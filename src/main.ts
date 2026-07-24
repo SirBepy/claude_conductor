@@ -47,7 +47,8 @@ import { installExternalLinkInterceptor } from "./shared/external-links";
 import { invoke } from "./shared/ipc";
 import { sessionEvents } from "./shared/chat/event-store";
 import { openModelEffortModal } from "./views/sessions/model-effort-modal";
-import { askConfirm } from "./shared/confirm";
+import { updateMissedPanel } from "./missed-panel";
+import "./missed-panel.css";
 import type { ChatEvent, NewsPost, ScheduledItem } from "./types/ipc.generated";
 
 // Test-build banner: in dev (`cargo tauri dev` / the vite dev server) paint a
@@ -466,13 +467,28 @@ function setupNewsBadgeAndNotifications(): void {
 
 // Scheduled items (messages / new chats) that missed their fire time (past the
 // grace window - see `daemon::schedule::compute_missed`). Global, not gated on
-// the schedule view being open: fires a dialog (never auto-dismissed, per the
-// app's askConfirm convention) plus an OS notification when the window is
-// hidden (reusing the same raw `Notification` API as the news-notification
-// path above - no new plugin). `seenMissedIds` is in-memory only, cleared on
-// relaunch by design: this is "don't let a fresh Missed slip by unnoticed
-// this session", not a durable read-receipt.
-const seenMissedIds = new Set<string>();
+// the schedule view being open. Surfaced as a non-blocking, dismissible panel
+// (see missed-panel.ts) with PERMANENT per-item dismissal, plus a one-shot OS
+// notification per newly-missed item when the window is hidden (reusing the raw
+// `Notification` API from the news path - no new plugin). `notifiedMissedIds`
+// is in-memory (don't re-notify the same miss twice this session); the panel's
+// own dismissal set is the durable localStorage one.
+const notifiedMissedIds = new Set<string>();
+
+function missedEntryName(i: ScheduledItem): string {
+  if (i.kind.type === "new_chat") {
+    const base = i.kind.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || i.kind.cwd;
+    return `New chat: ${base}`;
+  }
+  const p = (i.prompt || "").trim().replace(/\s+/g, " ");
+  return p.length > 60 ? `${p.slice(0, 60)}…` : p || "Scheduled message";
+}
+
+function missedEntryTime(i: ScheduledItem): string {
+  const d = new Date(i.last_fired_at || i.fire_at);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 function setupScheduleMissedPopup(): void {
   void getTransport().listen("scheduled-items-changed", async () => {
@@ -483,18 +499,20 @@ function setupScheduleMissedPopup(): void {
       console.warn("[schedule] schedule_list failed", err);
       return;
     }
-    const missed = items.filter((i) => i.status.type === "missed" && !seenMissedIds.has(i.id));
-    if (missed.length === 0) return;
-    for (const m of missed) seenMissedIds.add(m.id);
+    const missed = items.filter((i) => i.status.type === "missed");
+    updateMissedPanel(
+      missed.map((i) => ({ id: i.id, name: missedEntryName(i), time: missedEntryTime(i), kind: i.kind.type })),
+      () => showView("schedule"),
+    );
 
-    const text = `${missed.length} scheduled item${missed.length === 1 ? "" : "s"} missed their fire time.`;
-
-    if (document.hidden) {
+    // One OS notification per newly-missed item, only while the window's hidden.
+    const fresh = missed.filter((i) => !notifiedMissedIds.has(i.id));
+    for (const m of fresh) notifiedMissedIds.add(m.id);
+    if (fresh.length > 0 && document.hidden) {
+      const text = `${fresh.length} scheduled item${fresh.length === 1 ? "" : "s"} missed their fire time.`;
       try {
         if (typeof Notification !== "undefined") {
-          if (Notification.permission === "default") {
-            await Notification.requestPermission();
-          }
+          if (Notification.permission === "default") await Notification.requestPermission();
           if (Notification.permission === "granted") {
             const n = new Notification("Claude Conductor", { body: text });
             n.onclick = () => { window.focus(); void showView("schedule"); };
@@ -504,9 +522,6 @@ function setupScheduleMissedPopup(): void {
         console.warn("[schedule] OS notification failed", err);
       }
     }
-
-    const ok = await askConfirm(text, { confirmLabel: "Open schedule", cancelLabel: "Dismiss", danger: false });
-    if (ok) showView("schedule");
   });
 }
 

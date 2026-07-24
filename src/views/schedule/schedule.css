@@ -84,6 +84,57 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 }
 .cal-legend span { display: inline-flex; align-items: center; gap: 4px; }
 
+/* ── view-mode toggle (Month / Week) ── */
+.view-toggle {
+  display: flex;
+  width: fit-content;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 10px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.view-toggle button {
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.view-toggle button.active { background: var(--color-primary); color: var(--color-background); }
+
+/* ── Week view: 7 collapsible day-row-groups (reuses .agenda-row) ── */
+.week-list { display: flex; flex-direction: column; gap: 8px; }
+.week-day {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-surface-alt);
+}
+.week-day-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+}
+.week-day-head.is-today { color: var(--color-primary); }
+.week-day-head .wd-date { color: var(--color-text-muted); font-weight: 500; }
+.week-day-head .schedule-count-chip { margin-left: auto; }
+.week-day.collapsed .week-day-head { border-bottom: none; }
+.week-day.collapsed .week-day-rows { display: none; }
+.week-day-rows { list-style: none; margin: 0; padding: 0; }
+.week-day-rows li.agenda-row:last-child { border-bottom: none; }
+
 /* ── Day agenda ── */
 .agenda { margin-top: 4px; }
 .agenda-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }

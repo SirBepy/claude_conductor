@@ -46,6 +46,12 @@ interface ScheduleState {
   selectedKey: string | null;
   /** id of the row currently showing its inline reschedule datetime picker. */
   reschedulingId: string | null;
+  /** "month" (grid) or "week" (7 collapsible day-row-groups). */
+  viewMode: "month" | "week";
+  /** Day key (yyyy-mm-dd) anchoring the visible week - any day within it. */
+  weekAnchor: string;
+  /** Day keys the user has manually collapsed in week view. */
+  collapsedDays: Set<string>;
 }
 
 function todayKey(): string {
@@ -67,6 +73,9 @@ function freshState(mountId: number): ScheduleState {
     viewMonth: now0.getMonth(),
     selectedKey: todayKey(),
     reschedulingId: null,
+    viewMode: "month",
+    weekAnchor: todayKey(),
+    collapsedDays: new Set(),
   };
 }
 
@@ -256,6 +265,17 @@ function renderBody(): string {
     return `<div class="schedule-loading"><span class="schedule-spinner"></span>Loading schedule&hellip;</div>`;
   }
 
+  const toggle = `
+    <div class="view-toggle">
+      <button data-view-mode="month" class="${state.viewMode === "month" ? "active" : ""}">Month</button>
+      <button data-view-mode="week" class="${state.viewMode === "week" ? "active" : ""}">Week</button>
+    </div>`;
+  return `${toggle}${state.viewMode === "week" ? renderWeekView() : renderMonthView()}`;
+}
+
+const MONTH_ABBR = MONTH_NAMES.map((m) => m.slice(0, 3));
+
+function renderMonthView(): string {
   const { end, cells } = gridRange(state.viewYear, state.viewMonth);
   const byDay = buildOccurrences(state.items, state.external, end);
 
@@ -271,9 +291,9 @@ function renderBody(): string {
 
   return `
     <div class="cal-head">
-      <button class="cal-nav" data-cal="prev" title="Previous month">&lsaquo;</button>
+      <button class="cal-nav" data-cal="prev" title="Previous month"><i class="ph ph-caret-left"></i></button>
       <div class="cal-month">${MONTH_NAMES[state.viewMonth]} ${state.viewYear}</div>
-      <button class="cal-nav" data-cal="next" title="Next month">&rsaquo;</button>
+      <button class="cal-nav" data-cal="next" title="Next month"><i class="ph ph-caret-right"></i></button>
       <button class="cal-today" data-cal="today">Today</button>
     </div>
     ${renderGrid(byDay, cells)}
@@ -291,6 +311,61 @@ function renderBody(): string {
       </div>
       ${agenda}
     </div>
+  `;
+}
+
+/** The 7 Monday-start days of the week containing `anchorKey`, plus the
+ *  end-of-week instant used to cap recurrence expansion. */
+function weekRange(anchorKey: string): { days: Date[]; end: Date } {
+  const parts = anchorKey.split("-");
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  const anchor = new Date(y, (m || 1) - 1, d || 1);
+  const lead = (anchor.getDay() + 6) % 7; // Mon=0
+  const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - lead);
+  const days: Date[] = [];
+  for (let i = 0; i < 7; i++) days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+  const last = days[6]!;
+  const end = new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59);
+  return { days, end };
+}
+
+function renderWeekView(): string {
+  const { days, end } = weekRange(state.weekAnchor);
+  const byDay = buildOccurrences(state.items, state.external, end);
+  const tKey = todayKey();
+  const start = days[0]!;
+  const last = days[6]!;
+  const label = `${MONTH_ABBR[start.getMonth()]} ${start.getDate()} – ${MONTH_ABBR[last.getMonth()]} ${last.getDate()}, ${last.getFullYear()}`;
+  const groups = days
+    .map((d) => {
+      const key = dayKeyOf(d);
+      const occs = (byDay.get(key) || []).slice().sort((a, b) => a.time - b.time);
+      const isToday = key === tKey;
+      const collapsed = state.collapsedDays.has(key);
+      const rows = occs.length
+        ? occs.map(agendaRowHtml).join("")
+        : `<div class="agenda-empty" style="border:none;border-radius:0">Nothing scheduled</div>`;
+      return `<div class="week-day ${collapsed ? "collapsed" : ""}">
+      <div class="week-day-head ${isToday ? "is-today" : ""}" data-week-head="${key}">
+        <i class="ph ${collapsed ? "ph-caret-right" : "ph-caret-down"}"></i>
+        <span>${WEEKDAY_LABELS[(d.getDay() + 6) % 7]}</span>
+        <span class="wd-date">${d.getDate()} ${MONTH_ABBR[d.getMonth()]}</span>
+        <span class="schedule-count-chip">${occs.length}</span>
+      </div>
+      <ul class="week-day-rows">${rows}</ul>
+    </div>`;
+    })
+    .join("");
+  return `
+    <div class="cal-head">
+      <button class="cal-nav" data-cal="prev-week" title="Previous week"><i class="ph ph-caret-left"></i></button>
+      <div class="cal-month">${escapeHtml(label)}</div>
+      <button class="cal-nav" data-cal="next-week" title="Next week"><i class="ph ph-caret-right"></i></button>
+      <button class="cal-today" data-cal="this-week">This week</button>
+    </div>
+    <div class="week-list">${groups}</div>
   `;
 }
 
@@ -322,13 +397,38 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
   bodyEl.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
 
-    // Month nav.
+    // View-mode toggle (Month / Week).
+    const modeBtn = target.closest<HTMLElement>("[data-view-mode]");
+    if (modeBtn) {
+      const mode = modeBtn.dataset.viewMode === "week" ? "week" : "month";
+      if (mode !== state.viewMode) {
+        if (mode === "week") state.weekAnchor = state.selectedKey || todayKey();
+        state.viewMode = mode;
+        rerender(bodyEl);
+      }
+      return;
+    }
+
+    // Week-view day-group collapse toggle.
+    const weekHead = target.closest<HTMLElement>("[data-week-head]");
+    if (weekHead) {
+      const key = weekHead.dataset.weekHead!;
+      if (state.collapsedDays.has(key)) state.collapsedDays.delete(key);
+      else state.collapsedDays.add(key);
+      rerender(bodyEl);
+      return;
+    }
+
+    // Month / week nav.
     const cal = target.closest<HTMLElement>("[data-cal]");
     if (cal) {
       const which = cal.dataset.cal;
       if (which === "prev") stepMonth(-1);
       else if (which === "next") stepMonth(1);
       else if (which === "today") { state.viewYear = new Date().getFullYear(); state.viewMonth = new Date().getMonth(); state.selectedKey = todayKey(); }
+      else if (which === "prev-week") stepWeek(-7);
+      else if (which === "next-week") stepWeek(7);
+      else if (which === "this-week") state.weekAnchor = todayKey();
       rerender(bodyEl);
       return;
     }
@@ -385,6 +485,15 @@ function stepMonth(delta: number): void {
   else if (m > 11) { m = 0; y++; }
   state.viewMonth = m;
   state.viewYear = y;
+}
+
+function stepWeek(deltaDays: number): void {
+  const parts = state.weekAnchor.split("-");
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  const dt = new Date(y, (m || 1) - 1, (d || 1) + deltaDays);
+  state.weekAnchor = dayKeyOf(dt);
 }
 
 async function handleAction(action: string, id: string, bodyEl: HTMLElement, myMount: number): Promise<void> {

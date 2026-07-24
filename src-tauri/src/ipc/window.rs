@@ -263,6 +263,9 @@ fn build_chats_window(app: &AppHandle) -> Result<(), String> {
     .min_inner_size(600.0, 400.0)
     .resizable(true)
     .visible(false)
+    // Opaque app-dark background so the first composited frame is never the
+    // desktop wallpaper (see build_schedule_window). Matches --color-background.
+    .background_color(tauri::window::Color(22, 21, 31, 255))
     .on_page_load(move |w, payload| {
         if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
             let _ = w.show();
@@ -293,6 +296,12 @@ fn build_schedule_window(app: &AppHandle) -> Result<(), String> {
     .min_inner_size(380.0, 520.0)
     .resizable(true)
     .visible(false)
+    // Opaque app-dark background so the first composited frame is never the
+    // desktop wallpaper. The window is built hidden and shown on page-load, but
+    // WebView2 can still paint a frame before `body{background}` (base.css) has
+    // visually landed - most visible opening schedule first on a cold profile.
+    // Matches --color-background (#16151f, void dark).
+    .background_color(tauri::window::Color(22, 21, 31, 255))
     .on_page_load(move |w, payload| {
         if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
             let _ = w.show();

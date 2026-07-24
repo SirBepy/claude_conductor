@@ -1,0 +1,102 @@
+/* ── Missed scheduled-items panel (ai_todo 322 item 4) ────────────────────
+   Non-blocking card docked bottom-right, replacing the old askConfirm popup. */
+.missed-panel-host {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3000;
+}
+.missed-panel-host[hidden] { display: none; }
+
+.missed-panel {
+  width: min(400px, calc(100vw - 32px));
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.missed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.missed-head i.ph-warning-circle { color: var(--color-warning, #e5a040); font-size: 1.15rem; }
+.missed-head-title { font-weight: 700; font-size: 0.92rem; flex: 1; }
+.missed-head-count {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 1px 9px;
+}
+.missed-list { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+.missed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  transition: opacity 0.22s ease, transform 0.22s ease, max-height 0.22s ease, padding 0.22s ease;
+}
+.missed-row:last-child { border-bottom: none; }
+.missed-row.leaving {
+  opacity: 0;
+  transform: translateX(14px);
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  border-bottom-width: 0;
+}
+.missed-row-icon { color: var(--color-warning, #e5a040); flex-shrink: 0; }
+.missed-row-main { flex: 1; min-width: 0; }
+.missed-row-name { font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.missed-row-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 0.7rem; color: var(--color-text-muted); }
+.missed-row-time { font-variant-numeric: tabular-nums; }
+.missed-pill {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--color-warning, #e5a040) 15%, transparent);
+  color: var(--color-warning, #e5a040);
+}
+.missed-row-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.missed-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+}
+.missed-icon-btn:hover { background: var(--color-surface-alt); color: var(--color-text); }
+.missed-icon-btn--dismiss:hover { color: var(--color-danger, #e05252); }
+.missed-icon-btn--open:hover { color: var(--color-primary); }
+.missed-foot { display: flex; gap: 8px; padding: 10px 16px 14px; }
+.missed-foot button {
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+}
+.missed-foot .btn-open { background: var(--color-primary); color: var(--color-background); border-color: var(--color-primary); }
+.missed-foot .btn-dismiss-all:hover { border-color: var(--color-danger, #e05252); color: var(--color-danger, #e05252); }
