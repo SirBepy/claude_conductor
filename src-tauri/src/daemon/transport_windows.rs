@@ -25,13 +25,22 @@ fn client_pid(pipe: &NamedPipeServer) -> Option<u32> {
     unsafe { GetNamedPipeClientProcessId(handle, &mut pid).ok().map(|_| pid) }
 }
 
-pub fn pipe_name_for_user() -> String {
+/// Pipe name for an explicit instance suffix, bypassing `instance::
+/// instance_suffix()` so callers can probe a DIFFERENT identity than the one
+/// this process would otherwise use (see `daemon_client::ensure_daemon`'s
+/// production-attach probe, and the `daemon_client` pipe-health test). The
+/// single place that builds the Windows pipe name string - ai_todo 267.
+pub fn pipe_name_for_suffix(suffix: &str) -> String {
     // SID-based naming is added in a later phase. For Phase 1, a per-user
-    // suffix via USERNAME is sufficient on a single dev machine. The instance
-    // suffix (empty in production) isolates test daemons (ai_todo 71).
+    // suffix via USERNAME is sufficient on a single dev machine.
     let user = std::env::var("USERNAME").unwrap_or_else(|_| "default".to_string());
-    let inst = crate::daemon::instance::instance_suffix();
-    format!(r"\\.\pipe\cc-conductor-daemon-{user}{inst}")
+    format!(r"\\.\pipe\cc-conductor-daemon-{user}{suffix}")
+}
+
+/// Pipe name for the current process's own instance identity. The instance
+/// suffix (empty in production) isolates test daemons (ai_todo 71).
+pub fn pipe_name_for_user() -> String {
+    pipe_name_for_suffix(&crate::daemon::instance::instance_suffix())
 }
 
 pub async fn accept_loop(pipe_name: &str, router: Router) -> io::Result<()> {

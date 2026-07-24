@@ -11,14 +11,22 @@ use std::io;
 use std::path::PathBuf;
 use tokio::net::UnixListener;
 
-/// Socket path for the current user, matching the named-pipe naming on Windows.
-/// The instance suffix (empty in production) isolates test daemons (ai_todo 71).
-pub fn socket_path_for_user() -> PathBuf {
+/// Socket path for an explicit instance suffix, bypassing `instance::
+/// instance_suffix()` so callers can probe a DIFFERENT identity than the one
+/// this process would otherwise use. The single place that builds the Unix
+/// socket path string - ai_todo 267.
+pub fn socket_path_for_suffix(suffix: &str) -> PathBuf {
     let mut p = dirs::data_dir().unwrap_or_else(std::env::temp_dir);
     p.push("claude-conductor");
-    let inst = crate::daemon::instance::instance_suffix();
-    p.push(format!("cc-conductor-daemon{inst}.sock"));
+    p.push(format!("cc-conductor-daemon{suffix}.sock"));
     p
+}
+
+/// Socket path for the current user, matching the named-pipe naming on
+/// Windows. The instance suffix (empty in production) isolates test daemons
+/// (ai_todo 71).
+pub fn socket_path_for_user() -> PathBuf {
+    socket_path_for_suffix(&crate::daemon::instance::instance_suffix())
 }
 
 pub async fn accept_loop(socket_path: &std::path::Path, router: Router) -> io::Result<()> {
