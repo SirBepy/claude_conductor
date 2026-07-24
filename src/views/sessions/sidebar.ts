@@ -19,6 +19,7 @@ import {
   isSegCollapsed,
   resetSegCollapse,
   scheduledCountsBySession,
+  scheduledPendingPlaceholderIds,
 } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
@@ -116,6 +117,9 @@ function refreshDrainMap(sessionIds: string[]): void {
 // (wired in sessions.ts via forceRefreshScheduledCounts) so the badge doesn't
 // lag behind a schedule/cancel action taken in the open chat.
 const scheduledCountMap = new Map<string, number>();
+// Draft placeholderIds with a pending/firing scheduled NewChat - the sidebar
+// hides those draft rows until the schedule fires (ai_todo 322 item 6).
+const scheduledPendingPlaceholders = new Set<string>();
 const SCHEDULED_REFRESH_DEBOUNCE_MS = 3000;
 
 function scheduledCountMapsEqual(a: Map<string, number>, b: Map<string, number>): boolean {
@@ -126,20 +130,35 @@ function scheduledCountMapsEqual(a: Map<string, number>, b: Map<string, number>)
   return true;
 }
 
+function stringSetsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
 const runScheduledRefresh = createDebouncedRefresher("schedule_list", async () => {
   const all = await invoke<ScheduledItem[]>("schedule_list");
   // Defensive: schedule_list is contracted to return an array, but never
   // trust an IPC response shape blindly (a mocked/misbehaving transport
   // returning e.g. {} would make the grouping loop below throw).
-  const next = scheduledCountsBySession(Array.isArray(all) ? all : []);
-  // Only re-render if the counts actually changed - the common case on every
-  // poll tick is "nothing scheduled changed", and re-rendering unconditionally
-  // would fire a full sidebar re-render (and its own recursive
-  // refreshScheduledCounts + avatar/icon hydrate passes) on every single
-  // refresh cycle for no visible difference.
-  if (scheduledCountMapsEqual(scheduledCountMap, next)) return false;
+  const arr = Array.isArray(all) ? all : [];
+  const next = scheduledCountsBySession(arr);
+  const nextPlaceholders = scheduledPendingPlaceholderIds(arr);
+  // Only re-render if the counts OR the hidden-draft set actually changed - the
+  // common case on every poll tick is "nothing scheduled changed", and
+  // re-rendering unconditionally would fire a full sidebar re-render (and its
+  // own recursive refreshScheduledCounts + hydrate passes) every cycle for no
+  // visible difference.
+  if (
+    scheduledCountMapsEqual(scheduledCountMap, next) &&
+    stringSetsEqual(scheduledPendingPlaceholders, nextPlaceholders)
+  ) {
+    return false;
+  }
   scheduledCountMap.clear();
   for (const [sid, n] of next) scheduledCountMap.set(sid, n);
+  scheduledPendingPlaceholders.clear();
+  for (const pid of nextPlaceholders) scheduledPendingPlaceholders.add(pid);
   return true;
 }, SCHEDULED_REFRESH_DEBOUNCE_MS);
 
@@ -332,14 +351,19 @@ export function renderSidebar(listEl: HTMLElement): void {
 
   const entries: Array<{ key: string; html: string }> = [];
 
-  if (pending || state.parkedDrafts.length > 0) {
+  // Hide a draft row whose placeholder has a pending scheduled NewChat: the
+  // user deferred it, so don't clutter the list with it until it fires (322 #6).
+  const pendingHidden = !!pending && scheduledPendingPlaceholders.has(pending.placeholderId);
+  const visibleParked = state.parkedDrafts.filter((d) => !scheduledPendingPlaceholders.has(d.placeholderId));
+
+  if ((pending && !pendingHidden) || visibleParked.length > 0) {
     entries.push({
       key: "__seg:draft__",
       html: `<li class="session-group-header" data-row-key="__seg:draft__">Draft</li>`,
     });
   }
 
-  if (pending) {
+  if (pending && !pendingHidden) {
     const isPendingActive = state.selectedId === pending.placeholderId;
     const activeCls = isPendingActive ? "active" : "";
     // Key by placeholderId, NOT a constant "pending": consecutive drafts must
@@ -373,7 +397,7 @@ export function renderSidebar(listEl: HTMLElement): void {
     entries.push({ key: `p:${pending.placeholderId}`, html });
   }
 
-  for (const d of state.parkedDrafts) {
+  for (const d of visibleParked) {
     entries.push({
       key: `p:${d.placeholderId}`,
       html: `<li class="parked-draft" data-placeholder-id="${escapeHtml(d.placeholderId)}" title="Parked draft — click to resume">

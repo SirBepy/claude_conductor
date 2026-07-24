@@ -79,6 +79,23 @@ export function scheduledTooltip(count: number): string {
   return `${count} scheduled message${count === 1 ? "" : "s"}`;
 }
 
+/**
+ * The set of draft `placeholderId`s that have a pending/firing scheduled
+ * NewChat queued (tagged at creation in pending-pane.ts). The sidebar uses this
+ * to HIDE a draft row until its scheduled spawn actually fires (ai_todo 322
+ * item 6) - a draft the user has deferred shouldn't sit in the list labelled
+ * "draft". Mirrors scheduledCountsBySession's filter, keyed on placeholder_id.
+ */
+export function scheduledPendingPlaceholderIds(items: ScheduledItem[]): Set<string> {
+  const ids = new Set<string>();
+  for (const it of items) {
+    if (it.kind.type !== "new_chat") continue;
+    if (it.status.type !== "pending" && it.status.type !== "firing") continue;
+    if (it.kind.placeholder_id) ids.add(it.kind.placeholder_id);
+  }
+  return ids;
+}
+
 /** 0=NeedsPermission, 1=Question, 2=Working, 3=Waiting(external process),
  * 4=Done(unread), 5=YourTurn, 6=External/Automated.
  * Question (Claude is waiting on the user) sorts above Working so idle-blocked

@@ -184,24 +184,38 @@ export async function renderPendingPane(
       hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
       flushHeldWithDraft: (draftBlocks) => { void state.heldMessages?.flushHeldWithDraft(draftBlocks); },
       onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
-      // Phase 3: schedule a brand-new chat instead of starting one now. Always
-      // ScheduledKind::NewChat — this pane's job is exactly that, regardless of
-      // whether the first message has already started a real session (started
-      // stays irrelevant here; the pane's own cwd/model/effort/account are what
-      // a fresh spawn at fire time needs, not the mid-conversation state).
+      // Phase 3: schedule a follow-up. The KIND is decided at scheduling time,
+      // not pane-mount time: once this draft's first message has started a real
+      // session, a scheduled message must target THAT session
+      // (Message{session_id}) - otherwise it silently spawns a disconnected new
+      // chat the user (staring at this conversation) never sees (ai_todo 322
+      // item 5). A still-unstarted draft schedules a NewChat, tagged with this
+      // pane's placeholderId so the sidebar can hide the draft row until it
+      // fires (item 6).
       onSchedule: (blocks: ContentBlock[], fireAtUtcIso: string, recurrence) => {
         const prompt = blocksToText(blocks);
         if (!prompt.trim()) return;
-        const kind: ScheduledKind = {
-          type: "new_chat",
-          cwd: project.path,
-          model: config.model,
-          effort: config.effort,
-          account_id: config.accountId ?? null,
-        };
+        const realId =
+          state.pendingNewSession?.placeholderId === placeholderId
+            ? state.pendingNewSession.realId
+            : null;
+        const kind: ScheduledKind = realId
+          ? { type: "message", session_id: realId, cwd: project.path }
+          : {
+              type: "new_chat",
+              cwd: project.path,
+              model: config.model,
+              effort: config.effort,
+              account_id: config.accountId ?? null,
+              placeholder_id: placeholderId,
+            };
         void invoke<ScheduledItem>("schedule_create", { kind, prompt, fireAt: fireAtUtcIso, recurrence })
           .then((item) => {
-            showToast(`Scheduled new chat for ${formatFireAt(item.fire_at)}`);
+            showToast(
+              realId
+                ? `Scheduled message for ${formatFireAt(item.fire_at)}`
+                : `Scheduled new chat for ${formatFireAt(item.fire_at)}`,
+            );
           })
           .catch((err) => {
             console.error("[sessions] schedule_create failed", err);

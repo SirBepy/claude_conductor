@@ -34,6 +34,12 @@ pub enum ScheduledKind {
         model: String,
         effort: String,
         account_id: Option<String>,
+        /// The originating draft's `placeholderId` (frontend sidebar state), so
+        /// the sidebar can hide that draft row until this item fires (ai_todo
+        /// 322 item 6). `#[serde(default)]` keeps NewChat items written before
+        /// this field existed deserializable (they load as `None`).
+        #[serde(default)]
+        placeholder_id: Option<String>,
     },
 }
 
@@ -473,6 +479,7 @@ mod tests {
         upsert_at(&path, item(message_kind()));
         upsert_at(&path, item(ScheduledKind::NewChat {
             cwd: "C:/proj2".into(), model: "opus".into(), effort: "high".into(), account_id: None,
+            placeholder_id: None,
         }));
         assert_eq!(list_at(&path).len(), 2);
     }

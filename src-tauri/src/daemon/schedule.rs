@@ -285,7 +285,7 @@ async fn fire_kind(state: &Arc<DaemonState>, item: &ScheduledItem) -> Result<Opt
             fire_message(state, session_id, cwd, &item.prompt).await?;
             Ok(Some(session_id.clone()))
         }
-        ScheduledKind::NewChat { cwd, model, effort, account_id } => {
+        ScheduledKind::NewChat { cwd, model, effort, account_id, .. } => {
             fire_new_chat(state, cwd, model, effort, account_id.as_deref(), &item.prompt).await
         }
     }
@@ -537,6 +537,7 @@ mod tests {
                 model: "opus".into(),
                 effort: "high".into(),
                 account_id: None,
+                placeholder_id: None,
             },
             "hi".into(),
             Utc::now().to_rfc3339(),
