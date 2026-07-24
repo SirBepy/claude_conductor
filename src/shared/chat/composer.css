@@ -274,10 +274,3 @@
   transform: scale(1.06);
   box-shadow: 0 0 0 2px var(--color-primary), 0 4px 14px rgba(0, 0, 0, 0.28);
 }
-
-/* Drag-over state */
-
-.composer-root.drag-over {
-  outline: 2px dashed var(--color-accent, #7b6eff);
-  outline-offset: 2px;
-}

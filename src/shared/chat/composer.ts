@@ -3,9 +3,7 @@
 // it exists, falls back to attaching base64 only). Phase 6 wires the IPC
 // command and converts attachments to <file:path> mention text on send.
 
-import { invoke } from "../ipc";
 import type { ContentBlock, Recurrence } from "../../types/ipc.generated";
-import { mimeToIcon } from "./attachment-hydrator";
 import { openSchedulePicker } from "./schedule-picker";
 import { openComposerMenu, type ComposerMenuItem } from "./composer-menu";
 import { CaretSuggestPopup } from "./caret-popup/popup";
@@ -20,37 +18,9 @@ import { ComposerPtt } from "./voice/composer-ptt";
 import "./voice/voice.css";
 import "./builtins/register";
 import "./caret-popup/popup.css";
-import { openLightbox } from "./lightbox";
-// tauri-plugin-clipboard-api pulls in valibot@0.40.0, which has a ReDoS in
-// EMOJI_REGEX (GHSA-vqpr-j7v3-hqw9, valibot >=0.31.0 <1.2.0). Verified unreachable:
-// v.emoji()/EMOJI_REGEX is never called anywhere in the plugin's guest-js source
-// (only hasFiles/readFiles are imported here). Revisit if: the plugin bumps valibot
-// to >=1.2.0, this file starts importing the plugin's monitor/listener API, or we
-// migrate off this plugin.
-import { hasFiles, readFiles } from "tauri-plugin-clipboard-api";
-import {
-  loadDraft, saveDraft, clearDraft,
-  loadAttachmentsMeta, saveAttachmentsMeta, clearAttachmentsMeta,
-} from "./composer-persistence";
+import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
+import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
-
-interface Attachment {
-  mime: string;
-  data: string; // base64 (no data: prefix)
-  path: string | null;
-  filename: string; // original filename for display; derived from uuid path if absent
-}
-
-/** A large text paste held as a collapsed "log" chip instead of being dumped
- * into the textarea. In-memory only; inlined into the message text on send. */
-interface PastedBlock {
-  name: string;
-  text: string;
-}
-
-// Paste payloads at or above this many characters become a pasted_log chip
-// rather than landing as a wall of text in the textarea.
-const PASTE_LOG_THRESHOLD = 2000;
 
 export interface ComposerOptions {
   onSend: (blocks: ContentBlock[]) => Promise<void> | void;
@@ -95,15 +65,12 @@ const supportsFieldSizing =
 export class Composer {
   private root: HTMLElement;
   private opts: ComposerOptions;
-  private attachments: Attachment[] = [];
-  private pastedBlocks: PastedBlock[] = [];
   private sessionId: string | null = null;
   private disabled = false;
   private textarea: HTMLTextAreaElement | null = null;
   private highlightEl: HTMLElement | null = null;
   private noticeEl: HTMLElement | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
-  private attachmentsEl: HTMLElement | null = null;
   private sendBtn: HTMLButtonElement | null = null;
   private scheduleBtn: HTMLButtonElement | null = null;
   private slash: SlashProvider | null = null;
@@ -115,8 +82,8 @@ export class Composer {
   private lastKeyAt = 0;
   private cv: ComposerVoice;
   private ptt: ComposerPtt;
+  private att: ComposerAttachments;
   private micBtn: HTMLButtonElement | null = null;
-  private fileInput: HTMLInputElement | null = null;
 
   private _globalKeydown = (e: KeyboardEvent): void => {
     if (this.disabled || !this.textarea || this.textarea.disabled) return;
@@ -154,6 +121,10 @@ export class Composer {
       currentInsertPos: () => this.currentInsertPos(),
       isMobile: () => this.isMobileViewport(),
       isDisabled: () => this.disabled,
+    });
+    this.att = new ComposerAttachments({
+      getSessionId: () => this.sessionId,
+      onChange: () => this.updateScheduleBtnState(),
     });
     // Establish positioning context so the absolute-anchored popup lands
     // above the composer instead of falling back to a distant ancestor.
@@ -202,11 +173,7 @@ export class Composer {
       const prevStored = loadDraft(prevId);
       if (prevStored && !loadDraft(id)) saveDraft(id, prevStored);
       clearDraft(prevId);
-      const prevAttMeta = loadAttachmentsMeta(prevId);
-      if (prevAttMeta.length && loadAttachmentsMeta(id).length === 0) {
-        saveAttachmentsMeta(id, prevAttMeta);
-      }
-      clearAttachmentsMeta(prevId);
+      this.att.migrateSession(prevId, id);
     }
     this.sessionId = id;
     this.disabled = !!opts.readOnly;
@@ -222,43 +189,8 @@ export class Composer {
     // Refresh DOM so any in-memory attachments are visible in the rebuilt
     // .composer-attachments host, then async-rehydrate any persisted metas
     // from disk.
-    this.renderAttachments();
-    void this.restoreAttachments(id);
-  }
-
-  private async restoreAttachments(sid: string): Promise<void> {
-    const metas = loadAttachmentsMeta(sid);
-    if (metas.length === 0) return;
-    const existingPaths = new Set(this.attachments.map(a => a.path).filter(Boolean));
-    const restored: Attachment[] = [];
-    for (const m of metas) {
-      if (existingPaths.has(m.path)) continue;
-      try {
-        const r = await invoke<{ mime: string; base64: string }>("read_attachment", { path: m.path });
-        restored.push({ mime: m.mime || r.mime, data: r.base64, path: m.path, filename: m.filename });
-      } catch {
-        // Backing file gone (GC'd or deleted). Drop silently.
-      }
-    }
-    if (this.sessionId !== sid) return;
-    if (restored.length === 0) {
-      // All metas turned out to be dead; clean the LS entry.
-      const stillHave = this.attachments.some(a => a.path && metas.find(m => m.path === a.path));
-      if (!stillHave) clearAttachmentsMeta(sid);
-      return;
-    }
-    this.attachments = [...this.attachments, ...restored];
-    this.renderAttachments();
-    this.persistAttachments();
-  }
-
-  private persistAttachments(): void {
-    if (!this.sessionId) return;
-    const metas = this.attachments
-      .filter((a): a is Attachment & { path: string } => typeof a.path === "string" && a.path.length > 0)
-      .map(a => ({ path: a.path, mime: a.mime, filename: a.filename }));
-    if (metas.length) saveAttachmentsMeta(this.sessionId, metas);
-    else clearAttachmentsMeta(this.sessionId);
+    this.att.render();
+    void this.att.hydrate(id);
   }
 
   /** Idle placeholder text. Blocked (rate-limited but still enabled) beats the
@@ -319,11 +251,10 @@ export class Composer {
     this.textarea = this.root.querySelector<HTMLTextAreaElement>(".composer-textarea");
     this.highlightEl = this.root.querySelector<HTMLElement>(".composer-highlight");
     this.noticeEl = this.root.querySelector<HTMLElement>(".composer-notice");
-    this.attachmentsEl = this.root.querySelector<HTMLElement>(".composer-attachments");
     this.sendBtn = this.root.querySelector<HTMLButtonElement>(".composer-send");
     this.scheduleBtn = this.root.querySelector<HTMLButtonElement>(".composer-send-chevron");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
-    this.fileInput = this.root.querySelector<HTMLInputElement>(".composer-file-input");
+    this.att.bind(this.root);
     // The popup div was inside root.innerHTML, so it's gone after the swap.
     // Rebuild it on every render and keep the provider's cache.
     this.popup?.destroy();
@@ -335,7 +266,7 @@ export class Composer {
         providers: [this.slash, this.file] as unknown as SuggestProvider<unknown>[],
       });
       this.textarea.addEventListener("keydown", this.onKey.bind(this));
-      this.textarea.addEventListener("paste", this.onPaste.bind(this));
+      this.textarea.addEventListener("paste", (e) => void this.att.handlePaste(e));
       this.textarea.addEventListener("input", () => {
         this.lastKeyAt = Date.now();
         this.autoResize();
@@ -355,16 +286,7 @@ export class Composer {
         if (this.disabled || !this.scheduleBtn) return;
         this.openActionsMenu(this.scheduleBtn);
       });
-      this.fileInput?.addEventListener("change", () => {
-        const files = this.fileInput?.files;
-        if (!files?.length) return;
-        void (async () => {
-          for (const file of Array.from(files)) {
-            await this.attachBlob(file, file.name);
-          }
-          if (this.fileInput) this.fileInput.value = "";
-        })();
-      });
+      this.att.wireInteractive();
       this.micBtn?.addEventListener("click", () => {
         if (this.disabled) return;
         this.textarea?.focus();
@@ -381,10 +303,6 @@ export class Composer {
         // Chat is now open: pre-warm so the first dictation click is instant.
         this.cv.warm();
       }
-      this.root.classList.add("composer-root");
-      this.root.addEventListener("dragover", this.onDragOver);
-      this.root.addEventListener("dragleave", this.onDragLeave);
-      this.root.addEventListener("drop", this.onDrop);
     }
     this.autoResize();
     this.updateHighlight();
@@ -452,11 +370,7 @@ export class Composer {
       items.push({
         icon: "image",
         label: "Attach image",
-        run: () => {
-          if (!this.fileInput) return;
-          this.fileInput.value = "";
-          this.fileInput.click();
-        },
+        run: () => this.att.openFilePicker(),
       });
     } else {
       // Re-warm on menu open so Voice is hot by the time it's clicked, even if
@@ -509,193 +423,15 @@ export class Composer {
     }
   }
 
-  private async onPaste(e: ClipboardEvent): Promise<void> {
-    if (!e.clipboardData) return;
-    // Snapshot the browser blobs SYNCHRONOUSLY, before any await: WebView2
-    // neuters e.clipboardData the moment this handler yields, so getAsFile()
-    // returns null afterwards. This is the fallback for pastes with no native
-    // file list (e.g. a Win+Shift+S snip, which lands as a raw bitmap on the
-    // clipboard with no CF_HDROP paths). Capturing here keeps that path alive.
-    const blobs = Array.from(e.clipboardData.items)
-      .filter((item) => item.kind === "file")
-      .map((item) => ({ blob: item.getAsFile(), type: item.type }))
-      .filter((b): b is { blob: File; type: string } => b.blob !== null);
-    if (blobs.length > 0) {
-      e.preventDefault();
-      // The browser's DataTransfer only ever exposes one file when multiple
-      // files are copied from Explorer (a WebView2 limitation), so read the
-      // native clipboard file list directly when available. Falls back to
-      // the blob(s) snapshotted above when the plugin call fails or finds no
-      // file list (non-Windows, view-harness, or a bitmap snip with no paths).
-      let usedNativeFiles = false;
-      try {
-        if (await hasFiles()) {
-          const paths = await readFiles();
-          if (paths.length > 0) {
-            for (const path of paths) await this.attachFromPath(path);
-            usedNativeFiles = true;
-          }
-        }
-      } catch (err) {
-        console.warn("[Composer] clipboard readFiles failed, falling back to blob paste:", err);
-      }
-      if (usedNativeFiles) return;
-      for (const { blob, type } of blobs) {
-        await this.attachBlob(blob, blob.name || `paste.${type.split("/")[1] ?? "bin"}`);
-      }
-      return;
-    }
-    // A big plain-text paste becomes a collapsed log chip instead of a wall of
-    // text in the textarea. Claude still receives the full text inline on send.
-    const text = e.clipboardData.getData("text/plain");
-    if (text && text.length >= PASTE_LOG_THRESHOLD) {
-      e.preventDefault();
-      this.addPastedBlock(text);
-    }
-  }
-
-  private addPastedBlock(text: string): void {
-    const n = this.pastedBlocks.length;
-    const name = n === 0 ? "pasted_log.txt" : `pasted_log_${n + 1}.txt`;
-    this.pastedBlocks.push({ name, text });
-    this.renderAttachments();
-  }
-
-  private async attachBlob(blob: Blob, filename: string): Promise<void> {
-    const data = await blobToBase64(blob);
-    let path: string | null = null;
-    if (this.sessionId) {
-      try {
-        path = await invoke<string>("paste_attachment", {
-          sessionId: this.sessionId,
-          base64Data: data,
-          mime: blob.type || "application/octet-stream",
-        });
-      } catch (err) {
-        console.warn("[Composer] paste_attachment not available:", err);
-      }
-    }
-    this.attachments.push({ mime: blob.type || "application/octet-stream", data, path, filename });
-    this.renderAttachments();
-    this.persistAttachments();
-  }
-
-  private onDragOver = (e: DragEvent): void => {
-    if (!e.dataTransfer?.types.includes("Files")) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "copy";
-    this.root.classList.add("drag-over");
-  };
-
-  private onDragLeave = (e: DragEvent): void => {
-    e.stopPropagation();
-    if (e.relatedTarget && this.root.contains(e.relatedTarget as Node)) return;
-    this.root.classList.remove("drag-over");
-  };
-
-  private onDrop = async (e: DragEvent): Promise<void> => {
-    e.preventDefault();
-    e.stopPropagation();
-    this.root.classList.remove("drag-over");
-    this.root.closest(".view-sessions")?.classList.remove("drag-over");
-    if (!e.dataTransfer?.files.length) return;
-    for (const file of Array.from(e.dataTransfer.files)) {
-      await this.attachBlob(file, file.name);
-    }
-  };
-
+  /** Drop files onto the composer (e.g. a future external drop zone). */
   async dropFiles(files: Iterable<File>): Promise<void> {
-    for (const file of files) {
-      await this.attachBlob(file, file.name);
-    }
+    return this.att.dropFiles(files);
   }
 
+  /** Attach a file already on disk by path. Called by sessions.ts's
+   * `tauri://drag-drop` listener, the actual working drop path in Tauri v2. */
   async attachFromPath(srcPath: string): Promise<void> {
-    const filename = srcPath.split(/[\\/]/).pop() ?? srcPath;
-    let result: { path: string; mime: string; base64: string } | null = null;
-    if (this.sessionId) {
-      try {
-        result = await invoke<{ path: string; mime: string; base64: string }>(
-          "paste_attachment_from_path",
-          { sessionId: this.sessionId, path: srcPath },
-        );
-      } catch (err) {
-        console.warn("[Composer] paste_attachment_from_path failed:", err);
-      }
-    }
-    this.attachments.push({
-      filename,
-      mime: result?.mime ?? "application/octet-stream",
-      data: result?.base64 ?? "",
-      path: result?.path ?? null,
-    });
-    this.renderAttachments();
-    this.persistAttachments();
-  }
-
-  private renderAttachments(): void {
-    if (!this.attachmentsEl) return;
-    this.attachmentsEl.innerHTML = "";
-    this.attachments.forEach((a, i) => {
-      const div = document.createElement("div");
-      const isImage = a.mime.startsWith("image/");
-      div.className = `attachment${isImage ? "" : " file-chip"}`;
-
-      if (isImage) {
-        const img = document.createElement("img");
-        img.src = `data:${a.mime};base64,${a.data}`;
-        img.alt = a.filename;
-        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
-        div.appendChild(img);
-      } else {
-        const icon = mimeToIcon(a.mime);
-        div.innerHTML = `<i class="ph ${icon}"></i>`;
-        const label = document.createElement("span");
-        label.textContent = a.filename;
-        div.appendChild(label);
-        div.addEventListener("click", () => openPreviewIfSupported(a));
-      }
-
-      const rm = document.createElement("button");
-      rm.className = "rm";
-      rm.title = "Remove";
-      rm.innerHTML = '<i class="ph ph-x"></i>';
-      rm.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.attachments.splice(i, 1);
-        this.renderAttachments();
-        this.persistAttachments();
-      });
-      div.appendChild(rm);
-      this.attachmentsEl!.appendChild(div);
-    });
-
-    this.pastedBlocks.forEach((b, i) => {
-      const div = document.createElement("div");
-      div.className = "attachment file-chip pasted-log";
-      div.title = "Pasted text — click to view";
-      div.innerHTML = `<i class="ph ph-file-text"></i>`;
-      const label = document.createElement("span");
-      label.textContent = b.name;
-      div.appendChild(label);
-      div.addEventListener("click", () =>
-        openLightbox({ type: "text", content: b.text, filename: b.name }),
-      );
-
-      const rm = document.createElement("button");
-      rm.className = "rm";
-      rm.title = "Remove";
-      rm.innerHTML = '<i class="ph ph-x"></i>';
-      rm.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.pastedBlocks.splice(i, 1);
-        this.renderAttachments();
-      });
-      div.appendChild(rm);
-      this.attachmentsEl!.appendChild(div);
-    });
-    this.updateScheduleBtnState();
+    return this.att.attachFromPath(srcPath);
   }
 
   private builtinCtx(): BuiltinContext {
@@ -714,7 +450,7 @@ export class Composer {
       return;
     }
     const text = (this.textarea?.value ?? "").trim();
-    const empty = !text && this.attachments.length === 0 && this.pastedBlocks.length === 0;
+    const empty = !text && this.att.isEmpty();
 
     const builtin = text ? parseBuiltin(text) : null;
     if (builtin) {
@@ -741,8 +477,8 @@ export class Composer {
       if (empty) return;
       this.sending = true;
       const blocks = this.buildBlocks(text);
-      const savedBlockedAttachments = this.attachments;
-      const savedBlockedPastedBlocks = this.pastedBlocks;
+      const savedBlockedAttachments = this.att.attachments;
+      const savedBlockedPastedBlocks = this.att.pastedBlocks;
       this.clearComposer();
       try {
         await this.opts.onSchedule?.(blocks, blocked.resetsAtIso, null);
@@ -777,8 +513,8 @@ export class Composer {
     if (empty) return;
     this.sending = true;
     const blocks = this.buildBlocks(text);
-    const savedAttachments = this.attachments;
-    const savedPastedBlocks = this.pastedBlocks;
+    const savedAttachments = this.att.attachments;
+    const savedPastedBlocks = this.att.pastedBlocks;
     this.clearComposer();
     try {
       await this.opts.onSend(blocks);
@@ -796,7 +532,7 @@ export class Composer {
    * user never sees the wall of text in their own message. */
   private buildBlocks(text: string): ContentBlock[] {
     let fullText = text;
-    for (const b of this.pastedBlocks) {
+    for (const b of this.att.pastedBlocks) {
       const nonce = Math.random().toString(36).slice(2, 10);
       const wrapped = `<pasted-log id="${nonce}" name="${b.name}">\n${b.text}\n</pasted-log:${nonce}>`;
       fullText += (fullText ? "\n\n" : "") + wrapped;
@@ -808,7 +544,7 @@ export class Composer {
     }
     const blocks: ContentBlock[] = [];
     if (fullText) blocks.push({ type: "text", text: fullText });
-    for (const a of this.attachments) {
+    for (const a of this.att.attachments) {
       if (a.path) {
         blocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
       } else {
@@ -827,14 +563,11 @@ export class Composer {
     if (this.textarea) this.textarea.value = "";
     this.autoResize();
     this.updateHighlight();
-    this.attachments = [];
-    this.pastedBlocks = [];
     // Reset voice state; stop an in-flight recording so a send mid-dictation
     // doesn't leave the controller running against stale anchor positions.
     this.cv.reset();
-    this.renderAttachments();
+    this.att.clear();
     this.persistDraft();
-    this.persistAttachments();
   }
 
   /** Undo a `clearComposer()` after a failed send: puts the text, attachments
@@ -844,13 +577,10 @@ export class Composer {
       this.textarea.value = text;
       this.textarea.focus();
     }
-    this.attachments = attachments;
-    this.pastedBlocks = pastedBlocks;
+    this.att.restoreDraft(attachments, pastedBlocks);
     this.autoResize();
     this.updateHighlight();
-    this.renderAttachments();
     this.persistDraft();
-    this.persistAttachments();
   }
 
   /** Replace the current draft (text + attachments + pasted blocks) with plain
@@ -862,10 +592,7 @@ export class Composer {
    * persists the new draft so a navigate-away keeps it (existing draft
    * persistence), matching the normal typing path. */
   setDraftText(text: string): void {
-    this.attachments = [];
-    this.pastedBlocks = [];
-    this.renderAttachments();
-    this.persistAttachments();
+    this.att.clear();
     if (this.textarea) {
       this.textarea.value = text;
       this.textarea.focus();
@@ -885,7 +612,7 @@ export class Composer {
 
   isDraftEmpty(): boolean {
     const text = (this.textarea?.value ?? "").trim();
-    return !text && this.attachments.length === 0 && this.pastedBlocks.length === 0;
+    return !text && this.att.isEmpty();
   }
 
   /** Programmatically send a plain-text message, bypassing busy/held checks. */
@@ -918,31 +645,4 @@ export class Composer {
     if (text) saveDraft(this.sessionId, text);
     else clearDraft(this.sessionId);
   }
-}
-
-function openPreviewIfSupported(a: Attachment): void {
-  if (!a.data) return;
-  if (a.mime === "application/pdf") {
-    openLightbox({ type: "pdf", base64: a.data, filename: a.filename });
-  } else if (a.mime.startsWith("text/") || a.mime === "application/json") {
-    try {
-      const text = atob(a.data);
-      openLightbox({ type: "text", content: text, filename: a.filename });
-    } catch {
-      /* non-UTF8 content, no preview */
-    }
-  }
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result ?? "");
-      const idx = result.indexOf(",");
-      resolve(idx >= 0 ? result.slice(idx + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
 }
