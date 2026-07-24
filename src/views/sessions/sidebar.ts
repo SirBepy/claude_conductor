@@ -83,8 +83,12 @@ const DRAIN_REFRESH_DEBOUNCE_MS = 3000;
 let pendingDrainSessionIds: string[] = [];
 
 const runDrainRefresh = createDebouncedRefresher("chat_drains", async () => {
-  const board = await invoke<DrainBoard>("chat_drains", { sessionIds: pendingDrainSessionIds });
-  for (const id of pendingDrainSessionIds) {
+  // Snapshot the id list: a refreshDrainMap() call landing while this fetch is
+  // in flight overwrites pendingDrainSessionIds, and the apply loop must walk
+  // the ids this fetch actually queried, not the newer set.
+  const sessionIds = pendingDrainSessionIds;
+  const board = await invoke<DrainBoard>("chat_drains", { sessionIds });
+  for (const id of sessionIds) {
     const chat = board.chats[id];
     // null share = no usage snapshot yet; leave it out so the row keeps the
     // "—% of 5h" placeholder rather than rendering a misleading 0%.
