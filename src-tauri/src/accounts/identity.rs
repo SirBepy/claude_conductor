@@ -55,6 +55,23 @@ pub fn read_token_expiry(config_dir: &Path) -> Option<i64> {
     v.get("claudeAiOauth")?.get("expiresAt")?.as_i64()
 }
 
+/// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth.accessToken`, the
+/// live OAuth access token used to authenticate the `/v1/models` and
+/// `/v1/messages/count_tokens` calls in `ipc/models.rs` (consolidated here
+/// per ai_todo 275 - was a second, duplicate `.credentials.json` parser
+/// living in `ipc/models.rs`). The app never writes this file (locked
+/// decision, 00-overview.md) - read-only, mirrors `read_token_expiry`. `None`
+/// when the file is missing, unparsable, or has no
+/// `claudeAiOauth.accessToken`.
+pub fn read_access_token(config_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("claudeAiOauth")?
+        .get("accessToken")?
+        .as_str()
+        .map(String::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +160,36 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join(".credentials.json"), "{ not valid").unwrap();
         assert_eq!(read_token_expiry(dir.path()), None);
+    }
+
+    #[test]
+    fn read_access_token_parses_fixture() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","refreshToken":"sk-ant-ort01-x","expiresAt":1783437706982,"scopes":[]}}"#,
+        ).unwrap();
+        assert_eq!(read_access_token(dir.path()).as_deref(), Some("sk-ant-oat01-x"));
+    }
+
+    #[test]
+    fn read_access_token_none_when_file_missing() {
+        let dir = tempdir().unwrap();
+        assert_eq!(read_access_token(dir.path()), None);
+    }
+
+    #[test]
+    fn read_access_token_none_when_no_claude_ai_oauth_block() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".credentials.json"), r#"{"other": true}"#).unwrap();
+        assert_eq!(read_access_token(dir.path()), None);
+    }
+
+    #[test]
+    fn read_access_token_none_when_unparsable() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join(".credentials.json"), "{ not valid").unwrap();
+        assert_eq!(read_access_token(dir.path()), None);
     }
 
     #[test]

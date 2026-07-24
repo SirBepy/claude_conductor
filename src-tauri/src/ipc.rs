@@ -15,6 +15,7 @@ pub mod git;
 pub mod git_diff;
 pub mod ai_todos;
 pub mod models;
+mod models_auth;
 pub mod window;
 pub mod overlay_window;
 pub mod update;
