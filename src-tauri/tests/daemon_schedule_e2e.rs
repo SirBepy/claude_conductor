@@ -28,6 +28,10 @@ use serde_json::json;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[path = "support/mod.rs"]
+mod support;
+use support::ChildGuard;
+
 fn daemon_exe() -> std::path::PathBuf {
     // Respects `CARGO_TARGET_DIR` if the environment sets it (e.g. to avoid
     // colliding with a currently-running daemon locking the default
@@ -43,18 +47,6 @@ fn daemon_exe() -> std::path::PathBuf {
     p.push("debug");
     p.push("cc-conductor-daemon.exe");
     p
-}
-
-/// Kills the spawned test-daemon child on drop (including on a mid-test
-/// panic from a failed assertion), so a failing test never leaves an orphan
-/// `cc-conductor-daemon.exe` running under this instance label.
-struct ChildGuard(std::process::Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
 }
 
 /// Deletes a `scheduled-items.json` entry by id on drop, even if the test
@@ -111,7 +103,7 @@ async fn spawn_test_daemon(instance: &str) -> (ChildGuard, String) {
         .expect("spawn daemon");
 
     tokio::time::sleep(Duration::from_millis(800)).await;
-    (ChildGuard(child), pipe_name)
+    (ChildGuard::new(child), pipe_name)
 }
 
 /// Drains notifications on `rx` up to `timeout`, returning true as soon as an

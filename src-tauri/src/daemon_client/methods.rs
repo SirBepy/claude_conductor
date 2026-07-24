@@ -292,6 +292,13 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
+    // Shared with the `tests/daemon_schedule_e2e.rs` integration test (ai_todo
+    // 268) - one physical copy of the kill-on-drop guard instead of two
+    // hand-maintained near-duplicates (`KillOnDrop` vs `ChildGuard`).
+    #[path = "../../../../tests/support/mod.rs"]
+    mod test_support;
+    use test_support::ChildGuard;
+
     #[tokio::test(flavor = "current_thread")]
     async fn persistent_client_health_against_real_daemon() {
         // Isolated test instance: distinct pipe/lockfile/hook-port so this never
@@ -351,7 +358,7 @@ mod tests {
         // (os error 5) until someone notices and kills it by hand (as happened
         // 2026-07-17 - a run failed hours earlier and the orphan silently
         // broke every re-run after it).
-        let _child = KillOnDrop(child);
+        let _child = ChildGuard::new(child);
 
         // Poll for the pipe to bind rather than a single fixed-delay attempt:
         // under system load (e.g. a concurrent `cargo tauri dev` rebuild) the
@@ -370,13 +377,5 @@ mod tests {
         let result = client.health().await.expect("health call");
         assert!(result["daemon_version"].is_string());
         assert_eq!(result["protocol_version"], json!(PROTOCOL_VERSION));
-    }
-
-    struct KillOnDrop(std::process::Child);
-    impl Drop for KillOnDrop {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
     }
 }
