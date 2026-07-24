@@ -13,7 +13,8 @@ import { ChatPaginator } from "./chat-pagination";
 import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
 import { buildMessageEl, foldClosedRange, revealTranscript } from "./chat-dom-renderer";
 import { flushRenderNow } from "./flush-scheduler";
-import { handleChatEvent, bulkLoadEvents, type HandleEventOpts } from "./chat-event-handler";
+import { handleChatEvent, type HandleEventOpts } from "./chat-event-handler";
+import { bulkLoadEvents } from "./chat-event-bulk-load";
 import { getCta } from "./cta-registry";
 
 export interface SessionMeta {
