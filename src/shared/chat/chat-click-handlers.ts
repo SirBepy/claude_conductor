@@ -50,20 +50,25 @@ export function handleTableFullscreen(e: MouseEvent): void {
   document.addEventListener("keydown", onTableEsc);
 }
 
+/** Shared shape for base64-chip-to-text-lightbox handlers: find the chip by
+ *  selector, base64-decode a data attribute, open it as a text lightbox. */
+function openBase64TextChip(e: MouseEvent, selector: string, dataKey: string, filename: string): void {
+  const chip = (e.target as Element).closest<HTMLElement>(selector);
+  if (!chip) return;
+  const text = base64ToUtf8((chip.dataset as Record<string, string>)[dataKey] || "");
+  if (!text) return;
+  openLightbox({ type: "text", content: text, filename });
+}
+
 export function handlePastedLogClick(e: MouseEvent): void {
   const chip = (e.target as Element).closest<HTMLElement>(".pasted-log-chip");
   if (!chip) return;
   const name = chip.dataset.pastedName || "pasted_log.txt";
-  const text = base64ToUtf8(chip.dataset.pastedText || "");
-  openLightbox({ type: "text", content: text, filename: name });
+  openBase64TextChip(e, ".pasted-log-chip", "pastedText", name);
 }
 
 export function handleAuqAnswerClick(e: MouseEvent): void {
-  const chip = (e.target as Element).closest<HTMLElement>(".auq-answer-chip");
-  if (!chip) return;
-  const text = base64ToUtf8(chip.dataset.auqAnswerText || "");
-  if (!text) return;
-  openLightbox({ type: "text", content: text, filename: "answer.txt" });
+  openBase64TextChip(e, ".auq-answer-chip", "auqAnswerText", "answer.txt");
 }
 
 export function handleSlashClick(e: MouseEvent): void {
