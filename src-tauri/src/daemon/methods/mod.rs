@@ -3,16 +3,22 @@
 //! calls them in sequence at startup to populate the Router.
 
 mod channels;
+mod context;
 mod lifecycle;
 mod permission;
+mod preview;
 mod registry;
 mod schedule;
+mod usage;
 
 pub use channels::register_channels;
+pub use context::register_context;
 pub use lifecycle::{register, register_notifier, register_settings};
 pub use permission::register_responders;
+pub use preview::register_preview;
 pub use registry::register_chat_registry;
 pub use schedule::register_schedule;
+pub use usage::register_usage;
 
 #[cfg(test)]
 mod tests {

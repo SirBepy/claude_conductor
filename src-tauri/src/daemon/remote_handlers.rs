@@ -1,6 +1,10 @@
-//! Endpoint handlers for the remote-access server (`remote_server.rs` owns the
-//! router, auth middleware, and pairing-file helpers; this module is just the
-//! per-route business logic).
+//! Chat/session HTTP+WS handlers for the remote-access server
+//! (`remote_server.rs` owns the router, auth middleware, and pairing-file
+//! helpers; this module is the per-route business logic for the session/chat
+//! surface specifically). Push notifications, the voice/STT relay, and device
+//! pairing live in their own sibling modules (`remote_push.rs`,
+//! `remote_voice.rs`, `remote_pairing.rs` - split out in ai_todo 319) since
+//! none of them share state or helpers with the chat/session core.
 
 use std::sync::Arc;
 
@@ -21,7 +25,7 @@ use crate::daemon::device_registry::DeviceRegistry;
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
 
-use super::remote_server::{validate_pairing_code, RemoteCtx};
+use super::remote_server::RemoteCtx;
 
 /// The compiled frontend SPA, embedded at compile time from `../dist` (the vite
 /// build output). `$CARGO_MANIFEST_DIR` resolves to `src-tauri/`, so the path
@@ -123,49 +127,6 @@ const SAFE_METHODS: &[&str] = &[
     "list_previews",
     "get_preview",
 ];
-
-// ── Push notifications (ai_todo 119) ─────────────────────────────────────────
-
-/// The VAPID public key the phone needs as its `applicationServerKey`.
-pub(super) async fn push_vapid_key(State(ctx): State<Arc<RemoteCtx>>) -> Response {
-    match ctx.state.push.get() {
-        Some(pm) => Json(serde_json::json!({ "key": pm.vapid_public() })).into_response(),
-        None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-    }
-}
-
-/// Register a phone's Web Push subscription (body = `subscription.toJSON()`).
-pub(super) async fn push_subscribe(
-    State(ctx): State<Arc<RemoteCtx>>,
-    Json(sub): Json<crate::daemon::push::PushSubscription>,
-) -> StatusCode {
-    match ctx.state.push.get() {
-        Some(pm) => {
-            pm.subscribe(sub);
-            StatusCode::NO_CONTENT
-        }
-        None => StatusCode::SERVICE_UNAVAILABLE,
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct UnsubscribeBody {
-    endpoint: String,
-}
-
-/// Drop a phone's subscription (on disable / re-pair).
-pub(super) async fn push_unsubscribe(
-    State(ctx): State<Arc<RemoteCtx>>,
-    Json(body): Json<UnsubscribeBody>,
-) -> StatusCode {
-    match ctx.state.push.get() {
-        Some(pm) => {
-            pm.unsubscribe(&body.endpoint);
-            StatusCode::NO_CONTENT
-        }
-        None => StatusCode::SERVICE_UNAVAILABLE,
-    }
-}
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -294,7 +255,7 @@ pub(super) async fn rpc_dispatch(
 
 #[derive(Deserialize)]
 pub(super) struct StreamQuery {
-    token: String,
+    pub(super) token: String,
 }
 
 pub(super) async fn stream_ws(
@@ -520,109 +481,6 @@ async fn wait_for_respawn(
                 _ => return None,        // client closed or errored
             },
         }
-    }
-}
-
-/// Authed entry to the voice transcription pipe. Self-authenticates via the
-/// `?token=` query (browsers cannot set the Authorization header on a WS
-/// handshake) exactly like `stream_ws`, ensures the Python STT sidecar is
-/// running, then upgrades and dumb-relays frames browser<->sidecar.
-pub(super) async fn transcribe_ws(
-    State(ctx): State<Arc<RemoteCtx>>,
-    Query(q): Query<StreamQuery>,
-    ws: WebSocketUpgrade,
-) -> Response {
-    if !DeviceRegistry::validate_token(&q.token, &ctx.app_data) {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    if let Err(e) = ctx.stt.ensure_running().await {
-        log::error!("stt ensure_running: {e}");
-        return (StatusCode::SERVICE_UNAVAILABLE, "voice engine unavailable").into_response();
-    }
-    let stt = ctx.stt.clone();
-    ws.on_upgrade(move |socket| relay_transcribe(socket, stt))
-}
-
-/// Dumb bidirectional relay between the browser axum WebSocket and a
-/// tokio-tungstenite client WS to the localhost STT sidecar. Binary PCM goes
-/// up; JSON transcript frames come down. Closes when either side closes.
-async fn relay_transcribe(browser: WebSocket, stt: Arc<crate::daemon::stt::SttSupervisor>) {
-    use axum::extract::ws::Message as AxMsg;
-    use futures_util::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::Message as TgMsg;
-
-    stt.on_connect();
-    // Brief retry so the freshly-spawned sidecar has time to bind its socket.
-    let url = format!("ws://127.0.0.1:{}", crate::daemon::stt::SIDECAR_PORT);
-    let mut sidecar = None;
-    for _ in 0..50 {
-        if let Ok((s, _)) = tokio_tungstenite::connect_async(&url).await {
-            sidecar = Some(s);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
-    let Some(sidecar) = sidecar else {
-        let _ = browser;
-        stt.on_disconnect().await;
-        return;
-    };
-
-    let (mut b_tx, mut b_rx) = browser.split();
-    let (mut s_tx, mut s_rx) = sidecar.split();
-
-    // browser -> sidecar (binary PCM + text control)
-    let up = async {
-        while let Some(Ok(msg)) = b_rx.next().await {
-            let out = match msg {
-                AxMsg::Binary(b) => TgMsg::Binary(b),
-                AxMsg::Text(t) => TgMsg::Text(t),
-                AxMsg::Close(_) => break,
-                _ => continue,
-            };
-            if s_tx.send(out).await.is_err() {
-                break;
-            }
-        }
-    };
-    // sidecar -> browser (JSON results)
-    let down = async {
-        while let Some(Ok(msg)) = s_rx.next().await {
-            let out = match msg {
-                TgMsg::Text(t) => AxMsg::Text(t),
-                TgMsg::Binary(b) => AxMsg::Binary(b),
-                TgMsg::Close(_) => break,
-                _ => continue,
-            };
-            if b_tx.send(out).await.is_err() {
-                break;
-            }
-        }
-    };
-    tokio::select! { _ = up => {}, _ = down => {} }
-    stt.on_disconnect().await;
-}
-
-#[derive(Deserialize)]
-pub(super) struct PairBody {
-    pairing_code: String,
-    device_name: Option<String>,
-}
-
-pub(super) async fn pair_device(
-    State(ctx): State<Arc<RemoteCtx>>,
-    Json(body): Json<PairBody>,
-) -> Response {
-    if !DeviceRegistry::is_enabled(&ctx.app_data) {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    }
-    if let Err(reason) = validate_pairing_code(&body.pairing_code, &ctx.app_data) {
-        return (StatusCode::BAD_REQUEST, reason).into_response();
-    }
-    let name = body.device_name.unwrap_or_else(|| "Phone".to_string());
-    match DeviceRegistry::add_device(&name, &ctx.app_data) {
-        Ok(token) => Json(serde_json::json!({ "device_token": token })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
 

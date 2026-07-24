@@ -23,7 +23,10 @@ pub mod pump;
 pub mod push;
 pub mod rate_limit;
 mod remote_handlers;
+mod remote_pairing;
+mod remote_push;
 pub mod remote_server;
+mod remote_voice;
 pub mod rpc;
 pub mod schedule;
 pub mod session;
@@ -125,6 +128,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_responders(&mut router, state.clone());
     methods::register_channels(&mut router, state.clone());
     methods::register_chat_registry(&mut router, state.clone());
+    methods::register_usage(&mut router, state.clone());
+    methods::register_context(&mut router, state.clone());
+    methods::register_preview(&mut router, state.clone());
     methods::register_schedule(&mut router, state.clone());
 
     // Bind hook server BEFORE the RPC accept loop so in-flight claude

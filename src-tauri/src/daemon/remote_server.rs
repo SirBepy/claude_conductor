@@ -39,6 +39,9 @@ use crate::daemon::device_registry::DeviceRegistry;
 use crate::daemon::state::DaemonState;
 
 use super::remote_handlers::*;
+use super::remote_pairing::pair_device;
+use super::remote_push::{push_subscribe, push_unsubscribe, push_vapid_key};
+use super::remote_voice::transcribe_ws;
 
 /// Fixed localhost port for the remote API. Stable so the user's
 /// `tailscale serve` config can target it. Distinct from the hook port (27182).
