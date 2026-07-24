@@ -5,6 +5,7 @@ import { ensureModalHost, closeModal } from "../../shared/modal";
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal";
+import { openWorktreePickerModal } from "./worktree-picker";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 
 export type SortChoice = "name" | "recent" | "todos";
@@ -139,6 +140,26 @@ export function openProjectPickerModal(
       return rows;
     };
 
+    // A project with git worktrees opens the New/Existing/Default sub-picker;
+    // one without keeps today's single-click resolve. Mirrors the "New
+    // project…" footer flow: hide the host, await the sub-modal, then finish on
+    // a result or restore + re-render on cancel.
+    const selectProjectRow = async (p: ProjectGroup): Promise<void> => {
+      if (p.path_exists === false) return;
+      if (!p.worktrees || p.worktrees.length === 0) {
+        finish({ path: p.path, name: p.name });
+        return;
+      }
+      host.classList.remove("open");
+      const result = await openWorktreePickerModal(p);
+      if (!result) {
+        host.classList.add("open");
+        renderModal();
+        return;
+      }
+      finish(result);
+    };
+
     const renderModal = () => {
       const rows = computeRows();
       const tpl = html`
@@ -206,7 +227,7 @@ export function openProjectPickerModal(
                     e.preventDefault();
                     const idx = Math.min(selectedIdx, matches.length - 1);
                     const m = matches[idx]!;
-                    if (m.path_exists !== false) finish({ path: m.path, name: m.name });
+                    if (m.path_exists !== false) void selectProjectRow(m);
                   }
                 } else if (e.key === "ArrowDown") {
                   e.preventDefault();
@@ -253,7 +274,7 @@ export function openProjectPickerModal(
                             renderModal();
                           }
                         }}
-                        @click=${() => { if (p.path_exists !== false) finish({ path: p.path, name: p.name }); }}
+                        @click=${() => void selectProjectRow(p)}
                       >
                         <div class="project-picker-avatar">${unsafeHTML(renderAvatar(p.avatar, p.path))}</div>
                         <div class="project-picker-info">
@@ -261,6 +282,7 @@ export function openProjectPickerModal(
                           <span class="project-picker-path">${p.path}</span>
                           ${p.path_exists === false ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
                         </div>
+                        ${p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}
                         ${showTodos && todoCount > 0 ? html`<span class="project-picker-todo-badge">${todoCount}</span>` : ""}
                       </li>
                     `;}

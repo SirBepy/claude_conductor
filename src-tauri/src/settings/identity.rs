@@ -15,6 +15,47 @@ pub fn find_repo_root(start: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
+/// If `path` is a git worktree checkout, returns the main repo's root path.
+/// A worktree's `.git` is a *file* (not a directory) reading
+/// `gitdir: <main-repo>/.git/worktrees/<name>`; this walks that pointer back
+/// to `<main-repo>`. Returns `None` for a normal repo, a submodule (whose
+/// `.git` file points at `.../modules/<name>`, not `.../worktrees/<name>`),
+/// or a non-repo path.
+pub fn worktree_main_repo(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let git_path = path.join(".git");
+    if !git_path.is_file() {
+        return None;
+    }
+    let contents = std::fs::read_to_string(&git_path).ok()?;
+    let gitdir = contents.trim().strip_prefix("gitdir:")?.trim();
+    if gitdir.is_empty() {
+        return None;
+    }
+    let gitdir_path = std::path::Path::new(gitdir);
+    let gitdir_path = if gitdir_path.is_absolute() {
+        gitdir_path.to_path_buf()
+    } else {
+        path.join(gitdir_path)
+    };
+
+    // Expect a tail of `.../.git/worktrees/<name>`.
+    let mut components: Vec<std::path::Component> = gitdir_path.components().collect();
+    components.pop()?; // <name>
+    let worktrees_seg = components.pop()?;
+    if worktrees_seg.as_os_str() != "worktrees" {
+        return None;
+    }
+    let git_seg = components.pop()?;
+    if git_seg.as_os_str() != ".git" {
+        return None;
+    }
+    let main_repo: std::path::PathBuf = components.iter().collect();
+    if main_repo.as_os_str().is_empty() {
+        return None;
+    }
+    Some(main_repo)
+}
+
 /// Canonicalizes via the filesystem (resolves real casing, junctions,
 /// symlinks). On Windows, strips the `\\?\` UNC prefix that
 /// `fs::canonicalize` emits. Falls back to `normalize_cwd_key` when the
@@ -223,6 +264,37 @@ mod tests {
         let key = project_key(p);
         assert!(!key.is_empty());
         assert_eq!(key, normalize_cwd_key(p));
+    }
+
+    #[test]
+    fn worktree_main_repo_resolves_gitdir_pointer() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("fibo");
+        let worktree = repo.join(".claude").join("worktrees").join("v2-frontend-shell");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::create_dir_all(repo.join(".git").join("worktrees").join("v2-frontend-shell")).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join("v2-frontend-shell");
+        std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", gitdir.to_string_lossy())).unwrap();
+        let found = worktree_main_repo(&worktree).expect("expected a main repo");
+        assert_eq!(found, repo);
+    }
+
+    #[test]
+    fn worktree_main_repo_none_for_submodule_gitdir() {
+        // Submodule .git files point at `.../modules/<name>`, not `.../worktrees/<name>`.
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("submod");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join(".git"), b"gitdir: ../.git/modules/submod").unwrap();
+        assert!(worktree_main_repo(&repo).is_none());
+    }
+
+    #[test]
+    fn worktree_main_repo_none_for_normal_repo() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        assert!(worktree_main_repo(&repo).is_none());
     }
 
     #[cfg(windows)]

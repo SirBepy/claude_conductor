@@ -164,6 +164,27 @@ pub struct ProjectGroup {
     pub any_automated: bool,
     pub last_active_at: Option<String>,
     pub path_exists: bool,
+    /// Git worktrees of this repo that were folded out of the top-level
+    /// picker list (see `ipc::project_groups::fold_worktrees`). Empty for
+    /// projects with no known worktrees.
+    #[serde(default)]
+    pub worktrees: Vec<WorktreeSummary>,
+}
+
+/// A git worktree belonging to a `ProjectGroup`, surfaced by the project
+/// picker instead of appearing as its own top-level entry. Cheap fields
+/// only (no git subprocess calls) - branch name and staleness are fetched
+/// on demand via `list_worktree_details` when the user opens the
+/// new/existing/default sub-picker.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct WorktreeSummary {
+    pub path: String,
+    pub name: String,
+    pub tokens_7d: u64,
+    pub live: u32,
+    pub last_active_at: Option<String>,
+    pub path_exists: bool,
 }
 
 #[cfg(test)]

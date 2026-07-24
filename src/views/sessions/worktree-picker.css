@@ -1,0 +1,164 @@
+/* ── Worktree sub-picker modal (New / Existing / Default) ─────────────────
+   Opened from the project picker for a repo that has git worktrees. Reuses the
+   shared #modal-host, .modal-backdrop, .modal-header/body/footer and .btn base
+   classes (see project-picker.css); only the wt-picker-* internals live here. */
+#modal-host .modal-card.wt-picker-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2501;
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 8px;
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.wt-picker-modal .modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border, #2e2e40);
+}
+.wt-picker-modal .modal-header h3 { margin: 0; font-size: 0.95rem; flex: 1; }
+.wt-picker-modal .modal-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border, #2e2e40);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.wt-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── choice view: three big option buttons ── */
+.wt-picker-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--color-surface-alt, #15151e);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: inherit;
+}
+.wt-picker-choice:hover { border-color: var(--color-primary, #4c9eff); }
+.wt-picker-choice > i { font-size: 1.25rem; color: var(--color-primary, #4c9eff); flex-shrink: 0; }
+.wt-picker-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wt-picker-choice-title { font-size: 0.88rem; font-weight: 600; }
+.wt-picker-choice-sub {
+  font-size: 0.74rem;
+  color: var(--color-text-muted, #8a8aa0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── existing-worktrees view ── */
+.wt-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 6px;
+}
+.wt-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #2e2e40);
+}
+.wt-picker-row:last-child { border-bottom: none; }
+.wt-picker-row-check,
+.wt-picker-row-check-spacer { width: 16px; flex-shrink: 0; }
+.wt-picker-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+.wt-picker-row-name { font-size: 0.86rem; font-weight: 600; color: var(--color-text); }
+.wt-picker-row-sub {
+  font-size: 0.72rem;
+  color: var(--color-text-muted, #8a8aa0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-picker-row--stale { background: color-mix(in srgb, var(--color-warning, #e5a040) 8%, transparent); }
+.wt-picker-stale-tag {
+  flex-shrink: 0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-warning, #e5a040) 18%, transparent);
+  color: var(--color-warning, #e5a040);
+}
+.wt-picker-cleanup-btn:not([disabled]) {
+  color: var(--color-warning, #e5a040);
+  border-color: color-mix(in srgb, var(--color-warning, #e5a040) 40%, var(--color-border, #2e2e40));
+}
+
+/* ── new-worktree form ── */
+.wt-picker-field { display: flex; flex-direction: column; gap: 4px; }
+.wt-picker-field label { font-size: 0.74rem; color: var(--color-text-muted, #8a8aa0); }
+.wt-picker-field-optional { opacity: 0.7; }
+.wt-picker-field input {
+  padding: 8px 10px;
+  background: var(--color-surface-alt, #15151e);
+  color: var(--color-text);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.wt-picker-field input:focus { outline: none; border-color: var(--color-primary, #4c9eff); }
+
+/* ── status rows ── */
+.wt-picker-loading,
+.wt-picker-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--color-text-muted, #8a8aa0);
+  font-size: 0.82rem;
+}
+.wt-picker-error { color: var(--color-danger, #e05252); font-size: 0.78rem; padding: 4px 2px; }
+.wt-spin { display: inline-block; animation: wt-spin 0.7s linear infinite; }
+@keyframes wt-spin { to { transform: rotate(360deg); } }
+
+/* ── worktree-count badge shown on project-picker rows ── */
+.project-picker-wt-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary, #4c9eff) 15%, transparent);
+  color: var(--color-primary, #4c9eff);
+  border: 1px solid color-mix(in srgb, var(--color-primary, #4c9eff) 25%, transparent);
+  white-space: nowrap;
+}

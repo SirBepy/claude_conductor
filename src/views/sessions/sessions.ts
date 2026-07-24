@@ -11,6 +11,7 @@ import "./session-ctx-menu.css";
 import "./session-avatar.css";
 import "./session-statusbar.css";
 import "./project-picker.css";
+import "./worktree-picker.css";
 import "./model-effort-modal.css";
 import "./new-project-modal.css";
 import "./preview-panel.css";
@@ -207,7 +208,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   if (rlHost) rateLimitBanner.mount(rlHost);
 
   const usageChipHost = root.querySelector<HTMLElement>("#usage-chip-host");
-  const teardownUsageChip = usageChipHost ? mountUsageChip(usageChipHost) : null;
+  const teardownUsageChip = usageChipHost && isRemote() ? mountUsageChip(usageChipHost) : null;
   rateLimitBanner.setSelectedSessionGetter(() => state.selectedId);
   rateLimitBanner.setOnMoved((newId, oldId) => {
     carrySessionSettings(oldId, newId);

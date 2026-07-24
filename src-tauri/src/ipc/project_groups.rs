@@ -97,6 +97,7 @@ pub mod groups_test_helpers {
             any_automated: false,
             last_active_at: None,
             path_exists: true,
+            worktrees: Vec::new(),
         }
     }
 
@@ -132,11 +133,67 @@ pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate
         for g in &mut groups {
             g.path_exists = Path::new(&g.path).exists();
         }
-        groups
+        fold_worktrees(groups)
     })
     .await
     .unwrap_or_default();
     Ok(groups)
+}
+
+/// Folds groups whose path is a git worktree into their main repo's
+/// `worktrees` list, dropping them from the top-level output so the picker
+/// shows one row per repo instead of one per worktree. A worktree whose
+/// main repo isn't present among `groups` (the repo itself was never opened
+/// as its own project) is left as a standalone top-level entry - losing the
+/// only way to reach it would be worse than one extra flat row.
+fn fold_worktrees(groups: Vec<crate::types::ProjectGroup>) -> Vec<crate::types::ProjectGroup> {
+    use crate::settings::identity::{normalize_path, worktree_main_repo};
+    use crate::types::WorktreeSummary;
+    use std::collections::HashMap;
+
+    let main_repo_key: Vec<Option<String>> = groups
+        .iter()
+        .map(|g| worktree_main_repo(Path::new(&g.path)).map(|m| normalize_path(&m)))
+        .collect();
+
+    let mut parent_idx_by_key: HashMap<String, usize> = HashMap::new();
+    for (i, g) in groups.iter().enumerate() {
+        if main_repo_key[i].is_none() {
+            parent_idx_by_key.insert(normalize_path(Path::new(&g.path)), i);
+        }
+    }
+
+    let mut summaries_by_parent: Vec<Vec<WorktreeSummary>> = vec![Vec::new(); groups.len()];
+    let mut folded: Vec<bool> = vec![false; groups.len()];
+    for (i, g) in groups.iter().enumerate() {
+        let Some(parent_key) = &main_repo_key[i] else { continue };
+        let Some(&parent_i) = parent_idx_by_key.get(parent_key) else { continue };
+        if parent_i == i {
+            continue;
+        }
+        summaries_by_parent[parent_i].push(WorktreeSummary {
+            path: g.path.clone(),
+            name: g.name.clone(),
+            tokens_7d: g.tokens_7d,
+            live: g.live,
+            last_active_at: g.last_active_at.clone(),
+            path_exists: g.path_exists,
+        });
+        folded[i] = true;
+    }
+
+    let mut groups = groups;
+    for (i, summaries) in summaries_by_parent.into_iter().enumerate() {
+        if !summaries.is_empty() {
+            groups[i].worktrees = summaries;
+        }
+    }
+    groups
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !folded[*i])
+        .map(|(_, g)| g)
+        .collect()
 }
 
 /// Computes the latest `mtime` of any `.jsonl` under
@@ -385,5 +442,82 @@ mod last_activity_tests {
         std::fs::write(&c, "much-newer-txt").unwrap();
         let got2 = max_jsonl_mtime(d.path());
         assert_eq!(got, got2, "non-jsonl file must not affect mtime");
+    }
+}
+
+#[cfg(test)]
+mod fold_worktrees_tests {
+    use super::fold_worktrees;
+    use crate::types::{Avatar, ProjectGroup};
+    use tempfile::tempdir;
+
+    fn group(path: &std::path::Path, name: &str) -> ProjectGroup {
+        ProjectGroup {
+            id: None,
+            path: path.to_string_lossy().into_owned(),
+            name: name.to_string(),
+            parent_segment: None,
+            avatar: Avatar::None,
+            automation_enabled: false,
+            tokens_7d: 0,
+            live: 0,
+            any_remote: false,
+            any_automated: false,
+            last_active_at: None,
+            path_exists: true,
+            worktrees: Vec::new(),
+        }
+    }
+
+    fn write_worktree_gitfile(repo: &std::path::Path, worktree: &std::path::Path, name: &str) {
+        std::fs::create_dir_all(worktree).unwrap();
+        std::fs::create_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join(name);
+        std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", gitdir.to_string_lossy())).unwrap();
+    }
+
+    #[test]
+    fn folds_worktree_under_known_parent() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("fibo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let worktree = repo.join(".claude").join("worktrees").join("v2-frontend-shell");
+        write_worktree_gitfile(&repo, &worktree, "v2-frontend-shell");
+
+        let groups = vec![group(&repo, "fibo"), group(&worktree, "v2-frontend-shell")];
+        let out = fold_worktrees(groups);
+
+        assert_eq!(out.len(), 1, "worktree must fold into its parent, not stay top-level");
+        assert_eq!(out[0].name, "fibo");
+        assert_eq!(out[0].worktrees.len(), 1);
+        assert_eq!(out[0].worktrees[0].name, "v2-frontend-shell");
+    }
+
+    #[test]
+    fn leaves_worktree_standalone_when_parent_unknown() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("fibo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let worktree = repo.join(".claude").join("worktrees").join("v2-frontend-shell");
+        write_worktree_gitfile(&repo, &worktree, "v2-frontend-shell");
+
+        // Parent repo was never opened as its own project - only the
+        // worktree is in the list. Must not be silently dropped.
+        let groups = vec![group(&worktree, "v2-frontend-shell")];
+        let out = fold_worktrees(groups);
+
+        assert_eq!(out.len(), 1, "orphaned worktree must stay reachable as a top-level row");
+        assert_eq!(out[0].name, "v2-frontend-shell");
+    }
+
+    #[test]
+    fn normal_repos_pass_through_unchanged() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let groups = vec![group(&repo, "repo")];
+        let out = fold_worktrees(groups);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].worktrees.is_empty());
     }
 }
