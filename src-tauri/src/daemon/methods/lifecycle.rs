@@ -114,7 +114,20 @@ fn register_new_session(
     state.registry.set_awaiting(session_id, None);
 }
 
+/// Thin dispatcher: each sub-function below registers its own group of RPC
+/// methods against the same `router`/`state`, mirroring the standalone shape
+/// `register_notifier`/`register_settings` already use for their groups.
 pub fn register(router: &mut Router, state: Arc<DaemonState>) {
+    register_core(router, state.clone());
+    register_account_move(router, state.clone());
+    #[cfg(debug_assertions)]
+    register_debug(router, state.clone());
+    register_attach(router, state.clone());
+    register_shutdown(router, state);
+}
+
+/// The common turn-taking lifecycle: start/send/cancel/end a session.
+fn register_core(router: &mut Router, state: Arc<DaemonState>) {
     let map = state.sessions.clone();
     {
         let state = state.clone();
@@ -212,6 +225,12 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+}
+
+/// `move_session_to_account` alone - it's the largest single handler (forks a
+/// session onto a different account) and the most likely to grow further.
+fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
+    let map = state.sessions.clone();
     {
         let map = map.clone();
         let state = state.clone();
@@ -294,12 +313,16 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    // Debug builds only: drive the whole rate-limit flow without waiting hours
-    // for a real window to run out. Feeds `handle_rate_limit_rejection` the same
-    // payload shape `chat/parser.rs` builds from the CLI's `rate_limit_event`,
-    // so the blocked state, the banner, and the staggered scheduled resume all
-    // come from the production path, not a test-only branch.
-    #[cfg(debug_assertions)]
+}
+
+/// Debug-only: drive the whole rate-limit flow without waiting hours
+/// for a real window to run out. Feeds `handle_rate_limit_rejection` the same
+/// payload shape `chat/parser.rs` builds from the CLI's `rate_limit_event`,
+/// so the blocked state, the banner, and the staggered scheduled resume all
+/// come from the production path, not a test-only branch.
+#[cfg(debug_assertions)]
+fn register_debug(router: &mut Router, state: Arc<DaemonState>) {
+    let map = state.sessions.clone();
     {
         let map = map.clone();
         let state = state.clone();
@@ -327,6 +350,12 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+}
+
+/// `attach_session`/`detach_session` - subscribe/unsubscribe a client
+/// connection to a session's live chat-event stream.
+fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
+    let map = state.sessions.clone();
     {
         let map = map.clone();
         router.register("attach_session", move |params, ctx| {
@@ -432,10 +461,16 @@ pub fn register(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!({"ok": true}))
         }
     });
+}
+
+/// Explicit daemon stop: kill channels and any live chat sessions, then
+/// signal the main loop to exit the process. Sessions are NOT spared -
+/// this is the deliberate full stop. Not named in the split's original 8
+/// (the count was already slightly stale), but it's its own concern and
+/// doesn't fit turn-taking/account-move/debug/attach, so it gets the same
+/// standalone shape as `register_notifier`/`register_settings`.
+fn register_shutdown(router: &mut Router, state: Arc<DaemonState>) {
     {
-        // Explicit daemon stop: kill channels and any live chat sessions, then
-        // signal the main loop to exit the process. Sessions are NOT spared -
-        // this is the deliberate full stop.
         let state = state.clone();
         router.register("shutdown_daemon", move |_params, _ctx| {
             let state = state.clone();
