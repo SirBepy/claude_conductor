@@ -11,6 +11,7 @@
 
 mod commit_lock;
 mod context;
+mod decision;
 mod lifecycle;
 mod permission;
 mod preview;

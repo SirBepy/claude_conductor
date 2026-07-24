@@ -3,6 +3,7 @@
 //! blocks the HTTP response until the app responds (via the daemon-side RPC
 //! `respond_*` in methods.rs) or the prompt timeout fires.
 
+use super::decision::deny_decision;
 use super::HookCtx;
 use crate::daemon::state::DaemonState;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
@@ -234,21 +235,6 @@ pub(super) async fn ask_question_decision(ctx: &Arc<HookCtx>, body: Value) -> Va
         json!({ "session_id": session_id, "awaiting": "question" }),
     );
     deny_decision(ASK_FIRE_AND_FORGET_REASON)
-}
-
-/// Wrap a reason in the PreToolUse decision claude reads off the hook's stdout.
-/// We always `deny` AskUserQuestion (claude must not execute it in headless
-/// mode). In the fire-and-forget model the reason is just the terse "card shown,
-/// stop" handshake (`ASK_FIRE_AND_FORGET_REASON`) - the actual answer no longer
-/// rides back through the hook; it arrives later as a normal follow-up message.
-fn deny_decision(reason: &str) -> Value {
-    json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    })
 }
 
 #[cfg(test)]

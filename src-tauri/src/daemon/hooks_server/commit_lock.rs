@@ -12,6 +12,7 @@
 //! (`DaemonState::try_acquire_commit_lock`) is polled for up to
 //! [`COMMIT_LOCK_POLL_BUDGET`] before giving up and denying.
 
+use super::decision::{allow_decision, deny_decision};
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde_json::{json, Value};
@@ -36,25 +37,6 @@ fn is_git_commit(command: &str) -> bool {
         let rest = &tokens[git_idx + 1..];
         let rest = if rest.first() == Some(&"-C") { rest.get(2..).unwrap_or(&[]) } else { rest };
         rest.first() == Some(&"commit")
-    })
-}
-
-fn allow_decision() -> Value {
-    json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-        }
-    })
-}
-
-fn deny_decision(reason: &str) -> Value {
-    json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
     })
 }
 
