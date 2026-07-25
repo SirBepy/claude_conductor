@@ -3,7 +3,7 @@ import { openLightbox } from "./lightbox";
 import { chipToLightboxContent } from "./attachment-hydrator";
 import { showView } from "../navigation";
 import { openPrPreviewModal } from "./pr-review-modal";
-import { getScreenshotRowShots } from "./turn-collapse";
+import { getScreenshotRowShots } from "./screenshot-row";
 import { openScreenshotGallery } from "./screenshot-gallery";
 
 let tableOverlay: HTMLDivElement | null = null;
