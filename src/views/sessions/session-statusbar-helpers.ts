@@ -85,16 +85,6 @@ export async function saveStatuslineHideZero(hide: boolean): Promise<void> {
   }
 }
 
-export function modelContextWindow(model: string | null): number {
-  // claude-3-opus family is 200K; all other/future opus and all fable default to 1M.
-  if (model && /claude-3[^0-9]*opus/i.test(model)) return 200_000;
-  if (model && (model.includes("opus") || model.includes("fable"))) return 1_000_000;
-  // Sonnet 5 and Sonnet 4.6 are also 1M; older sonnet (4.0/4.5/3.x) stays 200K
-  // since their default (non-beta) window isn't confirmed 1M.
-  if (model && (model.includes("sonnet-5") || model.includes("sonnet-4-6"))) return 1_000_000;
-  return 200_000;
-}
-
 export const shortModelName = modelLabel;
 
 export function formatDuration(startedAt: string): string {

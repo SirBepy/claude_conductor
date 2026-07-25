@@ -10,7 +10,6 @@ import { getCachedAccount, capitalize } from "../../shared/accounts-cache";
 import {
   formatDuration,
   shortModelName,
-  modelContextWindow,
   gitInfoCache,
   metaCache,
   countsCache,
@@ -28,7 +27,6 @@ export {
   saveStatuslineHideZero,
   migrateLegacyFields,
   shortModelName,
-  modelContextWindow,
   formatDuration,
   fetchGitInfo,
   type StatusbarOptions,
@@ -53,9 +51,10 @@ export class SessionStatusbar {
   private metaLoaded = false;
   private counts: SessionCounts | null = null;
   private countsLoaded = false;
-  // Daemon-computed context occupancy is the source of truth for the context
-  // chip; the frontend modelContextWindow calc is only a transition/offline
-  // fallback (see renderContext). null = not yet fetched or unavailable.
+  // Daemon-computed context occupancy is the SOLE source of truth for the
+  // context chip (ai_todo 31 - the frontend no longer duplicates the
+  // window-size heuristic as a fallback; see renderContext). null = not yet
+  // fetched or unavailable.
   private ctxStatus: ContextStatus | null = null;
   // Uncommitted-file count for the `dirty` chip (via get_git_dirty IPC, cwd-based).
   private dirtyCount: number | null = null;
@@ -465,18 +464,12 @@ export class SessionStatusbar {
       const pctStr = raw < 1 && raw > 0 ? "<1" : String(Math.min(100, Math.round(raw)));
       const body = asTokens ? `${formatTokenCount(Number(c.occupancy), { decimals: 0 })} / ${formatTokenCount(Number(c.window), { decimals: 0 })}` : `${pctStr}%`;
       return `<span class="sb-chip sb-context${cls}${this.animClass(key)}" title="${occ} / ${win} tokens (conversation + system prompt + tools)${note}"><i class="ph ph-stack"></i>${body}</span>`;
-    } else if (this.meta.inputTokens > 0) {
-      // meta.model updates live on every turn_usage event; sessionModel is set
-      // once at spawn and never refreshed, so it wins here only when meta.model
-      // hasn't arrived yet (e.g. right after setSessionId, before any usage).
-      const window = modelContextWindow(this.meta.model || this.sessionModel);
-      const raw = (this.meta.inputTokens / window) * 100;
-      if (raw >= 100) console.warn("[ctx-100] context pinned at 100%", { inputTokens: this.meta.inputTokens, window, sessionModel: this.sessionModel, metaModel: this.meta.model });
-      const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
-      const pctStr = raw < 1 ? "<1" : String(Math.min(100, Math.round(raw)));
-      const body = asTokens ? `${formatTokenCount(this.meta.inputTokens, { decimals: 0 })} / ${formatTokenCount(window, { decimals: 0 })}` : `${pctStr}%`;
-      return `<span class="sb-chip sb-context${cls}${this.animClass(key)}" title="${this.meta.inputTokens.toLocaleString()} / ${window.toLocaleString()} tokens (conversation + system prompt + tools)"><i class="ph ph-stack"></i>${body}</span>`;
-    } else if (!this.metaLoaded) {
+    } else if (!this.metaLoaded || this.meta.hasUsage) {
+      // No independent window heuristic here anymore (ai_todo 31): the daemon's
+      // context_status is the sole source of truth. While it's still resolving
+      // (or hasn't been fetched yet) show a loading skeleton instead of an
+      // estimate; once meta reports usage with no context_status forthcoming,
+      // this keeps showing the skeleton rather than silently going stale.
       return this.skeletonChip(key, "sb-context", "ph-stack", asTokens ? "70px" : "40px");
     }
     return "";

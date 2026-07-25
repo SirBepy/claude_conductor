@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 //
-// The context chip's percentage now comes from the daemon's `context_status`
-// IPC (the single source of truth), not the duplicated frontend
-// modelContextWindow calc. This drives the real SessionStatusbar so a revert to
-// frontend-only is caught:
+// The context chip's percentage comes exclusively from the daemon's
+// `context_status` IPC (the single source of truth - ai_todo 31 removed the
+// frontend's duplicate modelContextWindow calc entirely). This drives the
+// real SessionStatusbar so a revert to an independent frontend heuristic is
+// caught:
 //   - daemon value renders as the chip pct + color tier,
-//   - heuristic confidence prefixes a "~",
-//   - a null IPC result falls back to the frontend calc (chip never breaks).
+//   - heuristic confidence is noted via the title, not a ~ prefix,
+//   - a null IPC result renders a loading skeleton, never a self-computed
+//     estimate (chip never fabricates a number the daemon didn't provide).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -98,22 +100,25 @@ describe("context chip - daemon source of truth", () => {
     expect(c.getAttribute("title")).not.toContain("(estimated)");
   });
 
-  it("falls back to the frontend calc when context_status returns null", async () => {
+  it("renders a loading skeleton (never a self-computed estimate) when context_status returns null", async () => {
     ipcMock.impl = async () => null;
     const { el, sb } = mount();
     await flush();
-    // No daemon value -> chip uses meta.inputTokens / modelContextWindow.
-    // opus -> 1M window, 300K tokens -> 30%.
+    // Usage has arrived but the daemon hasn't produced a context_status yet
+    // (or ever will, for this test) - ai_todo 31 removed the frontend's
+    // independent modelContextWindow calc, so this must stay a skeleton, not
+    // a fabricated percentage.
     sb.updateMeta({ model: "claude-opus-4-8", inputTokens: 300_000, hasThinking: false, totalCostUsd: 0, hasUsage: true });
     await flush();
     const c = chip(el);
     expect(c).not.toBeNull();
-    expect(c.textContent).toContain("30%");
-    expect(c.textContent).not.toContain("~");
+    expect(c.className).toContain("sb-skeleton");
+    expect(c.textContent).not.toContain("%");
   });
 
-  it("prefers the daemon value over the frontend calc when both are available", async () => {
-    // Daemon says 70% even though meta.inputTokens / 1M would be 30%.
+  it("prefers the daemon value when both a context_status and usage-bearing meta are available", async () => {
+    // Daemon says 70%; meta.updateMeta arriving too must not perturb the
+    // daemon-sourced render (there is no frontend calc left to "prefer over").
     ipcMock.impl = async () => makeCtx({ pct_used: 70, occupancy: 700_000n });
     const { el, sb } = mount();
     sb.updateMeta({ model: "claude-opus-4-8", inputTokens: 300_000, hasThinking: false, totalCostUsd: 0, hasUsage: true });
