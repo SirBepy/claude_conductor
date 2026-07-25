@@ -249,7 +249,7 @@ export function mountComposer(
       if (state.renderer && state.renderer.currentSessionId() === sessionId) {
         await state.renderer.loadFromStore(cwd);
       }
-      alert(`Send failed: ${err}`);
+      showToast(`Send failed: ${err}`);
     }
   };
 
