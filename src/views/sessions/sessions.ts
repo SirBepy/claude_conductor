@@ -156,54 +156,45 @@ function discardStuckPending(pane: HTMLElement): void {
   })();
 }
 
-export async function renderSessionsView(root: HTMLElement): Promise<() => void> {
-  // Reset state on each mount; bump mountId so any pending async work from
-  // a prior mount sees a stale id and bails.
-  const myMount = resetState();
-  _ensuredSessionIds.clear();
-  loadAndRestorePendingSession();
+/** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
+ * shared/ipc.ts. Threaded through the wiring helpers below instead of each
+ * one re-reading `window.__TAURI__?.event`. */
+type TauriEventApi = NonNullable<Window["__TAURI__"]>["event"];
 
-  render(template(), root);
+// ── renderSessionsView setup helpers ──────────────────────────────────────────
+// Each helper below owns one self-contained slice of renderSessionsView's
+// mount sequence (extracted verbatim, ai_todo 300); renderSessionsView is
+// just the ordered composition of these plus whatever genuinely can't be
+// pulled out (the final teardown closure, which reaches into several of
+// their locals).
 
-  const view = root.querySelector<HTMLElement>(".view-sessions");
-  const listEl = root.querySelector<HTMLElement>("#sessions-list");
-  const pane = root.querySelector<HTMLElement>("#session-pane");
-  const newBtn = root.querySelector<HTMLButtonElement>("#newSessionBtn");
-
-  if (!view || !listEl || !pane) {
-    console.error("[sessions] view template missing expected nodes");
-    return () => { /* no-op */ };
-  }
-
-  setPaneRef(pane);
-  // Docked HTML preview panel (ai_todo 138): a snapshot store rendered as a
-  // right-rail sibling of the pane, scoped to whichever chat is active (see
-  // state.ts's setActiveSession -> previewController.setSessionScope).
+/** Docked HTML preview panel (ai_todo 138): a snapshot store rendered as a
+ * right-rail sibling of the pane, scoped to whichever chat is active (see
+ * state.ts's setActiveSession -> previewController.setSessionScope). */
+function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewController | null {
   const previewRoot = root.querySelector<HTMLElement>("#preview-panel-host");
-  let previewController: PreviewController | null =
+  const previewController: PreviewController | null =
     previewRoot ? renderPreview(previewRoot, { mode: "panel" }) : null;
   state.previewController = previewController;
   previewController?.setSessionScope(state.selectedId);
   state.launchNewChatCallback = (project, config) => { void launchNewSession(pane, project, config); };
-  initThinkingBar(pane);
+  return previewController;
+}
 
-  // Clicking a pending "awaiting answer" chip in the chat dismisses any active
-  // AUQ card and re-surfaces it. Handles the case where the modal somehow got
-  // closed without answering (navigated away and back, dismissed by mistake).
-  pane.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest(".tool-qa-a--pending")) return;
-    const sid = getSelectedSessionId();
-    if (!sid) return;
-    dismissQuestionCard();
-    replayPendingPrompt(sid);
-  });
-
-  // Mount the global rate-limit banner (top of the Chats window; also mounted
-  // independently in the detached session-chats window, same module). The
-  // daemon is the sole source of truth for blocked state now - it marks
-  // Instance.rate_limited_resets_at, schedules the resume itself, and
-  // publishes instances_changed. The banner is purely a reflection of that,
-  // re-rendered from state.sessions on every refresh below.
+/** Mounts the global rate-limit banner (top of the Chats window; also
+ * mounted independently in the detached session-chats window, same module)
+ * plus the usage chip that lives in the same header row. The daemon is the
+ * sole source of truth for blocked state now - it marks
+ * Instance.rate_limited_resets_at, schedules the resume itself, and
+ * publishes instances_changed. The banner is purely a reflection of that,
+ * re-rendered from state.sessions on every refresh below. Returns the usage
+ * chip's teardown (or null if it was never mounted). */
+function wireRateLimitBanner(
+  root: HTMLElement,
+  pane: HTMLElement,
+  listEl: HTMLElement,
+  myMount: number,
+): (() => void) | null {
   const rlHost = root.querySelector<HTMLElement>("#rate-limit-banner-host");
   if (rlHost) rateLimitBanner.mount(rlHost);
 
@@ -236,11 +227,17 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     })();
   });
 
-  if (consumePendingOpenPicker()) {
-    void startNewSession(pane);
-  }
+  return teardownUsageChip;
+}
 
-  // Wire the "more options" overflow button.
+/** Wires the "more options" overflow button, the preview-panel toggle button
+ * inside it, and the sleep/shutdown-when-done protocol subscription that
+ * keeps the overflow menu's indicator dot + protocol section live. Returns a
+ * dispose function for the whenDone subscription/listener. */
+async function wireOverflowMenu(
+  root: HTMLElement,
+  previewController: PreviewController | null,
+): Promise<() => void> {
   const viewMoreBtn = root.querySelector<HTMLButtonElement>("#viewMoreBtn");
   if (viewMoreBtn) {
     viewMoreBtn.addEventListener("click", (e) => {
@@ -267,7 +264,16 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   });
   refreshViewMoreIndicator();
 
-  // Register chats-view shortcuts
+  return () => {
+    unsubWhenDone();
+    unlistenWhenDone();
+  };
+}
+
+/** Registers the chats-view keyboard shortcuts (numbered slot jump/assign,
+ * close-chat) and the ctrl-held sidebar hint class. Returns a dispose
+ * function that unregisters everything. */
+function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
   for (let i = 0; i < 9; i++) {
     const slot = i + 1;
     shortcuts.register(`open-chat-${slot}`, () => {
@@ -281,10 +287,27 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   }
   shortcuts.register("close-chat", closeFocusedChat);
 
-  let unlistenCtrlHeld: (() => void) | null = shortcuts.onCtrlHeld((held) => {
+  const unlistenCtrlHeld = shortcuts.onCtrlHeld((held) => {
     listEl.classList.toggle("kbd-hint-active", held);
   });
 
+  return () => {
+    for (let i = 1; i <= 9; i++) {
+      shortcuts.unregister(`open-chat-${i}`);
+      shortcuts.unregister(`assign-slot-${i}`);
+    }
+    shortcuts.unregister("close-chat");
+    unlistenCtrlHeld();
+  };
+}
+
+/** Shows the setup indicator, kicks off the initial sessions/daemon-status
+ * fetch, and best-effort restores the queued-chat / history-resume /
+ * last-selected session. Must not throw past its own try/catch: the click
+ * and event listeners wired after this in renderSessionsView must still be
+ * registered even if restore fails (see the "I can't click any of the
+ * chats" failure mode noted inline below). */
+async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLElement, myMount: number): Promise<void> {
   // Show setup indicator immediately (daemonConnected = null → centered
   // "Setting up..." in the pane; the sidebar stays blank until connected).
   renderSidebar(listEl);
@@ -343,9 +366,18 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   } catch (err) {
     console.error("[sessions] restore-selection failed; continuing mount", err);
   }
+}
 
-  // Subscribe to live registry updates
-  const ev = window.__TAURI__?.event;
+/** Subscribes to settings-changed (re-resolve session hero assignments) and
+ * daemon-status-changed (stall-timer arm/disarm + resync + restore-on-
+ * reconnect). No-op if the Tauri event bridge isn't present. Returns a
+ * dispose function. */
+async function wireDaemonStatusListeners(
+  ev: TauriEventApi,
+  listEl: HTMLElement,
+  pane: HTMLElement,
+  myMount: number,
+): Promise<() => void> {
   let unlistenDaemonStatus: (() => void) | null = null;
   let unlistenSettingsChanged: (() => void) | null = null;
   if (ev?.listen) {
@@ -394,6 +426,24 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     });
   }
 
+  return () => {
+    if (unlistenDaemonStatus) { try { unlistenDaemonStatus(); } catch { /* ignore */ } }
+    if (unlistenSettingsChanged) { try { unlistenSettingsChanged(); } catch { /* ignore */ } }
+  };
+}
+
+/** Defines syncInstances (the shared instances-changed/poll-fallback
+ * handler) and subscribes it to both the instances-changed and
+ * scheduled-items-changed transport events, plus the low-frequency poll
+ * fallback for the lossy daemon->app notifier. No dispose needed: the
+ * unlisten handles are stashed on `state`/module-level `instancesPollTimer`,
+ * which teardownState() already reclaims. */
+async function wireInstancesChangedListener(
+  ev: TauriEventApi,
+  listEl: HTMLElement,
+  pane: HTMLElement,
+  myMount: number,
+): Promise<void> {
   const syncInstances = async (): Promise<void> => {
     if (state.mountId !== myMount) return;
     // See reconcileEndedSessions for why previousIds is snapshotted before
@@ -509,7 +559,21 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
       void syncInstances().finally(() => { pollInFlight = false; });
     }, 15_000);
   }
+}
 
+/** Wires the +New button, its floating FAB twin, the mobile back button,
+ * the sidebar's right-click context menu, and the sidebar's main click
+ * handler (row menu buttons, parked/pending/draft rows, session rows). None
+ * of these are torn down explicitly on unmount in the original code either -
+ * the listEl/pane/newBtn nodes are discarded wholesale by the next mount's
+ * `render(template(), root)` call, so no dispose function is needed here. */
+function wireStaticListeners(
+  root: HTMLElement,
+  view: HTMLElement,
+  pane: HTMLElement,
+  listEl: HTMLElement,
+  newBtn: HTMLButtonElement | null,
+): void {
   // Wire +New
   if (newBtn) {
     newBtn.disabled = false;
@@ -525,7 +589,6 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   // Only visible on ≤768px in chat mode (CSS-driven); a no-op on desktop.
   const backBtn = root.querySelector<HTMLButtonElement>("#sessionsBackBtn");
   backBtn?.addEventListener("click", () => view.setAttribute("data-mobile-pane", "list"));
-
 
   // Sort select moved to Settings. No binding needed here; sessions.ts reads
   // the persisted localStorage value on each renderSidebar call via loadSort().
@@ -620,25 +683,13 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
         .catch((err) => console.error(`[sessions] selectSession(${id}) failed`, err));
     }
   });
+}
 
-  let unlistenDragEnter: (() => void) | null = null;
-  let unlistenDragLeave: (() => void) | null = null;
-  let unlistenFileDrop: (() => void) | null = null;
-  void (async () => {
-    if (!ev?.listen) return;
-    [unlistenDragEnter, unlistenDragLeave, unlistenFileDrop] = await Promise.all([
-      ev.listen("tauri://drag-enter", () => { view.classList.add("drag-over"); }),
-      ev.listen("tauri://drag-leave", () => { view.classList.remove("drag-over"); }),
-      ev.listen<{ paths: string[] }>("tauri://drag-drop", (e) => {
-        view.classList.remove("drag-over");
-        if (!state.composer || !e.payload.paths.length) return;
-        void (async (composer, paths) => {
-          for (const path of paths) await composer.attachFromPath(path);
-        })(state.composer, e.payload.paths);
-      }),
-    ]);
-  })();
-
+/** Subscribes the three document-level custom events the rest of the app
+ * dispatches at this pane (session-closed from elsewhere, sort-preference
+ * change from Settings, "delete draft" from the view-more menu). Returns a
+ * dispose function that removes all three. */
+function wireDocumentListeners(pane: HTMLElement, listEl: HTMLElement, myMount: number): () => void {
   const onSessionClosed = (e: Event) => {
     const { sessionId } = (e as CustomEvent<{ sessionId: string }>).detail;
     if (state.selectedId !== sessionId) return;
@@ -676,22 +727,92 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     document.removeEventListener("cc:session-closed", onSessionClosed);
     document.removeEventListener("cc-sort-changed", onSortChanged);
     document.removeEventListener("discard-pending-draft", onDiscardPendingDraft);
+  };
+}
+
+export async function renderSessionsView(root: HTMLElement): Promise<() => void> {
+  // Reset state on each mount; bump mountId so any pending async work from
+  // a prior mount sees a stale id and bails.
+  const myMount = resetState();
+  _ensuredSessionIds.clear();
+  loadAndRestorePendingSession();
+
+  render(template(), root);
+
+  const view = root.querySelector<HTMLElement>(".view-sessions");
+  const listEl = root.querySelector<HTMLElement>("#sessions-list");
+  const pane = root.querySelector<HTMLElement>("#session-pane");
+  const newBtn = root.querySelector<HTMLButtonElement>("#newSessionBtn");
+
+  if (!view || !listEl || !pane) {
+    console.error("[sessions] view template missing expected nodes");
+    return () => { /* no-op */ };
+  }
+
+  setPaneRef(pane);
+  let previewController = wirePreviewPanel(root, pane);
+  initThinkingBar(pane);
+
+  // Clicking a pending "awaiting answer" chip in the chat dismisses any active
+  // AUQ card and re-surfaces it. Handles the case where the modal somehow got
+  // closed without answering (navigated away and back, dismissed by mistake).
+  pane.addEventListener("click", (e) => {
+    if (!(e.target as HTMLElement).closest(".tool-qa-a--pending")) return;
+    const sid = getSelectedSessionId();
+    if (!sid) return;
+    dismissQuestionCard();
+    replayPendingPrompt(sid);
+  });
+
+  const teardownUsageChip = wireRateLimitBanner(root, pane, listEl, myMount);
+
+  if (consumePendingOpenPicker()) {
+    void startNewSession(pane);
+  }
+
+  const teardownOverflowMenu = await wireOverflowMenu(root, previewController);
+  const teardownKeyboardShortcuts = wireKeyboardShortcuts(listEl);
+
+  await initialLoadAndRestore(pane, listEl, myMount);
+
+  // Subscribe to live registry updates
+  const ev = window.__TAURI__?.event;
+  const teardownDaemonStatusListeners = await wireDaemonStatusListeners(ev, listEl, pane, myMount);
+  await wireInstancesChangedListener(ev, listEl, pane, myMount);
+
+  wireStaticListeners(root, view, pane, listEl, newBtn);
+
+  let unlistenDragEnter: (() => void) | null = null;
+  let unlistenDragLeave: (() => void) | null = null;
+  let unlistenFileDrop: (() => void) | null = null;
+  void (async () => {
+    if (!ev?.listen) return;
+    [unlistenDragEnter, unlistenDragLeave, unlistenFileDrop] = await Promise.all([
+      ev.listen("tauri://drag-enter", () => { view.classList.add("drag-over"); }),
+      ev.listen("tauri://drag-leave", () => { view.classList.remove("drag-over"); }),
+      ev.listen<{ paths: string[] }>("tauri://drag-drop", (e) => {
+        view.classList.remove("drag-over");
+        if (!state.composer || !e.payload.paths.length) return;
+        void (async (composer, paths) => {
+          for (const path of paths) await composer.attachFromPath(path);
+        })(state.composer, e.payload.paths);
+      }),
+    ]);
+  })();
+
+  const teardownDocumentListeners = wireDocumentListeners(pane, listEl, myMount);
+
+  return () => {
+    teardownDocumentListeners();
     if (unlistenDragEnter) { try { unlistenDragEnter(); } catch { /* ignore */ } unlistenDragEnter = null; }
     if (unlistenDragLeave) { try { unlistenDragLeave(); } catch { /* ignore */ } unlistenDragLeave = null; }
     if (unlistenFileDrop) { try { unlistenFileDrop(); } catch { /* ignore */ } unlistenFileDrop = null; }
     view.classList.remove("drag-over");
-    for (let i = 1; i <= 9; i++) {
-      shortcuts.unregister(`open-chat-${i}`);
-      shortcuts.unregister(`assign-slot-${i}`);
-    }
-    shortcuts.unregister("close-chat");
-    if (unlistenCtrlHeld) { unlistenCtrlHeld(); unlistenCtrlHeld = null; }
+    teardownKeyboardShortcuts();
     closeCtxMenu();
     closeViewMoreMenu();
-    unsubWhenDone();
-    unlistenWhenDone();
-    if (unlistenDaemonStatus) { try { unlistenDaemonStatus(); } catch { /* ignore */ } unlistenDaemonStatus = null; }
-    if (unlistenSettingsChanged) { try { unlistenSettingsChanged(); } catch { /* ignore */ } unlistenSettingsChanged = null; }
+    teardownOverflowMenu();
+    teardownDaemonStatusListeners();
     previewController?.destroy();
     previewController = null;
     state.previewController = null;
