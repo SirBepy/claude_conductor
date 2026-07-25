@@ -381,313 +381,323 @@ pub fn run() {
             when_done::cancel_when_done,
             when_done::get_when_done_state,
         ])
-        .setup(|app| {
-            log::info!("claude-conductor started");
-            #[cfg(target_os = "macos")]
-            {
-                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            }
-            crate::tray::setup(app.handle())?;
+        .setup(setup_app)
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app_handle, _event| {});
+}
 
-            // Debug (`cargo tauri dev`) builds auto-open the chats window on
-            // launch - the tray-icon left-click opens the account overlay, not
-            // this window (see tray/menu.rs's on_left_click), so without this a
-            // dev instance stays invisible until someone finds the right-click
-            // menu item. Prod is untouched: it still starts tray-only.
-            if cfg!(debug_assertions) {
-                let _ = ipc::open_chats_window(app.handle().clone());
-            }
+/// Tauri `.setup()` callback: activation policy, tray, one-time debug-only
+/// chats-window auto-open, legacy SQLite import + retention prune, and every
+/// startup background loop/watcher (attachment GC, autostart sync, updater,
+/// remote-access reapply, scheduler/news/slash/meeting spawns, audio-device
+/// follow, token backfill, hook/character migrations, daemon subscription,
+/// shutdown guard, webview boot watchdog, auto-login). Extracted out of
+/// `run()`'s builder chain so `run()` isn't dominated by one ~300-line closure
+/// (ai_todo 266) - pure extraction, no behavior change.
+fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    log::info!("claude-conductor started");
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+    crate::tray::setup(app.handle())?;
 
-            // The main dashboard window is built lazily on first open (see
-            // `build_main_window`), NOT eagerly here - an eager startup window
-            // flashes a white ghost frame on Windows (ai_todo 143). Usage
-            // polling runs in the backend `scheduler::spawn` loop and does not
-            // need this window.
+    // Debug (`cargo tauri dev`) builds auto-open the chats window on
+    // launch - the tray-icon left-click opens the account overlay, not
+    // this window (see tray/menu.rs's on_left_click), so without this a
+    // dev instance stays invisible until someone finds the right-click
+    // menu item. Prod is untouched: it still starts tray-only.
+    if cfg!(debug_assertions) {
+        let _ = ipc::open_chats_window(app.handle().clone());
+    }
+
+    // The main dashboard window is built lazily on first open (see
+    // `build_main_window`), NOT eagerly here - an eager startup window
+    // flashes a white ghost frame on Windows (ai_todo 143). Usage
+    // polling runs in the backend `scheduler::spawn` loop and does not
+    // need this window.
 
 
-            // One-time legacy import into SQLite for all three datasets. Each
-            // importer renames its source to `.bak` on success, so the on-disk
-            // presence of the source file is itself the idempotency gate (no
-            // separate flag). The APP owns this migration for ALL datasets
-            // (it controls startup order); the daemon only writes new rows.
-            {
-                use tauri::Manager;
-                let state = app.state::<crate::state::AppState>();
-                let mgr = state.db.lock().unwrap();
-                let conn = mgr.conn();
+    // One-time legacy import into SQLite for all three datasets. Each
+    // importer renames its source to `.bak` on success, so the on-disk
+    // presence of the source file is itself the idempotency gate (no
+    // separate flag). The APP owns this migration for ALL datasets
+    // (it controls startup order); the daemon only writes new rows.
+    {
+        use tauri::Manager;
+        let state = app.state::<crate::state::AppState>();
+        let mgr = state.db.lock().unwrap();
+        let conn = mgr.conn();
 
-                // Usage (history.jsonl -> usage_snapshots).
-                if let Ok(history_path) = paths::history_file() {
-                    if history_path.exists() {
-                        match crate::storage::migration::import_usage_jsonl(conn, &history_path) {
-                            Ok(stats) => log::info!(
-                                "storage: imported usage history into SQLite (imported={}, skipped={})",
-                                stats.imported,
-                                stats.skipped,
-                            ),
-                            Err(e) => log::error!("storage: usage history import failed: {e:#}"),
-                        }
-                    }
-                }
-
-                // Tokens (token-history.json array -> token_records).
-                if let Ok(token_path) = paths::token_history_file() {
-                    if token_path.exists() {
-                        match crate::storage::migration::import_token_history_json(conn, &token_path) {
-                            Ok(stats) => log::info!(
-                                "storage: imported token history into SQLite (imported={}, skipped={})",
-                                stats.imported,
-                                stats.skipped,
-                            ),
-                            Err(e) => log::error!("storage: token history import failed: {e:#}"),
-                        }
-                    }
-                }
-
-                // Skills (skill-usage/events-*.jsonl -> skill_events). The
-                // importer renames each daily file to `.bak`; a dir with no
-                // remaining events-*.jsonl is a clean no-op on later launches.
-                if let Ok(skill_dir) = paths::skill_usage_dir() {
-                    let has_events = std::fs::read_dir(&skill_dir)
-                        .map(|entries| {
-                            entries.flatten().any(|e| {
-                                e.file_name()
-                                    .to_str()
-                                    .map(|n| n.starts_with("events-") && n.ends_with(".jsonl"))
-                                    .unwrap_or(false)
-                            })
-                        })
-                        .unwrap_or(false);
-                    if has_events {
-                        match crate::storage::migration::import_skill_events_dir(conn, &skill_dir) {
-                            Ok(stats) => log::info!(
-                                "storage: imported skill events into SQLite (imported={}, skipped={})",
-                                stats.imported,
-                                stats.skipped,
-                            ),
-                            Err(e) => log::error!("storage: skill events import failed: {e:#}"),
-                        }
-                    }
-                }
-
-                // One-time startup prune of all three datasets under the
-                // user-configured retention policies (subsequent prunes run on
-                // each scheduler poll tick).
-                let policies = state.settings.lock().unwrap().retention;
-                match crate::storage::prune_all(conn, &policies) {
-                    Ok(deleted) => {
-                        if deleted > 0 {
-                            log::info!("storage: startup prune removed {deleted} row(s)");
-                        }
-                    }
-                    Err(e) => log::warn!("storage: startup prune failed: {e:#}"),
+        // Usage (history.jsonl -> usage_snapshots).
+        if let Ok(history_path) = paths::history_file() {
+            if history_path.exists() {
+                match crate::storage::migration::import_usage_jsonl(conn, &history_path) {
+                    Ok(stats) => log::info!(
+                        "storage: imported usage history into SQLite (imported={}, skipped={})",
+                        stats.imported,
+                        stats.skipped,
+                    ),
+                    Err(e) => log::error!("storage: usage history import failed: {e:#}"),
                 }
             }
+        }
 
-            // Schedule chat-attachments GC: run once on startup, then every 24h.
-            // Removes pasted-image directories whose mtime is older than 30 days.
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    crate::ipc::chat::gc_attachments().await;
-                    tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+        // Tokens (token-history.json array -> token_records).
+        if let Ok(token_path) = paths::token_history_file() {
+            if token_path.exists() {
+                match crate::storage::migration::import_token_history_json(conn, &token_path) {
+                    Ok(stats) => log::info!(
+                        "storage: imported token history into SQLite (imported={}, skipped={})",
+                        stats.imported,
+                        stats.skipped,
+                    ),
+                    Err(e) => log::error!("storage: token history import failed: {e:#}"),
                 }
-            });
-            {
-                use tauri_plugin_autostart::ManagerExt;
-                let autostart_mgr = app.autolaunch();
-                let state = app.state::<crate::state::AppState>();
-                let desired = state.settings.lock().unwrap().autostart;
-                let _ = if desired {
-                    autostart_mgr.enable()
-                } else {
-                    autostart_mgr.disable()
-                };
             }
-            {
-                use tauri::Listener;
-                let h = app.handle().clone();
-                app.listen("settings-changed", move |event| {
-                    use tauri_plugin_autostart::ManagerExt;
-                    let Ok(settings) = serde_json::from_str::<crate::types::Settings>(event.payload()) else { return; };
-                    let mgr = h.autolaunch();
-                    let _ = if settings.autostart { mgr.enable() } else { mgr.disable() };
-                });
+        }
+
+        // Skills (skill-usage/events-*.jsonl -> skill_events). The
+        // importer renames each daily file to `.bak`; a dir with no
+        // remaining events-*.jsonl is a clean no-op on later launches.
+        if let Ok(skill_dir) = paths::skill_usage_dir() {
+            let has_events = std::fs::read_dir(&skill_dir)
+                .map(|entries| {
+                    entries.flatten().any(|e| {
+                        e.file_name()
+                            .to_str()
+                            .map(|n| n.starts_with("events-") && n.ends_with(".jsonl"))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false);
+            if has_events {
+                match crate::storage::migration::import_skill_events_dir(conn, &skill_dir) {
+                    Ok(stats) => log::info!(
+                        "storage: imported skill events into SQLite (imported={}, skipped={})",
+                        stats.imported,
+                        stats.skipped,
+                    ),
+                    Err(e) => log::error!("storage: skill events import failed: {e:#}"),
+                }
             }
-            {
-                let h = app.handle().clone();
-                tauri::async_runtime::spawn(auto_update_loop(h));
+        }
+
+        // One-time startup prune of all three datasets under the
+        // user-configured retention policies (subsequent prunes run on
+        // each scheduler poll tick).
+        let policies = state.settings.lock().unwrap().retention;
+        match crate::storage::prune_all(conn, &policies) {
+            Ok(deleted) => {
+                if deleted > 0 {
+                    log::info!("storage: startup prune removed {deleted} row(s)");
+                }
             }
-            // Re-apply the phone remote-access reverse proxy if the user left it
-            // on. Best-effort + off-thread: a missing/disconnected tailscale just
-            // logs a warning, never blocks or panics startup.
-            {
-                let enabled = app
+            Err(e) => log::warn!("storage: startup prune failed: {e:#}"),
+        }
+    }
+
+    // Schedule chat-attachments GC: run once on startup, then every 24h.
+    // Removes pasted-image directories whose mtime is older than 30 days.
+    tauri::async_runtime::spawn(async move {
+        loop {
+            crate::ipc::chat::gc_attachments().await;
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+        }
+    });
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let autostart_mgr = app.autolaunch();
+        let state = app.state::<crate::state::AppState>();
+        let desired = state.settings.lock().unwrap().autostart;
+        let _ = if desired {
+            autostart_mgr.enable()
+        } else {
+            autostart_mgr.disable()
+        };
+    }
+    {
+        use tauri::Listener;
+        let h = app.handle().clone();
+        app.listen("settings-changed", move |event| {
+            use tauri_plugin_autostart::ManagerExt;
+            let Ok(settings) = serde_json::from_str::<crate::types::Settings>(event.payload()) else { return; };
+            let mgr = h.autolaunch();
+            let _ = if settings.autostart { mgr.enable() } else { mgr.disable() };
+        });
+    }
+    {
+        let h = app.handle().clone();
+        tauri::async_runtime::spawn(auto_update_loop(h));
+    }
+    // Re-apply the phone remote-access reverse proxy if the user left it
+    // on. Best-effort + off-thread: a missing/disconnected tailscale just
+    // logs a warning, never blocks or panics startup.
+    {
+        let enabled = app
+            .state::<crate::state::AppState>()
+            .settings
+            .lock()
+            .unwrap()
+            .remote_access_enabled;
+        crate::ipc::remote_access::reapply_on_boot(enabled);
+    }
+    crate::ipc::remote_access::start_tailscale_watcher(app.handle().clone());
+    crate::scheduler::spawn(app.handle().clone());
+    crate::news::spawn_poll_loop(app.handle().clone());
+    crate::slash::watcher::spawn(app.handle().clone());
+    crate::meeting::start(app.handle().clone());
+
+    // Make a "System default" audio-output preference follow live OS
+    // default-device changes. Opt-in watcher from the kit; reads the
+    // current pref and re-binds the held stream when the OS default
+    // shifts while no explicit device is selected.
+    {
+        use tauri::Manager;
+        let pref_app = app.handle().clone();
+        let reinit_app = app.handle().clone();
+        tauri_kit_audio::spawn_default_follow(
+            move || {
+                pref_app
                     .state::<crate::state::AppState>()
                     .settings
                     .lock()
                     .unwrap()
-                    .remote_access_enabled;
-                crate::ipc::remote_access::reapply_on_boot(enabled);
-            }
-            crate::ipc::remote_access::start_tailscale_watcher(app.handle().clone());
-            crate::scheduler::spawn(app.handle().clone());
-            crate::news::spawn_poll_loop(app.handle().clone());
-            crate::slash::watcher::spawn(app.handle().clone());
-            crate::meeting::start(app.handle().clone());
+                    .audio_output_device
+                    .clone()
+            },
+            move |dev| {
+                reinit_app
+                    .state::<crate::state::AppState>()
+                    .audio_stream
+                    .reinit(dev.as_deref());
+            },
+        );
+    }
 
-            // Make a "System default" audio-output preference follow live OS
-            // default-device changes. Opt-in watcher from the kit; reads the
-            // current pref and re-binds the held stream when the OS default
-            // shifts while no explicit device is selected.
+    // Auto-backfill token history once, off the main thread. Keeps
+    // the stats page populated on first launch / after new sessions.
+    {
+        let h = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            let Ok(path) = paths::token_history_file() else { return };
+            let path_clone = path.clone();
+            match tauri::async_runtime::spawn_blocking(move || {
+                crate::tokens::backfill_all(&path_clone)
+            })
+            .await
             {
-                use tauri::Manager;
-                let pref_app = app.handle().clone();
-                let reinit_app = app.handle().clone();
-                tauri_kit_audio::spawn_default_follow(
-                    move || {
-                        pref_app
-                            .state::<crate::state::AppState>()
-                            .settings
-                            .lock()
-                            .unwrap()
-                            .audio_output_device
-                            .clone()
-                    },
-                    move |dev| {
-                        reinit_app
-                            .state::<crate::state::AppState>()
-                            .audio_stream
-                            .reinit(dev.as_deref());
-                    },
-                );
-            }
-
-            // Auto-backfill token history once, off the main thread. Keeps
-            // the stats page populated on first launch / after new sessions.
-            {
-                let h = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let Ok(path) = paths::token_history_file() else { return };
-                    let path_clone = path.clone();
-                    match tauri::async_runtime::spawn_blocking(move || {
-                        crate::tokens::backfill_all(&path_clone)
-                    })
-                    .await
-                    {
-                        Ok(Ok(r)) => {
-                            log::info!(
-                                "startup backfill: {} new, {} skipped (sub: {} new, {} skipped)",
-                                r.processed, r.skipped, r.sub_processed, r.sub_skipped
-                            );
-                            let history = crate::tokens::load_history(&path);
-                            let _ = h.emit("token-history-updated", history);
-                        }
-                        Ok(Err(e)) => log::warn!("startup backfill failed: {e:?}"),
-                        Err(e) => log::warn!("startup backfill join error: {e}"),
-                    }
-                });
-            }
-            {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    migrate_hook_install_if_needed(&handle);
-                });
-            }
-            {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    backfill_project_characters_if_needed(&handle);
-                });
-            }
-            // Daemon notification subscription. Replaces the old app-side
-            // hook server: the daemon now binds port 27182 and owns the
-            // registry; the app subscribes for `instances_changed`,
-            // permission/question relays, token-history updates, etc.
-            {
-                let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn(crate::daemon_link::run_app_subscription(app_handle));
-            }
-            // (Main-window hide-to-tray lives in `build_main_window`; the window
-            // is built lazily on first open, so there is nothing to wire here.)
-
-            // Windows session-end guard. Owns its own hidden window + message
-            // pump on a dedicated thread so a PC shutdown is never left waiting
-            // on a wedged event loop. See `shutdown_guard` for the full why.
-            crate::shutdown_guard::arm(app.handle().clone());
-
-            // Webview boot watchdog. If `frontend_ready` IPC never fires
-            // within ~6s, force-navigate the main window back to the start
-            // URL. Covers: WebView2 showing "localhost refused to connect"
-            // when the start URL was unreachable at boot (autostart racing
-            // a slow vite dev server, or just no network when something
-            // upstream needed it). Retries every 5s for up to 2 minutes.
-            {
-                let h = app.handle().clone();
-                let alive = app.state::<AppState>().frontend_alive.clone();
-                tauri::async_runtime::spawn(async move {
-                    use std::sync::atomic::Ordering;
-                    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-                    // Bound by wall-clock (~2 min from boot). The main window is
-                    // lazy, so it usually does not exist here; only act when it
-                    // does - an unopened dashboard is not a stalled one.
-                    let mut ticks = 0u32;
-                    let mut acted = false;
-                    while !alive.load(Ordering::SeqCst) && ticks < 24 {
-                        ticks += 1;
-                        if let Some(w) = h.get_webview_window("main") {
-                            acted = true;
-                            let url = boot_start_url();
-                            log::warn!(
-                                "main webview not ready (tick {ticks}); reloading -> {url}"
-                            );
-                            if let Ok(parsed) = url.parse::<tauri::Url>() {
-                                let _ = w.navigate(parsed);
-                            }
-                        }
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    }
-                    if alive.load(Ordering::SeqCst) {
-                        if acted {
-                            log::info!("main webview recovered after {ticks} reload tick(s)");
-                        }
-                    } else if acted {
-                        log::error!("main webview never reported ready; giving up");
-                    }
-                });
-            }
-            // Auto-trigger login if no session on first launch.
-            {
-                use crate::state::AppState;
-                use crate::types::AuthState;
-                let needs_login = matches!(
-                    *app.state::<AppState>().auth_state.lock().unwrap(),
-                    AuthState::NeedsLogin
-                );
-                if needs_login {
-                    let h = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        {
-                            *h.state::<AppState>().auth_state.lock().unwrap() = AuthState::InProgress;
-                        }
-                        let _ = h.emit("auth-progress", serde_json::json!({"stage": "starting"}));
-                        match crate::auth::run(h.clone()).await {
-                            Ok(()) => {
-                                *h.state::<AppState>().auth_state.lock().unwrap() = AuthState::LoggedIn;
-                                let _ = crate::scheduler::poll_once(&h, crate::scheduler::PollTrigger::Scheduled).await;
-                            }
-                            Err(e) => {
-                                *h.state::<AppState>().auth_state.lock().unwrap() = AuthState::NeedsLogin;
-                                log::error!("auto-login failed: {e}");
-                            }
-                        }
-                    });
+                Ok(Ok(r)) => {
+                    log::info!(
+                        "startup backfill: {} new, {} skipped (sub: {} new, {} skipped)",
+                        r.processed, r.skipped, r.sub_processed, r.sub_skipped
+                    );
+                    let history = crate::tokens::load_history(&path);
+                    let _ = h.emit("token-history-updated", history);
                 }
+                Ok(Err(e)) => log::warn!("startup backfill failed: {e:?}"),
+                Err(e) => log::warn!("startup backfill join error: {e}"),
             }
-            Ok(())
-        })
-        .build(tauri::generate_context!())
-        .expect("error while running tauri application")
-        .run(|_app_handle, _event| {});
+        });
+    }
+    {
+        let handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            migrate_hook_install_if_needed(&handle);
+        });
+    }
+    {
+        let handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            backfill_project_characters_if_needed(&handle);
+        });
+    }
+    // Daemon notification subscription. Replaces the old app-side
+    // hook server: the daemon now binds port 27182 and owns the
+    // registry; the app subscribes for `instances_changed`,
+    // permission/question relays, token-history updates, etc.
+    {
+        let app_handle = app.handle().clone();
+        tauri::async_runtime::spawn(crate::daemon_link::run_app_subscription(app_handle));
+    }
+    // (Main-window hide-to-tray lives in `build_main_window`; the window
+    // is built lazily on first open, so there is nothing to wire here.)
+
+    // Windows session-end guard. Owns its own hidden window + message
+    // pump on a dedicated thread so a PC shutdown is never left waiting
+    // on a wedged event loop. See `shutdown_guard` for the full why.
+    crate::shutdown_guard::arm(app.handle().clone());
+
+    // Webview boot watchdog. If `frontend_ready` IPC never fires
+    // within ~6s, force-navigate the main window back to the start
+    // URL. Covers: WebView2 showing "localhost refused to connect"
+    // when the start URL was unreachable at boot (autostart racing
+    // a slow vite dev server, or just no network when something
+    // upstream needed it). Retries every 5s for up to 2 minutes.
+    {
+        let h = app.handle().clone();
+        let alive = app.state::<AppState>().frontend_alive.clone();
+        tauri::async_runtime::spawn(async move {
+            use std::sync::atomic::Ordering;
+            tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+            // Bound by wall-clock (~2 min from boot). The main window is
+            // lazy, so it usually does not exist here; only act when it
+            // does - an unopened dashboard is not a stalled one.
+            let mut ticks = 0u32;
+            let mut acted = false;
+            while !alive.load(Ordering::SeqCst) && ticks < 24 {
+                ticks += 1;
+                if let Some(w) = h.get_webview_window("main") {
+                    acted = true;
+                    let url = boot_start_url();
+                    log::warn!(
+                        "main webview not ready (tick {ticks}); reloading -> {url}"
+                    );
+                    if let Ok(parsed) = url.parse::<tauri::Url>() {
+                        let _ = w.navigate(parsed);
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            if alive.load(Ordering::SeqCst) {
+                if acted {
+                    log::info!("main webview recovered after {ticks} reload tick(s)");
+                }
+            } else if acted {
+                log::error!("main webview never reported ready; giving up");
+            }
+        });
+    }
+    // Auto-trigger login if no session on first launch.
+    {
+        use crate::state::AppState;
+        use crate::types::AuthState;
+        let needs_login = matches!(
+            *app.state::<AppState>().auth_state.lock().unwrap(),
+            AuthState::NeedsLogin
+        );
+        if needs_login {
+            let h = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                {
+                    *h.state::<AppState>().auth_state.lock().unwrap() = AuthState::InProgress;
+                }
+                let _ = h.emit("auth-progress", serde_json::json!({"stage": "starting"}));
+                match crate::auth::run(h.clone()).await {
+                    Ok(()) => {
+                        *h.state::<AppState>().auth_state.lock().unwrap() = AuthState::LoggedIn;
+                        let _ = crate::scheduler::poll_once(&h, crate::scheduler::PollTrigger::Scheduled).await;
+                    }
+                    Err(e) => {
+                        *h.state::<AppState>().auth_state.lock().unwrap() = AuthState::NeedsLogin;
+                        log::error!("auto-login failed: {e}");
+                    }
+                }
+            });
+        }
+    }
+    Ok(())
 }
 
 /// URL the main webview was originally loaded from. Mirrors what Tauri's
