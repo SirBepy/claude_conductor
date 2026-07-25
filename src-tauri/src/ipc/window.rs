@@ -89,29 +89,44 @@ fn attach_hide_to_tray(window: &tauri::WebviewWindow) {
     });
 }
 
-// `(async)`: lazily builds `main` - see the module doc's deadlock rule.
-#[tauri::command(async)]
-pub fn open_dashboard(app: AppHandle) {
-    use tauri::Emitter;
+/// Shared body for every `open_dashboard*` command below: surface `main` and
+/// emit `event`/`payload` to it if the webview is already alive, queue
+/// `pending` into `AppState.pending_main_nav` for `frontend_ready` to drain if
+/// it's still loading, or lazily build `main` with `pending` queued if it
+/// doesn't exist yet. Collapses the four near-identical surface-or-build
+/// blocks that used to be copy-pasted across these commands (ai_todo 311) -
+/// each one differed only in `event`/`payload`/`pending`. Does NOT change the
+/// `surface_main_if_ready` guard (ai_todo-095) or the `frontend_alive` /
+/// `pending_main_nav` cold-boot queue path (`frontend_ready` in `misc.rs`).
+fn surface_main_with_nav(
+    app: &AppHandle,
+    event: &str,
+    payload: impl serde::Serialize + Clone,
+    pending: String,
+) {
     if let Some(w) = app.get_webview_window("main") {
-        surface_main_if_ready(&app, &w);
+        surface_main_if_ready(app, &w);
         let alive = app
             .try_state::<crate::state::AppState>()
             .map(|s| s.frontend_alive.load(Ordering::SeqCst))
             .unwrap_or(true);
         if alive {
-            let _ = w.emit("navigate-to-dashboard", ());
-        } else {
+            let _ = w.emit(event, payload);
+        } else if let Some(state) = app.try_state::<crate::state::AppState>() {
             // Webview is still loading; queue for frontend_ready to drain.
-            if let Some(state) = app.try_state::<crate::state::AppState>() {
-                *state.pending_main_nav.lock().unwrap() = Some("dashboard".into());
-            }
+            *state.pending_main_nav.lock().unwrap() = Some(pending);
         }
     } else {
-        // Not built yet (main is lazy - see build_main_window). Build it; the
-        // SPA boots to the dashboard view by default, so no nav queue needed.
-        let _ = build_main_window(&app, None);
+        // Not built yet (main is lazy - see build_main_window). Build it with
+        // the nav queued for frontend_ready to drain once the SPA mounts.
+        let _ = build_main_window(app, Some(&pending));
     }
+}
+
+// `(async)`: lazily builds `main` - see the module doc's deadlock rule.
+#[tauri::command(async)]
+pub fn open_dashboard(app: AppHandle) {
+    surface_main_with_nav(&app, "navigate-to-dashboard", (), "dashboard".to_string());
 }
 
 /// Surfaces the main dashboard window and tells it to navigate to a specific
@@ -121,24 +136,8 @@ pub fn open_dashboard(app: AppHandle) {
 // `(async)`: lazily builds `main` - see the module doc's deadlock rule.
 #[tauri::command(async)]
 pub fn open_dashboard_project(app: AppHandle, cwd: String) {
-    use tauri::Emitter;
-    if let Some(w) = app.get_webview_window("main") {
-        surface_main_if_ready(&app, &w);
-        let alive = app
-            .try_state::<crate::state::AppState>()
-            .map(|s| s.frontend_alive.load(Ordering::SeqCst))
-            .unwrap_or(true);
-        if alive {
-            let _ = w.emit("navigate-to-project", cwd);
-        } else {
-            if let Some(state) = app.try_state::<crate::state::AppState>() {
-                *state.pending_main_nav.lock().unwrap() = Some(format!("project:{cwd}"));
-            }
-        }
-    } else {
-        // Lazy build; queue the project nav for frontend_ready to drain on load.
-        let _ = build_main_window(&app, Some(&format!("project:{cwd}")));
-    }
+    let pending = format!("project:{cwd}");
+    surface_main_with_nav(&app, "navigate-to-project", cwd, pending);
 }
 
 /// Surfaces the main dashboard window and tells it to navigate to the
@@ -149,23 +148,12 @@ pub fn open_dashboard_project(app: AppHandle, cwd: String) {
 // `(async)`: lazily builds `main` - see the module doc's deadlock rule.
 #[tauri::command(async)]
 pub fn open_dashboard_settings_accounts(app: AppHandle) {
-    use tauri::Emitter;
-    if let Some(w) = app.get_webview_window("main") {
-        surface_main_if_ready(&app, &w);
-        let alive = app
-            .try_state::<crate::state::AppState>()
-            .map(|s| s.frontend_alive.load(Ordering::SeqCst))
-            .unwrap_or(true);
-        if alive {
-            let _ = w.emit("navigate-to-settings-accounts", ());
-        } else {
-            if let Some(state) = app.try_state::<crate::state::AppState>() {
-                *state.pending_main_nav.lock().unwrap() = Some("settings-accounts".into());
-            }
-        }
-    } else {
-        let _ = build_main_window(&app, Some("settings-accounts"));
-    }
+    surface_main_with_nav(
+        &app,
+        "navigate-to-settings-accounts",
+        (),
+        "settings-accounts".to_string(),
+    );
 }
 
 /// Surfaces the main dashboard window and focuses it on a specific account.
@@ -178,20 +166,8 @@ pub fn open_dashboard_settings_accounts(app: AppHandle) {
 // dashboard window hasn't been built yet.
 #[tauri::command(async)]
 pub fn open_dashboard_account(app: AppHandle, account_id: String) {
-    if let Some(w) = app.get_webview_window("main") {
-        surface_main_if_ready(&app, &w);
-        let alive = app
-            .try_state::<crate::state::AppState>()
-            .map(|s| s.frontend_alive.load(Ordering::SeqCst))
-            .unwrap_or(true);
-        if alive {
-            let _ = w.emit("navigate-to-account", account_id);
-        } else if let Some(state) = app.try_state::<crate::state::AppState>() {
-            *state.pending_main_nav.lock().unwrap() = Some(format!("account:{account_id}"));
-        }
-    } else {
-        let _ = build_main_window(&app, Some(&format!("account:{account_id}")));
-    }
+    let pending = format!("account:{account_id}");
+    surface_main_with_nav(&app, "navigate-to-account", account_id, pending);
 }
 
 /// Build the main dashboard window (label `main`) lazily, on first open, rather
