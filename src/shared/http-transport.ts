@@ -298,6 +298,21 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_previews", null);
       case "get_preview":
         return this.rpc<T>("get_preview", { id: args.id });
+      // Close-chat: mirrors desktop's `ipc::clear_session` (builtins.rs).
+      // `end_session` kills the underlying `claude` process for daemon-hosted
+      // (interactive) sessions and marks the registry entry ended in one RPC;
+      // it 404s for sessions the daemon's SessionMap doesn't know about (e.g.
+      // External), so that failure is swallowed and `mark_session_ended` runs
+      // regardless to clear the sidebar row either way.
+      case "clear_session": {
+        const sessionId = args.sessionId ?? args.session_id;
+        try {
+          await this.rpc<unknown>("end_session", { session_id: sessionId });
+        } catch {
+          /* not daemon-hosted (e.g. External) - fall through to registry cleanup */
+        }
+        return this.rpc<T>("mark_session_ended", { session_id: sessionId });
+      }
       // No remote path: poll_now (a CDP scrape needing Chrome), takeover,
       // editor/window/local-FS commands, and file watchers. Degrade clearly.
       default:

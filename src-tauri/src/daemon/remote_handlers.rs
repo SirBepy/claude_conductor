@@ -42,7 +42,7 @@ struct Assets;
 /// the load-bearing security allowlist: anything NOT here is 403, so adding a
 /// method is a deliberate, reviewable act. Deliberately EXCLUDED: `shutdown_daemon`,
 /// `set_settings` (could disable security), all `*_channel` (automation/bridge
-/// control), `end_session`, and the streaming methods `attach_session` /
+/// control), and the streaming methods `attach_session` /
 /// `detach_session` / `subscribe_global` (connection-scoped; the WS endpoint
 /// handles streaming instead). See the test below.
 const SAFE_METHODS: &[&str] = &[
@@ -131,6 +131,21 @@ const SAFE_METHODS: &[&str] = &[
     // the existing push(hook server)/read(remote RPC) split for this feature.
     "list_previews",
     "get_preview",
+    // Close-chat (ai_todo: phone's "clear_session" had no remote path at all,
+    // so the button silently no-op'd). Strictly weaker than the remote surface
+    // already granted: a paired client can already `start_session` +
+    // `send_message` to spawn and drive an arbitrary `claude` run, so ending
+    // one it already knows the id of is not a new capability class. Mirrors
+    // desktop's `ipc::clear_session` (builtins.rs): `end_session` kills the
+    // underlying process for daemon-hosted (interactive) sessions and marks
+    // the registry entry ended; `mark_session_ended` alone is the fallback for
+    // sessions `end_session` doesn't know about (e.g. External, not in the
+    // daemon's SessionMap) so the sidebar entry still clears instead of
+    // leaving a ghost row. Without both, remote close-chat would either 403
+    // or silently leak the subprocess (the exact bug `clear_session` exists
+    // to prevent - see builtins.rs's doc comment).
+    "end_session",
+    "mark_session_ended",
 ];
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -573,7 +588,7 @@ mod tests {
     fn allowlist_excludes_dangerous_methods() {
         for m in [
             "shutdown_daemon", "set_settings", "start_channel", "stop_channel",
-            "restart_channel", "show_channel", "hide_channel", "end_session",
+            "restart_channel", "show_channel", "hide_channel",
             "attach_session", "detach_session", "subscribe_global",
             "externalize_session", "takeover_manual",
             // schedule mutators became remote-callable in ai_todo 259 (they are
@@ -602,6 +617,7 @@ mod tests {
             "list_accounts", "list_slash_commands", "ensure_session_character",
             "schedule_list", "schedule_create", "schedule_update",
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview",
+            "end_session", "mark_session_ended",
         ] {
             assert!(SAFE_METHODS.contains(&m), "{m} should be remotely callable");
         }
