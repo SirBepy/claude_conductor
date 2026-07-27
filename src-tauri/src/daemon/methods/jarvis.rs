@@ -18,6 +18,68 @@ use std::sync::Arc;
 const JARVIS_MODEL: &str = "opus";
 const JARVIS_EFFORT: &str = "high";
 
+/// Jarvis's standing instructions, written to `<jarvis-home>/CLAUDE.md` the
+/// first time the singleton is spawned. The `claude` CLI loads this file
+/// natively every turn (and re-loads it after context compaction) - that's
+/// the platform primitive this chunk relies on instead of an injected first
+/// message, which would only ever appear once in the transcript and get
+/// evicted on compaction like anything else.
+const JARVIS_CLAUDE_MD: &str = r#"# Jarvis - Conductor fleet orchestrator
+
+You are Jarvis, the single point of contact between Joe and a fleet of worker chat sessions in Claude Conductor. You never write code yourself - you dispatch, mediate, and relay.
+
+## Tools
+- spawn_worker(cwd, task, name?, model?) - start a real worker session in a project. Default model sonnet; override only with a stated reason.
+- send_to_session(session_id, text) - message one of your workers. Rejects if the worker is mid-turn; retry after its next [fleet] terminal note.
+- fleet_status() - your workers: busy state, awaiting, pending prompt ids.
+- respond_worker_prompt(request_id, allow, message?/updated_input?) - answer a worker's permission/question prompt yourself when the answer is obvious from context; relay to Joe when it isn't.
+
+## Wake notes
+Lines starting with [fleet] are injected by the daemon, not typed by Joe: worker terminal states (done/question/waiting), blocked prompts, and "Joe messaged worker X directly". Act on them; never attribute them to Joe.
+
+## Discipline
+- Fan-out cap: at most 4 concurrent workers. Say so in chat when the cap or the usage window gates a dispatch.
+- Every worker briefing must include: a tight spec, a disjoint file domain, the project's verify floor (typecheck/tests/build), and the commit policy: workers run /commit themselves when their work verifies green.
+- Relay policy: stay quiet while workers work. Report to Joe on terminal states, blockers, and questions - batched, outcome first, no play-by-play.
+- state.md in this folder is your source of truth: current plan, worker roster (session ids + tasks), decisions made, open questions. Update it after every dispatch, completion, and decision.
+- At the start of any conversation - and whenever your context feels incomplete (e.g. after compaction) - read state.md and call fleet_status() before assuming anything about the fleet. Never trust a remembered summary of a worker you can re-query.
+"#;
+
+/// Empty-template seed for `<jarvis-home>/state.md`, written alongside
+/// `JARVIS_CLAUDE_MD` on first spawn only. Jarvis is instructed (in the
+/// CLAUDE.md above) to keep this updated as its own scratch/roster file; this
+/// is just the starting shape.
+const JARVIS_STATE_MD_SEED: &str = r#"# Jarvis state
+
+## Plan
+(nothing active)
+
+## Fleet
+(no workers)
+
+## Decisions
+(none yet)
+
+## Open questions
+(none)
+"#;
+
+/// Writes `<jarvis-home>/CLAUDE.md` and `/state.md` iff each is individually
+/// missing - never overwrites either, since Joe may hand-tune them once
+/// Jarvis (or Joe himself) has edited them. Called only on the fresh-spawn
+/// path in `ensure_jarvis_session`, never on reuse of an existing pointer.
+fn seed_jarvis_home_files(cwd: &std::path::Path) -> Result<(), RpcError> {
+    let claude_md = cwd.join("CLAUDE.md");
+    if !claude_md.exists() {
+        std::fs::write(&claude_md, JARVIS_CLAUDE_MD).map_err(|e| RpcError::internal(e.to_string()))?;
+    }
+    let state_md = cwd.join("state.md");
+    if !state_md.exists() {
+        std::fs::write(&state_md, JARVIS_STATE_MD_SEED).map_err(|e| RpcError::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Default model/effort for a `spawn_worker`-created session. Model default
 /// ("sonnet") is spec'd (todo 272 chunk 2b); effort isn't, so this picks the
 /// middle of `daemon::lifecycle::VALID_EFFORTS` - workers are meant to be
@@ -74,6 +136,7 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
             }
 
             let cwd = jarvis_home_dir()?;
+            seed_jarvis_home_files(&cwd)?;
             let params = StartSessionParams {
                 cwd: cwd.clone(),
                 model: JARVIS_MODEL.to_string(),
@@ -347,6 +410,60 @@ mod tests {
         assert!(resp.error.is_none(), "got {:?}", resp.error);
         assert_eq!(resp.result, Some(json!({"session_id": "jv-1"})));
     }
+
+    #[test]
+    fn seed_jarvis_home_files_creates_both_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_jarvis_home_files(dir.path()).unwrap();
+
+        let claude_md = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert_eq!(claude_md, JARVIS_CLAUDE_MD);
+        let state_md = std::fs::read_to_string(dir.path().join("state.md")).unwrap();
+        assert_eq!(state_md, JARVIS_STATE_MD_SEED);
+    }
+
+    #[test]
+    fn seed_jarvis_home_files_never_overwrites_existing_content() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "Joe's hand-tuned instructions").unwrap();
+        std::fs::write(dir.path().join("state.md"), "Joe's hand-tuned state").unwrap();
+
+        seed_jarvis_home_files(dir.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap(),
+            "Joe's hand-tuned instructions"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("state.md")).unwrap(),
+            "Joe's hand-tuned state"
+        );
+    }
+
+    #[test]
+    fn seed_jarvis_home_files_fills_in_only_the_missing_one() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "Joe's hand-tuned instructions").unwrap();
+        // state.md left absent.
+
+        seed_jarvis_home_files(dir.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap(),
+            "Joe's hand-tuned instructions"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("state.md")).unwrap(),
+            JARVIS_STATE_MD_SEED
+        );
+    }
+
+    // `ensure_jarvis_session_reuses_existing_pointer` above doubles as coverage
+    // for "reuse writes nothing": the reuse branch returns at the `Ok(json!(
+    // {"session_id": id}))` early-return, before `jarvis_home_dir()` or
+    // `seed_jarvis_home_files` are ever reached (see the non-test code above),
+    // so there's no filesystem side effect to assert on - the call graph
+    // itself is the guarantee.
 
     // No test exercises the "pointer is stale/ended -> spawn a fresh singleton"
     // branch: that requires reaching `lifecycle::spawn_session`'s account
