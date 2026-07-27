@@ -90,6 +90,16 @@ pub struct Settings {
     /// this fallback (00-overview.md, locked decision).
     #[serde(default)]
     pub default_account_id: Option<String>,
+    /// Session id of the singleton Jarvis orchestrator (todo 272). `None`
+    /// until `ensure_jarvis_session` spawns it for the first time. Written by
+    /// the daemon via the `jarvis_session_created` notification (mirrors how
+    /// `project_created` / `session_character_assigned` let a daemon-side
+    /// mutation reach the app-process-owned `settings.json`), so it survives
+    /// the frontend's `save_settings` full-replace the same way
+    /// `default_account_id` does: as long as this field round-trips through
+    /// the JS settings object untouched, an unrelated save can't clobber it.
+    #[serde(default)]
+    pub jarvis_session_id: Option<String>,
     /// User dismissed the one-time "set up your accounts" migration prompt
     /// (milestone 08 - shown when a legacy `session.txt` exists and the
     /// accounts registry is still empty). `false` until dismissed; the prompt
@@ -139,6 +149,7 @@ impl Default for Settings {
             retention: crate::storage::RetentionPolicies::default(),
             remote_access_enabled: false,
             default_account_id: None,
+            jarvis_session_id: None,
             accounts_setup_prompt_dismissed: false,
             schedule_grace_secs: None,
             extra: serde_json::Map::new(),

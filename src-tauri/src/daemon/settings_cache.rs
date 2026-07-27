@@ -100,6 +100,18 @@ impl SettingsCache {
         let mut g = self.inner.lock().unwrap();
         g.session_characters.insert(session_id.to_string(), character_id.to_string());
     }
+
+    /// Directly assign `session_id` as the singleton Jarvis pointer (todo
+    /// 272), for an instant in-memory read right after `ensure_jarvis_session`
+    /// spawns it. Mirrors `set_session_character`: the caller is responsible
+    /// for publishing a notification (`jarvis_session_created`) so the app
+    /// process merges the same value into its own `AppState.settings` and
+    /// persists it to `settings.json` - the daemon has no direct write access
+    /// to that file (see this module's header comment).
+    pub fn set_jarvis_session_id(&self, session_id: &str) {
+        let mut g = self.inner.lock().unwrap();
+        g.jarvis_session_id = Some(session_id.to_string());
+    }
 }
 
 #[cfg(test)]

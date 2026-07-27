@@ -41,6 +41,15 @@ pub struct PersistedInteractive {
     /// pre-existing snapshots.
     #[serde(default)]
     pub awaiting: Option<String>,
+    /// True for the singleton Jarvis orchestrator session (todo 272).
+    /// `#[serde(default)]` so snapshots written before this field existed
+    /// still load (as `false`).
+    #[serde(default)]
+    pub jarvis: bool,
+    /// Jarvis session id this session was spawned as a worker of, if any.
+    /// `#[serde(default)]` for pre-existing snapshots.
+    #[serde(default)]
+    pub worker_of: Option<String>,
 }
 
 /// Best-effort write of every live Interactive entry to `path`. Failures
@@ -75,6 +84,8 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             started_at: i.started_at,
             account_id: i.account_id,
             awaiting: i.awaiting,
+            jarvis: i.jarvis,
+            worker_of: i.worker_of,
         })
         .collect();
     if snapshot.is_empty() && load_snapshot(path).len() > 1 {
@@ -167,6 +178,12 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.awaiting.is_some() {
             registry.set_awaiting(&s.session_id, s.awaiting.clone());
         }
+        if s.jarvis {
+            registry.set_jarvis(&s.session_id, true);
+        }
+        if s.worker_of.is_some() {
+            registry.set_worker_of(&s.session_id, s.worker_of.clone());
+        }
         // A /close rename written since the last save lives in the transcript,
         // so a fresh override beats everything; then the AI milestone title (so
         // a chat that re-titled itself keeps that name across a restart); then
@@ -225,6 +242,8 @@ mod tests {
             started_at: "2026-05-13T00:00:00Z".into(),
             account_id: None,
             awaiting: None,
+            jarvis: false,
+            worker_of: None,
         }];
         let added = populate_registry(&registry, sessions);
         assert_eq!(added, 0);

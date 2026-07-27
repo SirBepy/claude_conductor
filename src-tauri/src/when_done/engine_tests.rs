@@ -36,6 +36,8 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         effort: String::new(),
         awaiting: None,
         autopilot: false,
+        jarvis: false,
+        worker_of: None,
         closing: false,
         turn_gen: 0,
         account_id: None,

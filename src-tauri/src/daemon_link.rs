@@ -411,6 +411,24 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
                 let _ = app.emit("settings-changed", &snapshot);
             }
         }
+        // The daemon spawned the singleton Jarvis session (ensure_jarvis_session,
+        // todo 272) and updated its own in-memory settings cache for an instant
+        // read; here the app process (if running) merges the pointer into its
+        // AppState and persists it to settings.json, mirroring the
+        // `session_character_assigned` handler above.
+        "jarvis_session_created" => {
+            if let Some(session_id) = params.get("session_id").and_then(|v| v.as_str()) {
+                let state = app.state::<crate::state::AppState>();
+                let mut settings_guard = state.settings.lock().unwrap();
+                settings_guard.jarvis_session_id = Some(session_id.to_string());
+                let snapshot = settings_guard.clone();
+                drop(settings_guard);
+                if let Ok(path) = crate::settings::paths::settings_file() {
+                    let _ = crate::settings::save(&path, &snapshot);
+                }
+                let _ = app.emit("settings-changed", &snapshot);
+            }
+        }
         other => {
             log::debug!("daemon notif ignored: {other}");
         }
@@ -443,6 +461,8 @@ mod tests {
             effort: String::new(),
             awaiting: None,
             autopilot: false,
+            jarvis: false,
+            worker_of: None,
             closing: false,
             turn_gen: 0,
             account_id: None,

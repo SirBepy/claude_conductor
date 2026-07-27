@@ -4,6 +4,7 @@
 
 mod channels;
 mod context;
+mod jarvis;
 mod lifecycle;
 mod permission;
 mod preview;
@@ -13,6 +14,7 @@ mod usage;
 
 pub use channels::register_channels;
 pub use context::register_context;
+pub use jarvis::register_jarvis;
 pub use lifecycle::{register, register_notifier, register_settings};
 pub use permission::register_responders;
 pub use preview::register_preview;

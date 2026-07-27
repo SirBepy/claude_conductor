@@ -108,6 +108,15 @@ pub struct Instance {
     /// marker, cleared by `<cc-autopilot:off>` or session end.
     #[serde(default)]
     pub autopilot: bool,
+    /// True for the singleton Jarvis orchestrator session (todo 272). Set once,
+    /// at spawn time, by `ensure_jarvis_session`; never flips back.
+    #[serde(default)]
+    pub jarvis: bool,
+    /// Set on a worker session spawned BY Jarvis, to the Jarvis session's id.
+    /// `None` for every ordinary session and for Jarvis itself. Later chunks
+    /// use this to route worker status back to the orchestrator.
+    #[serde(default)]
+    pub worker_of: Option<String>,
     /// True while a `/close` skill run is in flight for this session (the pump
     /// saw the turn's first live output and the user opened it with `/close`,
     /// and the close has neither confirmed nor stood down yet). Daemon-
@@ -277,6 +286,8 @@ mod tests {
             effort: String::new(),
             awaiting: None,
             autopilot: false,
+            jarvis: false,
+            worker_of: None,
             closing: false,
             turn_gen: 0,
             account_id: None,

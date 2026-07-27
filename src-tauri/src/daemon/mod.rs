@@ -132,6 +132,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_context(&mut router, state.clone());
     methods::register_preview(&mut router, state.clone());
     methods::register_schedule(&mut router, state.clone());
+    methods::register_jarvis(&mut router, state.clone());
 
     // Bind hook server BEFORE the RPC accept loop so in-flight claude
     // processes can re-discover the port the moment we're up.

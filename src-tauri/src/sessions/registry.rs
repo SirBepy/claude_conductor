@@ -123,6 +123,8 @@ impl Registry {
             effort: String::new(),
             awaiting: None,
             autopilot: false,
+            jarvis: false,
+            worker_of: None,
             closing: false,
             turn_gen: 0,
             account_id: None,
@@ -180,6 +182,8 @@ impl Registry {
             effort: String::new(),
             awaiting: None,
             autopilot: false,
+            jarvis: false,
+            worker_of: None,
             closing: false,
             turn_gen: 0,
             account_id: None,
@@ -227,6 +231,8 @@ impl Registry {
             effort: String::new(),
             awaiting: None,
             autopilot: false,
+            jarvis: false,
+            worker_of: None,
             closing: false,
             turn_gen: 0,
             account_id: None,
@@ -297,6 +303,23 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         if let Some(i) = guard.get_mut(session_id) {
             i.autopilot = active;
+        }
+    }
+
+    /// Set the Jarvis-singleton flag (todo 272). No-op if session is unknown.
+    pub fn set_jarvis(&self, session_id: &str, jarvis: bool) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.jarvis = jarvis;
+        }
+    }
+
+    /// Set which Jarvis session (if any) spawned this session as a worker.
+    /// `None` clears it. No-op if session is unknown.
+    pub fn set_worker_of(&self, session_id: &str, worker_of: Option<String>) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.worker_of = worker_of;
         }
     }
 
