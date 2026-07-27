@@ -294,11 +294,43 @@ pub(crate) async fn run_stdout_pump(
                                     };
                                     state_for_pump.registry.set_awaiting_if_gen(
                                         &pump_session.session_id,
-                                        awaiting,
+                                        awaiting.clone(),
                                         pump_turn_gen,
                                     );
+                                    // Jarvis wake (todo 272 chunk 3): a worker of Jarvis's
+                                    // fleet just hit a terminal state - tell Jarvis so it can
+                                    // check in instead of polling `fleet_status`. The decision
+                                    // (worker? wake-worthy state?) and line formatting live in
+                                    // `jarvis_wake::worker_terminal_wake` so they're unit-
+                                    // testable without a live ChildStdin.
+                                    if let Some(inst) = state_for_pump.registry.get(&pump_session.session_id) {
+                                        let display_name = inst.name.clone().unwrap_or_else(|| pump_session.session_id.clone());
+                                        if let Some((jarvis_id, line)) = crate::daemon::jarvis_wake::worker_terminal_wake(
+                                            inst.worker_of.as_deref(),
+                                            &pump_session.session_id,
+                                            &display_name,
+                                            awaiting.as_deref(),
+                                        ) {
+                                            crate::daemon::jarvis_wake::enqueue(&state_for_pump, &jarvis_id, line);
+                                            // Dispatched detached (not awaited): this task
+                                            // itself lives inside `spawn_session`'s spawn of
+                                            // `run_stdout_pump`, and `drain` can loop back into
+                                            // `spawn_session` on a respawn - see
+                                            // `jarvis_wake::spawn_drain`'s doc for the Send-
+                                            // cycle this avoids.
+                                            crate::daemon::jarvis_wake::spawn_drain(&state_for_pump, &jarvis_id);
+                                        }
+                                    }
                                 }
                                 state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen);
+                                // Drain-on-jarvis-idle (todo 272 chunk 3): this session IS
+                                // Jarvis and it just went idle - flush anything that queued
+                                // up while it was mid-turn. No-op (via the busy/ended guards
+                                // inside `drain`) for every non-Jarvis session and for a
+                                // stale/replayed result line that didn't actually clear busy.
+                                if state_for_pump.registry.get(&pump_session.session_id).map(|i| i.jarvis).unwrap_or(false) {
+                                    crate::daemon::jarvis_wake::spawn_drain(&state_for_pump, &pump_session.session_id);
+                                }
                                 if let Some(active) = turn_autopilot_changed {
                                     state_for_pump.registry.set_autopilot(&pump_session.session_id, active);
                                 }

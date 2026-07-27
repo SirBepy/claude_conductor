@@ -220,7 +220,7 @@ pub(super) async fn send_message(
     // -32004 -> start_session(resume) -> retry dance - see
     // `lifecycle::send_message_with_respawn`). Without this a remote send into
     // an idle chat 404'd here instead of resuming it.
-    match crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text).await {
+    match crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text, false).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(crate::daemon::lifecycle::LifecycleError::NotFound(_)) => {
             (StatusCode::NOT_FOUND, "no such session").into_response()

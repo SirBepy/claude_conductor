@@ -94,6 +94,11 @@ pub(super) async fn on_permission_request(
     ctx.state.add_prompt(&body.id, "permission-requested", payload.clone(), false).await;
     // Push the phone if Joe is away (ai_todo 119): Claude is now blocked on him.
     ctx.state.fire_blocked_prompt(body.session_id.as_deref(), &body.id);
+    // Wake Jarvis (todo 272 chunk 3) if this prompt belongs to one of its
+    // workers - no-op for every other session.
+    crate::daemon::jarvis_wake::wake_on_worker_blocked(
+        &ctx.state, body.session_id.as_deref(), &body.id, Some(body.tool_name.as_str()),
+    ).await;
     let subs = ctx.state.notifier.publish("permission_request", payload);
     log::info!(
         "[perm-relay] published permission_request id={} tool={} session={:?} -> {} subscriber(s)",
@@ -128,6 +133,11 @@ pub(super) async fn on_question_request(
     // the lossy notifier broadcast drops the frame.
     ctx.state.add_prompt(&body.id, "question-requested", payload.clone(), false).await;
     ctx.state.fire_blocked_prompt(body.session_id.as_deref(), &body.id);
+    // Wake Jarvis (todo 272 chunk 3) if this prompt belongs to one of its
+    // workers - no-op for every other session.
+    crate::daemon::jarvis_wake::wake_on_worker_blocked(
+        &ctx.state, body.session_id.as_deref(), &body.id, Some("question"),
+    ).await;
     // Durable "waiting on the user" state + sidebar publish, mirroring the
     // AskUserQuestion hook path below - this relay used to leave the registry
     // untouched, so a question asked via the MCP tool never showed (or cleared)
@@ -223,6 +233,11 @@ pub(super) async fn ask_question_decision(ctx: &Arc<HookCtx>, body: Value) -> Va
     // explicit answer/skip via `respond_question`.
     ctx.state.add_prompt(&id, "question-requested", payload.clone(), true).await;
     ctx.state.fire_blocked_prompt(session_id.as_deref(), &id);
+    // Wake Jarvis (todo 272 chunk 3) if this prompt belongs to one of its
+    // workers - no-op for every other session.
+    crate::daemon::jarvis_wake::wake_on_worker_blocked(
+        &ctx.state, session_id.as_deref(), &id, Some("AskUserQuestion"),
+    ).await;
     // Durable "waiting on the user" state -> sidebar "Input Needed". The asking
     // turn never emits its own `awaiting:question` result line, so this is the
     // only source of that state; `respond_question`'s `settle_prompt` clears it

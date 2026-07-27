@@ -1,4 +1,4 @@
-//! Per-session lifecycle: spawn / send_message / cancel_turn / end_session.
+﻿//! Per-session lifecycle: spawn / send_message / cancel_turn / end_session.
 //! Owns the long-lived `claude -p --input-format stream-json` subprocess
 //! per session and the stdout reader task that fans events into the
 //! session's broadcast channel.
@@ -233,7 +233,14 @@ pub async fn spawn_session(
 }
 
 
-pub async fn send_message(session: &Arc<Session>, text: &str) -> Result<(), LifecycleError> {
+/// `is_meta` marks the broadcast `UserMessage` as daemon-injected rather than
+/// a real human turn (todo 272 chunk 3): the frontend already renders
+/// `is_meta: true` turns as a system note (see `chat-event-handler.ts`), which
+/// is exactly what a daemon-side Jarvis wake needs - Jarvis's own chat pane
+/// should show "worker X finished" as a note, not a fake user bubble. Every
+/// pre-existing caller passes `false`, keeping their behavior byte-identical;
+/// `daemon::jarvis_wake::drain` is the only caller that passes `true`.
+pub async fn send_message(session: &Arc<Session>, text: &str, is_meta: bool) -> Result<(), LifecycleError> {
     // Remember the prompt: if this turn is rejected by a rate limit before
     // producing any output, the scheduled resume replays exactly this text.
     if let Ok(mut lp) = session.last_prompt.lock() {
@@ -269,7 +276,7 @@ pub async fn send_message(session: &Arc<Session>, text: &str) -> Result<(), Life
             content: vec![crate::types::chat::ContentBlock::Text { text: text.to_string() }],
             timestamp: now_ms,
             remote_echo: true,
-            is_meta: false,
+            is_meta,
         },
     );
     Ok(())
@@ -294,13 +301,18 @@ pub async fn send_message(session: &Arc<Session>, text: &str) -> Result<(), Life
 /// Only respawns sessions the Registry still considers a live Interactive
 /// chat (not `ended_at`-marked, not External/Automated) - anything else is a
 /// genuine NotFound, same as before this existed.
+///
+/// `is_meta` rides straight through to `send_message` - see its doc for what
+/// that flag means. Every caller of this function today passes `false`
+/// except `daemon::jarvis_wake::drain`, the sole source of `true`.
 pub async fn send_message_with_respawn(
     state: &Arc<DaemonState>,
     session_id: &str,
     text: &str,
+    is_meta: bool,
 ) -> Result<(), LifecycleError> {
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
-        return send_message(&session, text).await;
+        return send_message(&session, text, is_meta).await;
     }
 
     let inst = state
@@ -325,7 +337,7 @@ pub async fn send_message_with_respawn(
         },
     )
     .await?;
-    send_message(&session, text).await
+    send_message(&session, text, is_meta).await
 }
 
 pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), LifecycleError> {
@@ -595,7 +607,7 @@ mod tests {
     #[tokio::test]
     async fn send_message_with_respawn_unknown_everywhere_errors_not_found() {
         let state = test_state();
-        let r = send_message_with_respawn(&state, "ghost", "hi").await;
+        let r = send_message_with_respawn(&state, "ghost", "hi", false).await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))), "{r:?}");
     }
 
@@ -615,7 +627,7 @@ mod tests {
             "proj-1",
             "2026-01-01T00:00:00Z",
         );
-        let r = send_message_with_respawn(&state, "sid-respawn-1", "hi").await;
+        let r = send_message_with_respawn(&state, "sid-respawn-1", "hi", false).await;
         assert!(matches!(r, Err(LifecycleError::CwdMissing(_))), "{r:?}");
     }
 
@@ -636,7 +648,7 @@ mod tests {
             crate::types::EndReason::Manual,
             "2026-01-01T00:00:01Z",
         );
-        let r = send_message_with_respawn(&state, "sid-respawn-2", "hi").await;
+        let r = send_message_with_respawn(&state, "sid-respawn-2", "hi", false).await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))), "{r:?}");
     }
 
@@ -658,7 +670,7 @@ mod tests {
             &std::sync::Mutex::new(crate::types::Settings::default()),
             "2026-01-01T00:00:00Z",
         );
-        let r = send_message_with_respawn(&state, "sid-respawn-3", "hi").await;
+        let r = send_message_with_respawn(&state, "sid-respawn-3", "hi", false).await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))), "{r:?}");
     }
 }

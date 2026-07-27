@@ -13,6 +13,7 @@ pub mod health;
 pub mod hooks_server;
 pub mod idle;
 pub mod instance;
+pub mod jarvis_wake;
 pub mod jsonl_tail;
 pub mod lifecycle;
 pub mod lockfile;

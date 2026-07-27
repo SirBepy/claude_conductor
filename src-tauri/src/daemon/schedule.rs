@@ -317,7 +317,7 @@ async fn fire_message(
         Some(s) => s,
         None => respawn_for_message(state, session_id, cwd).await?,
     };
-    lifecycle::send_message(&session, prompt).await.map_err(|e| e.to_string())?;
+    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(session_id, None);
     state.registry.set_busy(session_id, true);
     state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
@@ -397,7 +397,7 @@ async fn fire_new_chat(
     crate::sessions::chat_config::set_account(&sid, &session.account_id);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    lifecycle::send_message(&session, prompt).await.map_err(|e| e.to_string())?;
+    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
     state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));

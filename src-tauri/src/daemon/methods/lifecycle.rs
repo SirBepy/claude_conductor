@@ -169,10 +169,29 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let session = map.get(&p.session_id)
                     .ok_or_else(|| err_to_rpc(LifecycleError::NotFound(p.session_id.clone())))?
                     .clone();
-                lifecycle::send_message(&session, &p.text).await.map_err(err_to_rpc)?;
+                lifecycle::send_message(&session, &p.text, false).await.map_err(err_to_rpc)?;
                 state.registry.set_awaiting(&p.session_id, None);
                 state.registry.set_busy(&p.session_id, true);
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                // Jarvis wake (todo 272 chunk 3): this is the one user-facing send
+                // path both desktop (`ipc/chat/run.rs`) and the remote/phone
+                // cockpit (`http-transport.ts`'s `/api/rpc` "send_message") funnel
+                // through - Jarvis's own `send_to_session` bypasses this RPC
+                // entirely (see `methods::jarvis::send_to_session`), so a hit here
+                // is by construction Joe (or a paired device), never Jarvis itself.
+                // Tell Jarvis when Joe messages one of its workers directly so it
+                // doesn't keep orchestrating a fleet member Joe just took over.
+                if let Some(inst) = state.registry.get(&p.session_id) {
+                    if let Some(jarvis_id) = inst.worker_of.clone() {
+                        let display_name = inst.name.clone().unwrap_or_else(|| p.session_id.clone());
+                        crate::daemon::jarvis_wake::enqueue(
+                            &state,
+                            &jarvis_id,
+                            format!("[fleet] Joe messaged worker \"{display_name}\" directly"),
+                        );
+                        crate::daemon::jarvis_wake::drain(&state, &jarvis_id).await;
+                    }
+                }
                 Ok(json!({"ok": true}))
             }
         });
@@ -297,7 +316,7 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     }));
                 }
 
-                lifecycle::send_message(&session, &prompt).await.map_err(err_to_rpc)?;
+                lifecycle::send_message(&session, &prompt, false).await.map_err(err_to_rpc)?;
                 state.registry.set_busy(&new_id, true);
 
                 // Retire the old session. A rate-limited session's `claude -p` child

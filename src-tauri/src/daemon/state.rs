@@ -73,6 +73,12 @@ pub struct DaemonState {
     /// every access is a quick check-and-set with no await held across it,
     /// same shape as `db` above.
     commit_locks: std::sync::Mutex<HashMap<String, CommitLock>>,
+    /// Per-Jarvis-session wake queue (todo 272 chunk 3) - see
+    /// `daemon::jarvis_wake` for the enqueue/drain contract. Public (not a
+    /// `DaemonState` method wrapper) because the module's free functions read
+    /// and write it directly, the same shape `sessions`/`registry` above use
+    /// for their own daemon-wide consumers.
+    pub jarvis_wakes: crate::daemon::jarvis_wake::WakeQueue,
 }
 
 impl DaemonState {
@@ -103,6 +109,7 @@ impl DaemonState {
             db,
             push: OnceLock::new(),
             commit_locks: std::sync::Mutex::new(HashMap::new()),
+            jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
         })
     }
 

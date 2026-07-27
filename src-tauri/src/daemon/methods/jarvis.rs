@@ -185,7 +185,7 @@ pub(crate) async fn spawn_worker(
     crate::sessions::chat_config::set_account(&sid, &session.account_id);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    lifecycle::send_message(&session, task).await.map_err(|e| e.to_string())?;
+    lifecycle::send_message(&session, task, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
     state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
@@ -221,7 +221,7 @@ pub(crate) async fn send_to_session(
                 .to_string(),
         );
     }
-    lifecycle::send_message_with_respawn(state, target_session_id, text)
+    lifecycle::send_message_with_respawn(state, target_session_id, text, false)
         .await
         .map_err(|e| e.to_string())
 }
