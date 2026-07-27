@@ -1,5 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
+import { updateFaviconBadge } from "../../shared/favicon-badge";
 import type { Instance, DrainBoard, ScheduledItem } from "../../types/ipc.generated";
 import {
   projectName,
@@ -256,6 +257,7 @@ export async function refreshSessions(): Promise<boolean> {
 
     saveUnreadSet(unread);
     state.sessions = next;
+    updateFaviconBadge(next, unread);
     return true;
   } catch (err) {
     console.error("[sessions] list_instances failed", err);
