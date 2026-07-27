@@ -524,7 +524,9 @@ function setupScheduleMissedPopup(): void {
       console.warn("[schedule] schedule_list failed", err);
       return;
     }
-    const missed = items.filter((i) => i.status.type === "missed");
+    const missed = items
+      .filter((i) => i.status.type === "missed")
+      .sort((a, b) => new Date(b.last_fired_at || b.fire_at).getTime() - new Date(a.last_fired_at || a.fire_at).getTime());
     updateMissedPanel(
       missed.map((i) => ({ id: i.id, name: missedEntryName(i), time: missedEntryTime(i), kind: i.kind.type })),
       () => showView("schedule"),
