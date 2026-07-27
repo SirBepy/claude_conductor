@@ -20,6 +20,7 @@ import {
   resetSegCollapse,
   scheduledCountsBySession,
   scheduledPendingPlaceholderIds,
+  isJarvisOrWorker,
 } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
@@ -270,24 +271,30 @@ export function renderSidebar(listEl: HTMLElement): void {
   const filter = state.filter.toLowerCase();
   const pending = state.pendingNewSession;
   const unread = loadUnreadSet();
+  // Jarvis (todo 272) and its worker sub-sessions are hidden from every row
+  // this function renders (segments, project rail, hidden section) - they
+  // live in Jarvis's own dedicated window only. `state.sessions` itself stays
+  // the full unfiltered live set (see isJarvisOrWorker's doc): only this
+  // list-building path filters.
+  const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s));
   // The viewed chat's parked prompt is already shown as a card; don't also flag
   // its row with the attention alarm (backgrounded parked prompts still badge).
   const attention = pendingPromptSessionIds();
   if (state.selectedId) attention.delete(state.selectedId);
   // Registry-backed only (see deriveQuestionSet): one source of truth for the
   // question flag, covering background sessions too.
-  const question = deriveQuestionSet(state.sessions);
+  const question = deriveQuestionSet(listSessions);
   const style = loadStateStyle();
   const sort = loadSort();
-  const rateLimited = new Set(state.sessions.filter(isBlocked).map((s) => s.session_id));
+  const rateLimited = new Set(listSessions.filter(isBlocked).map((s) => s.session_id));
 
   // Load hidden set and prune stale IDs. Only prune against a non-empty live
   // list: renderSidebar fires once on mount before refreshSessions()
   // resolves (state.sessions still []), and pruning against that transient
   // empty set would wipe every hidden id before the real list ever loads.
   const hidden = loadHiddenSessions();
-  const liveIds = new Set(state.sessions.map(s => s.session_id));
-  if (state.sessions.length > 0) {
+  const liveIds = new Set(listSessions.map(s => s.session_id));
+  if (listSessions.length > 0) {
     let hiddenPruned = false;
     for (const id of [...hidden]) {
       if (!liveIds.has(id)) { hidden.delete(id); hiddenPruned = true; }
@@ -300,11 +307,11 @@ export function renderSidebar(listEl: HTMLElement): void {
   const hiddenProjects = loadHiddenProjects();
   const projectHidden = (s: Instance): boolean => hiddenProjects.has(String(s.cwd ?? ""));
   const railHost = listEl.parentElement?.querySelector<HTMLElement>("#project-rail");
-  if (railHost) renderProjectRail(railHost, state.sessions, () => renderSidebar(listEl));
+  if (railHost) renderProjectRail(railHost, listSessions, () => renderSidebar(listEl));
 
-  const hiddenSessions = state.sessions.filter(s => hidden.has(s.session_id) && !projectHidden(s));
+  const hiddenSessions = listSessions.filter(s => hidden.has(s.session_id) && !projectHidden(s));
 
-  let visible = state.sessions.filter(s => !hidden.has(s.session_id) && !projectHidden(s));
+  let visible = listSessions.filter(s => !hidden.has(s.session_id) && !projectHidden(s));
   if (pending?.realId) {
     visible = visible.filter(s => s.session_id !== pending.realId);
   } else if (pending) {
@@ -327,7 +334,7 @@ export function renderSidebar(listEl: HTMLElement): void {
   // Rendered purely off the daemon-broadcast Instance.closing flag: the
   // daemon sets it itself the moment a /close turn starts, so every window
   // shows the Closing segment.
-  const closing = new Set(state.sessions.filter((s) => s.closing).map((s) => s.session_id));
+  const closing = new Set(listSessions.filter((s) => s.closing).map((s) => s.session_id));
   // Only fetch token-drain data when the user is actually sorting by it. Fire
   // the (debounced) async refresh in the background; render now with whatever
   // drainMap already holds so render never blocks on the IPC.

@@ -117,6 +117,31 @@ pub mod groups_test_helpers {
             .and_then(|s| s.to_str())
             .map(|s| s.to_string())
     }
+
+    /// Drops the "jarvis-home" pseudo-project (todo 272) from a groups list.
+    /// `ensure_jarvis_session` (`daemon/methods/jarvis.rs`) spawns Jarvis into
+    /// `<data-dir>/jarvis-home/` via the ordinary `upsert_project_for_cwd`
+    /// path, which otherwise mints it a real project card here - Joe's
+    /// binding design decision is that it must never clutter the Projects
+    /// view or the new-chat project picker (both consume this same
+    /// `build_groups` output; see `project-picker.ts` /
+    /// `views/projects/projects.ts`). Matched by `project_key()` (the same
+    /// canonicalized-path identity function `upsert_project_for_cwd` keyed it
+    /// with), not by name, so a real project a user happens to name
+    /// "jarvis-home" is never caught by this.
+    ///
+    /// Shared by both call sites that produce this list: the desktop Tauri
+    /// command (`list_project_groups` below) and its daemon-side RPC mirror
+    /// for the phone client (`daemon::methods::registry::register`'s
+    /// `list_project_groups` handler).
+    pub fn filter_out_jarvis_home(groups: Vec<ProjectGroup>) -> Vec<ProjectGroup> {
+        let Ok(data_dir) = crate::settings::paths::data_dir() else { return groups };
+        let jarvis_key = project_key(&data_dir.join("jarvis-home"));
+        groups
+            .into_iter()
+            .filter(|g| project_key(Path::new(&g.path)) != jarvis_key)
+            .collect()
+    }
 }
 
 #[tauri::command]
@@ -133,7 +158,7 @@ pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate
         for g in &mut groups {
             g.path_exists = Path::new(&g.path).exists();
         }
-        fold_worktrees(groups)
+        groups_test_helpers::filter_out_jarvis_home(fold_worktrees(groups))
     })
     .await
     .unwrap_or_default();
@@ -403,6 +428,39 @@ mod build_groups_tests {
         };
         let groups = build_groups(&[], &[], &[inst], 0);
         assert_eq!(groups.len(), 0, "ended instances must not appear");
+    }
+
+    #[test]
+    fn filter_out_jarvis_home_drops_only_the_jarvis_pseudo_project() {
+        use super::groups_test_helpers::filter_out_jarvis_home;
+        use crate::types::ProjectGroup;
+
+        fn group(path: &str) -> ProjectGroup {
+            ProjectGroup {
+                id: None,
+                path: path.to_string(),
+                name: "x".into(),
+                parent_segment: None,
+                avatar: Avatar::None,
+                automation_enabled: false,
+                tokens_7d: 0,
+                live: 0,
+                any_remote: false,
+                any_automated: false,
+                last_active_at: None,
+                path_exists: true,
+                worktrees: Vec::new(),
+            }
+        }
+
+        let jarvis_path = crate::settings::paths::data_dir().unwrap().join("jarvis-home");
+        let groups = vec![
+            group(&jarvis_path.to_string_lossy()),
+            group("C:\\some\\real\\project"),
+        ];
+        let filtered = filter_out_jarvis_home(groups);
+        assert_eq!(filtered.len(), 1, "only jarvis-home should be dropped");
+        assert_eq!(filtered[0].path, "C:\\some\\real\\project");
     }
 }
 

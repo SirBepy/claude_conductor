@@ -56,6 +56,26 @@ export function deriveQuestionSet(sessions: Instance[]): Set<string> {
 }
 
 /**
+ * Jarvis (todo 272) and its worker sub-sessions, daemon-authoritative via
+ * `Instance.jarvis` / `Instance.worker_of`. Joe's binding design decision:
+ * Jarvis lives ONLY in its own dedicated window (see `open_jarvis_window`)
+ * and must never appear in the Chats sidebar; a worker is meaningless to
+ * browse outside its parent's context, so it's hidden the same way.
+ *
+ * Deliberately NOT applied to `state.sessions` itself (see `refreshSessions`
+ * in `sidebar.ts`) - only to the LIST-BUILDING path in `renderSidebar`. The
+ * Jarvis session's own detached window reuses the exact same `refreshSessions`
+ * + `state.sessions` machinery to find and render itself
+ * (`sessions.ts`'s `renderDetachedSession`: "We need state.sessions populated
+ * so selectSession can find the entry"), so filtering it out of the shared
+ * `state.sessions` array would break Jarvis's own window, not just hide it
+ * from the sidebar list.
+ */
+export function isJarvisOrWorker(i: Instance): boolean {
+  return i.jarvis === true || i.worker_of != null;
+}
+
+/**
  * Groups pending scheduled MESSAGE items by session_id, mirroring the exact
  * filter `scheduled-chip.ts` uses per-chat: `kind.type === "message"` and
  * status pending/firing (sent/failed excluded). `schedule_list` returns every

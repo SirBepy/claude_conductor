@@ -96,6 +96,20 @@ impl PersistentClient {
         self.call("list_instances", json!({})).await
     }
 
+    /// Get-or-spawn the singleton Jarvis session (`daemon/methods/jarvis.rs`,
+    /// todo 272). Returns its session_id - either the still-live pointer
+    /// already recorded in settings, or a freshly-spawned one.
+    pub async fn ensure_jarvis_session(&self) -> Result<String, ClientError> {
+        let v = self.call("ensure_jarvis_session", Value::Null).await?;
+        v.get("session_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ClientError::Rpc {
+                code: -32000,
+                message: "ensure_jarvis_session: response missing session_id".into(),
+            })
+    }
+
     /// Start (or resume) a daemon-owned session. Returns the real session_id.
     pub async fn start_session(
         &self,

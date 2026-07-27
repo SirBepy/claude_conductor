@@ -9,6 +9,7 @@ import {
   statusDotClass,
   statusIndicator,
   deriveQuestionSet,
+  isJarvisOrWorker,
 } from "../src/views/sessions/sessions-helpers.ts";
 
 function makeInstance(overrides = {}) {
@@ -115,6 +116,23 @@ describe("deriveQuestionSet", () => {
   });
   it("empty input gives an empty set", () => {
     expect(deriveQuestionSet([]).size).toBe(0);
+  });
+});
+
+// Jarvis (todo 272) + its worker sub-sessions are hidden from the Chats
+// sidebar list (sidebar.ts's renderSidebar) via this one predicate.
+describe("isJarvisOrWorker", () => {
+  it("is false for an ordinary session", () => {
+    expect(isJarvisOrWorker(makeInstance())).toBe(false);
+  });
+  it("is true when jarvis is true", () => {
+    expect(isJarvisOrWorker(makeInstance({ jarvis: true }))).toBe(true);
+  });
+  it("is true when worker_of is a session id", () => {
+    expect(isJarvisOrWorker(makeInstance({ worker_of: "jarvis-session-id" }))).toBe(true);
+  });
+  it("is false when worker_of is explicitly null", () => {
+    expect(isJarvisOrWorker(makeInstance({ jarvis: false, worker_of: null }))).toBe(false);
   });
 });
 

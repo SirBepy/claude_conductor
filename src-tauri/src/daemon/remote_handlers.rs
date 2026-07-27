@@ -130,8 +130,32 @@ const SAFE_METHODS: &[&str] = &[
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
+/// Jarvis (todo 272) and its worker sub-sessions never reach the remote/phone
+/// cockpit - Joe's binding design decision: Jarvis exists only in its own
+/// dedicated desktop window (`ipc::window::open_jarvis_window`), and a worker
+/// is meaningless outside its parent session's context. Shared by every
+/// remote session-list surface below: the `GET /api/sessions` REST route, the
+/// `POST /api/rpc {"method":"list_instances"}` allowlisted RPC (the one the
+/// phone SPA's `HttpTransport` actually calls - see `http-transport.ts`), the
+/// WebSocket global-stream's initial resync frame, and its live-forwarded
+/// `instances_changed` notifications.
+fn strip_hidden_instances(instances: Vec<crate::types::Instance>) -> Vec<crate::types::Instance> {
+    instances.into_iter().filter(|i| !i.jarvis && i.worker_of.is_none()).collect()
+}
+
+/// JSON-level counterpart of `strip_hidden_instances`, for call sites that
+/// already hold a serialized instance array (the shared RPC router's dispatch
+/// result, and forwarded notifier frames) rather than typed `Instance`s.
+fn strip_hidden_instances_json(arr: &mut Vec<serde_json::Value>) {
+    arr.retain(|v| {
+        let jarvis = v.get("jarvis").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let is_worker = v.get("worker_of").map(|w| !w.is_null()).unwrap_or(false);
+        !jarvis && !is_worker
+    });
+}
+
 pub(super) async fn list_sessions(State(ctx): State<Arc<RemoteCtx>>) -> Response {
-    Json(ctx.state.registry.list()).into_response()
+    Json(strip_hidden_instances(ctx.state.registry.list())).into_response()
 }
 
 /// SPA fallback: serves the embedded frontend bundle for any path that does not
@@ -238,6 +262,7 @@ pub(super) async fn rpc_dispatch(
         )
             .into_response();
     }
+    let method = body.method.clone();
     let (tx, _rx) = tokio::sync::mpsc::channel(16);
     let conn = crate::daemon::rpc::ConnectionContext::new(tx);
     let req = crate::daemon::rpc::Request {
@@ -249,7 +274,20 @@ pub(super) async fn rpc_dispatch(
     let resp = ctx.router.dispatch(req, conn).await;
     match resp.error {
         Some(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err)).into_response(),
-        None => Json(resp.result.unwrap_or(serde_json::Value::Null)).into_response(),
+        None => {
+            let mut result = resp.result.unwrap_or(serde_json::Value::Null);
+            // `list_instances` is the one SAFE_METHODS entry backed by the
+            // shared daemon RPC router (also used by the desktop app, whose
+            // own Jarvis window needs the UNFILTERED data - see
+            // sessions-helpers.ts's isJarvisOrWorker doc), so it can't be
+            // filtered centrally. Strip it here instead, remote-transport-only.
+            if method == "list_instances" {
+                if let Some(arr) = result.as_array_mut() {
+                    strip_hidden_instances_json(arr);
+                }
+            }
+            Json(result).into_response()
+        }
     }
 }
 
@@ -307,7 +345,7 @@ fn instances_changed_frame(state: &DaemonState) -> String {
     serde_json::json!({
         "jsonrpc": "2.0",
         "method": "instances_changed",
-        "params": {"instances": state.registry.list()},
+        "params": {"instances": strip_hidden_instances(state.registry.list())},
     })
     .to_string()
 }
@@ -343,7 +381,19 @@ async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonState>) {
     loop {
         tokio::select! {
             recv = rx.recv() => match recv {
-                Ok(frame) => {
+                Ok(mut frame) => {
+                    // The notifier fans out every daemon-wide event verbatim
+                    // (see this fn's doc), but `instances_changed` specifically
+                    // must never carry Jarvis/worker sessions to a remote
+                    // client - the initial resync frame above already strips
+                    // them; do the same for every live one, or a later
+                    // unrelated registry mutation anywhere in the daemon would
+                    // re-leak the full unfiltered list within seconds.
+                    if frame.get("method").and_then(serde_json::Value::as_str) == Some("instances_changed") {
+                        if let Some(arr) = frame.pointer_mut("/params/instances").and_then(serde_json::Value::as_array_mut) {
+                            strip_hidden_instances_json(arr);
+                        }
+                    }
                     let txt = match serde_json::to_string(&frame) {
                         Ok(t) => t,
                         Err(_) => continue,
@@ -500,6 +550,18 @@ mod tests {
         assert_eq!(v["method"], "instances_changed");
         assert!(v["params"]["instances"].is_array(), "params.instances should be an array: {v}");
         assert_eq!(v["params"]["instances"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn strip_hidden_instances_json_drops_jarvis_and_workers() {
+        let mut arr = vec![
+            serde_json::json!({"session_id": "a", "jarvis": false, "worker_of": null}),
+            serde_json::json!({"session_id": "b", "jarvis": true, "worker_of": null}),
+            serde_json::json!({"session_id": "c", "jarvis": false, "worker_of": "a"}),
+        ];
+        strip_hidden_instances_json(&mut arr);
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["session_id"], "a");
     }
 
     #[test]

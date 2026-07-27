@@ -186,7 +186,10 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
                     for g in &mut groups {
                         g.path_exists = std::path::Path::new(&g.path).exists();
                     }
-                    groups
+                    // Keep the phone's project picker / Projects view free of
+                    // the "jarvis-home" pseudo-project, mirroring the desktop
+                    // Tauri command - see `filter_out_jarvis_home`'s doc.
+                    crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(groups)
                 })
                 .await
                 .map_err(|e| RpcError::internal(format!("join: {e}")))?;

@@ -314,6 +314,20 @@ if (!await ensureRemoteToken()) {
   document.querySelectorAll<HTMLElement>(".sidemenu-nav-item").forEach((item) => {
     item.onclick = () => {
       const view = item.dataset.view;
+      // Jarvis (todo 272) has no in-app view at all - it lives ONLY in its own
+      // dedicated Tauri window (see open_jarvis_window), same "own window, not
+      // a route" shape as Schedule below. No browser/remote fallback route
+      // exists to fall back to (the design's phone cockpit deliberately never
+      // surfaces Jarvis), so this is a no-op outside Tauri.
+      if (item.dataset.action === "jarvis") {
+        if (window.__TAURI__) {
+          void invoke("open_jarvis_window").catch((err) =>
+            console.error("[nav] open_jarvis_window failed", err),
+          );
+        }
+        closeSidemenu();
+        return;
+      }
       // Schedule now lives in its own window (the calendar). Open that instead
       // of routing in-place; fall back to the in-app route in the browser/remote
       // build where there's no separate-window concept.
@@ -332,6 +346,15 @@ if (!await ensureRemoteToken()) {
   if (!isRemote()) {
     const chatsNavItem = document.getElementById("sm-chats");
     if (chatsNavItem) chatsNavItem.style.display = "none";
+  }
+
+  // Jarvis is desktop-only (own dedicated window; no remote/phone route at
+  // all - see the click handler above and the design's binding decision to
+  // keep Jarvis out of the phone cockpit entirely). Hide the nav item on the
+  // remote/phone build so it's not a dead button there.
+  if (isRemote()) {
+    const jarvisNavItem = document.getElementById("sm-jarvis");
+    if (jarvisNavItem) jarvisNavItem.style.display = "none";
   }
 
   // Static legacy back buttons still present in index.html.

@@ -35,6 +35,12 @@ pub fn setup(app: &AppHandle) -> Result<()> {
                         let _ = crate::ipc::open_chats_window(h);
                     });
                 }
+                "open-jarvis" => {
+                    let h = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::ipc::open_jarvis_window(h).await;
+                    });
+                }
                 "refresh" => {
                     let h = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -193,6 +199,7 @@ fn build_menu(app: &AppHandle, mute_all: bool, update: &serde_json::Value) -> Re
     let mut builder = MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?)
         .item(&MenuItemBuilder::with_id("open-chats", "Open Chats").build(app)?)
+        .item(&MenuItemBuilder::with_id("open-jarvis", "Jarvis").build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("refresh", "Refresh Now").build(app)?)
         .item(&mute);
