@@ -41,6 +41,16 @@ pub enum ScheduledKind {
         #[serde(default)]
         placeholder_id: Option<String>,
     },
+    /// Send `prompt` into the Jarvis singleton (todo 272 memory-hygiene
+    /// chunk). Deliberately carries NO session id, unlike `Message`: Jarvis's
+    /// session id can change across a respawn
+    /// (`daemon::methods::jarvis::ensure_jarvis_session`), so a value baked in
+    /// at creation would silently orphan a recurring item the first time
+    /// Jarvis respawns. The fire path (`daemon::schedule::
+    /// fire_jarvis_hygiene`) resolves `Settings.jarvis_session_id` fresh every
+    /// time this item fires instead, and delivers through the jarvis wake
+    /// queue (`daemon::jarvis_wake`) rather than writing into stdin directly.
+    JarvisHygiene,
 }
 
 /// A recurrence rule: a local time-of-day plus a repeat pattern.

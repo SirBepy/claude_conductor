@@ -11,7 +11,7 @@ export interface MissedEntry {
   id: string;
   name: string;
   time: string;
-  /** ScheduledItem.kind.type - "new_chat" | "message". */
+  /** ScheduledItem.kind.type - "new_chat" | "message" | "jarvis_hygiene". */
   kind: string;
 }
 

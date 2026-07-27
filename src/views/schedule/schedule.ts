@@ -127,12 +127,17 @@ function recurrenceBadge(rec: Recurrence | null): string {
 }
 
 function kindIconClass(item: ScheduledItem): string {
-  return item.kind.type === "new_chat" ? "ph-plus-circle" : "ph-paper-plane-tilt";
+  if (item.kind.type === "new_chat") return "ph-plus-circle";
+  if (item.kind.type === "jarvis_hygiene") return "ph-broom";
+  return "ph-paper-plane-tilt";
 }
 
 function targetLabel(item: ScheduledItem): string {
   if (item.kind.type === "new_chat") {
     return `New chat: ${cwdToProjectName(item.kind.cwd)}`;
+  }
+  if (item.kind.type === "jarvis_hygiene") {
+    return "Jarvis: memory hygiene";
   }
   const title = state.titles.get(item.kind.session_id);
   if (title) return title;

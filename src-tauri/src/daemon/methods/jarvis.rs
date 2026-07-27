@@ -7,6 +7,7 @@
 use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
+use crate::sessions::scheduled_items::{self, Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -79,6 +80,64 @@ fn seed_jarvis_home_files(cwd: &std::path::Path) -> Result<(), RpcError> {
         std::fs::write(&state_md, JARVIS_STATE_MD_SEED).map_err(|e| RpcError::internal(e.to_string()))?;
     }
     Ok(())
+}
+
+/// Weekly memory-hygiene prompt sent to Jarvis (todo 272 remainder): lints
+/// `state.md` and every other memory file in `jarvis-home` so months-old
+/// stale facts can't keep steering it. Verbatim per spec - the const is the
+/// single source of truth, stored into the seeded `ScheduledItem.prompt` so
+/// `daemon::schedule::fire_jarvis_hygiene` never needs its own copy.
+const JARVIS_HYGIENE_PROMPT: &str = r###"[fleet] Weekly memory hygiene pass. Do this now, autonomously:
+1. Read state.md and every other .md file in this folder (except CLAUDE.md).
+2. Dedupe repeated facts; resolve contradictions in favor of the newest evidence; delete entries about work that is finished and recorded in git.
+3. Expire stale facts: anything you cannot re-verify via fleet_status() or the files themselves gets removed or marked unverified.
+4. If a correction from Joe has come up more than once, promote it into a short rule in CLAUDE.md under a "## Learned rules" section (create it if missing).
+5. Rewrite state.md clean and compact. Reply with a one-paragraph summary of what changed.
+"###;
+
+/// The Monday-morning weekly recurrence the hygiene item seeds with. Time is
+/// local wall-clock per `Recurrence::time`'s semantics; the exact slot is an
+/// arbitrary-but-reasonable default (start of week, low-traffic hour) - Joe
+/// can drag it in the Schedule view like any other recurring item afterward.
+fn jarvis_hygiene_recurrence() -> Recurrence {
+    Recurrence {
+        time: "09:00".to_string(),
+        rule: RecurrenceRule::Weekly { weekdays: vec![0] }, // Monday
+    }
+}
+
+/// True iff a `JarvisHygiene`-kind item already exists anywhere in the
+/// schedule store. The kind itself IS the stable idempotency marker (it
+/// carries no session id to dedupe on - see `ScheduledKind::JarvisHygiene`'s
+/// doc comment for why), so this is a plain existence check, not a lookup by
+/// id. Pure (takes the already-loaded list) so it's testable without disk I/O.
+fn jarvis_hygiene_already_seeded(items: &[ScheduledItem]) -> bool {
+    items.iter().any(|it| matches!(it.kind, ScheduledKind::JarvisHygiene))
+}
+
+/// Builds the (not-yet-persisted) recurring hygiene item, its first `fire_at`
+/// computed as the next Monday-09:00 occurrence strictly after `now`. Pure
+/// builder, split out from `seed_jarvis_hygiene_schedule` so the shape is
+/// testable without touching the real scheduled-items store.
+fn build_jarvis_hygiene_item(now: chrono::DateTime<chrono::Utc>) -> ScheduledItem {
+    let recurrence = jarvis_hygiene_recurrence();
+    let fire_at = scheduled_items::next_occurrence(now, &recurrence).to_rfc3339();
+    ScheduledItem::new(ScheduledKind::JarvisHygiene, JARVIS_HYGIENE_PROMPT.to_string(), fire_at, Some(recurrence))
+}
+
+/// Seeds the recurring weekly memory-hygiene pass (todo 272 remainder), once,
+/// the first time a fresh Jarvis singleton is spawned - never called from the
+/// pointer-reuse branch in `ensure_jarvis_session`. An existing item already
+/// targets Jarvis correctly regardless of respawns (it resolves the live
+/// session id at FIRE time, not creation time - see `ScheduledKind::
+/// JarvisHygiene` and `daemon::schedule::fire_jarvis_hygiene`), so a second
+/// fresh spawn (e.g. after the stored pointer went stale) must not create a
+/// duplicate recurring item - `jarvis_hygiene_already_seeded` is the guard.
+fn seed_jarvis_hygiene_schedule() {
+    if jarvis_hygiene_already_seeded(&scheduled_items::list()) {
+        return;
+    }
+    scheduled_items::upsert(build_jarvis_hygiene_item(chrono::Utc::now()));
 }
 
 /// Default model/effort for a `spawn_worker`-created session. Model default
@@ -168,6 +227,9 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
             crate::sessions::chat_config::record(&sid, JARVIS_MODEL, JARVIS_EFFORT);
             crate::sessions::chat_config::set_account(&sid, &account_id);
             crate::sessions::persistence::save_snapshot_default(&state.registry);
+            // Fresh-spawn only (never on pointer reuse, above) and idempotent -
+            // see the function doc for why a respawn never duplicates this.
+            seed_jarvis_hygiene_schedule();
 
             // Instant in-memory read for this and any other daemon-side
             // consumer; the app process persists the same value to
@@ -575,6 +637,75 @@ mod tests {
         .await;
         let err = r.expect_err("out-of-pool explicit account must be rejected");
         assert!(err.contains("not fleet-eligible"), "{err}");
+    }
+
+    // ── weekly memory-hygiene seed (todo 272 remainder) ─────────────────────
+
+    #[test]
+    fn jarvis_hygiene_already_seeded_true_when_a_jarvis_hygiene_item_exists() {
+        let items = vec![ScheduledItem::new(
+            ScheduledKind::JarvisHygiene,
+            "x".into(),
+            "2026-01-01T00:00:00Z".into(),
+            None,
+        )];
+        assert!(jarvis_hygiene_already_seeded(&items), "idempotency guard must detect the existing marker item");
+    }
+
+    #[test]
+    fn jarvis_hygiene_already_seeded_false_when_only_other_kinds_exist() {
+        let items = vec![
+            ScheduledItem::new(
+                ScheduledKind::Message { session_id: "s".into(), cwd: "C:/x".into() },
+                "x".into(),
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            ),
+            ScheduledItem::new(
+                ScheduledKind::NewChat {
+                    cwd: "C:/y".into(), model: "opus".into(), effort: "high".into(),
+                    account_id: None, placeholder_id: None,
+                },
+                "x".into(),
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            ),
+        ];
+        assert!(!jarvis_hygiene_already_seeded(&items), "Message/NewChat items must never be mistaken for the hygiene marker");
+    }
+
+    #[test]
+    fn jarvis_hygiene_already_seeded_false_for_empty_list() {
+        assert!(!jarvis_hygiene_already_seeded(&[]));
+    }
+
+    #[test]
+    fn build_jarvis_hygiene_item_shape_is_weekly_with_the_verbatim_prompt() {
+        let now = chrono::Utc::now();
+        let item = build_jarvis_hygiene_item(now);
+        assert!(matches!(item.kind, ScheduledKind::JarvisHygiene));
+        assert_eq!(item.prompt, JARVIS_HYGIENE_PROMPT);
+        let rec = item.recurrence.expect("hygiene item must recur");
+        assert!(matches!(rec.rule, RecurrenceRule::Weekly { .. }), "must be a weekly recurrence, not one-shot");
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&item.fire_at).is_ok(),
+            "fire_at must be a valid RFC3339 instant"
+        );
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&item.fire_at).unwrap() > now,
+            "seeded fire_at must be strictly in the future"
+        );
+    }
+
+    #[test]
+    fn build_jarvis_hygiene_item_two_calls_produce_distinct_ids() {
+        // Guards against `seed_jarvis_hygiene_schedule` ever accidentally
+        // upserting over itself by id (it doesn't - `ScheduledItem::new` mints
+        // a fresh uuid every call, same as every other kind).
+        let now = chrono::Utc::now();
+        let a = build_jarvis_hygiene_item(now);
+        let b = build_jarvis_hygiene_item(now);
+        assert_ne!(a.id, b.id);
     }
 
     #[tokio::test]

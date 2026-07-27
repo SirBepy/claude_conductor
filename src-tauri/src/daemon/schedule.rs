@@ -9,6 +9,7 @@
 //! daemon's existing notifier broadcast (the same mechanism `instances_
 //! changed` uses - see `daemon::notifier`).
 
+use crate::daemon::jarvis_wake;
 use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
 use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{self, ScheduledItem, ScheduledKind, ScheduledStatus};
@@ -54,6 +55,7 @@ pub fn next_stagger_slot(
         .filter_map(|it| match &it.kind {
             ScheduledKind::Message { session_id, .. } => Some(session_id.clone()),
             ScheduledKind::NewChat { .. } => None,
+            ScheduledKind::JarvisHygiene => None,
         })
         .filter(|sid| {
             state.registry.get(sid).and_then(|i| i.account_id).as_deref() == account_id
@@ -161,6 +163,10 @@ fn is_message_session_busy(state: &Arc<DaemonState>, item: &ScheduledItem) -> bo
             state.registry.get(session_id).map(|inst| inst.busy).unwrap_or(false)
         }
         ScheduledKind::NewChat { .. } => false,
+        // Never deferred at this level: `fire_jarvis_hygiene` routes through
+        // the jarvis wake queue, which has its own busy check and its own
+        // retry-on-next-trigger discipline (see that function's doc comment).
+        ScheduledKind::JarvisHygiene => false,
     }
 }
 
@@ -225,6 +231,7 @@ async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledItem, now: D
                 state.registry.get(session_id).and_then(|i| i.account_id)
             }
             ScheduledKind::NewChat { account_id, .. } => account_id.clone(),
+            ScheduledKind::JarvisHygiene => None,
         };
         item.fire_at = next_stagger_slot(state, account_id.as_deref(), resets_at).to_rfc3339();
         item.status = ScheduledStatus::Pending;
@@ -249,6 +256,7 @@ async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledItem, now: D
         let kind_tag = match &item.kind {
             ScheduledKind::Message { .. } => "message",
             ScheduledKind::NewChat { .. } => "new_chat",
+            ScheduledKind::JarvisHygiene => "jarvis_hygiene",
         };
         state.notifier.publish(
             "scheduled_item_fired",
@@ -288,7 +296,40 @@ async fn fire_kind(state: &Arc<DaemonState>, item: &ScheduledItem) -> Result<Opt
         ScheduledKind::NewChat { cwd, model, effort, account_id, .. } => {
             fire_new_chat(state, cwd, model, effort, account_id.as_deref(), &item.prompt).await
         }
+        ScheduledKind::JarvisHygiene => fire_jarvis_hygiene(state, &item.prompt).await,
     }
+}
+
+/// `ScheduledKind::JarvisHygiene` fire path: resolves the CURRENT jarvis
+/// session id from `Settings.jarvis_session_id` at fire time (never a value
+/// baked into the item - see the kind's doc comment), so a Jarvis respawn
+/// under a new session id never orphans this recurring item. "Live" mirrors
+/// `ensure_jarvis_session`'s own "ended == gone" treatment of the pointer.
+///
+/// Delivery reuses the jarvis wake queue (`jarvis_wake::enqueue`/`drain`)
+/// instead of writing into Jarvis's stdin directly - `drain` alone decides
+/// whether it's safe to send now (idle) or leaves the line queued for the
+/// next trigger (busy: a worker terminal wake, or Jarvis's own turn ending
+/// drains it). This is the same discipline every other write into Jarvis
+/// follows; nothing here re-checks `busy` itself.
+///
+/// Returns `Err` (never a panic) when there's no live jarvis session to
+/// target. `compute_fired` advances a recurring item to its next occurrence
+/// regardless of `Ok`/`Err`, so a quiet stretch with no Jarvis spawned yet is
+/// a graceful skip, not a stuck or terminally-failed item.
+async fn fire_jarvis_hygiene(state: &Arc<DaemonState>, prompt: &str) -> Result<Option<String>, String> {
+    let jarvis_id = state.settings.snapshot().jarvis_session_id;
+    let live = jarvis_id
+        .as_deref()
+        .and_then(|id| state.registry.get(id))
+        .map(|inst| inst.ended_at.is_none())
+        .unwrap_or(false);
+    let Some(jarvis_id) = jarvis_id.filter(|_| live) else {
+        return Err("no live jarvis session configured; hygiene pass skipped".to_string());
+    };
+    jarvis_wake::enqueue(state, &jarvis_id, prompt.to_string());
+    jarvis_wake::drain(state, &jarvis_id).await;
+    Ok(Some(jarvis_id))
 }
 
 /// Sends `prompt` into `session_id`, respawning it first (via `resume_id`,
@@ -544,5 +585,52 @@ mod tests {
             None,
         );
         assert!(!is_message_session_busy(&state, &item), "NewChat never spawns into an existing turn, so it needs no busy check");
+    }
+
+    #[test]
+    fn is_message_session_busy_false_for_jarvis_hygiene_kind_regardless_of_registry() {
+        let state = test_state();
+        let item = ScheduledItem::new(ScheduledKind::JarvisHygiene, "hi".into(), Utc::now().to_rfc3339(), None);
+        assert!(!is_message_session_busy(&state, &item), "JarvisHygiene defers to the wake queue, not the tick's busy guard");
+    }
+
+    // --- ScheduledKind::JarvisHygiene fire path ---
+
+    #[tokio::test]
+    async fn fire_jarvis_hygiene_skips_gracefully_when_no_jarvis_session_configured() {
+        let state = test_state(); // Settings::default() -> jarvis_session_id is None
+        let result = fire_jarvis_hygiene(&state, "hi").await;
+        assert!(result.is_err(), "no jarvis session configured must be a graceful skip, not a panic");
+    }
+
+    #[tokio::test]
+    async fn fire_jarvis_hygiene_skips_gracefully_when_pointer_is_a_stale_ended_session() {
+        let state = test_state();
+        state.registry.upsert_interactive("jv-1", std::path::Path::new("."), "proj-1", "2026-07-27T00:00:00Z");
+        state.registry.mark_ended("jv-1", crate::types::EndReason::Manual, "2026-07-27T00:00:01Z");
+        state.settings.set_jarvis_session_id("jv-1");
+
+        let result = fire_jarvis_hygiene(&state, "hi").await;
+
+        assert!(result.is_err(), "an ended jarvis pointer is treated the same as no pointer at all");
+    }
+
+    #[tokio::test]
+    async fn fire_jarvis_hygiene_routes_through_the_wake_queue_when_jarvis_is_busy() {
+        // No live ChildStdin exists in this test, so a successful direct send
+        // would panic - which is exactly why this must go through `enqueue`
+        // + `drain` (whose own busy guard short-circuits) rather than writing
+        // into Jarvis's stdin itself.
+        let state = test_state();
+        state.registry.upsert_interactive("jv-1", std::path::Path::new("."), "proj-1", "2026-07-27T00:00:00Z");
+        state.registry.set_busy("jv-1", true);
+        state.settings.set_jarvis_session_id("jv-1");
+
+        let result = fire_jarvis_hygiene(&state, "hi").await;
+
+        assert_eq!(result, Ok(Some("jv-1".to_string())));
+        let queues = state.jarvis_wakes.lock().unwrap();
+        let pending = queues.get("jv-1").expect("hygiene prompt queued for the busy jarvis");
+        assert_eq!(pending.iter().cloned().collect::<Vec<_>>(), vec!["hi".to_string()]);
     }
 }
