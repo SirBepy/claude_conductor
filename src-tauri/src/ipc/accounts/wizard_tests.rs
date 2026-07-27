@@ -23,6 +23,7 @@ fn acct(id: &str, org: &str, email: &str, dir: &str) -> Account {
         org_uuid: org.into(),
         subscription_tier: "claude_max".into(),
         created_at: "2026-01-01T00:00:00Z".into(),
+        fleet_eligible: false,
     }
 }
 

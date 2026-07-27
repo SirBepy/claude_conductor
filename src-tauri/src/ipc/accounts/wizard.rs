@@ -401,6 +401,9 @@ pub async fn add_account_finalize(
         org_uuid: identity.organization_uuid,
         subscription_tier: identity.organization_type.unwrap_or_default(),
         created_at: chrono::Utc::now().to_rfc3339(),
+        // New accounts default out of the Jarvis fleet pool - Joe opts each
+        // one in explicitly via the accounts settings toggle (todo 272).
+        fleet_eligible: false,
     };
 
     if let Some(session_key) = session.session_key {

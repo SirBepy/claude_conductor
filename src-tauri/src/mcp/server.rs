@@ -150,7 +150,8 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     "cwd": {"type": "string", "description": "Absolute working directory for the worker."},
                     "task": {"type": "string", "description": "Full briefing prompt, sent as the worker's first message."},
                     "name": {"type": "string", "description": "Optional short label for the worker."},
-                    "model": {"type": "string", "description": "Optional model id/alias; defaults to sonnet."}
+                    "model": {"type": "string", "description": "Optional model id/alias; defaults to sonnet."},
+                    "account": {"type": "string", "description": "Optional account id to spawn this worker under. Must be fleet-eligible (opted in via Settings > Accounts, or the default account). Omit to let the daemon auto-pick whichever eligible account has the most 5h-window headroom."}
                 },
                 "required": ["cwd", "task"]
             }
@@ -356,6 +357,7 @@ pub fn run_stdio() {
                                 "task": arguments["task"],
                                 "name": arguments.get("name"),
                                 "model": arguments.get("model"),
+                                "account": arguments.get("account"),
                             });
                             match http_post(&rt, &url, body) {
                                 Ok(resp) => tool_result(&id, &resp.to_string()),

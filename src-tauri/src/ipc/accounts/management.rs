@@ -83,14 +83,16 @@ pub fn logout_account(account_id: String, state: State<AppState>, app: AppHandle
 }
 
 /// Renames/recolours/re-icons an existing account (Settings > Accounts edit
-/// panel). Any field left `None` is left untouched. Never touches identity,
-/// credentials, or the cookie - purely cosmetic registry fields.
+/// panel), and/or flips its Jarvis fleet-eligibility opt-in (todo 272). Any
+/// field left `None` is left untouched. Never touches identity, credentials,
+/// or the cookie.
 #[tauri::command]
 pub fn update_account(
     account_id: String,
     label: Option<String>,
     colour: Option<String>,
     icon: Option<String>,
+    fleet_eligible: Option<bool>,
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<Account, String> {
@@ -111,6 +113,9 @@ pub fn update_account(
     }
     if let Some(icon) = icon {
         account.icon = icon;
+    }
+    if let Some(fleet_eligible) = fleet_eligible {
+        account.fleet_eligible = fleet_eligible;
     }
     let updated = account.clone();
     accounts_store::save(&accounts_path, &accounts).map_err(|e| e.to_string())?;

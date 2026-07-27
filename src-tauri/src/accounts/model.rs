@@ -21,6 +21,18 @@ pub struct Account {
     /// human-friendly labeling is a frontend concern.
     pub subscription_tier: String,
     pub created_at: String,
+    /// Opt-in for Jarvis fleet worker spawns (todo 272, "Fleet account
+    /// allocation"): only accounts with this set to `true` are eligible to be
+    /// auto-picked by `pick_worker_account`, or named explicitly in a
+    /// `spawn_worker` call. `#[serde(default)]` so every pre-existing
+    /// `accounts.json` on disk (written before this field existed) loads as
+    /// `false` - work accounts are never silently drafted into a fleet.
+    /// `Settings.default_account_id` is always eligible regardless of this
+    /// flag (see `accounts::eligible_pool`), so the pool is never empty and
+    /// v1's spawn-under-default behavior is preserved when nothing is opted
+    /// in.
+    #[serde(default)]
+    pub fleet_eligible: bool,
 }
 
 /// Turns a free-typed label into a filesystem- and slug-safe identifier used
@@ -80,6 +92,7 @@ mod tests {
             org_uuid: "org-1".into(),
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
+            fleet_eligible: false,
         };
         let raw = serde_json::to_string(&a).unwrap();
         let back: Account = serde_json::from_str(&raw).unwrap();

@@ -82,6 +82,7 @@ mod tests {
             org_uuid: "org-work".into(),
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
+            fleet_eligible: false,
         }
     }
 

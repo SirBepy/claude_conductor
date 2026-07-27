@@ -7,6 +7,7 @@
 import { escapeHtml } from "../../../../shared/escape-html";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
+import { invoke } from "../../../../shared/ipc";
 import type { ProjectConfig } from "../../../../types/ipc.generated";
 import { pickProject } from "../../../sessions/project-picker";
 import { registerOverlayBack } from "../../../../shared/back-button";
@@ -30,6 +31,7 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
     // handed to renderAppearancePicker() and mutated in place - see
     // appearance-picker.ts.
     const appearance: AppearanceState = { icon: account.icon, colour: account.colour };
+    let fleetEligible = account.fleet_eligible;
     let busy = false;
     let error: string | null = null;
     let projects: ProjectConfig[] = [];
@@ -86,7 +88,17 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
       error = null;
       render();
       try {
-        const updated = await api.updateAccount(account.id, { label: trimmed, icon: appearance.icon, colour: appearance.colour });
+        // `fleetEligible` rides on the same `update_account` command as
+        // label/icon/colour (`ipc/accounts/management.rs`), called directly
+        // here rather than through `api.updateAccount` since that wrapper's
+        // typed shape (`shared/api.ts`) doesn't carry the new field yet.
+        const updated = await invoke<Account>("update_account", {
+          accountId: account.id,
+          label: trimmed,
+          icon: appearance.icon,
+          colour: appearance.colour,
+          fleetEligible,
+        });
         close(updated);
       } catch (e) {
         busy = false;
@@ -102,6 +114,13 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
           <input class="fake-input" id="aem-label" type="text" value="${escapeHtml(label)}">
         </div>
         <div id="aem-appearance-picker"></div>
+        <div class="kit-row">
+          <span class="kit-row-label">Fleet eligible (Jarvis may spawn workers on this account)</span>
+          <label class="kit-toggle">
+            <input type="checkbox" id="aem-fleet-eligible" ${fleetEligible ? "checked" : ""}>
+            <span class="kit-toggle-track"></span>
+          </label>
+        </div>
         ${error ? `<div class="aem-error"><i class="ph ph-warning-circle"></i> ${escapeHtml(error)}</div>` : ""}
       `;
     }
@@ -168,6 +187,9 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
           label = labelEl.value;
           const saveBtn = overlay.querySelector<HTMLButtonElement>("#aem-save-btn");
           if (saveBtn) saveBtn.disabled = busy || !label.trim();
+        });
+        overlay.querySelector<HTMLInputElement>("#aem-fleet-eligible")?.addEventListener("change", (e) => {
+          fleetEligible = (e.target as HTMLInputElement).checked;
         });
         const pickerContainer = overlay.querySelector<HTMLElement>("#aem-appearance-picker");
         if (pickerContainer) {

@@ -34,6 +34,11 @@ pub(super) struct SpawnWorkerBody {
     name: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    /// Explicit account request (todo 272 "Fleet account allocation"). Omit
+    /// to let `spawn_worker` auto-pick from the fleet-eligible pool; if
+    /// given, validated against that same pool before spawning.
+    #[serde(default)]
+    account: Option<String>,
 }
 
 pub(super) async fn on_spawn_worker(
@@ -47,6 +52,7 @@ pub(super) async fn on_spawn_worker(
         &body.task,
         body.name.as_deref(),
         body.model.as_deref(),
+        body.account.as_deref(),
     )
     .await;
     match result {
@@ -157,6 +163,7 @@ mod tests {
             task: "do the thing".to_string(),
             name: None,
             model: None,
+            account: None,
         };
         let resp = on_spawn_worker(AxState(ctx()), Json(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
