@@ -175,25 +175,12 @@ function detachedSessionFromHash(): string | null {
   return params.get("session");
 }
 
-// Install the permission/question relay listener once per window, regardless
-// of whether this is the main window or a detached single-session window. The
-// listener is a no-op until either a permission-requested or question-requested
-// Tauri event fires from the hooks server.
 // Signal to the Rust boot watchdog that the webview loaded successfully.
 // If this never fires within ~6s, the watchdog reloads the window. Recovers
 // from WebView2 "can't reach this page" caused by an unreachable start URL
 // at boot (autostart racing the network / vite dev server).
 void invoke("frontend_ready").catch(() => {});
 
-installPermissionModalListener();
-// Let the permission relay re-render the sidebar when it parks/clears a
-// backgrounded chat's prompt (injected to avoid a static import cycle).
-setSidebarRerenderHook(() => {
-  const listEl = document
-    .querySelector<HTMLElement>(".view-sessions")
-    ?.querySelector<HTMLElement>("#sessions-list");
-  if (listEl) renderSidebar(listEl);
-});
 installExternalLinkInterceptor();
 
 if (new URLSearchParams(window.location.search).get("chatswindow") === "1") {
@@ -221,7 +208,26 @@ const detachedSessionId = detachedSessionFromHash();
 void (async () => {
 if (!await ensureRemoteToken()) {
   // Gate rendered - boot stops here. The form's submit handler reloads the page.
-} else if (detachedSessionId) {
+} else {
+// Install the permission/question relay listener once per window, regardless
+// of whether this is the main window or a detached single-session window. The
+// listener is a no-op until either a permission-requested or question-requested
+// Tauri event fires from the hooks server. Deliberately placed AFTER the token
+// gate above: hydrateAutoAccept()/startRemotePromptPoll() (inside this call)
+// fire an RPC immediately, and on the phone client that raced ahead of the
+// token being stored, 401ing and tripping handleAuthFailure()'s token-clear +
+// reload on every single load - an inescapable reload loop (the "page
+// refreshing constantly" bug).
+installPermissionModalListener();
+// Let the permission relay re-render the sidebar when it parks/clears a
+// backgrounded chat's prompt (injected to avoid a static import cycle).
+setSidebarRerenderHook(() => {
+  const listEl = document
+    .querySelector<HTMLElement>(".view-sessions")
+    ?.querySelector<HTMLElement>("#sessions-list");
+  if (listEl) renderSidebar(listEl);
+});
+if (detachedSessionId) {
   document.body.classList.add("detached-mode");
   // Hide all static legacy views from index.html so only #app renders.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
@@ -370,6 +376,7 @@ if (!await ensureRemoteToken()) {
   setupScheduleMissedPopup();
   setupScheduledFireToast();
   setupRemoteVoicelines();
+}
 }
 })();
 
