@@ -78,6 +78,15 @@ export class ChatRenderer {
   // Accumulated streamed assistant text for the current turn (for live token
   // estimate). Reset at each new turn.
   activeTurnStreamedText = "";
+  // Turn-scoping marker for the TodoWrite-driven checklist: null = no
+  // checklist active for the current turn yet. Reset at each turn boundary.
+  turnTodosBaseline: { content: string; status: string }[] | null = null;
+  // Running tracker of the full todos array as of the last TodoWrite call.
+  // NEVER reset at turn boundaries - only ever overwritten.
+  lastTodosSnapshot: { content: string; status: string }[] | null = null;
+  // In-flight TodoWrite tool_use ids, so the paired tool_result can be
+  // silently absorbed instead of rendered as a raw tool_result row.
+  _todoWriteToolUseIds = new Set<string>();
   // Wall-clock ms when the active turn's user message arrived. Drives the
   // live elapsed display (NEVER derive elapsed from the key - it's a counter).
   activeTurnStartedAtMs = 0;
@@ -129,6 +138,7 @@ export class ChatRenderer {
   public onToolTally: ((t: ToolTally) => void) | null = null;
   public onActivityUpdate: ((activity: string | null) => void) | null = null;
   public onProgressUpdate: ((n: number, m: number) => void) | null = null;
+  public onTodoActivityUpdate: ((activeForm: string | null) => void) | null = null;
   public onSendText: ((text: string) => void) | null = null;
   /** Fired when a next-ai-prompt skill turn completes. Active-session wires this to show the pickup CTA. */
   public onNextAiPromptDone: (() => void) | null = null;

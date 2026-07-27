@@ -570,3 +570,103 @@
 .turn-meta-chips[title]:hover {
   cursor: help;
 }
+
+/* TodoWrite-driven step checklist: replaces the visual role of .turn-progress
+   for a turn that emits TodoWrite calls (chat-event-handler.ts suppresses the
+   progress bar/callback once turnTodosBaseline is set). Pending circle ->
+   active spinner -> done checkmark-pop, connector line between rows filling
+   as they complete, collapsing to a summary .turn-chip once settled. */
+.todo-checklist {
+  margin-top: 4px;
+  transition: opacity 0.35s ease;
+}
+.todo-checklist-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.todo-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 2px;
+  position: relative;
+}
+.todo-step-connector {
+  position: absolute;
+  left: 8px;
+  top: 20px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--color-border);
+  z-index: 0;
+}
+.todo-step:last-child .todo-step-connector {
+  display: none;
+}
+.todo-step-connector-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0%;
+  background: var(--color-success);
+  transition: height 0.5s ease;
+}
+.todo-step-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  background: var(--color-background);
+}
+.todo-step-label {
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+  padding-top: 1px;
+  transition: color 0.25s ease;
+}
+.todo-step--active .todo-step-label {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.todo-step--done .todo-step-label {
+  color: var(--color-text-muted);
+}
+.todo-step--pending,
+.todo-step--skipped {
+  opacity: 0.6;
+  font-style: italic;
+}
+.todo-step-icon .ph-circle {
+  color: var(--color-text-muted);
+  opacity: 0.45;
+}
+.todo-step-icon .ph-spinner-gap {
+  color: var(--color-primary);
+  animation: icon-btn-spin 0.9s linear infinite;
+}
+.todo-step-icon .ph-fill.ph-check-circle {
+  color: var(--color-success);
+  transform: scale(0);
+  animation: todo-step-pop 0.4s cubic-bezier(.25,1.4,.4,1) forwards;
+}
+.todo-step--interrupted .todo-step-icon .ph-x-circle {
+  color: var(--color-danger);
+  opacity: 0.8;
+}
+@keyframes todo-step-pop {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+.todo-checklist-collapsed {
+  padding: 0;
+}

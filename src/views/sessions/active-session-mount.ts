@@ -24,7 +24,7 @@ import { renderSidebar } from "./sidebar";
 import { api } from "../../shared/api";
 import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import type { SessionHeader } from "./session-header";
-import { setThinkingActivity, setThinkingProgress, isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
+import { setThinkingActivity, setThinkingProgress, setThinkingTodoActivity, isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { completeHandoff } from "./handoff";
 
@@ -151,6 +151,7 @@ export async function mountRenderer(
   setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));
   renderer.onActivityUpdate = (activity) => setThinkingActivity(activity);
   renderer.onProgressUpdate = (n, m) => setThinkingProgress(n, m);
+  renderer.onTodoActivityUpdate = (activeForm) => setThinkingTodoActivity(activeForm);
   renderer.onNextAiPromptDone = () => {
     if (state.renderer !== renderer) return;
     renderer.injectCta("pickup");

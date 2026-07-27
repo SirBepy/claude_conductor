@@ -118,6 +118,7 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       r.activeTurnUsage = null;
       r.activeTurnFirstTs = ts > 0 ? ts : 0;
       r.activeTurnLastTs = r.activeTurnFirstTs;
+      r.turnTodosBaseline = null;
       if (isCompact) {
         r.messages.push({ kind: "system", text: "Conversation compacted", ts, compactionN: ++r.compactionCount });
       } else if (isSilent) {
@@ -139,6 +140,14 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         const noiseLabel = noiseAssistantLabel(msgText);
         if (noiseLabel !== null) {
           // Internal CLI messages become inline system notices.
+          // Interrupted turn with an active checklist: mark its in-flight
+          // step interrupted BEFORE the streaming bubble finalizes below (the
+          // closest thing to a "settle" step in this branch), so the
+          // checklist visually reflects the cancel rather than being frozen
+          // mid-spin.
+          if (noiseLabel === "Request interrupted by user" && r.activeTurnChipKey !== null && r.turnTodosBaseline !== null) {
+            r.turnFooters.interruptTodoChecklist(r.activeTurnChipKey);
+          }
           // Finalize any in-progress streaming bubble first.
           if (r.streamingIndex !== null) {
             const existing = r.messages[r.streamingIndex] as RenderedMessage;
@@ -211,7 +220,10 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         const joined = blocksToText(ev.content);
         r.activeTurnStreamedText = joined;
         r.turnFooters.updateLiveTokenEstimate(r.activeTurnChipKey, joined);
-        if (!r.hydrating) {
+        // Suppressed once a todo checklist owns this turn's visual progress
+        // (the marker is still parsed out of the displayed text elsewhere -
+        // only its bar/callback is skipped here to avoid a dual indicator).
+        if (!r.hydrating && r.turnTodosBaseline === null) {
           const prog = detectProgressToken(joined);
           if (prog) {
             r.turnFooters.setProgress(r.activeTurnChipKey, prog.n, prog.m);
@@ -255,8 +267,68 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         r.activeTurnUsage = null;
         r.activeTurnFirstTs = ts > 0 ? ts : 0;
         r.activeTurnLastTs = r.activeTurnFirstTs;
+        r.turnTodosBaseline = null;
         r.activityToolCanon = null;
         r.setActivity("Waiting for your answer…");
+        touched = true;
+        break;
+      }
+      // TodoWrite drives the step-checklist that replaces the visual role of
+      // the <cc-progress:N/M> marker bar (chat-tools.css .todo-checklist).
+      // Renders straight into the turn footer via turnFooters - never a
+      // message row.
+      if (ev.tool_name === "TodoWrite" && !ev.parent_tool_use_id) {
+        r._todoWriteToolUseIds.add(ev.id);
+        const rawTodos = (ev.input as { todos?: { content: string; status: string; activeForm?: string }[] } | null)?.todos;
+        const todos = Array.isArray(rawTodos) ? rawTodos : [];
+        let steps: { label: string; status: "pending" | "active" | "done" }[];
+        if (r.hydrating && r.lastTodosSnapshot === null) {
+          // Cold-reopen degrade: first TodoWrite seen in a bulk-load batch
+          // with no prior snapshot in the loaded window - render a flat
+          // settled checklist (no diff, no new/carryover distinction). No
+          // special no-animation handling needed: hydrating renders happen
+          // while the transcript is hidden (revealTranscript), so any CSS
+          // animation on these rows plays out unseen before the reveal.
+          steps = todos.map((t) => ({
+            label: t.content,
+            status: t.status === "completed" ? "done" : t.status === "in_progress" ? "active" : "pending",
+          }));
+        } else {
+          if (r.turnTodosBaseline === null) {
+            r.turnTodosBaseline = r.lastTodosSnapshot ? r.lastTodosSnapshot.map((b) => ({ ...b })) : [];
+          }
+          const baseline = r.turnTodosBaseline;
+          steps = [];
+          for (const t of todos) {
+            const baseEntry = baseline.find((b) => b.content === t.content);
+            if (!baseEntry) {
+              steps.push({
+                label: t.content,
+                status: t.status === "completed" ? "done" : t.status === "in_progress" ? "active" : "pending",
+              });
+            } else if (baseEntry.status !== t.status) {
+              // Changed-status entry: never mapped back to "pending" (a
+              // regression to pending can't happen under TodoWrite's normal
+              // pending -> in_progress -> completed progression; "active" is
+              // the fallback if it somehow did - judgment call, unpinned by
+              // the spec).
+              steps.push({
+                label: t.content,
+                status: t.status === "completed" ? "done" : t.status === "in_progress" ? "active" : "active",
+              });
+            }
+            // else: identical content+status to baseline - carryover noise, filtered out.
+          }
+        }
+        if (r.activeTurnChipKey !== null) {
+          r.turnFooters.ensureTodoChecklist(r.activeTurnChipKey);
+          r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
+        }
+        r.lastTodosSnapshot = todos.map((t) => ({ content: t.content, status: t.status }));
+        if (!r.hydrating) {
+          const active = todos.find((t) => t.status === "in_progress");
+          r.onTodoActivityUpdate?.(active?.activeForm ?? null);
+        }
         touched = true;
         break;
       }
@@ -291,6 +363,10 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       break;
     }
     case "tool_result": {
+      // TodoWrite's tool_result carries no user-facing content - absorb it
+      // silently (no message row, no tool tally bump), mirroring how the AUQ
+      // branch below absorbs its own result but simpler: no card to update.
+      if (r._todoWriteToolUseIds.delete(ev.tool_use_id)) { touched = true; break; }
       // If this result is the answer to an AUQ question card, absorb it into
       // the card (update its text and dirty-flag for re-render) instead of
       // adding a raw tool_result row.
