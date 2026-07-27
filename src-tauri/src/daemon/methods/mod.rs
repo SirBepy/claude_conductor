@@ -4,7 +4,13 @@
 
 mod channels;
 mod context;
-mod jarvis;
+// pub(crate): `hooks_server::jarvis` (the fleet-tool HTTP routes, todo 272
+// chunk 2b) calls this module's `spawn_worker`/`send_to_session`/
+// `fleet_status`/`respond_worker_prompt` directly - those aren't RPC methods
+// (no `Router`/`ConnectionContext` at a hooks-server callsite - see that
+// module's header), so plain private-to-`daemon::methods` visibility isn't
+// enough; `hooks_server` is a sibling of `daemon::methods`, not a descendant.
+pub(crate) mod jarvis;
 mod lifecycle;
 mod permission;
 mod preview;

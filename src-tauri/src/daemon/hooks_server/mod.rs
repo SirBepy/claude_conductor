@@ -12,6 +12,7 @@
 mod commit_lock;
 mod context;
 mod decision;
+mod jarvis;
 mod lifecycle;
 mod permission;
 mod preview;
@@ -144,6 +145,10 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/ask-question", post(permission::on_ask_question_hook))
         .route("/hooks/commit-lock-request", post(commit_lock::on_commit_lock_request))
         .route("/hooks/commit-lock-release", post(commit_lock::on_commit_lock_release))
+        .route("/jarvis/spawn-worker", post(jarvis::on_spawn_worker))
+        .route("/jarvis/send-to-session", post(jarvis::on_send_to_session))
+        .route("/jarvis/fleet-status", post(jarvis::on_fleet_status))
+        .route("/jarvis/respond-worker-prompt", post(jarvis::on_respond_worker_prompt))
         .with_state(ctx);
 
     tokio::spawn(async move {

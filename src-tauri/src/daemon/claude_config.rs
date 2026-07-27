@@ -23,15 +23,26 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "End EVERY response with exactly two
 /// Write a temporary .mcp.json file for the given turn and return its path.
 /// Returns None if the app-data dir is unavailable (non-fatal; permission
 /// relay simply won't be wired up for this turn).
-pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str) -> Option<PathBuf> {
+///
+/// `is_jarvis` adds `CC_JARVIS=1` to the spawned MCP child's env IFF this
+/// turn belongs to the Jarvis singleton session (todo 272, chunk 2b) - that
+/// var is what `mcp::server::run_stdio` reads to decide whether to advertise
+/// the fleet-orchestration tools (`spawn_worker`/`send_to_session`/
+/// `fleet_status`/`respond_worker_prompt`) in `tools/list`. A normal
+/// session's config is byte-identical to before this var existed.
+pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> Option<PathBuf> {
     let mcp_dir = crate::settings::paths::mcp_temp_dir().ok()?;
     let exe = std::env::current_exe().ok()?;
+    let mut env = serde_json::json!({"CC_SESSION_ID": tracking_id});
+    if is_jarvis {
+        env["CC_JARVIS"] = serde_json::json!("1");
+    }
     let config = serde_json::json!({
         "mcpServers": {
             "cc_conductor": {
                 "command": exe.to_string_lossy(),
                 "args": ["--mcp-permission"],
-                "env": {"CC_SESSION_ID": tracking_id}
+                "env": env
             }
         }
     });

@@ -37,6 +37,62 @@ async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaitin
     }
 }
 
+/// Core of `respond_permission`, factored out so the Jarvis `respond_worker_prompt`
+/// route (`daemon::methods::jarvis::respond_worker_prompt`) can answer a
+/// worker's permission prompt without going through the RPC `Router` (the
+/// hooks-server handlers that route works don't have a `Router`/`ConnectionContext`
+/// to dispatch through - see `hooks_server::jarvis`). Returns whether a live
+/// waiter was actually resolved (`false` for a ghost/unknown request_id, same
+/// as the RPC handler below).
+pub(crate) async fn respond_permission_inner(
+    state: &Arc<DaemonState>,
+    request_id: &str,
+    allow: bool,
+    updated_input: Option<serde_json::Value>,
+    message: Option<String>,
+) -> bool {
+    let tx = state.pending.lock().await.remove(request_id);
+    let delivered = match tx {
+        Some(tx) => {
+            let payload = if allow {
+                serde_json::json!({
+                    "behavior": "allow",
+                    "updatedInput": updated_input.unwrap_or(serde_json::Value::Object(Default::default())),
+                })
+            } else {
+                serde_json::json!({
+                    "behavior": "deny",
+                    "message": message.unwrap_or_default(),
+                })
+            };
+            let _ = tx.send(payload);
+            true
+        }
+        None => false,
+    };
+    settle_prompt(state, request_id, false).await;
+    delivered
+}
+
+/// Core of `respond_question`, factored out for the same reason as
+/// `respond_permission_inner` above.
+pub(crate) async fn respond_question_inner(
+    state: &Arc<DaemonState>,
+    request_id: &str,
+    answers: serde_json::Value,
+) -> bool {
+    let tx = state.pending.lock().await.remove(request_id);
+    let delivered = match tx {
+        Some(tx) => {
+            let _ = tx.send(serde_json::json!({"answers": answers}));
+            true
+        }
+        None => false,
+    };
+    settle_prompt(state, request_id, true).await;
+    delivered
+}
+
 pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
@@ -52,26 +108,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let tx = state.pending.lock().await.remove(&b.request_id);
-                let delivered = match tx {
-                    Some(tx) => {
-                        let payload = if b.allow {
-                            serde_json::json!({
-                                "behavior": "allow",
-                                "updatedInput": b.updated_input.unwrap_or(serde_json::Value::Object(Default::default())),
-                            })
-                        } else {
-                            serde_json::json!({
-                                "behavior": "deny",
-                                "message": b.message.unwrap_or_default(),
-                            })
-                        };
-                        let _ = tx.send(payload);
-                        true
-                    }
-                    None => false,
-                };
-                settle_prompt(&state, &b.request_id, false).await;
+                let delivered = respond_permission_inner(&state, &b.request_id, b.allow, b.updated_input, b.message).await;
                 Ok(serde_json::json!({"ok": true, "delivered": delivered}))
             }
         });
@@ -93,15 +130,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             struct Body { request_id: String, answers: serde_json::Value }
             let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            let tx = state.pending.lock().await.remove(&b.request_id);
-            let delivered = match tx {
-                Some(tx) => {
-                    let _ = tx.send(serde_json::json!({"answers": b.answers}));
-                    true
-                }
-                None => false,
-            };
-            settle_prompt(&state, &b.request_id, true).await;
+            let delivered = respond_question_inner(&state, &b.request_id, b.answers).await;
             Ok(serde_json::json!({"ok": true, "delivered": delivered}))
         }
     });

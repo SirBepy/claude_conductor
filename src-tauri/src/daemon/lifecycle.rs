@@ -141,7 +141,16 @@ pub async fn spawn_session(
         return Err(LifecycleError::AlreadyExists(session_id));
     }
 
-    let mcp_config_path = write_mcp_config(&session_id, &session_id);
+    // Resume path: `session_id` is the pre-existing registry entry (see the
+    // match above), so its `jarvis` flag - stamped by `ensure_jarvis_session`
+    // before any message is ever sent to it - is already known here. New/fork
+    // spawns get a brand-new id never seen by the registry yet, so this reads
+    // false for them; the one caller that spawns a genuinely new Jarvis
+    // session (`ensure_jarvis_session`) sends no first message itself, so no
+    // MCP child is ever started off that particular config before the
+    // registry's `jarvis` flag is set on the very next turn's respawn.
+    let is_jarvis = state.registry.get(&session_id).map(|i| i.jarvis).unwrap_or(false);
+    let mcp_config_path = write_mcp_config(&session_id, &session_id, is_jarvis);
     let hook_settings_path = write_hook_settings(&session_id);
 
     let mut cmd = Command::new("claude");

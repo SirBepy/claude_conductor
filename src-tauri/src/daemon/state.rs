@@ -174,6 +174,20 @@ impl DaemonState {
             .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
     }
 
+    /// The recorded `event` kind for a still-open prompt (`"permission-requested"`
+    /// or `"question-requested"`), if any. `daemon::methods::jarvis::respond_worker_prompt`
+    /// uses this to route a Jarvis worker-prompt answer to the matching
+    /// `respond_permission_inner`/`respond_question_inner` without the caller
+    /// having to know (or be trusted about) which kind of prompt it's
+    /// answering.
+    pub async fn prompt_event(&self, id: &str) -> Option<String> {
+        self.pending_prompts
+            .lock()
+            .await
+            .get(id)
+            .and_then(|v| v["event"].as_str().map(str::to_string))
+    }
+
     /// Expire every open prompt belonging to `session_id`: drop the prompt
     /// records (so `list_pending_prompts` stops resurrecting their cards) and
     /// the pending oneshots (waking any still-blocked hook handler into its
