@@ -184,6 +184,14 @@ export class HttpTransport implements Transport {
           character_id: args.characterId ?? args.character_id,
           file: args.file,
         });
+      // Resolves the voiceline data URL for a `turn_sound` event so the phone
+      // can mirror the same clip the desktop app just played natively.
+      case "resolve_voiceline":
+        return this.rpc<T>("resolve_voiceline", {
+          session_id: args.sessionId ?? args.session_id ?? null,
+          cwd: args.cwd ?? null,
+          awaiting: args.awaiting,
+        });
       case "read_attachment":
         // Pasted chat-image attachments. The daemon path-validates against the
         // chat-attachments dir, so a malicious path can't read arbitrary files.

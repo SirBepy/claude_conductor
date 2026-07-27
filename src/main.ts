@@ -48,6 +48,7 @@ import { invoke } from "./shared/ipc";
 import { sessionEvents } from "./shared/chat/event-store";
 import { openModelEffortModal } from "./views/sessions/model-effort-modal";
 import { updateMissedPanel } from "./missed-panel";
+import { setupRemoteVoicelines } from "./shared/remote-voiceline";
 import "./missed-panel.css";
 import type { ChatEvent, NewsPost, ScheduledItem } from "./types/ipc.generated";
 
@@ -368,6 +369,7 @@ if (!await ensureRemoteToken()) {
   setupNewsBadgeAndNotifications();
   setupScheduleMissedPopup();
   setupScheduledFireToast();
+  setupRemoteVoicelines();
 }
 })();
 

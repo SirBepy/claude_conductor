@@ -250,6 +250,50 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!(url))
         }
     });
+    // Mirrors the character/slot resolution `notifications::fire` runs natively
+    // on the app process for a `turn_sound` event (rodio playback there avoids
+    // `data:` URLs only because WebView2 blocks them - a real browser tab has
+    // no such restriction). Lets a remote client hear the same voiceline the
+    // desktop app just played by resolving the identical rule daemon-side and
+    // handing back a data URL instead of bytes. Returns null whenever there's
+    // nothing to play: muted (mute_all/mute_sounds), no character resolved, or
+    // the resolved mode is Voice/TTS (out of scope for remote - sound-clip
+    // slots only).
+    {
+        let state = state.clone();
+        router.register("resolve_voiceline", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { session_id: Option<String>, cwd: Option<String>, awaiting: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let kind = match p.awaiting.as_str() {
+                    "done" => crate::notifications::NotifKind::WorkFinished,
+                    "question" => crate::notifications::NotifKind::QuestionAsked,
+                    _ => return Ok(json!(null)),
+                };
+                let settings = state.settings.snapshot();
+                if crate::notifications::should_suppress(&settings, crate::tray::NotifMode::Sound) {
+                    return Ok(json!(null));
+                }
+                let cfg: crate::tray::NotificationsConfig = (&settings).try_into().unwrap_or_default();
+                let rule = crate::notifications::resolve_with_character(
+                    &cfg, &settings, kind, p.session_id.as_deref(), p.cwd.as_deref(),
+                );
+                if !rule.enabled
+                    || rule.mode != crate::tray::NotifMode::Sound
+                    || rule.sound_pack != crate::notifications::CHARACTER_PACK_SENTINEL
+                {
+                    return Ok(json!(null));
+                }
+                let url = crate::characters::assets::file_data_url_at(
+                    std::path::Path::new(&rule.sound_file),
+                );
+                Ok(json!(url))
+            }
+        });
+    }
     // Mirrors `read_attachment` (params: path) -> { mime, base64 }. Lets the
     // phone render pasted chat-image attachments. The underlying fn canonicalizes
     // the path and rejects anything outside <app-data>/chat-attachments/, so this

@@ -65,6 +65,11 @@ const SAFE_METHODS: &[&str] = &[
     "list_characters",
     "list_project_groups",
     "character_asset_url",
+    // Read-only: resolves the same character/slot voiceline rule
+    // `notifications::fire` uses natively (mute/whitelist/character gating
+    // included) and returns a data URL instead of playing bytes, so the
+    // remote client can mirror the sound the desktop app just played.
+    "resolve_voiceline",
     "resolve_whitelist_characters",
     "list_session_characters",
     // Write: assigns a character to a freshly-created remote session (the
@@ -590,7 +595,7 @@ mod tests {
             "list_instances", "send_message", "cancel_turn", "respond_question",
             "respond_permission", "load_history_page", "read_attachment",
             "paste_attachment", "list_characters", "list_project_groups",
-            "character_asset_url", "resolve_whitelist_characters", "list_projects",
+            "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
             "project_last_activity_at", "get_project_tech", "get_project_icon",
             "get_history", "get_token_history", "get_active_sessions",
             "get_usage_map", "get_auth_state_map", "context_status",
