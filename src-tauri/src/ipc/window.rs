@@ -468,13 +468,30 @@ pub async fn open_jarvis_window(app: AppHandle) -> Result<(), String> {
     let session_id = {
         let state = app.state::<crate::state::AppState>();
         let guard = state.daemon_client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| "daemon client not connected".to_string())?;
-        client
-            .ensure_jarvis_session()
-            .await
-            .map_err(|e| e.to_string())?
+        let result = match guard.as_ref() {
+            None => Err("daemon client not connected".to_string()),
+            Some(client) => client.ensure_jarvis_session().await.map_err(|e| e.to_string()),
+        };
+        drop(guard);
+        match result {
+            Ok(id) => id,
+            Err(e) => {
+                // Both callers (tray menu item, sidebar nav item) previously
+                // discarded this error entirely - a failed spawn (most
+                // commonly `NoDefault`: no default account set with 2+
+                // accounts registered) looked identical to a dead click.
+                // Surface it as a native dialog so it fails loudly instead,
+                // regardless of which caller triggered it or whether any
+                // webview is even focused (the tray path has none).
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                app.dialog()
+                    .message(&e)
+                    .title("Couldn't open Jarvis")
+                    .kind(MessageDialogKind::Error)
+                    .show(|_| {});
+                return Err(e);
+            }
+        }
     };
 
     use std::sync::atomic::AtomicBool;
