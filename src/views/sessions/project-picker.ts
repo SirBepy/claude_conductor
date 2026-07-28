@@ -5,7 +5,7 @@ import { ensureModalHost, closeModal } from "../../shared/modal";
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal";
-import { openWorktreePickerModal } from "./worktree-picker";
+import { openLocationModal } from "./location-picker";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 
 export type SortChoice = "name" | "recent" | "todos";
@@ -140,18 +140,16 @@ export function openProjectPickerModal(
       return rows;
     };
 
-    // A project with git worktrees opens the New/Existing/Default sub-picker;
-    // one without keeps today's single-click resolve. Mirrors the "New
-    // project…" footer flow: hide the host, await the sub-modal, then finish on
-    // a result or restore + re-render on cancel.
+    // Opens the location picker (worktree + CLAUDE.md start-folder, see
+    // location-picker.ts) for every project - it decides on its own whether
+    // there's anything to show or whether it can resolve instantly, same as
+    // the old direct worktree-picker branch used to. Mirrors the "New
+    // project…" footer flow: hide the host, await the sub-modal, then finish
+    // on a result or restore + re-render on cancel.
     const selectProjectRow = async (p: ProjectGroup): Promise<void> => {
       if (p.path_exists === false) return;
-      if (!p.worktrees || p.worktrees.length === 0) {
-        finish({ path: p.path, name: p.name });
-        return;
-      }
       host.classList.remove("open");
-      const result = await openWorktreePickerModal(p);
+      const result = await openLocationModal(p);
       if (!result) {
         host.classList.add("open");
         renderModal();

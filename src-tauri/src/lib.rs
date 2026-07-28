@@ -266,6 +266,7 @@ pub fn run() {
             ipc::list_worktree_details,
             ipc::create_worktree,
             ipc::remove_worktree,
+            ipc::list_claude_md_scopes,
             ipc::get_project_tech,
             ipc::get_project_icon,
             ipc::list_characters,

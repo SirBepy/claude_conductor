@@ -45,6 +45,8 @@ pub mod groups_test_helpers {
                 update_last_active(&mut entry.last_active_at, la);
             }
             entry.path = p.path.to_string_lossy().into_owned();
+            entry.last_worktree_path = p.last_worktree_path.clone();
+            entry.last_start_folder_rel = p.last_start_folder_rel.clone();
         }
 
         // 3. Layer live instances on top.
@@ -98,6 +100,8 @@ pub mod groups_test_helpers {
             last_active_at: None,
             path_exists: true,
             worktrees: Vec::new(),
+            last_worktree_path: None,
+            last_start_folder_rel: None,
         }
     }
 
@@ -337,6 +341,8 @@ mod build_groups_tests {
             last_active_at: Some("2026-04-28T00:00:00Z".into()),
             whitelist: crate::types::CharacterWhitelist::default(),
             preferred_account_id: None,
+            last_worktree_path: None,
+            last_start_folder_rel: None,
         }];
         let groups = build_groups(&projects, &history, &[], 0);
         assert_eq!(groups.len(), 1);
@@ -450,6 +456,8 @@ mod build_groups_tests {
                 last_active_at: None,
                 path_exists: true,
                 worktrees: Vec::new(),
+                last_worktree_path: None,
+                last_start_folder_rel: None,
             }
         }
 
@@ -528,6 +536,8 @@ mod fold_worktrees_tests {
             last_active_at: None,
             path_exists: true,
             worktrees: Vec::new(),
+            last_worktree_path: None,
+            last_start_folder_rel: None,
         }
     }
 

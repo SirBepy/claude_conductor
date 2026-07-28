@@ -106,6 +106,8 @@ pub fn upsert_project_for_cwd(
         last_active_at: Some(now.to_string()),
         whitelist: crate::types::CharacterWhitelist::default(),
         preferred_account_id: None,
+        last_worktree_path: None,
+        last_start_folder_rel: None,
     });
     (id, true)
 }
@@ -143,6 +145,8 @@ pub fn upsert_project_with_id_for_cwd(
         last_active_at: Some(now.to_string()),
         whitelist: crate::types::CharacterWhitelist::default(),
         preferred_account_id: None,
+        last_worktree_path: None,
+        last_start_folder_rel: None,
     });
 }
 

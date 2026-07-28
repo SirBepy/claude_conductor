@@ -15,6 +15,7 @@ use claude_conductor_lib::ipc::ai_todos::AiTodoEntry;
 use claude_conductor_lib::ipc::servers::ServerInfo;
 use claude_conductor_lib::ipc::git::GitInfo;
 use claude_conductor_lib::ipc::worktrees::WorktreeDetail;
+use claude_conductor_lib::ipc::claude_scopes::ClaudeMdScope;
 use claude_conductor_lib::ipc::git_diff::PrFileChange;
 use claude_conductor_lib::ipc::files::TextFileData;
 use claude_conductor_lib::ipc::schedule::ExternalScheduledJob;
@@ -69,6 +70,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<ProjectGroup>());
     out.push_str(&decl::<WorktreeSummary>());
     out.push_str(&decl::<WorktreeDetail>());
+    out.push_str(&decl::<ClaudeMdScope>());
 
     // automation
     out.push_str(&decl::<AutomationConfig>());

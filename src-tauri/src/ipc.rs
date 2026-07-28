@@ -31,6 +31,7 @@ pub mod schedule;
 pub mod servers;
 pub mod preview;
 pub mod worktrees;
+pub mod claude_scopes;
 
 pub use usage::*;
 pub use accounts::*;
@@ -64,6 +65,7 @@ pub use schedule::*;
 pub use servers::*;
 pub use preview::*;
 pub use worktrees::*;
+pub use claude_scopes::*;
 
 // Re-export test helper submodules so integration tests can reach them via
 // `claude_conductor_lib::ipc::projects_test_helpers` and

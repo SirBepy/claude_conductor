@@ -63,6 +63,18 @@ pub struct ProjectConfig {
     /// see `docs/multi-account/04-project-binding.md`.
     #[serde(default)]
     pub preferred_account_id: Option<String>,
+    /// Last worktree path opened for this project (absolute), so the
+    /// location picker can default to it next time instead of always
+    /// starting at the main worktree.
+    #[serde(default)]
+    pub last_worktree_path: Option<String>,
+    /// Last CLAUDE.md start-folder chosen, relative to whichever worktree
+    /// was open at the time (empty string means the worktree's own root).
+    /// Not necessarily valid for a *different* worktree - callers must
+    /// re-verify it still exists after a worktree switch and fall back to
+    /// root if not, since different checkouts can have different layouts.
+    #[serde(default)]
+    pub last_start_folder_rel: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
@@ -178,6 +190,14 @@ pub struct ProjectGroup {
     /// projects with no known worktrees.
     #[serde(default)]
     pub worktrees: Vec<WorktreeSummary>,
+    /// Mirrors `ProjectConfig.last_worktree_path`/`last_start_folder_rel` so
+    /// the location picker can seed its chips without a separate
+    /// `get_project` round-trip. `None` when the project has no settings
+    /// entry yet (id is also `None` in that case).
+    #[serde(default)]
+    pub last_worktree_path: Option<String>,
+    #[serde(default)]
+    pub last_start_folder_rel: Option<String>,
 }
 
 /// A git worktree belonging to a `ProjectGroup`, surfaced by the project
@@ -212,6 +232,8 @@ mod tests {
             last_active_at: None,
             whitelist: CharacterWhitelist::default(),
             preferred_account_id: None,
+            last_worktree_path: None,
+            last_start_folder_rel: None,
         };
         let raw = serde_json::to_string(&p).unwrap();
         let back: ProjectConfig = serde_json::from_str(&raw).unwrap();

@@ -161,6 +161,8 @@ mod tests {
             last_active_at: None,
             whitelist: crate::types::CharacterWhitelist::default(),
             preferred_account_id: preferred_account_id.map(str::to_string),
+            last_worktree_path: None,
+            last_start_folder_rel: None,
         }
     }
 
