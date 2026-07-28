@@ -375,6 +375,25 @@ class SessionEventStore {
     // the next turn's fresh `claude -p` process, so drop it now - otherwise
     // the next turn's early deltas would look "already covered" and be eaten.
     if (ev.type === "turn_usage" || (ev.type === "assistant_message" && !ev.streaming)) {
+      // An interrupted turn finalizes with the CLI's "[Request interrupted by
+      // user]" notice (see noiseAssistantLabel), NOT a final assistant_message
+      // whose text matches the accumulated streamAcc text. Without a recorded
+      // sig for the actual streamed text, the file watcher's later delivery of
+      // that same text straight from the JSONL transcript finds no dedup match
+      // and renders as a second, duplicate bubble - live-only, since a reload
+      // reads the JSONL once and never doubles. Record the accumulated text as
+      // an already-delivered final now, before clearing, so that replay is
+      // caught by the normal isLiveDuplicate check. A no-op double-record on
+      // the ordinary (non-interrupted) path, where the real final already
+      // carries this exact text.
+      if (entry.streamAcc && entry.streamAcc.text) {
+        entry.recent.push({
+          sig: `a:${entry.streamAcc.text}`,
+          text: entry.streamAcc.text,
+          assistantFinal: true,
+          ts: Date.now(),
+        });
+      }
       entry.streamAcc = null;
     }
     if (this.isLiveDuplicate(entry, ev)) return;

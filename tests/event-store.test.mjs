@@ -330,6 +330,24 @@ describe("assistant_delta accumulation (ai_todo 186)", () => {
     expect(evs[0].streaming).toBe(false);
   });
 
+  it("interrupt: watcher's late delivery of the real streamed text does not double-render (ai_todo doubled-bubble-on-interrupt)", () => {
+    const sid = "sess-delta-interrupt";
+    // Runner streams partial text, then the user interrupts: the CLI finalizes
+    // with its "[Request interrupted by user]" notice, not the accumulated text.
+    sessionEvents.pushSynthetic(sid, deltaEvent("I'll look into", 1, 1));
+    sessionEvents.pushSynthetic(sid, deltaEvent(" that now", 1, 2));
+    sessionEvents.pushSynthetic(sid, finalEvent("[Request interrupted by user]"));
+    // The file watcher later tails the JSONL transcript and delivers a genuine
+    // finalized assistant_message with the SAME text that was streamed - this
+    // must be deduped, not rendered as a second bubble.
+    sessionEvents.pushSynthetic(sid, finalEvent("I'll look into that now"));
+    const assistants = sessionEvents.events(sid).filter((e) => e.type === "assistant_message");
+    expect(assistants.map((e) => e.content[0].text)).toEqual([
+      "I'll look into that now",
+      "[Request interrupted by user]",
+    ]);
+  });
+
   it("does not clobber a non-delta event that landed between deltas", () => {
     const sid = "sess-delta-interleave";
     sessionEvents.pushSynthetic(sid, deltaEvent("part one", 1, 1));
