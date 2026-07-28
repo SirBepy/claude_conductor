@@ -22,7 +22,7 @@ export function template() {
           <i class="ph ph-arrow-left"></i>
         </button>
         <h2>Chats</h2>
-        <span class="usage-chip" id="usage-chip-host" hidden></span>
+        <span class="usage-dial-row" id="usage-dial-host" hidden></span>
         <button
           class="icon-btn more-btn"
           id="viewMoreBtn"

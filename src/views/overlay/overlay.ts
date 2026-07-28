@@ -9,15 +9,12 @@
 // its graph + icon and shows an info circle in its place: the account name and
 // both windows' current%/safe%.
 
-import { escapeHtml } from "../../shared/escape-html";
 import "./overlay.css";
-import { valueColor } from "../../shared/formatters";
-import type { ValueColorSettings } from "../../shared/formatters";
 import { api } from "../../shared/api";
 import { getSettings, setSettings } from "../../shared/state";
 import type { SettingsShape } from "../../shared/state";
 import { buildOverlayRows } from "./overlay-logic";
-import type { OverlayMetric, OverlayRow } from "./overlay-logic";
+import { cellHtml } from "../../shared/usage-dial";
 import { initOverlayDrag, resizeOverlayToContent } from "./overlay-drag";
 
 const DEFAULT_OVERLAY_OPACITY = 0.72;
@@ -26,147 +23,6 @@ const REFRESH_INTERVAL_MS = 30_000;
 // runs long enough to actually be worth signalling, so a normal 30s tick
 // doesn't flash the icon for a frame.
 const REFRESH_SPINNER_DELAY_MS = 150;
-
-// Dial geometry — ported 1:1 from the mockup's arc()/seg()/ring()/dial() so
-// the rendered result matches it exactly (viewBox 0 0 44 44, centre 22,22).
-const OUTER_R = 19;
-const OUTER_W = 4.5;
-const INNER_R = 12;
-const INNER_W = 3;
-const TRACK_COLOR = "var(--color-surface-alt, #262637)";
-// Filled backing disc behind each dial (circles mode). Gives contrast on light
-// desktops where the fully-transparent window was hard to read, while staying
-// subtle on dark ones (its fill honours the overlay-opacity slider — see
-// .oc-disc in overlay.css). Sized to sit a `DISC_PAD` gap OUTSIDE the outer
-// ring so the graph is padded within the disc rather than touching its rim.
-const DISC_PAD = 4;
-const DISC_R = OUTER_R + OUTER_W / 2 + DISC_PAD;
-// Small breathing gap around the rings in card mode, where the shared row card
-// (not a per-dial disc) is the backing — so dials sit compactly in the card
-// rather than floating in the disc's padding.
-const CARD_MARGIN = 2;
-
-/** Uniform scale from viewBox units to rendered px. >1 enlarges the whole dial
- * (rings + disc + icon together). Kept a touch bigger than 1:1 so the resting
- * circles and the (now smaller) hover info circle are close in size. */
-const DIAL_SCALE = 1.2;
-
-/** The ring maths all draw around centre (22,22) inside a 44-unit box. Widening
- * the viewBox symmetrically with a negative origin keeps the centre at (22,22)
- * (so none of the seg/ring code changes) while making room around the rings —
- * the margin differs by mode (large in circles mode to become the disc's
- * padding, small in card mode). The rendered px is that unit-box scaled by
- * DIAL_SCALE, so the graph keeps its proportions and just renders larger. */
-function dialGeometry(showDisc: boolean): { viewBox: string; sizeCss: string } {
-  const margin = showDisc ? DISC_PAD : CARD_MARGIN;
-  const size = 44 + 2 * margin;
-  const px = Math.round(size * DIAL_SCALE);
-  return { viewBox: `${-margin} ${-margin} ${size} ${size}`, sizeCss: `width:${px}px;height:${px}px` };
-}
-
-/** One arc's dasharray + rotation, matching the mockup's `arc()`. */
-function arcGeometry(r: number, startPct: number, lenPct: number): { dash: string; rot: string } {
-  const c = 2 * Math.PI * r;
-  const dash = `${((lenPct / 100) * c).toFixed(2)} ${c.toFixed(2)}`;
-  const rot = (-90 + (startPct / 100) * 360).toFixed(2);
-  return { dash, rot };
-}
-
-/** One arc segment, matching the mockup's `seg()`. */
-function seg(r: number, w: number, startPct: number, lenPct: number, stroke: string, cap: boolean, opacity?: number): string {
-  const a = arcGeometry(r, startPct, lenPct);
-  const capAttr = cap ? ' stroke-linecap="round"' : "";
-  const opacityAttr = opacity != null ? ` opacity="${opacity}"` : "";
-  return `<circle cx="22" cy="22" r="${r}" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-dasharray="${a.dash}" transform="rotate(${a.rot} 22 22)"${capAttr}${opacityAttr}/>`;
-}
-
-/**
- * One ring (either the 5h or the 7d), matching the mockup's `ring()` exactly:
- * a full-track base, then either a single solid arc (on pace), a faded
- * safe-pace arc under a solid current arc (under pace — solid up to current,
- * ghost out to the safe mark), or a bright current arc under a darker
- * safe-pace arc (over pace — darker up to safe, bright for the overshoot).
- */
-function ring(r: number, w: number, cur: number, safe: number, color: string): string {
-  let out = seg(r, w, 0, 100, TRACK_COLOR, false);
-  if (cur === safe) {
-    out += seg(r, w, 0, cur, color, true);
-  } else if (cur < safe) {
-    out += seg(r, w, 0, safe, color, true, 0.3);
-    out += seg(r, w, 0, cur, color, true);
-  } else {
-    const darker = `color-mix(in srgb, ${color} 52%, #08060c)`;
-    out += seg(r, w, 0, cur, color, true);
-    out += seg(r, w, 0, safe, darker, true);
-  }
-  return out;
-}
-
-/** Base ring colour for one metric: the app's settings-driven pace colour
- * (getPaceColor, via valueColor which also honours the existing colorApplyTo
- * "off" escape hatch and falls back to a plain percent-threshold colour when
- * there's no safe-pace anchor yet) — never a hand-rolled green/amber/red. */
-function metricColor(metric: OverlayMetric, settings: ValueColorSettings): string {
-  if (metric.pct == null) return "var(--color-text-muted, #8a8aa0)";
-  return valueColor(metric.pct, metric.safePct, settings, "overlay");
-}
-
-/** SVG for one ring, degrading to a bare track when there's no data yet, and
- * to a single solid arc (no faded/darker split) when there's data but no
- * safe-pace anchor to compare it against (e.g. no active reset window). */
-function ringSvg(r: number, w: number, metric: OverlayMetric, settings: ValueColorSettings): string {
-  if (metric.pct == null) return seg(r, w, 0, 100, TRACK_COLOR, false);
-  const cur = Math.max(0, Math.min(100, metric.pct));
-  const safe = metric.safePct != null ? Math.max(0, Math.min(100, metric.safePct)) : cur;
-  return ring(r, w, cur, safe, metricColor(metric, settings));
-}
-
-function dialHtml(row: OverlayRow, settings: ValueColorSettings, showDisc: boolean): string {
-  const outer = ringSvg(OUTER_R, OUTER_W, row.session, settings);
-  const inner = ringSvg(INNER_R, INNER_W, row.weekly, settings);
-  const icon = escapeHtml(row.icon);
-  // Centre icon carries the account's own colour (identity); the rings carry
-  // pace status. Falls back to the CSS neutral when an account has no colour.
-  const iconColor = row.colour ? ` style="color:${escapeHtml(row.colour)}"` : "";
-  // Circles mode draws a per-dial backing disc; card mode omits it (the shared
-  // row card is the backing instead — see .oc-dial-row.oc-card in overlay.css).
-  const disc = showDisc ? `<circle class="oc-disc" cx="22" cy="22" r="${DISC_R}"/>` : "";
-  const { viewBox, sizeCss } = dialGeometry(showDisc);
-  // Spinner glyph sits alongside the account icon at all times, hidden by
-  // default — #ocRows.oc-refreshing (set by refresh() while a fetch is in
-  // flight) swaps which one is visible, so a background refresh reads as the
-  // dial "working" instead of the icon just silently updating.
-  const icons = `<i class="ph ph-${icon} oc-ic-glyph"></i><i class="ph ph-spinner oc-ic-spin"></i>`;
-  return `<div class="oc-dial" style="${sizeCss}"><svg viewBox="${viewBox}" style="${sizeCss}">${disc}${outer}${inner}</svg><div class="oc-ic"${iconColor}>${icons}</div></div>`;
-}
-
-/** One `<cur>%/<safe>%` line inside the hover info circle, the current %
- * tinted by pace colour. Shows `--` when there's no data yet. */
-function infoMetricLine(metric: OverlayMetric, settings: ValueColorSettings): string {
-  const color = metricColor(metric, settings);
-  const curText = metric.pct != null ? `${metric.pct}%` : "--";
-  const safeText = metric.safePct != null ? `/${metric.safePct}%` : "";
-  return `<div class="oc-info-row"><b style="color:${escapeHtml(color)}">${curText}</b><span class="oc-info-safe">${escapeHtml(safeText)}</span></div>`;
-}
-
-/** Hover content shown INSIDE the circle in place of the graph: the account
- * name plus the session/weekly current%/safe% lines (top = session, bottom =
- * weekly). Fades in (and the dial graph fades out) on cell hover — see .oc-info
- * in overlay.css. */
-function infoHtml(row: OverlayRow, settings: ValueColorSettings): string {
-  return `<div class="oc-info">
-    <div class="oc-info-nm">${escapeHtml(row.label)}</div>
-    ${infoMetricLine(row.session, settings)}
-    ${infoMetricLine(row.weekly, settings)}
-  </div>`;
-}
-
-function cellHtml(row: OverlayRow, settings: ValueColorSettings, showDisc: boolean): string {
-  return `<div class="oc-cell" data-acc-id="${escapeHtml(row.id)}">
-    ${dialHtml(row, settings, showDisc)}
-    ${infoHtml(row, settings)}
-  </div>`;
-}
 
 function readOverlayOpacity(settings: SettingsShape): number {
   const raw = settings["overlayOpacity"];
@@ -218,15 +74,23 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     if (panelEl) requestAnimationFrame(() => void resizeOverlayToContent(panelEl));
   }
 
-  // Click (a press that didn't turn into a drag) on a dial → surface the
-  // dashboard focused + highlighted on that account. Routed through the drag
-  // handler's pointerup rather than a native `click` listener: the whole panel
-  // is the drag surface and takes pointer capture on press, which would
-  // redirect the synthesized click away from the dial's cell.
-  const openClickedAccount = (target: EventTarget | null): void => {
+  // Click (a press that didn't turn into a drag) on a dial → live-refresh
+  // just that account (Joe 2026-07-27: he rarely clicked through to the
+  // dashboard - when he did, it was only to trigger a refresh - so the click
+  // now does that directly instead). Routed through the drag handler's
+  // pointerup rather than a native `click` listener: the whole panel is the
+  // drag surface and takes pointer capture on press, which would redirect the
+  // synthesized click away from the dial's cell.
+  const refreshClickedAccount = (target: EventTarget | null): void => {
     const cell = (target as HTMLElement | null)?.closest<HTMLElement>(".oc-cell[data-acc-id]");
     const id = cell?.dataset["accId"];
-    if (id) void api.openDashboardAccount(id);
+    if (!id) return;
+    cell.classList.add("oc-refreshing");
+    api
+      .refreshUsageLive(id)
+      .catch((e) => console.error("overlay: refreshUsageLive failed", e))
+      .then(() => refresh())
+      .finally(() => cell.classList.remove("oc-refreshing"));
   };
 
   async function refresh(): Promise<void> {
@@ -256,7 +120,7 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
   }
 
   await refresh();
-  const cleanupDrag = panelEl ? initOverlayDrag(panelEl, openClickedAccount) : () => {};
+  const cleanupDrag = panelEl ? initOverlayDrag(panelEl, refreshClickedAccount) : () => {};
   const unlistenHistory = api.onHistoryUpdated(() => void refresh());
   // The overlay window skips initBoot(), so it has no other subscription to
   // settings changes made elsewhere (e.g. Settings > Visuals color rules) -

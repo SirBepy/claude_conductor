@@ -13,6 +13,40 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Snapshots come back ascending by timestamp, so a plain insert-per-row walk
+/// naturally leaves the latest snapshot per account in the map. Shared by
+/// `get_usage_map` and `request_live_usage_refresh` below.
+fn reduce_to_latest_per_account(
+    rows: Vec<crate::types::UsageSnapshot>,
+) -> HashMap<String, crate::types::UsageSnapshot> {
+    let mut map: HashMap<String, crate::types::UsageSnapshot> = HashMap::new();
+    for snap in rows {
+        if let Some(id) = snap.account_id.clone() {
+            map.insert(id, snap);
+        }
+    }
+    map
+}
+
+/// The newest `captured_at` across every snapshot in the DB, used by
+/// `request_live_usage_refresh` to detect once the app's triggered poll has
+/// actually written a fresh row (called once for the baseline, then again on
+/// each poll of the wait loop).
+async fn latest_captured_at(
+    db: Arc<std::sync::Mutex<crate::storage::StorageManager>>,
+) -> Result<Option<String>, RpcError> {
+    tokio::task::spawn_blocking(move || {
+        let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
+        crate::storage::usage_store::get_all_snapshots(mgr.conn())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.captured_at)
+            .max()
+    })
+    .await
+    .map_err(|e| RpcError::internal(format!("join: {e}")))
+}
+
 pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
     // Mirrors `get_history` (params: { limit }) -> Vec<UsageSnapshot>. Snapshots
     // come back ascending by timestamp; `limit` keeps the newest N (trim front).
@@ -106,13 +140,70 @@ pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
                     let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
                     let all = crate::storage::usage_store::get_all_snapshots(mgr.conn())
                         .unwrap_or_default();
-                    let mut map: HashMap<String, crate::types::UsageSnapshot> = HashMap::new();
-                    for snap in all {
-                        if let Some(id) = snap.account_id.clone() {
-                            map.insert(id, snap);
-                        }
+                    reduce_to_latest_per_account(all)
+                })
+                .await
+                .map_err(|e| RpcError::internal(format!("join: {e}")))?;
+                Ok(json!(map))
+            }
+        });
+    }
+    // Click-to-refresh from the remote/phone usage dials (ai_todo: live-poll
+    // refresh). The daemon itself can never do the cookie-authed HTTPS poll -
+    // that stays app-process-only, same reason `poll_now` isn't mirrored above.
+    // Instead this asks the CONNECTED app process to do it: publish
+    // "usage_poll_requested" over the same global notifier the app already
+    // subscribes to (see daemon_link.rs's `handle_daemon_notification`), whose
+    // `publish` return value (subscriber count) doubles as an instant "is the
+    // app even running" check - a paired phone with the app not open would
+    // otherwise hang for the full timeout for no reason. Then poll `companion.db`
+    // for a snapshot fresher than the baseline captured just before publishing;
+    // the app's poll writes there the same way the scheduler's tick does. This
+    // is a best-effort wait, not a true request/response - the app has no
+    // reverse channel to say "here's your answer" directly (see the doc
+    // comment above other read-only mirrors in this file), so a slow/failed
+    // poll on the app side just falls through the timeout and returns whatever
+    // is latest in the DB instead of hanging or erroring.
+    {
+        let state = state.clone();
+        router.register("request_live_usage_refresh", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize, Default)]
+                struct P {
+                    account_id: Option<String>,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .unwrap_or_default();
+                let Some(db) = state.db.clone() else {
+                    return Err(RpcError::internal("companion.db is not open on the daemon"));
+                };
+
+                let baseline = latest_captured_at(db.clone()).await?;
+
+                let heard = state
+                    .notifier
+                    .publish("usage_poll_requested", json!({ "account_id": p.account_id }));
+                if heard == 0 {
+                    return Err(RpcError::internal(
+                        "desktop app is not running - open it to refresh usage",
+                    ));
+                }
+
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(12);
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    let latest = latest_captured_at(db.clone()).await?;
+                    if latest > baseline || tokio::time::Instant::now() >= deadline {
+                        break;
                     }
-                    map
+                }
+
+                let map = tokio::task::spawn_blocking(move || {
+                    let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
+                    let all = crate::storage::usage_store::get_all_snapshots(mgr.conn())
+                        .unwrap_or_default();
+                    reduce_to_latest_per_account(all)
                 })
                 .await
                 .map_err(|e| RpcError::internal(format!("join: {e}")))?;

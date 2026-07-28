@@ -97,11 +97,15 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
 
 /* Refresh spinner: swaps in for the account glyph while #ocRows carries
  * .oc-refreshing (set by refresh() in overlay.ts for the duration of an
- * in-flight fetch), so the dial visibly "works" instead of the icon just
- * silently updating once new data lands. */
+ * in-flight fetch, spinning every dial), OR while a single .oc-cell carries
+ * it on its own (set by refreshClickedAccount for a click-to-refresh live
+ * poll scoped to just that account), so the dial visibly "works" instead of
+ * the icon just silently updating once new data lands. */
 .oc-ic-spin { display: none; }
-#ocRows.oc-refreshing .oc-ic-glyph { display: none; }
-#ocRows.oc-refreshing .oc-ic-spin {
+#ocRows.oc-refreshing .oc-ic-glyph,
+.oc-cell.oc-refreshing .oc-ic-glyph { display: none; }
+#ocRows.oc-refreshing .oc-ic-spin,
+.oc-cell.oc-refreshing .oc-ic-spin {
   display: block;
   animation: oc-ic-spin 0.8s linear infinite;
 }

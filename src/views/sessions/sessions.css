@@ -315,29 +315,14 @@
 }
 
 /* View-level overflow menu: reuses .session-more-menu look. */
-/* Usage%/safe% chip in the Chats header - see usage-chip.ts. */
-.usage-chip {
+/* Multi-account usage dials in the Chats header - see usage-dials.ts. The
+ * dials themselves are `.oc-cell`/`.oc-dial` etc from overlay.css (imported
+ * by usage-dials.ts); this just lays out the compact inline row they sit in. */
+.usage-dial-row {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   flex-shrink: 0;
-  font-size: 0.78rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-muted);
-  padding: 0 4px;
-  white-space: nowrap;
-}
-
-.usage-chip i {
-  font-size: 0.9rem;
-}
-
-.usage-chip .uc-cur {
-  font-weight: 600;
-}
-
-.usage-chip .uc-safe {
-  color: var(--color-text-muted);
 }
 
 .view-more-menu .view-more-sort-label {

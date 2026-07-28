@@ -320,6 +320,24 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
                 );
             }
         }
+        // Live-refresh request from the remote/phone usage dials (via the
+        // daemon's `request_live_usage_refresh` RPC) - unlike "refresh_requested"
+        // above, this must NOT fire a WorkFinished notification popup; it's a
+        // silent poll triggered by a user clicking a dial, not a Claude Code
+        // hook event. `account_id` (optional) scopes the poll to one account
+        // instead of refreshing every configured account.
+        "usage_poll_requested" => {
+            let app2 = app.clone();
+            let account_id = params.get("account_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+            tokio::spawn(async move {
+                let _ = crate::scheduler::poll_once_scoped(
+                    &app2,
+                    crate::scheduler::PollTrigger::Manual,
+                    account_id.as_deref(),
+                )
+                .await;
+            });
+        }
         "refresh_requested" => {
             let app2 = app.clone();
             let cwd = params.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());

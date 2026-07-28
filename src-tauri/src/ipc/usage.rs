@@ -48,8 +48,14 @@ pub fn get_history(
 }
 
 #[tauri::command]
-pub async fn poll_now(app: AppHandle) -> Result<UsageSnapshot, String> {
-    match crate::scheduler::poll_once(&app, crate::scheduler::PollTrigger::Manual).await {
+pub async fn poll_now(app: AppHandle, account_id: Option<String>) -> Result<UsageSnapshot, String> {
+    match crate::scheduler::poll_once_scoped(
+        &app,
+        crate::scheduler::PollTrigger::Manual,
+        account_id.as_deref(),
+    )
+    .await
+    {
         Ok(snap) => Ok(snap),
         Err(e) => Err(format!("{e:?}")),
     }

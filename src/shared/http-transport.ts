@@ -252,6 +252,12 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("get_usage_map", null);
       case "get_auth_state_map":
         return this.rpc<T>("get_auth_state_map", null);
+      // Click-to-refresh usage dials (api.refreshUsageLive on the remote
+      // branch): asks the daemon to forward a live-poll request to the
+      // connected desktop app and wait for a fresh snapshot - see
+      // daemon/methods/usage.rs's `request_live_usage_refresh` handler.
+      case "request_live_usage_refresh":
+        return this.rpc<T>("request_live_usage_refresh", { account_id: args.accountId ?? null });
       // Transcript-derived context-window status (mirrors desktop's
       // `context_status` Tauri command). Without this the phone had no way to
       // reach the daemon's authoritative computation and silently fell back
@@ -427,7 +433,15 @@ export class HttpTransport implements Transport {
       body: JSON.stringify({ method, params }),
     });
     if (res.status === 401) handleAuthFailure();
-    if (!res.ok) throw new Error(`rpc ${method} failed: ${res.status}`);
+    if (!res.ok) {
+      // Daemon RPC errors (e.g. request_live_usage_refresh's "desktop app is
+      // not running") come back as a JSON-RPC error body - surface its
+      // message instead of just the bare HTTP status so a caller can show the
+      // dev something actionable.
+      const detail = await res.json().catch(() => null);
+      const message = detail?.message as string | undefined;
+      throw new Error(message || `rpc ${method} failed: ${res.status}`);
+    }
     return (await res.json()) as T;
   }
 

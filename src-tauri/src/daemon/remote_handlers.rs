@@ -92,6 +92,11 @@ const SAFE_METHODS: &[&str] = &[
     // the cross-process derivation notes.
     "get_usage_map",
     "get_auth_state_map",
+    // Write-ish but narrow: triggers a live claude.ai poll on the connected
+    // desktop app (click-to-refresh usage dials) - it cannot mutate anything
+    // besides the usage snapshot cache/DB the read-only methods above already
+    // expose, and only refreshes (never adds/removes) an account.
+    "request_live_usage_refresh",
     // Read-only, transcript-derived context-window status for a session
     // (mirrors desktop's `context_status` Tauri command). Without this the
     // phone had no daemon RPC for it at all - it silently fell back to a
@@ -375,7 +380,7 @@ fn instances_changed_frame(state: &DaemonState) -> String {
 /// because every notifier event (`instances_changed`, `channels_changed`,
 /// `project_created`, `scheduled_items_changed`, `scheduled_item_fired`,
 /// `permission_request`, `question_request`, `question_expired`,
-/// `turn_sound`, `refresh_requested`, `notify_requested`, `quit_requested`,
+/// `turn_sound`, `refresh_requested`, `usage_poll_requested`, `notify_requested`, `quit_requested`,
 /// `skill_usage_changed`, `session_character_assigned`,
 /// `token_history_updated` - see the `notifier.publish` call sites across
 /// `daemon/`) mirrors data already exposed by an allowlisted `/api/rpc`

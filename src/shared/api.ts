@@ -6,6 +6,7 @@
 // callbacks) are kept as stubs so callers don't crash.
 
 import { invoke } from "./ipc";
+import { isTauri } from "./transport";
 import type { TokenRecord, AliasMap } from "./tokens";
 import type { SettingsShape } from "./state";
 import type {
@@ -79,6 +80,17 @@ function toUsageRecord(snap: UsageSnapshot | null | undefined): UsageRecord | nu
     weekly_resets_at: snap.seven_day.resets_at || null,
     extra_usage: snap.extra_usage || null,
   };
+}
+
+function usageSnapshotMapToRecordMap(
+  raw: Record<string, UsageSnapshot>,
+): Record<string, UsageRecord> {
+  const out: Record<string, UsageRecord> = {};
+  for (const [accountId, snap] of Object.entries(raw)) {
+    const rec = toUsageRecord(snap);
+    if (rec) out[accountId] = rec;
+  }
+  return out;
 }
 
 async function fetchHistoryLegacy(): Promise<UsageRecord[]> {
@@ -208,13 +220,29 @@ export const api = {
   getUsageMap: async (): Promise<Record<string, UsageRecord>> => {
     try {
       const raw = (await invoke<Record<string, UsageSnapshot>>("get_usage_map")) || {};
-      const out: Record<string, UsageRecord> = {};
-      for (const [accountId, snap] of Object.entries(raw)) {
-        const rec = toUsageRecord(snap);
-        if (rec) out[accountId] = rec;
-      }
-      return out;
+      return usageSnapshotMapToRecordMap(raw);
     } catch (e) { console.error("get_usage_map failed", e); return {}; }
+  },
+
+  /** Click-to-refresh for the usage dials: a REAL claude.ai poll (not a cached
+   * re-read), scoped to one account when `accountId` is given. On desktop
+   * (Tauri) this calls the existing `poll_now` command directly, then re-reads
+   * the map. On the remote/phone PWA there is no direct route to the app
+   * process, so it goes through the daemon's `request_live_usage_refresh` RPC
+   * instead, which forwards the request to the connected desktop app and
+   * waits for a fresh snapshot to land (see daemon/methods/usage.rs). Throws
+   * if the desktop app isn't reachable (remote) or the poll itself fails
+   * (desktop) - callers show that as a failed-refresh state, not a silent
+   * no-op. */
+  refreshUsageLive: async (accountId?: string | null): Promise<Record<string, UsageRecord>> => {
+    if (isTauri()) {
+      await invoke("poll_now", { accountId: accountId ?? null });
+      return api.getUsageMap();
+    }
+    const raw = await invoke<Record<string, UsageSnapshot>>("request_live_usage_refresh", {
+      accountId: accountId ?? null,
+    });
+    return usageSnapshotMapToRecordMap(raw || {});
   },
   getAuthStateMap: async (): Promise<Record<string, AuthState>> => {
     try { return (await invoke<Record<string, AuthState>>("get_auth_state_map")) || {}; }

@@ -164,8 +164,20 @@ pub enum PollErr {
 }
 
 pub async fn poll_once(app: &AppHandle, trigger: PollTrigger) -> Result<UsageSnapshot, PollErr> {
+    poll_once_scoped(app, trigger, None).await
+}
+
+/// Same as [`poll_once`], but when `account_id` is given only that account is
+/// polled (used by the click-to-refresh dial - a single account's manual
+/// refresh shouldn't re-poll every other configured account too). `None`
+/// preserves the original all-accounts behaviour.
+pub async fn poll_once_scoped(
+    app: &AppHandle,
+    trigger: PollTrigger,
+    account_id: Option<&str>,
+) -> Result<UsageSnapshot, PollErr> {
     let _ = trigger;
-    let result = do_poll(app).await;
+    let result = do_poll(app, account_id).await;
 
     crate::tray::render_tray_now(app);
     if let Ok(snap) = &result {
@@ -186,9 +198,18 @@ pub async fn poll_once(app: &AppHandle, trigger: PollTrigger) -> Result<UsageSna
 /// threshold is never silently missed by comparing against the wrong
 /// account's prior reading. Each branch owns its own SQLite insert(s) since
 /// the per-account branch may write more than one row.
-async fn do_poll(app: &AppHandle) -> Result<UsageSnapshot, PollErr> {
+async fn do_poll(app: &AppHandle, account_filter: Option<&str>) -> Result<UsageSnapshot, PollErr> {
     let accounts = crate::accounts::load_registry();
-    let with_cookies: Vec<Account> = accounts.into_iter().filter(account_has_cookie).collect();
+    let mut with_cookies: Vec<Account> = accounts.into_iter().filter(account_has_cookie).collect();
+    if let Some(id) = account_filter {
+        with_cookies.retain(|a| a.id == id);
+        if with_cookies.is_empty() {
+            // The requested account has no cookie to poll with - the legacy
+            // branch below ignores the filter entirely, so falling through to
+            // it would poll the wrong (or an arbitrary) account instead.
+            return Err(PollErr::NoSession);
+        }
+    }
 
     let snap = if with_cookies.is_empty() {
         let prev_snap = app.state::<AppState>().current_usage.lock().unwrap().clone();
@@ -430,6 +451,7 @@ mod tests {
             org_uuid: format!("org-{id}"),
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
+            fleet_eligible: false,
         }
     }
 

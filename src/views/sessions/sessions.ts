@@ -26,7 +26,7 @@ import { renderSidebar, refreshSessions, openCtxMenu, closeCtxMenu, openDraftCtx
 import { loadSessionCharacters } from "./session-characters";
 import { api } from "../../shared/api";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
-import { mountUsageChip } from "./usage-chip";
+import { mountUsageDials } from "./usage-dials";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { getTransport, isRemote } from "../../shared/transport";
 import {
@@ -198,8 +198,8 @@ function wireRateLimitBanner(
   const rlHost = root.querySelector<HTMLElement>("#rate-limit-banner-host");
   if (rlHost) rateLimitBanner.mount(rlHost);
 
-  const usageChipHost = root.querySelector<HTMLElement>("#usage-chip-host");
-  const teardownUsageChip = usageChipHost && isRemote() ? mountUsageChip(usageChipHost) : null;
+  const usageDialHost = root.querySelector<HTMLElement>("#usage-dial-host");
+  const teardownUsageDials = usageDialHost && isRemote() ? mountUsageDials(usageDialHost) : null;
   rateLimitBanner.setSelectedSessionGetter(() => state.selectedId);
   rateLimitBanner.setOnMoved((newId, oldId) => {
     carrySessionSettings(oldId, newId);
@@ -227,7 +227,7 @@ function wireRateLimitBanner(
     })();
   });
 
-  return teardownUsageChip;
+  return teardownUsageDials;
 }
 
 /** Wires the "more options" overflow button, the preview-panel toggle button
@@ -764,7 +764,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     replayPendingPrompt(sid);
   });
 
-  const teardownUsageChip = wireRateLimitBanner(root, pane, listEl, myMount);
+  const teardownUsageDials = wireRateLimitBanner(root, pane, listEl, myMount);
 
   if (consumePendingOpenPicker()) {
     void startNewSession(pane);
@@ -817,7 +817,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     previewController = null;
     state.previewController = null;
     disarmSetupStallTimer();
-    teardownUsageChip?.();
+    teardownUsageDials?.();
     teardownState();
   };
 }
