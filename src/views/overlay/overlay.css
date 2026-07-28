@@ -52,8 +52,26 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
 
 /* Padding is sized so the hover info circle (larger than a dial, centred on it)
  * always fits inside the window — that lets the window stay a FIXED size and
- * never reposition/resize on hover (which is what made it stutter + wander). */
-.oc-dial-row { display: flex; align-items: flex-start; gap: 6px; padding: 13px; }
+ * never reposition/resize on hover (which is what made it stutter + wander).
+ * Top/left/right padding are all bigger than the bottom for the same reason,
+ * on behalf of the reset popup (.oc-reset-pop, shared/usage-dial.ts): that
+ * popup renders ABOVE and centred-overhanging the dial, so
+ * resizeOverlayToContent (which measures from the window's own top-left
+ * origin, and never counts an absolutely-positioned child that overflows its
+ * static ancestor) needs all of that headroom reserved in the row's
+ * normal-flow box at all times, not just while something is hovered - Joe,
+ * 2026-07-28: simplest option, a permanently-reserved allowance beats making
+ * the window resize on hover in/out (the exact behaviour that used to
+ * stutter/wander here). Costs a small always-present dead-click zone around
+ * the row when nothing's hovered - the tradeoff Joe picked over the
+ * alternative of a window that grows/shrinks live. Left/right padding (65px)
+ * covers the popup's worst-case overhang for the FIRST/LAST dial in the row
+ * (measured: a 168px popup centred over a ~60px dial overhangs ~54px each
+ * side, see e2e/view-harness/overlay.view.spec.ts) - an interior dial's
+ * popup overlapping a neighbour's icon is fine (a hover tooltip covering
+ * something briefly is normal), only the row's own outer edges are a hard
+ * window-clipping risk. */
+.oc-dial-row { display: flex; align-items: flex-start; gap: 6px; padding: 13px 65px 13px 65px; padding-top: 70px; }
 
 /* Card mode: one shared rounded card behind the whole dial row instead of a
  * per-dial disc (which circles mode uses). Same tint as .oc-disc and honours
@@ -169,6 +187,43 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
 .oc-info-row { display: flex; align-items: baseline; justify-content: center; gap: 1px; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .oc-info-row b { font-weight: 700; }
 .oc-info-safe { color: var(--color-text-muted, #8a8aa0); opacity: 0.7; }
+
+/* Reset countdown popup: a SEPARATE small bubble above the dial (not inside
+ * the .oc-info circle - that stays exactly as it was) showing the 5h/7d
+ * reset countdown + absolute clock time. Fades in together with .oc-info on
+ * the same hover trigger, so it reads as one popup gaining a second tier
+ * rather than two unrelated things appearing (see shared/usage-dial.ts's
+ * resetPopupHtml). Deliberately NOT wired to any click - click stays
+ * refresh-only (2026-07-27 decision), this is hover-only, matching .oc-info. */
+.oc-reset-pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%) translateY(4px) scale(0.92);
+  z-index: 9;
+  min-width: 118px;
+  border-radius: 10px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: color-mix(in srgb, var(--color-surface, #1f1f2c) 92%, transparent);
+  border: 1px solid var(--color-border, #2e2e40);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1), transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.oc-cell:hover .oc-reset-pop {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+.oc-reset-row { display: flex; align-items: baseline; gap: 5px; font-size: 10.5px; white-space: nowrap; }
+.oc-reset-k { color: var(--color-text-muted, #8a8aa0); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; width: 14px; flex: none; }
+.oc-reset-rel { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text, #e8e8f0); }
+.oc-reset-rel.oc-reset-near { color: #e6a23c; }
+.oc-reset-rel.oc-reset-hot { color: #e05252; }
+.oc-reset-abs { color: var(--color-text-muted, #8a8aa0); opacity: 0.75; font-variant-numeric: tabular-nums; }
 
 /* Placeholder (loading / no accounts): give it a card look so it's legible
  * against the transparent window instead of floating text. */

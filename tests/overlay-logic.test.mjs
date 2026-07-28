@@ -10,8 +10,8 @@ describe("buildOverlayRow", () => {
   it("marks an account with no usage entry as no-data, all metrics null", () => {
     const row = buildOverlayRow(personal, undefined, NOW);
     expect(row.hasData).toBe(false);
-    expect(row.session).toEqual({ pct: null, safePct: null });
-    expect(row.weekly).toEqual({ pct: null, safePct: null });
+    expect(row.session).toEqual({ pct: null, safePct: null, resetIso: null });
+    expect(row.weekly).toEqual({ pct: null, safePct: null, resetIso: null });
     expect(row.id).toBe("acct-personal");
     expect(row.colour).toBe("#9d7dfc");
   });
@@ -29,6 +29,8 @@ describe("buildOverlayRow", () => {
     expect(row.session.safePct).toBe(0); // window just started
     expect(row.weekly.pct).toBe(31);
     expect(row.weekly.safePct).toBe(0);
+    expect(row.session.resetIso).toBe("2026-04-20T15:00:00Z");
+    expect(row.weekly.resetIso).toBe("2026-04-27T10:00:00Z");
   });
 
   it("falls back to a synthetic +1h weekly reset when the API omits it (matches account-selector.ts)", () => {
@@ -43,6 +45,10 @@ describe("buildOverlayRow", () => {
     // fallback reset is ~now + 1h against a 7-day window).
     expect(row.weekly.safePct).not.toBeNull();
     expect(row.session.safePct).toBeNull(); // no fallback for session
+    // resetIso stays null (raw) even though safePct got a fallback anchor -
+    // the fallback is only for the safe-pace maths, never a display value.
+    expect(row.weekly.resetIso).toBeNull();
+    expect(row.session.resetIso).toBeNull();
   });
 });
 

@@ -110,6 +110,32 @@ export function fmtResetDisplay(isoStr: string | null | undefined): ResetDisplay
   return { absolute, relative, diffMs };
 }
 
+// Near/hot urgency thresholds for a reset countdown - shared by every reset
+// display so "near" (amber) and "hot" (red, about to fire) mean the same
+// thing everywhere one shows (dashboard account-selector.ts ring time-stacks,
+// the overlay's reset popup).
+export const RESET_NEAR_MS = 3_600_000; // 1h
+export const RESET_HOT_MS = 300_000; // 5m
+
+export interface ResetUrgency {
+  text: string;
+  near: boolean;
+  hot: boolean;
+}
+
+/** Countdown text ("in Xh Ym") plus near/hot urgency for a reset timestamp,
+ * built on the same fmtResetDisplay used for the absolute/relative pair. */
+export function resetUrgency(isoStr: string | null | undefined): ResetUrgency | null {
+  const reset = fmtResetDisplay(isoStr);
+  if (!reset) return null;
+  if (reset.diffMs <= 0) return { text: "now", near: false, hot: false };
+  return {
+    text: formatRelativeMinutes(reset.diffMs),
+    near: reset.diffMs <= RESET_NEAR_MS,
+    hot: reset.diffMs <= RESET_HOT_MS,
+  };
+}
+
 export function pctColor(v: number | null | undefined): string {
   if (v === null || v === undefined) return "var(--text-dim)";
   if (v >= 80) return "#e74c3c";

@@ -6,7 +6,7 @@
 // `views/overlay/overlay.css`'s `.oc-*` classes, imported by both consumers.
 
 import { escapeHtml } from "./escape-html";
-import { valueColor } from "./formatters";
+import { valueColor, fmtResetDisplay, resetUrgency } from "./formatters";
 import type { ValueColorSettings } from "./formatters";
 import type { OverlayMetric, OverlayRow } from "../views/overlay/overlay-logic";
 
@@ -141,6 +141,36 @@ function infoHtml(row: OverlayRow, settings: ValueColorSettings): string {
   </div>`;
 }
 
+/** One row of the reset popup: `<label> in Xh Ym  <absolute clock time>`,
+ * the countdown tinted near/hot per `resetUrgency`'s shared thresholds.
+ * `data-reset-iso` lets tickOverlayResetPopups update just this span's text
+ * every second without touching anything else. Empty string when there's no
+ * active reset to show (no fabricated countdown). */
+function resetPopupRow(label: string, resetIso: string | null): string {
+  const urgency = resetUrgency(resetIso);
+  if (!urgency) return "";
+  const reset = fmtResetDisplay(resetIso);
+  const cls = `oc-reset-rel${urgency.near ? " oc-reset-near" : ""}${urgency.hot ? " oc-reset-hot" : ""}`;
+  return `<div class="oc-reset-row">
+    <span class="oc-reset-k">${escapeHtml(label)}</span>
+    <span class="${cls}" data-reset-iso="${escapeHtml(resetIso as string)}">${escapeHtml(urgency.text)}</span>
+    <span class="oc-reset-abs">${escapeHtml(reset?.absolute ?? "")}</span>
+  </div>`;
+}
+
+/** Satellite popup shown ABOVE the (separate, unrelated) hover info circle -
+ * the 5h/7d reset countdown + absolute clock time. A distinct popup instead
+ * of squeezing into the 82px info circle (see .for_bepy/mockups' overlay
+ * reset-timer round, real-component branch, approved 2026-07-28: hover-only,
+ * own tier above the existing circle, no click gesture so it can't collide
+ * with click-to-refresh). Renders "" when neither window has an active reset
+ * (e.g. no data yet), so no empty bubble ever shows. */
+function resetPopupHtml(row: OverlayRow): string {
+  const rows = resetPopupRow("5h", row.session.resetIso) + resetPopupRow("7d", row.weekly.resetIso);
+  if (!rows) return "";
+  return `<div class="oc-reset-pop">${rows}</div>`;
+}
+
 export function cellHtml(
   row: OverlayRow,
   settings: ValueColorSettings,
@@ -148,7 +178,26 @@ export function cellHtml(
   scale = 1.2,
 ): string {
   return `<div class="oc-cell" data-acc-id="${escapeHtml(row.id)}">
+    ${resetPopupHtml(row)}
     ${dialHtml(row, settings, showDisc, scale)}
     ${infoHtml(row, settings)}
   </div>`;
+}
+
+/** Live per-second tick for reset-popup countdowns: recomputes each visible
+ * `[data-reset-iso]` span's text + near/hot classes against the current time,
+ * in place - no innerHTML rebuild. Mirrors account-selector.ts's
+ * tickAccountCardCountdowns for the dashboard rings. Safe to call on a
+ * container with none open (no-op) - cheap enough to run every second
+ * regardless of hover state. */
+export function tickOverlayResetPopups(container: HTMLElement): void {
+  container.querySelectorAll<HTMLElement>("[data-reset-iso]").forEach((span) => {
+    const iso = span.dataset["resetIso"];
+    if (!iso) return;
+    const urgency = resetUrgency(iso);
+    if (!urgency) return;
+    span.textContent = urgency.text;
+    span.classList.toggle("oc-reset-near", urgency.near);
+    span.classList.toggle("oc-reset-hot", urgency.hot);
+  });
 }

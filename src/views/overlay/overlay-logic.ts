@@ -23,6 +23,7 @@ export interface OverlayUsageLite {
 export interface OverlayMetric {
   pct: number | null;
   safePct: number | null;
+  resetIso: string | null;
 }
 
 export interface OverlayRow {
@@ -50,8 +51,8 @@ export function buildOverlayRow(
       colour: account.colour,
       icon: account.icon,
       hasData: false,
-      session: { pct: null, safePct: null },
-      weekly: { pct: null, safePct: null },
+      session: { pct: null, safePct: null, resetIso: null },
+      weekly: { pct: null, safePct: null, resetIso: null },
     };
   }
   const sessionSafe = computeSafePacePct(usage.session_resets_at, SESSION_WINDOW_MS, now);
@@ -63,8 +64,12 @@ export function buildOverlayRow(
     colour: account.colour,
     icon: account.icon,
     hasData: true,
-    session: { pct: usage.session_pct, safePct: sessionSafe },
-    weekly: { pct: usage.weekly_pct, safePct: weeklySafe },
+    // resetIso carries the RAW reset timestamp (not weeklyFallback, which only
+    // exists to anchor the safe-pace % calc above) - null when the account
+    // genuinely has no active weekly reset yet, so the reset popup can skip
+    // showing a fabricated countdown for it.
+    session: { pct: usage.session_pct, safePct: sessionSafe, resetIso: usage.session_resets_at },
+    weekly: { pct: usage.weekly_pct, safePct: weeklySafe, resetIso: usage.weekly_resets_at },
   };
 }
 

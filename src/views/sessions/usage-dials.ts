@@ -12,10 +12,11 @@
 import { api } from "../../shared/api";
 import { getSettings } from "../../shared/state";
 import "../overlay/overlay.css";
-import { cellHtml } from "../../shared/usage-dial";
+import { cellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
 import { buildOverlayRows } from "../overlay/overlay-logic";
 
 const POLL_MS = 60_000;
+const RESET_TICK_MS = 1_000;
 // Compact size for the header row - no backing disc (the row itself sits
 // inline in the header, not floating over the desktop), scaled down from the
 // overlay's full-size dial.
@@ -71,6 +72,7 @@ export function mountUsageDials(host: HTMLElement): () => void {
   host.addEventListener("click", onClick);
 
   const timer = window.setInterval(() => void renderUsageDials(host), POLL_MS);
+  const tickTimer = window.setInterval(() => tickOverlayResetPopups(host), RESET_TICK_MS);
   const onVisible = () => {
     if (document.visibilityState === "visible") void renderUsageDials(host);
   };
@@ -78,6 +80,7 @@ export function mountUsageDials(host: HTMLElement): () => void {
 
   return () => {
     window.clearInterval(timer);
+    window.clearInterval(tickTimer);
     document.removeEventListener("visibilitychange", onVisible);
     host.removeEventListener("click", onClick);
   };

@@ -14,11 +14,15 @@ import { api } from "../../shared/api";
 import { getSettings, setSettings } from "../../shared/state";
 import type { SettingsShape } from "../../shared/state";
 import { buildOverlayRows } from "./overlay-logic";
-import { cellHtml } from "../../shared/usage-dial";
+import { cellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
 import { initOverlayDrag, resizeOverlayToContent } from "./overlay-drag";
 
 const DEFAULT_OVERLAY_OPACITY = 0.72;
 const REFRESH_INTERVAL_MS = 30_000;
+// Separate from the 30s data refresh: just re-paints the reset popup's own
+// countdown text/near-hot classes in place, so a countdown someone's actually
+// watching (via the hover popup) doesn't sit frozen between refreshes.
+const RESET_TICK_INTERVAL_MS = 1_000;
 // Local IPC refreshes are usually near-instant; only show the spinner if one
 // runs long enough to actually be worth signalling, so a normal 30s tick
 // doesn't flash the icon for a frame.
@@ -140,11 +144,15 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     });
   }
   const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+  const tickTimer = window.setInterval(() => {
+    if (rowsEl) tickOverlayResetPopups(rowsEl);
+  }, RESET_TICK_INTERVAL_MS);
 
   return () => {
     try { unlistenHistory(); } catch { /* ignore */ }
     if (unlistenSettings) { try { unlistenSettings(); } catch { /* ignore */ } }
     try { cleanupDrag(); } catch { /* ignore */ }
     window.clearInterval(timer);
+    window.clearInterval(tickTimer);
   };
 }
