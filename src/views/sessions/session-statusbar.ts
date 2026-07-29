@@ -71,6 +71,7 @@ export class SessionStatusbar {
   private sessionModel: string | null;
   private readOnlyEffort: boolean;
   private onEffortChange: ((effort: string) => void) | null;
+  private onModelChange: ((model: string) => void) | null;
   private accountId: string | null;
   private onAccountClick: (() => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
@@ -103,6 +104,7 @@ export class SessionStatusbar {
     this.sessionModel = opts.sessionModel ?? null;
     this.readOnlyEffort = opts.readOnly ?? false;
     this.onEffortChange = opts.onEffortChange ?? null;
+    this.onModelChange = opts.onModelChange ?? null;
     this.accountId = opts.accountId ?? null;
     this.onAccountClick = opts.onAccountClick ?? null;
     this.hideZero = opts.hideZero ?? true;
@@ -326,6 +328,15 @@ export class SessionStatusbar {
     this.render();
   }
 
+  /** Locks the model chip once the real agent process has spawned (a draft's
+   *  onModelChange must not survive into the started session, or the chip
+   *  would keep letting the user "change" a model that's already running). */
+  disableModelEdit(): void {
+    if (!this.onModelChange) return;
+    this.onModelChange = null;
+    this.render();
+  }
+
   destroy(): void {
     if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null; }
     if (this.serversTimer) { clearInterval(this.serversTimer); this.serversTimer = null; }
@@ -542,7 +553,15 @@ export class SessionStatusbar {
       const anchor = e.currentTarget as HTMLElement;
       const wasOpen = this.modelPopover.isOpen;
       this.closeChipPopovers();
-      if (!wasOpen) this.modelPopover.open(anchor, this.meta.model ?? this.sessionModel);
+      if (!wasOpen) this.modelPopover.open(anchor, {
+        model: this.meta.model ?? this.sessionModel ?? "",
+        onModelChange: this.onModelChange ?? undefined,
+        onCommit: (next) => {
+          this.sessionModel = next;
+          this.modelPopover.close();
+          this.render();
+        },
+      });
     });
 
     this.container.querySelector<HTMLElement>(".sb-effort-btn")?.addEventListener("click", (e) => {

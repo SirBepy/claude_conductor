@@ -237,23 +237,27 @@
   font-weight: 600;
 }
 
-.sb-effort-slider {
+.sb-effort-slider,
+.sb-model-slider {
   width: 100%;
 }
 
-.sb-effort-stops {
+.sb-effort-stops,
+.sb-model-stops {
   display: flex;
   justify-content: space-between;
   margin-top: 4px;
   gap: 4px;
 }
 
-.sb-effort-stop {
+.sb-effort-stop,
+.sb-model-stop {
   font-size: 0.7rem;
   color: var(--color-text-muted);
 }
 
-.sb-effort-stop.active {
+.sb-effort-stop.active,
+.sb-model-stop.active {
   color: var(--color-primary);
   font-weight: 600;
 }

@@ -145,6 +145,9 @@ export interface StatusbarOptions {
   hideZero?: boolean;
   /** Called instead of set_session_effort IPC when effort changes (e.g. pending sessions). */
   onEffortChange?: (effort: string) => void;
+  /** When set, the model chip is editable (draft/pending sessions, before a real
+   *  agent process is spawned) instead of showing the "locked" popover. */
+  onModelChange?: (model: string) => void;
   /** Account this session is running under, for the `account` chip. */
   accountId?: string | null;
   /** Called when the `account` chip is clicked, to open the change-account picker. */

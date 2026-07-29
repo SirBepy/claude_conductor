@@ -8,7 +8,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
-import { EFFORTS } from "../../shared/effort-presets";
+import { EFFORTS, readModels, modelDisplayLabel } from "../../shared/effort-presets";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { AiTodoEntry, ChatDrain, ServerInfo } from "../../types/ipc.generated";
 import { drainCache } from "./session-statusbar-helpers";
@@ -363,15 +363,40 @@ export class EffortPopover {
 
 // ─────────────────────────────── Model ─────────────────────────────────────
 
+export interface ModelOpenCtx {
+  model: string;
+  /** Present only for a not-yet-started (draft) session: the picker becomes
+   *  editable instead of showing the "locked" hint. */
+  onModelChange?: (model: string) => void;
+  /** Persist + reflect the chosen model, then close + re-render the chip. */
+  onCommit: (model: string) => void;
+}
+
 export class ModelPopover {
   private shell = new PopoverShell();
 
   get isOpen(): boolean { return this.shell.isOpen; }
 
-  open(anchor: HTMLElement, model: string | null): void {
-    if (!model) { this.shell.close(); return; }
+  open(anchor: HTMLElement, ctx: ModelOpenCtx): void {
+    if (ctx.onModelChange) {
+      const models = readModels({});
+      this.shell.open(anchor, this.buildEditableHtml(models, ctx.model), {
+        className: "sb-model-popover",
+        wire: (el) => {
+          const slider = el.querySelector<HTMLInputElement>(".sb-model-slider");
+          slider?.addEventListener("change", () => {
+            const next = models[Number(slider.value)];
+            if (!next) return;
+            ctx.onModelChange!(next);
+            ctx.onCommit(next);
+          });
+        },
+      });
+      return;
+    }
+    if (!ctx.model) { this.shell.close(); return; }
     this.shell.open(anchor, `
-      <div class="sb-model-popover-name">${escapeHtml(model)}</div>
+      <div class="sb-model-popover-name">${escapeHtml(ctx.model)}</div>
       <div class="sb-model-popover-hint">Locked for this session. Start a new session to change.</div>
     `, { className: "sb-model-popover" });
   }
@@ -379,4 +404,17 @@ export class ModelPopover {
   close(): void { this.shell.close(); }
 
   reanchor(anchor: HTMLElement): void { this.shell.reanchor(anchor); }
+
+  private buildEditableHtml(models: string[], model: string): string {
+    const idx = Math.max(0, models.indexOf(model));
+    const stops = models.map((m, i) => `
+      <span class="sb-model-stop${i === idx ? " active" : ""}">${escapeHtml(modelDisplayLabel(m))}</span>
+    `).join("");
+    return `
+      <div class="sb-model-popover-name">Model</div>
+      <input type="range" class="sb-model-slider" min="0" max="${models.length - 1}" step="1" value="${idx}">
+      <div class="sb-model-stops">${stops}</div>
+      <div class="sb-model-popover-hint">Applies when this chat starts.</div>
+    `;
+  }
 }
