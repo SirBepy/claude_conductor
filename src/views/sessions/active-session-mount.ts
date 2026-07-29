@@ -16,6 +16,7 @@ import { blocksToText } from "../../shared/chat/content-blocks";
 import { showToast } from "../../shared/toast";
 import { setFileEditsProvider } from "../../shared/chat/file-viewer";
 import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
+import { setLightboxComposerBridge } from "../../shared/chat/lightbox";
 import type { ChatEvent, ContentBlock, Instance, ScheduledItem, ScheduledKind } from "../../types/ipc.generated";
 import { state } from "./state";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero } from "./session-statusbar";
@@ -301,6 +302,10 @@ export function mountComposer(
   });
   state.composer = composer;
   composer.setSessionId(sessionId, { readOnly });
+  setLightboxComposerBridge({
+    getDraftText: () => composer.getDraftText(),
+    setDraftText: (text) => composer.setDraftText(text),
+  });
 
   state.scheduledChip?.destroy();
   const scheduledChipSlot = pane.querySelector<HTMLElement>(".scheduled-chip-slot");

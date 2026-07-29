@@ -74,6 +74,36 @@
   max-height: 90%;
 }
 
+.lightbox-composer {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 44px;
+  max-height: 160px;
+  resize: none;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #fff;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.lightbox-composer::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.lightbox-composer:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .lightbox-content embed {
   width: 80vw;
   height: 85vh;

@@ -603,6 +603,11 @@ export class Composer {
     this.opts.onDraftActivity?.();
   }
 
+  /** Plain text of the current draft, attachments aside (lightbox draft mirror). */
+  getDraftText(): string {
+    return this.textarea?.value ?? "";
+  }
+
   /** Build blocks for the current draft without clearing it (for bundling). */
   getDraftBlocks(): ContentBlock[] {
     const text = (this.textarea?.value ?? "").trim();

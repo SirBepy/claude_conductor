@@ -9,14 +9,19 @@ export type LightboxContent =
 
 let overlay: HTMLDivElement | null = null;
 
-// Composer/sidebar-visible windowed layout - TEMPORARILY REVERTED (2026-07-29)
-// to bisect a reported app freeze from repeated open-image/close-image/
-// switch-chat cycling. This was the newest, most cross-cutting addition (the
-// only piece that reaches outside the lightbox's own subtree, tracking the
-// composer element across chat switches via ResizeObserver). Re-add once
-// confirmed innocent or once the actual freeze cause is found.
-function watchOverlayBounds(): void {}
-function unwatchOverlayBounds(): void {}
+export interface LightboxComposerBridge {
+  getDraftText(): string;
+  setDraftText(text: string): void;
+}
+
+// Set by the sessions view (active-session-mount.ts) to the currently mounted
+// Composer, so the lightbox's own textbox can seed from / hand back to the
+// real draft without importing the views layer - same seam as
+// setFileEditsProvider in file-viewer.ts.
+let composerBridge: LightboxComposerBridge | null = null;
+export function setLightboxComposerBridge(bridge: LightboxComposerBridge | null): void {
+  composerBridge = bridge;
+}
 
 export function openLightbox(content: LightboxContent): void {
   closeLightbox();
@@ -44,6 +49,13 @@ export function openLightbox(content: LightboxContent): void {
     inner.appendChild(img);
     setupImageZoomPan(img, inner);
     overlay.appendChild(buildMoreMenuButton(content));
+    if (composerBridge) {
+      const box = document.createElement("textarea");
+      box.className = "lightbox-composer";
+      box.placeholder = "Type a message...";
+      box.value = composerBridge.getDraftText();
+      overlay.appendChild(box);
+    }
   } else if (content.type === "pdf") {
     const blob = b64toBlob(content.base64, "application/pdf");
     const url = URL.createObjectURL(blob);
@@ -60,15 +72,16 @@ export function openLightbox(content: LightboxContent): void {
 
   overlay.appendChild(close);
   overlay.appendChild(inner);
-  watchOverlayBounds();
   document.body.appendChild(overlay);
+  overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer")?.focus();
   document.addEventListener("keydown", onEsc);
 }
 
 export function closeLightbox(): void {
   if (!overlay) return;
   closeAllMenus();
-  unwatchOverlayBounds();
+  const box = overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer");
+  if (box && composerBridge) composerBridge.setDraftText(box.value);
   const url = overlay.dataset.blobUrl;
   if (url) URL.revokeObjectURL(url);
   overlay.remove();
