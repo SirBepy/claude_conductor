@@ -27,6 +27,26 @@ fn watchers() -> &'static Mutex<HashMap<String, WatchHandle>> {
     W.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Guards the race where a rapid switch-away unwatches a session before its
+/// still-in-flight `watch_session_transcript` call has registered - without
+/// this, that call would insert its `WatchHandle` anyway once it finishes,
+/// leaking a live FS watcher + tail task forever (no TTL on this side).
+fn generations() -> &'static Mutex<HashMap<String, u64>> {
+    static G: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    G.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn bump_generation(session_id: &str) -> u64 {
+    let mut g = generations().lock().unwrap();
+    let next = g.get(session_id).copied().unwrap_or(0) + 1;
+    g.insert(session_id.to_string(), next);
+    next
+}
+
+fn current_generation(session_id: &str) -> u64 {
+    generations().lock().unwrap().get(session_id).copied().unwrap_or(0)
+}
+
 /// Start tailing `session_id`'s JSONL transcript, emitting
 /// `chat-watch:<session_id>` Tauri events for each new complete line.
 ///
@@ -44,6 +64,7 @@ pub async fn watch_session_transcript(
 
     // Replace any existing watcher for this session.
     stop_watcher(&session_id);
+    let my_gen = bump_generation(&session_id);
 
     let sid = session_id.clone();
     let c = cwd.clone();
@@ -174,6 +195,15 @@ pub async fn watch_session_transcript(
         }
     });
 
+    // A rapid switch-away (unwatch, or a fresh watch call for the same id) may
+    // have superseded this call while the setup above was in flight. Only
+    // register if we're still the latest request for this session; otherwise
+    // tear down what we just built instead of leaking it.
+    if current_generation(&session_id) != my_gen {
+        task.abort();
+        return Ok(());
+    }
+
     watchers()
         .lock()
         .unwrap()
@@ -185,6 +215,7 @@ pub async fn watch_session_transcript(
 /// Stop the file watcher for `session_id`. No-op if not currently watching.
 #[tauri::command]
 pub fn unwatch_session_transcript(session_id: String) {
+    bump_generation(&session_id);
     stop_watcher(&session_id);
 }
 
