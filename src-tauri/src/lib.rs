@@ -313,6 +313,8 @@ pub fn run() {
             ipc::read_image_file,
             ipc::read_text_file,
             ipc::write_text_file,
+            ipc::write_temp_image,
+            ipc::reveal_file_in_explorer,
             ipc::get_git_info,
             ipc::get_git_dirty,
             ipc::get_recent_branches,

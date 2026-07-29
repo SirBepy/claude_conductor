@@ -200,6 +200,76 @@ pub async fn read_text_file(path: String) -> Result<TextFileData, String> {
     .map_err(|e| format!("read_text_file join error: {e}"))?
 }
 
+/// Write base64 image bytes to a temp file so it can be revealed in the OS
+/// file manager. Used by the lightbox "Show in File Explorer" menu item for
+/// images that have no known source path (inline chat-block images from an
+/// MCP tool result, e.g. a chrome-devtools screenshot) - the temp copy is a
+/// synthesized stand-in, not the original file.
+#[tauri::command]
+pub async fn write_temp_image(mime: String, base64: String) -> Result<String, String> {
+    use base64::Engine;
+    tauri::async_runtime::spawn_blocking(move || {
+        let ext = match mime.as_str() {
+            "image/png" => "png",
+            "image/jpeg" => "jpg",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            "image/bmp" => "bmp",
+            "image/svg+xml" => "svg",
+            _ => "bin",
+        };
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&base64)
+            .map_err(|e| e.to_string())?;
+        let path = std::env::temp_dir().join(format!("claude-conductor-{}.{ext}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("write_temp_image join error: {e}"))?
+}
+
+/// Reveal (and select, where the OS supports it) a specific FILE in the OS
+/// file manager. Unlike `open_in_explorer` (which opens a directory), this
+/// takes a file path and highlights it in its parent folder.
+#[tauri::command]
+pub async fn reveal_file_in_explorer(path: String) -> Result<(), String> {
+    if path.is_empty() { return Err("empty path".into()) }
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer")
+                .arg(format!("/select,{path}"))
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("explorer spawn failed: {e}"))
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(&path)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("open -R spawn failed: {e}"))
+        }
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        {
+            let parent = std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from(&path));
+            std::process::Command::new("xdg-open")
+                .arg(&parent)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("xdg-open spawn failed: {e}"))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Overwrite a local text file from the in-app file editor (ai_todo 95 slice 3).
 /// The counterpart to `read_text_file`: writes any absolute path the agent
 /// surfaced (not sandboxed). The frontend only enables editing for files that
