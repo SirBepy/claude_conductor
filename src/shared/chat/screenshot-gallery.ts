@@ -8,6 +8,7 @@
 // lands inline with the title/tag/counter instead of sitting lower than them.
 
 import { escapeHtml } from "../escape-html";
+import { setupImageZoomPan } from "./image-zoom-pan";
 
 /** One screenshot surfaced from a turn's tool_result image outputs. */
 export interface ScreenshotShot {
@@ -28,6 +29,7 @@ export interface ScreenshotShot {
 
 let overlay: HTMLDivElement | null = null;
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
+let disposeZoomPan: (() => void) | null = null;
 
 export function closeScreenshotGallery(): void {
   if (!overlay) return;
@@ -37,6 +39,8 @@ export function closeScreenshotGallery(): void {
     document.removeEventListener("keydown", keyHandler);
     keyHandler = null;
   }
+  disposeZoomPan?.();
+  disposeZoomPan = null;
 }
 
 export function openScreenshotGallery(shots: ScreenshotShot[], startIndex: number): void {
@@ -95,7 +99,12 @@ export function openScreenshotGallery(shots: ScreenshotShot[], startIndex: numbe
       </div>
     `;
     header.querySelector(".lightbox-close")?.addEventListener("click", closeScreenshotGallery);
-    stage.innerHTML = `<img src="data:${escapeHtml(shot.mime)};base64,${escapeHtml(shot.data)}" alt="${escapeHtml(shot.title)}">`;
+    disposeZoomPan?.();
+    // base64's alphabet can't contain &<>"', so escaping shot.data (can be
+    // multiple MB) would scan the whole payload for zero benefit.
+    stage.innerHTML = `<img src="data:${escapeHtml(shot.mime)};base64,${shot.data}" alt="${escapeHtml(shot.title)}">`;
+    const img = stage.querySelector("img");
+    disposeZoomPan = img ? setupImageZoomPan(img, stage) : null;
     prevBtn.disabled = idx === 0;
     nextBtn.disabled = idx === shots.length - 1;
   }

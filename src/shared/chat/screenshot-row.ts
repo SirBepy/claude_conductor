@@ -108,7 +108,10 @@ export function collectScreenshotShots(
 
 function screenshotThumbHtml(shot: ScreenshotShot, index: number): string {
   const titleAttr = escapeHtml(`${shot.title} — ${shot.agentTag}`);
-  return `<div class="sent-attachment-thumb screenshot-thumb" data-agent="${shot.agentKind}" data-shot-index="${index}" title="${titleAttr}"><span class="screenshot-agent-tag">${escapeHtml(shot.agentTag)}</span><img src="data:${escapeHtml(shot.mime)};base64,${escapeHtml(shot.data)}" alt="${escapeHtml(shot.title)}"></div>`;
+  // base64's alphabet can't contain &<>"', so escaping shot.data (can be
+  // multiple MB, and there's one of these per thumbnail in the row) would
+  // scan every payload for zero benefit.
+  return `<div class="sent-attachment-thumb screenshot-thumb" data-agent="${shot.agentKind}" data-shot-index="${index}" title="${titleAttr}"><span class="screenshot-agent-tag">${escapeHtml(shot.agentTag)}</span><img src="data:${escapeHtml(shot.mime)};base64,${shot.data}" alt="${escapeHtml(shot.title)}"></div>`;
 }
 
 /** Paint (or repaint) a screenshot-row's thumbnails as a CSS-native
