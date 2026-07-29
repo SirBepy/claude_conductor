@@ -266,7 +266,9 @@ export function renderBlocks(blocks: ContentBlock[], breaks = false, fileChips =
         case "text":
           return renderTextBlock(b.text, breaks, fileChips);
         case "image":
-          return `<img class="block image" src="data:${escapeHtml(b.mime)};base64,${escapeHtml(b.data)}" alt="">`;
+          // base64's alphabet can't contain &<>"', so escaping it (b.data can
+          // be multiple MB) would scan the whole payload for zero benefit.
+          return `<img class="block image" src="data:${escapeHtml(b.mime)};base64,${b.data}" alt="">`;
         default:
           ((_: never) => "")(b);
       }

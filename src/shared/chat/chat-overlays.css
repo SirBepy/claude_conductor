@@ -35,10 +35,30 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
+.lightbox-more-btn {
+  top: 16px;
+  right: 60px;
+}
+
 .lightbox-content {
   max-width: 90vw;
   max-height: 90vh;
   overflow: auto;
+}
+
+/* Zoom/pan is done via a manual CSS transform on the img itself, not native
+   scroll - overflow:auto's scrollbars would fight the transform. Fixed to
+   fill the overlay (not sized to the img's own pre-transform box) so a
+   small image scaling up isn't clipped by its own un-enlarged container -
+   overflow:hidden needs a boundary as big as the viewing area, not the
+   image's native size. */
+.lightbox-content--image {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .lightbox-content img {
@@ -46,6 +66,12 @@
   max-height: 90vh;
   display: block;
   border-radius: 4px;
+  touch-action: none;
+}
+
+.lightbox-content--image img {
+  max-width: 90%;
+  max-height: 90%;
 }
 
 .lightbox-content embed {
@@ -141,11 +167,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Fixed to fill the overlay (not sized to the img's own pre-transform box),
+   same fix as .lightbox-content--image - overflow:hidden needs a boundary as
+   big as the viewing area, or a zoomed image clips at its own native size.
+   header/prevBtn/nextBtn are position:absolute so they still stack above
+   this despite it now spanning the full overlay (positioned elements always
+   paint above static ones, regardless of DOM order). */
+.screenshot-gallery-stage {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .screenshot-gallery-stage img {
-  max-width: 78vw;
-  max-height: 78vh;
+  max-width: 90%;
+  max-height: 90%;
   display: block;
   border-radius: 4px;
+  touch-action: none;
 }
 
 .screenshot-gallery-nav {
