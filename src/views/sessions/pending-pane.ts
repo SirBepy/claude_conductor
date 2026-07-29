@@ -86,6 +86,7 @@ export async function renderPendingPane(
       sessionModel: config.model || null,
       hideZero,
       onEffortChange: (e) => { config.effort = e; },
+      onModelChange: (m) => { config.model = m; },
     });
     state.statusbar = sb;
     fetchGitInfo(project.path)
@@ -208,6 +209,8 @@ export async function renderPendingPane(
               effort: config.effort,
               account_id: config.accountId ?? null,
               placeholder_id: placeholderId,
+              character_id: config.characterId ?? null,
+              auto_accept: config.autoAccept !== false,
             };
         void invoke<ScheduledItem>("schedule_create", { kind, prompt, fireAt: fireAtUtcIso, recurrence })
           .then((item) => {
@@ -350,6 +353,7 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
   if (state.statusbar) {
     state.statusbar.setSessionId(sessionId);
     state.statusbar.setReadOnlyEffort(false);
+    state.statusbar.disableModelEdit();
   }
   pane.querySelector(".session-pending-hint")?.remove();
 

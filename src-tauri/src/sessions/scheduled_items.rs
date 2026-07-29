@@ -40,6 +40,19 @@ pub enum ScheduledKind {
         /// this field existed deserializable (they load as `None`).
         #[serde(default)]
         placeholder_id: Option<String>,
+        /// The character picked in the new-chat modal at scheduling time, so
+        /// `fire_new_chat` can assign it to the spawned session the same way
+        /// `move_session_to_account` carries a fork's character (`daemon::
+        /// methods::lifecycle::register_account_move`). `#[serde(default)]`
+        /// keeps pre-existing items deserializable (they load as `None`).
+        #[serde(default)]
+        character_id: Option<String>,
+        /// The auto-accept checkbox state from the new-chat modal at
+        /// scheduling time. `#[serde(default)]` keeps pre-existing items
+        /// deserializable (they load as `false`, matching the old behavior of
+        /// never carrying it).
+        #[serde(default)]
+        auto_accept: bool,
     },
     /// Send `prompt` into the Jarvis singleton (todo 272 memory-hygiene
     /// chunk). Deliberately carries NO session id, unlike `Message`: Jarvis's
@@ -489,7 +502,7 @@ mod tests {
         upsert_at(&path, item(message_kind()));
         upsert_at(&path, item(ScheduledKind::NewChat {
             cwd: "C:/proj2".into(), model: "opus".into(), effort: "high".into(), account_id: None,
-            placeholder_id: None,
+            placeholder_id: None, character_id: None, auto_accept: false,
         }));
         assert_eq!(list_at(&path).len(), 2);
     }

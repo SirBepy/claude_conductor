@@ -226,6 +226,10 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
             state.registry.set_jarvis(&sid, true);
             crate::sessions::chat_config::record(&sid, JARVIS_MODEL, JARVIS_EFFORT);
             crate::sessions::chat_config::set_account(&sid, &account_id);
+            // On by default: Jarvis runs unattended, so requiring manual approval
+            // on every tool call would stall the whole fleet on a prompt no one
+            // is watching for.
+            crate::sessions::chat_config::set_auto_accept(&sid, true);
             crate::sessions::persistence::save_snapshot_default(&state.registry);
             // Fresh-spawn only (never on pointer reuse, above) and idempotent -
             // see the function doc for why a respawn never duplicates this.
@@ -372,6 +376,9 @@ pub(crate) async fn spawn_worker(
     }
     crate::sessions::chat_config::record(&sid, &model, WORKER_DEFAULT_EFFORT);
     crate::sessions::chat_config::set_account(&sid, &session.account_id);
+    // On by default: a worker is spawned unattended by Jarvis itself, so
+    // requiring manual approval on every tool call would stall the fleet.
+    crate::sessions::chat_config::set_auto_accept(&sid, true);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     lifecycle::send_message(&session, task, false).await.map_err(|e| e.to_string())?;
@@ -664,7 +671,7 @@ mod tests {
             ScheduledItem::new(
                 ScheduledKind::NewChat {
                     cwd: "C:/y".into(), model: "opus".into(), effort: "high".into(),
-                    account_id: None, placeholder_id: None,
+                    account_id: None, placeholder_id: None, character_id: None, auto_accept: false,
                 },
                 "x".into(),
                 "2026-01-01T00:00:00Z".into(),

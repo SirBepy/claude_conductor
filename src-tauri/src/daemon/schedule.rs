@@ -293,8 +293,11 @@ async fn fire_kind(state: &Arc<DaemonState>, item: &ScheduledItem) -> Result<Opt
             fire_message(state, session_id, cwd, &item.prompt).await?;
             Ok(Some(session_id.clone()))
         }
-        ScheduledKind::NewChat { cwd, model, effort, account_id, .. } => {
-            fire_new_chat(state, cwd, model, effort, account_id.as_deref(), &item.prompt).await
+        ScheduledKind::NewChat { cwd, model, effort, account_id, character_id, auto_accept, .. } => {
+            fire_new_chat(
+                state, cwd, model, effort, account_id.as_deref(),
+                character_id.as_deref(), *auto_accept, &item.prompt,
+            ).await
         }
         ScheduledKind::JarvisHygiene => fire_jarvis_hygiene(state, &item.prompt).await,
     }
@@ -402,12 +405,22 @@ async fn respawn_for_message(
 /// `start_session` handler), since this fires with no RPC round trip to
 /// replicate that path automatically. Respects the metered-billing gate
 /// already inside `spawn_session` (surfaces as `Err` -> `Failed{reason}`).
+///
+/// `character_id`/`auto_accept` are the new-chat modal's settings, captured
+/// on `ScheduledKind::NewChat` at scheduling time (they'd otherwise be lost
+/// before this fire path ever runs - the modal's own settings only reach a
+/// session via two follow-up client calls, `pending-pane.ts`, that a
+/// scheduled fire has no client to make). Applied the same way
+/// `move_session_to_account`'s `register_account_move` carries them onto a
+/// forked session id (`daemon::methods::lifecycle.rs`).
 async fn fire_new_chat(
     state: &Arc<DaemonState>,
     cwd: &str,
     model: &str,
     effort: &str,
     account_id: Option<&str>,
+    character_id: Option<&str>,
+    auto_accept: bool,
     prompt: &str,
 ) -> Result<Option<String>, String> {
     let params = StartSessionParams {
@@ -436,6 +449,15 @@ async fn fire_new_chat(
     state.registry.set_account(&sid, &session.account_id);
     crate::sessions::chat_config::record(&sid, model, effort);
     crate::sessions::chat_config::set_account(&sid, &session.account_id);
+    if auto_accept {
+        crate::sessions::chat_config::set_auto_accept(&sid, true);
+    }
+    if let Some(character_id) = character_id {
+        state.settings.set_session_character(&sid, character_id);
+        state.notifier.publish("session_character_assigned", serde_json::json!({
+            "session_id": sid, "character_id": character_id,
+        }));
+    }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
@@ -579,6 +601,8 @@ mod tests {
                 effort: "high".into(),
                 account_id: None,
                 placeholder_id: None,
+                character_id: None,
+                auto_accept: false,
             },
             "hi".into(),
             Utc::now().to_rfc3339(),

@@ -79,10 +79,46 @@ pub(super) struct QuestRequestBody {
     session_id: Option<String>,
 }
 
+/// Mirrors the frontend's `isAutoAccept(sid) && extractQuestions(input) ===
+/// null` gate (permission-modal/gating.ts + question-state.ts's
+/// `extractQuestions`): fires for a session with the persisted auto-accept
+/// flag on, UNLESS the payload is a well-formed AskUserQuestion-shaped tool
+/// call (an MCP `ask_user_question` call routed through the ordinary
+/// permission-prompt-tool path, which always needs a human). Checked
+/// server-side, not just client-side, because a client's in-memory gate only
+/// catches up to a freshly forked/spawned session's persisted setting AFTER
+/// the RPC that created it resolves - a session that requests a tool
+/// permission immediately upon resume (`move_session_to_account`, scheduled
+/// new-chat, Jarvis workers) can race that and pop the modal anyway.
+fn is_auto_accept_eligible(auto_accept: bool, input: &Value) -> bool {
+    auto_accept && !is_question_shaped(input)
+}
+
+fn is_question_shaped(input: &Value) -> bool {
+    let Some(questions) = input.as_object().and_then(|o| o.get("questions")).and_then(|v| v.as_array()) else {
+        return false;
+    };
+    !questions.is_empty()
+        && questions.iter().all(|q| {
+            q.as_object().and_then(|o| o.get("question")).and_then(|v| v.as_str()).is_some()
+        })
+}
+
 pub(super) async fn on_permission_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     Json(body): Json<PermRequestBody>,
 ) -> impl IntoResponse {
+    let auto_accept = body.session_id.as_deref()
+        .and_then(crate::sessions::chat_config::get)
+        .map(|c| c.auto_accept)
+        .unwrap_or(false);
+    if is_auto_accept_eligible(auto_accept, &body.input) {
+        log::debug!(
+            "[perm-relay] server-side auto-accept id={} tool={} session={:?}",
+            body.id, body.tool_name, body.session_id
+        );
+        return (StatusCode::OK, Json(json!({"behavior": "allow", "updatedInput": body.input})));
+    }
     let payload = json!({
         "id": body.id,
         "tool_name": body.tool_name,
@@ -254,13 +290,42 @@ pub(super) async fn ask_question_decision(ctx: &Arc<HookCtx>, body: Value) -> Va
 
 #[cfg(test)]
 mod tests {
-    use super::{ask_question_decision, ASK_FIRE_AND_FORGET_REASON, HookCtx};
+    use super::{ask_question_decision, is_auto_accept_eligible, is_question_shaped, ASK_FIRE_AND_FORGET_REASON, HookCtx};
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;
     use crate::types::Settings;
     use serde_json::json;
     use std::sync::Arc;
+
+    #[test]
+    fn is_question_shaped_detects_well_formed_ask_user_question_payload() {
+        let input = json!({ "questions": [ { "question": "Tabs or spaces?", "options": [] } ] });
+        assert!(is_question_shaped(&input));
+    }
+
+    #[test]
+    fn is_question_shaped_false_for_ordinary_tool_input() {
+        assert!(!is_question_shaped(&json!({ "command": "ls" })));
+        assert!(!is_question_shaped(&json!({})));
+        assert!(!is_question_shaped(&json!(null)));
+    }
+
+    #[test]
+    fn is_question_shaped_false_for_empty_or_malformed_questions_array() {
+        assert!(!is_question_shaped(&json!({ "questions": [] })));
+        assert!(!is_question_shaped(&json!({ "questions": [ { "no_question_field": true } ] })));
+        assert!(!is_question_shaped(&json!({ "questions": "not-an-array" })));
+    }
+
+    #[test]
+    fn is_auto_accept_eligible_requires_the_flag_and_a_non_question_payload() {
+        let ordinary = json!({ "command": "ls" });
+        let question = json!({ "questions": [ { "question": "Tabs or spaces?" } ] });
+        assert!(is_auto_accept_eligible(true, &ordinary));
+        assert!(!is_auto_accept_eligible(false, &ordinary), "flag off never auto-accepts");
+        assert!(!is_auto_accept_eligible(true, &question), "question-shaped always needs a human");
+    }
 
     /// Fire-and-forget: the hook posts the card and returns IMMEDIATELY without
     /// inserting a pending oneshot or waiting. It publishes `question_request`,
