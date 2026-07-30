@@ -149,7 +149,7 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_LIST_PEERS,
-            "description": "List other Claude Conductor sessions currently active in this same project (repo), with their busy/awaiting state. Use this before editing a shared file to check whether another agent is already on it.",
+            "description": "Call this BEFORE editing any file another Conductor session might also be touching, and before running `git commit` - other concurrent sessions in this same project can silently sweep your uncommitted edits into their own commit. Lists other Claude Conductor sessions currently active in this same project (repo), with their busy/awaiting state. If it returns any peers, call post_message before proceeding.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -157,7 +157,7 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_POST_MESSAGE,
-            "description": "Post a short coordination note to this project's shared channel (e.g. \"about to edit foo.ts, is anyone on this?\"). Every other currently-active session in this project is nudged to read it at its next idle moment. Only visible to other Conductor sessions in this same project - not a general chat.",
+            "description": "Call this right after list_peers shows another active session, before you start editing or committing - post a short note saying what you're about to touch (e.g. \"about to edit foo.ts, is anyone on this?\"). Every other currently-active session in this project is nudged to read it at its next idle moment. Only visible to other Conductor sessions in this same project - not a general chat.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -168,7 +168,7 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_READ_MESSAGES,
-            "description": "Read this project's recent coordination-channel history (see post_message).",
+            "description": "Check this before editing or committing, alongside list_peers: recent coordination-channel history for this project (see post_message) - a peer may have already flagged the exact file or area you're about to touch.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
