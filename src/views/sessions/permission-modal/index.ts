@@ -108,6 +108,7 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
     sessionId: payload.session_id,
     questions,
     initialDraft,
+    cwd: resolveCwdForSession(payload.session_id),
     titleIcon: "ph-chat-circle-dots",
     titleText: "Claude is asking",
     submitLabel: "Submit",

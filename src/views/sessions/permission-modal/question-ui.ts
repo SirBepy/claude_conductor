@@ -9,6 +9,9 @@ import { openLightbox } from "../../../shared/chat/lightbox";
 // unreachability note - same plugin, same guarantee (only hasFiles/readFiles
 // used here too).
 import { hasFiles, readFiles } from "tauri-plugin-clipboard-api";
+import { CaretSuggestPopup } from "../../../shared/chat/caret-popup/popup";
+import { SlashProvider } from "../../../shared/chat/caret-popup/providers/slash";
+import "../../../shared/chat/caret-popup/popup.css";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import type { Answers, AuqAttachment, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
@@ -130,6 +133,31 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     }
   }
 
+  // "/" skill/command suggestion popup - the exact same CaretSuggestPopup +
+  // SlashProvider the main composer uses (shared/chat/caret-popup/), not a
+  // reimplementation. One provider instance for the card's whole lifetime;
+  // one popup instance per textarea per render (its DOM node is a child of
+  // the render()-rebuilt card, so it's recreated - and the stale one's
+  // document-level dismiss listener explicitly destroyed - every render).
+  const slashProvider = new SlashProvider();
+  void slashProvider.start(opts.cwd ?? null);
+  let popups: CaretSuggestPopup[] = [];
+  const destroyPopups = (): void => {
+    popups.forEach((p) => p.destroy());
+    popups = [];
+  };
+  function attachSlashPopup(ta: HTMLTextAreaElement): void {
+    const anchor = ta.closest<HTMLElement>(".prompt-q__other") ?? ta.parentElement;
+    if (!anchor) return;
+    if (getComputedStyle(anchor).position === "static") anchor.style.position = "relative";
+    const popup = new CaretSuggestPopup({ anchor, textarea: ta, providers: [slashProvider] });
+    popups.push(popup);
+    ta.addEventListener("input", () => popup.handleInput());
+    ta.addEventListener("keydown", (e) => {
+      if (popup.handleKey(e)) e.stopPropagation();
+    });
+  }
+
   function renderAttachmentsStrip(container: HTMLElement): void {
     container.innerHTML = "";
     attachments.forEach((a, i) => {
@@ -184,6 +212,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const teardown = () => {
     backDisposer?.();
     backDisposer = null;
+    destroyPopups();
+    slashProvider.stop();
     clearHost();
     document.removeEventListener("keydown", keydownHandler);
     if (resizeObs) { try { resizeObs.disconnect(); } catch { /* ignore */ } resizeObs = null; }
@@ -294,6 +324,11 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   const render = () => {
+    // The old textareas (and the popups anchored to them) are about to be
+    // thrown away by the innerHTML rebuild below - drop the popups' own
+    // document-level listeners explicitly first, since DOM removal alone
+    // doesn't do that.
+    destroyPopups();
     const title = `
       <span class="prompt-card__title">
         <i class="ph ${opts.titleIcon}"></i>
@@ -516,6 +551,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       if (opts.supportsExtras) {
         otherEl.addEventListener("paste", (e) => void handleAttachmentPaste(e));
       }
+      attachSlashPopup(otherEl);
     }
 
     const extraEl = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
@@ -532,6 +568,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         opts.onDraftChange?.(currentDraft());
       });
       extraEl.addEventListener("paste", (e) => void handleAttachmentPaste(e));
+      attachSlashPopup(extraEl);
     }
 
     const attachmentsEl = host.querySelector<HTMLElement>(".prompt-attachments");
