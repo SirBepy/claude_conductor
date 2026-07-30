@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { saveSettings } from "../../../../shared/settings-save";
 import { getSettings, setSettings } from "../../../../shared/state";
 import { LS_ANIM } from "../../../sessions/sidebar-anim";
+import { LS_ROW_STYLE, loadRowStyle } from "../../../sessions/row-style";
 import { settingsHeader, toggleRow } from "../../ui";
 import "./appearance.css";
 
@@ -170,6 +171,15 @@ async function hydrateUsageColorsAndInterface(): Promise<void> {
 
   wireInfoTooltips(document.getElementById("app") || document);
 
+  const chatRowStyle = $("chatRowStyle") as HTMLSelectElement | null;
+  if (chatRowStyle) {
+    chatRowStyle.value = loadRowStyle();
+    chatRowStyle.addEventListener("change", () => {
+      try { localStorage.setItem(LS_ROW_STYLE, chatRowStyle.value); }
+      catch { /* ignore */ }
+    });
+  }
+
   const sessionStateStyle = $("sessionStateStyle") as HTMLSelectElement | null;
   if (sessionStateStyle) {
     try {
@@ -305,6 +315,13 @@ function template() {
 
         <div class="kit-section">
           <div class="kit-section-title">Interface</div>
+          <div class="kit-row">
+            <span class="kit-row-label"><span class="info-wrap">Chat row style<i class="ph ph-info info-icon"></i><span class="info-tooltip">Portrait: square character portrait, project name, and a battery for the model - the chat title moves to the hover tooltip. Classic: the original title-led row.</span></span></span>
+            <select id="chatRowStyle">
+              <option value="portrait">Portrait</option>
+              <option value="classic">Classic</option>
+            </select>
+          </div>
           <div class="kit-row">
             <span class="kit-row-label">Session state style</span>
             <select id="sessionStateStyle">

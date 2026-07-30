@@ -227,6 +227,65 @@
   gap: 1px;
 }
 
+/* ── Portrait row style (Settings > Appearance > Chat row style) ────────────
+   Character portrait leads, project name replaces the title (which moves to the
+   hover tooltip), model battery anchors the right edge. Everything scoped under
+   .row-portrait so the classic row is untouched and this block can be deleted
+   whole if Portrait doesn't stick — see the 2026-08-30 todo. */
+.sessions-list li.row-portrait {
+  --row-h: 52px;
+  height: var(--row-h);
+  gap: 15px;
+  /* The gap between portraits IS this border. Putting it on the row rather than
+     inside the avatar wrapper keeps the strip's box, and therefore the centre
+     every other element aligns to, identical to the art's visible centre. */
+  border-bottom: 2px solid var(--color-surface-alt);
+}
+
+/* Square, so the square source art is never cropped: a taller row buys a bigger
+   face instead of a taller crop. -2px is the row's bottom border. */
+.sessions-list li.row-portrait .session-avatar-wrap,
+.sessions-list li.row-portrait .session-avatar {
+  width: calc(var(--row-h) - 2px);
+}
+
+/* Name and battery share one baseline. With only two things to place, a second
+   row left them stranded at opposite edges of mostly empty space. */
+.sessions-list li.row-portrait .session-row-text {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.sessions-list li.row-portrait .session-row-project {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.sessions-list li.row-portrait .proj-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The battery is on every row and the scheduled marker is not, so the battery
+   anchors the right edge and never shifts. */
+.sessions-list li.row-portrait .session-chips {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+.session-model-battery {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted);
+}
+.session-model-battery i { font-size: 1rem; line-height: 1; }
+.sessions-list li.active .session-model-battery { color: var(--color-background); opacity: 0.85; }
+
 .session-row-project {
   font-size: 0.85rem;
   font-weight: 600;

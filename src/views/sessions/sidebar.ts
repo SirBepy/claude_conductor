@@ -31,7 +31,16 @@ import { reconcileList, loadAnimEnabled } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
-import { drainChipHtml, leadingVisual, draftLeadingVisual, scheduledBadgeHtml } from "./sidebar-row-visuals";
+import {
+  drainChipHtml,
+  leadingVisual,
+  draftLeadingVisual,
+  scheduledBadgeHtml,
+  scheduledCornerHtml,
+  modelBatteryHtml,
+} from "./sidebar-row-visuals";
+import { loadRowStyle } from "./row-style";
+import { attachRowTooltips } from "../../shared/row-tooltip";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 
 let sidebarListEl: HTMLElement | null = null;
@@ -287,6 +296,8 @@ export function renderSidebar(listEl: HTMLElement): void {
   // question flag, covering background sessions too.
   const question = deriveQuestionSet(listSessions);
   const style = loadStateStyle();
+  const isPortrait = loadRowStyle() === "portrait";
+  const rowClass = isPortrait ? "row-portrait" : "";
   const sort = loadSort();
   const rateLimited = new Set(listSessions.filter(isBlocked).map((s) => s.session_id));
 
@@ -459,15 +470,23 @@ export function renderSidebar(listEl: HTMLElement): void {
         }
         entries.push({
           key: `s:${s.session_id}`,
-          html: `<li data-session-id="${escapeHtml(s.session_id)}"${kbdHint} class="${isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${rateLimited.has(s.session_id) ? "is-rate-limited" : ""}">
-            ${leadingVisual(s, indicator, unread, attention, question, rateLimited)}
+          html: `<li data-session-id="${escapeHtml(s.session_id)}"${kbdHint} class="${isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${rateLimited.has(s.session_id) ? "is-rate-limited" : ""} ${rowClass}">
+            ${isPortrait
+              ? leadingVisual(s, indicator, unread, attention, question, rateLimited, {
+                  badgeClass: "is-centred",
+                  extra: scheduledCornerHtml(scheduledCountMap.get(s.session_id)),
+                })
+              : leadingVisual(s, indicator, unread, attention, question, rateLimited)}
             <div class="session-row-text">
-              <span class="session-row-project">${scheduledBadgeHtml(scheduledCountMap.get(s.session_id))}${escapeHtml(sessionSubtitle(s))}${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" title="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" title="Autopilot active">autopilot</span>` : ""}</span>
-              <span class="session-row-subtitle">${escapeHtml(projectName(s))}${sort === "drain" ? drainChipHtml(drainMap.get(s.session_id)) : ""}</span>
+              ${isPortrait
+                ? `<span class="session-row-project" data-tip="${escapeHtml(sessionSubtitle(s))}"><span class="proj-name">${escapeHtml(projectName(s))}</span>${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" data-tip="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" data-tip="Autopilot active">autopilot</span>` : ""}</span>
+              <span class="session-chips">${modelBatteryHtml(s.model)}${sort === "drain" ? drainChipHtml(drainMap.get(s.session_id)) : ""}</span>`
+                : `<span class="session-row-project">${scheduledBadgeHtml(scheduledCountMap.get(s.session_id))}${escapeHtml(sessionSubtitle(s))}${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" title="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" title="Autopilot active">autopilot</span>` : ""}</span>
+              <span class="session-row-subtitle">${escapeHtml(projectName(s))}${sort === "drain" ? drainChipHtml(drainMap.get(s.session_id)) : ""}</span>`}
             </div>
-            <button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
+            ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
               <i class="ph ph-dots-three-vertical"></i>
-            </button>
+            </button>`}
           </li>`,
         });
       }
@@ -510,15 +529,20 @@ export function renderSidebar(listEl: HTMLElement): void {
         const indicator = statusIndicator(s, unread, attention, question, style, escapeHtml, rateLimited);
         entries.push({
           key: `s:${s.session_id}`,
-          html: `<li data-session-id="${escapeHtml(s.session_id)}" class="${isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""}">
-            ${leadingVisual(s, indicator, unread, attention, question, rateLimited)}
+          html: `<li data-session-id="${escapeHtml(s.session_id)}" class="${isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${rowClass}">
+            ${isPortrait
+              ? leadingVisual(s, indicator, unread, attention, question, rateLimited, { badgeClass: "is-centred" })
+              : leadingVisual(s, indicator, unread, attention, question, rateLimited)}
             <div class="session-row-text">
-              <span class="session-row-project">${escapeHtml(sessionSubtitle(s))}</span>
-              <span class="session-row-subtitle">${escapeHtml(projectName(s))}</span>
+              ${isPortrait
+                ? `<span class="session-row-project" data-tip="${escapeHtml(sessionSubtitle(s))}"><span class="proj-name">${escapeHtml(projectName(s))}</span></span>
+              <span class="session-chips">${modelBatteryHtml(s.model)}</span>`
+                : `<span class="session-row-project">${escapeHtml(sessionSubtitle(s))}</span>
+              <span class="session-row-subtitle">${escapeHtml(projectName(s))}</span>`}
             </div>
-            <button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
+            ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
               <i class="ph ph-dots-three-vertical"></i>
-            </button>
+            </button>`}
           </li>`,
         });
       }
@@ -530,6 +554,8 @@ export function renderSidebar(listEl: HTMLElement): void {
   renderSeg(3);
 
   reconcileList(listEl, entries, loadAnimEnabled());
+  // Delegated, so it survives every reconcile without rebinding per row.
+  attachRowTooltips(listEl);
   // Resolve hero avatar images to data URLs (idempotent per character id).
   void hydrateCharacterAvatars(listEl);
   void hydrateProjectTechIcons(listEl);

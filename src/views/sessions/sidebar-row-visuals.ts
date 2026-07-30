@@ -2,6 +2,35 @@ import { escapeHtml } from "../../shared/escape-html";
 import type { Instance } from "../../types/ipc.generated";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { statusDotClass, scheduledTooltip } from "./sessions-helpers";
+import { modelFamilyFromId } from "../../shared/effort-presets";
+import { modelLabel } from "../../shared/model-name";
+
+// ── Portrait row ─────────────────────────────────────────────────────────────
+// Model shown as a battery whose fill is the family's rank. Ranked, not
+// arbitrary, so you compare fill instead of decoding a symbol; one colour
+// because the rail's five chat-state hues already own the colour channel.
+// Fable outranks Opus (Joe, 2026-07-30).
+const MODEL_RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
+const RANK_ICON: Record<number, string> = {
+  1: "ph-battery-low", 2: "ph-battery-medium", 3: "ph-battery-high", 4: "ph-battery-full",
+};
+
+/** Battery glyph for a session's model, or "" for an unrecognised family. */
+export function modelBatteryHtml(model: string): string {
+  const rank = MODEL_RANK[modelFamilyFromId(String(model ?? ""))];
+  if (!rank) return "";
+  return `<span class="session-model-battery" data-tip="${escapeHtml(modelLabel(model))}"><i class="ph-bold ${RANK_ICON[rank]}"></i></span>`;
+}
+
+/** Scheduled marker for the portrait row: a corner badge on the character
+ *  rather than a chip in the text line, so the battery stays the only
+ *  right-hand element and sits at a fixed x on every row. */
+export function scheduledCornerHtml(count: number | undefined): string {
+  if (!count) return "";
+  const title = escapeHtml(scheduledTooltip(count));
+  const countHtml = count > 1 ? `<span class="session-sched-count">${count}</span>` : "";
+  return `<span class="session-sched-corner" data-tip="${title}"><i class="ph ph-clock-countdown"></i>${countHtml}</span>`;
+}
 
 /** Inline "X% of 5h" chip shown in a row's subtitle while sorting by drain.
  *  Muted "—% of 5h" placeholder until the async drain fetch resolves. */
@@ -40,6 +69,15 @@ function avatarWrap(avatarHtml: string, badge: string): string {
   return `<span class="session-avatar-wrap">${avatarHtml}${badge}</span>`;
 }
 
+
+/** Extra bits the portrait row hangs off the same avatar wrapper. */
+export interface LeadingExtras {
+  /** Appended to the project badge's class list (`is-centred` in portrait rows). */
+  badgeClass?: string;
+  /** Markup appended inside the wrapper, after the badge (the scheduled corner). */
+  extra?: string;
+}
+
 /** Leading visual for a live session row: character portrait + status glow + optional project badge. */
 export function leadingVisual(
   s: Instance,
@@ -48,6 +86,7 @@ export function leadingVisual(
   attention: Set<string>,
   question: Set<string>,
   rateLimited: ReadonlySet<string> = new Set(),
+  extras: LeadingExtras = {},
 ): string {
   const charId = characterForSession(s);
   if (!charId) return indicator;
@@ -67,8 +106,8 @@ export function leadingVisual(
           <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
           <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
         </span>`;
-  const badge = projBadgeHtml(s.cwd, "session-proj-badge");
-  return avatarWrap(avatarHtml, badge);
+  const badge = projBadgeHtml(s.cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
+  return avatarWrap(avatarHtml, badge + (extras.extra ?? ""));
 }
 
 /** Leading visual for a draft/parked-draft row: same structure as live rows

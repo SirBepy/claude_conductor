@@ -113,6 +113,42 @@
   background: rgba(0, 0, 0, 0.7);
 }
 
+/* Portrait row: the devicon moves from the bottom corner to the middle of the
+   portrait's right border, so it lines up with the project name. It straddles
+   the strip edge; the row's 15px flex gap is what keeps it from touching the
+   name and reading as a text-leading icon instead of a badge on the character. */
+.session-proj-badge.is-centred {
+  top: 50%;
+  bottom: auto;
+  right: -8px;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 2px solid var(--color-surface-alt, #0d0f15);
+  background: var(--color-surface-alt, #0d0f15);
+}
+
+/* Scheduled marker as a corner badge on the character, keeping the text line's
+   right edge occupied by the battery alone at a fixed x on every row. */
+.session-sched-corner {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 11;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 3px;
+  border-radius: 999px;
+  background: rgba(10, 11, 17, 0.78);
+  color: var(--color-primary, #7c6af7);
+  font-size: 0.62rem;
+  line-height: 1.5;
+}
+.session-sched-corner i { font-size: 0.72rem; }
+.session-sched-count { font-weight: 700; }
+
 /* Wrapper for the open-chat header avatar: circular clip + status-coloured
    ring. Contains session-header-backdrop (blurred art fill) + session-header-char
    (sharp portrait). Also used as a plain container for the "?" placeholder. */

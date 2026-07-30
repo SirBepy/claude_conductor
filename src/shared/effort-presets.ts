@@ -54,7 +54,8 @@ export function curateLatestPerFamily(models: string[]): string[] {
   return out;
 }
 
-function modelFamilyFromId(id: string): string {
+/** "claude-opus-5" -> "opus". Returns the id unchanged for unknown families. */
+export function modelFamilyFromId(id: string): string {
   const s = id.toLowerCase();
   if (s.includes("fable")) return "fable";
   if (s.includes("opus")) return "opus";

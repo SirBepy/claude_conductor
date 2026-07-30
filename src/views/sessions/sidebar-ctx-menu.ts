@@ -125,6 +125,19 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && activeCtxMenu) closeCtxMenu();
 });
 
+// Right-click anywhere on a session row opens the same menu the 3-dot button
+// used to. The portrait row style drops that button entirely, so this is the
+// only way in there; it works in the classic style too rather than being
+// gated on the setting.
+document.addEventListener("contextmenu", (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>("#sessions-list li[data-session-id]");
+  if (!row) return;
+  const sessionId = row.dataset.sessionId;
+  if (!sessionId) return;
+  e.preventDefault();
+  openCtxMenu(sessionId, row);
+});
+
 document.addEventListener("click", (e) => {
   const toggle = (e.target as HTMLElement).closest<HTMLElement>("[data-hidden-toggle]");
   if (toggle) {
