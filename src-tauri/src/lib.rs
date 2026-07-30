@@ -289,6 +289,7 @@ pub fn run() {
             ipc::start_session,
             ipc::send_message,
             ipc::set_session_effort,
+            ipc::set_session_model,
             ipc::set_auto_accept,
             ipc::cancel_turn,
             ipc::clear_session,

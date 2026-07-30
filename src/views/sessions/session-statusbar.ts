@@ -328,9 +328,10 @@ export class SessionStatusbar {
     this.render();
   }
 
-  /** Locks the model chip once the real agent process has spawned (a draft's
-   *  onModelChange must not survive into the started session, or the chip
-   *  would keep letting the user "change" a model that's already running). */
+  /** Switches the model chip from draft-local editing to live editing once the
+   *  real agent process has spawned (a draft's onModelChange must not survive
+   *  into the started session, or picking a model would only update local
+   *  state instead of calling set_session_model). */
   disableModelEdit(): void {
     if (!this.onModelChange) return;
     this.onModelChange = null;
@@ -555,6 +556,7 @@ export class SessionStatusbar {
       this.closeChipPopovers();
       if (!wasOpen) this.modelPopover.open(anchor, {
         model: this.meta.model ?? this.sessionModel ?? "",
+        sessionId: this.sessionId,
         onModelChange: this.onModelChange ?? undefined,
         onCommit: (next) => {
           this.sessionModel = next;

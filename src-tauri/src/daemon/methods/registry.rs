@@ -1,5 +1,6 @@
 //! Registry-mutation RPC methods: mark-ended, externalize, set-effort,
-//! register-historical, manual takeover, and the list-instances snapshot fetch.
+//! set-model, register-historical, manual takeover, and the list-instances
+//! snapshot fetch.
 
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
@@ -13,6 +14,8 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     struct SessionId { session_id: String }
     #[derive(serde::Deserialize)]
     struct EffortParams { session_id: String, effort: String }
+    #[derive(serde::Deserialize)]
+    struct ModelParams { session_id: String, model: String }
     #[derive(serde::Deserialize)]
     struct HistoricalParams { session_id: String, cwd: String, account_id: String }
 
@@ -56,6 +59,21 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 state.registry.set_effort(&p.session_id, &p.effort);
                 crate::sessions::chat_config::record(&p.session_id, "", &p.effort);
+                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::sessions::persistence::save_snapshot_default(&state.registry);
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("set_session_model", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: ModelParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                state.registry.set_model(&p.session_id, &p.model);
+                crate::sessions::chat_config::record(&p.session_id, &p.model, "");
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))

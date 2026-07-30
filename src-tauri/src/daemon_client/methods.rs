@@ -205,6 +205,11 @@ impl PersistentClient {
         Ok(())
     }
 
+    pub async fn set_session_model(&self, session_id: &str, model: &str) -> Result<(), ClientError> {
+        self.call("set_session_model", json!({"session_id": session_id, "model": model})).await?;
+        Ok(())
+    }
+
     pub async fn set_auto_accept(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
         self.call("set_auto_accept", json!({"session_id": session_id, "value": value})).await?;
         Ok(())
