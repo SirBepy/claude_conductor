@@ -1,0 +1,168 @@
+/* ── Prompt card (permission + question relay) ────────────────────────────
+ * Floating card anchored just above the active composer. Host placement:
+ *   - .prompt-card-host--composer: inside .session-composer, bottom: 100%.
+ *   - .prompt-card-host--pane: inside .session-pane (read-only, no composer).
+ *   - .prompt-card-host--viewport: fixed at viewport bottom (no pane mounted).
+ */
+#prompt-card-host.prompt-card-host--composer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  padding: 0 12px 8px;
+  z-index: 20;
+  pointer-events: none;
+}
+#prompt-card-host.prompt-card-host--pane {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 20;
+  pointer-events: none;
+}
+#prompt-card-host.prompt-card-host--viewport {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  width: min(520px, calc(100vw - 32px));
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.prompt-card {
+  pointer-events: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 540px);
+  /* Same 520px the viewport-mode host already caps at (below) - the composer/
+   * pane hosts stretch full-width with no cap of their own, which on a wide
+   * window turned long question text into uncomfortably long lines. */
+  max-width: 520px;
+  margin: 0 auto;
+  overflow: hidden;
+  animation: prompt-card-in 0.16s ease-out;
+}
+
+.prompt-card--no-anim {
+  animation: none;
+}
+
+@keyframes prompt-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.prompt-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-primary) 8%, transparent),
+    transparent
+  );
+}
+
+.prompt-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.prompt-card__title i {
+  color: var(--color-primary);
+  font-size: 1.05rem;
+}
+
+.prompt-card__tool {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+.prompt-card__tool code {
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  background: var(--color-background);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
+.prompt-card__body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.prompt-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+.prompt-card__footer button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+.prompt-card__footer button {
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.prompt-card__footer .btn-tertiary {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+.prompt-card__footer .btn-tertiary:hover {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 50%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.prompt-card__footer .btn-tertiary i {
+  font-size: 0.95rem;
+}
+
+/* Permission details disclosure (raw tool input JSON, hidden by default). */
+.prompt-card__details summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  user-select: none;
+  padding: 2px 0;
+}
+.prompt-card__details summary:hover {
+  color: var(--color-text);
+}
+.prompt-card__pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}

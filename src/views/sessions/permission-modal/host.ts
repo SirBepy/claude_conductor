@@ -1,4 +1,5 @@
-import "../permission-modal.css";
+import "../permission-modal-shell.css";
+import "../permission-modal-question.css";
 
 export const HOST_ID = "prompt-card-host";
 
