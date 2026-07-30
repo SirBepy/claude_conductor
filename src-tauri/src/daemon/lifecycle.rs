@@ -54,6 +54,11 @@ pub struct StartSessionParams {
     /// Requires `resume_id`; ignored otherwise.
     #[serde(default)]
     pub fork: bool,
+    /// Caller-supplied id for the "mint a new id" branch, so the caller can
+    /// register the id's chat-config (auto-accept) before the child boots -
+    /// see `move_session_to_account`. `None` falls back to a fresh UUID.
+    #[serde(default)]
+    pub new_session_id: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -134,7 +139,8 @@ pub async fn spawn_session(
     // can never collide with the source session in `map`, in the mcp/hook
     // config paths (both keyed on session id), or in the registry.
     let session_id = match (&params.resume_id, params.fork) {
-        (Some(_), true) | (None, _) => uuid::Uuid::new_v4().to_string(),
+        (Some(_), true) | (None, _) => params.new_session_id.clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         (Some(id), false) => id.clone(),
     };
     if map.contains_key(&session_id) {
@@ -334,6 +340,7 @@ pub async fn send_message_with_respawn(
             remote: false,
             account_id: inst.account_id,
             fork: false,
+            new_session_id: None,
         },
     )
     .await?;
@@ -496,6 +503,7 @@ mod tests {
                 remote: false,
                 account_id: None,
                 fork: false,
+                new_session_id: None,
             },
         )
         .await;
@@ -519,6 +527,7 @@ mod tests {
                 remote: false,
                 account_id: None,
                 fork: false,
+                new_session_id: None,
             },
         )
         .await;
@@ -538,6 +547,7 @@ mod tests {
                 remote: false,
                 account_id: None,
                 fork: false,
+                new_session_id: None,
             },
         )
         .await;
@@ -558,6 +568,7 @@ mod tests {
                 remote: false,
                 account_id: None,
                 fork: false,
+                new_session_id: None,
             },
         )
         .await;

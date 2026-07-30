@@ -115,6 +115,7 @@ pub(crate) async fn spawn_worker(
         remote: false,
         account_id,
         fork: false,
+        new_session_id: None,
     };
     let session = lifecycle::spawn_session(state, params).await.map_err(|e| e.to_string())?;
     let sid = session.session_id.clone();

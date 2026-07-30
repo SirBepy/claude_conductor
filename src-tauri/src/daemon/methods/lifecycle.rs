@@ -259,6 +259,16 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     "Continue from where you left off.".to_string()
                 };
 
+                // Register (esp. auto-accept) before spawning: a forked resume
+                // can re-drive an outstanding tool call the instant it boots, so
+                // registering after the child is alive races the permission hook.
+                let new_id = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now().to_rfc3339();
+                crate::daemon::session_registration::register_new_session(
+                    &state, &new_id, &cwd, &model, &effort, &p.target_account_id, &now,
+                    auto_accept, character_id.as_deref(),
+                );
+
                 let session = lifecycle::spawn_session(&state, StartSessionParams {
                     cwd: cwd.clone(),
                     model: model.clone(),
@@ -267,14 +277,8 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     remote: false,
                     account_id: Some(p.target_account_id.clone()),
                     fork: true,
+                    new_session_id: Some(new_id.clone()),
                 }).await.map_err(err_to_rpc)?;
-                let new_id = session.session_id.clone();
-                let account_id = session.account_id.clone();
-                let now = chrono::Utc::now().to_rfc3339();
-                crate::daemon::session_registration::register_new_session(
-                    &state, &new_id, &cwd, &model, &effort, &account_id, &now,
-                    auto_accept, character_id.as_deref(),
-                );
 
                 lifecycle::send_message(&session, &prompt, false).await.map_err(err_to_rpc)?;
                 state.registry.set_busy(&new_id, true);

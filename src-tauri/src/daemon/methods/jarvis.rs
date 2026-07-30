@@ -147,6 +147,7 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
                 remote: false,
                 account_id: None,
                 fork: false,
+                new_session_id: None,
             };
             // check_metered_billing already gates inside spawn_session.
             let session = lifecycle::spawn_session(&state, params).await.map_err(err_to_rpc)?;

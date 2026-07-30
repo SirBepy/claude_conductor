@@ -121,6 +121,7 @@ async fn respawn_for_message(
         remote: false,
         account_id,
         fork: false,
+        new_session_id: None,
     };
     lifecycle::spawn_session(state, params).await.map_err(err_to_string)
 }
@@ -156,6 +157,7 @@ async fn fire_new_chat(
         remote: false,
         account_id: account_id.map(|s| s.to_string()),
         fork: false,
+        new_session_id: None,
     };
     let session = lifecycle::spawn_session(state, params).await.map_err(err_to_string)?;
     let sid = session.session_id.clone();
