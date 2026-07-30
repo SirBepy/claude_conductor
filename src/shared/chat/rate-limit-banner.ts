@@ -74,10 +74,9 @@ export interface RateLimitBannerDeps {
 }
 
 /** localStorage key -> JSON array of `${accountId}:${resetsAtMs}`. Keyed by
- * resets_at so a fresh rejection (new resets_at) re-shows the full card even
- * if the previous window's banner was minimized. Pruned to only the
- * currently-blocked keys on every render, so it self-cleans once a window
- * expires - no separate GC needed. */
+ * resets_at so a fresh rejection re-shows the full card even if minimized.
+ * Pruned to the currently-blocked keys on every render - self-cleans once a
+ * window expires, no separate GC. */
 const MINIMIZED_STORAGE_KEY = "rate-limit-banner:minimized";
 
 function minimizedKey(accountId: string, resetsAtMs: number): string {
