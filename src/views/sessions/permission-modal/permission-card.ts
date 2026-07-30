@@ -21,6 +21,7 @@ export function showPermissionCard(payload: PermissionRequestedPayload): void {
   if (questions) {
     renderQuestionUI({
       questions,
+      cwd: resolveCwdForSession(payload.session_id),
       titleIcon: "ph-chat-circle-dots",
       titleText: "Claude is asking",
       rightChipHtml: `<span class="prompt-card__tool"><code>${escapeHtml(payload.tool_name)}</code></span>`,

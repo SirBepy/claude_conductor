@@ -63,6 +63,10 @@ export interface QuestionUIOpts {
   rightChipHtml?: string;
   submitLabel: string;
   submitIcon: string;
+  /** Project directory for scoping the "/" skill/command suggestion popup
+   *  (same provider the composer uses) - project-scoped entries need it, but
+   *  it's optional: SlashProvider.start(null) still surfaces user/builtin ones. */
+  cwd?: string | null;
   /** Enables the review-step "additional message" field and image-paste
    *  attachments. Only the async MCP question flow (permission-modal/index.ts)
    *  can actually deliver these to Claude as a follow-up message - the
