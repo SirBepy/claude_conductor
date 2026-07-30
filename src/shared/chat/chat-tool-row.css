@@ -1,0 +1,36 @@
+/* Base .tool-row/.tool-row-summary chip row. Split out of chat-tools.css. */
+
+/* Collapsed, expandable tool rows (native <details>/<summary>). */
+.tool-row > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.tool-row > summary::-webkit-details-marker {
+  display: none;
+}
+.tool-row-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+}
+.tool-row-summary:hover {
+  background: var(--color-surface);
+}
+.tool-row-summary .ph {
+  flex: 0 0 auto;
+}
+.tool-row-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.tool-row-target {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}

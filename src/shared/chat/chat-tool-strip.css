@@ -1,0 +1,125 @@
+/* Inline tool chip strip + nesting rules (.tool-strip-group panels). Split out
+ * of chat-tools.css. */
+
+/* ── Inline tool chip strip (Read x4, Grep x5, ...) ─────────────────────── */
+
+.tool-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 2px;
+  padding: 0 2px;
+}
+
+/* A turn whose only tool has image results relocates that tool's chip into
+   its screenshot-block header (mountScreenshotBlock), leaving the strip
+   empty - collapse it instead of showing an empty gap. */
+.tool-strip:empty {
+  display: none;
+}
+
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: inherit;
+  user-select: none;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.tool-chip:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-border) 60%, var(--color-surface-alt));
+}
+
+.tool-chip--active {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary) 15%, var(--color-surface));
+  border-color: var(--color-primary);
+}
+
+@keyframes tool-chip-flash {
+  0% { background: color-mix(in srgb, var(--color-primary) 30%, var(--color-surface)); }
+  100% { background: var(--color-surface-alt); }
+}
+.tool-chip--highlight {
+  animation: tool-chip-flash 0.6s ease-out forwards;
+}
+.tool-chip--active.tool-chip--highlight { animation: none; }
+
+/* "Currently working" chip: the tool whose call is in flight right now (a
+   tool_use with no result yet). Primary-color fill + a soft pulsing ring, held
+   for as long as the call runs. The flash animation is the one-shot bump; this
+   is the persistent state, so it wins. */
+@keyframes tool-chip-working {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 40%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 0%, transparent); }
+}
+.tool-chip--running,
+.tool-chip--running.tool-chip--highlight {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary) 24%, var(--color-surface));
+  border-color: var(--color-primary);
+  animation: tool-chip-working 1.4s ease-in-out infinite;
+}
+
+.tool-chip i { font-size: 0.85rem; }
+
+.tool-chip-label { font-weight: 600; }
+
+.tool-chip-count { opacity: 0.8; }
+
+.tool-strip-panel {
+  margin: 2px 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-strip-group .tool-row {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  margin: 0;
+}
+
+.tool-strip-group .tool-row:last-child {
+  border-bottom: none;
+}
+
+/* File-edit cards folded into a chip bucket: drop the inline-chat margins so
+   they sit flush like the compact rows, separated by the same hairline. */
+.tool-strip-group .tool-use--file {
+  margin: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+.tool-strip-group .tool-use--file:last-child {
+  border-bottom: none;
+}
+.tool-strip-group .tool-use--file .edit-window {
+  margin: 0;
+}
+
+/* Nested drill-down strips (Subagent > per-subagent > tool-type). A faint
+   tinted band + padding visually separates each deeper control row. */
+.tool-strip-group .tool-strip {
+  padding: 5px 7px;
+  margin: 0;
+  background: color-mix(in srgb, var(--color-border) 16%, transparent);
+}
+.tool-strip-group .tool-strip-panel {
+  margin: 0 7px 7px;
+}
+
+/* Custom chip-panel views (Read / File Changes / Skills / Questions): clean
+   aggregated lists, not the generic stack of raw tool rows. */
+.tool-strip-group[data-custom-view] {
+  padding: 3px;
+}
+

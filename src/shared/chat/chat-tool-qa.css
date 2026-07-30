@@ -1,0 +1,37 @@
+/* Inline AskUserQuestion rendering (pre-answer widget). Split out of chat-tools.css. */
+
+/* ── AskUserQuestion inline rendering ──────────────────────────────────────────── */
+
+.ask-user-question {
+  background: var(--color-surface-2, #1e1e1e);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.ask-header {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary, #888);
+  margin-bottom: 10px;
+}
+
+.ask-question-block {
+  margin-bottom: 12px;
+}
+
+.ask-question-text {
+  font-size: 14px;
+  color: var(--color-text-primary, #e0e0e0);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ask-option-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+

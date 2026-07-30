@@ -1,0 +1,82 @@
+/* AUQ question card + related chip/label rules. Split out of chat-tools.css. */
+
+/* ── AUQ question card: rendered as a centered first-class message that splits
+   the chip strips before/after the question. Reuses .tool-qa internals. */
+.msg.question-card {
+  align-self: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0;
+  max-width: 460px;
+  width: 90%;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Collapsible wrapper inside .msg.question-card */
+.question-card-collapsible { list-style: none; }
+.question-card-collapsible > summary { list-style: none; }
+.question-card-collapsible > summary::-webkit-details-marker { display: none; }
+
+.question-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  user-select: none;
+  border-bottom: 1px solid transparent;
+}
+.question-card-collapsible[open] > .question-card-summary {
+  border-bottom-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+.question-card-summary > .ph:first-child { color: var(--color-primary); flex-shrink: 0; }
+.question-card-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.question-card-badge {
+  background: var(--color-primary);
+  color: white;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.question-card-chevron {
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: transform 0.15s;
+}
+.question-card-collapsible[open] > .question-card-summary .question-card-chevron {
+  transform: rotate(180deg);
+}
+
+/* Per-subagent chip: descriptions can be long, so cap + ellipsize the label
+   and lead with the robot icon so it reads as "a subagent", not a tool. */
+.tool-chip--agent .tool-chip-label {
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Read-only option labels (inline rendering; interaction is in the modal) */
+.ask-option-label {
+  display: inline-block;
+  background: var(--color-surface-3, #2a2a2a);
+  border: 1px solid var(--color-border, rgba(255,255,255,0.15));
+  border-radius: 6px;
+  color: var(--color-text-secondary, #c0c0c0);
+  padding: 4px 10px;
+  font-size: 12px;
+}

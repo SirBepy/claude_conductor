@@ -1,0 +1,97 @@
+/* Screenshot block + thumbnail row. Split out of chat-tools.css. */
+
+/* ── Screenshot block (turn-collapse.ts's mountScreenshotBlock): an
+   always-visible thumbnail row for a tool's image results, replacing the
+   click-to-expand accordion for screenshots specifically. Header: title left,
+   the tool's real (relocated) .tool-chip floated right over a divider, then
+   a CSS-native horizontally-scrolling thumbnail row (screenshot-row.ts). ── */
+
+.screenshot-block {
+  margin: 2px 0 4px;
+}
+
+.turn-footer > .screenshot-block {
+  margin: 0;
+}
+
+.screenshot-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 7px;
+}
+
+.screenshot-block-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+/* The relocated tool chip: same real .tool-chip look, just floated right in
+   the header instead of sitting in its own .tool-strip row. */
+.screenshot-block-header .tool-chip {
+  margin: 0;
+}
+
+.screenshot-block-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 0 2px 8px;
+}
+
+.screenshot-row {
+  margin: 2px 0 4px;
+}
+
+/* Native horizontal scroller: how many thumbnails show is whatever the
+   container's real width fits, not a guessed page size. scroll-snap-type
+   plus each thumb's scroll-snap-align keeps drags/wheel-scroll landing on a
+   thumb boundary instead of stopping mid-image. The colored 5px scrollbar
+   (base.css) is the discoverability cue that there's more to scroll. */
+.screenshot-viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+}
+
+.screenshot-track {
+  display: flex;
+  gap: 8px;
+  padding: 2px 1px 6px;
+}
+
+.screenshot-thumb {
+  position: relative;
+  flex-shrink: 0;
+  scroll-snap-align: start;
+}
+
+/* Corner provenance tag: which agent captured this screenshot. Main agent
+   gets the primary-color treatment; subagents get the same muted robot-icon
+   idiom as .tool-chip--agent so it reads as "a subagent", not a different
+   concept. */
+.screenshot-agent-tag {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 100px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #fff;
+  background: color-mix(in srgb, var(--color-text-muted) 55%, #000 30%);
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.screenshot-thumb[data-agent="main"] .screenshot-agent-tag {
+  background: color-mix(in srgb, var(--color-primary) 85%, #000 5%);
+}
+

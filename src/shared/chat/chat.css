@@ -1,16 +1,28 @@
 /* Shared chat-renderer + composer styles. Imported by the Sessions and
- * History views. Barrel: the rules live in six purpose-scoped modules.
- *  - chat-messages.css: message bubbles, markdown, tables, sent attachment chips
- *  - composer.css:      composer input, attachments, file chips, drag-over state
- *  - chat-tools.css:    tool rows, chip strip, custom views, AUQ, turn footer
- *  - pr-preview.css:    PR preview card + modal (the /create-pr skill preview)
- *  - chat-overlays.css: lightbox, edit window + unified diff (session hunks)
- *  - file-surface.css:  shared file surface (bar + File/Diff body) mounted by
- *                        the standalone file viewer (and, later, PR file tabs)
+ * History views. Barrel: the rules live in purpose-scoped modules.
+ *  - chat-messages.css:      message bubbles, markdown, tables, sent attachment chips
+ *  - composer.css:           composer input, attachments, file chips, drag-over state
+ *  - chat-tool-row.css:      base .tool-row/.tool-row-summary chip row
+ *  - chat-tool-qa.css:       inline AskUserQuestion rendering (pre-answer)
+ *  - chat-tool-strip.css:    inline tool chip strip + .tool-strip-group nesting
+ *  - chat-tool-file-row.css: .tool-file-row / .tool-skill-row / .tool-qa panels
+ *  - chat-question-card.css: AUQ question card (post-answer, first-class message)
+ *  - chat-screenshot-block.css: screenshot block + thumbnail row
+ *  - chat-turn-footer.css:   per-turn footer meta chips, progress bar, todo checklist
+ *  - pr-preview.css:         PR preview card + modal (the /create-pr skill preview)
+ *  - chat-overlays.css:      lightbox, edit window + unified diff (session hunks)
+ *  - file-surface.css:       shared file surface (bar + File/Diff body) mounted by
+ *                            the standalone file viewer (and, later, PR file tabs)
  */
 @import "./chat-messages.css";
 @import "./composer.css";
-@import "./chat-tools.css";
+@import "./chat-tool-row.css";
+@import "./chat-tool-qa.css";
+@import "./chat-tool-strip.css";
+@import "./chat-tool-file-row.css";
+@import "./chat-question-card.css";
+@import "./chat-screenshot-block.css";
+@import "./chat-turn-footer.css";
 @import "./pr-preview.css";
 @import "./chat-overlays.css";
 @import "./file-surface.css";

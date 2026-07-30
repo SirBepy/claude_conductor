@@ -1,0 +1,125 @@
+/* Custom chip-panel rows: .tool-file-row (Read/File Changes), .tool-skill-row
+ * (Skills), .tool-qa (Questions answered summary). Split out of
+ * chat-tools.css. */
+
+.tool-file-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+.tool-file-row:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.tool-file-row > .ph {
+  font-size: 0.95rem;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+.tool-file-name {
+  font-weight: 600;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+.tool-file-path {
+  flex: 1;
+  min-width: 0;
+  opacity: 0.55;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-file-count {
+  flex-shrink: 0;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-skill-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  font-size: 0.78rem;
+  color: var(--color-text);
+}
+.tool-skill-row > .ph {
+  font-size: 0.95rem;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.tool-skill-name { font-weight: 600; }
+.tool-skill-row .tool-file-count { margin-left: auto; }
+
+.tool-qa {
+  padding: 7px 9px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+.tool-qa:last-child { border-bottom: none; }
+.tool-qa-header {
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+  margin-bottom: 2px;
+}
+.tool-qa-q {
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+}
+/* Renders through renderMarkdown now (was escapeHtml) so it stays consistent
+ * with the live card's formatting - reset markdown-it's own block spacing to
+ * fit this compact, already-answered summary row. */
+.tool-qa-q p { margin: 0 0 4px; }
+.tool-qa-q p:last-child { margin-bottom: 0; }
+.tool-qa-q ul, .tool-qa-q ol { margin: 2px 0 4px; padding-left: 16px; }
+.tool-qa-q li { margin: 1px 0; }
+.tool-qa-q strong { font-weight: 700; }
+.tool-qa-q code { background: var(--color-surface-alt); border-radius: 3px; padding: 0 4px; font-size: 0.9em; }
+.tool-qa-a {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--color-text);
+}
+.tool-qa-a > .ph {
+  color: var(--color-primary);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.tool-qa-a--pending,
+.tool-qa-a--skipped,
+.tool-qa-a--timed-out {
+  opacity: 0.6;
+  font-style: italic;
+}
+.tool-qa-a--pending > .ph,
+.tool-qa-a--skipped > .ph,
+.tool-qa-a--timed-out > .ph { color: var(--color-text-muted); }
+.tool-qa-a--pending { cursor: pointer; }
+.tool-qa-a--pending:hover { opacity: 0.9; }
+/* A question the floating card reports as answered, while the overall AUQ
+   is still open - reads as "resolved" (not muted/italic) despite being a
+   --pending row underneath (keeps the click-to-reopen affordance). */
+.tool-qa-a--live-answered {
+  opacity: 1;
+  font-style: normal;
+}
+.tool-qa-a--live-answered > .ph {
+  color: var(--color-primary);
+}
+
