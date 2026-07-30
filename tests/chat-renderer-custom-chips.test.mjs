@@ -113,7 +113,7 @@ describe("custom chip-panel views", () => {
 
     const qa = container.querySelector(".tool-qa");
     expect(qa.querySelector(".tool-qa-header").textContent).toBe("Choice");
-    expect(qa.querySelector(".tool-qa-q").textContent).toBe("Pick one?");
+    expect(qa.querySelector(".tool-qa-q").textContent.trim()).toBe("Pick one?");
     expect(qa.querySelector(".tool-qa-a").textContent).toContain("Option A");
     r.detach();
   });

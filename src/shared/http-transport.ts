@@ -442,9 +442,16 @@ export class HttpTransport implements Transport {
       // Daemon RPC errors (e.g. request_live_usage_refresh's "desktop app is
       // not running") come back as a JSON-RPC error body - surface its
       // message instead of just the bare HTTP status so a caller can show the
-      // dev something actionable.
-      const detail = await res.json().catch(() => null);
-      const message = detail?.message as string | undefined;
+      // dev something actionable. `try/catch` (not `.catch()` on the call)
+      // because a non-JSON error page has no `.json` method at all, which
+      // throws synchronously before a promise exists to attach `.catch` to.
+      let message: string | undefined;
+      try {
+        const detail = (await res.json()) as { message?: string } | null;
+        message = detail?.message;
+      } catch {
+        /* body isn't JSON (proxy error page, empty response, etc.) */
+      }
       throw new Error(message || `rpc ${method} failed: ${res.status}`);
     }
     return (await res.json()) as T;
