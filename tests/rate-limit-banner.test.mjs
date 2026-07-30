@@ -64,6 +64,7 @@ beforeEach(() => {
   moveSessionToAccount.mockReset();
   showToast.mockReset();
   showView.mockReset();
+  localStorage.clear();
 });
 
 afterEach(() => {
@@ -228,5 +229,49 @@ describe("RateLimitBanner", () => {
     vi.setSystemTime(NOW_MS + 20_000); // past the 10s reset
     b.update([instance({ rate_limited_resets_at: BigInt(NOW_SEC + 10) })]);
     expect(host.hidden).toBe(true);
+  });
+
+  it("clicking minimize collapses the card to an icon-only pill; clicking the pill re-expands", async () => {
+    const b = new RateLimitBanner();
+    b.mount(host);
+    await flush();
+    b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600), rate_limited_type: "seven_day" })]);
+
+    host.querySelector(".rlb-minimize").click();
+    expect(host.querySelector(".rate-limit-banner--min")).toBeTruthy();
+    expect(host.querySelector(".rlb-title")).toBeFalsy();
+    expect(host.hidden).toBe(false); // pill still visible, not fully dismissed
+
+    host.querySelector(".rate-limit-banner--min").click();
+    expect(host.querySelector(".rate-limit-banner--min")).toBeFalsy();
+    expect(host.querySelector(".rlb-title").textContent).toBe("Fibo hit its weekly limit");
+  });
+
+  it("persists the minimized state across instances (survives an app restart) while the window is still live", async () => {
+    const resetsAt = BigInt(NOW_SEC + 3600);
+    const b1 = new RateLimitBanner();
+    b1.mount(host);
+    await flush();
+    b1.update([instance({ account_id: FIBO.id, rate_limited_resets_at: resetsAt })]);
+    host.querySelector(".rlb-minimize").click();
+
+    const b2 = new RateLimitBanner();
+    b2.mount(host);
+    await flush();
+    b2.update([instance({ account_id: FIBO.id, rate_limited_resets_at: resetsAt })]);
+    expect(host.querySelector(".rate-limit-banner--min")).toBeTruthy();
+  });
+
+  it("does not carry the minimized flag over to a new rejection window (different resets_at)", async () => {
+    const b = new RateLimitBanner();
+    b.mount(host);
+    await flush();
+    b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
+    host.querySelector(".rlb-minimize").click();
+
+    // A fresh rejection during a new window gets a new resets_at.
+    b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 7200) })]);
+    expect(host.querySelector(".rate-limit-banner--min")).toBeFalsy();
+    expect(host.querySelector(".rlb-title")).toBeTruthy();
   });
 });

@@ -70,6 +70,18 @@ async function refreshAccountsCache(): Promise<void> {
 
 export interface RateLimitBannerDeps {
   now?: () => number;
+  storage?: Pick<Storage, "getItem" | "setItem">;
+}
+
+/** localStorage key -> JSON array of `${accountId}:${resetsAtMs}`. Keyed by
+ * resets_at so a fresh rejection (new resets_at) re-shows the full card even
+ * if the previous window's banner was minimized. Pruned to only the
+ * currently-blocked keys on every render, so it self-cleans once a window
+ * expires - no separate GC needed. */
+const MINIMIZED_STORAGE_KEY = "rate-limit-banner:minimized";
+
+function minimizedKey(accountId: string, resetsAtMs: number): string {
+  return `${accountId}:${resetsAtMs}`;
 }
 
 export class RateLimitBanner {
@@ -77,11 +89,30 @@ export class RateLimitBanner {
   private instances: Instance[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private now: () => number;
+  private storage: Pick<Storage, "getItem" | "setItem"> | null;
+  private minimized: Set<string>;
   private getSelectedSessionId: () => string | null = () => null;
   private onMoved: (newSessionId: string, oldSessionId: string) => void = () => {};
 
   constructor(deps?: RateLimitBannerDeps) {
     this.now = deps?.now ?? (() => Date.now());
+    this.storage = deps?.storage ?? (typeof localStorage !== "undefined" ? localStorage : null);
+    this.minimized = new Set(this.loadMinimized());
+  }
+
+  private loadMinimized(): string[] {
+    try {
+      const raw = this.storage?.getItem(MINIMIZED_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((k) => typeof k === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveMinimized(): void {
+    try { this.storage?.setItem(MINIMIZED_STORAGE_KEY, JSON.stringify([...this.minimized])); }
+    catch { /* storage unavailable/full - minimize state just won't survive reload */ }
   }
 
   /** Attach to the host element, load accounts, and paint the current state. */
@@ -151,6 +182,7 @@ export class RateLimitBanner {
     const nowMs = this.now();
 
     const cards: string[] = [];
+    const liveKeys = new Set<string>();
     for (const [accountId, list] of groups) {
       const blockedInGroup = list.filter(isBlocked);
       // All rejections for one account share a resets_at in practice; take
@@ -159,6 +191,8 @@ export class RateLimitBanner {
         Number(b.rate_limited_resets_at) > Number(a.rate_limited_resets_at) ? b : a
       );
       const resetsAtMs = Number(rep.rate_limited_resets_at) * 1000;
+      const key = minimizedKey(accountId, resetsAtMs);
+      liveKeys.add(key);
       const acc = getCachedAccount(accountId);
       const label = capitalize(acc?.label ?? "Account");
       const icon = acc?.icon || "user";
@@ -166,6 +200,14 @@ export class RateLimitBanner {
       const windowLabel = humanWindow(rep.rate_limited_type);
 
       const title = `${label} hit its ${windowLabel} limit`;
+
+      if (this.minimized.has(key)) {
+        cards.push(`
+          <button type="button" class="rate-limit-banner rate-limit-banner--min" data-key="${escapeHtml(key)}" style="--acc:${escapeHtml(colour)}" title="${escapeHtml(title)} - click to expand">
+            <i class="ph ph-${escapeHtml(icon)} rlb-icon"></i>
+          </button>`);
+        continue;
+      }
       const affected = blockedInGroup.length > 1 ? ` · ${blockedInGroup.length} chats affected` : "";
       const timeLine = `Resets ${formatClockLabel(resetsAtMs, nowMs)}${affected}`;
       const countdown = formatCountdown(resetsAtMs - nowMs);
@@ -188,7 +230,7 @@ export class RateLimitBanner {
       }
 
       cards.push(`
-        <div class="rate-limit-banner" data-account-id="${escapeHtml(accountId)}" style="--acc:${escapeHtml(colour)}">
+        <div class="rate-limit-banner" data-account-id="${escapeHtml(accountId)}" data-key="${escapeHtml(key)}" style="--acc:${escapeHtml(colour)}">
           <i class="ph ph-${escapeHtml(icon)} rlb-icon"></i>
           <div class="rlb-text">
             <div class="rlb-title">${escapeHtml(title)}</div>
@@ -198,9 +240,17 @@ export class RateLimitBanner {
           <div class="rlb-actions">
             ${moveBtn}
             <button class="rlb-schedule"><i class="ph ph-calendar-dots"></i> View in Schedule</button>
+            <button class="rlb-minimize" title="Minimize"><i class="ph ph-minus"></i></button>
           </div>
         </div>`);
     }
+
+    // Drop any minimized keys whose window is no longer live (reset passed,
+    // or account no longer blocked) so localStorage doesn't grow forever.
+    for (const key of [...this.minimized]) {
+      if (!liveKeys.has(key)) this.minimized.delete(key);
+    }
+    this.saveMinimized();
 
     this.host.innerHTML = cards.join("");
     this.wireActions();
@@ -219,6 +269,24 @@ export class RateLimitBanner {
     });
     this.host.querySelectorAll<HTMLButtonElement>(".rlb-schedule").forEach((btn) => {
       btn.addEventListener("click", () => showView("schedule"));
+    });
+    this.host.querySelectorAll<HTMLButtonElement>(".rlb-minimize").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.closest<HTMLElement>(".rate-limit-banner")?.dataset.key;
+        if (!key) return;
+        this.minimized.add(key);
+        this.saveMinimized();
+        this.render();
+      });
+    });
+    this.host.querySelectorAll<HTMLButtonElement>(".rate-limit-banner--min").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.key;
+        if (!key) return;
+        this.minimized.delete(key);
+        this.saveMinimized();
+        this.render();
+      });
     });
   }
 

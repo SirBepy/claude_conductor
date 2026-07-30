@@ -649,6 +649,47 @@
   cursor: not-allowed;
 }
 
+.rate-limit-banner .rlb-minimize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.rate-limit-banner .rlb-minimize:hover {
+  background: color-mix(in srgb, var(--st-rate-limited) 12%, transparent);
+  color: var(--color-text);
+}
+
+/* Minimized state: the whole card collapses to a small round icon-only pill
+   (no title/time/actions) so it stops competing for attention while still
+   showing which account is blocked; click to re-expand. */
+.rate-limit-banner.rate-limit-banner--min {
+  display: inline-flex;
+  width: auto;
+  margin: 6px 0 6px 16px;
+  padding: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--st-rate-limited-line);
+  cursor: pointer;
+}
+
+.rate-limit-banner.rate-limit-banner--min:hover {
+  background: color-mix(in srgb, var(--st-rate-limited) 18%, var(--st-rate-limited-wash));
+}
+
+.rate-limit-banner.rate-limit-banner--min .rlb-icon {
+  font-size: 1.1rem;
+}
+
 
 .session-messages {
   flex: 1;
