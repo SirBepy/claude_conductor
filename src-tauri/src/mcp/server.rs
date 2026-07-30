@@ -111,7 +111,7 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_QUESTION,
-            "description": "Present questions to user. Returns answers.",
+            "description": "Present one or more questions to the user as a floating card. Keep 'question' scannable: short paragraphs (blank line between) rather than one dense run-on paragraph, bold the 1-2 facts that matter, bullet enumerable items, and end with the literal, standalone ask as its own final sentence. Options need short labels; put nuance in each option's description. Returns answers keyed by question text.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
