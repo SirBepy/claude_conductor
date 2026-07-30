@@ -753,11 +753,14 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   let previewController = wirePreviewPanel(root, pane);
   initThinkingBar(pane);
 
-  // Clicking a pending "awaiting answer" chip in the chat dismisses any active
-  // AUQ card and re-surfaces it. Handles the case where the modal somehow got
-  // closed without answering (navigated away and back, dismissed by mistake).
+  // Clicking anywhere on an unanswered AUQ card in the chat dismisses any
+  // active floating card and re-surfaces it. Handles the case where the modal
+  // somehow got closed without answering (navigated away and back, dismissed
+  // by mistake). Gated on a `.tool-qa-a--pending` row still being present so a
+  // fully answered/skipped/timed-out card doesn't reopen on click.
   pane.addEventListener("click", (e) => {
-    if (!(e.target as HTMLElement).closest(".tool-qa-a--pending")) return;
+    const card = (e.target as HTMLElement).closest(".msg.question-card");
+    if (!card || !card.querySelector(".tool-qa-a--pending")) return;
     const sid = getSelectedSessionId();
     if (!sid) return;
     dismissQuestionCard();
