@@ -272,6 +272,15 @@
   font-size: 0.78rem;
   margin-bottom: 4px;
 }
+/* Renders through renderMarkdown now (was escapeHtml) so it stays consistent
+ * with the live card's formatting - reset markdown-it's own block spacing to
+ * fit this compact, already-answered summary row. */
+.tool-qa-q p { margin: 0 0 4px; }
+.tool-qa-q p:last-child { margin-bottom: 0; }
+.tool-qa-q ul, .tool-qa-q ol { margin: 2px 0 4px; padding-left: 16px; }
+.tool-qa-q li { margin: 1px 0; }
+.tool-qa-q strong { font-weight: 700; }
+.tool-qa-q code { background: var(--color-surface-alt); border-radius: 3px; padding: 0 4px; font-size: 0.9em; }
 .tool-qa-a {
   display: flex;
   align-items: flex-start;

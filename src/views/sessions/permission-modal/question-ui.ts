@@ -1,5 +1,6 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { registerOverlayBack } from "../../../shared/back-button";
+import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
@@ -19,6 +20,42 @@ export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuest
 // zero-selections state - lets isQuestionAnswered require a real choice
 // (checkbox or free text) instead of treating an untouched question as done.
 const NONE_LABEL = "None of the above";
+
+/**
+ * Split a question body into reasoning/context and the actual ask, so the
+ * card can dim the former and highlight the latter (approved as "Variant B"
+ * in the /mockup Joe reviewed for the wall-of-text complaint). The ask is the
+ * final "?"-terminated sentence; its start is the nearest paragraph or
+ * sentence break before it, else the whole string. Falls back to no split
+ * (ask = everything) when there's no "?" or the "context" would be empty/
+ * negligible - keeps short, already-terse questions rendering exactly as
+ * before instead of wrapping them in a pointless empty context block.
+ */
+function splitAsk(question: string): { context: string; ask: string } {
+  const trimmed = question.trim();
+  const lastQ = trimmed.lastIndexOf("?");
+  if (lastQ === -1) return { context: "", ask: trimmed };
+  const beforeAsk = trimmed.slice(0, lastQ);
+  const paraBreak = beforeAsk.lastIndexOf("\n\n");
+  const sentenceBreak = beforeAsk.lastIndexOf(". ");
+  const cut = Math.max(paraBreak, sentenceBreak);
+  const askStart = cut === -1 ? 0 : cut + 2;
+  const context = trimmed.slice(0, askStart).trim();
+  const ask = trimmed.slice(askStart, lastQ + 1).trim();
+  if (!context || ask.length > trimmed.length * 0.85) return { context: "", ask: trimmed };
+  return { context, ask };
+}
+
+/** Renders a question's body: markdown throughout, plus (when splitAsk finds
+ *  a clear final ask) a dimmed context block above a highlighted ask line. */
+function questionTextHtml(question: string): string {
+  const { context, ask } = splitAsk(question);
+  if (!context) return `<div class="prompt-q__text">${renderMarkdown(question)}</div>`;
+  return `
+    <div class="prompt-q__context">${renderMarkdown(context)}</div>
+    <div class="prompt-q__ask"><i class="ph ph-arrow-bend-down-right"></i>${renderMarkdown(ask)}</div>
+  `;
+}
 
 export function renderQuestionUI(opts: QuestionUIOpts): void {
   const { host } = ensureHost();
@@ -207,7 +244,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         : selections.get(activeTab) === opt.label;
       const inputType = q!.multiSelect ? "checkbox" : "radio";
       const desc = opt.description
-        ? `<span class="prompt-opt__desc">${escapeHtml(opt.description)}</span>`
+        ? `<div class="prompt-opt__desc">${renderMarkdown(opt.description)}</div>`
         : "";
       const isNone = q!.multiSelect && opt.label === NONE_LABEL;
       return `
@@ -247,7 +284,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         ${tabsHtml}
         <div class="prompt-q" role="tabpanel">
           <div class="prompt-q__head">${qHeaderTag}${modeHtml}</div>
-          <div class="prompt-q__text">${escapeHtml(q?.question ?? "")}</div>
+          ${questionTextHtml(q?.question ?? "")}
           <div class="prompt-q__opts">${rows}</div>
           <label class="prompt-q__other">
             <span class="prompt-q__other-label">Add your own (combines with a pick above):</span>

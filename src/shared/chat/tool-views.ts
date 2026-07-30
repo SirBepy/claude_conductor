@@ -11,6 +11,7 @@
 // + history views), so the body-appended statusline popover styles it too.
 
 import type { RenderedMessage } from "./chat-transforms";
+import { renderMarkdown } from "./chat-transforms";
 import { canonicalTool } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
 import { basename } from "../path-utils";
@@ -161,7 +162,7 @@ export function renderQuestionsView(messages: RenderedMessage[], start: number, 
       const answerHtml = ans
         ? `<div class="tool-qa-a"><i class="ph ph-arrow-bend-down-right"></i><span>${escapeHtml(ans)}</span></div>`
         : `<div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div>`;
-      cards.push(`<div class="tool-qa">${header}<div class="tool-qa-q">${escapeHtml(q.question)}</div>${answerHtml}</div>`);
+      cards.push(`<div class="tool-qa">${header}<div class="tool-qa-q">${renderMarkdown(q.question)}</div>${answerHtml}</div>`);
     }
   }
   return cards.join("");
@@ -215,7 +216,7 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
     } else {
       answerHtml = `<div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div>`;
     }
-    return `<div class="tool-qa">${header}<div class="tool-qa-q">${escapeHtml(q.question)}</div>${answerHtml}</div>`;
+    return `<div class="tool-qa">${header}<div class="tool-qa-q">${renderMarkdown(q.question)}</div>${answerHtml}</div>`;
   }).join("");
   const firstLabel = questions[0]?.header || questions[0]?.question || "";
   const truncated = firstLabel.length > 55 ? firstLabel.slice(0, 53) + "…" : firstLabel;

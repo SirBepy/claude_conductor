@@ -42,6 +42,11 @@
   display: flex;
   flex-direction: column;
   max-height: min(60vh, 540px);
+  /* Same 520px the viewport-mode host already caps at (below) - the composer/
+   * pane hosts stretch full-width with no cap of their own, which on a wide
+   * window turned long question text into uncomfortably long lines. */
+  max-width: 520px;
+  margin: 0 auto;
   overflow: hidden;
   animation: prompt-card-in 0.16s ease-out;
 }
@@ -275,6 +280,69 @@
   font-size: 0.92rem;
   color: var(--color-text);
   line-height: 1.4;
+}
+/* Question/option text now renders through the real markdown pipeline
+ * (renderMarkdown) instead of escapeHtml, so a model's paragraph breaks,
+ * **bold**, and `- ` bullets actually render instead of collapsing into one
+ * blob - markdown-it's <p>/<ul>/<li> need spacing rules of their own since
+ * these containers previously only ever held one bare text node. */
+.prompt-q__text p,
+.prompt-q__context p,
+.prompt-q__opts .prompt-opt__desc p {
+  margin: 0 0 8px;
+}
+.prompt-q__text p:last-child,
+.prompt-q__context p:last-child,
+.prompt-q__opts .prompt-opt__desc p:last-child {
+  margin-bottom: 0;
+}
+.prompt-q__text ul, .prompt-q__text ol,
+.prompt-q__context ul, .prompt-q__context ol {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.prompt-q__text li, .prompt-q__context li {
+  margin: 2px 0;
+}
+.prompt-q__text strong, .prompt-q__context strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+.prompt-q__text code, .prompt-q__context code, .prompt-q__opts .prompt-opt__desc code {
+  background: var(--color-surface-alt);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+}
+
+/* Context/ask split: when splitAsk() finds a clear final question, the
+ * reasoning above it is dimmed and the actual ask gets a highlighted,
+ * left-accented line so it doesn't get lost under a long explanation. */
+.prompt-q__context {
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  margin-bottom: 4px;
+}
+.prompt-q__ask {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  border-left: 2px solid var(--color-primary);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.prompt-q__ask i {
+  color: var(--color-primary);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.prompt-q__ask p {
+  margin: 0;
 }
 
 .prompt-q__opts {

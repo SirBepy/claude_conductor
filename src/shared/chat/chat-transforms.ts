@@ -323,7 +323,7 @@ export function renderMessage(m: RenderedMessage): string {
   }
 }
 
-function renderMarkdown(text: string, breaks = false, allowHtml = false): string {
+export function renderMarkdown(text: string, breaks = false, allowHtml = false): string {
   const inst = allowHtml ? mdHtml : breaks ? mdBreaks : md;
   return highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst)));
 }
