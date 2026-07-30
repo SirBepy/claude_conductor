@@ -2,6 +2,10 @@
 //! more `register_*` fns; the daemon bin (`src/bin/cc_conductor_daemon.rs`)
 //! calls them in sequence at startup to populate the Router.
 
+// pub(crate): `hooks_server::channel` (the coordination-tool HTTP routes)
+// calls this module's `list_peers`/`post_message`/`read_messages` directly -
+// same non-RPC shape as `jarvis` below.
+pub(crate) mod channel;
 mod channels;
 mod context;
 // pub(crate): `hooks_server::jarvis` (the fleet-tool HTTP routes, todo 272

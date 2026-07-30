@@ -79,6 +79,11 @@ pub struct DaemonState {
     /// and write it directly, the same shape `sessions`/`registry` above use
     /// for their own daemon-wide consumers.
     pub jarvis_wakes: crate::daemon::jarvis_wake::WakeQueue,
+    /// Per-session wake queue for the inter-agent repo coordination channel -
+    /// see `daemon::repo_channel_wake` for the enqueue/drain contract. Same
+    /// shape as `jarvis_wakes` above (reuses its `WakeQueue` type), but keyed
+    /// by any live session id, not just a Jarvis singleton.
+    pub repo_channel_wakes: crate::daemon::jarvis_wake::WakeQueue,
 }
 
 impl DaemonState {
@@ -110,6 +115,7 @@ impl DaemonState {
             push: OnceLock::new(),
             commit_locks: std::sync::Mutex::new(HashMap::new()),
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
+            repo_channel_wakes: crate::daemon::jarvis_wake::new_queue(),
         })
     }
 

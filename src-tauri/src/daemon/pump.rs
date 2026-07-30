@@ -331,6 +331,13 @@ pub(crate) async fn run_stdout_pump(
                                 if state_for_pump.registry.get(&pump_session.session_id).map(|i| i.jarvis).unwrap_or(false) {
                                     crate::daemon::jarvis_wake::spawn_drain(&state_for_pump, &pump_session.session_id);
                                 }
+                                // Drain-on-idle for the repo coordination channel: ANY
+                                // session (not just Jarvis) can be woken by a peer's
+                                // `post_message`, so every session that just went idle
+                                // gets its queue flushed too - a no-op via `drain`'s own
+                                // busy/ended/empty-queue guards when there's nothing to
+                                // deliver.
+                                crate::daemon::repo_channel_wake::spawn_drain(&state_for_pump, &pump_session.session_id);
                                 if let Some(active) = turn_autopilot_changed {
                                     state_for_pump.registry.set_autopilot(&pump_session.session_id, active);
                                 }

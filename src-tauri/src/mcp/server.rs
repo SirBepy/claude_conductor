@@ -1,10 +1,12 @@
 //! stdio MCP server mode. Entered when the binary is spawned with
 //! `--mcp-permission`. Implements MCP JSON-RPC 2.0 over stdin/stdout
-//! (one JSON object per line). Exposes three tools:
+//! (one JSON object per line). Exposes six tools unconditionally:
 //!   - `approval_prompt`: used as `--permission-prompt-tool` by the runner
 //!   - `ask_user_question`: lets claude ask the user a question mid-turn
 //!   - `close_session`: the `/close` skill confirms teardown; the daemon ends
 //!     the session + kills the process at turn end
+//!   - `list_peers` / `post_message` / `read_messages`: inter-agent
+//!     coordination channel, scoped per project (see `daemon::methods::channel`)
 //!
 //! HTTP coordination piggybacks on the existing hooks server.
 
@@ -14,6 +16,13 @@ use std::io::{BufRead, Write};
 const TOOL_APPROVAL: &str = "approval_prompt";
 const TOOL_QUESTION: &str = "ask_user_question";
 const TOOL_CLOSE: &str = "close_session";
+// Inter-agent coordination-channel tools: unconditionally advertised (unlike
+// the Jarvis fleet tools below) - any session running through this app
+// should be able to see who else is active in its project and coordinate
+// with them, not just a Jarvis worker.
+const TOOL_LIST_PEERS: &str = "list_peers";
+const TOOL_POST_MESSAGE: &str = "post_message";
+const TOOL_READ_MESSAGES: &str = "read_messages";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -133,6 +142,33 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         json!({
             "name": TOOL_CLOSE,
             "description": "Confirm this chat's /close teardown so the host app ends the session and kills the process at turn end. Call ONLY from the /close skill's final close step, and never on --dont-close or a failed chain.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": TOOL_LIST_PEERS,
+            "description": "List other Claude Conductor sessions currently active in this same project (repo), with their busy/awaiting state. Use this before editing a shared file to check whether another agent is already on it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": TOOL_POST_MESSAGE,
+            "description": "Post a short coordination note to this project's shared channel (e.g. \"about to edit foo.ts, is anyone on this?\"). Every other currently-active session in this project is nudged to read it at its next idle moment. Only visible to other Conductor sessions in this same project - not a general chat.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The note to post."}
+                },
+                "required": ["text"]
+            }
+        }),
+        json!({
+            "name": TOOL_READ_MESSAGES,
+            "description": "Read this project's recent coordination-channel history (see post_message).",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -341,6 +377,33 @@ pub fn run_stdio() {
                                 Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
                             }
                         }
+                        TOOL_LIST_PEERS => {
+                            let url = format!("http://127.0.0.1:{port}/channel/list-peers");
+                            let body = json!({ "session_id": session_id });
+                            match http_post(&rt, &url, body) {
+                                Ok(resp) => tool_result(&id, &resp.to_string()),
+                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
+                            }
+                        }
+                        TOOL_POST_MESSAGE => {
+                            let url = format!("http://127.0.0.1:{port}/channel/post-message");
+                            let body = json!({
+                                "session_id": session_id,
+                                "text": arguments["text"],
+                            });
+                            match http_post(&rt, &url, body) {
+                                Ok(resp) => tool_result(&id, &resp.to_string()),
+                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
+                            }
+                        }
+                        TOOL_READ_MESSAGES => {
+                            let url = format!("http://127.0.0.1:{port}/channel/read-messages");
+                            let body = json!({ "session_id": session_id });
+                            match http_post(&rt, &url, body) {
+                                Ok(resp) => tool_result(&id, &resp.to_string()),
+                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
+                            }
+                        }
                         // The four arms below are only ever advertised to a
                         // Jarvis child's `tools/list` (see `is_jarvis` above),
                         // but a `tools/call` for a tool the model was never
@@ -475,22 +538,26 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_three_tools() {
-        // Non-jarvis (the default for every normal session): the list must
-        // stay byte-identical to before the Jarvis fleet tools existed.
+    fn tools_list_returns_six_base_tools() {
+        // Non-jarvis (the default for every normal session): base set is the
+        // original 3 permission/question/close tools plus the 3 unconditional
+        // coordination-channel tools (list_peers/post_message/read_messages).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 6);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
         assert!(names.contains(&"approval_prompt"));
         assert!(names.contains(&"ask_user_question"));
         assert!(names.contains(&"close_session"));
+        assert!(names.contains(&"list_peers"));
+        assert!(names.contains(&"post_message"));
+        assert!(names.contains(&"read_messages"));
     }
 
     #[test]
@@ -502,13 +569,16 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7, "3 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 10, "6 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
         assert!(names.contains(&"approval_prompt"));
         assert!(names.contains(&"ask_user_question"));
         assert!(names.contains(&"close_session"));
+        assert!(names.contains(&"list_peers"));
+        assert!(names.contains(&"post_message"));
+        assert!(names.contains(&"read_messages"));
         assert!(names.contains(&"spawn_worker"));
         assert!(names.contains(&"send_to_session"));
         assert!(names.contains(&"fleet_status"));

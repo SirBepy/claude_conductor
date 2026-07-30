@@ -9,6 +9,7 @@
 //! boot scaffolding (HookCtx, HOOK_PORT, health, spawn) and the route table,
 //! the only place that "sees" every category at once.
 
+mod channel;
 mod commit_lock;
 mod context;
 mod decision;
@@ -149,6 +150,9 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/jarvis/send-to-session", post(jarvis::on_send_to_session))
         .route("/jarvis/fleet-status", post(jarvis::on_fleet_status))
         .route("/jarvis/respond-worker-prompt", post(jarvis::on_respond_worker_prompt))
+        .route("/channel/list-peers", post(channel::on_list_peers))
+        .route("/channel/read-messages", post(channel::on_read_messages))
+        .route("/channel/post-message", post(channel::on_post_message))
         .with_state(ctx);
 
     tokio::spawn(async move {
