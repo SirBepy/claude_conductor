@@ -217,12 +217,8 @@ export class TurnFooterRegistry {
     }, 1000);
   }
 
-  /**
-   * Prime a still-open turn's row after a history reload: create it and
-   * start the live tick from `turnStartMs`, seeding the token/tooltip display
-   * with the real totals accumulated so far - WITHOUT settling, so later live
-   * events keep ticking instead of freezing at this reload snapshot forever.
-   */
+  /** Primes a still-open turn after a reload with a live (non-settled) tick,
+   *  seeded from the totals-so-far, so later events keep it ticking. */
   primeReplayedLiveRow(key: TurnChipKey, turnStartMs: number, totals: TurnUsageTotals): void {
     this.ensureLiveMetaRow(key, turnStartMs);
     const st = this.turns.get(key);
@@ -231,12 +227,8 @@ export class TurnFooterRegistry {
     st.metaRow!.title = buildTooltip(totals);
   }
 
-  /**
-   * Re-sync the ticking row's elapsed text to the true wall-clock value.
-   * Minimized/backgrounded windows can throttle or pause the 1s interval, so
-   * this is also called on every flush (real chat event) to self-correct
-   * without waiting on the timer. No-op once settled.
-   */
+  /** Re-syncs the ticking row's elapsed text on every flush, since a
+   *  minimized window can throttle setInterval. No-op once settled. */
   syncLiveTick(key: TurnChipKey): void {
     const st = this.turns.get(key);
     if (!st || st.settled || !st.timeTextNode || st.turnStartMs <= 0) return;

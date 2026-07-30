@@ -111,9 +111,8 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       r.setTurnStatus(null);
       // Open a new turn footer. The key is a sequence counter (unique even
       // when tests freeze system time); the wall-clock start drives the live
-      // elapsed display. History replay carries the message's real ts - using
-      // that (not replay-time Date.now()) keeps a resumed live tick's elapsed
-      // baseline correct instead of restarting from ~0.
+      // elapsed display - history replay uses the message's real ts (not
+      // replay-time Date.now()) so a resumed tick's baseline stays correct.
       r.activeTurnChipKey = ++r._chipKeySeq;
       r.activeTurnStreamedText = "";
       r.activeTurnStartedAtMs = ts > 0 ? ts : Date.now();

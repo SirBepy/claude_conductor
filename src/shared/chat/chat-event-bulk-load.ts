@@ -18,10 +18,8 @@ import { handleChatEvent } from "./chat-event-handler";
 import type { ChatRenderer } from "./chat-renderer";
 
 export interface BulkLoadOpts {
-  /** True for a still-attached live session (Sessions view): a still-open
-   *  final turn resumes live ticking instead of freezing at this reload's
-   *  snapshot. False (default) for read-only History, where nothing will
-   *  ever stream in again and a resumed tick would be misleading. */
+  /** True for a still-live session (resumes ticking on reload); false
+   *  (default) for read-only History, where nothing streams in again. */
   resumeLiveTicking?: boolean;
 }
 
@@ -77,10 +75,8 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.hydrating = false;
   r.onFileEditsChanged?.(r.getFileEdits());
   r.onActivityUpdate?.(r.lastActivity);
-  // The final turn never gets a closing user_message. A live session resumes
-  // ticking from the accumulated totals; read-only History (nothing left to
-  // stream) settles frozen instead - priming it live there would tick
-  // forever for a session that's actually long dead.
+  // The final turn never gets a closing user_message: a live session resumes
+  // ticking; History settles frozen (nothing left to stream in, ever).
   if (r.activeTurnChipKey !== null && r.activeTurnUsage) {
     const u = r.activeTurnUsage;
     const totals = { ...u, durationMs: u.durationMs > 0 ? u.durationMs : activeTurnTsSpan(r) };
