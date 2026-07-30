@@ -281,11 +281,8 @@
   color: var(--color-text);
   line-height: 1.4;
 }
-/* Question/option text now renders through the real markdown pipeline
- * (renderMarkdown) instead of escapeHtml, so a model's paragraph breaks,
- * **bold**, and `- ` bullets actually render instead of collapsing into one
- * blob - markdown-it's <p>/<ul>/<li> need spacing rules of their own since
- * these containers previously only ever held one bare text node. */
+/* Renders through renderMarkdown now (was escapeHtml), so <p>/<ul>/<li>
+ * need spacing rules - these divs previously only ever held one text node. */
 .prompt-q__text p,
 .prompt-q__context p,
 .prompt-q__opts .prompt-opt__desc p {

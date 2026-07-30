@@ -21,16 +21,10 @@ export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuest
 // (checkbox or free text) instead of treating an untouched question as done.
 const NONE_LABEL = "None of the above";
 
-/**
- * Split a question body into reasoning/context and the actual ask, so the
- * card can dim the former and highlight the latter (approved as "Variant B"
- * in the /mockup Joe reviewed for the wall-of-text complaint). The ask is the
- * final "?"-terminated sentence; its start is the nearest paragraph or
- * sentence break before it, else the whole string. Falls back to no split
- * (ask = everything) when there's no "?" or the "context" would be empty/
- * negligible - keeps short, already-terse questions rendering exactly as
- * before instead of wrapping them in a pointless empty context block.
- */
+/** Splits a body into context + the final "?"-terminated ask (cut at the
+ *  nearest paragraph/sentence break before it), so the card can dim the
+ *  former and highlight the latter. No "?", or a negligible context, falls
+ *  back to {context: "", ask: whole string} - keeps terse questions as-is. */
 function splitAsk(question: string): { context: string; ask: string } {
   const trimmed = question.trim();
   const lastQ = trimmed.lastIndexOf("?");
