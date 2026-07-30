@@ -186,7 +186,10 @@ export async function mountRenderer(
   // attached so events accrue even when this session isn't selected.
   const overlay = sessionEvents.isLoaded(sessionId) ? null : showChatLoadingOverlay(messagesEl);
   try {
-    await renderer.loadFromStore(sess.cwd ? String(sess.cwd) : undefined, { resumeLiveTicking: true });
+    // Only resume ticking if a turn is genuinely in flight right now - an
+    // idle/awaiting-reply session has no closing user_message either, but
+    // it isn't "still working".
+    await renderer.loadFromStore(sess.cwd ? String(sess.cwd) : undefined, { resumeLiveTicking: sess.busy });
     if (state.mountId !== myMount || state.selectedId !== sessionId) {
       settleLoad();
       renderer.detach();
@@ -249,7 +252,10 @@ export function mountComposer(
       // so a genuinely failed send doesn't keep looking like it went through.
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
       if (state.renderer && state.renderer.currentSessionId() === sessionId) {
-        await state.renderer.loadFromStore(cwd, { resumeLiveTicking: true });
+        // The failed send never started a turn, so this session is not busy
+        // from it - but check live rather than assume, in case another turn
+        // is genuinely still in flight.
+        await state.renderer.loadFromStore(cwd, { resumeLiveTicking: isCurrentSessionBusy() });
       }
       showToast(`Send failed: ${err}`);
     }
