@@ -15,6 +15,8 @@ mod context;
 // module's header), so plain private-to-`daemon::methods` visibility isn't
 // enough; `hooks_server` is a sibling of `daemon::methods`, not a descendant.
 pub(crate) mod jarvis;
+mod jarvis_assets;
+mod jarvis_fleet;
 mod lifecycle;
 mod permission;
 mod preview;
