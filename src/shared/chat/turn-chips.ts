@@ -218,6 +218,18 @@ export class TurnFooterRegistry {
   }
 
   /**
+   * Re-sync the ticking row's elapsed text to the true wall-clock value.
+   * Minimized/backgrounded windows can throttle or pause the 1s interval, so
+   * this is also called on every flush (real chat event) to self-correct
+   * without waiting on the timer. No-op once settled.
+   */
+  syncLiveTick(key: TurnChipKey): void {
+    const st = this.turns.get(key);
+    if (!st || st.settled || !st.timeTextNode || st.turnStartMs <= 0) return;
+    st.timeTextNode.nodeValue = formatTurnDuration(Date.now() - st.turnStartMs);
+  }
+
+  /**
    * Update the live token estimate as assistant text streams in.
    * `text` is the full accumulated assistant text for this turn.
    */

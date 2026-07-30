@@ -124,6 +124,7 @@ export function ensureActiveTurnFooter(r: ChatRenderer): void {
   }
   if (r.liveBuffer === null) {
     r.turnFooters.ensureLiveMetaRow(r.activeTurnChipKey, r.activeTurnStartedAtMs || Date.now());
+    r.turnFooters.syncLiveTick(r.activeTurnChipKey);
     if (r.activeTurnStreamedText) {
       r.turnFooters.updateLiveTokenEstimate(r.activeTurnChipKey, r.activeTurnStreamedText);
     }
