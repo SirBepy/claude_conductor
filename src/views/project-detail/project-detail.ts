@@ -1,5 +1,7 @@
 import { html, render } from "lit-html";
 import "./project-detail.css";
+import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
+import "../../shared/kebab-menu.css";
 import { formatTokens, formatMillions, totalTok } from "../../shared/tokens";
 import type { TokenRecord } from "../../shared/tokens";
 import { invoke } from "../../shared/ipc";
@@ -152,28 +154,18 @@ export async function renderProjectDetailView(
   // 3-dot menu
   const menuBtn = root.querySelector<HTMLButtonElement>("#projectDetailMenuBtn");
   const menu = root.querySelector<HTMLElement>("#projectDetailMenu");
-  const onDocClick = (e: MouseEvent) => {
-    if (!menu) return;
-    if (menu.classList.contains("hidden")) return;
-    const target = e.target as Node;
-    if (menu.contains(target) || menuBtn?.contains(target)) return;
-    menu.classList.add("hidden");
-  };
+  let disposeMenu: (() => void) | undefined;
   if (menuBtn && menu) {
-    menuBtn.onclick = (e: MouseEvent) => {
-      e.stopPropagation();
-      menu.classList.toggle("hidden");
-    };
+    disposeMenu = wireKebabMenu(menuBtn, menu);
     menu.querySelectorAll<HTMLButtonElement>(".menu-item").forEach((btn) => {
       btn.onclick = () => {
-        menu.classList.add("hidden");
+        closeKebabMenu(menu);
         const kind = btn.dataset.menuItem;
         if (kind === "character-pick") openProjectSubview("project-character-pick");
         else if (kind === "automation") openProjectSubview("project-automation");
         else if (kind === "folder-mapping") openProjectSubview("project-folder-mapping");
       };
     });
-    document.addEventListener("click", onDocClick);
   }
 
   // New chat in this project (+ on the running-instances header)
@@ -237,7 +229,7 @@ export async function renderProjectDetailView(
 
   return () => {
     try { unsub(); } catch { /* ignore */ }
-    document.removeEventListener("click", onDocClick);
+    disposeMenu?.();
   };
 }
 

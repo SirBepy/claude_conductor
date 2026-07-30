@@ -70,31 +70,5 @@
 .range-btn.active { background: var(--color-primary); color: var(--color-background); border-color: var(--color-primary); }
 .range-btn:hover:not(.active) { border-color: var(--color-primary); color: var(--color-primary); }
 
-/* Project detail menu popover */
-.menu-anchor { position: relative; display: inline-block; }
-.menu-popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 200px;
-  background: var(--color-surface, #1f1d2e);
-  border: 1px solid var(--color-border, #2d2c44);
-  border-radius: 6px;
-  padding: 4px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-  z-index: 1400;
-}
-.menu-popover.hidden { display: none; }
-.menu-popover .menu-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 12px;
-  font-size: 0.82rem;
-  background: transparent;
-  color: var(--color-text);
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.menu-popover .menu-item:hover { background: var(--color-surface-alt, #2a2840); }
+/* .menu-anchor/.menu-popover/.menu-item rules moved to
+ * src/shared/kebab-menu.css (todo 204). */

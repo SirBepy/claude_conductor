@@ -16,6 +16,8 @@ import {
   isLive,
   renderCards,
 } from "./session-detail-cards";
+import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
+import "../../shared/kebab-menu.css";
 import "./session-detail.css";
 
 function sessionIdOf(r: SessionRecord): string {
@@ -83,16 +85,10 @@ function wireMenu(root: HTMLElement, r: SessionRecord): void {
   const menu = root.querySelector<HTMLElement>("#sessionDetailMenu");
   if (!menuBtn || !menu) return;
   const sid = sessionIdOf(r);
-  const onDocClick = (e: MouseEvent) => {
-    if (menu.classList.contains("hidden")) return;
-    const target = e.target as Node;
-    if (menu.contains(target) || menuBtn.contains(target)) return;
-    menu.classList.add("hidden");
-  };
-  menuBtn.onclick = (e: MouseEvent) => { e.stopPropagation(); menu.classList.toggle("hidden"); };
+  const dispose = wireKebabMenu(menuBtn, menu);
   menu.querySelectorAll<HTMLButtonElement>(".menu-item").forEach((btn) => {
     btn.onclick = async () => {
-      menu.classList.add("hidden");
+      closeKebabMenu(menu);
       const act = btn.dataset.act;
       try {
         if (act === "copy-pid" && (r.pid ?? 0) > 0) {
@@ -105,9 +101,7 @@ function wireMenu(root: HTMLElement, r: SessionRecord): void {
       } catch (err) { showToast(`Copy failed: ${err}`); }
     };
   });
-  document.addEventListener("click", onDocClick);
-  (menu as unknown as { _cleanup?: () => void })._cleanup = () =>
-    document.removeEventListener("click", onDocClick);
+  (menu as unknown as { _cleanup?: () => void })._cleanup = dispose;
 }
 
 function wireCta(root: HTMLElement, r: SessionRecord): void {

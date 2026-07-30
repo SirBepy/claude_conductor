@@ -13,6 +13,7 @@ import { openEditAccountModal } from "./edit-account-modal";
 import { askConfirm } from "../../../../shared/confirm";
 import { buildIdentitySurface } from "./wizard-logic";
 import "../../../../shared/account-chip.css";
+import "../../../../shared/kebab-menu.css";
 import "./accounts.css";
 
 interface LegacyGlobals {

@@ -4,6 +4,8 @@ import { loadCharacters, invalidateCharactersCache, slotFillCount } from "../../
 import { hydrateCharacterAvatars } from "../../shared/projects";
 import { api, type Character } from "../../shared/api";
 import { openCharacterDetail } from "./character-detail";
+import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
+import "../../shared/kebab-menu.css";
 import "./characters.css";
 
 interface GameGroup {
@@ -106,32 +108,22 @@ export async function renderCharactersView(root: HTMLElement): Promise<() => voi
   const moreBtn = root.querySelector<HTMLButtonElement>("#characters-more")!;
   const menu = root.querySelector<HTMLElement>("#characters-menu")!;
 
-  moreBtn.onclick = (e) => {
-    e.stopPropagation();
-    menu.classList.toggle("hidden");
-  };
-
-  const closeOnOutside = (e: MouseEvent) => {
-    if (!menu.contains(e.target as Node) && e.target !== moreBtn) {
-      menu.classList.add("hidden");
-    }
-  };
-  document.addEventListener("click", closeOnOutside);
+  const disposeMenu = wireKebabMenu(moreBtn, menu);
 
   root.querySelector<HTMLButtonElement>("#characters-refresh")!.onclick = () => {
-    menu.classList.add("hidden");
+    closeKebabMenu(menu);
     invalidateCharactersCache();
     void refresh(list);
   };
 
   root.querySelector<HTMLButtonElement>("#characters-open-folder")!.onclick = async () => {
-    menu.classList.add("hidden");
+    closeKebabMenu(menu);
     const dir = await api.getCharactersDir();
     await api.openInExplorer(dir);
   };
 
   root.querySelector<HTMLButtonElement>("#characters-create-new")!.onclick = () => {
-    menu.classList.add("hidden");
+    closeKebabMenu(menu);
     alert(
       "To make a new character, run this in Claude Code:\n\n  /character-creator <name>\n\nThe skill searches sprite + sound sources, downloads candidates, and asks you to pick which go into each slot.",
     );
@@ -140,6 +132,6 @@ export async function renderCharactersView(root: HTMLElement): Promise<() => voi
   await refresh(list);
 
   return () => {
-    document.removeEventListener("click", closeOnOutside);
+    disposeMenu();
   };
 }

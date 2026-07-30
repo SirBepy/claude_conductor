@@ -98,8 +98,7 @@
 }
 
 /* Kebab menu (reuses .menu-anchor/.menu-popover/.menu-item from
- * src/views/project-detail/project-detail.css - already loaded globally,
- * same pattern as session-detail/characters/news). Only the modifiers below
+ * src/shared/kebab-menu.css, imported below). Only the modifiers below
  * are new. */
 .menu-item.danger { color: var(--color-danger, #f87171); }
 .menu-item.danger:hover { background: color-mix(in srgb, var(--color-danger, #f87171) 12%, transparent); }

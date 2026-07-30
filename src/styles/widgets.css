@@ -1099,8 +1099,8 @@ input:checked + .slider:before {
   min-width: 140px;
 }
 
-/* .menu-anchor and .menu-popover rules moved to
- * src/views/project-detail/project-detail.css.
+/* .menu-anchor and .menu-popover rules moved to src/shared/kebab-menu.css
+ * (todo 204).
  * .subview-header is still used by the legacy session-detail view so
  * keep it here until Task 11 migrates session-detail. */
 .subview-header {
