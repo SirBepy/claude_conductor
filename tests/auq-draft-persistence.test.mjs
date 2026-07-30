@@ -51,6 +51,19 @@ describe("AUQ draft persistence", () => {
     expect(loadQuestionDraft("never-saved")).toBeNull();
   });
 
+  it("round-trips the review-step additional message, defaulting attachments to empty (not persisted)", () => {
+    saveQuestionDraft(PROMPT, {
+      freeText: new Map(),
+      selections: new Map(),
+      activeTab: 0,
+      additionalMessage: "also check the staging env",
+      attachments: [{ mime: "image/png", data: "abc123", path: "/tmp/x.png", filename: "x.png" }],
+    });
+    const loaded = loadQuestionDraft(PROMPT);
+    expect(loaded.additionalMessage).toBe("also check the staging env");
+    expect(loaded.attachments).toEqual([]);
+  });
+
   it("clearQuestionDraft removes it, and is a no-op for an unknown id", () => {
     saveQuestionDraft(PROMPT, { freeText: new Map(), selections: new Map(), activeTab: 0 });
     clearQuestionDraft(PROMPT);

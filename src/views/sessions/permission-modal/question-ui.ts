@@ -1,8 +1,16 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { registerOverlayBack } from "../../../shared/back-button";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
+import { invoke } from "../../../shared/ipc";
+import { blobToBase64 } from "../../../shared/chat/composer-attachments";
+import { mimeToIcon } from "../../../shared/chat/attachment-hydrator";
+import { openLightbox } from "../../../shared/chat/lightbox";
+// See composer-attachments.ts's identical import for the valibot/ReDoS
+// unreachability note - same plugin, same guarantee (only hasFiles/readFiles
+// used here too).
+import { hasFiles, readFiles } from "tauri-plugin-clipboard-api";
 import { clearHost, ensureHost, renderCardShell } from "./host";
-import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
+import type { Answers, AuqAttachment, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
   computeAnswer,
@@ -71,6 +79,119 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (q.multiSelect && !selections.has(i)) selections.set(i, new Set<string>());
   });
 
+  // Review-step extra message + pasted-image attachments. Only ever populated
+  // when opts.supportsExtras (the async MCP flow) - see QuestionUIOpts doc.
+  let additionalMessage = opts.initialDraft?.additionalMessage ?? "";
+  const attachments: AuqAttachment[] = opts.initialDraft?.attachments
+    ? [...opts.initialDraft.attachments]
+    : [];
+
+  async function attachBlob(blob: Blob, filename: string): Promise<void> {
+    const data = await blobToBase64(blob);
+    let path: string | null = null;
+    if (opts.sessionId) {
+      try {
+        path = await invoke<string>("paste_attachment", {
+          sessionId: opts.sessionId,
+          base64Data: data,
+          mime: blob.type || "application/octet-stream",
+        });
+      } catch (err) {
+        console.warn("[AUQ] paste_attachment failed:", err);
+      }
+    }
+    attachments.push({ mime: blob.type || "application/octet-stream", data, path, filename });
+    render();
+  }
+
+  async function attachFromPath(srcPath: string): Promise<void> {
+    const filename = srcPath.split(/[\\/]/).pop() ?? srcPath;
+    let result: { path: string; mime: string; base64: string } | null = null;
+    if (opts.sessionId) {
+      try {
+        result = await invoke<{ path: string; mime: string; base64: string }>(
+          "paste_attachment_from_path",
+          { sessionId: opts.sessionId, path: srcPath },
+        );
+      } catch (err) {
+        console.warn("[AUQ] paste_attachment_from_path failed:", err);
+      }
+    }
+    attachments.push({
+      filename,
+      mime: result?.mime ?? "application/octet-stream",
+      data: result?.base64 ?? "",
+      path: result?.path ?? null,
+    });
+    render();
+  }
+
+  // Wired onto every free-text input on the card (per-question "other" field +
+  // the review-step additional-message field) so an image can be pasted from
+  // any step, same as the composer. Mirrors ComposerAttachments.handlePaste;
+  // not reused directly since that class persists to localStorage keyed by
+  // session id, which would collide with the main composer's own draft for
+  // the same session (see AuqAttachment doc in types.ts).
+  async function handleAttachmentPaste(e: ClipboardEvent): Promise<void> {
+    if (!opts.supportsExtras || !e.clipboardData) return;
+    const blobs = Array.from(e.clipboardData.items)
+      .filter((item) => item.kind === "file")
+      .map((item) => ({ blob: item.getAsFile(), type: item.type }))
+      .filter((b): b is { blob: File; type: string } => b.blob !== null);
+    if (blobs.length === 0) return;
+    e.preventDefault();
+    let usedNativeFiles = false;
+    try {
+      if (await hasFiles()) {
+        const paths = await readFiles();
+        if (paths.length > 0) {
+          for (const path of paths) await attachFromPath(path);
+          usedNativeFiles = true;
+        }
+      }
+    } catch (err) {
+      console.warn("[AUQ] clipboard readFiles failed, falling back to blob paste:", err);
+    }
+    if (usedNativeFiles) return;
+    for (const { blob, type } of blobs) {
+      await attachBlob(blob, blob.name || `paste.${type.split("/")[1] ?? "bin"}`);
+    }
+  }
+
+  function renderAttachmentsStrip(container: HTMLElement): void {
+    container.innerHTML = "";
+    attachments.forEach((a, i) => {
+      const div = document.createElement("div");
+      const isImage = a.mime.startsWith("image/");
+      div.className = `attachment${isImage ? "" : " file-chip"}`;
+      if (isImage && a.data) {
+        const img = document.createElement("img");
+        img.src = `data:${a.mime};base64,${a.data}`;
+        img.alt = a.filename;
+        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
+        div.appendChild(img);
+      } else {
+        const icon = mimeToIcon(a.mime);
+        div.innerHTML = `<i class="ph ${icon}"></i>`;
+        const label = document.createElement("span");
+        label.textContent = a.filename;
+        div.appendChild(label);
+      }
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "rm";
+      rm.title = "Remove";
+      rm.innerHTML = '<i class="ph ph-x"></i>';
+      rm.addEventListener("click", (e) => {
+        e.stopPropagation();
+        attachments.splice(i, 1);
+        render();
+      });
+      div.appendChild(rm);
+      container.appendChild(div);
+    });
+  }
+
   const messagesEl = document.querySelector<HTMLElement>(".session-messages");
   const savedScrollTop = messagesEl?.scrollTop ?? 0;
   const savedPaddingBottom = messagesEl?.style.paddingBottom ?? "";
@@ -106,6 +227,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       Array.from(selections.entries()).map(([k, v]) => [k, v instanceof Set ? new Set(v) : v])
     ),
     activeTab,
+    additionalMessage,
+    attachments: [...attachments],
   });
   if (opts.id) {
     setActiveCard({
@@ -146,7 +269,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       }
     });
     teardown();
-    void opts.onSubmit(answers);
+    void opts.onSubmit(answers, { additionalMessage: additionalMessage.trim(), attachments: [...attachments] });
   };
 
   const cancel = () => {
@@ -267,11 +390,29 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       `;
     }).join("");
 
+    // Attachments are shared across every step (paste on any question tab or
+    // the review step), so the strip shows wherever there's something to see -
+    // never gated on isSummary - and only for the flow that can actually
+    // deliver them (see QuestionUIOpts.supportsExtras doc).
+    const attachmentsStripHtml = opts.supportsExtras && attachments.length
+      ? `<div class="prompt-attachments composer-attachments"></div>`
+      : "";
+    const extraMessageHtml = opts.supportsExtras
+      ? `
+        <label class="prompt-q__other prompt-extra-message">
+          <span class="prompt-q__other-label">Add a message (optional):</span>
+          <textarea class="prompt-extra-input" rows="1" placeholder="Anything else to add...">${escapeHtml(additionalMessage)}</textarea>
+        </label>
+      `
+      : "";
+
     const body = isSummary
       ? `
         <div class="prompt-summary" role="tabpanel">
           <div class="prompt-summary__intro">Review your answers before sending:</div>
           ${summaryRows}
+          ${extraMessageHtml}
+          ${attachmentsStripHtml}
         </div>
       `
       : `
@@ -284,6 +425,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
             <span class="prompt-q__other-label">Add your own (combines with a pick above):</span>
             <textarea class="prompt-q__other-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
           </label>
+          ${attachmentsStripHtml}
         </div>
       `;
 
@@ -421,7 +563,29 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         syncMessagesPadding();
         opts.onDraftChange?.(currentDraft());
       });
+      if (opts.supportsExtras) {
+        otherEl.addEventListener("paste", (e) => void handleAttachmentPaste(e));
+      }
     }
+
+    const extraEl = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
+    if (extraEl) {
+      const autoSize = () => {
+        extraEl.style.height = "auto";
+        extraEl.style.height = `${Math.min(extraEl.scrollHeight, 160)}px`;
+      };
+      autoSize();
+      extraEl.addEventListener("input", () => {
+        additionalMessage = extraEl.value;
+        autoSize();
+        syncMessagesPadding();
+        opts.onDraftChange?.(currentDraft());
+      });
+      extraEl.addEventListener("paste", (e) => void handleAttachmentPaste(e));
+    }
+
+    const attachmentsEl = host.querySelector<HTMLElement>(".prompt-attachments");
+    if (attachmentsEl) renderAttachmentsStrip(attachmentsEl);
 
     host.querySelector<HTMLButtonElement>('[data-act="submit"]')
       ?.addEventListener("click", submit);

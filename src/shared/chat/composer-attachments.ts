@@ -349,7 +349,9 @@ function openPreviewIfSupported(a: Attachment): void {
   }
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
+/** Exported so other paste-image surfaces (e.g. the AUQ card) can reuse the
+ *  same base64 conversion without duplicating it. */
+export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
