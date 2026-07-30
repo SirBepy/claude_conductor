@@ -12,10 +12,8 @@ function draftKey(promptId: string): string {
 
 // JSON has no Map/Set - selections serialize as [index, label[]] (multiSelect)
 // or [index, label] (single-select), freeText as [index, text][]. Attachments
-// are NOT stored here (base64 bytes are too heavy for localStorage, and unlike
-// the composer's own attachments there's no path-only rehydration path for
-// this card) - a full app restart loses staged images, same as it already
-// loses everything else the card can't cheaply serialize.
+// aren't stored here (base64 bytes are too heavy for localStorage, with no
+// path-only rehydration path for this card) - a restart loses staged images.
 interface StoredDraft {
   freeText: [number, string][];
   selections: [number, string | string[]][];

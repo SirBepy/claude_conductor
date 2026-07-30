@@ -101,12 +101,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     render();
   }
 
-  // Wired onto every free-text input on the card (per-question "other" field +
-  // the review-step additional-message field) so an image can be pasted from
-  // any step, same as the composer. Mirrors ComposerAttachments.handlePaste;
-  // not reused directly since that class persists to localStorage keyed by
-  // session id, which would collide with the main composer's own draft for
-  // the same session (see AuqAttachment doc in types.ts).
+  // Wired onto every free-text input (per-question + review-step) so an
+  // image can be pasted from any step, same as the composer. Mirrors
+  // ComposerAttachments.handlePaste rather than reusing it - see
+  // AuqAttachment's doc in types.ts for why the two stay separate.
   async function handleAttachmentPaste(e: ClipboardEvent): Promise<void> {
     if (!opts.supportsExtras || !e.clipboardData) return;
     const blobs = Array.from(e.clipboardData.items)
@@ -133,12 +131,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     }
   }
 
-  // "/" skill/command suggestion popup - the exact same CaretSuggestPopup +
-  // SlashProvider the main composer uses (shared/chat/caret-popup/), not a
-  // reimplementation. One provider instance for the card's whole lifetime;
-  // one popup instance per textarea per render (its DOM node is a child of
-  // the render()-rebuilt card, so it's recreated - and the stale one's
-  // document-level dismiss listener explicitly destroyed - every render).
+  // "/" skill-suggestion popup - the same CaretSuggestPopup + SlashProvider
+  // the composer uses, not a reimplementation. One provider for the card's
+  // lifetime; one popup per textarea per render, since its DOM node is a
+  // child of the render()-rebuilt card and must be explicitly destroyed.
   const slashProvider = new SlashProvider();
   void slashProvider.start(opts.cwd ?? null);
   let popups: CaretSuggestPopup[] = [];

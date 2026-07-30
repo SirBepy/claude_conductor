@@ -28,10 +28,9 @@ export type Answers = Record<string, string | string[]>;
 export type Selection = string | Set<string>;
 
 /** A clipboard/file-picker attachment staged on an AUQ card. Same shape as the
- *  composer's own `Attachment` (shared/chat/composer-attachments.ts); kept as a
- *  separate type here since the card doesn't reuse that class (its localStorage
- *  persistence is keyed by session id and would collide with the main
- *  composer's own draft for the same session). */
+ *  composer's own `Attachment` (shared/chat/composer-attachments.ts) - kept
+ *  separate since reusing that class's localStorage persistence (keyed by
+ *  session id) would collide with the main composer's own draft. */
 export interface AuqAttachment {
   mime: string;
   data: string; // base64 (no data: prefix)
@@ -67,12 +66,10 @@ export interface QuestionUIOpts {
    *  (same provider the composer uses) - project-scoped entries need it, but
    *  it's optional: SlashProvider.start(null) still surfaces user/builtin ones. */
   cwd?: string | null;
-  /** Enables the review-step "additional message" field and image-paste
-   *  attachments. Only the async MCP question flow (permission-modal/index.ts)
-   *  can actually deliver these to Claude as a follow-up message - the
-   *  built-in-tool AskUserQuestion flow (permission-card.ts) settles via a
-   *  plain deny.message string with no channel for attachments, so it leaves
-   *  this unset and gets the plain card unchanged. */
+  /** Enables the review-step "additional message" field + image-paste
+   *  attachments. Only index.ts's async MCP flow can deliver these to Claude
+   *  (permission-card.ts's built-in-tool flow settles via a plain
+   *  deny.message string with no attachment channel, so it leaves this unset). */
   supportsExtras?: boolean;
   onSubmit: (
     answers: Answers,

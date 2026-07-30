@@ -154,11 +154,9 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
         const cwd = resolveCwdForSession(sid) ?? ".";
         await invoke("send_message", { sessionId: sid, cwd, blocks: [answerBlock] });
       }
-      // The extra message / pasted images, if any, go out as their OWN
-      // follow-up right after - a completely ordinary message (no sentinel),
-      // so it renders as a normal bubble with file chips. Staged rather than
-      // sent directly so it waits for the answer's own turn to finish instead
-      // of racing it.
+      // Extras go out as their own ordinary follow-up (no sentinel) right
+      // after - staged, not sent directly, so it waits for the answer's own
+      // turn to finish instead of racing it.
       const extraBlocks: ContentBlock[] = [];
       if (extras.additionalMessage) extraBlocks.push({ type: "text", text: extras.additionalMessage });
       for (const a of extras.attachments) {
