@@ -142,6 +142,31 @@ describe("custom chip-panel views", () => {
     r.detach();
   });
 
+  it("an is_error fire-and-forget handshake tool_result doesn't poison the card - the real answer still folds in later (regression, 2026-07-30)", () => {
+    const { r, container } = makeRenderer();
+    r.handleEvent(toolUseEvent("AskUserQuestion", { questions: [{ question: "Pick one?", header: "Choice" }] }, "q1"));
+    // permission.rs's ASK_FIRE_AND_FORGET_REASON: the PreToolUse deny fires this
+    // handshake tool_result right after the tool_use - never the real answer.
+    r.handleEvent({
+      type: "tool_result",
+      tool_use_id: "q1",
+      output: { type: "text", text: "Your question has been shown to the user in the app and the card is now waiting for their answer." },
+      is_error: true,
+      timestamp: 0,
+    });
+
+    let qa = container.querySelector(".tool-qa");
+    expect(qa.querySelector(".tool-qa-a").textContent).toContain("awaiting answer");
+
+    r.handleEvent(userEvent("<auq-answer/>User answered the question(s):\nQ: Pick one?\nA: Option A"));
+
+    qa = container.querySelector(".tool-qa");
+    expect(qa.querySelector(".tool-qa-a").textContent).toContain("Option A");
+    // No separate "answer" chip bubble - the resolved card above is the only trace.
+    expect(container.querySelector(".auq-answer-chip")).toBeNull();
+    r.detach();
+  });
+
   it("falls back to a normal bubble+chip when a <auq-answer/> message has no pending question card to resolve", () => {
     const { r, container } = makeRenderer();
     r.handleEvent(userEvent("<auq-answer/>User answered the question(s):\nQ: Pick one?\nA: Option A"));

@@ -369,14 +369,22 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       if (r._todoWriteToolUseIds.delete(ev.tool_use_id)) { touched = true; break; }
       // If this result is the answer to an AUQ question card, absorb it into
       // the card (update its text and dirty-flag for re-render) instead of
-      // adding a raw tool_result row.
+      // adding a raw tool_result row. The fire-and-forget PreToolUse deny
+      // (permission.rs's ASK_FIRE_AND_FORGET_REASON) always fires an is_error
+      // tool_result right after the tool_use - a handshake, never the real
+      // answer. Absorb it silently but leave `.text` undefined so the card
+      // still reads "awaiting answer" and resolvePendingQuestionCard can find
+      // it later when the real answer lands as a follow-up <auq-answer/>
+      // message; setting `.text` here would poison both.
       const qIdx = r.messages.findIndex(
         (m) => m.kind === "question" && m.id === ev.tool_use_id,
       );
       if (qIdx >= 0) {
-        const ansText = ev.output?.type === "text" ? ev.output.text : "";
-        r.messages[qIdx] = { ...r.messages[qIdx]!, text: ansText };
-        r.dirtyIndices.add(qIdx);
+        if (!ev.is_error) {
+          const ansText = ev.output?.type === "text" ? ev.output.text : "";
+          r.messages[qIdx] = { ...r.messages[qIdx]!, text: ansText };
+          r.dirtyIndices.add(qIdx);
+        }
         r.onToolTally?.(r.tallyState.build());
         touched = true;
         break;
