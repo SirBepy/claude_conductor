@@ -78,8 +78,8 @@ pub fn last_override_title(path: &Path, max_chars: usize) -> Option<String> {
 /// Resolves a session's display title. Precedence, highest first:
 /// 1. a curated override (a `custom-title`/`agent-name` line from /close's
 ///    rename or any future manual rename) — sticky, a human choice always wins;
-/// 2. an AI milestone title (the `<cc-title:…>` Claude emits, honored only at
-///    user-turn 1, 5, or 15 — see `ai_milestone_title`);
+/// 2. an AI milestone title (the `<cc-title:…>` Claude emits, snapshotted at
+///    user-turn 1, 5 and 15 — see `ai_milestone_title`);
 /// 3. the first user prompt.
 /// This is what the sidebar / history / restore paths use.
 pub fn session_title(path: &Path, max_chars: usize) -> Option<String> {
@@ -166,6 +166,43 @@ pub(crate) fn is_real_user_turn(v: &serde_json::Value) -> bool {
     }
 }
 
+/// Concatenated text of a *user* message's text blocks. Used to spot the
+/// bookkeeping turns below; `is_real_user_turn` deliberately doesn't expose it.
+fn user_turn_text(v: &serde_json::Value) -> String {
+    match v.get("message").and_then(|m| m.get("content")) {
+        Some(serde_json::Value::String(s)) => s.trim().to_string(),
+        Some(serde_json::Value::Array(items)) => {
+            let mut acc = String::new();
+            for it in items {
+                if it.get("type").and_then(|t| t.as_str()) != Some("text") { continue; }
+                if let Some(t) = it.get("text").and_then(|t| t.as_str()) {
+                    if !acc.is_empty() { acc.push(' '); }
+                    acc.push_str(t);
+                }
+            }
+            acc.trim().to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// A real user turn that also represents the user actually *saying* something,
+/// for the purpose of numbering title milestones. Excludes two bookkeeping
+/// turns the harness writes as user messages:
+///  - `[Request interrupted by user]`, which can never carry an assistant reply
+///    (that's what got interrupted), so counting it guarantees a missed milestone;
+///  - `<auq-answer/>` blocks, which are the answer to a question the assistant
+///    asked, not a new instruction.
+/// Both inflate the count and shift every milestone past the turns that do have
+/// a marker. Separate from `is_real_user_turn` because that one is also the
+/// token walker's "messages sent by me" predicate (see walker.rs) and must keep
+/// counting these.
+fn is_titleable_user_turn(v: &serde_json::Value) -> bool {
+    if !is_real_user_turn(v) { return false; }
+    let t = user_turn_text(v);
+    !t.starts_with("[Request interrupted by user]") && !t.starts_with("<auq-answer/>")
+}
+
 /// Concatenated text of an `assistant` message's text blocks, or None if the
 /// line isn't an assistant message with text (e.g. a pure tool_use turn).
 fn assistant_text(v: &serde_json::Value) -> Option<String> {
@@ -189,34 +226,49 @@ fn assistant_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// Reads the transcript and returns the AI-generated title from the highest
-/// reached milestone (user-turn 1/5/15) whose assistant response carried a
-/// `<cc-title:…>` marker. Walks real user turns to number them, attributing any
-/// assistant marker to the current turn; the latest milestone marker wins.
-/// Stops once past the last milestone so it never scans an entire long chat.
-/// Returns None when no milestone marker exists (caller falls back).
+/// Reads the transcript and returns the AI-generated title, snapshotting the
+/// most recent `<cc-title:…>` marker seen each time a milestone turn (1/5/15)
+/// completes. Stops once past the last milestone so it never scans an entire
+/// long chat. Returns None when the chat carries no marker at all.
+///
+/// Two rules here are deliberate, and both exist because the previous version
+/// required a marker to land on *exactly* turn 1, 5 or 15:
+///  - milestones snapshot the latest marker so far rather than demanding an
+///    exact-turn hit. An assistant turn that ends on a tool call (asking a
+///    question, say) emits no marker, which used to silently forfeit that
+///    milestone;
+///  - before the first milestone completes, the newest marker is used directly,
+///    so a chat gets a real title from its first finished turn instead of
+///    sitting on the first-user-prompt fallback.
+/// Together with `is_titleable_user_turn` this is what stops an interrupted or
+/// question-heavy chat from being stuck on "I've been meaning to do this for a
+/// while now lets actually d…" forever.
 pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
     let last_milestone = *TITLE_MILESTONES.last().unwrap();
     let mut turn = 0usize;
+    let mut latest: Option<String> = None;
     let mut best: Option<String> = None;
     for line in reader.lines().map_while(|r| r.ok()) {
         if line.trim().is_empty() { continue; }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        if is_real_user_turn(&v) {
+        if is_titleable_user_turn(&v) {
+            // The turn that just ended is complete; snapshot if it was a milestone.
+            if TITLE_MILESTONES.contains(&turn) { best = latest.clone(); }
             turn += 1;
             if turn > last_milestone { break; }
             continue;
         }
-        if turn == 0 || !TITLE_MILESTONES.contains(&turn) { continue; }
+        if turn == 0 { continue; }
         if let Some(text) = assistant_text(&v) {
             if let Some(t) = extract_cc_title(&text) {
-                if !t.trim().is_empty() { best = Some(t); }
+                if !t.trim().is_empty() { latest = Some(t); }
             }
         }
     }
-    best.and_then(|t| normalise_and_truncate(&t, max_chars))
+    if TITLE_MILESTONES.contains(&turn) { best = latest.clone(); }
+    best.or(latest).and_then(|t| normalise_and_truncate(&t, max_chars))
 }
 
 /// Scans a transcript for the first real user prompt and returns it
@@ -439,6 +491,62 @@ mod tests {
         std::fs::write(&path, lines.join("\n")).unwrap();
         // Turn 5 is a milestone; its title wins over turn 1's, turns 2-4 ignored.
         assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Turn 5 Title"));
+    }
+
+    // The two failure modes seen in a real chat that stayed on its first-prompt
+    // title for 13 turns while emitting six good markers.
+    #[test]
+    fn interrupted_first_turn_still_gets_an_ai_title() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        // Turn 1 is interrupted before any assistant reply, so the old
+        // exact-turn-1 rule found nothing and fell back to the first prompt.
+        let body = [
+            user_line("I've been meaning to do this for a while now"),
+            user_line("[Request interrupted by user]"),
+            user_line("actually also do this other thing"),
+            assistant_line("Done.\n<cc-title:Session Card Redesign>\n<cc-status:done>"),
+        ].join("\n");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Session Card Redesign"));
+        assert_eq!(session_title(&path, 60).as_deref(), Some("Session Card Redesign"));
+    }
+
+    #[test]
+    fn auq_answers_and_interrupts_do_not_shift_milestones() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        // Five genuine instructions, padded with the bookkeeping turns the
+        // harness writes. Milestone 5 must land on the fifth REAL instruction.
+        let body = [
+            user_line("one"), assistant_line("<cc-title:T1>"),
+            user_line("[Request interrupted by user]"),
+            user_line("two"), assistant_line("<cc-title:T2>"),
+            user_line("<auq-answer/>User answered the question(s):\nQ: pick one"),
+            assistant_line("<cc-title:T3-not-a-turn>"),
+            user_line("three"), assistant_line("<cc-title:T3>"),
+            user_line("four"), assistant_line("<cc-title:T4>"),
+            user_line("five"), assistant_line("<cc-title:T5 Final>"),
+        ].join("\n");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("T5 Final"));
+    }
+
+    #[test]
+    fn milestone_survives_a_turn_that_ends_on_a_tool_call() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        // Turn 5 ends on a question (no marker). The snapshot takes the most
+        // recent marker instead of forfeiting the milestone entirely.
+        let mut lines = vec![user_line("one"), assistant_line("<cc-title:First>")];
+        for n in 2..=4 {
+            lines.push(user_line(&format!("turn {n}")));
+            lines.push(assistant_line(&format!("<cc-title:Turn {n}>")));
+        }
+        lines.push(user_line("turn 5"));
+        lines.push(assistant_line("no marker on this one, it ended on a question"));
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Turn 4"));
     }
 
     #[test]
