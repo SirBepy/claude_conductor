@@ -8,13 +8,16 @@
 //! emit `scheduled_items_changed` at most once for the whole tick via the
 //! daemon's existing notifier broadcast (the same mechanism `instances_
 //! changed` uses - see `daemon::notifier`).
+//!
+//! Split into `schedule_fire.rs` (todo 419): the `fire_kind` dispatcher and
+//! its four per-kind handlers (`fire_jarvis_hygiene`, `fire_message`,
+//! `respawn_for_message`, `fire_new_chat`). This module keeps the tick loop
+//! and the claim/compute bookkeeping around it.
 
-use crate::daemon::jarvis_wake;
-use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
+use super::schedule_fire;
 use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{self, ScheduledItem, ScheduledKind, ScheduledStatus};
 use chrono::{DateTime, Utc};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,11 +34,11 @@ const RESUME_DELAY_SECS: i64 = 60;
 /// blocked chats all fire in the tick right after the reset and immediately
 /// re-exhaust the window they just waited out.
 const RESUME_STAGGER_SECS: i64 = 45;
-/// `fire_message` returns `Err("RATE_LIMITED:<unix secs>")` when the account is
-/// still inside its window at fire time. `compute_fired` turns that into a
-/// requeue instead of a terminal `Failed`, because the item is not broken, it
-/// is early.
-const RATE_LIMITED_PREFIX: &str = "RATE_LIMITED:";
+/// `fire_message` (`schedule_fire.rs`) returns `Err("RATE_LIMITED:<unix
+/// secs>")` when the account is still inside its window at fire time.
+/// `compute_fired` turns that into a requeue instead of a terminal `Failed`,
+/// because the item is not broken, it is early.
+pub(crate) const RATE_LIMITED_PREFIX: &str = "RATE_LIMITED:";
 
 /// When should the next resume on `account_id` fire, given the account leaves
 /// its window at `resets_at` (unix secs)? Slots are `resets_at + 60s`, then
@@ -221,7 +224,7 @@ fn compute_missed(mut item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem 
 /// itself has side effects (spawns/sends via `state`), but never touches the
 /// scheduled-items store directly - the caller persists the returned item.
 async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem {
-    let outcome = fire_kind(state, &item).await;
+    let outcome = schedule_fire::fire_kind(state, &item).await;
     // Still inside the account's window: not a failure, just early. Push the
     // item to the next free stagger slot and leave it Pending. `last_fired_at`
     // stays untouched so the schedule view doesn't claim we tried to send.
@@ -283,192 +286,6 @@ async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledItem, now: D
 /// `Some(resets_at)` if `reason` is the requeue sentinel from `fire_message`.
 pub(crate) fn parse_rate_limited(reason: &str) -> Option<i64> {
     reason.strip_prefix(RATE_LIMITED_PREFIX)?.parse().ok()
-}
-
-/// `Ok(Some(session_id))` on success: the session id the fire sent into
-/// (spawned fresh for `NewChat`, or the existing target for `Message`).
-async fn fire_kind(state: &Arc<DaemonState>, item: &ScheduledItem) -> Result<Option<String>, String> {
-    match &item.kind {
-        ScheduledKind::Message { session_id, cwd } => {
-            fire_message(state, session_id, cwd, &item.prompt).await?;
-            Ok(Some(session_id.clone()))
-        }
-        ScheduledKind::NewChat { cwd, model, effort, account_id, character_id, auto_accept, .. } => {
-            fire_new_chat(
-                state, cwd, model, effort, account_id.as_deref(),
-                character_id.as_deref(), *auto_accept, &item.prompt,
-            ).await
-        }
-        ScheduledKind::JarvisHygiene => fire_jarvis_hygiene(state, &item.prompt).await,
-    }
-}
-
-/// `ScheduledKind::JarvisHygiene` fire path: resolves the CURRENT jarvis
-/// session id from `Settings.jarvis_session_id` at fire time (never a value
-/// baked into the item - see the kind's doc comment), so a Jarvis respawn
-/// under a new session id never orphans this recurring item. "Live" mirrors
-/// `ensure_jarvis_session`'s own "ended == gone" treatment of the pointer.
-///
-/// Delivery reuses the jarvis wake queue (`jarvis_wake::enqueue`/`drain`)
-/// instead of writing into Jarvis's stdin directly - `drain` alone decides
-/// whether it's safe to send now (idle) or leaves the line queued for the
-/// next trigger (busy: a worker terminal wake, or Jarvis's own turn ending
-/// drains it). This is the same discipline every other write into Jarvis
-/// follows; nothing here re-checks `busy` itself.
-///
-/// Returns `Err` (never a panic) when there's no live jarvis session to
-/// target. `compute_fired` advances a recurring item to its next occurrence
-/// regardless of `Ok`/`Err`, so a quiet stretch with no Jarvis spawned yet is
-/// a graceful skip, not a stuck or terminally-failed item.
-async fn fire_jarvis_hygiene(state: &Arc<DaemonState>, prompt: &str) -> Result<Option<String>, String> {
-    let jarvis_id = state.settings.snapshot().jarvis_session_id;
-    let live = jarvis_id
-        .as_deref()
-        .and_then(|id| state.registry.get(id))
-        .map(|inst| inst.ended_at.is_none())
-        .unwrap_or(false);
-    let Some(jarvis_id) = jarvis_id.filter(|_| live) else {
-        return Err("no live jarvis session configured; hygiene pass skipped".to_string());
-    };
-    jarvis_wake::enqueue(state, &jarvis_id, prompt.to_string());
-    jarvis_wake::drain(state, &jarvis_id).await;
-    Ok(Some(jarvis_id))
-}
-
-/// Sends `prompt` into `session_id`, respawning it first (via `resume_id`,
-/// daemon-internal) if it isn't currently live. Mirrors the app-side -32004
-/// retry in `ipc/chat/run.rs::send_message_daemon` (~line 126), but without
-/// the RPC hop: this runs inside the daemon itself.
-async fn fire_message(
-    state: &Arc<DaemonState>,
-    session_id: &str,
-    cwd: &str,
-    prompt: &str,
-) -> Result<(), String> {
-    // The account may still be blocked even though this item came due: a
-    // seven-day window can outlast the five-hour reset we scheduled against.
-    // Bail with the requeue sentinel rather than spending the turn to learn
-    // that the hard way.
-    if let Some(resets_at) = state
-        .registry
-        .get(session_id)
-        .and_then(|i| i.rate_limited_resets_at)
-        .filter(|ts| *ts > Utc::now().timestamp())
-    {
-        return Err(format!("{RATE_LIMITED_PREFIX}{resets_at}"));
-    }
-    let session = match state.sessions.get(session_id).map(|s| s.clone()) {
-        Some(s) => s,
-        None => respawn_for_message(state, session_id, cwd).await?,
-    };
-    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
-    state.registry.set_awaiting(session_id, None);
-    state.registry.set_busy(session_id, true);
-    state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
-    Ok(())
-}
-
-/// Respawns a not-currently-live session with `--resume`, using the
-/// registry's last-known model/effort/account (falling back to opus/high/
-/// default when the registry has nothing recorded, same fallback
-/// `ipc/chat/run.rs::send_message` uses for a cold cache).
-async fn respawn_for_message(
-    state: &Arc<DaemonState>,
-    session_id: &str,
-    cwd: &str,
-) -> Result<Arc<crate::daemon::session::Session>, String> {
-    let (model, effort, account_id) = state
-        .registry
-        .get(session_id)
-        .map(|inst| {
-            let model = if inst.model.is_empty() { "opus".to_string() } else { inst.model };
-            let effort = if inst.effort.is_empty() { "high".to_string() } else { inst.effort };
-            (model, effort, inst.account_id)
-        })
-        .unwrap_or_else(|| ("opus".to_string(), "high".to_string(), None));
-    let params = StartSessionParams {
-        cwd: PathBuf::from(cwd),
-        model,
-        effort,
-        resume_id: Some(session_id.to_string()),
-        remote: false,
-        account_id,
-        fork: false,
-    };
-    lifecycle::spawn_session(state, params).await.map_err(err_to_string)
-}
-
-/// Spawns a brand-new chat and sends `prompt` as its first turn. Mirrors the
-/// bookkeeping the `start_session` RPC handler performs around
-/// `spawn_session` (project upsert, registry entries, chat-config record,
-/// `instances_changed` notify - see `daemon::methods::lifecycle::register`'s
-/// `start_session` handler), since this fires with no RPC round trip to
-/// replicate that path automatically. Respects the metered-billing gate
-/// already inside `spawn_session` (surfaces as `Err` -> `Failed{reason}`).
-///
-/// `character_id`/`auto_accept` are the new-chat modal's settings, captured
-/// on `ScheduledKind::NewChat` at scheduling time (they'd otherwise be lost
-/// before this fire path ever runs - the modal's own settings only reach a
-/// session via two follow-up client calls, `pending-pane.ts`, that a
-/// scheduled fire has no client to make). Applied the same way
-/// `move_session_to_account`'s `register_account_move` carries them onto a
-/// forked session id (`daemon::methods::lifecycle.rs`).
-async fn fire_new_chat(
-    state: &Arc<DaemonState>,
-    cwd: &str,
-    model: &str,
-    effort: &str,
-    account_id: Option<&str>,
-    character_id: Option<&str>,
-    auto_accept: bool,
-    prompt: &str,
-) -> Result<Option<String>, String> {
-    let params = StartSessionParams {
-        cwd: PathBuf::from(cwd),
-        model: model.to_string(),
-        effort: effort.to_string(),
-        resume_id: None,
-        remote: false,
-        account_id: account_id.map(|s| s.to_string()),
-        fork: false,
-    };
-    let session = lifecycle::spawn_session(state, params).await.map_err(err_to_string)?;
-    let sid = session.session_id.clone();
-
-    let now = chrono::Utc::now().to_rfc3339();
-    let (project_id, created_new) = state.settings.upsert_project_for_cwd(&PathBuf::from(cwd), &now);
-    if created_new {
-        state.notifier.publish("project_created", serde_json::json!({
-            "project_id": project_id,
-            "cwd": cwd,
-            "now": now,
-        }));
-    }
-    state.registry.upsert_interactive(&sid, &PathBuf::from(cwd), &project_id, &now);
-    state.registry.set_model_effort(&sid, model, effort);
-    state.registry.set_account(&sid, &session.account_id);
-    crate::sessions::chat_config::record(&sid, model, effort);
-    crate::sessions::chat_config::set_account(&sid, &session.account_id);
-    if auto_accept {
-        crate::sessions::chat_config::set_auto_accept(&sid, true);
-    }
-    if let Some(character_id) = character_id {
-        state.settings.set_session_character(&sid, character_id);
-        state.notifier.publish("session_character_assigned", serde_json::json!({
-            "session_id": sid, "character_id": character_id,
-        }));
-    }
-    crate::sessions::persistence::save_snapshot_default(&state.registry);
-
-    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
-    state.registry.set_awaiting(&sid, None);
-    state.registry.set_busy(&sid, true);
-    state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
-    Ok(Some(sid))
-}
-
-fn err_to_string(e: LifecycleError) -> String {
-    e.to_string()
 }
 
 #[cfg(test)]
@@ -536,13 +353,6 @@ mod tests {
         let updated = compute_fired(&state, item, now).await;
         assert_eq!(updated.status, ScheduledStatus::Pending, "recurring item stays Pending regardless of fire outcome");
         assert_ne!(updated.fire_at, old_fire_at.to_rfc3339());
-    }
-
-    #[tokio::test]
-    async fn fire_message_unknown_session_and_missing_cwd_fails_with_reason() {
-        let state = test_state();
-        let result = fire_message(&state, "no-such-session", "Z:\\does\\not\\exist", "hi").await;
-        assert!(result.is_err(), "respawn of a session with a missing cwd must fail, not panic");
     }
 
     #[tokio::test]
@@ -616,45 +426,5 @@ mod tests {
         let state = test_state();
         let item = ScheduledItem::new(ScheduledKind::JarvisHygiene, "hi".into(), Utc::now().to_rfc3339(), None);
         assert!(!is_message_session_busy(&state, &item), "JarvisHygiene defers to the wake queue, not the tick's busy guard");
-    }
-
-    // --- ScheduledKind::JarvisHygiene fire path ---
-
-    #[tokio::test]
-    async fn fire_jarvis_hygiene_skips_gracefully_when_no_jarvis_session_configured() {
-        let state = test_state(); // Settings::default() -> jarvis_session_id is None
-        let result = fire_jarvis_hygiene(&state, "hi").await;
-        assert!(result.is_err(), "no jarvis session configured must be a graceful skip, not a panic");
-    }
-
-    #[tokio::test]
-    async fn fire_jarvis_hygiene_skips_gracefully_when_pointer_is_a_stale_ended_session() {
-        let state = test_state();
-        state.registry.upsert_interactive("jv-1", std::path::Path::new("."), "proj-1", "2026-07-27T00:00:00Z");
-        state.registry.mark_ended("jv-1", crate::types::EndReason::Manual, "2026-07-27T00:00:01Z");
-        state.settings.set_jarvis_session_id("jv-1");
-
-        let result = fire_jarvis_hygiene(&state, "hi").await;
-
-        assert!(result.is_err(), "an ended jarvis pointer is treated the same as no pointer at all");
-    }
-
-    #[tokio::test]
-    async fn fire_jarvis_hygiene_routes_through_the_wake_queue_when_jarvis_is_busy() {
-        // No live ChildStdin exists in this test, so a successful direct send
-        // would panic - which is exactly why this must go through `enqueue`
-        // + `drain` (whose own busy guard short-circuits) rather than writing
-        // into Jarvis's stdin itself.
-        let state = test_state();
-        state.registry.upsert_interactive("jv-1", std::path::Path::new("."), "proj-1", "2026-07-27T00:00:00Z");
-        state.registry.set_busy("jv-1", true);
-        state.settings.set_jarvis_session_id("jv-1");
-
-        let result = fire_jarvis_hygiene(&state, "hi").await;
-
-        assert_eq!(result, Ok(Some("jv-1".to_string())));
-        let queues = state.jarvis_wakes.lock().unwrap();
-        let pending = queues.get("jv-1").expect("hygiene prompt queued for the busy jarvis");
-        assert_eq!(pending.iter().cloned().collect::<Vec<_>>(), vec!["hi".to_string()]);
     }
 }

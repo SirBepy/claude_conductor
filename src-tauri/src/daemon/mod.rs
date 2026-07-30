@@ -31,6 +31,7 @@ mod remote_voice;
 pub mod repo_channel_wake;
 pub mod rpc;
 pub mod schedule;
+mod schedule_fire;
 pub mod session;
 pub mod settings_cache;
 pub mod spawn_self;
