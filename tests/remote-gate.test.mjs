@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 // remote-gate.ts exports ensureRemoteToken() which:
 //   - returns true  when window.__TAURI__ is present (Tauri webview)
@@ -140,3 +143,46 @@ describe("ensureRemoteToken - browser with NO token", () => {
 // it now forwards to the daemon's rpc (settings served from the shared store, so
 // the phone populates). That forwarding is covered in tests/transport-http.test.mjs
 // with a mocked fetch.
+
+// ── Boot-order regression (ai_todo 200) ─────────────────────────────────────
+// list_auto_accept (fired by hydrateAutoAccept, seeded via
+// installPermissionModalListener) plus every other boot-time RPC caller in
+// main.ts must not run until ensureRemoteToken() resolves - otherwise the
+// phone client fires /api/rpc before its bearer token is stored, 401s, and
+// (pre commit 064fa8d5) trips a reload loop. Real DOM/Tauri-mock boot of
+// main.ts needs heavy mocking (30+ view imports, CSS, #app element), so this
+// locks the ordering via static analysis of the source, mirroring the
+// existing sidemenu_nav.test.mjs precedent for main.ts wiring checks.
+describe("main.ts boot order - RPC callers wait on the remote token gate", () => {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const mainTs = readFileSync(join(__dirname, "..", "src", "main.ts"), "utf8");
+
+  const gateIdx = mainTs.indexOf("await ensureRemoteToken()");
+  const installIdx = mainTs.indexOf("installPermissionModalListener();");
+  const mountRouterIdx = mainTs.indexOf("mountRouter(app);");
+  const initBootIdx = mainTs.indexOf("initBoot();");
+
+  it("checks the token gate before installing the permission/auto-accept listener", () => {
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(installIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeLessThan(installIdx);
+  });
+
+  it("has exactly one call site for the listener install (no earlier duplicate)", () => {
+    const matches = mainTs.match(/installPermissionModalListener\(\);/g) ?? [];
+    expect(matches).toHaveLength(1);
+  });
+
+  it("gates the listener install inside the gate's success branch, not the failure branch", () => {
+    // Between the `if (!await ensureRemoteToken())` check and the install call
+    // there must be an `else {` - i.e. the install lives in the "token is
+    // ready" branch, not before/inside the "gate rendered, boot halts" one.
+    const between = mainTs.slice(gateIdx, installIdx);
+    expect(between).toMatch(/}\s*else\s*{/);
+  });
+
+  it("also gates the router mount and boot init behind the token gate", () => {
+    expect(mountRouterIdx).toBeGreaterThan(gateIdx);
+    expect(initBootIdx).toBeGreaterThan(gateIdx);
+  });
+});
