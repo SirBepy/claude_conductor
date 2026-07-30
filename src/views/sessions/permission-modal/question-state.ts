@@ -4,6 +4,7 @@
 // importers (permission-card.ts, permission-modal/index.ts, gating.ts,
 // active-session.ts) keep working unchanged.
 
+import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import type { Answers, Question, QuestionDraft, Selection } from "./types";
 
 /**
@@ -43,6 +44,36 @@ export function computeAnswer(
   if (typed) return typed;
   if (typeof selection === "string") return selection;
   return null;
+}
+
+/** Splits a body into context + the final "?"-terminated ask (cut at the
+ *  nearest paragraph/sentence break before it), so the card can dim the
+ *  former and highlight the latter. No "?", or a negligible context, falls
+ *  back to {context: "", ask: whole string} - keeps terse questions as-is. */
+export function splitAsk(question: string): { context: string; ask: string } {
+  const trimmed = question.trim();
+  const lastQ = trimmed.lastIndexOf("?");
+  if (lastQ === -1) return { context: "", ask: trimmed };
+  const beforeAsk = trimmed.slice(0, lastQ);
+  const paraBreak = beforeAsk.lastIndexOf("\n\n");
+  const sentenceBreak = beforeAsk.lastIndexOf(". ");
+  const cut = Math.max(paraBreak, sentenceBreak);
+  const askStart = cut === -1 ? 0 : cut + 2;
+  const context = trimmed.slice(0, askStart).trim();
+  const ask = trimmed.slice(askStart, lastQ + 1).trim();
+  if (!context || ask.length > trimmed.length * 0.85) return { context: "", ask: trimmed };
+  return { context, ask };
+}
+
+/** Renders a question's body: markdown throughout, plus (when splitAsk finds
+ *  a clear final ask) a dimmed context block above a highlighted ask line. */
+export function questionTextHtml(question: string): string {
+  const { context, ask } = splitAsk(question);
+  if (!context) return `<div class="prompt-q__text">${renderMarkdown(question)}</div>`;
+  return `
+    <div class="prompt-q__context">${renderMarkdown(context)}</div>
+    <div class="prompt-q__ask"><i class="ph ph-arrow-bend-down-right"></i>${renderMarkdown(ask)}</div>
+  `;
 }
 
 /**

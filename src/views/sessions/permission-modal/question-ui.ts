@@ -6,50 +6,22 @@ import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from
 import {
   isQuestionAnswered,
   computeAnswer,
+  questionTextHtml,
   setActiveCard,
   clearActiveCardIfCurrent,
 } from "./question-state";
 
-// Payload normalization, the active-card draft registry, and the pure
-// answer-completeness check now live in ./question-state.ts; re-exported here
-// so existing importers of this file keep working unchanged.
-export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuestions, dismissQuestionCard, snapshotActiveCardDraft } from "./question-state";
+// Payload normalization, the active-card draft registry, the pure
+// answer-completeness check, and the pure question-text helpers now live in
+// ./question-state.ts; re-exported here so existing importers of this file
+// keep working unchanged.
+export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuestions, dismissQuestionCard, snapshotActiveCardDraft, splitAsk, questionTextHtml } from "./question-state";
 
 // Synthetic option appended to every multiSelect question so "nothing
 // applies" is an explicit, selectable answer instead of an implicit
 // zero-selections state - lets isQuestionAnswered require a real choice
 // (checkbox or free text) instead of treating an untouched question as done.
 const NONE_LABEL = "None of the above";
-
-/** Splits a body into context + the final "?"-terminated ask (cut at the
- *  nearest paragraph/sentence break before it), so the card can dim the
- *  former and highlight the latter. No "?", or a negligible context, falls
- *  back to {context: "", ask: whole string} - keeps terse questions as-is. */
-function splitAsk(question: string): { context: string; ask: string } {
-  const trimmed = question.trim();
-  const lastQ = trimmed.lastIndexOf("?");
-  if (lastQ === -1) return { context: "", ask: trimmed };
-  const beforeAsk = trimmed.slice(0, lastQ);
-  const paraBreak = beforeAsk.lastIndexOf("\n\n");
-  const sentenceBreak = beforeAsk.lastIndexOf(". ");
-  const cut = Math.max(paraBreak, sentenceBreak);
-  const askStart = cut === -1 ? 0 : cut + 2;
-  const context = trimmed.slice(0, askStart).trim();
-  const ask = trimmed.slice(askStart, lastQ + 1).trim();
-  if (!context || ask.length > trimmed.length * 0.85) return { context: "", ask: trimmed };
-  return { context, ask };
-}
-
-/** Renders a question's body: markdown throughout, plus (when splitAsk finds
- *  a clear final ask) a dimmed context block above a highlighted ask line. */
-function questionTextHtml(question: string): string {
-  const { context, ask } = splitAsk(question);
-  if (!context) return `<div class="prompt-q__text">${renderMarkdown(question)}</div>`;
-  return `
-    <div class="prompt-q__context">${renderMarkdown(context)}</div>
-    <div class="prompt-q__ask"><i class="ph ph-arrow-bend-down-right"></i>${renderMarkdown(ask)}</div>
-  `;
-}
 
 export function renderQuestionUI(opts: QuestionUIOpts): void {
   const { host } = ensureHost();
