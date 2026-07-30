@@ -154,24 +154,13 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
             let account_id = session.account_id.clone();
             let now = chrono::Utc::now().to_rfc3339();
 
-            let (project_id, created_new) = state.settings.upsert_project_for_cwd(&cwd, &now);
-            if created_new {
-                state.notifier.publish("project_created", json!({
-                    "project_id": project_id,
-                    "cwd": cwd.to_string_lossy(),
-                    "now": now,
-                }));
-            }
-            state.registry.upsert_interactive(&sid, &cwd, &project_id, &now);
-            state.registry.set_model_effort(&sid, JARVIS_MODEL, JARVIS_EFFORT);
-            state.registry.set_account(&sid, &account_id);
+            // auto_accept=true, no character: Jarvis runs unattended, so
+            // requiring manual approval on every tool call would stall the
+            // whole fleet on a prompt no one is watching for.
+            crate::daemon::session_registration::register_new_session(
+                &state, &sid, &cwd, JARVIS_MODEL, JARVIS_EFFORT, &account_id, &now, true, None,
+            );
             state.registry.set_jarvis(&sid, true);
-            crate::sessions::chat_config::record(&sid, JARVIS_MODEL, JARVIS_EFFORT);
-            crate::sessions::chat_config::set_account(&sid, &account_id);
-            // On by default: Jarvis runs unattended, so requiring manual approval
-            // on every tool call would stall the whole fleet on a prompt no one
-            // is watching for.
-            crate::sessions::chat_config::set_auto_accept(&sid, true);
             crate::sessions::persistence::save_snapshot_default(&state.registry);
             // Fresh-spawn only (never on pointer reuse, above) and idempotent -
             // see the function doc for why a respawn never duplicates this.

@@ -67,14 +67,11 @@ pub(crate) async fn pick_worker_account(state: &Arc<DaemonState>) -> Option<Stri
 }
 
 /// `spawn_worker` tool: spawns a brand-new Interactive session under `cwd`
-/// and sends `task` as its first turn. Mirrors the bookkeeping in
-/// `daemon::schedule::fire_new_chat` (project upsert, registry entries,
-/// chat-config record, `instances_changed` notify) - that function is
-/// private to `schedule.rs` and has no `set_worker_of` step, so this is a
-/// parallel copy rather than a shared call, with one extra step:
-/// `set_worker_of` right after registration, tagging the new session as
-/// belonging to this Jarvis's fleet (consumed by `fleet_status` and the
-/// ownership checks in `send_to_session`/`respond_worker_prompt` below).
+/// and sends `task` as its first turn. Registers it via the shared
+/// `session_registration::register_new_session` (todo 420), with one extra
+/// step after: `set_worker_of`, tagging the new session as belonging to this
+/// Jarvis's fleet (consumed by `fleet_status` and the ownership checks in
+/// `send_to_session`/`respond_worker_prompt` below).
 ///
 /// `account`: `Some(id)` is Jarvis naming a specific account explicitly -
 /// validated against the same eligible pool `pick_worker_account` draws from
@@ -123,26 +120,16 @@ pub(crate) async fn spawn_worker(
     let sid = session.session_id.clone();
 
     let now = chrono::Utc::now().to_rfc3339();
-    let (project_id, created_new) = state.settings.upsert_project_for_cwd(&cwd_path, &now);
-    if created_new {
-        state.notifier.publish("project_created", json!({
-            "project_id": project_id,
-            "cwd": cwd,
-            "now": now,
-        }));
-    }
-    state.registry.upsert_interactive(&sid, &cwd_path, &project_id, &now);
-    state.registry.set_model_effort(&sid, &model, WORKER_DEFAULT_EFFORT);
-    state.registry.set_account(&sid, &session.account_id);
+    // auto_accept=true, no character: a worker is spawned unattended by
+    // Jarvis itself, so requiring manual approval on every tool call would
+    // stall the fleet.
+    crate::daemon::session_registration::register_new_session(
+        state, &sid, &cwd_path, &model, WORKER_DEFAULT_EFFORT, &session.account_id, &now, true, None,
+    );
     state.registry.set_worker_of(&sid, Some(jarvis_session_id.to_string()));
     if let Some(n) = name {
         state.registry.set_name(&sid, n.to_string());
     }
-    crate::sessions::chat_config::record(&sid, &model, WORKER_DEFAULT_EFFORT);
-    crate::sessions::chat_config::set_account(&sid, &session.account_id);
-    // On by default: a worker is spawned unattended by Jarvis itself, so
-    // requiring manual approval on every tool call would stall the fleet.
-    crate::sessions::chat_config::set_auto_accept(&sid, true);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     lifecycle::send_message(&session, task, false).await.map_err(|e| e.to_string())?;

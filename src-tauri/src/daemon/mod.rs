@@ -33,6 +33,7 @@ pub mod rpc;
 pub mod schedule;
 mod schedule_fire;
 pub mod session;
+pub(crate) mod session_registration;
 pub mod settings_cache;
 pub mod spawn_self;
 pub mod state;

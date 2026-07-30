@@ -10,7 +10,6 @@ use crate::daemon::state::DaemonState;
 use crate::types::EndReason;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
@@ -79,41 +78,6 @@ pub(super) fn err_to_rpc(e: LifecycleError) -> RpcError {
     }
 }
 
-/// Register a freshly-spawned session into the project/registry/chat-config
-/// layers: upserts the cwd's project (publishing `project_created` if it's
-/// new), records model/effort/account into both the registry and
-/// `chat_config`, and clears `awaiting`. Shared by `start_session` and
-/// `move_session_to_account`, which both spawn a session via
-/// `lifecycle::spawn_session` and then need this identical sequence to make
-/// it visible session-wide.
-fn register_new_session(
-    state: &DaemonState,
-    session_id: &str,
-    cwd: &Path,
-    model: &str,
-    effort: &str,
-    account_id: &str,
-    now: &str,
-) {
-    let (project_id, created_new) = {
-        let mut snap = state.settings.snapshot();
-        crate::settings::upsert_project_for_cwd(&mut snap, cwd, now)
-    };
-    if created_new {
-        state.notifier.publish("project_created", json!({
-            "project_id": project_id,
-            "cwd": cwd.to_string_lossy(),
-            "now": now,
-        }));
-    }
-    state.registry.upsert_interactive(session_id, cwd, &project_id, now);
-    state.registry.set_model_effort(session_id, model, effort);
-    state.registry.set_account(session_id, account_id);
-    crate::sessions::chat_config::record(session_id, model, effort);
-    crate::sessions::chat_config::set_account(session_id, account_id);
-    state.registry.set_awaiting(session_id, None);
-}
-
 /// Thin dispatcher: each sub-function below registers its own group of RPC
 /// methods against the same `router`/`state`, mirroring the standalone shape
 /// `register_notifier`/`register_settings` already use for their groups.
@@ -143,7 +107,9 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let sid = session.session_id.clone();
                 let account_id = session.account_id.clone();
                 let now = chrono::Utc::now().to_rfc3339();
-                register_new_session(&state, &sid, &cwd, &model, &effort, &account_id, &now);
+                crate::daemon::session_registration::register_new_session(
+                    &state, &sid, &cwd, &model, &effort, &account_id, &now, false, None,
+                );
                 // Deliberately NOT set_busy(true) here: no turn is in flight yet
                 // (claude emits nothing until its first stdin message, so the
                 // pump can never clear a busy set now). The caller's follow-up
@@ -305,16 +271,10 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 let new_id = session.session_id.clone();
                 let account_id = session.account_id.clone();
                 let now = chrono::Utc::now().to_rfc3339();
-                register_new_session(&state, &new_id, &cwd, &model, &effort, &account_id, &now);
-                if auto_accept {
-                    crate::sessions::chat_config::set_auto_accept(&new_id, true);
-                }
-                if let Some(character_id) = character_id {
-                    state.settings.set_session_character(&new_id, &character_id);
-                    state.notifier.publish("session_character_assigned", json!({
-                        "session_id": new_id, "character_id": character_id,
-                    }));
-                }
+                crate::daemon::session_registration::register_new_session(
+                    &state, &new_id, &cwd, &model, &effort, &account_id, &now,
+                    auto_accept, character_id.as_deref(),
+                );
 
                 lifecycle::send_message(&session, &prompt, false).await.map_err(err_to_rpc)?;
                 state.registry.set_busy(&new_id, true);
