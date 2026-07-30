@@ -186,7 +186,7 @@ export async function mountRenderer(
   // attached so events accrue even when this session isn't selected.
   const overlay = sessionEvents.isLoaded(sessionId) ? null : showChatLoadingOverlay(messagesEl);
   try {
-    await renderer.loadFromStore(sess.cwd ? String(sess.cwd) : undefined);
+    await renderer.loadFromStore(sess.cwd ? String(sess.cwd) : undefined, { resumeLiveTicking: true });
     if (state.mountId !== myMount || state.selectedId !== sessionId) {
       settleLoad();
       renderer.detach();
@@ -249,7 +249,7 @@ export function mountComposer(
       // so a genuinely failed send doesn't keep looking like it went through.
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
       if (state.renderer && state.renderer.currentSessionId() === sessionId) {
-        await state.renderer.loadFromStore(cwd);
+        await state.renderer.loadFromStore(cwd, { resumeLiveTicking: true });
       }
       showToast(`Send failed: ${err}`);
     }

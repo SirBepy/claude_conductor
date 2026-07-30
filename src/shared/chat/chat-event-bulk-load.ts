@@ -17,7 +17,15 @@ import {
 import { handleChatEvent } from "./chat-event-handler";
 import type { ChatRenderer } from "./chat-renderer";
 
-export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[]): Promise<void> {
+export interface BulkLoadOpts {
+  /** True for a still-attached live session (Sessions view): a still-open
+   *  final turn resumes live ticking instead of freezing at this reload's
+   *  snapshot. False (default) for read-only History, where nothing will
+   *  ever stream in again and a resumed tick would be misleading. */
+  resumeLiveTicking?: boolean;
+}
+
+export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts: BulkLoadOpts = {}): Promise<void> {
   const myGen = ++r._bulkGen;
   r.liveBuffer = [];
   r.messages = [];
@@ -69,15 +77,18 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[]): Prom
   r.hydrating = false;
   r.onFileEditsChanged?.(r.getFileEdits());
   r.onActivityUpdate?.(r.lastActivity);
-  // The final turn of the load never gets a closing user_message: settle its
-  // meta row from whatever usage accumulated (re-settleable if the session
-  // is live and more usage streams in after this).
+  // The final turn never gets a closing user_message. A live session resumes
+  // ticking from the accumulated totals; read-only History (nothing left to
+  // stream) settles frozen instead - priming it live there would tick
+  // forever for a session that's actually long dead.
   if (r.activeTurnChipKey !== null && r.activeTurnUsage) {
     const u = r.activeTurnUsage;
-    r.turnFooters.settleMetaRow(r.activeTurnChipKey, {
-      ...u,
-      durationMs: u.durationMs > 0 ? u.durationMs : activeTurnTsSpan(r),
-    });
+    const totals = { ...u, durationMs: u.durationMs > 0 ? u.durationMs : activeTurnTsSpan(r) };
+    if (opts.resumeLiveTicking) {
+      r.turnFooters.primeReplayedLiveRow(r.activeTurnChipKey, r.activeTurnStartedAtMs || Date.now(), totals);
+    } else {
+      r.turnFooters.settleMetaRow(r.activeTurnChipKey, totals);
+    }
   }
   foldLeadingPartialTurn(r);
   scrollToBottom(r);

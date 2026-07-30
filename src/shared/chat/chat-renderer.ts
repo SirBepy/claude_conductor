@@ -14,7 +14,7 @@ import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./tu
 import { buildMessageEl, foldClosedRange, revealTranscript } from "./chat-dom-renderer";
 import { flushRenderNow } from "./flush-scheduler";
 import { handleChatEvent, type HandleEventOpts } from "./chat-event-handler";
-import { bulkLoadEvents } from "./chat-event-bulk-load";
+import { bulkLoadEvents, type BulkLoadOpts } from "./chat-event-bulk-load";
 import { getCta } from "./cta-registry";
 
 export interface SessionMeta {
@@ -274,13 +274,13 @@ export class ChatRenderer {
     handleChatEvent(this, ev, opts);
   }
 
-  async loadFromStore(cwd?: string): Promise<void> {
+  async loadFromStore(cwd?: string, opts: BulkLoadOpts = {}): Promise<void> {
     if (!this.sessionId) return;
     const sid = this.sessionId;
     this.paginator.cwdHint = cwd;
     const events = [...(await sessionEvents.loadInitial(sid, cwd))];
     if (this.sessionId !== sid) return;
-    await bulkLoadEvents(this, events);
+    await bulkLoadEvents(this, events, opts);
     if (this.sessionId !== sid) return;
     this.paginator.install();
   }
@@ -371,8 +371,8 @@ export class ChatRenderer {
     return renderCustomToolView(tool, this.messages, 0, this.messages.length);
   }
 
-  async loadHistory(events: ChatEvent[]): Promise<void> {
-    await bulkLoadEvents(this, events);
+  async loadHistory(events: ChatEvent[], opts: BulkLoadOpts = {}): Promise<void> {
+    await bulkLoadEvents(this, events, opts);
   }
 
   // Custom chip-panel file rows (Read / File Changes) open their target in the

@@ -320,6 +320,51 @@ describe("Turn footer DOM integration", () => {
     expect(tokenChip.textContent).toContain("2.5k");
   });
 
+  it("resumes live ticking after a reload finds a still-open turn, instead of freezing forever", async () => {
+    const { renderer, container } = await createRenderer();
+    const now = 1_000_000_000_000;
+    vi.setSystemTime(now);
+
+    // Reload replays a turn that started 10s ago and never got a closing
+    // user_message - it's still genuinely in progress on the daemon side.
+    await renderer.loadHistory(
+      [
+        makeUserMessage("Do a big task", now - 10_000),
+        makeAssistantMessage("Line one", false, now - 5_000),
+        makeTurnUsage({ durationMs: 0, outputTokens: 1000 }),
+      ],
+      { resumeLiveTicking: true },
+    );
+    expect(container.querySelector(".turn-chip--time").textContent).toContain("10s");
+
+    // More work streams in live after the reload - the elapsed time must keep
+    // advancing, not stay pinned at the reload snapshot (the actual bug: a
+    // reload settled the row for good, silently dropping every later tick).
+    vi.advanceTimersByTime(5000);
+    renderer.handleEvent(makeAssistantMessage("more", true));
+    expect(container.querySelector(".turn-chip--time").textContent).toContain("15s");
+  });
+
+  it("does NOT resume live ticking for a read-only history reload (default)", async () => {
+    const { renderer, container } = await createRenderer();
+    const now = 1_000_000_000_000;
+    vi.setSystemTime(now);
+
+    await renderer.loadHistory([
+      makeUserMessage("Do a big task", now - 10_000),
+      makeAssistantMessage("Line one", false, now - 5_000),
+      makeTurnUsage({ durationMs: 0, outputTokens: 1000 }),
+    ]);
+    // Settled from the ts span (first to last message, 5s here) - correct for
+    // a dead/closed transcript, unlike the live case's wall-clock elapsed.
+    expect(container.querySelector(".turn-chip--time").textContent).toContain("5s");
+
+    vi.advanceTimersByTime(5000);
+    renderer.handleEvent(makeAssistantMessage("more", true));
+    // Still 5s - settled/frozen, as intended for a read-only view.
+    expect(container.querySelector(".turn-chip--time").textContent).toContain("5s");
+  });
+
   it("derives duration from the turn's timestamp span when duration_ms is absent", async () => {
     const { renderer, container } = await createRenderer();
 
