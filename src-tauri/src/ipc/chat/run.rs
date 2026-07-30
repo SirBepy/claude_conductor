@@ -205,6 +205,21 @@ pub async fn set_session_effort(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn set_session_model(
+    session_id: String,
+    model: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !crate::daemon::lifecycle::is_valid_model(&model) {
+        return Err(format!("invalid model: {model}"));
+    }
+    let guard = state.daemon_client.lock().await;
+    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    client.set_session_model(&session_id, &model).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Persist a chat's auto-accept-permissions toggle. Forwarded to the daemon so
 /// it stays the sole writer of chat-config.json (the read side is the local
 /// `list_auto_accept` command in misc.rs, which reads the same shared file).

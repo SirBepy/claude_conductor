@@ -24,7 +24,7 @@ const VALID_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 /// (`claude-opus-4-8`). The session model picker is now data-driven from
 /// `/v1/models`, which returns full ids; claude's `--model` flag accepts
 /// either form, so validation only needs the family to be recognizable.
-fn is_valid_model(model: &str) -> bool {
+pub(crate) fn is_valid_model(model: &str) -> bool {
     let m = model.to_ascii_lowercase();
     VALID_MODELS.iter().any(|fam| m.contains(fam))
 }

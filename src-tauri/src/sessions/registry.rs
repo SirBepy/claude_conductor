@@ -383,6 +383,15 @@ impl Registry {
         true
     }
 
+    /// Set only the model on a session entry. Returns true if the entry
+    /// was found.
+    pub fn set_model(&self, session_id: &str, model: &str) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        i.model = model.to_string();
+        true
+    }
+
     /// Set the registry account this session was spawned under. Returns true
     /// if the entry was found. Also stamps the account's current rate-limit
     /// window onto the instance, so a chat started while the account is
