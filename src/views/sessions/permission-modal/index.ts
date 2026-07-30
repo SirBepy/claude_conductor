@@ -113,11 +113,15 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
     submitLabel: "Submit",
     submitIcon: "ph-paper-plane-right",
     cancelLabel: "Skip",
+    // Only this flow can deliver an extra message / pasted images to Claude
+    // (see QuestionUIOpts.supportsExtras doc) - the built-in-tool flow in
+    // permission-card.ts settles via a plain deny.message string instead.
+    supportsExtras: true,
     onDraftChange: (draft) => {
       saveQuestionDraft(payload.id, draft);
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
-    onSubmit: async (answers) => {
+    onSubmit: async (answers, extras) => {
       clearQuestionDraft(payload.id);
       const sid = payload.session_id;
       // Settle the daemon card FIRST: drop the durable fire-and-forget prompt
@@ -137,6 +141,10 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
       // fresh turn. `<auq-answer/>` renders it as an "answer" chip; the framed
       // body ("User answered…") is what the model reads. Routing through the
       // held-flush path folds any queued (held) messages into the same send.
+      // This block MUST stay the sole content of this message: chat-transforms.ts's
+      // extractAuqAnswerText only folds the sentinel into the resolved question
+      // card when the message is exactly one block, else the card is stuck
+      // showing "awaiting answer" forever.
       const answerText = formatAnswersAsMessage(questions, answers);
       const answerBlock: ContentBlock = { type: "text", text: `${AUQ_ANSWER_SENTINEL}${answerText}` };
       if (state.selectedId === sid && state.heldMessages) {
@@ -144,6 +152,25 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
       } else {
         const cwd = resolveCwdForSession(sid) ?? ".";
         await invoke("send_message", { sessionId: sid, cwd, blocks: [answerBlock] });
+      }
+      // The extra message / pasted images, if any, go out as their OWN
+      // follow-up right after - a completely ordinary message (no sentinel),
+      // so it renders as a normal bubble with file chips. Staged rather than
+      // sent directly so it waits for the answer's own turn to finish instead
+      // of racing it.
+      const extraBlocks: ContentBlock[] = [];
+      if (extras.additionalMessage) extraBlocks.push({ type: "text", text: extras.additionalMessage });
+      for (const a of extras.attachments) {
+        if (a.path) extraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
+      }
+      if (extraBlocks.length === 0) return;
+      if (state.selectedId === sid && state.heldMessages) {
+        state.heldMessages.stage(extraBlocks);
+      } else {
+        const cwd = resolveCwdForSession(sid) ?? ".";
+        await invoke("send_message", { sessionId: sid, cwd, blocks: extraBlocks }).catch((e) =>
+          console.warn("[AUQ] extra-message send failed:", e),
+        );
       }
     },
     onCancel: async () => {

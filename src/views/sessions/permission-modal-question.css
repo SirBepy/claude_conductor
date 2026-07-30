@@ -233,6 +233,16 @@
   color: var(--color-text-muted);
 }
 
+/* Review-step extra message + pasted-image attachments (question-ui.ts,
+ * gated on supportsExtras). Attachment chip styles (.attachment/.rm/etc.)
+ * come from composer.css's .composer-attachments rules, already global. */
+.prompt-extra-message {
+  margin-top: 6px;
+}
+.prompt-attachments {
+  margin-top: 4px;
+}
+
 /* Recap screen shown after the last question, before Send. */
 .prompt-summary {
   display: flex;
