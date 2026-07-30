@@ -186,17 +186,10 @@ fn user_turn_text(v: &serde_json::Value) -> String {
     }
 }
 
-/// A real user turn that also represents the user actually *saying* something,
-/// for the purpose of numbering title milestones. Excludes two bookkeeping
-/// turns the harness writes as user messages:
-///  - `[Request interrupted by user]`, which can never carry an assistant reply
-///    (that's what got interrupted), so counting it guarantees a missed milestone;
-///  - `<auq-answer/>` blocks, which are the answer to a question the assistant
-///    asked, not a new instruction.
-/// Both inflate the count and shift every milestone past the turns that do have
-/// a marker. Separate from `is_real_user_turn` because that one is also the
-/// token walker's "messages sent by me" predicate (see walker.rs) and must keep
-/// counting these.
+/// Milestone-numbering predicate. Drops the harness's bookkeeping user turns
+/// (`[Request interrupted by user]`, which can never carry a reply, and
+/// `<auq-answer/>`), which otherwise shift every milestone off the turns that
+/// do carry a marker. Kept separate from walker.rs's `is_real_user_turn`.
 fn is_titleable_user_turn(v: &serde_json::Value) -> bool {
     if !is_real_user_turn(v) { return false; }
     let t = user_turn_text(v);
@@ -226,23 +219,10 @@ fn assistant_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// Reads the transcript and returns the AI-generated title, snapshotting the
-/// most recent `<cc-title:…>` marker seen each time a milestone turn (1/5/15)
-/// completes. Stops once past the last milestone so it never scans an entire
-/// long chat. Returns None when the chat carries no marker at all.
-///
-/// Two rules here are deliberate, and both exist because the previous version
-/// required a marker to land on *exactly* turn 1, 5 or 15:
-///  - milestones snapshot the latest marker so far rather than demanding an
-///    exact-turn hit. An assistant turn that ends on a tool call (asking a
-///    question, say) emits no marker, which used to silently forfeit that
-///    milestone;
-///  - before the first milestone completes, the newest marker is used directly,
-///    so a chat gets a real title from its first finished turn instead of
-///    sitting on the first-user-prompt fallback.
-/// Together with `is_titleable_user_turn` this is what stops an interrupted or
-/// question-heavy chat from being stuck on "I've been meaning to do this for a
-/// while now lets actually d…" forever.
+/// AI title, snapshotting the newest `<cc-title:…>` seen each time a milestone
+/// turn (1/5/15) completes, and using the newest marker directly before the
+/// first milestone lands. Demanding an exact-turn hit used to forfeit any
+/// milestone whose turn ended on a tool call. None when the chat has no marker.
 pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let reader = BufReader::new(file);

@@ -1,8 +1,5 @@
-// Which sidebar row layout to render. Deliberately its own module rather than
-// another flag in sessions-helpers: the classic branch is scheduled for removal
-// once Joe has lived on Portrait for a month (see the 2026-08-30 todo), and
-// keeping the flag, the type and the default in one file makes that deletion a
-// single grep instead of an archaeology exercise.
+// Own module, not another flag in sessions-helpers: the classic branch is
+// slated for deletion once Portrait has stuck (see the 2026-08-30 todo).
 
 export const LS_ROW_STYLE = "cc_chat_row_style";
 

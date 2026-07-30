@@ -1,11 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
-// Frontend proof for the Portrait chat-row style (Settings > Appearance > Chat
-// row style). Drives the REAL sidebar rather than asserting on markup strings:
-// the round-4 lesson was that a "square" portrait can be 46x59 while every
-// screenshot still looks plausible, so the geometry asserts below measure the
-// rendered boxes.
+// Drives the REAL sidebar, not markup strings: a "square" portrait can be
+// 46x59 while every screenshot still looks plausible, so the asserts below
+// measure rendered boxes.
 
 const BASE_INVOKE = {
   get_accounts_setup_prompt_state: { shouldShow: false },

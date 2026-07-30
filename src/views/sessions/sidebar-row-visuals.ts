@@ -5,11 +5,9 @@ import { statusDotClass, scheduledTooltip } from "./sessions-helpers";
 import { modelFamilyFromId } from "../../shared/effort-presets";
 import { modelLabel } from "../../shared/model-name";
 
-// ── Portrait row ─────────────────────────────────────────────────────────────
-// Model shown as a battery whose fill is the family's rank. Ranked, not
-// arbitrary, so you compare fill instead of decoding a symbol; one colour
-// because the rail's five chat-state hues already own the colour channel.
-// Fable outranks Opus (Joe, 2026-07-30).
+// Model as a battery whose fill is the family's rank - compare fill, don't
+// decode a symbol. One colour: the rail's five chat-state hues own that
+// channel. Fable outranks Opus (Joe, 2026-07-30).
 const MODEL_RANK: Record<string, number> = { haiku: 1, sonnet: 2, opus: 3, fable: 4 };
 const RANK_ICON: Record<number, string> = {
   1: "ph-battery-low", 2: "ph-battery-medium", 3: "ph-battery-high", 4: "ph-battery-full",

@@ -1,12 +1,6 @@
-// Shared hover tooltip for sidebar rows and their chips.
-//
-// Reuses the app's existing `.info-tooltip` box (styles/widgets.css) rather than
-// the native title= tooltip, which is slow to appear and unstyleable. Placed to
-// the SIDE of its anchor, not above: the sidebar rows are 52px tall and stacked,
-// so an above-placement lands on the neighbouring row.
-//
-// Delegated from a container because the sidebar re-renders constantly - binding
-// per element would leak a listener on every reconcile.
+// Hover tooltip for sidebar rows, reusing widgets.css's `.info-tooltip` box.
+// Placed to the SIDE: rows are 52px and stacked, so above lands on the
+// neighbour. Delegated, because the sidebar reconciles on every render.
 
 const PAD = 10;
 let box: HTMLElement | null = null;
