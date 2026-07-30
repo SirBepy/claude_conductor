@@ -31,26 +31,20 @@ pub(crate) fn is_jarvis_caller(state: &Arc<DaemonState>, jarvis_session_id: &str
 }
 
 /// Reads the daemon's cached per-account 5h-window utilization straight out
-/// of `companion.db`'s `usage_snapshots` table: latest snapshot per account,
-/// mapped to its `five_hour.utilization`. Same underlying read as
-/// `daemon::methods::usage::get_usage_map`'s `reduce_to_latest_per_account`,
-/// duplicated here rather than shared since that helper is private to its own
-/// (currently locked-for-edit) file - see the module doc there for why
-/// `account_id: None` legacy rows are skipped. An account absent from the
-/// returned map has never been polled yet; `pick_worker_account` below treats
-/// that as full headroom (utilization 0.0), not as "unranked" or "excluded".
+/// of `companion.db`'s `usage_snapshots` table: latest snapshot per account
+/// (via the shared `usage::reduce_to_latest_per_account`, todo 330), mapped to
+/// its `five_hour.utilization`. An account absent from the returned map has
+/// never been polled yet; `pick_worker_account` below treats that as full
+/// headroom (utilization 0.0), not as "unranked" or "excluded".
 async fn five_hour_utilization_by_account(state: &Arc<DaemonState>) -> HashMap<String, f64> {
     let Some(db) = state.db.clone() else { return HashMap::new(); };
     tokio::task::spawn_blocking(move || {
         let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
         let all = crate::storage::usage_store::get_all_snapshots(mgr.conn()).unwrap_or_default();
-        let mut map: HashMap<String, f64> = HashMap::new();
-        for snap in all {
-            if let Some(id) = snap.account_id.clone() {
-                map.insert(id, snap.five_hour.utilization);
-            }
-        }
-        map
+        super::usage::reduce_to_latest_per_account(all)
+            .into_iter()
+            .map(|(id, snap)| (id, snap.five_hour.utilization))
+            .collect()
     })
     .await
     .unwrap_or_default()

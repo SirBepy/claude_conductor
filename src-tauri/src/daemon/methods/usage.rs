@@ -15,8 +15,9 @@ use std::sync::Arc;
 
 /// Snapshots come back ascending by timestamp, so a plain insert-per-row walk
 /// naturally leaves the latest snapshot per account in the map. Shared by
-/// `get_usage_map` and `request_live_usage_refresh` below.
-fn reduce_to_latest_per_account(
+/// `get_usage_map` and `request_live_usage_refresh` below, and by
+/// `jarvis_fleet::five_hour_utilization_by_account` (todo 330).
+pub(crate) fn reduce_to_latest_per_account(
     rows: Vec<crate::types::UsageSnapshot>,
 ) -> HashMap<String, crate::types::UsageSnapshot> {
     let mut map: HashMap<String, crate::types::UsageSnapshot> = HashMap::new();
