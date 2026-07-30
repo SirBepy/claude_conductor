@@ -83,10 +83,14 @@ pub(crate) fn post_message(state: &Arc<DaemonState>, session_id: &str, text: &st
     let peers = state.registry.by_project(&project_id);
     let mut notified = 0usize;
     for peer in peers.iter().filter(|i| i.session_id != session_id && i.ended_at.is_none()) {
+        // `msg.text` (already truncated to MAX_TEXT_LEN by `repo_channel::post`
+        // above), NOT the raw `text` argument - otherwise the length cap only
+        // ever applied to the persisted JSON history, and an unbounded string
+        // still landed as a real injected turn in every peer's live session.
         repo_channel_wake::enqueue(
             state,
             &peer.session_id,
-            format!("[repo-channel] {author}: {text}"),
+            format!("[repo-channel] {author}: {}", msg.text),
         );
         repo_channel_wake::spawn_drain(state, &peer.session_id);
         notified += 1;
@@ -149,6 +153,34 @@ mod tests {
         let state = test_state();
         let r = post_message(&state, "ghost", "hello");
         assert_eq!(r, Err("unknown session: ghost".to_string()));
+    }
+
+    #[tokio::test]
+    async fn post_message_wake_line_uses_truncated_text_not_raw() {
+        // Regression: the wake line handed to peers must be built from the
+        // returned message's (already-truncated) text, not the caller's raw
+        // argument - otherwise MAX_TEXT_LEN only ever capped the persisted
+        // JSON history while an unbounded string still landed as a real
+        // injected turn in every peer's live session. `post_message` always
+        // calls `spawn_drain` (a synchronous `tokio::spawn`) for each
+        // notified peer, so this needs a live runtime (`#[tokio::test]`)
+        // even though the peer being marked busy makes the spawned task
+        // itself a guaranteed no-op - the enqueue this test asserts on
+        // happens synchronously, before that task is ever dispatched.
+        let state = test_state();
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.set_busy("s2", true);
+
+        let long = "x".repeat(3000); // exceeds repo_channel::MAX_TEXT_LEN (2000)
+        let v = post_message(&state, "s1", &long).unwrap();
+        assert_eq!(v["notified"], 1);
+
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.get("s2").expect("wake queued for s2");
+        assert_eq!(pending.len(), 1);
+        // "[repo-channel] {author}: " prefix + at most 2000 chars of text.
+        assert!(pending[0].len() < 3000, "wake line must be truncated, was {} bytes", pending[0].len());
     }
 
     #[tokio::test]

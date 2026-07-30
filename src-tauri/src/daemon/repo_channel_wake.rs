@@ -6,23 +6,45 @@
 //! undefined behavior) - but keyed by ANY live session id, not just a Jarvis
 //! singleton, since every session (not only Jarvis workers) can now receive a
 //! coordination nudge.
+//!
+//! This is a SEPARATE queue from `jarvis_wakes`, not a shared one, so in
+//! principle a session with entries pending in both could receive two
+//! separate injected turns at the same idle moment instead of one coalesced
+//! message. Not reachable today: `jarvis_wakes` is only ever keyed by the
+//! Jarvis singleton's own session id (populated by wake-on-worker-blocked /
+//! worker-terminal-wake, which always target the ORCHESTRATOR, never a
+//! worker), and the singleton runs in its own dedicated `jarvis-home`
+//! directory/project - it never shares a `project_id` with the sessions
+//! `post_message` can target, so it can never actually be enqueued into both
+//! queues at once. If a future feature ever let Jarvis participate as an
+//! ordinary repo-channel peer, this invariant would need re-checking (either
+//! merge the two queues, or drain both from one call site).
 
 use crate::daemon::lifecycle;
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
 
-/// Queue one wake line for `target_session_id`. Delivery-agnostic - callers
-/// pair this with [`spawn_drain`] right after so a wake fires as soon as
-/// possible, but `drain` alone decides when it's actually safe to write into
-/// the target's stdin.
+/// Cap on queued-but-undelivered lines per target session. Unlike
+/// `jarvis_wake` (whose queue only ever fills from a bounded set of worker
+/// terminal-state events), this queue is fed by `post_message`, which any
+/// live peer can call at will - a target that never goes idle (or a peer that
+/// posts in a tight loop) must not grow this queue without bound. Oldest
+/// lines are dropped first: a stale coordination note is worse than useless
+/// once several newer ones have queued up behind it.
+const MAX_QUEUED_LINES: usize = 50;
+
+/// Queue one wake line for `target_session_id`, dropping the oldest queued
+/// line first if this would exceed [`MAX_QUEUED_LINES`]. Delivery-agnostic -
+/// callers pair this with [`spawn_drain`] right after so a wake fires as soon
+/// as possible, but `drain` alone decides when it's actually safe to write
+/// into the target's stdin.
 pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, line: String) {
-    state
-        .repo_channel_wakes
-        .lock()
-        .unwrap()
-        .entry(target_session_id.to_string())
-        .or_default()
-        .push_back(line);
+    let mut queues = state.repo_channel_wakes.lock().unwrap();
+    let pending = queues.entry(target_session_id.to_string()).or_default();
+    if pending.len() >= MAX_QUEUED_LINES {
+        pending.pop_front();
+    }
+    pending.push_back(line);
 }
 
 /// Deliver everything queued for `target_session_id` as ONE coalesced,
@@ -103,6 +125,21 @@ mod tests {
         let pending = queues.get("s1").expect("queue exists");
         assert_eq!(pending.len(), 2);
         assert_eq!(pending.iter().cloned().collect::<Vec<_>>(), vec!["line one", "line two"]);
+    }
+
+    #[test]
+    fn enqueue_caps_queue_depth_dropping_oldest_first() {
+        // A target that never goes idle (or a peer posting in a tight loop)
+        // must not grow this queue without bound.
+        let state = test_state();
+        for i in 0..MAX_QUEUED_LINES + 10 {
+            enqueue(&state, "s1", format!("line {i}"));
+        }
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.get("s1").expect("queue exists");
+        assert_eq!(pending.len(), MAX_QUEUED_LINES);
+        assert_eq!(pending[0], "line 10", "oldest 10 must have been dropped");
+        assert_eq!(pending[MAX_QUEUED_LINES - 1], format!("line {}", MAX_QUEUED_LINES + 9));
     }
 
     #[tokio::test]

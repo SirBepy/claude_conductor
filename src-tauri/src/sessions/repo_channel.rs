@@ -75,7 +75,11 @@ fn write_atomic(path: &Path, messages: &[ChannelMessage]) {
 /// for a project with no channel file yet.
 pub fn list(project_id: &str) -> Vec<ChannelMessage> {
     let Some(path) = store_path_for(project_id) else { return Vec::new() };
-    load(&path)
+    list_at(&path)
+}
+
+fn list_at(path: &Path) -> Vec<ChannelMessage> {
+    load(path)
 }
 
 /// Appends one message, pruning to `MAX_MESSAGES` (oldest dropped first).
@@ -84,6 +88,19 @@ pub fn list(project_id: &str) -> Vec<ChannelMessage> {
 /// `post_message` response and the wake line it hands to peers stay
 /// consistent) even though it never made it to disk.
 pub fn post(project_id: &str, session_id: &str, author: &str, text: &str) -> ChannelMessage {
+    let Some(path) = store_path_for(project_id) else {
+        return post_at(None, session_id, author, text);
+    };
+    post_at(Some(&path), session_id, author, text)
+}
+
+/// `path: None` skips the disk write entirely (mirrors `post`'s own
+/// `store_path_for` failure branch); `Some(path)` is the injectable form real
+/// unit tests use, so the truncation/overflow logic below is exercised
+/// through the actual function instead of duplicated inline (the
+/// `scheduled_items.rs` `_at(path, ...)` pattern this module was already
+/// documented as following, but hadn't actually applied before this pass).
+fn post_at(path: Option<&Path>, session_id: &str, author: &str, text: &str) -> ChannelMessage {
     let msg = ChannelMessage {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),
@@ -91,15 +108,15 @@ pub fn post(project_id: &str, session_id: &str, author: &str, text: &str) -> Cha
         text: text.chars().take(MAX_TEXT_LEN).collect(),
         posted_at: chrono::Utc::now().to_rfc3339(),
     };
-    if let Some(path) = store_path_for(project_id) {
+    if let Some(path) = path {
         let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut messages = load(&path);
+        let mut messages = load(path);
         messages.push(msg.clone());
         if messages.len() > MAX_MESSAGES {
             let excess = messages.len() - MAX_MESSAGES;
             messages.drain(0..excess);
         }
-        write_atomic(&path, &messages);
+        write_atomic(path, &messages);
     }
     msg
 }
@@ -118,50 +135,49 @@ mod tests {
     fn post_and_load_roundtrip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-1.json");
-        let msg = ChannelMessage {
-            id: "m1".into(),
-            session_id: "s1".into(),
-            author: "Alice".into(),
-            text: "hello".into(),
-            posted_at: "2026-07-30T00:00:00Z".into(),
-        };
-        write_atomic(&path, &[msg.clone()]);
-        let loaded = load(&path);
+        let msg = post_at(Some(&path), "s1", "Alice", "hello");
+        assert_eq!(msg.text, "hello");
+        let loaded = list_at(&path);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].text, "hello");
+        assert_eq!(loaded[0].id, msg.id);
     }
 
     #[test]
     fn overflow_prunes_oldest_first() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-1.json");
-        let mut messages: Vec<ChannelMessage> = (0..MAX_MESSAGES + 5)
-            .map(|i| ChannelMessage {
-                id: format!("m{i}"),
-                session_id: "s1".into(),
-                author: "Alice".into(),
-                text: format!("msg {i}"),
-                posted_at: "2026-07-30T00:00:00Z".into(),
-            })
-            .collect();
-        // Mirror `post`'s own overflow trim so this test exercises the exact
-        // logic `post` runs, without needing the real data_dir.
-        if messages.len() > MAX_MESSAGES {
-            let excess = messages.len() - MAX_MESSAGES;
-            messages.drain(0..excess);
+        for i in 0..MAX_MESSAGES + 5 {
+            post_at(Some(&path), "s1", "Alice", &format!("msg {i}"));
         }
-        write_atomic(&path, &messages);
-        let loaded = load(&path);
+        let loaded = list_at(&path);
         assert_eq!(loaded.len(), MAX_MESSAGES);
         assert_eq!(loaded[0].text, "msg 5", "oldest 5 must have been dropped");
+        assert_eq!(loaded[MAX_MESSAGES - 1].text, format!("msg {}", MAX_MESSAGES + 4));
     }
 
     #[test]
     fn post_truncates_overlong_text() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-1.json");
         let long = "x".repeat(MAX_TEXT_LEN + 500);
-        // Exercise the truncation logic directly (same as `post`'s body) -
-        // `post` itself needs a real data_dir, which isn't test-isolated.
-        let truncated: String = long.chars().take(MAX_TEXT_LEN).collect();
-        assert_eq!(truncated.chars().count(), MAX_TEXT_LEN);
+        let msg = post_at(Some(&path), "s1", "Alice", &long);
+        assert_eq!(msg.text.chars().count(), MAX_TEXT_LEN);
+        // Persisted copy must match the truncated returned copy - this is the
+        // exact invariant `daemon::methods::channel::post_message` relies on
+        // (it formats the peer wake line from the returned `msg.text`, not
+        // the caller's raw argument).
+        let loaded = list_at(&path);
+        assert_eq!(loaded[0].text.chars().count(), MAX_TEXT_LEN);
+    }
+
+    #[test]
+    fn post_at_with_no_path_still_returns_truncated_message() {
+        // Mirrors `post`'s own `store_path_for` failure branch (e.g. `data_dir`
+        // unavailable) - the caller must still get a usable, correctly
+        // truncated message back even though nothing was written to disk.
+        let long = "x".repeat(MAX_TEXT_LEN + 500);
+        let msg = post_at(None, "s1", "Alice", &long);
+        assert_eq!(msg.text.chars().count(), MAX_TEXT_LEN);
     }
 }
