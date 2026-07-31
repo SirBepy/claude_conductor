@@ -357,7 +357,7 @@ export function renderSidebar(listEl: HTMLElement): void {
   // Unconditional (unlike the drain fetch above): the scheduled marker/count
   // applies regardless of sort mode.
   refreshScheduledCounts();
-  const sorted = sortSessions(filtered, sort, unread, attention, question, closing, drainMap);
+  const sorted = sortSessions(filtered, sort, closing, drainMap);
   state.sortedSessionIds = sorted.map(s => s.session_id);
 
   const isManualSlots = getChatSlotMode() === "manual";

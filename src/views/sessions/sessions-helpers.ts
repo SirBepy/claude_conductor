@@ -174,9 +174,6 @@ export function sessionSegment(
 export function sortSessions(
   sessions: Instance[],
   sort: SessionSort,
-  unread: Set<string>,
-  attention: Set<string>,
-  question: Set<string>,
   closing: Set<string> = new Set(),
   drainBySession?: Map<string, number>,
 ): Instance[] {
@@ -210,14 +207,16 @@ export function sortSessions(
       (b.started_at ?? "").localeCompare(a.started_at ?? "")
     );
   }
-  // status sort
+  // status sort: segment/header placement (sessionSegment) already buckets by
+  // status/unread elsewhere - ordering WITHIN a bucket is project name asc,
+  // then creation order (started_at asc, oldest first). Read/unread must not
+  // affect order, so statusPriority is deliberately not consulted here.
   return copy.sort((a, b) => {
     const cl = closingLast(a, b);
     if (cl !== 0) return cl;
-    const pa = statusPriority(a, unread, attention, question);
-    const pb = statusPriority(b, unread, attention, question);
-    if (pa !== pb) return pa - pb;
-    return (b.started_at ?? "").localeCompare(a.started_at ?? "");
+    const pn = projectName(a).localeCompare(projectName(b), undefined, { sensitivity: "base" });
+    if (pn !== 0) return pn;
+    return (a.started_at ?? "").localeCompare(b.started_at ?? "");
   });
 }
 
