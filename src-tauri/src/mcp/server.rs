@@ -111,7 +111,7 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_QUESTION,
-            "description": "Present one or more questions to the user as a floating card. There is NO cap on how many questions you may send - unlike the built-in AskUserQuestion tool, which stops at 4, this one accepts any number. Prefer it whenever you have more than 4, and always ask everything you need in ONE call instead of drip-feeding the user across several rounds. Keep 'question' scannable: short paragraphs (blank line between) rather than one dense run-on paragraph, bold the 1-2 facts that matter, bullet enumerable items, and end with the literal, standalone ask as its own final sentence. Options need short labels; put nuance in each option's description. Returns answers keyed by question text.",
+            "description": "Present one or more questions to the user as a floating card. There is NO cap on how many questions you may send - unlike the built-in AskUserQuestion tool, which stops at 4, this one accepts any number. Prefer it whenever you have more than 4, and always ask everything you need in ONE call instead of drip-feeding the user across several rounds. Keep 'question' scannable: short paragraphs (blank line between) rather than one dense run-on paragraph, bold the 1-2 facts that matter, bullet enumerable items, and end with the literal, standalone ask as its own final sentence. Options need short labels; put nuance in each option's description. 'domain' tags what kind of decision this is, so the user can weigh it accordingly. 'badges' mark an option as the recommended and/or long-term/short-term best pick. Returns answers keyed by question text.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -121,13 +121,26 @@ fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                             "type": "object",
                             "properties": {
                                 "question": {"type": "string"},
+                                "header": {"type": "string"},
+                                "domain": {
+                                    "type": "string",
+                                    "enum": ["ux", "arch", "sec", "data", "tooling", "infra", "billing"]
+                                },
+                                "multiSelect": {"type": "boolean"},
                                 "options": {
                                     "type": "array",
                                     "items": {
                                         "type": "object",
                                         "properties": {
                                             "label": {"type": "string"},
-                                            "description": {"type": "string"}
+                                            "description": {"type": "string"},
+                                            "badges": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "enum": ["recommended", "long_term", "short_term"]
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -5,14 +5,21 @@ export interface PermissionRequestedPayload {
   session_id?: string;
 }
 
+export type OptionBadge = "recommended" | "long_term" | "short_term";
+
 export interface QuestionOption {
   label: string;
   description?: string;
+  /** Zero or more; an option can be both recommended AND long-term best. */
+  badges?: OptionBadge[];
 }
+
+export type QuestionDomain = "ux" | "arch" | "sec" | "data" | "tooling" | "infra" | "billing";
 
 export interface Question {
   question: string;
   header?: string;
+  domain?: QuestionDomain;
   multiSelect?: boolean;
   options?: QuestionOption[];
 }
