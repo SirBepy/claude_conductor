@@ -273,6 +273,22 @@ pub async fn move_session_to_account(
         .map_err(|e| e.to_string())
 }
 
+/// Kebab menu's "Restart Jarvis" (Jarvis window only, gated in the frontend
+/// on the session's `jarvis` flag): force-kills the daemon's live child for
+/// `session_id` and respawns it resuming the SAME id - never a fork, never
+/// marked ended. Returns the (unchanged) session id; the frontend re-selects
+/// the pane in place (see `active-session.ts`'s `changeAccountForSession` for
+/// the same "rebind the pane" precedent, used there because the id changes).
+#[tauri::command]
+pub async fn restart_jarvis_session(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let guard = state.daemon_client.lock().await;
+    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    client.restart_jarvis_session(&session_id).await.map_err(|e| e.to_string())
+}
+
 /// Debug builds only: fake a usage-limit rejection on `session_id` so the
 /// blocked banner, the red chat state, and the staggered scheduled resume can
 /// all be exercised without waiting for a real window to run out. Everything

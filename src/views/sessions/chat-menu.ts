@@ -25,6 +25,9 @@ export interface ChatMenuCtx {
   readOnly: boolean;
   autoAcceptOn: boolean;
   isHidden: boolean;
+  /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is
+   *  disabled for them so flipping it off can't silently stall the fleet. */
+  isJarvis?: boolean;
   viewChanges?: () => void;
   onAfterAction?: () => void;
   onDiscard?: () => void;
@@ -206,14 +209,16 @@ export function buildChatMenuBlock(
       label: "Auto-accept",
       isOn: autoOn,
       checkDot: autoOn,
-      run: isDraft || !sessionId
+      run: isDraft || !sessionId || ctx.isJarvis
         ? undefined
         : () => {
             const next = !isAutoAccept(sessionId);
             setAutoAccept(sessionId, next);
             if (next) autoAcceptParked(sessionId);
           },
-      disabledReason: isDraft ? "Available once the chat starts" : (!sessionId ? "No session" : undefined),
+      disabledReason: isDraft
+        ? "Available once the chat starts"
+        : (!sessionId ? "No session" : (ctx.isJarvis ? "Jarvis always auto-accepts" : undefined)),
     },
     {
       icon: "user-switch",

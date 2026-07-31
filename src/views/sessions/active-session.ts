@@ -30,6 +30,7 @@ import { isBlocked, capitalize, getCachedAccount } from "../../shared/chat/rate-
 import { openModelEffortModal } from "./model-effort-modal";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer, mountComposer } from "./active-session-mount";
+import { openJarvisKebabMenu } from "./jarvis-kebab-menu";
 
 const HEADER_STATUS_CLASSES = [
   "st-working", "st-question", "st-done", "st-your-turn", "st-external", "st-attention", "st-rate-limited",
@@ -282,6 +283,13 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     cwd: sess.cwd ? String(sess.cwd) : null,
     autoAcceptOn: !readOnly && isAutoAccept(sess.session_id),
   });
+  // Jarvis has no in-app view (it only lives at #detached?session=<id>), so
+  // its window's pane header is the only place a menu can go. Gated on both
+  // "this IS a detached window" and "this session IS jarvis" so a regular
+  // popped-out session window never grows the button.
+  if (document.body.classList.contains("detached-mode") && sess.jarvis) {
+    header.addKebabButton((btn) => openJarvisKebabMenu(btn, sess.session_id));
+  }
 
   pane.innerHTML = [
     `<div class="session-statusbar-host"></div>`,

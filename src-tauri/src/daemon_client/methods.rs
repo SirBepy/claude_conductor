@@ -190,6 +190,21 @@ impl PersistentClient {
             .ok_or_else(|| ClientError::Rpc { code: -32000, message: "move_session_to_account: no session_id in result".into() })
     }
 
+    /// Force-kill the Jarvis singleton's live child (if any) and respawn it
+    /// resuming the SAME session id - the kebab menu's "Restart Jarvis"
+    /// action (`daemon::methods::jarvis::register_jarvis`'s
+    /// `restart_jarvis_session` RPC). Returns the (unchanged) session id so
+    /// the frontend can re-select the pane in place.
+    pub async fn restart_jarvis_session(&self, session_id: &str) -> Result<String, ClientError> {
+        let res = self
+            .call("restart_jarvis_session", json!({"session_id": session_id}))
+            .await?;
+        res.get("session_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string())
+            .ok_or_else(|| ClientError::Rpc { code: -32000, message: "restart_jarvis_session: no session_id in result".into() })
+    }
+
     pub async fn mark_session_ended(&self, session_id: &str) -> Result<(), ClientError> {
         self.call("mark_session_ended", json!({"session_id": session_id})).await?;
         Ok(())

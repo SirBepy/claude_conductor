@@ -32,7 +32,13 @@ export async function hydrateAutoAccept(): Promise<void> {
 
 export function isAutoAccept(sessionId: string | undefined | null): boolean {
   if (!sessionId) return false;
-  return _autoAccept.get(sessionId) === true;
+  if (_autoAccept.get(sessionId) === true) return true;
+  // A Jarvis session flagged after boot (spawned mid-session, or resumed)
+  // never lands in the boot-time-hydrated map above until an app restart.
+  // The backend guarantees a jarvis-flagged session's persisted auto_accept
+  // is always true (`flag_as_jarvis` / `spawn_session`'s belt-and-suspenders
+  // re-assert), so trust the live Instance flag directly instead of waiting.
+  return state.sessions.some((s) => s.session_id === sessionId && s.jarvis === true);
 }
 
 export function setAutoAccept(sessionId: string, value: boolean): void {

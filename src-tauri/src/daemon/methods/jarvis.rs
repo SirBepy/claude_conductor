@@ -18,8 +18,14 @@ use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{self, Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind};
-use serde_json::json;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use std::sync::Arc;
+
+#[derive(Debug, Deserialize)]
+struct RestartJarvisParams {
+    session_id: String,
+}
 
 /// Model/effort the Jarvis singleton always spawns with. "opus" matches the
 /// bare family-alias form `is_valid_model` accepts (see
@@ -120,7 +126,9 @@ fn jarvis_home_dir() -> Result<std::path::PathBuf, RpcError> {
 }
 
 pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
-    router.register("ensure_jarvis_session", move |_params, _ctx| {
+    {
+        let state = state.clone();
+        router.register("ensure_jarvis_session", move |_params, _ctx| {
         let state = state.clone();
         async move {
             let existing = state.settings.snapshot().jarvis_session_id;
@@ -161,7 +169,10 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
             crate::daemon::session_registration::register_new_session(
                 &state, &sid, &cwd, JARVIS_MODEL, JARVIS_EFFORT, &account_id, &now, true, None,
             );
-            state.registry.set_jarvis(&sid, true);
+            // Atomic coupling lives in `flag_as_jarvis` (session_registration.rs):
+            // flagging the registry AND forcing chat_config's auto_accept happen
+            // together so a future change here can't decouple them.
+            crate::daemon::session_registration::flag_as_jarvis(&state, &sid);
             crate::sessions::persistence::save_snapshot_default(&state.registry);
             // Fresh-spawn only (never on pointer reuse, above) and idempotent -
             // see the function doc for why a respawn never duplicates this.
@@ -177,6 +188,30 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
             state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
 
             Ok(json!({"session_id": sid}))
+        }
+        });
+    }
+
+    // Kebab menu's "Restart Jarvis" (Part B): force-kill the live child (if
+    // any) and respawn resuming the SAME session id - never a fork, never a
+    // fresh id, and the session is never marked ended. Scoped to a
+    // jarvis-flagged session_id only; the frontend only ever surfaces this
+    // action inside the Jarvis window, but the daemon re-checks so a stray
+    // call against an ordinary session can't nuke its live process.
+    router.register("restart_jarvis_session", move |params, _ctx| {
+        let state = state.clone();
+        async move {
+            let p: RestartJarvisParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            let is_jarvis = state.registry.get(&p.session_id).map(|i| i.jarvis).unwrap_or(false);
+            if !is_jarvis {
+                return Err(RpcError::invalid_params(format!(
+                    "session {} is not the Jarvis singleton", p.session_id
+                )));
+            }
+            let new_id = lifecycle::restart_session(&state, &p.session_id).await.map_err(err_to_rpc)?;
+            state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+            Ok(json!({"session_id": new_id}))
         }
     });
 }

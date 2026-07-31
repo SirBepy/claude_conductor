@@ -56,3 +56,17 @@ pub(crate) fn register_new_session(
         }));
     }
 }
+
+/// Flag `session_id` as the Jarvis singleton in the registry AND force-persist
+/// `chat_config`'s auto-accept flag in the same call (hardening adjacent to
+/// todo 441): Jarvis runs fully unattended, so even a future spawn path that
+/// forgets to pass `auto_accept: true` into `register_new_session` can never
+/// leave a Jarvis-flagged session able to pop a permission modal nobody is
+/// watching for. `Registry::set_jarvis` itself stays a plain in-memory setter
+/// (it has a direct unit-test caller - `jarvis_fleet.rs`'s eligible-pool test -
+/// that must not trigger a real `chat-config.json` write), so the coupling
+/// lives here instead, one level up, where `DaemonState` is available.
+pub(crate) fn flag_as_jarvis(state: &DaemonState, session_id: &str) {
+    state.registry.set_jarvis(session_id, true);
+    crate::sessions::chat_config::set_auto_accept(session_id, true);
+}

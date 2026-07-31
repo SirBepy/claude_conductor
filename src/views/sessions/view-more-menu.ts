@@ -213,6 +213,7 @@ function openViewMoreMenu(btn: HTMLButtonElement): void {
         readOnly: sess?.kind === "external" || sess?.kind === "automated",
         autoAcceptOn: isAutoAccept(sid),
         isHidden: hiddenSet.has(sid),
+        isJarvis: sess?.jarvis === true,
         viewChanges: state.activeChatActions?.viewChanges,
         onAfterAction: () => closeViewMoreMenu(),
       };
@@ -227,6 +228,7 @@ function openViewMoreMenu(btn: HTMLButtonElement): void {
         readOnly: false,
         autoAcceptOn: false,
         isHidden: false,
+        isJarvis: false,
         onDiscard: () => {
           closeViewMoreMenu();
           // Signal sessions.ts to handle draft discard.

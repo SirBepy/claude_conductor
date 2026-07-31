@@ -51,6 +51,7 @@ export function openDraftCtxMenu(anchor: HTMLElement, onDiscard: () => void): vo
     readOnly: false,
     autoAcceptOn: false,
     isHidden: false,
+    isJarvis: false,
     onDiscard: () => { closeCtxMenu(); onDiscard(); },
     onAfterAction: () => closeCtxMenu(),
   };
@@ -91,6 +92,7 @@ export function openCtxMenu(
     readOnly: sess.kind === "external" || sess.kind === "automated",
     autoAcceptOn: isAutoAccept(sessionId),
     isHidden,
+    isJarvis: sess.jarvis === true,
     viewChanges,
     onAfterAction: () => {
       closeCtxMenu();

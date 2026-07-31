@@ -114,4 +114,25 @@ export class SessionHeader {
       this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd);
     }
   }
+
+  /**
+   * Append a kebab (⋮) button to the header - the Jarvis detached window's
+   * only menu affordance (it has no view-level header of its own to hold one,
+   * unlike the main window). The caller gates when this is invoked (only for
+   * a jarvis-flagged session inside a detached window - see
+   * `active-session.ts`'s `selectSession`); this method itself has no opinion
+   * on that and will happily add the button to any header.
+   */
+  addKebabButton(onClick: (btn: HTMLButtonElement) => void): void {
+    if (this.el.querySelector(".jarvis-kebab-btn")) return;
+    const btn = document.createElement("button");
+    btn.className = "icon-btn more-btn jarvis-kebab-btn";
+    btn.title = "More options";
+    btn.innerHTML = `<i class="ph ph-dots-three-vertical"></i>`;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick(btn);
+    });
+    this.el.appendChild(btn);
+  }
 }

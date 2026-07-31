@@ -156,6 +156,13 @@ pub async fn spawn_session(
     // MCP child is ever started off that particular config before the
     // registry's `jarvis` flag is set on the very next turn's respawn.
     let is_jarvis = state.registry.get(&session_id).map(|i| i.jarvis).unwrap_or(false);
+    // Belt-and-suspenders (todo 441 area): every spawn/resume of a Jarvis-
+    // flagged session re-asserts chat-config's auto-accept here, so no resume
+    // path - present or future - can ever boot a Jarvis session whose
+    // persisted flag was somehow left/found false.
+    if is_jarvis {
+        crate::sessions::chat_config::set_auto_accept(&session_id, true);
+    }
     let mcp_config_path = write_mcp_config(&session_id, &session_id, is_jarvis);
     let hook_settings_path = write_hook_settings(&session_id);
 
@@ -334,7 +341,21 @@ pub async fn send_message_with_respawn(
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message(&session, text, is_meta).await;
     }
+    let session = respawn_interactive(state, session_id).await?;
+    send_message(&session, text, is_meta).await
+}
 
+/// Re-spawn `session_id` from the Registry's recorded cwd/model/effort/
+/// account, resuming its existing transcript (never a fork, never a fresh
+/// id). Only respawns sessions the Registry still considers a live
+/// Interactive chat (not `ended_at`-marked, not External/Automated) -
+/// anything else is a genuine NotFound. Shared by `send_message_with_respawn`
+/// (sends a message right after) and `restart_session` (the Jarvis "Restart"
+/// action - no message, just a fresh child).
+async fn respawn_interactive(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+) -> Result<Arc<Session>, LifecycleError> {
     let inst = state
         .registry
         .get(session_id)
@@ -344,7 +365,7 @@ pub async fn send_message_with_respawn(
 
     let model = if inst.model.is_empty() { "opus".to_string() } else { inst.model };
     let effort = if inst.effort.is_empty() { "high".to_string() } else { inst.effort };
-    let session = spawn_session(
+    spawn_session(
         state,
         StartSessionParams {
             cwd: inst.cwd,
@@ -357,8 +378,33 @@ pub async fn send_message_with_respawn(
             new_session_id: None,
         },
     )
-    .await?;
-    send_message(&session, text, is_meta).await
+    .await
+}
+
+/// Force-kill `session_id`'s live child (if any) and respawn it resuming the
+/// SAME session id - the Jarvis kebab menu's "Restart Jarvis" action. Never
+/// forks, never marks the session ended in the Registry (unlike
+/// `end_session`), so the fleet-ownership/persisted-name/awaiting bookkeeping
+/// survives untouched across the restart.
+///
+/// Waits for the pump task's own EOF teardown to remove the killed session
+/// from the `SessionMap` before respawning: `run_stdout_pump`'s exit path does
+/// an unconditional `map_for_pump.remove(session_id)` keyed only by id, so if
+/// the fresh spawn's `map.insert` landed first, that stale removal would
+/// delete the brand-new live entry out from under it.
+pub async fn restart_session(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+) -> Result<String, LifecycleError> {
+    if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+        crate::channels::kill::kill_tree(session.pid);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline && state.sessions.get(session_id).is_some() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+    let session = respawn_interactive(state, session_id).await?;
+    Ok(session.session_id.clone())
 }
 
 pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), LifecycleError> {
