@@ -44,30 +44,39 @@ export interface PreviewController {
   open(snapshotId?: string): void;
   close(): void;
   isOpen(): boolean;
-  /** Scopes the panel to one chat's previews; call on every active-session
-   *  switch (see state.ts). Clears and re-fetches when the id changes. */
+  /** Scopes the panel to one chat's previews, INCLUDING its open/closed
+   *  state (each chat remembers its own independently); call on every
+   *  active-session switch (see state.ts). Clears and re-fetches when the
+   *  id changes. */
   setSessionScope(sessionId: string | null): void;
   destroy(): void;
 }
 
-// ── Persistence (dock-open + panel width only — the real cross-reopen
-// behavior per the spec; device-width and history-rail-open stay in-memory,
-// same as the removed auto-refresh toggle used to). Same localStorage +
-// try/catch shape as state.ts's LS_LAST_SELECTED. ──────────────────────────
-const LS_OPEN_KEY = "cc_preview_panel_open";
+// ── Persistence (dock-open + panel width — the real cross-reopen behavior
+// per the spec; device-width and history-rail-open stay in-memory, same as
+// the removed auto-refresh toggle used to). Open state is keyed per session
+// id (Joe, 2026-08-01: opening the panel in one chat must not show it open
+// in another) — same per-session-key shape as composer-persistence.ts's
+// draftKey. Width stays a single global key; a dragged panel width isn't a
+// per-chat preference. ──────────────────────────────────────────────────
+const LS_OPEN_PREFIX = "cc_preview_panel_open:";
 const LS_WIDTH_KEY = "cc_preview_panel_width";
 
-function loadOpen(): boolean {
+function openKey(sessionId: string): string {
+  return LS_OPEN_PREFIX + sessionId;
+}
+
+function loadOpen(sessionId: string): boolean {
   try {
-    return localStorage.getItem(LS_OPEN_KEY) === "1";
+    return localStorage.getItem(openKey(sessionId)) === "1";
   } catch {
     return false;
   }
 }
 
-function saveOpen(open: boolean): void {
+function saveOpen(sessionId: string, open: boolean): void {
   try {
-    localStorage.setItem(LS_OPEN_KEY, open ? "1" : "0");
+    localStorage.setItem(openKey(sessionId), open ? "1" : "0");
   } catch {
     /* quota or storage disabled */
   }
@@ -187,7 +196,11 @@ class PreviewPanel implements PreviewController {
     this.root = root;
     this.mode = mode;
     this.width = loadWidth();
-    this.openState = loadOpen();
+    // Open state is per-session (see LS_OPEN_PREFIX); unknown until
+    // setSessionScope runs, which sessions.ts calls synchronously right
+    // after construction - start closed so there's no flash of the wrong
+    // chat's open state in between.
+    this.openState = false;
 
     this.applyWidth();
     this.renderShell();
@@ -206,17 +219,9 @@ class PreviewPanel implements PreviewController {
     };
     window.addEventListener("focus", this.focusHandler);
 
-    if (this.openState) {
-      this.root.hidden = false;
-      void this.refreshList();
-    } else {
-      this.root.hidden = true;
-      this.renderHeaderEmpty();
-      this.renderCanvasEmpty();
-      // Baseline only - mark whatever already exists as seen so mount never
-      // pops the panel open for pre-existing history (see checkForUnseen doc).
-      void this.checkForUnseen({ allowOpen: false });
-    }
+    this.root.hidden = true;
+    this.renderHeaderEmpty();
+    this.renderCanvasEmpty();
   }
 
   /** Sets the flex sizing on the host element (`this.root`, the actual flex
@@ -238,14 +243,14 @@ class PreviewPanel implements PreviewController {
 
   open(snapshotId?: string): void {
     this.openState = true;
-    saveOpen(true);
+    if (this.currentSessionId) saveOpen(this.currentSessionId, true);
     this.root.hidden = false;
     void this.refreshList(snapshotId ? { selectId: snapshotId } : {});
   }
 
   close(): void {
     this.openState = false;
-    saveOpen(false);
+    if (this.currentSessionId) saveOpen(this.currentSessionId, false);
     this.root.hidden = true;
   }
 
@@ -256,13 +261,23 @@ class PreviewPanel implements PreviewController {
   setSessionScope(sessionId: string | null): void {
     if (this.currentSessionId === sessionId) return;
     this.currentSessionId = sessionId;
-    if (this.openState) {
+    // Each chat's open/closed state is independent (loadOpen defaults false
+    // for an id with no saved key yet, e.g. one that's never had the panel
+    // opened) - re-derive from THIS chat's key, never carry over the
+    // previous chat's this.openState.
+    if (sessionId && loadOpen(sessionId)) {
+      this.openState = true;
+      this.root.hidden = false;
       void this.refreshList();
     } else {
+      this.openState = false;
+      this.root.hidden = true;
       // Drop the stale cross-chat cache so a later open() never flashes the
       // previous chat's snapshots before the fresh fetch lands.
       this.snapshots = [];
       this.selected = null;
+      this.renderHeaderEmpty();
+      this.renderCanvasEmpty();
       // Baseline only - the chat just switched into may already have older
       // previews; those shouldn't force-open the panel, only a push that
       // arrives *after* this baseline should (see checkForUnseen doc).
