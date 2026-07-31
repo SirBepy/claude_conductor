@@ -1,0 +1,77 @@
+/* Stacked per-file diff (shared edit-window renderer). Lives here, not
+   sessions.css, so the file viewer's Diff tab is styled when opened from the
+   history window too (which imports only chat.css). The changes-panel sheet
+   in the sessions view still gets these via its chat.css import. */
+.stacked-diff-file { margin-bottom: 16px; }
+.stacked-diff-header {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--color-background);
+  border-radius: 4px 4px 0 0;
+  font-size: 12px;
+  font-family: "Fira Code", ui-monospace, monospace;
+}
+
+/* ── Edit window (inline tool-call preview) ──────────────────────────── */
+.edit-window {
+  margin: 6px 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 12px;
+  overflow: hidden;
+}
+.edit-window-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.edit-window-summary::-webkit-details-marker { display: none; }
+.edit-window-summary::before {
+  content: "▸";
+  color: var(--color-text-muted);
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.edit-window[open] > .edit-window-summary::before { transform: rotate(90deg); }
+.edit-window-path {
+  font-family: "Fira Code", ui-monospace, monospace;
+  color: var(--color-text);
+}
+.edit-window-diff { margin-left: auto; font-family: "Fira Code", ui-monospace, monospace; }
+.diff-add { color: #3fb950; }
+.diff-del { color: #f85149; }
+[data-theme="light"] .diff-add, [data-mode="light"] .diff-add { color: #1a7f37; }
+[data-theme="light"] .diff-del, [data-mode="light"] .diff-del { color: #cf222e; }
+.edit-window-diff .diff-zero { color: var(--color-text-muted); }
+.edit-window-body { border-top: 1px solid var(--color-border); }
+.edit-window-hunk-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  padding: 4px 10px;
+  background: var(--color-background);
+}
+.edit-window-hunk {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--color-border);
+}
+.edit-window-side {
+  background: var(--color-surface);
+  padding: 6px 10px;
+  overflow-x: auto;
+}
+.edit-window-side[data-side="before"] pre { color: var(--color-danger); }
+.edit-window-side[data-side="after"] pre { color: #3fb950; }
+[data-theme="light"] .edit-window-side[data-side="after"] pre,
+[data-mode="light"] .edit-window-side[data-side="after"] pre { color: #1a7f37; }
+.edit-window-side pre { margin: 0; font-family: "Fira Code", ui-monospace, monospace; font-size: 11px; }
+.edit-window-empty { color: var(--color-text-muted); font-style: italic; font-size: 11px; }

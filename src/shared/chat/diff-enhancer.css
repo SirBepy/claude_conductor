@@ -1,0 +1,53 @@
+/* ── Unified diff (diff-enhancer.ts upgrades edit-window hunks) ─────────
+ * Lives here (not sessions.css) because the history window imports only
+ * chat.css. Token colors come from shiki dual-theme CSS vars set per-span;
+ * line tints are fixed translucent rgba, readable over any palette. */
+
+.edit-window-hunk[data-enhanced] {
+  display: block;
+  position: relative;
+  background: var(--color-surface, #1c1c1c);
+}
+
+.diff-unified {
+  overflow-x: auto;
+  font-family: "Fira Code", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  padding: 4px 0;
+}
+
+.diff-line {
+  white-space: pre;
+  padding: 0 10px 0 22px;
+  position: relative;
+  min-width: max-content;
+}
+
+.diff-line::before {
+  position: absolute;
+  left: 8px;
+  color: var(--color-text-muted, #888);
+}
+
+.diff-line--add { background: rgba(63, 185, 80, 0.15); }
+.diff-line--add::before { content: "+"; color: #3fb950; }
+.diff-line--del { background: rgba(248, 81, 73, 0.15); }
+.diff-line--del::before { content: "-"; color: #f85149; }
+
+/* Dual-theme shiki tokens: spans carry --shiki-light/--shiki-dark vars. */
+.diff-line span { color: var(--shiki-dark); }
+[data-theme="light"] .diff-line span,
+[data-mode="light"] .diff-line span { color: var(--shiki-light); }
+@media (prefers-color-scheme: light) {
+  [data-theme="system"] .diff-line span { color: var(--shiki-light); }
+}
+
+/* Per-hunk copy button (copies the post-edit text: ctx + add rows). Reuses
+ * .copy-btn chrome; shown on hunk hover like .copyable-block does. */
+.diff-copy-btn { opacity: 0; }
+.edit-window-hunk[data-enhanced]:hover .diff-copy-btn { opacity: 1; }
+
+/* Word-level emphasis: the exact changed words inside a replaced line pair. */
+.diff-line--add .diff-emph { background: rgba(63, 185, 80, 0.4); border-radius: 2px; }
+.diff-line--del .diff-emph { background: rgba(248, 81, 73, 0.4); border-radius: 2px; }

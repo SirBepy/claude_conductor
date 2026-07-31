@@ -6,8 +6,8 @@
 // The container must be sized to the actual viewing area (not shrunk to the
 // image's own pre-transform size) and have `overflow: hidden` - otherwise a
 // zoomed-in image gets clipped at its own original box instead of the real
-// viewing area (see the `.lightbox-content--image`/`.screenshot-gallery-stage`
-// CSS fix, chat-overlays.css).
+// viewing area (see the `.lightbox-content--image` CSS fix in chat-overlays.css
+// and its `.screenshot-gallery-stage` twin in screenshot-gallery.css).
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 8;

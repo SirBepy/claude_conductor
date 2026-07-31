@@ -1,0 +1,117 @@
+/* ── Screenshot gallery (screenshot-gallery.ts): a multi-image lightbox for a
+ * turn's screenshot row, layered on the same .lightbox-overlay/.lightbox-close
+ * chrome above. Header pins to the overlay's own top edge (not the image's);
+ * the chevrons pin to its left/right edges - all independent of the centered
+ * image, per Joe's mockup review. Mirrors src/mockup-screenshot-row.css. ──── */
+
+.screenshot-gallery-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: #fff;
+  padding: 16px 24px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(rgba(0, 0, 0, 0.35), transparent);
+}
+
+.screenshot-gallery-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* Right-hand cluster: who-captured-it tag, position counter, close - all in
+   the SAME flex row as the title, so the close button lands inline with it
+   instead of the real .lightbox-close's independent top:16px/right:16px. */
+.screenshot-gallery-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.screenshot-gallery-header-right .lightbox-close {
+  position: static;
+  width: 32px;
+  height: 32px;
+}
+
+.screenshot-gallery-agent {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  border-radius: 100px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+}
+.screenshot-gallery-agent[data-agent="main"] {
+  background: color-mix(in srgb, var(--color-primary) 85%, #000 5%);
+}
+.screenshot-gallery-agent[data-agent="sub"] {
+  background: color-mix(in srgb, var(--color-text-muted) 55%, #000 30%);
+}
+.screenshot-gallery-agent i { font-size: 0.85rem; }
+
+.screenshot-gallery-counter {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 100px;
+  padding: 2px 11px;
+  font-size: 0.76rem;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fixed to fill the overlay (not sized to the img's own pre-transform box),
+   same fix as .lightbox-content--image - overflow:hidden needs a boundary as
+   big as the viewing area, or a zoomed image clips at its own native size.
+   header/prevBtn/nextBtn are position:absolute so they still stack above
+   this despite it now spanning the full overlay (positioned elements always
+   paint above static ones, regardless of DOM order). */
+.screenshot-gallery-stage {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.screenshot-gallery-stage img {
+  max-width: 90%;
+  max-height: 90%;
+  display: block;
+  border-radius: 4px;
+  touch-action: none;
+}
+
+.screenshot-gallery-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  cursor: pointer;
+  font-size: 18px;
+  transition: background 0.12s;
+}
+.screenshot-gallery-nav:hover:not(:disabled) { background: rgba(0, 0, 0, 0.6); }
+.screenshot-gallery-nav:disabled { opacity: 0.25; cursor: default; }
+.screenshot-gallery-nav--prev { left: 24px; }
+.screenshot-gallery-nav--next { right: 24px; }

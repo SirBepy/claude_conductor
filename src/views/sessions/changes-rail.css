@@ -99,6 +99,6 @@
 }
 .changes-sheet-close:hover { background: var(--color-surface-alt); color: var(--color-text); }
 .changes-sheet-body { overflow-y: auto; padding: 12px; flex: 1; }
-/* .stacked-diff-* styles moved to shared chat-overlays.css so the file viewer's
+/* .stacked-diff-* styles moved to shared edit-window.css so the file viewer's
    Diff tab is styled from the history window too; this view still imports them
    via chat.css. */

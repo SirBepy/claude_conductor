@@ -10,7 +10,11 @@
  *  - chat-screenshot-block.css: screenshot block + thumbnail row
  *  - chat-turn-footer.css:   per-turn footer meta chips, progress bar, todo checklist
  *  - pr-preview.css:         PR preview card + modal (the /create-pr skill preview)
- *  - chat-overlays.css:      lightbox, edit window + unified diff (session hunks)
+ *  - chat-overlays.css:      shared lightbox overlay chrome
+ *  - screenshot-gallery.css: screenshot gallery lightbox (screenshot-gallery.ts)
+ *  - file-viewer.css:        in-app file viewer overlay + panel (file-viewer.ts)
+ *  - edit-window.css:        stacked diff + inline tool-call preview (edit-window.ts)
+ *  - diff-enhancer.css:      unified diff hunk upgrade (diff-enhancer.ts)
  *  - file-surface.css:       shared file surface (bar + File/Diff body) mounted by
  *                            the standalone file viewer (and, later, PR file tabs)
  */
@@ -25,4 +29,8 @@
 @import "./chat-turn-footer.css";
 @import "./pr-preview.css";
 @import "./chat-overlays.css";
+@import "./screenshot-gallery.css";
+@import "./file-viewer.css";
+@import "./edit-window.css";
+@import "./diff-enhancer.css";
 @import "./file-surface.css";

@@ -1,0 +1,87 @@
+/* In-app file viewer (ai_todo 95): overlay + near-fullscreen panel hosting
+ * one shared file surface (file-surface.css owns the bar + body chrome). */
+
+.file-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-viewer-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1400px, 92vw);
+  height: 92vh;
+  background: #1e1e1e;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.file-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #252526;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex: 0 0 auto;
+}
+
+.file-viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #d4d4d4;
+}
+
+.file-viewer-title i {
+  flex: 0 0 auto;
+  color: #9aa0a6;
+}
+
+.file-viewer-name {
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.file-viewer-path {
+  color: #8a8f94;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.file-viewer-close {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  padding: 0;
+}
+
+.file-viewer-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.file-viewer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}

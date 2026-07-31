@@ -3,8 +3,9 @@
 // no concept of "next") - this one shows a title+counter header, prev/next
 // chevrons pinned to the SCREEN's own edges (not the image's), and left/right
 // arrow-key navigation, both clamped at the ends (no wraparound). Reuses the
-// real .lightbox-overlay/.lightbox-close chrome; chat-overlays.css overrides
-// .lightbox-close's positioning when it's inside the gallery header so it
+// real .lightbox-overlay/.lightbox-close chrome (chat-overlays.css);
+// screenshot-gallery.css overrides .lightbox-close's positioning when it's
+// inside the gallery header so it
 // lands inline with the title/tag/counter instead of sitting lower than them.
 
 import { escapeHtml } from "../escape-html";
@@ -57,7 +58,7 @@ export function openScreenshotGallery(shots: ScreenshotShot[], startIndex: numbe
   // Header pins to the overlay's (screen's) own top edge and the chevrons pin
   // to its left/right edges - all independent of the centered image below,
   // which sits inside the overlay's own flex-centering (see .screenshot-gallery-*
-  // rules in chat-overlays.css).
+  // rules in screenshot-gallery.css).
   const header = document.createElement("div");
   header.className = "screenshot-gallery-header";
 
@@ -81,7 +82,7 @@ export function openScreenshotGallery(shots: ScreenshotShot[], startIndex: numbe
 
   const stage = document.createElement("div");
   stage.className = "screenshot-gallery-stage";
-  // Stage fills the whole overlay (chat-overlays.css), so a click in the
+  // Stage fills the whole overlay (screenshot-gallery.css), so a click in the
   // empty space around the centered image lands here, not on `overlay` -
   // mirror the overlay's own click-outside-closes check for that case.
   stage.addEventListener("click", (e) => {
