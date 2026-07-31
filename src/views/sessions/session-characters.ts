@@ -41,7 +41,7 @@ export async function loadSessionCharacters(): Promise<void> {
 /** The assigned HotS character id for a session, or null if not yet assigned
  * (or the map isn't loaded yet). */
 export function characterForSession(s: Instance): string | null {
-  return sessionCharMap.get(s.session_id) ?? null;
+  return characterForSessionId(s.session_id);
 }
 
 /** Same lookup keyed directly by session id, for callers (History view) that
