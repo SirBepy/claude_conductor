@@ -5,11 +5,11 @@ import { clearHost, ensureHost, renderCardShell } from "./host";
 import { createAuqAttachments } from "./attachments";
 import { createAuqSlashPopup } from "./slash-popup";
 import { LIGHTBOX_OVERLAY_CLASS } from "../../../shared/chat/lightbox";
-import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
+import type { Answers, OptionBadge, Question, QuestionDomain, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
   computeAnswer,
-  questionTextHtml,
+  splitAsk,
   setActiveCard,
   clearActiveCardIfCurrent,
 } from "./question-state";
@@ -26,6 +26,22 @@ export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuest
 // (checkbox or free text) instead of treating an untouched question as done.
 const NONE_LABEL = "None of the above";
 
+const DOMAIN_META: Record<QuestionDomain, { icon: string; label: string }> = {
+  ux: { icon: "ph-fill ph-paint-brush-broad", label: "User experience" },
+  arch: { icon: "ph-fill ph-blueprint", label: "Architecture" },
+  sec: { icon: "ph-fill ph-shield-check", label: "Security" },
+  data: { icon: "ph-fill ph-database", label: "Data" },
+  tooling: { icon: "ph-fill ph-wrench", label: "Tooling" },
+  infra: { icon: "ph-fill ph-stack", label: "Infrastructure" },
+  billing: { icon: "ph-fill ph-currency-circle-dollar", label: "Billing" },
+};
+
+const BADGE_META: Record<OptionBadge, { cls: string; icon: string; label: string }> = {
+  recommended: { cls: "rec", icon: "ph-fill ph-star", label: "Recommended" },
+  long_term: { cls: "long", icon: "ph-fill ph-tree", label: "Long-term best" },
+  short_term: { cls: "short", icon: "ph-fill ph-lightning", label: "Short-term best" },
+};
+
 export function renderQuestionUI(opts: QuestionUIOpts): void {
   const { host } = ensureHost();
   const questions: Question[] = opts.questions.map((q) => {
@@ -33,6 +49,12 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (q.options.some((o) => o.label === NONE_LABEL)) return q;
     return { ...q, options: [...q.options, { label: NONE_LABEL }] };
   });
+
+  // The recap/review step is only worth a panel when there's something to
+  // review across multiple questions, or extras (message/attachments) to add -
+  // a single bare question goes straight from its own panel to Submit.
+  const hasSummary = Boolean(opts.supportsExtras) || questions.length > 1;
+  const totalPanels = questions.length + (hasSummary ? 1 : 0);
 
   const selections = new Map<number, Selection>();
   const freeText = new Map<number, string>();
@@ -66,7 +88,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   let resizeObs: ResizeObserver | null = null;
   const syncMessagesPadding = (): void => {
     if (!messagesEl) return;
-    const card = host.querySelector<HTMLElement>(".prompt-card");
+    // Broadened to the minimized bar too - it replaces .prompt-card wholesale
+    // rather than living inside it, so the old ".prompt-card"-only selector
+    // would stop measuring anything once minimized.
+    const card = host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed");
     if (!card) return;
     messagesEl.style.paddingBottom = `${card.offsetHeight + 12}px`;
     messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
@@ -76,6 +101,27 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // the card never traps the user, and the prompt resolves rather than silently
   // hiding. Registered below once `cancel` exists; disposed on teardown.
   let backDisposer: (() => void) | null = null;
+
+  let minimized = false;
+  let activeTab = Math.min(Math.max(opts.initialDraft?.activeTab ?? 0, 0), totalPanels - 1);
+  let firstRender = true;
+
+  // Declared and wired BEFORE `teardown` (which closes over it) so there is no
+  // forward reference in either direction - teardown used to be handed to
+  // setActiveCard while keydownHandler was still ~70 lines below it in the
+  // temporal dead zone, safe today only because nothing calls teardown
+  // synchronously during setup.
+  const keydownHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      dismissUnlessOverlayAbove();
+      return;
+    }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      triggerPrimaryShortcut();
+    }
+  };
+  document.addEventListener("keydown", keydownHandler);
 
   const teardown = () => {
     backDisposer?.();
@@ -143,18 +189,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     cancel();
   };
 
-  const keydownHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      dismissUnlessOverlayAbove();
-      return;
-    }
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      triggerPrimaryShortcut();
-    }
-  };
-  document.addEventListener("keydown", keydownHandler);
-
   backDisposer = registerOverlayBack(() => {
     // Always consumes the press (returns true) even when it no-ops - with the
     // lightbox unregistered, falling through (false) would step the
@@ -172,96 +206,129 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     return typeof a === "string" && a ? a : "Not answered";
   };
 
-  const showTabs = questions.length > 1;
-  let activeTab = opts.initialDraft?.activeTab ?? 0;
-  // Only meaningful when showTabs: "answer" is the per-question tab/form view,
-  // "summary" is the final recap-before-send screen.
-  let mode: "answer" | "summary" = "answer";
-  let firstRender = true;
-
-  const goNext = () => {
-    activeTab = Math.min(activeTab + 1, questions.length - 1);
-    render();
-  };
-  const goToSummary = () => {
-    mode = "summary";
-    render();
-  };
-  const goBackToAnswers = () => {
-    mode = "answer";
-    render();
-  };
+  // Ctrl/Cmd+Enter: submit once every question is answered, otherwise jump to
+  // the next unanswered panel - but only from a panel that's itself already
+  // answered, so it can't skip past the one you're mid-typing.
   const triggerPrimaryShortcut = () => {
-    const allAnsweredNow = questions.every((_, i) => answeredAt(i));
-    if (!showTabs || mode === "summary") {
-      if (allAnsweredNow) submit();
-      return;
-    }
-    if (!answeredAt(activeTab)) return;
-    if (activeTab < questions.length - 1) goNext();
-    else goToSummary();
+    if (questions.every((_, i) => answeredAt(i))) { submit(); return; }
+    if (activeTab < questions.length && !answeredAt(activeTab)) return;
+    const next = questions.findIndex((_, i) => !answeredAt(i));
+    if (next >= 0) { activeTab = next; render(); }
   };
 
-  const render = () => {
-    // The old textareas (and the popups anchored to them) are about to be
-    // thrown away by the innerHTML rebuild below - drop the popups' own
-    // document-level listeners explicitly first, since DOM removal alone
-    // doesn't do that.
-    slashPopup.destroyAll();
-    const title = `
-      <span class="prompt-card__title">
-        <i class="ph ${opts.titleIcon}"></i>
-        ${escapeHtml(opts.titleText)}
-      </span>
-      ${opts.rightChipHtml ?? ""}
-    `;
+  function domainVar(domain?: QuestionDomain): string {
+    return domain ? `var(--color-domain-${domain})` : "var(--color-primary)";
+  }
 
-    const isSummary = showTabs && mode === "summary";
-    const tabsHtml = showTabs && !isSummary
-      ? `<div class="prompt-tabs" role="tablist">
-          ${questions.map((q, qi) => {
-            const label = q.header?.trim() || `Question ${qi + 1}`;
-            const answered = answeredAt(qi);
-            const isActive = qi === activeTab;
-            return `
-              <button type="button" role="tab" class="prompt-tab${isActive ? " is-active" : ""}${answered ? " is-answered" : ""}" data-tab="${qi}" aria-selected="${isActive}">
-                <span class="prompt-tab__dot"><i class="${answered ? "ph-fill ph-check-circle" : "ph ph-circle"}"></i></span>
-                <span class="prompt-tab__label">${escapeHtml(label)}</span>
-              </button>
-            `;
-          }).join("")}
+  function domainChipHtml(domain?: QuestionDomain): string {
+    if (!domain) return "";
+    const meta = DOMAIN_META[domain];
+    return `<span class="prompt-domain"><i class="${meta.icon}"></i>${meta.label}</span>`;
+  }
+
+  function badgesHtml(badges?: OptionBadge[]): string {
+    if (!badges?.length) return "";
+    const chips = badges.map((b) => {
+      const m = BADGE_META[b];
+      return `<span class="prompt-badge prompt-badge--${m.cls}"><i class="${m.icon}"></i>${m.label}</span>`;
+    }).join("");
+    return `<span class="prompt-badges">${chips}</span>`;
+  }
+
+  // Zones 1+2: splitAsk() already separates the leading context from the
+  // final ask - zone 1 (dimmed context + domain chip) is omitted entirely
+  // when there's no separate ask to highlight.
+  function questionZonesHtml(q: Question): string {
+    const { context, ask } = splitAsk(q.question);
+    const ctxZone = context
+      ? `<div class="prompt-zone prompt-zone--ctx">
+          <span class="prompt-ctx__rail"><i class="ph ph-info"></i></span>
+          <span class="prompt-ctx__body">
+            <span class="prompt-ctx__head">
+              <span class="prompt-ctx__label">Context</span>${domainChipHtml(q.domain)}
+            </span>
+            <div class="prompt-ctx__text prompt-q__context">${renderMarkdown(context)}</div>
+          </span>
         </div>`
       : "";
+    return `
+      ${ctxZone}
+      <div class="prompt-zone prompt-zone--ask">
+        <i class="ph-fill ph-question prompt-ask__icon"></i>
+        <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
+      </div>
+    `;
+  }
 
-    const q = questions[activeTab];
-    const qHeaderTag = !showTabs && q?.header
-      ? `<span class="prompt-q__tag">${escapeHtml(q.header)}</span>`
-      : "";
-    const modeHtml = q?.options?.length
-      ? `<span class="prompt-q__mode">${q.multiSelect ? "Select all that apply" : "Pick one"}</span>`
-      : "";
-    const rows = (q?.options ?? []).map((opt) => {
-      const selected = q!.multiSelect
-        ? (selections.get(activeTab) as Set<string> | undefined)?.has(opt.label) ?? false
-        : selections.get(activeTab) === opt.label;
-      const inputType = q!.multiSelect ? "checkbox" : "radio";
+  function optsRowsHtml(q: Question, qi: number): string {
+    return (q.options ?? []).map((opt) => {
+      const selected = q.multiSelect
+        ? (selections.get(qi) as Set<string> | undefined)?.has(opt.label) ?? false
+        : selections.get(qi) === opt.label;
+      const inputType = q.multiSelect ? "checkbox" : "radio";
       const desc = opt.description
         ? `<div class="prompt-opt__desc">${renderMarkdown(opt.description)}</div>`
         : "";
-      const isNone = q!.multiSelect && opt.label === NONE_LABEL;
+      const isNone = q.multiSelect && opt.label === NONE_LABEL;
       return `
         <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}">
-          <input type="${inputType}" name="q-${activeTab}" data-label="${escapeHtml(opt.label)}" ${selected ? "checked" : ""} />
+          <input type="${inputType}" name="q-${qi}" data-label="${escapeHtml(opt.label)}" ${selected ? "checked" : ""} />
           <span class="prompt-opt__body">
-            <span class="prompt-opt__label">${escapeHtml(opt.label)}</span>
+            <span class="prompt-opt__top"><span class="prompt-opt__label">${escapeHtml(opt.label)}</span>${badgesHtml(opt.badges)}</span>
             ${desc}
           </span>
         </label>
       `;
     }).join("");
+  }
 
-    const typedValue = freeText.get(activeTab) ?? "";
-    const summaryRows = questions.map((sq, qi) => {
+  // The per-question free-text field keeps its `.prompt-q__other` wrapper
+  // (unstyled by the new design) because slash-popup.ts anchors on
+  // `ta.closest(".prompt-q__other")` and is not this task's file to touch.
+  function ownZoneHtml(qi: number): string {
+    const typedValue = freeText.get(qi) ?? "";
+    return `
+      <div class="prompt-sect"><i class="ph ph-pencil-simple"></i><span class="prompt-sect__label">Or answer in your own words</span><span class="prompt-sect__rule"></span></div>
+      <div class="prompt-own">
+        <label class="prompt-q__other">
+          <div class="cc-typing-wrap">
+            <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
+            <textarea class="prompt-q__other-input cc-typing-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
+          </div>
+        </label>
+      </div>
+    `;
+  }
+
+  // Virtualized: only the active panel gets real zone content. Every
+  // question's free-text/ask elements share one class name (`.prompt-q__text`,
+  // `.prompt-q__other-input`), so mounting all of them at once makes a plain
+  // `card.locator(...)` ambiguous - state (selections/freeText) is the source
+  // of truth regardless, so an inactive panel loses nothing by staying blank.
+  function panelHtml(q: Question, qi: number): string {
+    if (qi !== activeTab) return `<section class="prompt-panel" data-panel="${qi}" style="--dom:${domainVar(q.domain)}"></section>`;
+    const pickSect = q.options?.length
+      ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
+         <div class="prompt-q__opts">${optsRowsHtml(q, qi)}</div>`
+      : "";
+    const attachHtml = opts.supportsExtras && auqAttachments.attachments.length
+      ? `<div class="prompt-attachments composer-attachments"></div>`
+      : "";
+    return `
+      <section class="prompt-panel" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
+        ${questionZonesHtml(q)}
+        ${pickSect}
+        ${ownZoneHtml(qi)}
+        ${attachHtml}
+      </section>
+    `;
+  }
+
+  function summaryPanelHtml(): string {
+    if (activeTab !== questions.length) {
+      return `<section class="prompt-panel" data-panel="${questions.length}" style="--dom:var(--color-primary)"></section>`;
+    }
+    const rows = questions.map((sq, qi) => {
       const label = sq.header?.trim() || `Question ${qi + 1}`;
       const answered = answeredAt(qi);
       return `
@@ -275,10 +342,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       `;
     }).join("");
 
-    // Attachments are shared across every step (paste on any question tab or
-    // the review step), so the strip shows wherever there's something to see -
-    // never gated on isSummary - and only for the flow that can actually
-    // deliver them (see QuestionUIOpts.supportsExtras doc).
     const attachmentsStripHtml = opts.supportsExtras && auqAttachments.attachments.length
       ? `<div class="prompt-attachments composer-attachments"></div>`
       : "";
@@ -294,191 +357,214 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       `
       : "";
 
-    const body = isSummary
-      ? `
+    return `
+      <section class="prompt-panel" data-panel="${questions.length}" style="--dom:var(--color-primary)">
         <div class="prompt-summary" role="tabpanel">
           <div class="prompt-summary__intro">Review your answers before sending:</div>
-          ${summaryRows}
+          ${rows}
           ${extraMessageHtml}
           ${attachmentsStripHtml}
         </div>
-      `
-      : `
-        ${tabsHtml}
-        <div class="prompt-q" role="tabpanel">
-          <div class="prompt-q__head">${qHeaderTag}${modeHtml}</div>
-          ${questionTextHtml(q?.question ?? "")}
-          <div class="prompt-q__opts">${rows}</div>
-          <label class="prompt-q__other">
-            <span class="prompt-q__other-label">Add your own (combines with a pick above):</span>
-            <div class="cc-typing-wrap">
-              <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
-              <textarea class="prompt-q__other-input cc-typing-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
-            </div>
-          </label>
-          ${attachmentsStripHtml}
-        </div>
-      `;
+      </section>
+    `;
+  }
 
-    const allAnswered = questions.every((_, i) => answeredAt(i));
-    const submitDisabled = allAnswered ? "" : "disabled";
-    let footer: string;
-    if (!showTabs) {
-      footer = `
-        <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
-        <button type="button" class="btn btn-primary" data-act="submit" ${submitDisabled}>
-          <i class="ph ${opts.submitIcon}"></i> ${escapeHtml(opts.submitLabel)}
-        </button>
-      `;
-    } else if (isSummary) {
-      footer = `
-        <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
-        <button type="button" class="btn btn-secondary" data-act="back"><i class="ph ph-arrow-left"></i> Back</button>
-        <button type="button" class="btn btn-primary" data-act="submit" ${submitDisabled}>
-          <i class="ph ${opts.submitIcon}"></i> ${escapeHtml(opts.submitLabel)}
-        </button>
-      `;
+  function pagerHtml(): string {
+    const dots = Array.from({ length: totalPanels }, (_, i) => {
+      const isSummaryDot = hasSummary && i === questions.length;
+      const answered = isSummaryDot ? questions.every((_, qi) => answeredAt(qi)) : answeredAt(i);
+      const label = isSummaryDot ? "Review" : `Question ${i + 1}`;
+      return `<button type="button" class="prompt-dot${answered ? " is-answered" : ""}${i === activeTab ? " is-current" : ""}"
+        data-dot="${i}" aria-label="${label}, ${answered ? "answered" : "unanswered"}"></button>`;
+    }).join("");
+    const dotsHtml = `<span class="prompt-dots">${dots}</span>`;
+    if (totalPanels < 2) return `<span class="prompt-pager">${dotsHtml}</span>`;
+
+    // The right arrow doubles as the retired Next/Review CTA (data-act), so
+    // callers/tests keyed on the old footer buttons still find a live hook.
+    const nextAct = activeTab < questions.length - 1 ? ` data-act="next"`
+      : hasSummary && activeTab === questions.length - 1 ? ` data-act="review"` : "";
+    const nextDisabled = activeTab >= totalPanels - 1 || (activeTab < questions.length && !answeredAt(activeTab));
+    return `<span class="prompt-pager">
+      <button type="button" class="prompt-icon-btn" data-nav="-1" ${activeTab === 0 ? "disabled" : ""}><i class="ph ph-caret-left"></i></button>
+      ${dotsHtml}
+      <button type="button" class="prompt-icon-btn" data-nav="1"${nextAct} ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
+    </span>`;
+  }
+
+  function collapsedHtml(): string {
+    const isSummary = hasSummary && activeTab === questions.length;
+    const q = isSummary ? undefined : questions[activeTab];
+    const dom = domainVar(q?.domain);
+    const text = q ? splitAsk(q.question).ask : "Review your answers before sending";
+    return `
+      <div class="prompt-collapsed" style="--dom:${dom}">
+        <span class="prompt-collapsed__dot"></span>
+        <span class="prompt-collapsed__q">${escapeHtml(text)}</span>
+        <span class="prompt-collapsed__step">${activeTab + 1}/${totalPanels}</span>
+        <button type="button" class="prompt-icon-btn" data-act="restore" title="Restore"><i class="ph ph-caret-up"></i></button>
+      </div>
+    `;
+  }
+
+  const render = () => {
+    // The old textareas (and the popups anchored to them) are about to be
+    // thrown away by the innerHTML rebuild below - drop the popups' own
+    // document-level listeners explicitly first, since DOM removal alone
+    // doesn't do that.
+    slashPopup.destroyAll();
+    activeTab = Math.min(Math.max(activeTab, 0), totalPanels - 1);
+
+    if (minimized) {
+      host.innerHTML = collapsedHtml();
+      host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
     } else {
-      const isLast = activeTab === questions.length - 1;
-      const stepDisabled = answeredAt(activeTab) ? "" : "disabled";
-      footer = `
+      const headerHtml = `${pagerHtml()}<span class="prompt-head__spacer"></span><button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi)).join("") + (hasSummary ? summaryPanelHtml() : "");
+      const allAnswered = questions.every((_, i) => answeredAt(i));
+      const footerHtml = `
         <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
-        <button type="button" class="btn btn-primary" data-act="${isLast ? "review" : "next"}" ${stepDisabled}>
-          <i class="ph ${isLast ? "ph-list-checks" : "ph-arrow-right"}"></i> ${isLast ? "Review" : "Next"}
+        <button type="button" class="btn btn-primary" data-act="submit" ${allAnswered ? "" : "disabled"}>
+          <i class="ph ${opts.submitIcon}"></i> ${escapeHtml(opts.submitLabel)}
         </button>
       `;
-    }
+      host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track">${panelsHtml}</div>`, footerHtml);
 
-    host.innerHTML = renderCardShell(title, body, footer);
-    const card = host.querySelector<HTMLElement>(".prompt-card");
-    if (!firstRender) card?.classList.add("prompt-card--no-anim");
-    firstRender = false;
+      const card = host.querySelector<HTMLElement>(".prompt-card");
+      if (!firstRender) card?.classList.add("prompt-card--no-anim");
 
-    host.querySelectorAll<HTMLButtonElement>(".prompt-tab").forEach((tabBtn) => {
-      tabBtn.addEventListener("click", () => {
-        const idx = Number(tabBtn.dataset.tab);
-        if (Number.isFinite(idx)) {
-          activeTab = idx;
-          render();
-        }
+      // Scroll position doesn't survive the innerHTML rebuild above - a fresh
+      // track element always starts at scrollLeft 0, so without this an
+      // option click (which re-renders) would silently snap back to Q1.
+      const track = host.querySelector<HTMLElement>(".prompt-track");
+      if (track) track.scrollLeft = activeTab * track.clientWidth;
+
+      host.querySelectorAll<HTMLButtonElement>(".prompt-dot").forEach((dot) => {
+        dot.addEventListener("click", () => {
+          const idx = Number(dot.dataset.dot);
+          if (Number.isFinite(idx)) { activeTab = idx; render(); }
+        });
       });
-    });
+      host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="-1"]')
+        ?.addEventListener("click", () => { activeTab -= 1; render(); });
+      host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]')
+        ?.addEventListener("click", () => { activeTab += 1; render(); });
+      host.querySelector<HTMLButtonElement>('[data-act="minimize"]')
+        ?.addEventListener("click", () => { minimized = true; render(); });
 
-    host.querySelectorAll<HTMLInputElement>('.prompt-opt input').forEach((input) => {
-      input.addEventListener("change", () => {
-        const qi = activeTab;
-        const label = input.dataset.label ?? "";
-        const q = questions[qi];
-        if (!q) return;
-        if (q.multiSelect) {
-          const set = (selections.get(qi) as Set<string> | undefined) ?? new Set<string>();
-          if (label === NONE_LABEL) {
-            // Exclusive: picking "None of the above" clears every other pick.
-            set.clear();
-            if (input.checked) set.add(NONE_LABEL);
+      host.querySelectorAll<HTMLInputElement>(".prompt-q__opts input").forEach((input) => {
+        input.addEventListener("change", () => {
+          const qi = Number(input.closest<HTMLElement>(".prompt-panel")?.dataset.panel);
+          const q = questions[qi];
+          if (!q) return;
+          const label = input.dataset.label ?? "";
+          if (q.multiSelect) {
+            const set = (selections.get(qi) as Set<string> | undefined) ?? new Set<string>();
+            if (label === NONE_LABEL) {
+              // Exclusive: picking "None of the above" clears every other pick.
+              set.clear();
+              if (input.checked) set.add(NONE_LABEL);
+            } else if (input.checked) {
+              set.delete(NONE_LABEL);
+              set.add(label);
+            } else {
+              set.delete(label);
+            }
+            selections.set(qi, set);
           } else if (input.checked) {
-            set.delete(NONE_LABEL);
-            set.add(label);
-          } else {
-            set.delete(label);
+            selections.set(qi, label);
           }
-          selections.set(qi, set);
-        } else if (input.checked) {
-          selections.set(qi, label);
-        }
-        // Single-select: auto-advance to next unanswered tab.
-        if (!q.multiSelect && questions.length > 1) {
-          const next = questions.findIndex((_, i) => i !== qi && !answeredAt(i));
-          if (next >= 0) activeTab = next;
-        }
-        render();
-      });
-    });
-
-    // Radios don't fire "change" when re-clicking the option that's already
-    // checked (no state change to report), so re-selecting the current answer
-    // is a native no-op. Listen on "click" instead to detect that specific
-    // case and clear the answer, letting a re-click deselect it.
-    host.querySelectorAll<HTMLInputElement>('.prompt-opt input[type="radio"]').forEach((input) => {
-      input.addEventListener("click", () => {
-        const qi = activeTab;
-        const label = input.dataset.label ?? "";
-        if (selections.get(qi) !== label) return;
-        selections.delete(qi);
-        render();
-      });
-    });
-
-    const otherEl = host.querySelector<HTMLTextAreaElement>(".prompt-q__other-input");
-    if (otherEl) {
-      const otherHighlightEl = otherEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
-      // Attach the core (auto-resize + highlight + popup) BEFORE this input
-      // listener below, so its own "input" listener - registered first -
-      // resizes the textarea before syncMessagesPadding() measures the card.
-      slashPopup.attach(otherEl, otherHighlightEl);
-      otherEl.addEventListener("input", () => {
-        freeText.set(activeTab, otherEl.value);
-        const allAnsweredNow = questions.every((_, i) => answeredAt(i));
-        const submitBtn = host.querySelector<HTMLButtonElement>('[data-act="submit"]');
-        if (submitBtn) submitBtn.disabled = !allAnsweredNow;
-        const stepBtn = host.querySelector<HTMLButtonElement>('[data-act="next"], [data-act="review"]');
-        if (stepBtn) stepBtn.disabled = !answeredAt(activeTab);
-        const tabBtn = host.querySelector<HTMLElement>(`.prompt-tab[data-tab="${activeTab}"]`);
-        if (tabBtn) {
-          tabBtn.classList.toggle("is-answered", answeredAt(activeTab));
-          const dotIcon = tabBtn.querySelector("i");
-          if (dotIcon) dotIcon.className = answeredAt(activeTab) ? "ph-fill ph-check-circle" : "ph ph-circle";
-        }
-        syncMessagesPadding();
-        opts.onDraftChange?.(currentDraft());
-      });
-      if (opts.supportsExtras) {
-        otherEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
-      }
-    }
-
-    const extraEl = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
-    if (extraEl) {
-      const extraHighlightEl = extraEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
-      slashPopup.attach(extraEl, extraHighlightEl);
-      extraEl.addEventListener("input", () => {
-        additionalMessage = extraEl.value;
-        syncMessagesPadding();
-        opts.onDraftChange?.(currentDraft());
-      });
-      extraEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
-    }
-
-    const attachmentsEl = host.querySelector<HTMLElement>(".prompt-attachments");
-    if (attachmentsEl) auqAttachments.renderAttachmentsStrip(attachmentsEl);
-
-    host.querySelector<HTMLButtonElement>('[data-act="submit"]')
-      ?.addEventListener("click", submit);
-    host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
-      ?.addEventListener("click", cancel);
-    host.querySelector<HTMLButtonElement>('[data-act="next"]')
-      ?.addEventListener("click", goNext);
-    host.querySelector<HTMLButtonElement>('[data-act="review"]')
-      ?.addEventListener("click", goToSummary);
-    host.querySelector<HTMLButtonElement>('[data-act="back"]')
-      ?.addEventListener("click", goBackToAnswers);
-    host.querySelectorAll<HTMLButtonElement>('[data-summary-tab]').forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const idx = Number(btn.dataset.summaryTab);
-        if (Number.isFinite(idx)) {
-          activeTab = idx;
-          mode = "answer";
+          // Single-select: auto-advance to next unanswered panel.
+          if (!q.multiSelect && questions.length > 1) {
+            const next = questions.findIndex((_, i) => i !== qi && !answeredAt(i));
+            if (next >= 0) activeTab = next;
+          }
           render();
+        });
+      });
+
+      // Radios don't fire "change" when re-clicking the option that's already
+      // checked (no state change to report), so re-selecting the current answer
+      // is a native no-op. Listen on "click" instead to detect that specific
+      // case and clear the answer, letting a re-click deselect it.
+      host.querySelectorAll<HTMLInputElement>('.prompt-q__opts input[type="radio"]').forEach((input) => {
+        input.addEventListener("click", () => {
+          const qi = Number(input.closest<HTMLElement>(".prompt-panel")?.dataset.panel);
+          const label = input.dataset.label ?? "";
+          if (selections.get(qi) !== label) return;
+          selections.delete(qi);
+          render();
+        });
+      });
+
+      questions.forEach((_, qi) => {
+        const panelEl = host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${qi}"]`);
+        const otherEl = panelEl?.querySelector<HTMLTextAreaElement>(".prompt-q__other-input") ?? null;
+        if (!otherEl) return;
+        const otherHighlightEl = otherEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
+        // Attach the core (auto-resize + highlight + popup) BEFORE this input
+        // listener below, so its own "input" listener - registered first -
+        // resizes the textarea before syncMessagesPadding() measures the card.
+        slashPopup.attach(otherEl, otherHighlightEl);
+        otherEl.addEventListener("input", () => {
+          // Deliberately NOT a full render(): rebuilding the DOM on every
+          // keystroke would destroy and recreate this textarea, dropping
+          // focus and cursor position mid-type.
+          freeText.set(qi, otherEl.value);
+          const allAnsweredNow = questions.every((_, i) => answeredAt(i));
+          const submitBtn = host.querySelector<HTMLButtonElement>('[data-act="submit"]');
+          if (submitBtn) submitBtn.disabled = !allAnsweredNow;
+          const dotEl = host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${qi}"]`);
+          if (dotEl) dotEl.classList.toggle("is-answered", answeredAt(qi));
+          if (qi === activeTab) {
+            const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
+            if (nextArrow) nextArrow.disabled = activeTab >= totalPanels - 1 || !answeredAt(activeTab);
+          }
+          if (hasSummary) {
+            const summaryDot = host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${questions.length}"]`);
+            if (summaryDot) summaryDot.classList.toggle("is-answered", allAnsweredNow);
+          }
+          syncMessagesPadding();
+          opts.onDraftChange?.(currentDraft());
+        });
+        if (opts.supportsExtras) {
+          otherEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
         }
       });
-    });
+
+      const extraEl = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
+      if (extraEl) {
+        const extraHighlightEl = extraEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
+        slashPopup.attach(extraEl, extraHighlightEl);
+        extraEl.addEventListener("input", () => {
+          additionalMessage = extraEl.value;
+          syncMessagesPadding();
+          opts.onDraftChange?.(currentDraft());
+        });
+        extraEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
+      }
+
+      host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
+
+      host.querySelector<HTMLButtonElement>('[data-act="submit"]')
+        ?.addEventListener("click", submit);
+      host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
+        ?.addEventListener("click", cancel);
+      host.querySelectorAll<HTMLButtonElement>('[data-summary-tab]').forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.summaryTab);
+          if (Number.isFinite(idx)) { activeTab = idx; render(); }
+        });
+      });
+    }
+    firstRender = false;
 
     requestAnimationFrame(() => syncMessagesPadding());
     if (!resizeObs && messagesEl && typeof ResizeObserver !== "undefined") {
-      const card = host.querySelector<HTMLElement>(".prompt-card");
-      if (card) {
+      const cardEl = host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed");
+      if (cardEl) {
         resizeObs = new ResizeObserver(() => syncMessagesPadding());
-        resizeObs.observe(card);
+        resizeObs.observe(cardEl);
       }
     }
     opts.onDraftChange?.(currentDraft());
@@ -486,4 +572,3 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
   render();
 }
-
