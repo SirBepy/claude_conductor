@@ -81,6 +81,12 @@ export function openScreenshotGallery(shots: ScreenshotShot[], startIndex: numbe
 
   const stage = document.createElement("div");
   stage.className = "screenshot-gallery-stage";
+  // Stage fills the whole overlay (chat-overlays.css), so a click in the
+  // empty space around the centered image lands here, not on `overlay` -
+  // mirror the overlay's own click-outside-closes check for that case.
+  stage.addEventListener("click", (e) => {
+    if (e.target === stage) closeScreenshotGallery();
+  });
 
   overlay.appendChild(header);
   overlay.appendChild(prevBtn);

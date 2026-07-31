@@ -40,6 +40,14 @@ export function openLightbox(content: LightboxContent): void {
 
   const inner = document.createElement("div");
   inner.className = "lightbox-content";
+  // .lightbox-content--image stretches to fill the whole overlay (see its CSS
+  // doc) so a click in the empty space around a small/centered image lands on
+  // `inner`, not `overlay` - the overlay's own click-outside check above never
+  // sees it. Mirror that check here for clicks that land on `inner` itself
+  // (never on the img, which has its own pointerdown/up pair for pan/zoom).
+  inner.addEventListener("click", (e) => {
+    if (e.target === inner) closeLightbox();
+  });
 
   if (content.type === "image") {
     inner.classList.add("lightbox-content--image");

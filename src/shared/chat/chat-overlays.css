@@ -123,6 +123,7 @@
   font-size: 0.82rem;
   line-height: 1.5;
   margin: 0;
+  user-select: text;
 }
 
 /* ── Screenshot gallery (screenshot-gallery.ts): a multi-image lightbox for a
