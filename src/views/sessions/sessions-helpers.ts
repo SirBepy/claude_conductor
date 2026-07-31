@@ -153,12 +153,8 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
 
 /** Maps a session to its display segment index.
  *  0=Input Needed, 1=Done, 2=In Progress, 3=Closing, 4=Waiting for Reset,
- *  5=Waiting (parked on an external process), 6=Scheduled (has a pending
- *  scheduled message and isn't Input Needed/Done - Joe's spec: "not waiting
- *  for reply or done" gets relabeled Scheduled). Closing and rate-limited both
- *  still win over Scheduled - Closing because it's transient and about to
- *  disappear, rate-limited because that precedence already existed before
- *  Scheduled was added (checked ahead of the priority computation itself). */
+ *  5=Waiting (external process), 6=Scheduled (pending scheduled msg, not
+ *  Input Needed/Done). Closing and rate-limited both still win over Scheduled. */
 export function sessionSegment(
   s: Instance,
   unread: Set<string>,

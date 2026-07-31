@@ -276,13 +276,9 @@ export async function refreshSessions(): Promise<boolean> {
   }
 }
 
-/** Renders a single live-session row's `<li>`, shared by BOTH the segmented
- *  list and the Hidden section so they can never drift apart. Before this was
- *  extracted, Hidden hand-duplicated the row markup and had quietly dropped
- *  the scheduled-message badge, the remote/autopilot badges, the drain chip,
- *  and the closing/attention/rate-limited classes - it just looked like a
- *  different, poorer card. `kbdHint` is the pre-formed ` data-kbd-hint="n"`
- *  attribute (or "") since Hidden rows never get a keyboard shortcut. */
+/** Renders a live-session row's `<li>`, shared by the segmented list AND
+ *  Hidden so their badges/classes can never drift apart. `kbdHint` is the
+ *  pre-formed ` data-kbd-hint="n"` attribute, "" for Hidden rows. */
 function renderSessionRow(
   s: Instance,
   ctx: {
@@ -531,12 +527,9 @@ export function renderSidebar(listEl: HTMLElement): void {
     }
   };
 
-  // "Waiting" (5, parked on an external process) renders right after
-  // "In Progress" (2) so the blocked-on-a-script chats sit next to the
-  // actively-running ones without disturbing the other groups' order.
-  // "Scheduled" (6) and "Closing" (3) are both deferred past Hidden below -
-  // collapsed-by-default groups that render dead last so they never sit above
-  // a section that outlives them.
+  // "Waiting" (5) renders right after "In Progress" (2). "Scheduled" (6) and
+  // "Closing" (3) both defer past Hidden below - see the renderSeg(6)/(3)
+  // calls at the bottom of this function.
   for (const seg of [0, 1, 2, 5, 4]) {
     renderSeg(seg);
   }
@@ -574,10 +567,7 @@ export function renderSidebar(listEl: HTMLElement): void {
     }
   }
 
-  // Scheduled, then Closing, both render dead last below Hidden - collapsed-
-  // by-default groups that shouldn't crowd the primary triage segments above.
-  // Closing renders last of all since it's transient/self-clearing and should
-  // stay the true bottom of the list.
+  // Scheduled, then Closing (transient, so it stays the true bottom).
   renderSeg(6);
   renderSeg(3);
 

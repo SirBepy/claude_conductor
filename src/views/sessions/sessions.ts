@@ -594,11 +594,8 @@ function wireStaticListeners(
   // Sort select moved to Settings. No binding needed here; sessions.ts reads
   // the persisted localStorage value on each renderSidebar call via loadSort().
 
-  // Opens the right context menu for whichever row kind `li` is (live session,
-  // active draft/starting, or parked draft) - shared by the row's 3-dot button
-  // click AND right-click, so a row never has one interaction the other lacks.
-  // Portrait mode drops the 3-dot button entirely (see sidebar.ts), so for
-  // every row kind right-click is the only way in there.
+  // Opens the right context menu for whichever row kind `li` is - shared by
+  // the row's 3-dot click AND right-click (its only path in Portrait mode).
   const openMenuForRow = (li: HTMLElement, anchor: HTMLElement): void => {
     const sid = li.dataset.sessionId;
     if (sid) {
