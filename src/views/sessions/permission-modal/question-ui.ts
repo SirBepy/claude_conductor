@@ -237,8 +237,18 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     });
   }
 
+  // An image lightbox opened from a pasted attachment thumbnail sits on top
+  // of this card and has no shared-overlay registration of its own yet (see
+  // lightbox.ts's private onEsc listener) - so without this check Escape (and
+  // the phone back button below) would cancel THIS card while the lightbox
+  // closes on the very same press. Cancelling sends no answer at all
+  // (opts.onCancel), which is an unrecoverable loss for a keypress the user
+  // meant only for the image.
+  const lightboxIsOpen = (): boolean => document.querySelector(".lightbox-overlay") !== null;
+
   const keydownHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
+      if (lightboxIsOpen()) return;
       teardown();
       void opts.onCancel();
       return;
@@ -276,6 +286,11 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   backDisposer = registerOverlayBack(() => {
+    // Mirrors the Escape guard above. Swallow the press rather than falling
+    // through (returning false) - with the lightbox unregistered, a
+    // fallthrough would step the view-navigation stack instead, an even
+    // bigger surprise than a no-op while the image is up.
+    if (lightboxIsOpen()) return true;
     cancel();
     return true;
   });
