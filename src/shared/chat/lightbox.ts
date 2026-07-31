@@ -39,11 +39,9 @@ export function setLightboxComposerBridge(bridge: LightboxComposerBridge | null)
   composerBridge = bridge;
 }
 
-// Typing-experience core for the composer box (ai_todo composer-unification):
-// "/" + "@" suggestion popup and purple highlight backdrop, same shared core
-// as the main composer/AUQ card/preview-panel - not a reimplementation. No
-// onEnter (Enter stays a plain newline, per this box's draft-mirror-only
-// contract) and no paste adapter (attachments are out of scope here).
+// Same shared composer-core as main composer/AUQ card/preview-panel. No
+// onEnter (Enter stays a plain newline) and no paste adapter (attachments
+// out of scope here).
 let composerCore: ComposerCore | null = null;
 let slashProvider: SlashProvider | null = null;
 let fileProvider: FileProvider | null = null;
@@ -65,11 +63,9 @@ export function openLightbox(content: LightboxContent): void {
 
   const inner = document.createElement("div");
   inner.className = "lightbox-content";
-  // .lightbox-content--image stretches to fill the whole overlay (see its CSS
-  // doc) so a click in the empty space around a small/centered image lands on
-  // `inner`, not `overlay` - the overlay's own click-outside check above never
-  // sees it. Mirror that check here for clicks that land on `inner` itself
-  // (never on the img, which has its own pointerdown/up pair for pan/zoom).
+  // .lightbox-content--image stretches to fill the overlay, so clicks around
+  // a small image land on `inner` not `overlay` - mirror the click-outside
+  // check here (never the img itself, which has its own pan/zoom handlers).
   inner.addEventListener("click", (e) => {
     if (e.target === inner) closeLightbox();
   });

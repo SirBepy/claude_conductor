@@ -74,11 +74,9 @@
   max-height: 90%;
 }
 
-/* Position/sizing lives on the wrap now (composer-core's shared typing core
- * needs a highlight backdrop + transparent-text textarea, not one plain box).
- * Compound selectors throughout so these always win over composer-core/
- * core.css's plain .cc-typing-* rules regardless of import order (equal-
- * specificity same-element trap). */
+/* Compound selectors throughout so these win over composer-core/core.css's
+ * plain .cc-typing-* rules regardless of import order (equal-specificity
+ * same-element trap). */
 .cc-typing-wrap.lightbox-composer-wrap {
   position: absolute;
   left: 16px;

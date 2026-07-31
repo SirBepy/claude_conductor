@@ -232,11 +232,9 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     const draft = snapshotActiveCardDraft(state.selectedId);
     if (draft) savePendingPromptDraft(state.selectedId, draft);
   }
-  // Tear down any live question card BEFORE the pane's innerHTML is replaced
-  // below: otherwise the registry entry, its document-level keydown listener,
-  // and its ResizeObserver dangle past the DOM they reference. Display-only -
-  // dismissQuestionCard never fires onSubmit/onCancel, so the prompt stays
-  // pending daemon-side and the draft snapshotted just above still replays.
+  // Tear down before innerHTML replacement below: otherwise the registry
+  // entry, its keydown listener, and ResizeObserver dangle past their DOM.
+  // Display-only teardown - doesn't fire onSubmit/onCancel.
   dismissQuestionCard();
   // Unwatch any previously watched session if we're switching to a different one.
   if (_watchedId && _watchedId !== sessionId) {

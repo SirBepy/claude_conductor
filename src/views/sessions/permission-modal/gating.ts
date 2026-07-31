@@ -66,12 +66,10 @@ export function getSelectedSessionId(): string | null {
 export function isForSelectedSession(eventSessionId: string | undefined): boolean {
   if (!eventSessionId) return false;
   if (_selectedSessionId === eventSessionId) return true;
-  // No more `closing`-flag bypass here: since commit a3ef1d1a made `closing` a
-  // daemon-registry flag broadcast to EVERY window, the old inline-surface
-  // exception fired in every window for any session running /close, bleeding
-  // its card onto whatever chat happened to be on screen. A closing session's
-  // prompt now follows the exact same park/replay path as any other
-  // non-selected session (see the pending-prompt section below).
+  // Removed: the closing-flag bypass fired in every window once commit
+  // a3ef1d1a made `closing` a broadcast daemon flag, bleeding the /close
+  // session's card onto whatever chat was on screen. Now follows the normal
+  // park/replay path below.
   // During a brand-new session's first turn, selectedId is still the placeholder
   // while the active pane already shows the real session (the renderer swapped
   // its subscription on SessionStarted but setActiveSession lags until

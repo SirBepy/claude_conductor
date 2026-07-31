@@ -138,14 +138,9 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
         rerenderSidebar();
       }
       if (!sid) return;
-      // Inject the answer as an ordinary follow-up so it resumes the work in a
-      // fresh turn. `<auq-answer/>` renders it as an "answer" chip; the framed
-      // body ("User answered…") is what the model reads. The review step's
-      // extra message / attachments ride along as separate blocks in the SAME
-      // send (ai_todo 446) rather than a second, "Send now"-gated message -
-      // bundleHeld/extractAuqAnswerText key off the sentinel staying its own
-      // standalone block (cca356d8), not off the message being one block, so
-      // the card still folds.
+      // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
+      // staying its own standalone content block (cca356d8) - never merge it
+      // with extras into one block, or the card fails to fold.
       const answerText = formatAnswersAsMessage(questions, answers);
       const answerBlock: ContentBlock = { type: "text", text: `${AUQ_ANSWER_SENTINEL}${answerText}` };
       const extraBlocks: ContentBlock[] = [];
