@@ -1,19 +1,10 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { registerOverlayBack } from "../../../shared/back-button";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
-import { invoke } from "../../../shared/ipc";
-import { blobToBase64 } from "../../../shared/chat/composer-attachments";
-import { mimeToIcon } from "../../../shared/chat/attachment-hydrator";
-import { openLightbox } from "../../../shared/chat/lightbox";
-// See composer-attachments.ts's identical import for the valibot/ReDoS
-// unreachability note - same plugin, same guarantee (only hasFiles/readFiles
-// used here too).
-import { hasFiles, readFiles } from "tauri-plugin-clipboard-api";
-import { CaretSuggestPopup } from "../../../shared/chat/caret-popup/popup";
-import { SlashProvider } from "../../../shared/chat/caret-popup/providers/slash";
-import "../../../shared/chat/caret-popup/popup.css";
 import { clearHost, ensureHost, renderCardShell } from "./host";
-import type { Answers, AuqAttachment, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
+import { createAuqAttachments } from "./attachments";
+import { createAuqSlashPopup } from "./slash-popup";
+import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
   computeAnswer,
@@ -57,136 +48,16 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // Review-step extra message + pasted-image attachments. Only ever populated
   // when opts.supportsExtras (the async MCP flow) - see QuestionUIOpts doc.
   let additionalMessage = opts.initialDraft?.additionalMessage ?? "";
-  const attachments: AuqAttachment[] = opts.initialDraft?.attachments
-    ? [...opts.initialDraft.attachments]
-    : [];
+  const auqAttachments = createAuqAttachments({
+    sessionId: opts.sessionId,
+    supportsExtras: opts.supportsExtras,
+    initial: opts.initialDraft?.attachments,
+    onChange: () => render(),
+  });
 
-  async function attachBlob(blob: Blob, filename: string): Promise<void> {
-    const data = await blobToBase64(blob);
-    let path: string | null = null;
-    if (opts.sessionId) {
-      try {
-        path = await invoke<string>("paste_attachment", {
-          sessionId: opts.sessionId,
-          base64Data: data,
-          mime: blob.type || "application/octet-stream",
-        });
-      } catch (err) {
-        console.warn("[AUQ] paste_attachment failed:", err);
-      }
-    }
-    attachments.push({ mime: blob.type || "application/octet-stream", data, path, filename });
-    render();
-  }
-
-  async function attachFromPath(srcPath: string): Promise<void> {
-    const filename = srcPath.split(/[\\/]/).pop() ?? srcPath;
-    let result: { path: string; mime: string; base64: string } | null = null;
-    if (opts.sessionId) {
-      try {
-        result = await invoke<{ path: string; mime: string; base64: string }>(
-          "paste_attachment_from_path",
-          { sessionId: opts.sessionId, path: srcPath },
-        );
-      } catch (err) {
-        console.warn("[AUQ] paste_attachment_from_path failed:", err);
-      }
-    }
-    attachments.push({
-      filename,
-      mime: result?.mime ?? "application/octet-stream",
-      data: result?.base64 ?? "",
-      path: result?.path ?? null,
-    });
-    render();
-  }
-
-  // Wired onto every free-text input (per-question + review-step) so an
-  // image can be pasted from any step, same as the composer. Mirrors
-  // ComposerAttachments.handlePaste rather than reusing it - see
-  // AuqAttachment's doc in types.ts for why the two stay separate.
-  async function handleAttachmentPaste(e: ClipboardEvent): Promise<void> {
-    if (!opts.supportsExtras || !e.clipboardData) return;
-    const blobs = Array.from(e.clipboardData.items)
-      .filter((item) => item.kind === "file")
-      .map((item) => ({ blob: item.getAsFile(), type: item.type }))
-      .filter((b): b is { blob: File; type: string } => b.blob !== null);
-    if (blobs.length === 0) return;
-    e.preventDefault();
-    let usedNativeFiles = false;
-    try {
-      if (await hasFiles()) {
-        const paths = await readFiles();
-        if (paths.length > 0) {
-          for (const path of paths) await attachFromPath(path);
-          usedNativeFiles = true;
-        }
-      }
-    } catch (err) {
-      console.warn("[AUQ] clipboard readFiles failed, falling back to blob paste:", err);
-    }
-    if (usedNativeFiles) return;
-    for (const { blob, type } of blobs) {
-      await attachBlob(blob, blob.name || `paste.${type.split("/")[1] ?? "bin"}`);
-    }
-  }
-
-  // "/" skill-suggestion popup - the same CaretSuggestPopup + SlashProvider
-  // the composer uses, not a reimplementation. One provider for the card's
-  // lifetime; one popup per textarea per render, since its DOM node is a
-  // child of the render()-rebuilt card and must be explicitly destroyed.
-  const slashProvider = new SlashProvider();
-  void slashProvider.start(opts.cwd ?? null);
-  let popups: CaretSuggestPopup[] = [];
-  const destroyPopups = (): void => {
-    popups.forEach((p) => p.destroy());
-    popups = [];
-  };
-  function attachSlashPopup(ta: HTMLTextAreaElement): void {
-    const anchor = ta.closest<HTMLElement>(".prompt-q__other") ?? ta.parentElement;
-    if (!anchor) return;
-    if (getComputedStyle(anchor).position === "static") anchor.style.position = "relative";
-    const popup = new CaretSuggestPopup({ anchor, textarea: ta, providers: [slashProvider] });
-    popups.push(popup);
-    ta.addEventListener("input", () => popup.handleInput());
-    ta.addEventListener("keydown", (e) => {
-      if (popup.handleKey(e)) e.stopPropagation();
-    });
-  }
-
-  function renderAttachmentsStrip(container: HTMLElement): void {
-    container.innerHTML = "";
-    attachments.forEach((a, i) => {
-      const div = document.createElement("div");
-      const isImage = a.mime.startsWith("image/");
-      div.className = `attachment${isImage ? "" : " file-chip"}`;
-      if (isImage && a.data) {
-        const img = document.createElement("img");
-        img.src = `data:${a.mime};base64,${a.data}`;
-        img.alt = a.filename;
-        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
-        div.appendChild(img);
-      } else {
-        const icon = mimeToIcon(a.mime);
-        div.innerHTML = `<i class="ph ${icon}"></i>`;
-        const label = document.createElement("span");
-        label.textContent = a.filename;
-        div.appendChild(label);
-      }
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.className = "rm";
-      rm.title = "Remove";
-      rm.innerHTML = '<i class="ph ph-x"></i>';
-      rm.addEventListener("click", (e) => {
-        e.stopPropagation();
-        attachments.splice(i, 1);
-        render();
-      });
-      div.appendChild(rm);
-      container.appendChild(div);
-    });
-  }
+  // "/" skill-suggestion popup + highlight backdrop - the same shared core
+  // the composer uses (ai_todo 439), not a reimplementation.
+  const slashPopup = createAuqSlashPopup(opts.cwd);
 
   const messagesEl = document.querySelector<HTMLElement>(".session-messages");
   const savedScrollTop = messagesEl?.scrollTop ?? 0;
@@ -208,8 +79,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const teardown = () => {
     backDisposer?.();
     backDisposer = null;
-    destroyPopups();
-    slashProvider.stop();
+    slashPopup.destroyAll();
+    slashPopup.stop();
     clearHost();
     document.removeEventListener("keydown", keydownHandler);
     if (resizeObs) { try { resizeObs.disconnect(); } catch { /* ignore */ } resizeObs = null; }
@@ -226,7 +97,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     ),
     activeTab,
     additionalMessage,
-    attachments: [...attachments],
+    attachments: [...auqAttachments.attachments],
   });
   if (opts.id) {
     setActiveCard({
@@ -254,7 +125,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       }
     });
     teardown();
-    void opts.onSubmit(answers, { additionalMessage: additionalMessage.trim(), attachments: [...attachments] });
+    void opts.onSubmit(answers, { additionalMessage: additionalMessage.trim(), attachments: [...auqAttachments.attachments] });
   };
 
   const cancel = () => {
@@ -262,14 +133,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     void opts.onCancel();
   };
 
-  // An image lightbox opened from a pasted attachment thumbnail sits on top
-  // of this card and has no shared-overlay registration of its own yet (see
-  // lightbox.ts's private onEsc listener) - so without this check Escape/the
-  // phone back button below would cancel THIS card while the lightbox closes
-  // on the very same press. Cancelling sends no answer at all (opts.onCancel),
-  // an unrecoverable loss for a keypress the user meant only for the image.
-  // One shared guarded path for both dismiss triggers below, so a future
-  // rewrite of render()/keydownHandler only has to keep ONE call site correct.
+  // A lightbox on top of this card has no overlay registration of its own,
+  // so without this check Escape/back would also cancel the card - sending
+  // NO answer at all (onCancel), unrecoverable for a keypress meant for the
+  // image. One guarded path here so both dismiss triggers stay in sync.
   const dismissUnlessOverlayAbove = () => {
     if (document.querySelector(".lightbox-overlay")) return;
     cancel();
@@ -339,7 +206,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // thrown away by the innerHTML rebuild below - drop the popups' own
     // document-level listeners explicitly first, since DOM removal alone
     // doesn't do that.
-    destroyPopups();
+    slashPopup.destroyAll();
     const title = `
       <span class="prompt-card__title">
         <i class="ph ${opts.titleIcon}"></i>
@@ -411,14 +278,17 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // the review step), so the strip shows wherever there's something to see -
     // never gated on isSummary - and only for the flow that can actually
     // deliver them (see QuestionUIOpts.supportsExtras doc).
-    const attachmentsStripHtml = opts.supportsExtras && attachments.length
+    const attachmentsStripHtml = opts.supportsExtras && auqAttachments.attachments.length
       ? `<div class="prompt-attachments composer-attachments"></div>`
       : "";
     const extraMessageHtml = opts.supportsExtras
       ? `
         <label class="prompt-q__other prompt-extra-message">
           <span class="prompt-q__other-label">Add a message (optional):</span>
-          <textarea class="prompt-extra-input" rows="1" placeholder="Anything else to add...">${escapeHtml(additionalMessage)}</textarea>
+          <div class="cc-typing-wrap">
+            <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
+            <textarea class="prompt-extra-input cc-typing-input" rows="1" placeholder="Anything else to add...">${escapeHtml(additionalMessage)}</textarea>
+          </div>
         </label>
       `
       : "";
@@ -440,7 +310,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
           <div class="prompt-q__opts">${rows}</div>
           <label class="prompt-q__other">
             <span class="prompt-q__other-label">Add your own (combines with a pick above):</span>
-            <textarea class="prompt-q__other-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
+            <div class="cc-typing-wrap">
+              <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
+              <textarea class="prompt-q__other-input cc-typing-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
+            </div>
           </label>
           ${attachmentsStripHtml}
         </div>
@@ -537,14 +410,13 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
     const otherEl = host.querySelector<HTMLTextAreaElement>(".prompt-q__other-input");
     if (otherEl) {
-      const autoSize = () => {
-        otherEl.style.height = "auto";
-        otherEl.style.height = `${Math.min(otherEl.scrollHeight, 160)}px`;
-      };
-      autoSize();
+      const otherHighlightEl = otherEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
+      // Attach the core (auto-resize + highlight + popup) BEFORE this input
+      // listener below, so its own "input" listener - registered first -
+      // resizes the textarea before syncMessagesPadding() measures the card.
+      slashPopup.attach(otherEl, otherHighlightEl);
       otherEl.addEventListener("input", () => {
         freeText.set(activeTab, otherEl.value);
-        autoSize();
         const allAnsweredNow = questions.every((_, i) => answeredAt(i));
         const submitBtn = host.querySelector<HTMLButtonElement>('[data-act="submit"]');
         if (submitBtn) submitBtn.disabled = !allAnsweredNow;
@@ -560,30 +432,24 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         opts.onDraftChange?.(currentDraft());
       });
       if (opts.supportsExtras) {
-        otherEl.addEventListener("paste", (e) => void handleAttachmentPaste(e));
+        otherEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
       }
-      attachSlashPopup(otherEl);
     }
 
     const extraEl = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
     if (extraEl) {
-      const autoSize = () => {
-        extraEl.style.height = "auto";
-        extraEl.style.height = `${Math.min(extraEl.scrollHeight, 160)}px`;
-      };
-      autoSize();
+      const extraHighlightEl = extraEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
+      slashPopup.attach(extraEl, extraHighlightEl);
       extraEl.addEventListener("input", () => {
         additionalMessage = extraEl.value;
-        autoSize();
         syncMessagesPadding();
         opts.onDraftChange?.(currentDraft());
       });
-      extraEl.addEventListener("paste", (e) => void handleAttachmentPaste(e));
-      attachSlashPopup(extraEl);
+      extraEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
     }
 
     const attachmentsEl = host.querySelector<HTMLElement>(".prompt-attachments");
-    if (attachmentsEl) renderAttachmentsStrip(attachmentsEl);
+    if (attachmentsEl) auqAttachments.renderAttachmentsStrip(attachmentsEl);
 
     host.querySelector<HTMLButtonElement>('[data-act="submit"]')
       ?.addEventListener("click", submit);

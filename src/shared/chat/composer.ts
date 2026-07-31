@@ -6,13 +6,13 @@
 import type { ContentBlock, Recurrence } from "../../types/ipc.generated";
 import { openSchedulePicker } from "./schedule-picker";
 import { openComposerMenu, type ComposerMenuItem } from "./composer-menu";
-import { CaretSuggestPopup } from "./caret-popup/popup";
 import { SlashProvider } from "./caret-popup/providers/slash";
 import { FileProvider } from "./caret-popup/providers/file";
 import type { SuggestProvider } from "./caret-popup/types";
 import type { ChatRenderer } from "./chat-renderer";
 import { parseBuiltin, HANDLERS, type BuiltinContext } from "./builtins";
 import { highlightComposerInput } from "./chat-transforms";
+import { ComposerCore } from "./composer-core/core";
 import { ComposerVoice } from "./voice/composer-voice";
 import { ComposerPtt } from "./voice/composer-ptt";
 import "./voice/voice.css";
@@ -57,11 +57,6 @@ export interface ComposerOptions {
 
 let _composerInstanceCount = 0;
 
-// field-sizing: content lets the browser auto-grow textareas without the
-// JS height:"auto"→scrollHeight trick that caused a one-frame glow glitch.
-const supportsFieldSizing =
-  typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
-
 export class Composer {
   private root: HTMLElement;
   private opts: ComposerOptions;
@@ -75,7 +70,7 @@ export class Composer {
   private scheduleBtn: HTMLButtonElement | null = null;
   private slash: SlashProvider | null = null;
   private file: FileProvider | null = null;
-  private popup: CaretSuggestPopup | null = null;
+  private core: ComposerCore | null = null;
   private sending = false;
   // Wall-clock of the last keystroke; feeds isComposing() so an auto-flush
   // doesn't fire out from under the user mid-type.
@@ -155,8 +150,8 @@ export class Composer {
       this.noticeTimer = null;
     }
     this.cv.destroy();
-    this.popup?.destroy();
-    this.popup = null;
+    this.core?.destroy();
+    this.core = null;
     this.slash?.stop();
     this.slash = null;
     this.file?.stop();
@@ -255,31 +250,40 @@ export class Composer {
     this.scheduleBtn = this.root.querySelector<HTMLButtonElement>(".composer-send-chevron");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
     this.att.bind(this.root);
-    // The popup div was inside root.innerHTML, so it's gone after the swap.
-    // Rebuild it on every render and keep the provider's cache.
-    this.popup?.destroy();
-    this.popup = null;
-    if (!this.disabled && this.textarea && this.slash && this.file) {
-      this.popup = new CaretSuggestPopup({
-        anchor: this.root,
+    // The popup/highlight backdrop were inside root.innerHTML, so they're
+    // gone after the swap. Rebuild the core on every render (mirrors the
+    // instance-per-mount contract the popup already used) and keep the
+    // provider's cache.
+    this.core?.destroy();
+    this.core = null;
+    if (this.textarea) {
+      const interactive = !this.disabled && !!this.slash && !!this.file;
+      this.core = new ComposerCore({
         textarea: this.textarea,
-        providers: [this.slash, this.file] as unknown as SuggestProvider<unknown>[],
+        highlightEl: this.highlightEl,
+        anchor: this.root,
+        providers: interactive
+          ? ([this.slash, this.file] as unknown as SuggestProvider<unknown>[])
+          : [],
+        paste: interactive ? { handlePaste: (e) => this.att.handlePaste(e) } : undefined,
+        computeHighlightHtml: () => this.computeHighlightHtml(),
+        onInput: interactive
+          ? () => {
+              this.lastKeyAt = Date.now();
+              this.persistDraft();
+              this.updateScheduleBtnState();
+              this.opts.onDraftActivity?.();
+            }
+          : undefined,
+        onEnter: interactive ? () => void this.send() : undefined,
+        isMobileViewport: () => this.isMobileViewport(),
+        onResize: (scrollHeight) => {
+          this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", scrollHeight > 44);
+        },
       });
-      this.textarea.addEventListener("keydown", this.onKey.bind(this));
-      this.textarea.addEventListener("paste", (e) => void this.att.handlePaste(e));
-      this.textarea.addEventListener("input", () => {
-        this.lastKeyAt = Date.now();
-        this.autoResize();
-        this.updateHighlight();
-        this.popup?.handleInput();
-        this.persistDraft();
-        this.updateScheduleBtnState();
-        this.opts.onDraftActivity?.();
-      });
+    }
+    if (!this.disabled && this.textarea && this.slash && this.file) {
       this.textarea.addEventListener("blur", () => this.opts.onDraftActivity?.());
-      this.textarea.addEventListener("scroll", () => {
-        if (this.highlightEl && this.textarea) this.highlightEl.scrollTop = this.textarea.scrollTop;
-      });
       this.sendBtn?.addEventListener("click", () => void this.send());
       this.scheduleBtn?.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -318,40 +322,34 @@ export class Composer {
   }
 
   private autoResize(): void {
-    const ta = this.textarea;
-    if (!ta) return;
-    if (supportsFieldSizing) {
-      // CSS field-sizing: content handles height automatically — clear any
-      // inline height that might override it, then let the browser do the work.
-      ta.style.height = "";
-    } else {
-      // Fallback: manually resize. Setting height to "auto" first forces the
-      // browser to recalculate scrollHeight from the text content.
-      ta.style.height = "auto";
-      ta.style.height = `${ta.scrollHeight}px`;
-    }
-    this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", ta.scrollHeight > 44);
+    this.core?.autoResize();
   }
 
   // Repaint the highlight backdrop (colors known /slash commands) behind the
-  // transparent-text textarea, and keep it scroll-aligned.
+  // transparent-text textarea, and keep it scroll-aligned. Delegates to the
+  // shared core; computeHighlightHtml() below supplies the voice-volatile
+  // split this composer alone needs.
   private updateHighlight(): void {
-    if (!this.highlightEl || !this.textarea) return;
-    const val = this.textarea.value;
-    // While recording, paint the volatile (still-revising) voice tail faintly so
-    // it reads as "live, not yet committed". Committed voice text renders normally.
+    this.core?.updateHighlight();
+  }
+
+  // While recording, paint the volatile (still-revising) voice tail faintly so
+  // it reads as "live, not yet committed". Committed voice text renders
+  // normally. Voice/PTT stay main-composer-only, so this stays here rather
+  // than in the shared core.
+  private computeHighlightHtml(): string {
+    const val = this.textarea?.value ?? "";
     if (this.cv.state === "recording" && this.cv.volatileLen > 0) {
       const a = val.slice(0, this.cv.commitPos);
       const vol = val.slice(this.cv.commitPos, this.cv.commitPos + this.cv.volatileLen);
       const b = val.slice(this.cv.commitPos + this.cv.volatileLen);
-      this.highlightEl.innerHTML =
+      return (
         highlightComposerInput(a) +
         `<span class="voice-volatile">${highlightComposerInput(vol)}</span>` +
-        highlightComposerInput(b);
-    } else {
-      this.highlightEl.innerHTML = highlightComposerInput(val);
+        highlightComposerInput(b)
+      );
     }
-    this.highlightEl.scrollTop = this.textarea.scrollTop;
+    return highlightComposerInput(val);
   }
 
   /** Mobile = the same 768px breakpoint the sessions layout uses to switch to
@@ -411,16 +409,6 @@ export class Composer {
       typeof window.matchMedia === "function" &&
       window.matchMedia("(max-width: 768px)").matches
     );
-  }
-
-  private async onKey(e: KeyboardEvent): Promise<void> {
-    if (this.popup?.handleKey(e)) return;
-    if (e.key === "Enter" && !e.shiftKey) {
-      // On mobile, let Enter insert a newline and rely on the send button.
-      if (this.isMobileViewport()) return;
-      e.preventDefault();
-      await this.send();
-    }
   }
 
   /** Drop files onto the composer (e.g. a future external drop zone). */

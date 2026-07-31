@@ -102,37 +102,11 @@ export class ComposerAttachments {
 
   async handlePaste(e: ClipboardEvent): Promise<void> {
     if (!e.clipboardData) return;
-    // Snapshot the browser blobs SYNCHRONOUSLY, before any await: WebView2
-    // neuters e.clipboardData the moment this handler yields, so getAsFile()
-    // returns null afterwards. This is the fallback for pastes with no native
-    // file list (e.g. a Win+Shift+S snip, which lands as a raw bitmap on the
-    // clipboard with no CF_HDROP paths). Capturing here keeps that path alive.
-    const blobs = Array.from(e.clipboardData.items)
-      .filter((item) => item.kind === "file")
-      .map((item) => ({ blob: item.getAsFile(), type: item.type }))
-      .filter((b): b is { blob: File; type: string } => b.blob !== null);
-    if (blobs.length > 0) {
-      e.preventDefault();
-      // The browser's DataTransfer only ever exposes one file when multiple
-      // files are copied from Explorer (a WebView2 limitation), so read the
-      // native clipboard file list directly when available. Falls back to
-      // the blob(s) snapshotted above when the plugin call fails or finds no
-      // file list (non-Windows, view-harness, or a bitmap snip with no paths).
-      let usedNativeFiles = false;
-      try {
-        if (await hasFiles()) {
-          const paths = await readFiles();
-          if (paths.length > 0) {
-            for (const path of paths) await this.attachFromPath(path);
-            usedNativeFiles = true;
-          }
-        }
-      } catch (err) {
-        console.warn("[Composer] clipboard readFiles failed, falling back to blob paste:", err);
-      }
-      if (usedNativeFiles) return;
-      for (const { blob, type } of blobs) {
-        await this.attachBlob(blob, blob.name || `paste.${type.split("/")[1] ?? "bin"}`);
+    const resolved = await resolveClipboardAttachments(e);
+    if (resolved) {
+      for (const r of resolved) {
+        if (r.kind === "path") await this.attachFromPath(r.path);
+        else await this.attachBlob(r.blob, r.filename);
       }
       return;
     }
@@ -347,6 +321,62 @@ function openPreviewIfSupported(a: Attachment): void {
       /* non-UTF8 content, no preview */
     }
   }
+}
+
+/** A clipboard file item, resolved to either a native OS path (Explorer
+ *  copy, read via the clipboard plugin) or a raw blob (e.g. a Win+Shift+S
+ *  snip, which has no CF_HDROP path). */
+export type ResolvedClipboardAttachment =
+  | { kind: "path"; path: string }
+  | { kind: "blob"; blob: File; filename: string };
+
+/** Resolve a paste ClipboardEvent's file items into native paths or blobs -
+ *  the branching shared by `ComposerAttachments.handlePaste` and the AUQ
+ *  card's own paste handler (ai_todo 440: same logic, two separate callers,
+ *  since AuqAttachment's persistence deliberately stays separate from
+ *  Attachment's - see AuqAttachment's doc comment). Pure: does not call the
+ *  `paste_attachment*` IPC itself, does not persist anything - each caller
+ *  turns the result into its own stored shape. Returns `null` for a
+ *  paste with no file items at all (a plain-text paste), so a caller that
+ *  wants a pasted-log-chip fallback (the composer) or wants to no-op (the
+ *  AUQ card, which has none) can each handle that on their own. */
+export async function resolveClipboardAttachments(
+  e: ClipboardEvent,
+): Promise<ResolvedClipboardAttachment[] | null> {
+  if (!e.clipboardData) return null;
+  // Snapshot the browser blobs SYNCHRONOUSLY, before any await: WebView2
+  // neuters e.clipboardData the moment this handler yields, so getAsFile()
+  // returns null afterwards. This is the fallback for pastes with no native
+  // file list (e.g. a Win+Shift+S snip, which lands as a raw bitmap on the
+  // clipboard with no CF_HDROP paths). Capturing here keeps that path alive.
+  const blobs = Array.from(e.clipboardData.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => ({ blob: item.getAsFile(), type: item.type }))
+    .filter((b): b is { blob: File; type: string } => b.blob !== null);
+  if (blobs.length === 0) return null;
+  e.preventDefault();
+  // The browser's DataTransfer only ever exposes one file when multiple files
+  // are copied from Explorer (a WebView2 limitation), so read the native
+  // clipboard file list directly when available. Falls back to the blob(s)
+  // snapshotted above when the plugin call fails or finds no file list
+  // (non-Windows, view-harness, or a bitmap snip with no paths).
+  try {
+    if (await hasFiles()) {
+      const paths = await readFiles();
+      if (paths.length > 0) {
+        const resolved: ResolvedClipboardAttachment[] = paths.map((path) => ({ kind: "path", path }));
+        return resolved;
+      }
+    }
+  } catch (err) {
+    console.warn("[resolveClipboardAttachments] clipboard readFiles failed, falling back to blob paste:", err);
+  }
+  const resolved: ResolvedClipboardAttachment[] = blobs.map(({ blob, type }) => ({
+    kind: "blob",
+    blob,
+    filename: blob.name || `paste.${type.split("/")[1] ?? "bin"}`,
+  }));
+  return resolved;
 }
 
 /** Exported so other paste-image surfaces (e.g. the AUQ card) can reuse the

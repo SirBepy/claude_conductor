@@ -1,0 +1,76 @@
+/* composer-core: structural rules for NEW adopters of the shared typing
+ * core's highlight backdrop (AUQ card, preview-panel input). The main
+ * Composer keeps its own pre-existing .composer-highlight/.composer-textarea
+ * pair (composer.css) untouched - these classes are additive, not a
+ * replacement. */
+
+.cc-typing-wrap {
+  position: relative;
+}
+
+.cc-typing-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  color: var(--color-text);
+  z-index: 0;
+}
+
+.cc-typing-input {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--color-text);
+  /* ComposerCore's autoResize() feature-detects field-sizing support and, on
+   * a hit, only clears any inline height override - the actual auto-grow
+   * needs the property declared here. Without this, a field-sizing-capable
+   * browser (which skips the JS scrollHeight fallback) would render a
+   * permanently single-row box no matter how much is typed. */
+  field-sizing: content;
+}
+
+/* Mirrors .prompt-q__other-input/.prompt-extra-input's box model exactly
+ * (permission-modal-question.css, owned by a concurrent session - values
+ * duplicated on purpose rather than shared; keep in sync by hand). Compound
+ * selectors so this wins over that file's plain-class rule regardless of
+ * CSS import order (equal-specificity same-element trap). */
+.cc-typing-highlight--auq {
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.prompt-q__other-input.cc-typing-input,
+.prompt-extra-input.cc-typing-input,
+.prompt-q__other-input.cc-typing-input:focus,
+.prompt-extra-input.cc-typing-input:focus {
+  /* :focus variant listed explicitly (two classes + pseudo beats
+   * permission-modal-question.css's one-class `:focus` rule on specificity
+   * alone) so the transparent background survives focus regardless of CSS
+   * import order. */
+  background: transparent;
+  color: transparent;
+  caret-color: var(--color-text);
+}
+
+/* The solid fill that used to live on the textarea itself (permission-modal-
+ * question.css's `background: var(--color-surface-alt)`) moves to the wrap,
+ * now that the real textarea is transparent-for-backdrop. Border stays on
+ * the textarea (drawn on top, unaffected - only its fill went transparent). */
+.prompt-q__other .cc-typing-wrap,
+.prompt-extra-message .cc-typing-wrap {
+  background: var(--color-surface-alt);
+  border-radius: 8px;
+}

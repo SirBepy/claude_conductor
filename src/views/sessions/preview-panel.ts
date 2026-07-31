@@ -24,8 +24,17 @@ import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import { escapeHtml } from "../../shared/escape-html";
 import { formatRelativeMinutes } from "../../shared/formatters";
-import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
+import type { ChatEvent, ContentBlock, PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { wireResizeHandle, MIN_WIDTH, MAX_WIDTH } from "./preview-panel-resize";
+import { ComposerCore } from "../../shared/chat/composer-core/core";
+import { SlashProvider } from "../../shared/chat/caret-popup/providers/slash";
+import type { SuggestProvider } from "../../shared/chat/caret-popup/types";
+import "../../shared/chat/caret-popup/popup.css";
+import "../../shared/chat/composer.css";
+import { sessionEvents } from "../../shared/chat/event-store";
+import { showToast } from "../../shared/toast";
+import { isCurrentSessionBusy } from "./session-thinking-bar";
+import { state } from "./state";
 
 export type PreviewMode = "panel" | "window";
 type DeviceWidth = "desktop" | "tablet" | "phone";
@@ -165,6 +174,14 @@ class PreviewPanel implements PreviewController {
   private unlistenPreview: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
   private resizeCleanup: (() => void) | null = null;
+  /** Typing-experience core for the reply composer docked at the panel's
+   *  bottom (ai_todo composer-unification) - the shared popup/highlight/
+   *  auto-resize, not a reimplementation. Mounted once in the constructor:
+   *  unlike the AUQ card, this panel's own DOM is never innerHTML-rebuilt
+   *  (renderIframe/renderRail/renderHeader only touch their own sub-elements),
+   *  so there's no per-render remount to do. */
+  private composerCore: ComposerCore | null = null;
+  private composerSlash: SlashProvider | null = null;
 
   constructor(root: HTMLElement, mode: PreviewMode) {
     this.root = root;
@@ -174,6 +191,7 @@ class PreviewPanel implements PreviewController {
 
     this.applyWidth();
     this.renderShell();
+    this.mountComposer();
     this.wireEvents();
     this.resizeCleanup = wireResizeHandle(this.root, (px) => {
       this.width = px;
@@ -262,6 +280,10 @@ class PreviewPanel implements PreviewController {
       this.focusHandler = null;
     }
     if (this.resizeCleanup) { this.resizeCleanup(); this.resizeCleanup = null; }
+    this.composerCore?.destroy();
+    this.composerCore = null;
+    this.composerSlash?.stop();
+    this.composerSlash = null;
   }
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -380,6 +402,92 @@ class PreviewPanel implements PreviewController {
     }
   }
 
+  // ── Reply composer ───────────────────────────────────────────────────────
+  // Docked at the bottom of the panel (ai_todo composer-unification): the
+  // shared typing core (popup/highlight/auto-resize), not a reimplementation.
+  // Voice/PTT/schedule/builtins are main-composer-only and don't apply here.
+
+  private mountComposer(): void {
+    const ta = this.root.querySelector<HTMLTextAreaElement>(".pv-composer-input");
+    const highlightEl = this.root.querySelector<HTMLElement>(".pv-composer .composer-highlight");
+    const sendBtn = this.root.querySelector<HTMLButtonElement>(".pv-composer-send");
+    if (!ta) return;
+    this.composerSlash = new SlashProvider();
+    // No single cwd concept for this panel (it's scoped by session, not a
+    // project directory) - null still surfaces user/builtin skills, same as
+    // Composer's own SlashProvider.start(null) fallback.
+    void this.composerSlash.start(null);
+    this.composerCore = new ComposerCore({
+      textarea: ta,
+      highlightEl,
+      providers: [this.composerSlash] as unknown as SuggestProvider<unknown>[],
+      onInput: () => {
+        if (sendBtn) sendBtn.disabled = ta.value.trim().length === 0;
+      },
+      onEnter: () => void this.sendToOwningSession(),
+    });
+    sendBtn?.addEventListener("click", () => void this.sendToOwningSession());
+  }
+
+  /** Sends the composer's draft to whichever session pushed the
+   *  currently-viewed snapshot, tagged with a reference to it. That session
+   *  is always the active pane (this panel is scoped to it via
+   *  setSessionScope), so busy/held semantics reuse the SAME
+   *  state.heldMessages controller the main composer uses - not
+   *  reimplemented here. */
+  private async sendToOwningSession(): Promise<void> {
+    const ta = this.root.querySelector<HTMLTextAreaElement>(".pv-composer-input");
+    const snap = this.selected;
+    if (!ta || !snap) return;
+    const text = ta.value.trim();
+    if (!text) return;
+    const sessionId = snap.session_id;
+    if (!sessionId) {
+      showToast("This preview has no owning session to reply to.");
+      return;
+    }
+    const inst = state.sessions.find((s) => s.session_id === sessionId);
+    if (!inst) {
+      showToast("Session no longer available.");
+      return;
+    }
+    const label = snap.title || snap.slug;
+    const tag = `[re: preview v${snap.version}${label ? ` - ${label}` : ""}]`;
+    const blocks: ContentBlock[] = [{ type: "text", text: `${tag}\n${text}` }];
+
+    ta.value = "";
+    this.composerCore?.autoResize();
+    this.composerCore?.updateHighlight();
+    const sendBtn = this.root.querySelector<HTMLButtonElement>(".pv-composer-send");
+    if (sendBtn) sendBtn.disabled = true;
+
+    if (isCurrentSessionBusy()) {
+      state.heldMessages?.stage(blocks);
+      return;
+    }
+    if (state.heldMessages?.hasItemsForActive()) {
+      void state.heldMessages.flushHeldWithDraft(blocks);
+      return;
+    }
+
+    const optimisticEvent = {
+      type: "user_message",
+      content: blocks,
+      timestamp: BigInt(Date.now()),
+    } as ChatEvent;
+    sessionEvents.pushSynthetic(sessionId, optimisticEvent);
+    try {
+      await invoke<string>("send_message", { sessionId, cwd: String(inst.cwd ?? "."), blocks });
+    } catch (err) {
+      console.error("[preview-panel] send_message failed", err);
+      sessionEvents.removeSynthetic(sessionId, optimisticEvent);
+      ta.value = text;
+      this.composerCore?.autoResize();
+      this.composerCore?.updateHighlight();
+      showToast(`Send failed: ${err}`);
+    }
+  }
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   private openInBrowser(): void {
@@ -456,6 +564,15 @@ class PreviewPanel implements PreviewController {
         <div class="pv-body">
           <div class="pv-rail" data-rail hidden><div class="pv-rail-lbl">History</div></div>
           <div class="pv-canvas"></div>
+        </div>
+        <div class="pv-composer">
+          <div class="composer-input-wrap">
+            <div class="composer-highlight" aria-hidden="true"></div>
+            <textarea class="composer-textarea pv-composer-input" rows="1" placeholder="Message the session that pushed this preview..."></textarea>
+          </div>
+          <button type="button" class="pv-composer-send icon-btn" title="Send" disabled>
+            <i class="ph ph-paper-plane-right"></i>
+          </button>
         </div>
       </div>
     `;

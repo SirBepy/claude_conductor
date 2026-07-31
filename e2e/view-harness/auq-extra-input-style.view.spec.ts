@@ -38,13 +38,22 @@ test("review step's extra-message textarea picks up the card's input styling", a
 
   const style = await extra.evaluate((el) => {
     const cs = getComputedStyle(el);
-    return { radius: cs.borderRadius, resize: cs.resize, bg: cs.backgroundColor, borderW: cs.borderTopWidth };
+    return { radius: cs.borderRadius, resize: cs.resize, borderW: cs.borderTopWidth };
   });
 
-  // All four come only from the .prompt-extra-input rules; the browser default
-  // is radius 0 / resize both / transparent background.
+  // Radius/resize/border still come only from the .prompt-extra-input rules;
+  // the browser default is radius 0 / resize both.
   expect(style.radius).toBe("8px");
   expect(style.resize).toBe("none");
   expect(style.borderW).toBe("1px");
-  expect(style.bg).not.toBe("rgba(0, 0, 0, 0)");
+
+  // The textarea's own background is now transparent by design (composer-core
+  // highlight-backdrop adoption, ai_todo composer-unification): the solid
+  // surface color moved to the wrapping .cc-typing-wrap div so colored /slash
+  // spans can show through the text. Assert the wrapper instead - it's the
+  // element that would still render browser-default (transparent) if the
+  // stylesheet regressed.
+  const wrap = card.locator(".prompt-extra-message .cc-typing-wrap");
+  const wrapBg = await wrap.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(wrapBg).not.toBe("rgba(0, 0, 0, 0)");
 });

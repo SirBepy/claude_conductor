@@ -371,3 +371,22 @@
     display: none !important;
   }
 }
+
+/* ── Reply composer ────────────────────────────────────────────────────── */
+/* .composer-input-wrap/.composer-highlight/.composer-textarea come from
+ * composer.css (imported by preview-panel.ts) - reused as-is so the typing
+ * experience is pixel-identical to the main composer; only this row's own
+ * layout (flex + separator) is new. */
+
+.pv-composer {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.pv-composer-send {
+  flex-shrink: 0;
+}
