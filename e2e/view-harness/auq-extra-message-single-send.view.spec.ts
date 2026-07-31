@@ -72,11 +72,12 @@ test.describe("view-harness / AUQ review-step extra message rides in the SAME se
 
     // Q1 (single-select, auto-advances to Q2 since it's not the last question).
     await card.locator('.prompt-opt input[data-label="A"]').click();
-    await expect(card.locator(".prompt-q__text")).toHaveText("Q2?");
+    await expect(card.locator(".prompt-panel.is-active .prompt-q__text")).toHaveText("Q2?");
 
-    // Q2 is last: answering it does not auto-advance further; CTA reads Review.
+    // Q2 is last: answering it does not auto-advance further; the arrow leads
+    // to the summary panel instead.
     await card.locator('.prompt-opt input[data-label="X"]').click();
-    await card.locator('[data-act="review"]').click();
+    await card.locator('.prompt-pager [data-nav="1"]').click();
 
     // Summary screen: type the extra message, then Submit.
     await card.locator(".prompt-extra-input").fill("Also check the CI logs while you're at it.");

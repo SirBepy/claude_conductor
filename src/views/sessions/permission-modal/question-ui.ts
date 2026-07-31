@@ -300,13 +300,11 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     `;
   }
 
-  // Virtualized: only the active panel gets real zone content. Every
-  // question's free-text/ask elements share one class name (`.prompt-q__text`,
-  // `.prompt-q__other-input`), so mounting all of them at once makes a plain
-  // `card.locator(...)` ambiguous - state (selections/freeText) is the source
-  // of truth regardless, so an inactive panel loses nothing by staying blank.
+  // Every panel renders its real content always (never virtualized) - the
+  // horizontal track must show real questions on a drag/swipe, not blanks.
+  // `.is-active` marks the current one for tests and active-only logic.
   function panelHtml(q: Question, qi: number): string {
-    if (qi !== activeTab) return `<section class="prompt-panel" data-panel="${qi}" style="--dom:${domainVar(q.domain)}"></section>`;
+    const isActive = qi === activeTab;
     const pickSect = q.options?.length
       ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
          <div class="prompt-q__opts">${optsRowsHtml(q, qi)}</div>`
@@ -315,7 +313,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       ? `<div class="prompt-attachments composer-attachments"></div>`
       : "";
     return `
-      <section class="prompt-panel" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
+      <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
         ${questionZonesHtml(q)}
         ${pickSect}
         ${ownZoneHtml(qi)}
@@ -325,9 +323,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   }
 
   function summaryPanelHtml(): string {
-    if (activeTab !== questions.length) {
-      return `<section class="prompt-panel" data-panel="${questions.length}" style="--dom:var(--color-primary)"></section>`;
-    }
+    const isActive = activeTab === questions.length;
     const rows = questions.map((sq, qi) => {
       const label = sq.header?.trim() || `Question ${qi + 1}`;
       const answered = answeredAt(qi);
@@ -358,7 +354,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       : "";
 
     return `
-      <section class="prompt-panel" data-panel="${questions.length}" style="--dom:var(--color-primary)">
+      <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${questions.length}" style="--dom:var(--color-primary)">
         <div class="prompt-summary" role="tabpanel">
           <div class="prompt-summary__intro">Review your answers before sending:</div>
           ${rows}
@@ -380,15 +376,11 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     const dotsHtml = `<span class="prompt-dots">${dots}</span>`;
     if (totalPanels < 2) return `<span class="prompt-pager">${dotsHtml}</span>`;
 
-    // The right arrow doubles as the retired Next/Review CTA (data-act), so
-    // callers/tests keyed on the old footer buttons still find a live hook.
-    const nextAct = activeTab < questions.length - 1 ? ` data-act="next"`
-      : hasSummary && activeTab === questions.length - 1 ? ` data-act="review"` : "";
     const nextDisabled = activeTab >= totalPanels - 1 || (activeTab < questions.length && !answeredAt(activeTab));
     return `<span class="prompt-pager">
       <button type="button" class="prompt-icon-btn" data-nav="-1" ${activeTab === 0 ? "disabled" : ""}><i class="ph ph-caret-left"></i></button>
       ${dotsHtml}
-      <button type="button" class="prompt-icon-btn" data-nav="1"${nextAct} ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
+      <button type="button" class="prompt-icon-btn" data-nav="1" ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
     </span>`;
   }
 

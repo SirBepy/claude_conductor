@@ -28,10 +28,11 @@ test("review step's extra-message textarea picks up the card's input styling", a
   });
 
   const card = page.locator(".prompt-card");
-  await card.locator(".prompt-q__other-input").fill("a");
-  await card.locator('[data-act="next"]').click();
-  await card.locator(".prompt-q__other-input").fill("b");
-  await card.locator('[data-act="review"]').click();
+  const nextArrow = card.locator('.prompt-pager [data-nav="1"]');
+  await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("a");
+  await nextArrow.click();
+  await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("b");
+  await nextArrow.click();
 
   const extra = card.locator(".prompt-extra-input");
   await expect(extra).toBeVisible();
