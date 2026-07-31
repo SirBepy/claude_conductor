@@ -1,5 +1,4 @@
-import { html, render } from "lit-html";
-import { openSidemenu } from "../../shared/sidemenu";
+import { render } from "lit-html";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { showView } from "../../shared/navigation";
@@ -13,23 +12,17 @@ import "../../shared/chat/chat.css";
 import "../sessions/sessions.css";
 import "../sessions/session-avatar.css";
 import "../sessions/session-list.css";
+import "../sessions/session-row-portrait.css";
 import "../sessions/session-statusbar.css";
 import "./history.css";
 import type { HistoryEntry } from "../../types/ipc.generated";
 import { cwdToProjectName } from "../sessions/sessions-helpers";
-import { projBadgeHtml, modelBatteryHtml } from "../sessions/sidebar-row-visuals";
-import { hydrateProjectTechIcons, hydrateCharacterAvatars } from "../../shared/projects";
+import { hydrateCharacterAvatars } from "../../shared/projects";
 import { characterForSessionId, characterIconUrl, loadSessionCharacters } from "../sessions/session-characters";
 import { SessionHeader } from "../sessions/session-header";
 import { SessionStatusbar } from "../sessions/session-statusbar";
-
-interface HistoryFilters {
-  search: string;
-  projectId: string | null;
-  model: string | null;
-  dateFrom: string | null;
-  dateTo: string | null;
-}
+import { emptyFilters, startOfDayIso, endOfDayIso, historyStatusDotClass, type HistoryFilters } from "./history-helpers";
+import { template, renderList, renderListLoading, renderProjectFilterOptions } from "./history-render";
 
 interface HistoryState {
   mountId: number;
@@ -41,10 +34,6 @@ interface HistoryState {
   // project_id -> display label, accumulated across every fetch this mount so
   // the dropdown doesn't shrink to "1 option" once the user filters by project.
   projectOptions: Map<string, string>;
-}
-
-function emptyFilters(): HistoryFilters {
-  return { search: "", projectId: null, model: null, dateFrom: null, dateTo: null };
 }
 
 let state: HistoryState = {
@@ -68,19 +57,6 @@ export function queueHistorySelect(sessionId: string): void {
   _pendingSelect = sessionId;
 }
 
-/** Local midnight -> RFC3339, so a date filter is inclusive of the user's
- * whole calendar day rather than a UTC-shifted slice of it. */
-function startOfDayIso(dateStr: string): string {
-  return new Date(`${dateStr}T00:00:00`).toISOString();
-}
-function endOfDayIso(dateStr: string): string {
-  return new Date(`${dateStr}T23:59:59.999`).toISOString();
-}
-
-function hasActiveFilters(f: HistoryFilters): boolean {
-  return !!(f.search || f.projectId || f.model || f.dateFrom || f.dateTo);
-}
-
 async function fetchEntries(): Promise<void> {
   const f = state.filters;
   try {
@@ -100,118 +76,6 @@ async function fetchEntries(): Promise<void> {
     console.error("[history] list_history failed", err);
     state.entries = [];
   }
-}
-
-function dateBucket(secs: number | bigint | null | undefined): string {
-  if (!secs) return "Unknown date";
-  const n = typeof secs === "bigint" ? Number(secs) : secs;
-  if (!n) return "Unknown date";
-  const d = new Date(n * 1000);
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfYesterday = new Date(startOfToday.getTime() - 86400_000);
-  if (d >= startOfToday) return "Today";
-  if (d >= startOfYesterday) return "Yesterday";
-  const sameYear = d.getFullYear() === now.getFullYear();
-  return d.toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-}
-
-/** Historical equivalent of sessions-helpers' statusDotClass, mapping the
- * transcript's last `<cc-status:..>` marker onto the same st-* vocabulary.
- * "done" reads as the calm st-your-turn check, never the "unread" st-done
- * accent - a closed session has nothing left to notify about. */
-function historyStatusDotClass(status: string | null): string | null {
-  switch (status) {
-    case "question": return "st-question";
-    case "working": return "st-working";
-    case "waiting": return "st-waiting";
-    case "done": return "st-your-turn";
-    default: return null;
-  }
-}
-
-/** Leading visual for a row: character portrait when one resolves for this
- * session id, else the plain project badge - never a status icon. A closed
- * session's last-turn status isn't a useful row-level signal, so no ring
- * tint either; mirrors draftLeadingVisual's charId-or-fallback shape in
- * sidebar-row-visuals.ts. */
-function historyLeadingVisual(e: HistoryEntry): string {
-  const charId = characterForSessionId(e.session_id);
-  if (!charId) return projBadgeHtml(e.cwd, "history-proj-icon");
-  const id = escapeHtml(charId);
-  const url = characterIconUrl(charId);
-  const preload = url ? ` src="${escapeHtml(url)}" data-hydrated="${id}"` : "";
-  const avatarHtml = `<span class="session-avatar">
-          <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
-          <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
-        </span>`;
-  const badge = projBadgeHtml(e.cwd, "session-proj-badge");
-  return `<span class="session-avatar-wrap">${avatarHtml}${badge}</span>`;
-}
-
-function renderList(listEl: HTMLElement): void {
-  if (state.entries.length === 0) {
-    listEl.innerHTML = `<li class="history-empty-row">${
-      hasActiveFilters(state.filters) ? "No matches" : "No past sessions"
-    }</li>`;
-    return;
-  }
-
-  const html: string[] = [];
-  let lastBucket = "";
-  for (const e of state.entries) {
-    const bucket = dateBucket(e.ended_at ?? e.started_at);
-    if (bucket !== lastBucket) {
-      lastBucket = bucket;
-      html.push(`<li class="history-date-sep" aria-hidden="true">${escapeHtml(bucket)}</li>`);
-    }
-    const title = e.title || cwdToProjectName(e.cwd);
-    const time = escapeHtml(formatTime(e.ended_at ?? e.started_at));
-    html.push(
-      `<li data-session-id="${escapeHtml(e.session_id)}" class="${
-        e.session_id === state.selectedId ? "active" : ""
-      }" title="${time}">
-        ${historyLeadingVisual(e)}
-        <div class="history-row-text">
-          <span class="history-row-title">${escapeHtml(title)}</span>
-          <span class="history-row-subtitle">${escapeHtml(cwdToProjectName(e.cwd))}</span>
-        </div>
-        <span class="history-row-chips">${modelBatteryHtml(e.model ?? "")}</span>
-      </li>`,
-    );
-  }
-  listEl.innerHTML = html.join("");
-  void hydrateProjectTechIcons(listEl);
-  void hydrateCharacterAvatars(listEl);
-}
-
-function renderListLoading(listEl: HTMLElement): void {
-  listEl.innerHTML = `<li class="history-loading-row"><span class="history-spinner"></span>Loading sessions&hellip;</li>`;
-}
-
-function formatTime(secs: number | bigint | null | undefined): string {
-  if (secs === null || secs === undefined) return "";
-  const n = typeof secs === "bigint" ? Number(secs) : secs;
-  if (!n) return "";
-  const d = new Date(n * 1000);
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-/** Rebuild the project filter's options from everything loaded so far,
- * preserving the current selection. Called after every fetch. */
-function renderProjectFilterOptions(selectEl: HTMLSelectElement): void {
-  const current = state.filters.projectId ?? "";
-  const sorted = [...state.projectOptions.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  const opts = [`<option value="">All projects</option>`];
-  for (const [id, label] of sorted) {
-    opts.push(`<option value="${escapeHtml(id)}"${id === current ? " selected" : ""}>${escapeHtml(label)}</option>`);
-  }
-  selectEl.innerHTML = opts.join("");
 }
 
 async function selectHistorySession(sessionId: string, pane: HTMLElement): Promise<void> {
@@ -354,8 +218,8 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   renderListLoading(listEl);
   await fetchEntries();
   if (state.mountId !== myMount) return () => { /* superseded */ };
-  renderList(listEl);
-  if (projectSelect) renderProjectFilterOptions(projectSelect);
+  renderList(listEl, state.entries, state.filters, state.selectedId);
+  if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
 
   // If session-detail asked us to open a specific closed chat, select it now.
   // Otherwise auto-select the most recent session so the pane isn't blank.
@@ -378,8 +242,8 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
     renderListLoading(listEl);
     await fetchEntries();
     if (state.mountId !== myFetch) return;
-    renderList(listEl);
-    if (projectSelect) renderProjectFilterOptions(projectSelect);
+    renderList(listEl, state.entries, state.filters, state.selectedId);
+    if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
   };
 
   searchInput?.addEventListener("input", () => {
@@ -428,62 +292,4 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
     state.statusbar = null;
     state.selectedId = null;
   };
-}
-
-function template() {
-  return html`
-    <div class="view view-history">
-      <div class="view-header">
-        <button
-          class="icon-btn burger"
-          title="Menu"
-          data-burger="true"
-          @click=${openSidemenu}
-        >
-          <i class="ph ph-list"></i>
-        </button>
-        <h2>History</h2>
-        <button
-          class="icon-btn"
-          title="Back to Chats"
-          @click=${() => showView("sessions")}
-        >
-          <i class="ph ph-chats"></i>
-        </button>
-      </div>
-      <div class="view-body" id="history-content">
-        <div class="history-filter-bar">
-          <input
-            id="history-search"
-            type="search"
-            class="history-filter-input"
-            placeholder="Search titles"
-          />
-          <select id="history-project-filter" class="history-filter-select">
-            <option value="">All projects</option>
-          </select>
-          <select id="history-model-filter" class="history-filter-select">
-            <option value="">All models</option>
-            <option value="haiku">Haiku</option>
-            <option value="sonnet">Sonnet</option>
-            <option value="opus">Opus</option>
-            <option value="fable">Fable</option>
-          </select>
-          <div class="history-date-range">
-            <input id="history-date-from" type="date" class="history-filter-input" title="From date" />
-            <span class="history-date-range-sep">&ndash;</span>
-            <input id="history-date-to" type="date" class="history-filter-input" title="To date" />
-          </div>
-        </div>
-        <div class="history-layout">
-          <aside class="history-sidebar">
-            <ul id="history-list"></ul>
-          </aside>
-          <main class="history-pane">
-            <div class="history-empty">Pick a past session</div>
-          </main>
-        </div>
-      </div>
-    </div>
-  `;
 }
