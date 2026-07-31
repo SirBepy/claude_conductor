@@ -790,13 +790,15 @@
     position: relative;
   }
 
-  /* Each pane fills the body; the attribute decides which one is shown. */
-  .sessions-sidebar {
+  /* Each pane fills the body; the attribute decides which one is shown.
+     Scoped under .view-sessions to outrank session-list.css's unconditional
+     260px width, which Vite emits later in the bundle (source-order tie). */
+  .view-sessions .sessions-sidebar {
     width: 100%;
     flex-shrink: 1;
     border-right: none;
   }
-  .session-pane {
+  .view-sessions .session-pane {
     width: 100%;
   }
 
