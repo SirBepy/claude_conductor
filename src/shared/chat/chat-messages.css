@@ -589,6 +589,11 @@
   transition: opacity 0.15s, color 0.15s, background 0.15s;
   padding: 0;
   z-index: 1;
+  /* The <i> icon is a flex child, so it's blockified per the CSS Display
+     spec (flex items are always block-level) - Chromium's copy-selection
+     serializer then inserts a newline entering/exiting that box. UI chrome,
+     never real text: opt it out of selection so it can't split copied text. */
+  user-select: none;
 }
 
 .copyable-block:hover .copy-btn {
