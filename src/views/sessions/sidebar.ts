@@ -442,6 +442,8 @@ export function renderSidebar(listEl: HTMLElement): void {
     // turned it into a real session). The li carries data-placeholder-id so
     // keyOf() in sidebar-anim derives the matching `p:<id>` key.
     const pid = escapeHtml(pending.placeholderId);
+    // 3-dot button hidden in portrait mode, same as live rows - right-click
+    // (wired in sessions.ts's openMenuForRow) is the only way in there.
     const html = !pending.firstMessageSent
       ? `<li class="${activeCls} pending draft ${rowClass}" data-pending="1" data-placeholder-id="${pid}" title="Draft — type a message to start">
           ${draftLeadingVisual(pending.config.characterId, pending.projectPath)}
@@ -449,9 +451,9 @@ export function renderSidebar(listEl: HTMLElement): void {
             <span class="session-row-project">Draft New Chat</span>
             <span class="session-row-subtitle">${escapeHtml(pending.projectName || "New session")}</span>
           </div>
-          <button class="session-row-menu-btn icon-btn" title="Draft options" data-draft-menu="1">
+          ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="Draft options" data-draft-menu="1">
             <i class="ph ph-dots-three-vertical"></i>
-          </button>
+          </button>`}
         </li>`
       : `<li class="${activeCls} pending ${rowClass}" data-pending="1" data-placeholder-id="${pid}" title="Starting new session... click X to discard if stuck">
           ${draftLeadingVisual(pending.config.characterId, pending.projectPath)}
@@ -459,9 +461,9 @@ export function renderSidebar(listEl: HTMLElement): void {
             <span class="session-row-project">starting...</span>
             <span class="session-row-subtitle">${escapeHtml(pending.projectName || "New session")}</span>
           </div>
-          <button class="session-row-menu-btn icon-btn" title="Draft options" data-draft-menu="1">
+          ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="Draft options" data-draft-menu="1">
             <i class="ph ph-dots-three-vertical"></i>
-          </button>
+          </button>`}
         </li>`;
     entries.push({ key: `p:${pending.placeholderId}`, html });
   }
@@ -475,9 +477,9 @@ export function renderSidebar(listEl: HTMLElement): void {
           <span class="session-row-project">Draft New Chat</span>
           <span class="session-row-subtitle">${escapeHtml(d.projectName || "New session")}</span>
         </div>
-        <button class="session-row-menu-btn icon-btn" title="Draft options" data-parked-placeholder-id="${escapeHtml(d.placeholderId)}">
+        ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="Draft options" data-parked-placeholder-id="${escapeHtml(d.placeholderId)}">
           <i class="ph ph-dots-three-vertical"></i>
-        </button>
+        </button>`}
       </li>`,
     });
   }

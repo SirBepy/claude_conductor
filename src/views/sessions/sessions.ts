@@ -594,14 +594,40 @@ function wireStaticListeners(
   // Sort select moved to Settings. No binding needed here; sessions.ts reads
   // the persisted localStorage value on each renderSidebar call via loadSort().
 
+  // Opens the right context menu for whichever row kind `li` is (live session,
+  // active draft/starting, or parked draft) - shared by the row's 3-dot button
+  // click AND right-click, so a row never has one interaction the other lacks.
+  // Portrait mode drops the 3-dot button entirely (see sidebar.ts), so for
+  // every row kind right-click is the only way in there.
+  const openMenuForRow = (li: HTMLElement, anchor: HTMLElement): void => {
+    const sid = li.dataset.sessionId;
+    if (sid) {
+      openCtxMenu(sid, anchor);
+      return;
+    }
+    const pid = li.dataset.placeholderId;
+    if (!pid) return;
+    if (li.classList.contains("parked-draft")) {
+      openDraftCtxMenu(anchor, () => {
+        state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
+        discardComposerDraft(pid);
+        renderSidebar(listEl);
+      });
+    } else {
+      openDraftCtxMenu(anchor, () => {
+        if (state.pendingNewSession?.firstMessageSent) discardStuckPending(pane);
+        else { discardDraft(pane); updateThinkingBar(); }
+      });
+    }
+  };
+
   // Right-click anywhere on a session row opens the same context menu the
   // hover-revealed ⋮ button does (the button stays for discoverability).
   listEl.addEventListener("contextmenu", (e) => {
-    const li = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id]");
-    const sid = li?.dataset.sessionId;
-    if (!li || !sid) return;
+    const li = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id], li[data-placeholder-id]");
+    if (!li) return;
     e.preventDefault();
-    openCtxMenu(sid, li);
+    openMenuForRow(li, li);
   });
 
   listEl.addEventListener("click", (e) => {
@@ -609,22 +635,8 @@ function wireStaticListeners(
     const menuBtn = (e.target as HTMLElement).closest<HTMLButtonElement>(".session-row-menu-btn");
     if (menuBtn) {
       e.stopPropagation();
-      const sid = menuBtn.dataset.sessionId;
-      const parkedPid = menuBtn.dataset.parkedPlaceholderId;
-      if (sid) {
-        openCtxMenu(sid, menuBtn);
-      } else if (parkedPid) {
-        openDraftCtxMenu(menuBtn, () => {
-          state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== parkedPid);
-          discardComposerDraft(parkedPid);
-          renderSidebar(listEl);
-        });
-      } else if (menuBtn.dataset.draftMenu === "1") {
-        openDraftCtxMenu(menuBtn, () => {
-          if (state.pendingNewSession?.firstMessageSent) discardStuckPending(pane);
-          else { discardDraft(pane); updateThinkingBar(); }
-        });
-      }
+      const li = menuBtn.closest<HTMLLIElement>("li[data-session-id], li[data-placeholder-id]");
+      if (li) openMenuForRow(li, menuBtn);
       return;
     }
 
