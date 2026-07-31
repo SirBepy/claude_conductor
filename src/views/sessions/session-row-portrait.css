@@ -1,0 +1,92 @@
+/* ── Portrait row style (Settings > Appearance > Chat row style) ────────────
+   Scoped under .row-portrait so classic is untouched and this block can be
+   deleted whole if Portrait doesn't stick - see the 2026-08-30 todo. */
+.sessions-list li.row-portrait {
+  --row-h: 52px;
+  height: var(--row-h);
+  gap: 15px;
+  /* The gap between portraits IS this border. Putting it on the row rather than
+     inside the avatar wrapper keeps the strip's box, and therefore the centre
+     every other element aligns to, identical to the art's visible centre. */
+  border-bottom: 2px solid var(--color-surface-alt);
+}
+
+/* Square, so the square source art is never cropped: a taller row buys a bigger
+   face instead of a taller crop. -2px is the row's bottom border. */
+.sessions-list li.row-portrait .session-avatar-wrap,
+.sessions-list li.row-portrait .session-avatar {
+  width: calc(var(--row-h) - 2px);
+}
+
+/* Name and battery share one baseline. With only two things to place, a second
+   row left them stranded at opposite edges of mostly empty space. */
+.sessions-list li.row-portrait .session-row-text {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.sessions-list li.row-portrait .session-row-project {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.sessions-list li.row-portrait .proj-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The battery is on every row and the scheduled marker is not, so the battery
+   anchors the right edge and never shifts. */
+.sessions-list li.row-portrait .session-chips {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+.session-model-battery {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted);
+}
+.session-model-battery i { font-size: 1rem; line-height: 1; }
+.sessions-list li.active .session-model-battery { color: var(--color-background); opacity: 0.85; }
+
+/* Portrait row: the devicon moves from the bottom corner to the middle of the
+   portrait's right border, so it lines up with the project name. It straddles
+   the strip edge; the row's 15px flex gap is what keeps it from touching the
+   name and reading as a text-leading icon instead of a badge on the character. */
+.session-proj-badge.is-centred {
+  top: 50%;
+  bottom: auto;
+  right: -8px;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 2px solid var(--color-surface-alt, #0d0f15);
+  background: var(--color-surface-alt, #0d0f15);
+}
+
+/* Scheduled marker as a corner badge on the character, keeping the text line's
+   right edge occupied by the battery alone at a fixed x on every row. */
+.session-sched-corner {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 11;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 3px;
+  border-radius: 999px;
+  background: rgba(10, 11, 17, 0.78);
+  color: var(--color-primary, #7c6af7);
+  font-size: 0.62rem;
+  line-height: 1.5;
+}
+.session-sched-corner i { font-size: 0.72rem; }
+.session-sched-count { font-weight: 700; }
