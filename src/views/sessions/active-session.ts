@@ -21,7 +21,7 @@ import { api } from "../../shared/api";
 import { askConfirm } from "../../shared/confirm";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
-import { isAutoAccept, setAutoAccept, replayPendingPrompt, pendingPromptSessionIds } from "./permission-modal";
+import { isAutoAccept, setAutoAccept, replayPendingPrompt, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
 import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { SessionHeader } from "./session-header";
@@ -232,6 +232,12 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     const draft = snapshotActiveCardDraft(state.selectedId);
     if (draft) savePendingPromptDraft(state.selectedId, draft);
   }
+  // Tear down any live question card BEFORE the pane's innerHTML is replaced
+  // below: otherwise the registry entry, its document-level keydown listener,
+  // and its ResizeObserver dangle past the DOM they reference. Display-only -
+  // dismissQuestionCard never fires onSubmit/onCancel, so the prompt stays
+  // pending daemon-side and the draft snapshotted just above still replays.
+  dismissQuestionCard();
   // Unwatch any previously watched session if we're switching to a different one.
   if (_watchedId && _watchedId !== sessionId) {
     void invoke<void>("unwatch_session_transcript", { sessionId: _watchedId }).catch(() => {});

@@ -66,12 +66,12 @@ export function getSelectedSessionId(): string | null {
 export function isForSelectedSession(eventSessionId: string | undefined): boolean {
   if (!eventSessionId) return false;
   if (_selectedSessionId === eventSessionId) return true;
-  // A session mid-/close surfaces its prompts inline even when the user has
-  // switched away: the close skill's Phase-0 AskUserQuestion and chained-command
-  // permission prompts must reach the user, not sit parked. Driven by the
-  // daemon-authoritative `closing` flag (was a manually-maintained
-  // `_backgroundSessionIds` set the old frontend close-watcher populated).
-  if (state.sessions.some((s) => s.session_id === eventSessionId && s.closing)) return true;
+  // No more `closing`-flag bypass here: since commit a3ef1d1a made `closing` a
+  // daemon-registry flag broadcast to EVERY window, the old inline-surface
+  // exception fired in every window for any session running /close, bleeding
+  // its card onto whatever chat happened to be on screen. A closing session's
+  // prompt now follows the exact same park/replay path as any other
+  // non-selected session (see the pending-prompt section below).
   // During a brand-new session's first turn, selectedId is still the placeholder
   // while the active pane already shows the real session (the renderer swapped
   // its subscription on SessionStarted but setActiveSession lags until
@@ -91,8 +91,9 @@ export function isForSelectedSession(eventSessionId: string | undefined): boolea
 // respond_question, so a dropped event hangs that chat's turn forever. Instead
 // we stash the payload keyed by session_id and replay it when the user selects
 // that chat. While a prompt is parked the sidebar marks the row as needing
-// attention so the user knows to switch back. (A session mid-`/close` surfaces
-// inline instead - see the `closing`-flag check in `isForSelectedSession`.)
+// attention so the user knows to switch back. This applies uniformly,
+// including to a session mid-`/close` - it gets no special inline-surface
+// treatment (see `isForSelectedSession`).
 
 export type PendingPrompt =
   | { kind: "permission"; payload: PermissionRequestedPayload }

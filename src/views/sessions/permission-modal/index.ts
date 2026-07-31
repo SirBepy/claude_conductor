@@ -140,36 +140,28 @@ function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: Que
       if (!sid) return;
       // Inject the answer as an ordinary follow-up so it resumes the work in a
       // fresh turn. `<auq-answer/>` renders it as an "answer" chip; the framed
-      // body ("User answered…") is what the model reads. Routing through the
-      // held-flush path folds any queued (held) messages into the same send.
-      // This block MUST stay the sole content of this message: chat-transforms.ts's
-      // extractAuqAnswerText only folds the sentinel into the resolved question
-      // card when the message is exactly one block, else the card is stuck
-      // showing "awaiting answer" forever.
+      // body ("User answered…") is what the model reads. The review step's
+      // extra message / attachments ride along as separate blocks in the SAME
+      // send (ai_todo 446) rather than a second, "Send now"-gated message -
+      // bundleHeld/extractAuqAnswerText key off the sentinel staying its own
+      // standalone block (cca356d8), not off the message being one block, so
+      // the card still folds.
       const answerText = formatAnswersAsMessage(questions, answers);
       const answerBlock: ContentBlock = { type: "text", text: `${AUQ_ANSWER_SENTINEL}${answerText}` };
-      if (state.selectedId === sid && state.heldMessages) {
-        await state.heldMessages.flushHeldWithDraft([answerBlock]);
-      } else {
-        const cwd = resolveCwdForSession(sid) ?? ".";
-        await invoke("send_message", { sessionId: sid, cwd, blocks: [answerBlock] });
-      }
-      // Extras go out as their own ordinary follow-up (no sentinel) right
-      // after - staged, not sent directly, so it waits for the answer's own
-      // turn to finish instead of racing it.
       const extraBlocks: ContentBlock[] = [];
       if (extras.additionalMessage) extraBlocks.push({ type: "text", text: extras.additionalMessage });
       for (const a of extras.attachments) {
         if (a.path) extraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
       }
-      if (extraBlocks.length === 0) return;
       if (state.selectedId === sid && state.heldMessages) {
-        state.heldMessages.stage(extraBlocks);
+        // Stage the extras FIRST so flushHeldWithDraft's single bundleHeld call
+        // folds them alongside the isolated sentinel block into one bundle,
+        // instead of a second message queued behind it.
+        if (extraBlocks.length) state.heldMessages.stage(extraBlocks);
+        await state.heldMessages.flushHeldWithDraft([answerBlock]);
       } else {
         const cwd = resolveCwdForSession(sid) ?? ".";
-        await invoke("send_message", { sessionId: sid, cwd, blocks: extraBlocks }).catch((e) =>
-          console.warn("[AUQ] extra-message send failed:", e),
-        );
+        await invoke("send_message", { sessionId: sid, cwd, blocks: [answerBlock, ...extraBlocks] });
       }
     },
     onCancel: async () => {
@@ -240,8 +232,10 @@ function handlePermissionRequested(payload: PermissionRequestedPayload): void {
 }
 
 /** An AskUserQuestion fired. Park it (backgrounded chat) or show the card (the
- *  focused chat). Never auto-answered. */
-function handleQuestionRequested(payload: QuestionRequestedPayload): void {
+ *  focused chat). Never auto-answered. Exported (alongside dismissQuestionCard
+ *  below) so view-harness e2e specs can drive the real gate + card mount
+ *  without a full Tauri event round-trip. */
+export function handleQuestionRequested(payload: QuestionRequestedPayload): void {
   console.info("[perm-relay] frontend received question-requested", { session: payload.session_id, ...gateDiag() });
   if (!isForSelectedSession(payload.session_id)) {
     if (payload.session_id) {
