@@ -281,33 +281,45 @@ describe("stateTooltip", () => {
 });
 
 describe("sortSessions", () => {
-  const unread = new Set(["busy-id"]);
-  const noAttention = new Set();
-  const noQuestion = new Set();
   const working = makeInstance({ session_id: "busy-id", busy: true, started_at: "2026-05-08T09:00:00Z", cwd: "/p/beta" });
   const yourTurn = makeInstance({ session_id: "other-id", busy: false, started_at: "2026-05-08T07:00:00Z", cwd: "/p/gamma" });
   const external = makeInstance({ session_id: "ext-id", kind: "external", started_at: "2026-05-08T06:00:00Z", cwd: "/p/delta" });
 
-  it("status sort: working first", () => {
-    const sorted = sortSessions([yourTurn, working], "status", unread, noAttention, noQuestion);
-    expect(sorted[0].session_id).toBe("busy-id");
+  // Signature is sortSessions(sessions, sort, closing?, drainBySession?) - the
+  // old unread/attention/question Sets were removed for the "status" branch,
+  // which now orders purely by project name then started_at.
+  it("status sort: orders by project name ascending", () => {
+    const sorted = sortSessions([yourTurn, working, external], "status");
+    expect(sorted.map(s => s.session_id)).toEqual(["busy-id", "ext-id", "other-id"]);
   });
-  it("status sort: a chat needing permission sorts above a busy one", () => {
-    const attention = new Set(["other-id"]);
-    const sorted = sortSessions([working, yourTurn], "status", unread, attention, noQuestion);
-    expect(sorted[0].session_id).toBe("other-id");
+  it("status sort: project comparison is case-insensitive (not naive ASCII order)", () => {
+    const zeta = makeInstance({ session_id: "zeta-id", cwd: "/p/Zeta", started_at: "2026-05-08T08:00:00Z" });
+    const apple = makeInstance({ session_id: "apple-id", cwd: "/p/apple", started_at: "2026-05-08T08:00:00Z" });
+    const sorted = sortSessions([zeta, apple], "status");
+    expect(sorted.map(s => s.session_id)).toEqual(["apple-id", "zeta-id"]);
   });
-  it("status sort: a question sorts above a busy one", () => {
-    const question = new Set(["other-id"]);
-    const sorted = sortSessions([working, yourTurn], "status", unread, noAttention, question);
-    expect(sorted[0].session_id).toBe("other-id");
+  it("status sort: within the same project, oldest started_at sorts first", () => {
+    const betaOld = makeInstance({ session_id: "beta-old", cwd: "/p/beta", started_at: "2026-05-08T05:00:00Z" });
+    const betaNew = makeInstance({ session_id: "beta-new", cwd: "/p/beta", started_at: "2026-05-08T09:00:00Z" });
+    const sorted = sortSessions([betaNew, betaOld], "status");
+    expect(sorted.map(s => s.session_id)).toEqual(["beta-old", "beta-new"]);
+  });
+  it("status sort: busy/unread/attention/question have no effect on order", () => {
+    // working is busy (and was "unread" under the old model) but its project
+    // ("beta") still sorts before yourTurn's idle "gamma" on name alone.
+    const sorted = sortSessions([yourTurn, working], "status");
+    expect(sorted.map(s => s.session_id)).toEqual(["busy-id", "other-id"]);
+  });
+  it("status sort: closing session sorts last despite an alphabetically-earlier project", () => {
+    const sorted = sortSessions([yourTurn, working], "status", new Set(["busy-id"]));
+    expect(sorted.map(s => s.session_id)).toEqual(["other-id", "busy-id"]);
   });
   it("name sort: alphabetical by project", () => {
-    const sorted = sortSessions([working, yourTurn, external], "name", unread, noAttention, noQuestion);
+    const sorted = sortSessions([working, yourTurn, external], "name");
     expect(sorted.map(s => projectName(s))).toEqual(["beta", "delta", "gamma"]);
   });
   it("recent sort: newest started_at first", () => {
-    const sorted = sortSessions([yourTurn, working, external], "recent", unread, noAttention, noQuestion);
+    const sorted = sortSessions([yourTurn, working, external], "recent");
     expect(sorted[0]).toBe(working);
   });
   it("drain sort: heaviest drainer first, unknown drain sinks to bottom", () => {
@@ -319,9 +331,6 @@ describe("sortSessions", () => {
     const sorted = sortSessions(
       [working, yourTurn, external],
       "drain",
-      unread,
-      noAttention,
-      noQuestion,
       new Set(),
       drainBySession,
     );
