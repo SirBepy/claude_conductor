@@ -311,6 +311,7 @@ export function mountComposer(
   setLightboxComposerBridge({
     getDraftText: () => composer.getDraftText(),
     setDraftText: (text) => composer.setDraftText(text),
+    getCwd: () => sess.cwd ?? null,
   });
 
   state.scheduledChip?.destroy();

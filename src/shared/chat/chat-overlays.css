@@ -74,7 +74,12 @@
   max-height: 90%;
 }
 
-.lightbox-composer {
+/* Position/sizing lives on the wrap now (composer-core's shared typing core
+ * needs a highlight backdrop + transparent-text textarea, not one plain box).
+ * Compound selectors throughout so these always win over composer-core/
+ * core.css's plain .cc-typing-* rules regardless of import order (equal-
+ * specificity same-element trap). */
+.cc-typing-wrap.lightbox-composer-wrap {
   position: absolute;
   left: 16px;
   right: 16px;
@@ -83,11 +88,29 @@
   margin: 0 auto;
   min-height: 44px;
   max-height: 160px;
-  resize: none;
+}
+
+.cc-typing-highlight.cc-typing-highlight--lightbox {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
   color: #fff;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.cc-typing-input.lightbox-composer,
+.cc-typing-input.lightbox-composer:focus {
+  min-height: 44px;
+  max-height: 160px;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: #fff;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  outline: none;
   padding: 10px 14px;
   font: inherit;
   font-size: 0.9rem;
@@ -98,8 +121,7 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-.lightbox-composer:focus {
-  outline: none;
+.lightbox-composer-wrap:focus-within .cc-typing-highlight--lightbox {
   border-color: rgba(255, 255, 255, 0.4);
   background: rgba(255, 255, 255, 0.15);
 }

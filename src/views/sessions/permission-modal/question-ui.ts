@@ -4,6 +4,7 @@ import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { createAuqAttachments } from "./attachments";
 import { createAuqSlashPopup } from "./slash-popup";
+import { LIGHTBOX_OVERLAY_CLASS } from "../../../shared/chat/lightbox";
 import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
@@ -138,7 +139,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // NO answer at all (onCancel), unrecoverable for a keypress meant for the
   // image. One guarded path here so both dismiss triggers stay in sync.
   const dismissUnlessOverlayAbove = () => {
-    if (document.querySelector(".lightbox-overlay")) return;
+    if (document.querySelector(`.${LIGHTBOX_OVERLAY_CLASS}`)) return;
     cancel();
   };
 

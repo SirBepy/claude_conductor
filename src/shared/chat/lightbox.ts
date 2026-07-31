@@ -1,6 +1,12 @@
 import { buildMoreMenuButton } from "./lightbox-more-menu";
 import { closeAllMenus } from "../../views/sessions/menu-registry";
 import { setupImageZoomPan } from "./image-zoom-pan";
+import { ComposerCore } from "./composer-core/core";
+import { SlashProvider } from "./caret-popup/providers/slash";
+import { FileProvider } from "./caret-popup/providers/file";
+import type { SuggestProvider } from "./caret-popup/types";
+import "./caret-popup/popup.css";
+import "./composer-core/core.css";
 
 export type LightboxContent =
   | { type: "image"; mime: string; base64: string; filename?: string; sourcePath?: string }
@@ -9,9 +15,19 @@ export type LightboxContent =
 
 let overlay: HTMLDivElement | null = null;
 
+/** Single definition site for the overlay class - consumed by question-ui.ts's
+ *  dismissUnlessOverlayAbove() guard so a rename here can't silently drift out
+ *  of sync with that check again (todo 443). */
+export const LIGHTBOX_OVERLAY_CLASS = "lightbox-overlay";
+
 export interface LightboxComposerBridge {
   getDraftText(): string;
   setDraftText(text: string): void;
+  /** Project cwd for the "/" and "@" suggestion providers - same source as
+   *  the main composer's own SlashProvider.start()/FileProvider.start().
+   *  Omit or return null to still surface user/builtin skills with no
+   *  @file results (mirrors Composer's own null fallback). */
+  getCwd?(): string | null;
 }
 
 // Set by the sessions view (active-session-mount.ts) to the currently mounted
@@ -23,11 +39,20 @@ export function setLightboxComposerBridge(bridge: LightboxComposerBridge | null)
   composerBridge = bridge;
 }
 
+// Typing-experience core for the composer box (ai_todo composer-unification):
+// "/" + "@" suggestion popup and purple highlight backdrop, same shared core
+// as the main composer/AUQ card/preview-panel - not a reimplementation. No
+// onEnter (Enter stays a plain newline, per this box's draft-mirror-only
+// contract) and no paste adapter (attachments are out of scope here).
+let composerCore: ComposerCore | null = null;
+let slashProvider: SlashProvider | null = null;
+let fileProvider: FileProvider | null = null;
+
 export function openLightbox(content: LightboxContent): void {
   closeLightbox();
 
   overlay = document.createElement("div");
-  overlay.className = "lightbox-overlay";
+  overlay.className = LIGHTBOX_OVERLAY_CLASS;
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) closeLightbox();
   });
@@ -58,11 +83,30 @@ export function openLightbox(content: LightboxContent): void {
     setupImageZoomPan(img, inner);
     overlay.appendChild(buildMoreMenuButton(content));
     if (composerBridge) {
+      const wrap = document.createElement("div");
+      wrap.className = "lightbox-composer-wrap cc-typing-wrap";
+      const highlight = document.createElement("div");
+      highlight.className = "cc-typing-highlight cc-typing-highlight--lightbox";
+      highlight.setAttribute("aria-hidden", "true");
       const box = document.createElement("textarea");
-      box.className = "lightbox-composer";
+      box.className = "lightbox-composer cc-typing-input";
       box.placeholder = "Type a message...";
       box.value = composerBridge.getDraftText();
-      overlay.appendChild(box);
+      wrap.append(highlight, box);
+      overlay.appendChild(wrap);
+
+      const cwd = composerBridge.getCwd?.() ?? null;
+      slashProvider = new SlashProvider();
+      fileProvider = new FileProvider();
+      void slashProvider.start(cwd);
+      fileProvider.start(cwd);
+      composerCore = new ComposerCore({
+        textarea: box,
+        highlightEl: highlight,
+        anchor: wrap,
+        providers: [slashProvider, fileProvider] as unknown as SuggestProvider<unknown>[],
+        features: { paste: false },
+      });
     }
   } else if (content.type === "pdf") {
     const blob = b64toBlob(content.base64, "application/pdf");
@@ -90,6 +134,12 @@ export function closeLightbox(): void {
   closeAllMenus();
   const box = overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer");
   if (box && composerBridge) composerBridge.setDraftText(box.value);
+  composerCore?.destroy();
+  composerCore = null;
+  slashProvider?.stop();
+  slashProvider = null;
+  fileProvider?.stop();
+  fileProvider = null;
   const url = overlay.dataset.blobUrl;
   if (url) URL.revokeObjectURL(url);
   overlay.remove();

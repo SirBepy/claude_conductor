@@ -50,11 +50,14 @@ export class ComposerCore {
       if (this.opts.stopPropagationOnPopupConsume) e.stopPropagation();
       return;
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Gated on onEnter itself (not just !!onEnter above the call) so a host
+    // that omits it - per this option's own documented contract - actually
+    // gets the plain-newline default instead of a silently eaten keystroke.
+    if (e.key === "Enter" && !e.shiftKey && this.opts.onEnter) {
       const mobile = (this.opts.isMobileViewport ?? defaultIsMobile)();
       if (mobile) return;
       e.preventDefault();
-      this.opts.onEnter?.();
+      this.opts.onEnter();
     }
   };
 
