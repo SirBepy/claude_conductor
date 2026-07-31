@@ -437,6 +437,13 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         track.style.scrollBehavior = "auto";
         track.scrollLeft = activeTab * track.clientWidth;
         track.style.scrollBehavior = "";
+        // Flex's auto cross-size is the TALLEST sibling panel's height, so a
+        // 2-option question sitting next to a long one would render as tall
+        // as the long one (align-items:flex-start above only stops the panel
+        // itself from stretching, not the row). Pin the track's height to
+        // just the active panel's own content instead.
+        const activePanel = track.querySelector<HTMLElement>(`.prompt-panel[data-panel="${activeTab}"]`);
+        if (activePanel) track.style.height = `${activePanel.offsetHeight}px`;
       }
 
       host.querySelectorAll<HTMLButtonElement>(".prompt-dot").forEach((dot) => {

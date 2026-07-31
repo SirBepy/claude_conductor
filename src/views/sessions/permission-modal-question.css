@@ -579,11 +579,16 @@
  * scrolling - header/footer sit outside the track so the pager never moves. */
 .prompt-track {
   display: flex;
+  align-items: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
   scroll-behavior: smooth;
-  flex: 1;
+  /* flex-basis:auto (not the old flex:1's 0%) so question-ui.ts's per-render
+   * `track.style.height` - set to just the active panel's own content height -
+   * actually takes effect instead of being overridden by flex-grow filling
+   * whatever space the (now-obsolete) tallest-sibling auto-sizing implied. */
+  flex: none;
   min-height: 0;
   scrollbar-width: none;
 }

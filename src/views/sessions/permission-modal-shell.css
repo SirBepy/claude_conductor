@@ -26,7 +26,7 @@
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  width: min(640px, calc(100vw - 32px));
+  width: min(1000px, calc(100vw - 32px));
   z-index: 1000;
   pointer-events: none;
 }
@@ -45,7 +45,7 @@
   /* Same width the viewport-mode host already caps at (below) - the composer/
    * pane hosts stretch full-width with no cap of their own, which on a wide
    * window turned long question text into uncomfortably long lines. */
-  max-width: 640px;
+  max-width: 1000px;
   margin: 0 auto;
   overflow: hidden;
   animation: prompt-card-in 0.16s ease-out;
