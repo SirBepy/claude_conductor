@@ -102,7 +102,7 @@ function sourceDotClass(source: string): string {
 }
 
 /** AI-pushed HTML may be a bare fragment; wrap it in minimal boilerplate
- * before it becomes the iframe's srcdoc document. */
+ * before it becomes the iframe's data: URL document. */
 function wrapFragmentIfNeeded(html: string): string {
   if (/<html[\s>]/i.test(html) || /<body[\s>]/i.test(html)) return html;
   return `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
@@ -117,7 +117,11 @@ function wrapFragmentIfNeeded(html: string): string {
 const INNER_CSP_META =
   `<meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; img-src * data: blob:; font-src * data:;">`;
 
-function buildSrcdoc(html: string): string {
+/** Loaded via a `data:` URL, never `iframe.srcdoc`: a srcdoc document has no
+ * navigation, so it inherits the app's CSP and can only intersect this meta,
+ * never loosen it. A data: URL navigates into its own opaque origin, which
+ * makes this meta the sole governing policy. */
+function buildPreviewDocumentHtml(html: string): string {
   const wrapped = wrapFragmentIfNeeded(html);
   if (/<head[^>]*>/i.test(wrapped)) {
     return wrapped.replace(/<head[^>]*>/i, (m) => `${m}${INNER_CSP_META}`);
@@ -479,7 +483,10 @@ class PreviewPanel implements PreviewController {
     if (!canvas) return;
     canvas.innerHTML = `<div class="pv-frame" data-w="${this.deviceWidth}"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div>`;
     const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
-    if (iframe) iframe.srcdoc = buildSrcdoc(this.selected.html);
+    // data: src (not .srcdoc) — see buildPreviewDocumentHtml's doc for why.
+    if (iframe) {
+      iframe.src = "data:text/html;charset=utf-8," + encodeURIComponent(buildPreviewDocumentHtml(this.selected.html));
+    }
   }
 
   private renderCanvasEmpty(): void {
