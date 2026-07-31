@@ -6,6 +6,7 @@ import {
   type TodoChecklistState,
   type TodoStepStatus,
 } from "./turn-todo-checklist";
+import { STATUS_ICON } from "../status-icons";
 
 /**
  * Per-turn footer: a single block at the bottom of every response bundling
@@ -120,16 +121,16 @@ function buildTooltip(totals: TurnUsageTotals): string {
   return parts.join(" | ");
 }
 
-/** Icon/tooltip for each `<cc-status:..>` value, mirroring the sidebar's
- *  vocabulary (sessions-helpers.ts statusIndicator) so the same states read
- *  the same way in both places. "done" is deliberately left uncolored (no
- *  `turn-chip--status-*` modifier) - a settled turn is the calm default, not
- *  something to highlight. */
+/** Title for each `<cc-status:..>` value; icons come from the shared
+ *  STATUS_ICON table (also used by sessions-helpers.ts statusIndicator) so
+ *  the same states read the same way in both places. "done" is deliberately
+ *  left uncolored (no `turn-chip--status-*` modifier) - a settled turn is
+ *  the calm default, not something to highlight. */
 const STATUS_CHIP_META: Record<string, { icon: string; title: string }> = {
-  question: { icon: "ph-chat-circle-dots", title: "Ended with a question" },
-  working: { icon: "ph-spinner", title: "Working in the background" },
-  waiting: { icon: "ph-hourglass-medium", title: "Waiting on an external process" },
-  done: { icon: "ph-check", title: "Turn completed" },
+  question: { icon: STATUS_ICON.question, title: "Ended with a question" },
+  working: { icon: STATUS_ICON.working, title: "Working in the background" },
+  waiting: { icon: STATUS_ICON.waiting, title: "Waiting on an external process" },
+  done: { icon: STATUS_ICON.done, title: "Turn completed" },
 };
 
 /**

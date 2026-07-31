@@ -1,4 +1,5 @@
 import type { Instance, ScheduledItem } from "../../types/ipc.generated";
+import { STATUS_ICON } from "../../shared/status-icons";
 
 export type SessionSort = "status" | "recent" | "name" | "drain";
 export type SessionStateStyle = "icons" | "dots";
@@ -370,13 +371,13 @@ export function statusIndicator(
     return `<i class="session-state-icon ph ph-spinner s-working spinning" title="${tooltip}"></i>`;
   }
   if (isQuestion) {
-    return `<i class="session-state-icon ph ph-chat-circle-dots s-question" title="${tooltip}"></i>`;
+    return `<i class="session-state-icon ph ${STATUS_ICON.question} s-question" title="${tooltip}"></i>`;
   }
   if (i.awaiting === "working") {
-    return `<i class="session-state-icon ph ph-spinner s-working spinning" title="${tooltip}"></i>`;
+    return `<i class="session-state-icon ph ${STATUS_ICON.working} s-working spinning" title="${tooltip}"></i>`;
   }
   if (i.awaiting === "waiting") {
-    return `<i class="session-state-icon ph ph-hourglass-medium s-waiting" title="${tooltip}"></i>`;
+    return `<i class="session-state-icon ph ${STATUS_ICON.waiting} s-waiting" title="${tooltip}"></i>`;
   }
   if (isRateLimited) {
     return `<i class="session-state-icon ph ph-hourglass-high s-rate-limited" title="${tooltip}"></i>`;
@@ -386,5 +387,5 @@ export function statusIndicator(
   }
   // Done / your turn: a calm muted check, NOT the old red exclamation. The red
   // alarm is reserved for genuine permission prompts (attention-pulse above).
-  return `<i class="session-state-icon ph ph-check s-your-turn" title="${tooltip}"></i>`;
+  return `<i class="session-state-icon ph ${STATUS_ICON.done} s-your-turn" title="${tooltip}"></i>`;
 }
