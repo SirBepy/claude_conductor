@@ -76,6 +76,11 @@ export interface TurnUsageTotals {
   cacheCreate: number;
   cacheRead: number;
   costUsd: number;
+  /** Last non-null `<cc-status:..>` marker seen across the turn's TurnUsage
+   *  events ("question" | "working" | "waiting" | "done"), or undefined/null
+   *  if no marker was ever parsed (pre-marker transcript, or a "done" line
+   *  overwritten by nothing later). */
+  awaiting?: string | null;
 }
 
 export interface TurnFooterState {
@@ -85,6 +90,9 @@ export interface TurnFooterState {
   timeTextNode: Text | null;
   tokenChip: HTMLElement | null;
   tokenTextNode: Text | null;
+  /** Settle-only status chip (question/working/waiting/done). Never created
+   *  for a live/ticking row - see settleMetaRow. */
+  statusChip: HTMLElement | null;
   tickTimer: ReturnType<typeof setInterval> | null;
   /** Wall-clock ms when the live turn started (for the ticking elapsed time). */
   turnStartMs: number;
@@ -112,6 +120,18 @@ function buildTooltip(totals: TurnUsageTotals): string {
   return parts.join(" | ");
 }
 
+/** Icon/tooltip for each `<cc-status:..>` value, mirroring the sidebar's
+ *  vocabulary (sessions-helpers.ts statusIndicator) so the same states read
+ *  the same way in both places. "done" is deliberately left uncolored (no
+ *  `turn-chip--status-*` modifier) - a settled turn is the calm default, not
+ *  something to highlight. */
+const STATUS_CHIP_META: Record<string, { icon: string; title: string }> = {
+  question: { icon: "ph-chat-circle-dots", title: "Ended with a question" },
+  working: { icon: "ph-spinner", title: "Working in the background" },
+  waiting: { icon: "ph-hourglass-medium", title: "Waiting on an external process" },
+  done: { icon: "ph-check", title: "Turn completed" },
+};
+
 /**
  * Per-renderer registry of turn footers. MUST be instance state, not module
  * state: chip keys are a per-renderer sequence (1, 2, 3...), so a shared map
@@ -138,6 +158,7 @@ export class TurnFooterRegistry {
       timeTextNode: null,
       tokenChip: null,
       tokenTextNode: null,
+      statusChip: null,
       tickTimer: null,
       turnStartMs: 0,
       settled: false,
@@ -253,11 +274,37 @@ export class TurnFooterRegistry {
     }
     st.tokenTextNode!.nodeValue = `${formatTokenCount(totals.outputTokens)} tok`;
     st.metaRow!.title = buildTooltip(totals);
+    this.renderStatusChip(st, totals.awaiting);
     if (st.progressBar) {
       st.progressBar.remove();
       st.progressBar = null;
       st.progressFill = null;
     }
+  }
+
+  /**
+   * Settle-only status chip for the turn's folded `<cc-status:..>` marker.
+   * Never called from the live/ticking path (ensureLiveMetaRow) - a status
+   * only means something once the turn is done, so it must not flash mid-turn.
+   * No chip at all when no marker was ever parsed (undefined/null/unknown).
+   */
+  private renderStatusChip(st: TurnFooterState, awaiting: string | null | undefined): void {
+    const meta = awaiting ? STATUS_CHIP_META[awaiting] : undefined;
+    if (!meta) {
+      st.statusChip?.remove();
+      st.statusChip = null;
+      return;
+    }
+    if (!st.statusChip) {
+      const chip = document.createElement("span");
+      chip.className = "turn-chip turn-chip--status";
+      chip.appendChild(document.createElement("i"));
+      st.metaRow!.appendChild(chip);
+      st.statusChip = chip;
+    }
+    st.statusChip.title = meta.title;
+    st.statusChip.className = `turn-chip turn-chip--status turn-chip--status-${awaiting}`;
+    st.statusChip.firstElementChild!.className = `ph ${meta.icon}`;
   }
 
   /**

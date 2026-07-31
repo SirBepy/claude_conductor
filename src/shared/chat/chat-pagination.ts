@@ -24,10 +24,12 @@ export interface PaginatorCallbacks {
 }
 
 function emptyTotals(): TurnUsageTotals {
-  return { durationMs: 0, outputTokens: 0, inputTokens: 0, cacheCreate: 0, cacheRead: 0, costUsd: 0 };
+  return { durationMs: 0, outputTokens: 0, inputTokens: 0, cacheCreate: 0, cacheRead: 0, costUsd: 0, awaiting: null };
 }
 
-/** Combine two partial usage accumulations of the SAME turn (batch straddle). */
+/** Combine two partial usage accumulations of the SAME turn (batch straddle).
+ *  `b` is chronologically later (see prependEvents' carry comments), so its
+ *  status marker wins the last-non-null fold when present. */
 function mergeTotals(a: TurnUsageTotals | null, b: TurnUsageTotals | null): TurnUsageTotals | null {
   if (!a) return b;
   if (!b) return a;
@@ -38,6 +40,7 @@ function mergeTotals(a: TurnUsageTotals | null, b: TurnUsageTotals | null): Turn
     cacheCreate: a.cacheCreate + b.cacheCreate,
     cacheRead: a.cacheRead + b.cacheRead,
     costUsd: a.costUsd + b.costUsd,
+    awaiting: b.awaiting ?? a.awaiting ?? null,
   };
 }
 
@@ -172,6 +175,8 @@ export class ChatPaginator {
         acc.cacheRead += Number(ev.cache_read_input_tokens) || 0;
         acc.costUsd += Number(ev.total_cost_usd) || 0;
         acc.durationMs = Math.max(acc.durationMs, Number(ev.duration_ms) || 0);
+        // Same last-non-null fold as chat-event-handler.ts's live/bulk path.
+        if (ev.awaiting) acc.awaiting = ev.awaiting;
         continue;
       }
       const msg = eventToRenderedMessage(ev);

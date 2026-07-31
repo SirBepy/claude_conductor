@@ -458,6 +458,10 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         u.cacheRead += Number(ev.cache_read_input_tokens) || 0;
         u.costUsd += Number(ev.total_cost_usd) || 0;
         u.durationMs = Math.max(u.durationMs, Number(ev.duration_ms) || 0);
+        // Fold: only the turn's LAST assistant line carries the real
+        // `<cc-status:..>` marker (tool round-trip lines in between have
+        // none) - keep the latest non-null value, never overwrite with null.
+        if (ev.awaiting) u.awaiting = ev.awaiting;
         r.activeTurnUsage = u;
         // Live path: settle immediately so the row stops ticking the moment
         // usage lands. Watched external sessions stream one usage per

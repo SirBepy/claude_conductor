@@ -85,6 +85,17 @@
   display: none;
 }
 
+/* Status chip (question/working/waiting/done), settle-only. Colors mirror
+   the sidebar's status vocabulary (session-list.css --st-* tokens) so the
+   same state reads the same everywhere; "done" stays the uncolored default. */
+.turn-chip--status-question i { color: var(--chat-state-needs-input); }
+.turn-chip--status-working i { color: var(--chat-state-busy); }
+.turn-chip--status-waiting i { color: var(--chat-state-waiting); }
+.turn-chip--status-working i {
+  display: inline-block;
+  animation: icon-btn-spin 0.9s linear infinite;
+}
+
 /* Tooltip on hover for the chip row (full breakdown). */
 .turn-meta-chips[title]:hover {
   cursor: help;
