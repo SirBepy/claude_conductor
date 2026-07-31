@@ -141,6 +141,12 @@ export async function renderPendingPane(
       if (isStillActive && state.renderer && state.renderer.currentSessionId() === placeholderId) {
         await state.renderer.swapSubscription(realId);
       }
+      // Refresh state.sessions now (the daemon-side reseed on the Rust side
+      // runs before this event fires) so the sidebar can render the real,
+      // segmented row immediately instead of the static "starting..."
+      // placeholder, which never reflects live status.
+      await refreshSessions();
+      if (state.mountId !== myMount) return;
       rebuildSidebar();
     });
   }

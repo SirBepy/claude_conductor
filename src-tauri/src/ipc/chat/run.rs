@@ -56,6 +56,19 @@ async fn start_session_daemon(
     // no turn events are missed.
     super::daemon_bridge::ensure_attached(app, &real_id).await?;
 
+    // Reseed cached_instances BEFORE the SessionStarted emit below (moved
+    // ahead of send_message) so the frontend's session_started handler can
+    // call list_instances and immediately see the real session instead of
+    // racing this reseed - otherwise the sidebar keeps rendering the frozen
+    // "starting..." placeholder (which ignores live status) until some later,
+    // unrelated instances-changed broadcast happens to land.
+    {
+        let guard = state.daemon_client.lock().await;
+        if let Some(client) = guard.as_ref() {
+            crate::daemon_link::fetch_and_reseed_instances(client, state).await;
+        }
+    }
+
     // Hand the real id to the frontend: emit a synthetic SessionStarted on the
     // placeholder channel the frontend is listening on. The frontend swaps its
     // renderer subscription to chat:<real_id>, matching Path C.
@@ -74,20 +87,6 @@ async fn start_session_daemon(
         let guard = state.daemon_client.lock().await;
         let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
         client.send_message(&real_id, &prompt).await.map_err(|e| e.to_string())?;
-    }
-
-    // Reseed cached_instances immediately so the Sessions view's list_instances
-    // call sees the new session before the async instances_changed notification
-    // arrives (same race that register_historical_session avoids: the daemon
-    // notification travels via a lossy broadcast and can arrive after the
-    // frontend's pending-pane clears pendingNewSession and fires the
-    // instances-changed pane-clear check, which then finds the session missing
-    // and blanks the pane).
-    {
-        let guard = state.daemon_client.lock().await;
-        if let Some(client) = guard.as_ref() {
-            crate::daemon_link::fetch_and_reseed_instances(client, state).await;
-        }
     }
 
     Ok(real_id)

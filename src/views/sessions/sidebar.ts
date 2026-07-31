@@ -369,10 +369,18 @@ export function renderSidebar(listEl: HTMLElement): void {
 
   const hiddenSessions = listSessions.filter(s => hidden.has(s.session_id) && !projectHidden(s));
 
+  // Once the real session behind a draft is actually in state.sessions, let it
+  // render through the normal segmented row below instead of the static
+  // "starting..." placeholder, which never reflects live status (busy/question/
+  // done) - that placeholder is what forced a nav-away-and-back to see a
+  // just-sent draft's row catch up.
+  const pendingRealId = pending?.realId ?? null;
+  const pendingRealVisible = !!pendingRealId && listSessions.some(s => s.session_id === pendingRealId);
+
   let visible = listSessions.filter(s => !hidden.has(s.session_id) && !projectHidden(s));
-  if (pending?.realId) {
-    visible = visible.filter(s => s.session_id !== pending.realId);
-  } else if (pending) {
+  if (pendingRealId && !pendingRealVisible) {
+    visible = visible.filter(s => s.session_id !== pendingRealId);
+  } else if (pending && !pendingRealId) {
     // Pre-resolution window: the SessionStart hook on our own `claude -p`
     // spawn registers an External entry before chat IPC captures the real
     // session_id. Hide that newcomer row so it doesn't double-render
@@ -421,14 +429,14 @@ export function renderSidebar(listEl: HTMLElement): void {
   const pendingHidden = !!pending && scheduledPendingPlaceholders.has(pending.placeholderId);
   const visibleParked = state.parkedDrafts.filter((d) => !scheduledPendingPlaceholders.has(d.placeholderId));
 
-  if ((pending && !pendingHidden) || visibleParked.length > 0) {
+  if ((pending && !pendingHidden && !pendingRealVisible) || visibleParked.length > 0) {
     entries.push({
       key: "__seg:draft__",
       html: `<li class="session-group-header" data-row-key="__seg:draft__">Draft</li>`,
     });
   }
 
-  if (pending && !pendingHidden) {
+  if (pending && !pendingHidden && !pendingRealVisible) {
     const isPendingActive = state.selectedId === pending.placeholderId;
     const activeCls = isPendingActive ? "active" : "";
     // Key by placeholderId, NOT a constant "pending": consecutive drafts must
