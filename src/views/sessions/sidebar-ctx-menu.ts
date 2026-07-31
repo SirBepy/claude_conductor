@@ -34,7 +34,11 @@ export function closeCtxMenu(): void {
   }
 }
 
-export function openDraftCtxMenu(anchor: HTMLElement, onDiscard: () => void): void {
+export function openDraftCtxMenu(
+  anchor: HTMLElement,
+  onDiscard: () => void,
+  cwd: string | null = state.pendingNewSession?.projectPath ?? null,
+): void {
   closeCtxMenu();
   const pending = state.pendingNewSession;
 
@@ -46,7 +50,7 @@ export function openDraftCtxMenu(anchor: HTMLElement, onDiscard: () => void): vo
   const ctx: ChatMenuCtx = {
     kind: "draft",
     sessionId: pending?.realId ?? null,
-    cwd: pending?.projectPath ?? null,
+    cwd,
     pid: null,
     readOnly: false,
     autoAcceptOn: false,

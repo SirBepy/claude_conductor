@@ -608,11 +608,12 @@ function wireStaticListeners(
     const pid = li.dataset.placeholderId;
     if (!pid) return;
     if (li.classList.contains("parked-draft")) {
+      const parked = state.parkedDrafts.find(d => d.placeholderId === pid);
       openDraftCtxMenu(anchor, () => {
         state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
         discardComposerDraft(pid);
         renderSidebar(listEl);
-      });
+      }, parked?.projectPath ?? null);
     } else {
       openDraftCtxMenu(anchor, () => {
         if (state.pendingNewSession?.firstMessageSent) discardStuckPending(pane);
