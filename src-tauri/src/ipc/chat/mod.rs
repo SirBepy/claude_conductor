@@ -7,7 +7,8 @@
 //! - `attachments`— image attachments: `paste_image`, `read_attachment`,
 //!                  shared `validate_session_id` + `write_attachment` helpers.
 //! - `history`    — read-only transcript replays: `load_history`,
-//!                  `load_history_page`, `list_history`.
+//!                  `load_history_page`.
+//! - `history_list` — History-view listing pipeline: `list_history`.
 //! - `lifecycle`  — AppHandle / process-tree side: `gc_attachments`,
 //!                  `takeover_manual`, `detach_window`, `reattach_window`,
 //!                  `respond_permission`, `respond_question`.
@@ -20,6 +21,7 @@ pub mod attachments;
 pub mod builtins;
 pub mod daemon_bridge;
 pub mod history;
+pub mod history_list;
 pub mod lifecycle;
 pub mod run;
 pub mod watcher;
@@ -31,6 +33,7 @@ pub mod watcher;
 pub use attachments::*;
 pub use builtins::*;
 pub use history::*;
+pub use history_list::*;
 pub use lifecycle::*;
 pub use run::*;
 pub use watcher::*;
