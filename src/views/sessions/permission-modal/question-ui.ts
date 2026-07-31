@@ -428,8 +428,16 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       // Scroll position doesn't survive the innerHTML rebuild above - a fresh
       // track element always starts at scrollLeft 0, so without this an
       // option click (which re-renders) would silently snap back to Q1.
+      // scroll-behavior: smooth is CSS-level, so syncing scrollLeft on this
+      // brand-new node would animate FROM that fresh 0 (Q1) TO activeTab -
+      // visibly snapping to Q1 first. Force the sync instant, then hand
+      // back to CSS smooth for any real user scroll/swipe on the track.
       const track = host.querySelector<HTMLElement>(".prompt-track");
-      if (track) track.scrollLeft = activeTab * track.clientWidth;
+      if (track) {
+        track.style.scrollBehavior = "auto";
+        track.scrollLeft = activeTab * track.clientWidth;
+        track.style.scrollBehavior = "";
+      }
 
       host.querySelectorAll<HTMLButtonElement>(".prompt-dot").forEach((dot) => {
         dot.addEventListener("click", () => {
