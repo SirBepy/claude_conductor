@@ -210,7 +210,10 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.prompt-q__other-input {
+/* .prompt-extra-input is the review step's "add a message" box - same widget,
+ * different class, so it must be listed here or it renders browser-default. */
+.prompt-q__other-input,
+.prompt-extra-input {
   resize: none;
   min-height: 32px;
   max-height: 160px;
@@ -225,11 +228,13 @@
   outline: none;
   transition: border-color 0.12s, background 0.12s;
 }
-.prompt-q__other-input:focus {
+.prompt-q__other-input:focus,
+.prompt-extra-input:focus {
   border-color: var(--color-primary);
   background: var(--color-surface);
 }
-.prompt-q__other-input::placeholder {
+.prompt-q__other-input::placeholder,
+.prompt-extra-input::placeholder {
   color: var(--color-text-muted);
 }
 
