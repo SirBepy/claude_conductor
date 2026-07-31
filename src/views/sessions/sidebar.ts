@@ -23,6 +23,7 @@ import {
   scheduledPendingPlaceholderIds,
   isJarvisOrWorker,
 } from "./sessions-helpers";
+import type { SessionSort, SessionStateStyle } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
 import { getChatSlotMode, getSlotAssignment } from "../../shared/shortcuts";
@@ -275,6 +276,54 @@ export async function refreshSessions(): Promise<boolean> {
   }
 }
 
+/** Renders a single live-session row's `<li>`, shared by BOTH the segmented
+ *  list and the Hidden section so they can never drift apart. Before this was
+ *  extracted, Hidden hand-duplicated the row markup and had quietly dropped
+ *  the scheduled-message badge, the remote/autopilot badges, the drain chip,
+ *  and the closing/attention/rate-limited classes - it just looked like a
+ *  different, poorer card. `kbdHint` is the pre-formed ` data-kbd-hint="n"`
+ *  attribute (or "") since Hidden rows never get a keyboard shortcut. */
+function renderSessionRow(
+  s: Instance,
+  ctx: {
+    isActive: boolean;
+    unread: Set<string>;
+    attention: Set<string>;
+    question: Set<string>;
+    rateLimited: ReadonlySet<string>;
+    closing: Set<string>;
+    style: SessionStateStyle;
+    isPortrait: boolean;
+    rowClass: string;
+    sort: SessionSort;
+    drainMap: Map<string, number>;
+    scheduledCountMap: Map<string, number>;
+    kbdHint: string;
+  },
+): string {
+  const indicator = statusIndicator(s, ctx.unread, ctx.attention, ctx.question, ctx.style, escapeHtml, ctx.rateLimited);
+  const needsAttention = ctx.attention.has(s.session_id);
+  const isClosing = ctx.closing.has(s.session_id);
+  return `<li data-session-id="${escapeHtml(s.session_id)}"${ctx.kbdHint} class="${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} ${ctx.rowClass}">
+            ${ctx.isPortrait
+              ? leadingVisual(s, indicator, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited, {
+                  badgeClass: "is-centred",
+                  extra: scheduledCornerHtml(ctx.scheduledCountMap.get(s.session_id)),
+                })
+              : leadingVisual(s, indicator, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited)}
+            <div class="session-row-text">
+              ${ctx.isPortrait
+                ? `<span class="session-row-project" data-tip="${escapeHtml(sessionSubtitle(s))}"><span class="proj-name">${escapeHtml(projectName(s))}</span>${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" data-tip="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" data-tip="Autopilot active">autopilot</span>` : ""}</span>
+              <span class="session-chips">${modelBatteryHtml(s.model)}${ctx.sort === "drain" ? drainChipHtml(ctx.drainMap.get(s.session_id)) : ""}</span>`
+                : `<span class="session-row-project">${scheduledBadgeHtml(ctx.scheduledCountMap.get(s.session_id))}${escapeHtml(sessionSubtitle(s))}${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" title="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" title="Autopilot active">autopilot</span>` : ""}</span>
+              <span class="session-row-subtitle">${escapeHtml(projectName(s))}${ctx.sort === "drain" ? drainChipHtml(ctx.drainMap.get(s.session_id)) : ""}</span>`}
+            </div>
+            ${ctx.isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
+              <i class="ph ph-dots-three-vertical"></i>
+            </button>`}
+          </li>`;
+}
+
 export function renderSidebar(listEl: HTMLElement): void {
   sidebarListEl = listEl;
   setRerenderCallback(() => renderSidebar(listEl));
@@ -394,7 +443,7 @@ export function renderSidebar(listEl: HTMLElement): void {
     // keyOf() in sidebar-anim derives the matching `p:<id>` key.
     const pid = escapeHtml(pending.placeholderId);
     const html = !pending.firstMessageSent
-      ? `<li class="${activeCls} pending draft" data-pending="1" data-placeholder-id="${pid}" title="Draft — type a message to start">
+      ? `<li class="${activeCls} pending draft ${rowClass}" data-pending="1" data-placeholder-id="${pid}" title="Draft — type a message to start">
           ${draftLeadingVisual(pending.config.characterId, pending.projectPath)}
           <div class="session-row-text">
             <span class="session-row-project">Draft New Chat</span>
@@ -404,7 +453,7 @@ export function renderSidebar(listEl: HTMLElement): void {
             <i class="ph ph-dots-three-vertical"></i>
           </button>
         </li>`
-      : `<li class="${activeCls} pending" data-pending="1" data-placeholder-id="${pid}" title="Starting new session... click X to discard if stuck">
+      : `<li class="${activeCls} pending ${rowClass}" data-pending="1" data-placeholder-id="${pid}" title="Starting new session... click X to discard if stuck">
           ${draftLeadingVisual(pending.config.characterId, pending.projectPath)}
           <div class="session-row-text">
             <span class="session-row-project">starting...</span>
@@ -420,7 +469,7 @@ export function renderSidebar(listEl: HTMLElement): void {
   for (const d of visibleParked) {
     entries.push({
       key: `p:${d.placeholderId}`,
-      html: `<li class="parked-draft" data-placeholder-id="${escapeHtml(d.placeholderId)}" title="Parked draft — click to resume">
+      html: `<li class="parked-draft ${rowClass}" data-placeholder-id="${escapeHtml(d.placeholderId)}" title="Parked draft — click to resume">
         ${draftLeadingVisual(d.config.characterId, d.projectPath)}
         <div class="session-row-text">
           <span class="session-row-project">Draft New Chat</span>
@@ -433,10 +482,15 @@ export function renderSidebar(listEl: HTMLElement): void {
     });
   }
 
-  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting"];
-  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []]]);
+  // Sessions with a pending/firing scheduled message, keyed off the same
+  // count map the badge itself reads - a session shows in Scheduled iff it'd
+  // also show the clock badge.
+  const scheduledIds = new Set(scheduledCountMap.keys());
+
+  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled"];
+  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []]]);
   for (const s of sorted) {
-    segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited))!.push(s);
+    segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds))!.push(s);
   }
 
   let sessionIndex = 0;
@@ -458,9 +512,6 @@ export function renderSidebar(listEl: HTMLElement): void {
       for (const s of group) {
         const i = sessionIndex++;
         const isActive = s.session_id === state.selectedId;
-        const needsAttention = attention.has(s.session_id);
-        const isClosing = closing.has(s.session_id);
-        const indicator = statusIndicator(s, unread, attention, question, style, escapeHtml, rateLimited);
         let kbdHint = "";
         if (isManualSlots) {
           const slot = slotBySession[s.session_id];
@@ -470,24 +521,9 @@ export function renderSidebar(listEl: HTMLElement): void {
         }
         entries.push({
           key: `s:${s.session_id}`,
-          html: `<li data-session-id="${escapeHtml(s.session_id)}"${kbdHint} class="${isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${rateLimited.has(s.session_id) ? "is-rate-limited" : ""} ${rowClass}">
-            ${isPortrait
-              ? leadingVisual(s, indicator, unread, attention, question, rateLimited, {
-                  badgeClass: "is-centred",
-                  extra: scheduledCornerHtml(scheduledCountMap.get(s.session_id)),
-                })
-              : leadingVisual(s, indicator, unread, attention, question, rateLimited)}
-            <div class="session-row-text">
-              ${isPortrait
-                ? `<span class="session-row-project" data-tip="${escapeHtml(sessionSubtitle(s))}"><span class="proj-name">${escapeHtml(projectName(s))}</span>${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" data-tip="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" data-tip="Autopilot active">autopilot</span>` : ""}</span>
-              <span class="session-chips">${modelBatteryHtml(s.model)}${sort === "drain" ? drainChipHtml(drainMap.get(s.session_id)) : ""}</span>`
-                : `<span class="session-row-project">${scheduledBadgeHtml(scheduledCountMap.get(s.session_id))}${escapeHtml(sessionSubtitle(s))}${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" title="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" title="Autopilot active">autopilot</span>` : ""}</span>
-              <span class="session-row-subtitle">${escapeHtml(projectName(s))}${sort === "drain" ? drainChipHtml(drainMap.get(s.session_id)) : ""}</span>`}
-            </div>
-            ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
-              <i class="ph ph-dots-three-vertical"></i>
-            </button>`}
-          </li>`,
+          html: renderSessionRow(s, {
+            isActive, unread, attention, question, rateLimited, closing, style, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint,
+          }),
         });
       }
     }
@@ -496,14 +532,14 @@ export function renderSidebar(listEl: HTMLElement): void {
   // "Waiting" (5, parked on an external process) renders right after
   // "In Progress" (2) so the blocked-on-a-script chats sit next to the
   // actively-running ones without disturbing the other groups' order.
-  // "Closing" (3) is deferred past Hidden below - it renders dead last so a
-  // chat mid-close never sits above the Hidden group and the disappearing
-  // section is always the true bottom of the list.
+  // "Scheduled" (6) and "Closing" (3) are both deferred past Hidden below -
+  // collapsed-by-default groups that render dead last so they never sit above
+  // a section that outlives them.
   for (const seg of [0, 1, 2, 5, 4]) {
     renderSeg(seg);
   }
 
-  if (entries.length === 0 && segmented.get(3)!.length === 0 && state.daemonConnected === true) {
+  if (entries.length === 0 && segmented.get(3)!.length === 0 && segmented.get(6)!.length === 0 && state.daemonConnected === true) {
     // While the daemon is NOT connected the pane shows the centered
     // "Setting up..." / stalled state (paneEmptyStateHtml); the sidebar
     // stays blank rather than duplicating it in a cramped row.
@@ -526,31 +562,21 @@ export function renderSidebar(listEl: HTMLElement): void {
     if (!hiddenCollapsed) {
       for (const s of hiddenSessions) {
         const isActive = s.session_id === state.selectedId;
-        const indicator = statusIndicator(s, unread, attention, question, style, escapeHtml, rateLimited);
         entries.push({
           key: `s:${s.session_id}`,
-          html: `<li data-session-id="${escapeHtml(s.session_id)}" class="${isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${rowClass}">
-            ${isPortrait
-              ? leadingVisual(s, indicator, unread, attention, question, rateLimited, { badgeClass: "is-centred" })
-              : leadingVisual(s, indicator, unread, attention, question, rateLimited)}
-            <div class="session-row-text">
-              ${isPortrait
-                ? `<span class="session-row-project" data-tip="${escapeHtml(sessionSubtitle(s))}"><span class="proj-name">${escapeHtml(projectName(s))}</span></span>
-              <span class="session-chips">${modelBatteryHtml(s.model)}</span>`
-                : `<span class="session-row-project">${escapeHtml(sessionSubtitle(s))}</span>
-              <span class="session-row-subtitle">${escapeHtml(projectName(s))}</span>`}
-            </div>
-            ${isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
-              <i class="ph ph-dots-three-vertical"></i>
-            </button>`}
-          </li>`,
+          html: renderSessionRow(s, {
+            isActive, unread, attention, question, rateLimited, closing, style, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint: "",
+          }),
         });
       }
     }
   }
 
-  // Closing renders last, below Hidden - it's a transient, self-clearing
-  // section, so it should never sit above a section that outlives it.
+  // Scheduled, then Closing, both render dead last below Hidden - collapsed-
+  // by-default groups that shouldn't crowd the primary triage segments above.
+  // Closing renders last of all since it's transient/self-clearing and should
+  // stay the true bottom of the list.
+  renderSeg(6);
   renderSeg(3);
 
   reconcileList(listEl, entries, loadAnimEnabled());

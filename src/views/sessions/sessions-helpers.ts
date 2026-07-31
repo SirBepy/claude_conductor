@@ -153,7 +153,12 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
 
 /** Maps a session to its display segment index.
  *  0=Input Needed, 1=Done, 2=In Progress, 3=Closing, 4=Waiting for Reset,
- *  5=Waiting (parked on an external process). */
+ *  5=Waiting (parked on an external process), 6=Scheduled (has a pending
+ *  scheduled message and isn't Input Needed/Done - Joe's spec: "not waiting
+ *  for reply or done" gets relabeled Scheduled). Closing and rate-limited both
+ *  still win over Scheduled - Closing because it's transient and about to
+ *  disappear, rate-limited because that precedence already existed before
+ *  Scheduled was added (checked ahead of the priority computation itself). */
 export function sessionSegment(
   s: Instance,
   unread: Set<string>,
@@ -161,14 +166,16 @@ export function sessionSegment(
   question: Set<string>,
   closing: Set<string>,
   rateLimited: ReadonlySet<string> = new Set(),
+  scheduled: ReadonlySet<string> = new Set(),
 ): number {
   if (closing.has(s.session_id)) return 3;
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);
   if (priority === 0 || priority === 1) return 0; // Input Needed
+  if (priority === 4 || priority === 5) return 1; // Done
+  if (scheduled.has(s.session_id)) return 6; // Scheduled
   if (priority === 2 || priority === 6) return 2; // In Progress (busy + external/automated)
-  if (priority === 3) return 5; // Waiting on an external process (CI / long command)
-  return 1; // Done
+  return 5; // Waiting on an external process (CI / long command)
 }
 
 export function sortSessions(
@@ -277,8 +284,8 @@ export function saveHiddenCollapsed(collapsed: boolean): void {
 }
 
 // ── Per-segment collapse state (in-memory only, resets to default on section disappear) ──
-// Segments collapsed by default: 3 = Closing
-const SEG_DEFAULT_COLLAPSED = new Set([3]);
+// Segments collapsed by default: 3 = Closing, 6 = Scheduled
+const SEG_DEFAULT_COLLAPSED = new Set([3, 6]);
 const segCollapseOverrides = new Map<number, boolean>();
 
 export function isSegCollapsed(seg: number): boolean {
