@@ -1,51 +1,45 @@
-/* Tab strip (multi-question). Tabs share row width equally; labels truncate
- * with ellipsis when narrow so the row never scrolls or wraps. */
-.prompt-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--color-border);
-  margin: -4px -4px 4px;
-  padding: 0 4px;
+/* Domain tokens. These belong in tauri_kit's palette files, but that submodule
+ * sits on a detached HEAD here so edits there are unpushable and would be lost
+ * on the next update - see todo 447. Relocate once it's checked out properly. */
+[data-theme="void"] {
+  --color-domain-ux: #9d7dfc; --color-domain-arch: #6e8fff; --color-domain-sec: #e05252;
+  --color-domain-data: #7af0c0; --color-domain-tooling: #8f8dad;
+  --color-domain-infra: #e0a24f; --color-domain-billing: #4fd0c0;
 }
-.prompt-tab {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 6px 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border-radius: 0;
-  transition: color 0.12s, border-color 0.12s;
-  flex: 0 1 auto;
-  min-width: 0;
+[data-theme="void"][data-mode="light"] {
+  --color-domain-ux: #7c5ce7; --color-domain-arch: #5a75e0; --color-domain-sec: #d43f3f;
+  --color-domain-data: #2db87a; --color-domain-tooling: #6b6990;
+  --color-domain-infra: #b8752a; --color-domain-billing: #2ba894;
 }
-.prompt-tab__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+[data-theme="nebula"] {
+  --color-domain-ux: #c084fc; --color-domain-arch: #60a5fa; --color-domain-sec: #f06060;
+  --color-domain-data: #6ee7b7; --color-domain-tooling: #8b8ab8;
+  --color-domain-infra: #fbbf24; --color-domain-billing: #2dd4bf;
 }
-.prompt-tab:hover {
-  color: var(--color-text);
-  filter: none;
-  transform: none;
+[data-theme="nebula"][data-mode="light"] {
+  --color-domain-ux: #9333ea; --color-domain-arch: #2563eb; --color-domain-sec: #dc2626;
+  --color-domain-data: #16a34a; --color-domain-tooling: #6b699a;
+  --color-domain-infra: #b45309; --color-domain-billing: #0d9488;
 }
-.prompt-tab.is-active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+[data-theme="glacier"] {
+  --color-domain-ux: #38bdf8; --color-domain-arch: #818cf8; --color-domain-sec: #f87171;
+  --color-domain-data: #34d399; --color-domain-tooling: #7fa8ba;
+  --color-domain-infra: #fb923c; --color-domain-billing: #2dd4bf;
 }
-.prompt-tab.is-answered .prompt-tab__dot i {
-  color: var(--color-primary);
+[data-theme="glacier"][data-mode="light"] {
+  --color-domain-ux: #0284c7; --color-domain-arch: #4f46e5; --color-domain-sec: #dc2626;
+  --color-domain-data: #059669; --color-domain-tooling: #4f7688;
+  --color-domain-infra: #c2600f; --color-domain-billing: #0d9488;
 }
-.prompt-tab__dot {
-  display: inline-flex;
-  font-size: 0.95rem;
-  color: var(--color-text-muted);
+[data-theme="cosmo"] {
+  --color-domain-ux: #f472b6; --color-domain-arch: #818cf8; --color-domain-sec: #ef4444;
+  --color-domain-data: #4ade80; --color-domain-tooling: #9678a0;
+  --color-domain-infra: #fb923c; --color-domain-billing: #22d3ee;
+}
+[data-theme="cosmo"][data-mode="light"] {
+  --color-domain-ux: #db2777; --color-domain-arch: #4338ca; --color-domain-sec: #dc2626;
+  --color-domain-data: #16a34a; --color-domain-tooling: #7a5b86;
+  --color-domain-infra: #c2600f; --color-domain-billing: #0e7490;
 }
 
 /* Per-question block. */
@@ -167,14 +161,16 @@
   background: var(--color-surface);
   border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
 }
+/* --dom falls back to primary, so the permission card's options (which have no
+ * domain) keep their existing purple selection. */
 .prompt-opt.is-selected {
-  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
-  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--dom, var(--color-primary)) 14%, var(--color-surface));
+  border-color: var(--dom, var(--color-primary));
 }
 .prompt-opt > input {
   margin: 3px 0 0;
   flex-shrink: 0;
-  accent-color: var(--color-primary);
+  accent-color: var(--dom, var(--color-primary));
 }
 .prompt-opt--none {
   margin-top: 8px;
@@ -185,15 +181,19 @@
   gap: 2px;
   min-width: 0;
 }
+/* flex:0 0 max-content + no shrink is what keeps a badge group from peeling
+ * one chip onto its own line - see .prompt-opt__top / .prompt-badges below. */
 .prompt-opt__label {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   color: var(--color-text);
-  font-weight: 500;
+  font-weight: 600;
+  flex: 0 0 max-content;
+  max-width: 100%;
 }
 .prompt-opt__desc {
-  font-size: 0.78rem;
+  font-size: 0.79rem;
   color: var(--color-text-muted);
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 /* Free-text fallback below the options. Lives on every question so the user
@@ -309,4 +309,353 @@
 .prompt-summary-row i {
   color: var(--color-text-muted);
   flex-shrink: 0;
+}
+
+/* ── AUQ card redesign: four-zone question layout ──────────────────────────
+ * --dom is set inline per card/panel by question-ui.ts (one of the
+ * --color-domain-* tokens) and drives the chip, ask band, dot ring and
+ * collapsed bar below. */
+.prompt-zone {
+  padding: 12px 16px;
+}
+.prompt-zone--ctx {
+  display: flex;
+  gap: 10px;
+  background: color-mix(in srgb, var(--color-background) 55%, transparent);
+}
+.prompt-ctx__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+}
+.prompt-ctx__rail i {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+}
+.prompt-ctx__rail::after {
+  content: "";
+  flex: 1;
+  width: 1px;
+  background: var(--color-border);
+}
+.prompt-ctx__body {
+  min-width: 0;
+  flex: 1;
+}
+/* Chip is always right-floated on the context row now - no separate
+ * "--right" modifier needed. */
+.prompt-ctx__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  min-height: 20px;
+}
+.prompt-ctx__head .prompt-domain {
+  margin-left: auto;
+}
+.prompt-ctx__label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.prompt-ctx__text {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.prompt-domain {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--dom);
+  background: color-mix(in srgb, var(--dom) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dom) 38%, transparent);
+}
+.prompt-domain i {
+  font-size: 0.8rem;
+}
+
+/* Ask band always takes the domain colour. */
+.prompt-zone--ask {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 16px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--dom) 18%, transparent),
+    color-mix(in srgb, var(--dom) 5%, transparent)
+  );
+  border-top: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
+  box-shadow: inset 3px 0 0 var(--dom);
+}
+.prompt-ask__icon {
+  font-size: 1.15rem;
+  color: var(--dom);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.prompt-ask__text {
+  font-size: 1.04rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+}
+
+.prompt-sect {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 16px 8px;
+}
+.prompt-sect__label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.prompt-sect__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+.prompt-sect i {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+/* Badge group on an option row - see the load-bearing comment on
+ * .prompt-opt__label above; this and that rule work together. */
+.prompt-opt__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 8px;
+}
+.prompt-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+.prompt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.prompt-badge i {
+  font-size: 0.78rem;
+}
+.prompt-badge--rec {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+}
+.prompt-badge--long {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 13%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 32%, transparent);
+}
+.prompt-badge--short {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 15%, transparent);
+  border-color: color-mix(in srgb, var(--color-info) 35%, transparent);
+}
+
+.prompt-own {
+  padding: 0 16px 14px;
+}
+.prompt-own textarea {
+  resize: none;
+  min-height: 40px;
+  padding: 9px 11px;
+  width: 100%;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.88rem;
+  outline: none;
+}
+.prompt-own textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Header icon buttons (nav arrows + minimize). */
+.prompt-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.prompt-icon-btn i {
+  font-size: 1.05rem;
+}
+.prompt-icon-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border-color: var(--color-border);
+}
+
+/* Collapsed bar (minimized state), shown in place of the full card. */
+.prompt-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 640px;
+  padding: 8px 10px 8px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--dom);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+.prompt-collapsed__q {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.prompt-collapsed__step {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--dom);
+  background: color-mix(in srgb, var(--dom) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dom) 32%, transparent);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.prompt-collapsed__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dom);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dom) 22%, transparent);
+}
+
+/* ── Horizontal question track ─────────────────────────────────────────────
+ * One panel per question, each exactly the card's width, snapped. Native CSS
+ * scrolling - header/footer sit outside the track so the pager never moves. */
+.prompt-track {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: none;
+}
+.prompt-track::-webkit-scrollbar {
+  display: none;
+}
+.prompt-panel {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.prompt-panel + .prompt-panel {
+  border-left: 1px solid var(--color-border);
+}
+
+/* Pager: arrows flanking the dots, left-aligned, lives in the header. */
+.prompt-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.prompt-pager button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+.prompt-head__spacer {
+  flex: 1;
+}
+/* Dots are 22px hit-area buttons around an 8px visual dot. FILL encodes
+ * answered, RING encodes current - kept on separate channels because
+ * --color-domain-data IS green, so a --dom-tinted "current" would be
+ * indistinguishable from "answered" on Data questions. */
+.prompt-dots {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+}
+.prompt-dot {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.prompt-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-text-muted);
+  background: transparent;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.prompt-dot:hover::before {
+  border-color: var(--color-text);
+}
+.prompt-dot.is-answered::before {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+.prompt-dot.is-current::before {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dom) 55%, transparent);
+}
+.prompt-dot.is-current:not(.is-answered)::before {
+  border-color: var(--dom);
 }

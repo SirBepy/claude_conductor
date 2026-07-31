@@ -26,7 +26,7 @@
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  width: min(520px, calc(100vw - 32px));
+  width: min(640px, calc(100vw - 32px));
   z-index: 1000;
   pointer-events: none;
 }
@@ -41,11 +41,11 @@
     0 2px 8px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
-  max-height: min(60vh, 540px);
-  /* Same 520px the viewport-mode host already caps at (below) - the composer/
+  max-height: min(80vh, 720px);
+  /* Same width the viewport-mode host already caps at (below) - the composer/
    * pane hosts stretch full-width with no cap of their own, which on a wide
    * window turned long question text into uncomfortably long lines. */
-  max-width: 520px;
+  max-width: 640px;
   margin: 0 auto;
   overflow: hidden;
   animation: prompt-card-in 0.16s ease-out;
@@ -72,6 +72,14 @@
     color-mix(in srgb, var(--color-primary) 8%, transparent),
     transparent
   );
+}
+
+/* Question cards only - `renderCardShell` is shared with the permission card,
+ * whose header holds a title + tool chip and needs the roomier padding above. */
+.prompt-card__header:has(.prompt-pager) {
+  padding: 0 6px 0 8px;
+  height: 40px;
+  flex-shrink: 0;
 }
 
 .prompt-card__title {
