@@ -237,20 +237,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     });
   }
 
-  // An image lightbox opened from a pasted attachment thumbnail sits on top
-  // of this card and has no shared-overlay registration of its own yet (see
-  // lightbox.ts's private onEsc listener) - so without this check Escape (and
-  // the phone back button below) would cancel THIS card while the lightbox
-  // closes on the very same press. Cancelling sends no answer at all
-  // (opts.onCancel), which is an unrecoverable loss for a keypress the user
-  // meant only for the image.
-  const lightboxIsOpen = (): boolean => document.querySelector(".lightbox-overlay") !== null;
-
   const keydownHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
-      if (lightboxIsOpen()) return;
-      teardown();
-      void opts.onCancel();
+      dismissUnlessOverlayAbove();
       return;
     }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -285,13 +274,24 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     void opts.onCancel();
   };
 
-  backDisposer = registerOverlayBack(() => {
-    // Mirrors the Escape guard above. Swallow the press rather than falling
-    // through (returning false) - with the lightbox unregistered, a
-    // fallthrough would step the view-navigation stack instead, an even
-    // bigger surprise than a no-op while the image is up.
-    if (lightboxIsOpen()) return true;
+  // An image lightbox opened from a pasted attachment thumbnail sits on top
+  // of this card and has no shared-overlay registration of its own yet (see
+  // lightbox.ts's private onEsc listener) - so without this check Escape/the
+  // phone back button below would cancel THIS card while the lightbox closes
+  // on the very same press. Cancelling sends no answer at all (opts.onCancel),
+  // an unrecoverable loss for a keypress the user meant only for the image.
+  // One shared guarded path for both dismiss triggers below, so a future
+  // rewrite of render()/keydownHandler only has to keep ONE call site correct.
+  const dismissUnlessOverlayAbove = () => {
+    if (document.querySelector(".lightbox-overlay")) return;
     cancel();
+  };
+
+  backDisposer = registerOverlayBack(() => {
+    // Always consumes the press (returns true) even when it no-ops - with the
+    // lightbox unregistered, falling through (false) would step the
+    // view-navigation stack instead, an even bigger surprise than a no-op.
+    dismissUnlessOverlayAbove();
     return true;
   });
 
