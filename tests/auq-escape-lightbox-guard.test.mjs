@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 //
-// Regression: pressing Escape while an image lightbox is open on top of the
-// floating AUQ card used to cancel the card too, on the SAME keypress - and
-// cancelling sends no answer at all (opts.onCancel), an unrecoverable loss
-// for a keystroke the user meant only for the image. question-ui.ts's own
-// Escape listener now checks for a live `.lightbox-overlay` before treating
-// Escape as "cancel the card".
+// Regression: Escape meant for an open image lightbox used to also cancel
+// the AUQ card underneath on the same keypress, sending no answer at all
+// (opts.onCancel) - unrecoverable for the user. The keydown handler now
+// checks for a live `.lightbox-overlay` before treating Escape as cancel.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 

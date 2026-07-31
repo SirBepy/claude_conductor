@@ -263,11 +263,9 @@ pub async fn send_message(session: &Arc<Session>, text: &str, is_meta: bool) -> 
     if let Ok(mut lp) = session.last_prompt.lock() {
         *lp = text.to_string();
     }
-    // `isMeta:true` on a transcript line is a marker only the CLI itself ever
-    // writes; a plain stdin message we send has no way to make it persist
-    // that field (see `DAEMON_META_SENTINEL`'s doc). Embedding the sentinel in
-    // the actual text is the only way the marking survives into the CLI's own
-    // transcript, so `chat::parser` can still recognize it on replay.
+    // `isMeta:true` is a marker only the CLI itself ever writes; embedding the
+    // sentinel in the text is the only way the marking survives into the CLI's
+    // own persisted transcript (see `DAEMON_META_SENTINEL`'s doc).
     let wire_text = if is_meta {
         format!("{}{text}", crate::types::chat::DAEMON_META_SENTINEL)
     } else {

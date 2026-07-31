@@ -1,13 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
-// Regression for todo 442 / the bug Joe hit live: pressing Escape while an
-// image lightbox is open on top of the floating AUQ card used to cancel the
-// card too, on the SAME keypress. Cancelling settles the prompt as SKIPPED
-// (opts.onCancel, no answer at all) - an unrecoverable loss for a keystroke
-// meant only for the image. Drives the real renderQuestionUI + openLightbox
-// entry points (not internals) so this survives the AUQ redesign's render()
-// rewrite per the repo-channel agreement.
+// Regression for todo 442: Escape meant for an image lightbox atop the AUQ
+// card used to cancel the card too on the same keypress, settling it as
+// SKIPPED (no answer at all). Drives the real renderQuestionUI + openLightbox
+// entry points so this survives the AUQ redesign's render() rewrite.
 
 declare global {
   interface Window {

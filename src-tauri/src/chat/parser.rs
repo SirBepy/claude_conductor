@@ -270,14 +270,10 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
         }
         "user" => {
             let Some(content_val) = v.get("message").and_then(|m| m.get("content")) else { return vec![]; };
-            // `isMeta:true` marks a turn Claude Code injected into its own
-            // transcript (a fired ScheduleWakeup prompt, an autopilot/resume
-            // continuation, etc.) rather than something the human typed. A
-            // daemon-injected turn (repo-channel wake, Jarvis worker-wake,
-            // scheduled hygiene fire) never gets that field set by the CLI -
-            // it's recognized instead by `DAEMON_META_SENTINEL`, which
-            // `lifecycle::send_message` embeds directly in the text so it
-            // survives into the CLI's own persisted transcript.
+            // `isMeta:true` marks a turn Claude Code itself injected (a fired
+            // ScheduleWakeup, autopilot/resume) rather than something the human
+            // typed. A daemon-injected wake (repo-channel/Jarvis/schedule) has
+            // no such field on replay - see `strip_daemon_meta_sentinel` below.
             let mut content = extract_content_blocks(content_val);
             let sentinel_stripped = strip_daemon_meta_sentinel(&mut content);
             let is_meta = sentinel_stripped
@@ -498,10 +494,9 @@ fn tool_result_output(content_val: Option<&Value>) -> ContentBlock {
 }
 
 /// Strips a leading `DAEMON_META_SENTINEL` off the first text block, if
-/// present, and reports whether it found one. `lifecycle::send_message`
-/// always writes the sentinel at the very start of the wire text, so a plain
-/// `starts_with` on the first block is the only check needed - no reason for
-/// it to appear mid-message or split across blocks.
+/// present, and reports whether it found one. Always written at the very
+/// start of the wire text by `lifecycle::send_message`, so a plain
+/// `starts_with` on the first block is the only check needed.
 fn strip_daemon_meta_sentinel(content: &mut [ContentBlock]) -> bool {
     let Some(ContentBlock::Text { text }) = content.first_mut() else { return false };
     let Some(stripped) = text.strip_prefix(crate::types::chat::DAEMON_META_SENTINEL) else { return false };
@@ -812,13 +807,10 @@ mod tests {
 
     #[test]
     fn strips_daemon_meta_sentinel_and_flags_is_meta_even_without_ismeta_field() {
-        // A daemon-injected turn (repo-channel wake, Jarvis worker-wake,
-        // scheduled hygiene fire) never gets the CLI's own "isMeta":true field
-        // - that's only ever set by the CLI itself on ITS self-injected turns.
-        // `lifecycle::send_message` embeds DAEMON_META_SENTINEL directly in the
-        // wire text instead, which the CLI persists verbatim as part of the
-        // message content. This is what that persisted transcript line looks
-        // like on replay: no "isMeta" key at all.
+        // A daemon-injected wake never gets the CLI's own "isMeta":true field -
+        // only the CLI sets that on its OWN self-injected turns. This is what
+        // the persisted transcript line looks like on replay instead: no
+        // "isMeta" key, just the sentinel embedded in the content string.
         let mut ctx = ParserContext::new();
         let text = format!(
             "{}[repo-channel] other-session: touching pending-pane.ts, anyone on this?",

@@ -143,11 +143,10 @@ fn clean_title_capture(t: &str) -> String {
     t.trim().to_string()
 }
 
-/// True for a *real* user turn: a non-meta `user` message carrying actual text
-/// (not a `tool_result`-only message, not the local-command-caveat preamble,
-/// not a daemon-injected wake - see `DAEMON_META_SENTINEL`). Mirrors
-/// `first_user_prompt`'s skip rules so turn counting matches what the user
-/// perceives as a "message", and tool round-trips don't inflate the count.
+/// True for a *real* user turn: a non-meta `user` message with actual text
+/// (not tool_result-only, not local-command-caveat, not a daemon-injected
+/// wake - see `DAEMON_META_SENTINEL`). Mirrors `first_user_prompt`'s skip
+/// rules so turn counting matches what the user perceives as a "message".
 pub(crate) fn is_real_user_turn(v: &serde_json::Value) -> bool {
     if v.get("type").and_then(|t| t.as_str()) != Some("user") { return false; }
     if v.get("isMeta").and_then(|b| b.as_bool()) == Some(true) { return false; }
