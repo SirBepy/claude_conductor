@@ -2,6 +2,8 @@
   padding: 0;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .history-empty {
@@ -12,27 +14,59 @@
   padding: 40px;
 }
 
+/* ── Filter bar ───────────────────────────────────────────────────────────── */
+.history-filter-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  overflow-x: auto;
+}
+
+.history-filter-input,
+.history-filter-select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.history-filter-input#history-search {
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+
+.history-date-range {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.history-date-range input {
+  width: 132px;
+}
+
 .history-layout {
   display: flex;
-  height: 100%;
+  min-height: 0;
+  flex: 1;
 }
 
 .history-sidebar {
   width: 280px;
+  flex-shrink: 0;
   border-right: 1px solid var(--color-border);
   overflow-y: auto;
   background: var(--color-surface-alt);
-}
-
-.history-sidebar input {
-  width: 100%;
-  padding: 6px 10px;
-  box-sizing: border-box;
-  background: var(--color-surface);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  font-size: 0.85rem;
-  font-family: inherit;
 }
 
 .history-sidebar ul {
@@ -58,7 +92,9 @@
 }
 
 .history-sidebar li {
-  padding: 8px 12px;
+  /* 8px/10px matches .session-avatar's -8px/-10px bleed margin exactly, so
+     the portrait strip flushes to this row's top/bottom/left edges too. */
+  padding: 8px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--color-border);
   font-size: 0.85rem;
@@ -99,9 +135,32 @@
 
 .history-row-text {
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.history-row-subtitle {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-row-chips {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-sidebar li.active .history-row-subtitle,
+.history-sidebar li.active .session-model-battery,
+.history-sidebar li.active .session-state-icon {
+  color: var(--color-background);
+  opacity: 0.85;
 }
 
 .history-sidebar li:hover {
@@ -159,22 +218,11 @@
   text-overflow: ellipsis;
 }
 
-.history-row-meta {
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
-}
-
-.history-sidebar li.active .history-row-meta {
-  color: var(--color-background);
-  opacity: 0.7;
-}
-
 .history-pane {
   flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 12px;
 }
 
 .history-pane .session-messages {
@@ -206,4 +254,32 @@
 
 .btn-continue-chat:hover {
   opacity: 0.85;
+}
+
+/* ── Mobile (phone/remote client) ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .view-history .history-filter-bar {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .view-history .history-filter-bar > * {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .view-history .history-date-range {
+    flex: 1 1 100%;
+  }
+  .view-history .history-date-range input {
+    flex: 1;
+    width: auto;
+  }
+  .view-history .history-layout {
+    flex-direction: column;
+  }
+  .view-history .history-sidebar {
+    width: 100%;
+    max-height: 42vh;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
 }

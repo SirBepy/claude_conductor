@@ -44,6 +44,12 @@ export function characterForSession(s: Instance): string | null {
   return sessionCharMap.get(s.session_id) ?? null;
 }
 
+/** Same lookup keyed directly by session id, for callers (History view) that
+ * only have a HistoryEntry, not a live Instance. */
+export function characterForSessionId(sessionId: string): string | null {
+  return sessionCharMap.get(sessionId) ?? null;
+}
+
 /** Preloaded icon data URL for a character id, or null if not yet cached. */
 export function characterIconUrl(charId: string): string | null {
   return cachedCharacterIconUrl(charId);
