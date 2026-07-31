@@ -104,17 +104,26 @@ export function extractAttachedFilePaths(blocks: ContentBlock[]): Set<string> {
 }
 
 /** The raw "User answered…" framing text of a `<auq-answer/>`-tagged user
- *  message (sentinel stripped), or null if `blocks` isn't exactly that: one
- *  text block carrying the sentinel and nothing else. */
+ *  message (sentinel stripped), or null if no block qualifies. A qualifying
+ *  block is a text block whose content STARTS with the sentinel - held
+ *  prose bundled alongside it (see held-messages.ts's bundleHeld) rides in
+ *  its own separate block(s) and is ignored here, not scanned into the
+ *  fold. */
 export function extractAuqAnswerText(blocks: ContentBlock[]): string | null {
-  if (blocks.length !== 1) return null;
-  const b = blocks[0];
+  const b = blocks.find((x) => x && x.type === "text" && x.text.startsWith(AUQ_ANSWER_SENTINEL));
   if (!b || b.type !== "text") return null;
   AUQ_ANSWER_RE.lastIndex = 0;
-  const has = AUQ_ANSWER_RE.test(b.text);
-  AUQ_ANSWER_RE.lastIndex = 0;
-  if (!has) return null;
   return b.text.replace(AUQ_ANSWER_RE, "").trim();
+}
+
+/** `blocks` with its AUQ-answer sentinel block (if any) removed - the
+ *  remaining held/typed prose that rode along in the same bundleHeld send,
+ *  which still needs to render/transform as an ordinary user message once
+ *  the sentinel block has been folded into the question card. */
+export function stripAuqAnswerBlock(blocks: ContentBlock[]): ContentBlock[] {
+  const idx = blocks.findIndex((b) => b && b.type === "text" && b.text.startsWith(AUQ_ANSWER_SENTINEL));
+  if (idx === -1) return blocks;
+  return blocks.filter((_, i) => i !== idx);
 }
 
 function renderTextBlock(rawText: string, breaks = false, fileChips = false): string {

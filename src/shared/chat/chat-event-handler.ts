@@ -17,6 +17,7 @@ import {
   metaTurnLabel,
   noiseAssistantLabel,
   extractAuqAnswerText,
+  stripAuqAnswerBlock,
   RenderedMessage,
 } from "./chat-transforms";
 import { parseFileEdit } from "./file-edits";
@@ -106,6 +107,10 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       const isMeta = !isCompact && !isSilent && ev.is_meta;
       const auqAnswerText = !isCompact && !isSilent && !isMeta ? extractAuqAnswerText(cleaned) : null;
       const resolvedQuestionCard = auqAnswerText !== null && resolvePendingQuestionCard(r, auqAnswerText);
+      // Held prose bundled alongside the answer (bundleHeld keeps it as its own
+      // block - see held-messages.ts) still needs to reach the transcript as
+      // ordinary content once the sentinel block is folded above.
+      const remainderBlocks = resolvedQuestionCard ? stripAuqAnswerBlock(cleaned) : cleaned;
       enqueueTurnClose(r);
       r.setActivity(null);
       r.setTurnStatus(null);
@@ -127,7 +132,12 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       } else if (isMeta) {
         r.messages.push({ kind: "system", text: metaTurnLabel(cleaned), ts });
       } else if (resolvedQuestionCard) {
-        // Folded into the question card above instead of a separate bubble.
+        // Folded into the question card above instead of a separate bubble -
+        // except any held prose that rode along in the same bundle, which
+        // still renders as a normal user message (must not be swallowed).
+        if (remainderBlocks.length > 0) {
+          r.messages.push({ kind: "user", content: remainderBlocks, ts });
+        }
       } else {
         r.messages.push({ kind: "user", content: cleaned, ts });
       }

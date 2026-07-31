@@ -11,6 +11,7 @@
 
 import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
+import { AUQ_ANSWER_SENTINEL } from "./chat-transforms";
 import "./held-messages.css";
 
 interface HeldItem {
@@ -49,12 +50,23 @@ export interface HeldAttach {
 /** Join held items (+ optional trailing draft) into a single text block:
  * each message's text on its own, separated by a blank line. Non-text blocks
  * (none today — images become `<file:…>` text in the composer) are appended
- * after, preserving order. */
+ * after, preserving order.
+ *
+ * A group that IS an AUQ answer (see chat-transforms.ts's AUQ_ANSWER_SENTINEL,
+ * sent as the sole content of the draft by permission-modal/index.ts onSubmit)
+ * is kept as its OWN block instead of being joined into the merged prose text:
+ * joining it would bury the sentinel mid-string and pollute the folded
+ * question-card answer with unrelated held prose (extractAuqAnswerText below
+ * finds it regardless of position in the output array). */
 export function bundleHeld(items: ContentBlock[][], draftBlocks: ContentBlock[] = []): ContentBlock[] {
   const groups = draftBlocks.length ? [...items, draftBlocks] : items;
   const texts: string[] = [];
   const extras: ContentBlock[] = [];
   for (const g of groups) {
+    if (g.length === 1 && g[0]?.type === "text" && g[0].text.startsWith(AUQ_ANSWER_SENTINEL)) {
+      extras.push(g[0]);
+      continue;
+    }
     const t = blocksToText(g).trim();
     if (t) texts.push(t);
     for (const b of g) if (b && b.type !== "text") extras.push(b);
