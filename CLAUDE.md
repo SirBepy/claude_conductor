@@ -17,6 +17,7 @@ Deploy: GitHub Releases (NSIS / DMG / DEB + AppImage via CI)
 
 - Dev: `cargo tauri dev` (runs from anywhere in the repo; the Tauri CLI auto-locates `src-tauri/tauri.conf.json`)
 - Verify: `cargo build --manifest-path src-tauri/Cargo.toml`
+- Worktree bootstrap: `pwsh -File scripts/bootstrap-worktree.ps1` (run once right after `git worktree add`/`EnterWorktree`, before any build/verify - inits the `vendor/tauri_kit` submodule, runs `pnpm install`, and seeds the gitignored `src/types/ipc.generated.ts`; idempotent)
 
 ## Rules
 
