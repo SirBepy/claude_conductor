@@ -256,6 +256,10 @@ mod tests {
     fn parse_transcript_counts_real_user_messages_not_last_prompt() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
+        let sentinel_row = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": format!("{}[repo-channel] hi", crate::types::chat::DAEMON_META_SENTINEL)}
+        }).to_string();
         let content = [
             // 2 genuine human messages (role:user with text).
             r#"{"type":"user","message":{"role":"user","content":"first question"}}"#,
@@ -267,6 +271,9 @@ mod tests {
             r#"{"type":"last-prompt","lastPrompt":"first question"}"#,
             // meta row - must NOT count.
             r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>x"}}"#,
+            // daemon-injected wake row (repo-channel/Jarvis/scheduled) - carries
+            // no "isMeta" field on replay, only DAEMON_META_SENTINEL - must NOT count.
+            sentinel_row.as_str(),
             r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"second question"}]}}"#,
         ].join("\n");
         std::fs::write(&path, content).unwrap();

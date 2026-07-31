@@ -272,10 +272,18 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
             let Some(content_val) = v.get("message").and_then(|m| m.get("content")) else { return vec![]; };
             // `isMeta:true` marks a turn Claude Code injected into its own
             // transcript (a fired ScheduleWakeup prompt, an autopilot/resume
-            // continuation, etc.) rather than something the human typed.
-            let is_meta = v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false);
+            // continuation, etc.) rather than something the human typed. A
+            // daemon-injected turn (repo-channel wake, Jarvis worker-wake,
+            // scheduled hygiene fire) never gets that field set by the CLI -
+            // it's recognized instead by `DAEMON_META_SENTINEL`, which
+            // `lifecycle::send_message` embeds directly in the text so it
+            // survives into the CLI's own persisted transcript.
+            let mut content = extract_content_blocks(content_val);
+            let sentinel_stripped = strip_daemon_meta_sentinel(&mut content);
+            let is_meta = sentinel_stripped
+                || v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false);
             let mut evs = vec![ChatEvent::UserMessage {
-                content: extract_content_blocks(content_val),
+                content,
                 timestamp: ts,
                 remote_echo: false,
                 is_meta,
@@ -487,6 +495,18 @@ fn tool_result_output(content_val: Option<&Value>) -> ContentBlock {
         .collect::<Vec<_>>()
         .join("\n");
     ContentBlock::Text { text }
+}
+
+/// Strips a leading `DAEMON_META_SENTINEL` off the first text block, if
+/// present, and reports whether it found one. `lifecycle::send_message`
+/// always writes the sentinel at the very start of the wire text, so a plain
+/// `starts_with` on the first block is the only check needed - no reason for
+/// it to appear mid-message or split across blocks.
+fn strip_daemon_meta_sentinel(content: &mut [ContentBlock]) -> bool {
+    let Some(ContentBlock::Text { text }) = content.first_mut() else { return false };
+    let Some(stripped) = text.strip_prefix(crate::types::chat::DAEMON_META_SENTINEL) else { return false };
+    *text = stripped.to_string();
+    true
 }
 
 fn extract_content_blocks(v: &Value) -> Vec<ContentBlock> {
@@ -786,6 +806,43 @@ mod tests {
         assert_eq!(events.len(), 1);
         match &events[0] {
             ChatEvent::UserMessage { is_meta, .. } => assert!(*is_meta),
+            _ => panic!("expected UserMessage"),
+        }
+    }
+
+    #[test]
+    fn strips_daemon_meta_sentinel_and_flags_is_meta_even_without_ismeta_field() {
+        // A daemon-injected turn (repo-channel wake, Jarvis worker-wake,
+        // scheduled hygiene fire) never gets the CLI's own "isMeta":true field
+        // - that's only ever set by the CLI itself on ITS self-injected turns.
+        // `lifecycle::send_message` embeds DAEMON_META_SENTINEL directly in the
+        // wire text instead, which the CLI persists verbatim as part of the
+        // message content. This is what that persisted transcript line looks
+        // like on replay: no "isMeta" key at all.
+        let mut ctx = ParserContext::new();
+        let text = format!(
+            "{}[repo-channel] other-session: touching pending-pane.ts, anyone on this?",
+            crate::types::chat::DAEMON_META_SENTINEL
+        );
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": text},
+            "timestamp": 1700000000
+        })
+        .to_string();
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::UserMessage { content, is_meta, .. } => {
+                assert!(*is_meta, "sentinel-prefixed content must be treated as meta on replay");
+                match &content[0] {
+                    ContentBlock::Text { text } => assert_eq!(
+                        text, "[repo-channel] other-session: touching pending-pane.ts, anyone on this?",
+                        "the sentinel itself must not leak into displayed text"
+                    ),
+                    other => panic!("expected text block, got {other:?}"),
+                }
+            }
             _ => panic!("expected UserMessage"),
         }
     }

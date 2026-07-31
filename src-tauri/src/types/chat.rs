@@ -8,6 +8,19 @@ pub enum ContentBlock {
     Image { mime: String, data: String },
 }
 
+/// Prefix `daemon::lifecycle::send_message` embeds in the literal text it
+/// writes to a session's stdin for a daemon-injected turn (repo-channel wake,
+/// Jarvis worker-wake, scheduled hygiene fire). Unlike `UserMessage::is_meta`
+/// below, `isMeta:true` on a transcript line is something ONLY the `claude`
+/// CLI itself decides to set on its own self-injected turns - a plain stdin
+/// message we send has no way to make the CLI persist that field, so the flag
+/// is lost the moment the transcript is replayed from disk instead of read
+/// live off the daemon's own broadcast. This sentinel survives into the CLI's
+/// persisted transcript because it's part of the message text itself;
+/// `chat::parser` strips it back off and treats the turn as `is_meta: true`
+/// regardless of the (likely absent) `isMeta` JSON field.
+pub const DAEMON_META_SENTINEL: &str = "\u{200B}[daemon-meta]\u{200B}";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]

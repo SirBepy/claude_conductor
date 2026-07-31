@@ -249,14 +249,28 @@ pub async fn spawn_session(
 pub async fn send_message(session: &Arc<Session>, text: &str, is_meta: bool) -> Result<(), LifecycleError> {
     // Remember the prompt: if this turn is rejected by a rate limit before
     // producing any output, the scheduled resume replays exactly this text.
+    // Deliberately the CLEAN text, not `wire_text` below - every caller that
+    // can hit a rate-limit replay (`schedule_fire::fire_message`) always
+    // passes `is_meta: false`, so `wire_text` is byte-identical to `text` on
+    // every path that ever reads `last_prompt` back.
     if let Ok(mut lp) = session.last_prompt.lock() {
         *lp = text.to_string();
     }
+    // `isMeta:true` on a transcript line is a marker only the CLI itself ever
+    // writes; a plain stdin message we send has no way to make it persist
+    // that field (see `DAEMON_META_SENTINEL`'s doc). Embedding the sentinel in
+    // the actual text is the only way the marking survives into the CLI's own
+    // transcript, so `chat::parser` can still recognize it on replay.
+    let wire_text = if is_meta {
+        format!("{}{text}", crate::types::chat::DAEMON_META_SENTINEL)
+    } else {
+        text.to_string()
+    };
     let msg = serde_json::json!({
         "type": "user",
         "message": {
             "role": "user",
-            "content": text
+            "content": wire_text
         }
     });
     let mut line = serde_json::to_vec(&msg).expect("serialize");

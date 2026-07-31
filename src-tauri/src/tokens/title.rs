@@ -144,23 +144,25 @@ fn clean_title_capture(t: &str) -> String {
 }
 
 /// True for a *real* user turn: a non-meta `user` message carrying actual text
-/// (not a `tool_result`-only message, not the local-command-caveat preamble).
-/// Mirrors `first_user_prompt`'s skip rules so turn counting matches what the
-/// user perceives as a "message", and tool round-trips don't inflate the count.
+/// (not a `tool_result`-only message, not the local-command-caveat preamble,
+/// not a daemon-injected wake - see `DAEMON_META_SENTINEL`). Mirrors
+/// `first_user_prompt`'s skip rules so turn counting matches what the user
+/// perceives as a "message", and tool round-trips don't inflate the count.
 pub(crate) fn is_real_user_turn(v: &serde_json::Value) -> bool {
     if v.get("type").and_then(|t| t.as_str()) != Some("user") { return false; }
     if v.get("isMeta").and_then(|b| b.as_bool()) == Some(true) { return false; }
     let Some(msg) = v.get("message") else { return false; };
     if msg.get("role").and_then(|r| r.as_str()) != Some("user") { return false; }
+    let sentinel = crate::types::chat::DAEMON_META_SENTINEL;
     match msg.get("content") {
         Some(serde_json::Value::String(s)) => {
             let t = s.trim();
-            !t.is_empty() && !t.starts_with("<local-command-caveat>")
+            !t.is_empty() && !t.starts_with("<local-command-caveat>") && !s.starts_with(sentinel)
         }
         Some(serde_json::Value::Array(items)) => items.iter().any(|it| {
             it.get("type").and_then(|t| t.as_str()) == Some("text")
                 && it.get("text").and_then(|t| t.as_str())
-                    .map(|s| !s.trim().is_empty()).unwrap_or(false)
+                    .map(|s| !s.trim().is_empty() && !s.starts_with(sentinel)).unwrap_or(false)
         }),
         _ => false,
     }
@@ -288,6 +290,7 @@ pub fn first_user_prompt(path: &Path, max_chars: usize) -> Option<String> {
         let trimmed = text.trim();
         if trimmed.is_empty() { continue }
         if trimmed.starts_with("<local-command-caveat>") { continue }
+        if text.starts_with(crate::types::chat::DAEMON_META_SENTINEL) { continue }
         let label = command_label(trimmed).map(std::borrow::Cow::Owned)
             .unwrap_or(std::borrow::Cow::Borrowed(trimmed));
         if let Some(title) = normalise_and_truncate(&label, max_chars) {
@@ -307,6 +310,23 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
         std::fs::write(&path, r#"{"type":"user","message":{"role":"user","content":"build me a thing"}}"#).unwrap();
+        assert_eq!(first_user_prompt(&path, 60).as_deref(), Some("build me a thing"));
+    }
+
+    #[test]
+    fn first_user_prompt_skips_daemon_meta_sentinel_and_falls_through_to_real_prompt() {
+        // A daemon-injected wake (repo-channel/Jarvis/scheduled) carries no
+        // "isMeta" field on replay - the CLI only ever sets that on ITS OWN
+        // self-injected turns - so it's recognized by DAEMON_META_SENTINEL
+        // instead. Must not become the session's dashboard title.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let sentinel_line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": format!("{}[repo-channel] hi", crate::types::chat::DAEMON_META_SENTINEL)}
+        }).to_string();
+        let body = [sentinel_line, r#"{"type":"user","message":{"role":"user","content":"build me a thing"}}"#.to_string()].join("\n");
+        std::fs::write(&path, body).unwrap();
         assert_eq!(first_user_prompt(&path, 60).as_deref(), Some("build me a thing"));
     }
 
