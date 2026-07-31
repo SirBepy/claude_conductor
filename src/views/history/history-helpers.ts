@@ -1,6 +1,7 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { projBadgeHtml } from "../sessions/sidebar-row-visuals";
 import { characterForSessionId, characterIconUrl } from "../sessions/session-characters";
+import { markerToStatusClass } from "../../shared/status-icons";
 import type { HistoryEntry } from "../../types/ipc.generated";
 
 export interface HistoryFilters {
@@ -56,17 +57,9 @@ export function formatTime(secs: number | bigint | null | undefined): string {
 }
 
 /** Historical equivalent of sessions-helpers' statusDotClass, mapping the
- * transcript's last `<cc-status:..>` marker onto the same st-* vocabulary.
- * "done" reads as the calm st-your-turn check, never the "unread" st-done
- * accent - a closed session has nothing left to notify about. */
+ * transcript's last `<cc-status:..>` marker via the shared marker table. */
 export function historyStatusDotClass(status: string | null): string | null {
-  switch (status) {
-    case "question": return "st-question";
-    case "working": return "st-working";
-    case "waiting": return "st-waiting";
-    case "done": return "st-your-turn";
-    default: return null;
-  }
+  return status ? markerToStatusClass(status) : null;
 }
 
 /** Leading visual for a row: character portrait when one resolves for this

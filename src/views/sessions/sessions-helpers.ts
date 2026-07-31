@@ -1,5 +1,5 @@
 import type { Instance, ScheduledItem } from "../../types/ipc.generated";
-import { STATUS_ICON } from "../../shared/status-icons";
+import { STATUS_ICON, markerToStatusClass } from "../../shared/status-icons";
 
 export type SessionSort = "status" | "recent" | "name" | "drain";
 export type SessionStateStyle = "icons" | "dots";
@@ -320,7 +320,9 @@ export function loadStateStyle(): SessionStateStyle {
 }
 
 /** The `st-*` status modifier for a session, shared by the dots-style indicator
- * and the hero-avatar corner dot. Priority matches `statusIndicator`. */
+ * and the hero-avatar corner dot. Priority matches `statusIndicator`. Marker
+ * classes (question/working/waiting/done) funnel through markerToStatusClass;
+ * attention/external/rate-limited/unread are statusDotClass-only states. */
 export function statusDotClass(
   i: Instance,
   unread: Set<string>,
@@ -330,13 +332,13 @@ export function statusDotClass(
 ): string {
   if (attention.has(i.session_id)) return "st-attention";
   if (i.kind === "external" || i.kind === "automated") return "st-external";
-  if (i.busy && i.awaiting !== "question") return "st-working";
-  if (question.has(i.session_id)) return "st-question";
-  if (i.awaiting === "working") return "st-working";
-  if (i.awaiting === "waiting") return "st-waiting";
+  if (i.busy && i.awaiting !== "question") return markerToStatusClass("working");
+  if (question.has(i.session_id)) return markerToStatusClass("question");
+  if (i.awaiting === "working") return markerToStatusClass("working");
+  if (i.awaiting === "waiting") return markerToStatusClass("waiting");
   if (rateLimited.has(i.session_id)) return "st-rate-limited";
   if (unread.has(i.session_id)) return "st-done";
-  return "st-your-turn";
+  return markerToStatusClass("done");
 }
 
 export function statusIndicator(
