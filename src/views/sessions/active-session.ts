@@ -342,7 +342,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
       setActiveSession(null);
       await selectSession(sessionId, pane);
     });
-    pane.querySelector<HTMLButtonElement>(".takeover-btn")?.addEventListener("click", async () => {
+    const takeoverBtn = pane.querySelector<HTMLButtonElement>(".takeover-btn");
+    takeoverBtn?.addEventListener("click", async () => {
       const ok = await askConfirm(
         `Take over manual session? This kills the external claude process (pid ${sess.pid}) so this app can resume the session.`,
         { confirmLabel: "Take over" },
@@ -354,20 +355,47 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
       // to the app's default account.
       const accountId = await openChangeAccountModal({ currentId: null, title: "Take over as which account?" });
       if (!accountId) return;
+      const originalId = sess.session_id;
+      takeoverBtn.disabled = true;
+      state.takeoverInFlightIds.add(originalId);
       try {
         const newId = await invoke<string>("takeover_manual", { manualPid: sess.pid, accountId });
-        if (newId) {
-          await refreshSessions();
-          const root = document.querySelector<HTMLElement>(".view-sessions");
-          if (root) {
-            const listEl = root.querySelector<HTMLElement>("#sessions-list");
-            if (listEl) renderSidebar(listEl);
+        if (!newId) return;
+        await refreshSessions();
+        const updatedSess = state.sessions.find((s) => s.session_id === newId);
+        // Bail without forcing a jump if the user navigated away mid-takeover,
+        // or the promoted entry is missing - refreshSessions/renderSidebar
+        // below already reflect the promotion either way.
+        if (!updatedSess || state.selectedId !== originalId) return;
+
+        // Stay on this same pane (no teardown/rebuild, no sidebar jump).
+        // newId can differ from originalId - takeover.rs prefers the
+        // on-disk session file over a possibly-stale registry entry - so
+        // repoint identity silently instead of switching the visible chat.
+        if (newId !== originalId) {
+          setActiveSession(newId);
+          if (_watchedId === originalId) {
+            void invoke<void>("unwatch_session_transcript", { sessionId: originalId }).catch(() => {});
+            sessionEvents.stopWatchListener(originalId);
+            _watchedId = newId;
+            void invoke<void>("watch_session_transcript", { sessionId: newId, cwd: updatedSess.cwd ?? null })
+              .then(() => sessionEvents.ensureWatchListener(newId))
+              .catch(() => {});
           }
-          await selectSession(newId, pane);
         }
+        pane.querySelector(".readonly-banner")?.remove();
+        mountComposer(pane, updatedSess, newId, false);
+        state.statusbar?.setReadOnlyEffort(false);
+        updateHeaderAvatarStatus(pane, updatedSess);
+        const root = document.querySelector<HTMLElement>(".view-sessions");
+        const listEl = root?.querySelector<HTMLElement>("#sessions-list");
+        if (listEl) renderSidebar(listEl);
       } catch (err) {
         console.error("[sessions] takeover_manual failed", err);
         alert(`Takeover failed: ${err}`);
+      } finally {
+        state.takeoverInFlightIds.delete(originalId);
+        takeoverBtn.disabled = false;
       }
     });
   }

@@ -5,7 +5,7 @@
 
 use crate::hooks::session_files;
 use crate::sessions::registry::Registry;
-use crate::types::Settings;
+use crate::types::{EndReason, Settings};
 use chrono::Utc;
 use std::sync::Mutex;
 
@@ -45,9 +45,9 @@ pub fn takeover(
     let session_id = if let Some(file_path) = session_files::session_file_for_pid(manual_pid) {
         session_files::parse_session_file(&file_path)
             .map(|s| s.session_id)
-            .unwrap_or(session_id_from_registry)
+            .unwrap_or_else(|| session_id_from_registry.clone())
     } else {
-        session_id_from_registry
+        session_id_from_registry.clone()
     };
 
     if session_id.is_empty() {
@@ -69,8 +69,16 @@ pub fn takeover(
     // 4. Promote registry entry to Interactive. record_interactive_session
     //    is upsert-with-takeover semantics: existing entry's project_id
     //    and pid are preserved while kind, busy, ended_at, end_reason
-    //    are reset.
+    //    are reset. If the on-disk file (step 2) disagreed with the
+    //    registry, this upserts under a NEW key instead of updating the
+    //    entry found by pid - retire that old entry now (same EndReason
+    //    the account-move path uses for its pre-move stub) so it doesn't
+    //    linger as a live-looking zombie until the 5s detector poll
+    //    reconciles the now-dead pid.
     let now = Utc::now().to_rfc3339();
+    if session_id != session_id_from_registry {
+        registry.mark_ended(&session_id_from_registry, EndReason::Moved, &now);
+    }
     registry.record_interactive_session(&session_id, &cwd, settings, &now);
     registry.set_model_effort(&session_id, model, effort);
     crate::sessions::chat_config::record(&session_id, model, effort);

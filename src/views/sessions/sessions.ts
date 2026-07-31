@@ -516,8 +516,11 @@ async function wireInstancesChangedListener(
     }
     // If the selected session's kind changed (e.g. Interactive -> External
     // after "Open in Terminal"), the pane must re-render to show the correct
-    // read-only UI. Detect by comparing pane DOM vs current kind.
-    if (!state.pendingNewSession && state.selectedId) {
+    // read-only UI. Detect by comparing pane DOM vs current kind. Skipped
+    // while the takeover-btn handler owns this same transition in place
+    // (see takeoverInFlightIds doc) so the two don't race to both rebuild
+    // the pane.
+    if (!state.pendingNewSession && state.selectedId && !state.takeoverInFlightIds.has(state.selectedId)) {
       const updatedSess = state.sessions.find((s) => s.session_id === state.selectedId);
       if (updatedSess) {
         const paneIsReadOnly = !!pane.querySelector(".readonly-banner");
