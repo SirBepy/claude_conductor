@@ -157,8 +157,7 @@
 }
 
 .history-sidebar li.active .history-row-subtitle,
-.history-sidebar li.active .session-model-battery,
-.history-sidebar li.active .session-state-icon {
+.history-sidebar li.active .session-model-battery {
   color: var(--color-background);
   opacity: 0.85;
 }

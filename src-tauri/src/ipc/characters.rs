@@ -314,19 +314,14 @@ pub fn reroll_session_character(
     Ok(pick)
 }
 
-/// Return the session->character map, pruning dead sessions first.
+/// Return the session->character map, unpruned. A closed session's
+/// assignment must survive so History can still show its portrait; pruning
+/// happens only at assignment time (`ensure_session_character`,
+/// `reroll_session_character`), which is where the map's growth is actually
+/// bounded. Mirrors the daemon's read-only `list_session_characters` RPC.
 #[tauri::command]
-pub fn list_session_characters(state: State<AppState>, app: AppHandle) -> HashMap<String, String> {
-    let live_ids = live_session_ids(&state);
-    let mut s = state.settings.lock().unwrap();
-    let pruned = prune_dead_sessions(&mut s.session_characters, &live_ids);
-    let map = s.session_characters.clone();
-    if pruned {
-        let snapshot = s.clone();
-        drop(s);
-        persist(&app, &snapshot);
-    }
-    map
+pub fn list_session_characters(state: State<AppState>) -> HashMap<String, String> {
+    state.settings.lock().unwrap().session_characters.clone()
 }
 
 // ---------------------------------------------------------------------------

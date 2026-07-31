@@ -135,45 +135,18 @@ function historyStatusDotClass(status: string | null): string | null {
   }
 }
 
-const HISTORY_STATUS_ICON: Record<string, string> = {
-  "st-question": "ph-chat-circle-dots",
-  "st-working": "ph-spinner",
-  "st-waiting": "ph-hourglass-medium",
-  "st-your-turn": "ph-check",
-};
-
-const HISTORY_STATUS_TOOLTIP: Record<string, string> = {
-  "st-question": "Ended on a question to you",
-  "st-working": "Ended mid-turn",
-  "st-waiting": "Ended while waiting on an external process",
-  "st-your-turn": "Finished",
-};
-
-/** Row/header status chip - same session-state-icon markup+classes the live
- * sidebar uses, so a history row reads consistently. No "spinning" class:
- * there's no live process behind a closed session to animate. */
-function historyStatusChip(e: HistoryEntry): string {
-  const cls = historyStatusDotClass(e.last_status);
-  if (!cls) return "";
-  const icon = HISTORY_STATUS_ICON[cls] ?? "";
-  const tip = escapeHtml(HISTORY_STATUS_TOOLTIP[cls] ?? "");
-  return `<i class="session-state-icon ph ${icon} s-${cls.slice(3)}" title="${tip}"></i>`;
-}
-
-/** Leading visual for a row: character portrait (ring-tinted by last_status)
- * when one resolves for this session id, else the bare status chip, else the
- * plain project badge - mirrors leadingVisual's same charId-or-fallback shape
- * in sidebar-row-visuals.ts. */
+/** Leading visual for a row: character portrait when one resolves for this
+ * session id, else the plain project badge - never a status icon. A closed
+ * session's last-turn status isn't a useful row-level signal, so no ring
+ * tint either; mirrors draftLeadingVisual's charId-or-fallback shape in
+ * sidebar-row-visuals.ts. */
 function historyLeadingVisual(e: HistoryEntry): string {
   const charId = characterForSessionId(e.session_id);
-  if (!charId) {
-    return historyStatusChip(e) || projBadgeHtml(e.cwd, "history-proj-icon");
-  }
+  if (!charId) return projBadgeHtml(e.cwd, "history-proj-icon");
   const id = escapeHtml(charId);
-  const dotClass = historyStatusDotClass(e.last_status) ?? "";
   const url = characterIconUrl(charId);
   const preload = url ? ` src="${escapeHtml(url)}" data-hydrated="${id}"` : "";
-  const avatarHtml = `<span class="session-avatar ${dotClass}">
+  const avatarHtml = `<span class="session-avatar">
           <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
           <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
         </span>`;
@@ -208,7 +181,7 @@ function renderList(listEl: HTMLElement): void {
           <span class="history-row-title">${escapeHtml(title)}</span>
           <span class="history-row-subtitle">${escapeHtml(cwdToProjectName(e.cwd))}</span>
         </div>
-        <span class="history-row-chips">${modelBatteryHtml(e.model ?? "")}${historyStatusChip(e)}</span>
+        <span class="history-row-chips">${modelBatteryHtml(e.model ?? "")}</span>
       </li>`,
     );
   }
