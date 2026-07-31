@@ -124,6 +124,12 @@ pub struct HistoryEntry {
     pub ended_at: Option<i64>,
     pub message_count: u32,
     pub last_kind: crate::sessions::kinds::InstanceKind,
+    /// Last-seen model id for this session (assistant-line `message.model`,
+    /// falling back to the init line's model). None if never parsed.
+    pub model: Option<String>,
+    /// Last `<cc-status:..>` marker seen in the transcript (question/done/
+    /// waiting/working). None if no assistant turn carried one.
+    pub last_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

@@ -22,6 +22,12 @@ pub fn register_history(router: &mut Router, state: Arc<DaemonState>) {
                     search: Option<String>,
                     limit: u32,
                     offset: u32,
+                    #[serde(default)]
+                    model_filter: Option<String>,
+                    #[serde(default)]
+                    date_from: Option<String>,
+                    #[serde(default)]
+                    date_to: Option<String>,
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
@@ -44,6 +50,9 @@ pub fn register_history(router: &mut Router, state: Arc<DaemonState>) {
                         p.search,
                         p.limit,
                         p.offset,
+                        p.model_filter,
+                        p.date_from,
+                        p.date_to,
                     );
                     entries.retain(|e| !live_ids.contains(&e.session_id));
                     entries

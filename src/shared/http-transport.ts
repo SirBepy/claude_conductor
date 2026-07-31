@@ -193,6 +193,9 @@ export class HttpTransport implements Transport {
           search: args.search ?? null,
           limit: args.limit ?? 200,
           offset: args.offset ?? 0,
+          model_filter: args.modelFilter ?? args.model_filter ?? null,
+          date_from: args.dateFrom ?? args.date_from ?? null,
+          date_to: args.dateTo ?? args.date_to ?? null,
         });
       case "load_history":
         return this.rpc<T>("load_history", {
