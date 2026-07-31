@@ -237,18 +237,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     });
   }
 
-  const keydownHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      dismissUnlessOverlayAbove();
-      return;
-    }
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      triggerPrimaryShortcut();
-    }
-  };
-  document.addEventListener("keydown", keydownHandler);
-
   // Per-question answer, normalized: multiSelect -> string[] (possibly empty,
   // always present), single-select/free-text -> string, string[] (pick +
   // typed combined), or null if unanswered. See computeAnswer for the rule.
@@ -286,6 +274,18 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (document.querySelector(".lightbox-overlay")) return;
     cancel();
   };
+
+  const keydownHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      dismissUnlessOverlayAbove();
+      return;
+    }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      triggerPrimaryShortcut();
+    }
+  };
+  document.addEventListener("keydown", keydownHandler);
 
   backDisposer = registerOverlayBack(() => {
     // Always consumes the press (returns true) even when it no-ops - with the
