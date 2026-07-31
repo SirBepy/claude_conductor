@@ -17,6 +17,7 @@ mod context;
 pub(crate) mod jarvis;
 mod jarvis_assets;
 mod jarvis_fleet;
+mod history;
 mod lifecycle;
 mod permission;
 mod preview;
@@ -26,6 +27,7 @@ mod usage;
 
 pub use channels::register_channels;
 pub use context::register_context;
+pub use history::register_history;
 pub use jarvis::register_jarvis;
 pub use lifecycle::{register, register_notifier, register_settings};
 pub use permission::register_responders;

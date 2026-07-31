@@ -58,6 +58,12 @@ const SAFE_METHODS: &[&str] = &[
     "set_auto_accept",
     "list_auto_accept",
     "load_history_page",
+    // Read-only past-session browsing for the phone History view (mirrors
+    // desktop's `list_history` / `load_history` Tauri commands). Without
+    // these HttpTransport had no case for either name, so the view silently
+    // rendered empty.
+    "list_history",
+    "load_history",
     "read_attachment",
     // Write: phone composer paperclip upload. Bytes land in the path-validated
     // chat-attachments dir (write_attachment rejects path-traversal session ids),
@@ -614,7 +620,7 @@ mod tests {
     fn allowlist_includes_core_chat_methods() {
         for m in [
             "list_instances", "send_message", "cancel_turn", "respond_question",
-            "respond_permission", "load_history_page", "read_attachment",
+            "respond_permission", "load_history_page", "list_history", "load_history", "read_attachment",
             "paste_attachment", "list_characters", "list_project_groups",
             "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
             "project_last_activity_at", "get_project_tech", "get_project_icon",

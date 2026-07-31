@@ -116,11 +116,13 @@ fn build_entry(m: &LiteMeta) -> crate::types::chat::HistoryEntry {
 }
 
 /// Core of `list_history`, split out so it can be unit-tested against a temp
-/// projects dir. Does the cheap walk + stat + sort + slice FIRST, then parses
-/// titles for the returned page only. The exception is title `search`, which
-/// inherently needs every title and so falls back to the full-parse path (the
-/// History view passes `search = None`, so the common case stays cheap).
-fn collect_history(
+/// projects dir, and reused by the daemon RPC mirror (`daemon::methods::history`)
+/// so the remote/phone client shares the exact same walk + cache. Does the
+/// cheap walk + stat + sort + slice FIRST, then parses titles for the returned
+/// page only. The exception is title `search`, which inherently needs every
+/// title and so falls back to the full-parse path (the History view passes
+/// `search = None`, so the common case stays cheap).
+pub(crate) fn collect_history(
     projects_dir: &std::path::Path,
     project_id: Option<String>,
     search: Option<String>,
