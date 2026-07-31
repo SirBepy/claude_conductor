@@ -1,4 +1,5 @@
 import { html, render } from "lit-html";
+import { attachTooltips } from "../../../../shared/row-tooltip";
 import { saveSettings } from "../../../../shared/settings-save";
 import { getSettings, setSettings } from "../../../../shared/state";
 import { LS_ANIM } from "../../../sessions/sidebar-anim";
@@ -115,28 +116,6 @@ function hydrateTheme(): void {
 
 // ── Usage colors / overlay / interface (ported from subviews/visuals/visuals.ts) ──
 
-function wireInfoTooltips(root: HTMLElement | Document): void {
-  for (const wrap of root.querySelectorAll<HTMLElement>(".info-wrap")) {
-    const icon = wrap.querySelector<HTMLElement>(".info-icon");
-    const tip = wrap.querySelector<HTMLElement>(".info-tooltip");
-    if (!icon || !tip) continue;
-    icon.addEventListener("mouseenter", () => {
-      tip.style.display = "block";
-      const iconRect = icon.getBoundingClientRect();
-      const tipRect = tip.getBoundingClientRect();
-      const pad = 8;
-      let top = iconRect.top - tipRect.height - pad;
-      let left = iconRect.left + iconRect.width / 2 - tipRect.width / 2;
-      if (left < pad) left = pad;
-      if (left + tipRect.width > window.innerWidth - pad) left = window.innerWidth - pad - tipRect.width;
-      if (top < pad) top = iconRect.bottom + pad;
-      tip.style.top = top + "px";
-      tip.style.left = left + "px";
-    });
-    icon.addEventListener("mouseleave", () => { tip.style.display = "none"; });
-  }
-}
-
 async function hydrateUsageColorsAndInterface(): Promise<void> {
   const s = getSettings();
   const colorApplyDashboard = $("colorApplyDashboard") as HTMLInputElement | null;
@@ -169,7 +148,7 @@ async function hydrateUsageColorsAndInterface(): Promise<void> {
   paceColorNearOver.addEventListener("change", saveSettings);
   paceColorOver.addEventListener("change", saveSettings);
 
-  wireInfoTooltips(document.getElementById("app") || document);
+  attachTooltips(document.getElementById("app") || document.body, { placement: "above" });
 
   const chatRowStyle = $("chatRowStyle") as HTMLSelectElement | null;
   if (chatRowStyle) {

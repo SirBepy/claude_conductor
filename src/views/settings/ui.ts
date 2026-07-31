@@ -80,9 +80,8 @@ export interface ToggleRowOpts {
  * the label gets an inline info icon reusing the `.info-wrap`/`.info-icon`/
  * `.info-tooltip` classes from src/styles/widgets.css. Those classes only
  * supply the box/positioning styling - the hover-position JS (see
- * `wireInfoTooltips` in subviews/appearance/appearance.ts) still has to be wired by
- * the caller against the rendered root; centralizing that wiring is left to a
- * later task.
+ * `attachTooltips` in src/shared/row-tooltip.ts) still has to be wired by
+ * the caller against the rendered root.
  */
 export function toggleRow(opts: ToggleRowOpts): TemplateResult {
   const labelContent = opts.tooltip
