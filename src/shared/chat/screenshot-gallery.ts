@@ -10,6 +10,7 @@
 
 import { escapeHtml } from "../escape-html";
 import { setupImageZoomPan } from "./image-zoom-pan";
+import { registerOverlayBack } from "../back-button";
 
 /** One screenshot surfaced from a turn's tool_result image outputs. */
 export interface ScreenshotShot {
@@ -31,9 +32,13 @@ export interface ScreenshotShot {
 let overlay: HTMLDivElement | null = null;
 let keyHandler: ((e: KeyboardEvent) => void) | null = null;
 let disposeZoomPan: (() => void) | null = null;
+// Phone back button closes an open gallery first, mirroring modal.ts.
+let backDisposer: (() => void) | null = null;
 
 export function closeScreenshotGallery(): void {
   if (!overlay) return;
+  backDisposer?.();
+  backDisposer = null;
   overlay.remove();
   overlay = null;
   if (keyHandler) {
@@ -122,5 +127,9 @@ export function openScreenshotGallery(shots: ScreenshotShot[], startIndex: numbe
     else if (e.key === "ArrowRight" && idx < shots.length - 1) { idx++; render(); }
   };
   document.addEventListener("keydown", keyHandler);
+  backDisposer = registerOverlayBack(() => {
+    closeScreenshotGallery();
+    return true;
+  });
   render();
 }

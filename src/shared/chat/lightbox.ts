@@ -1,5 +1,6 @@
 import { buildMoreMenuButton } from "./lightbox-more-menu";
 import { closeAllMenus } from "../../views/sessions/menu-registry";
+import { registerOverlayBack } from "../back-button";
 import { setupImageZoomPan } from "./image-zoom-pan";
 import { ComposerCore } from "./composer-core/core";
 import { SlashProvider } from "./caret-popup/providers/slash";
@@ -14,6 +15,8 @@ export type LightboxContent =
   | { type: "text"; content: string; filename?: string };
 
 let overlay: HTMLDivElement | null = null;
+// Phone back button closes an open lightbox first, mirroring modal.ts.
+let backDisposer: (() => void) | null = null;
 
 /** Single definition site for the overlay class - consumed by question-ui.ts's
  *  dismissUnlessOverlayAbove() guard so a rename here can't silently drift out
@@ -123,10 +126,17 @@ export function openLightbox(content: LightboxContent): void {
   document.body.appendChild(overlay);
   overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer")?.focus();
   document.addEventListener("keydown", onEsc);
+  backDisposer?.();
+  backDisposer = registerOverlayBack(() => {
+    closeLightbox();
+    return true;
+  });
 }
 
 export function closeLightbox(): void {
   if (!overlay) return;
+  backDisposer?.();
+  backDisposer = null;
   closeAllMenus();
   const box = overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer");
   if (box && composerBridge) composerBridge.setDraftText(box.value);
