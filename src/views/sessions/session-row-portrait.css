@@ -18,6 +18,65 @@
   width: calc(var(--row-h) - 2px);
 }
 
+/* Circle avatar + notch mask (Joe's call, verified in mockup-circle-avatars.html):
+   a real hole cut where the project badge sits reveals the row's own painted
+   background - self-corrects to every row state with zero per-state CSS. The
+   edge-glow bar (classic style) is redundant once the dot below is the signal. */
+.sessions-list li.row-portrait .session-avatar-wrap > .session-avatar {
+  border-radius: 50%;
+  -webkit-mask-image: radial-gradient(13px at calc(100% - 0.5px) 50%, rgba(0,0,0,0) 12.9px, rgb(0,0,0) 13px);
+  mask-image: radial-gradient(13px at calc(100% - 0.5px) 50%, rgba(0,0,0,0) 12.9px, rgb(0,0,0) 13px);
+}
+.sessions-list li.row-portrait .session-avatar::before,
+.sessions-list li.row-portrait .session-avatar::after {
+  display: none;
+}
+
+/* Status dot, bottom-left of the circle - replaces the removed left-edge row
+   stripes (session-avatar.css) as the sole status signal. rate-limited uses
+   the documented-but-previously-unbound --chat-state-error orange so it reads
+   distinct from the red closing/attention family instead of duplicating it. */
+.sessions-list li.row-portrait .avatar-status-dot {
+  position: absolute;
+  left: 4px;
+  bottom: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--color-surface-alt);
+  z-index: 11;
+}
+.sessions-list li.row-portrait .avatar-status-dot.st-working   { background: var(--st-working);   box-shadow: 0 0 4px var(--st-working-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-done      { background: var(--st-done);      box-shadow: 0 0 4px var(--st-done-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-question  { background: var(--st-question);  box-shadow: 0 0 4px var(--st-question-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-waiting        { background: var(--st-waiting);       box-shadow: 0 0 4px var(--st-waiting-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-rate-limited   { background: var(--chat-state-error); box-shadow: 0 0 4px var(--chat-state-error-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-your-turn { background: var(--st-your-turn); }
+.sessions-list li.row-portrait .avatar-status-dot.st-external  { background: var(--st-external);  box-shadow: 0 0 4px var(--st-external-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-attention { background: var(--st-attention); box-shadow: 0 0 4px var(--st-attention-glow); animation: attention-pulse 1.4s ease-in-out infinite; }
+.sessions-list li.row-portrait .avatar-status-dot.st-closing   { background: var(--chat-state-closing); box-shadow: 0 0 4px var(--chat-state-closing-glow); }
+
+/* The dot is now the sole signal for portrait rows - scoped to .row-portrait
+   so classic keeps its stripes. 4-class specificity beats .closing.row-entering
+   /-exiting (session-avatar.css) so closing-pulse's own animated box-shadow
+   can't repaint the stripe over a plain `box-shadow: none`. */
+.sessions-list li.row-portrait.needs-attention {
+  box-shadow: none;
+}
+.sessions-list li.row-portrait.closing {
+  box-shadow: none;
+  animation: none;
+}
+.sessions-list li.row-portrait.closing.row-entering {
+  animation: slideInLeft 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.sessions-list li.row-portrait.closing.row-exiting {
+  animation: slideOutLeft 0.28s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+.sessions-list li.row-portrait.is-rate-limited::before {
+  display: none;
+}
+
 /* Name and battery share one baseline. With only two things to place, a second
    row left them stranded at opposite edges of mostly empty space. */
 .sessions-list li.row-portrait .session-row-text {

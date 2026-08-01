@@ -235,7 +235,8 @@
    until the session is actually ended (daemon process killed), instead of
    vanishing up front. Closing shares the red "needs your attention" family with
    needs-input (Joe's 2026-06-24 call); they're mutually exclusive states so the
-   shared hue doesn't ambiguate a row in practice. */
+   shared hue doesn't ambiguate a row in practice. Portrait rows override this
+   below (session-row-portrait.css) - their avatar dot is the signal instead. */
 .sessions-list li.closing {
   box-shadow: inset 3px 0 0 var(--chat-state-closing);
   animation: closing-pulse 1.2s ease-in-out infinite;

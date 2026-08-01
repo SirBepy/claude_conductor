@@ -85,6 +85,11 @@ export function sessionRowOptions(
   const drainChip = ctx.sort === "drain" ? drainChipHtml(ctx.drainMap.get(s.session_id)) : "";
   const tipAttr = ctx.isPortrait ? "data-tip" : "title";
   const badges = `${s.is_remote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${s.autopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}`;
+  const statusClass = statusDotClass(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited);
+  // Closing overrides the portrait DOT only, not statusClass/.session-avatar -
+  // statusDotClass has no closing awareness, and classic (which never renders
+  // the dot) must keep reading its pre-closing colour unchanged.
+  const dotClass = isClosing ? "st-closing" : statusClass;
   return {
     idAttr: "session-id",
     id: s.session_id,
@@ -92,9 +97,9 @@ export function sessionRowOptions(
     liExtraAttrs: ctx.kbdHint,
     charId: characterForSession(s),
     cwd: s.cwd,
-    statusClass: statusDotClass(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited),
+    statusClass,
     avatarExtras: ctx.isPortrait
-      ? { badgeClass: "is-centred", extra: scheduledCornerHtml(ctx.scheduledCountMap.get(s.session_id)) }
+      ? { badgeClass: "is-centred", extra: scheduledCornerHtml(ctx.scheduledCountMap.get(s.session_id)), dotClass }
       : undefined,
     isPortrait: ctx.isPortrait,
     title: escapeHtml(sessionSubtitle(s)),

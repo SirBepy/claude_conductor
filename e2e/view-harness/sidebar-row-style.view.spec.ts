@@ -71,7 +71,7 @@ test.describe("view-harness / chat row style", () => {
     await expect(rows.nth(1).locator(".session-model-battery i")).toHaveClass(/ph-battery-medium/);
   });
 
-  test("portrait is square and every element shares the art's centre", async ({ page }) => {
+  test("portrait avatar is a circle, notched for the badge, and every element shares the art's centre", async ({ page }) => {
     await mountSessions(page, "portrait");
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
@@ -82,9 +82,13 @@ test.describe("view-harness / chat row style", () => {
         const r = el.getBoundingClientRect();
         return Math.round((r.top + r.height / 2) * 100) / 100;
       };
-      const a = li.querySelector(".session-avatar")!.getBoundingClientRect();
+      const avatarEl = li.querySelector(".session-avatar")!;
+      const a = avatarEl.getBoundingClientRect();
+      const style = getComputedStyle(avatarEl);
       return {
         w: Math.round(a.width), h: Math.round(a.height),
+        borderRadius: style.borderRadius,
+        maskImage: style.getPropertyValue("mask-image") || style.getPropertyValue("-webkit-mask-image"),
         art: Math.round((a.top + a.height / 2) * 100) / 100,
         badge: mid(".session-proj-badge"),
         name: mid(".proj-name"),
@@ -92,14 +96,41 @@ test.describe("view-harness / chat row style", () => {
       };
     });
 
-    // Square: a taller row must buy a bigger face, not a taller crop.
+    // Circle, not square-with-corners: a taller row must buy a bigger face
+    // (still a bounding-box square), and border-radius must resolve full-round.
     expect(box.w).toBe(box.h);
+    expect(box.borderRadius).toBe("50%");
+    // Notch: a real mask-image, not the unset default.
+    expect(box.maskImage).not.toBe("none");
     // The bug that made everything "look 1px low": a separator inside the avatar
     // wrapper shortened the visible art, so the art's centre diverged from every
     // other element's. All four must agree.
     expect(box.badge).toBe(box.art);
     expect(box.name).toBe(box.art);
     expect(box.battery).toBe(box.art);
+  });
+
+  test("portrait status dot renders bottom-left, replacing the left-edge stripe", async ({ page }) => {
+    await mountSessions(page, "portrait");
+    const row = page.locator("#sessions-list li[data-session-id]").first();
+    await row.evaluate((li) => li.classList.add("needs-attention", "is-rate-limited"));
+
+    const dot = row.locator(".avatar-status-dot");
+    await expect(dot).toBeVisible();
+    const dotBox = await dot.evaluate((el) => el.getBoundingClientRect());
+    const avatarBox = await row.locator(".session-avatar").evaluate((el) => el.getBoundingClientRect());
+    expect(dotBox.left).toBeLessThan(avatarBox.left + avatarBox.width / 2);
+    expect(dotBox.bottom).toBeGreaterThan(avatarBox.top + avatarBox.height / 2);
+
+    // The dot replaces the stripe: needs-attention/rate-limited no longer paint
+    // a left-edge box-shadow/::before on portrait rows.
+    const stripes = await row.evaluate((li) => {
+      const s = getComputedStyle(li);
+      const before = getComputedStyle(li, "::before");
+      return { boxShadow: s.boxShadow, beforeDisplay: before.display };
+    });
+    expect(stripes.boxShadow).toBe("none");
+    expect(stripes.beforeDisplay).toBe("none");
   });
 
   test("Classic row keeps the title and the 3-dot button", async ({ page }) => {

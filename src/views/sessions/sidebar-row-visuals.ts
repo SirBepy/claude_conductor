@@ -73,6 +73,8 @@ export interface LeadingExtras {
   badgeClass?: string;
   /** Markup appended inside the wrapper, after the badge (the scheduled corner). */
   extra?: string;
+  /** Portrait-only status dot class (`st-*`), rendered bottom-left on the circle. */
+  dotClass?: string;
 }
 
 /** Leading visual for ANY sidebar row - live session, draft, or parked draft.
@@ -87,11 +89,12 @@ export function leadingVisual(
   extras: LeadingExtras = {},
 ): string {
   const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
+  const dot = extras.dotClass ? `<span class="avatar-status-dot ${extras.dotClass}"></span>` : "";
   if (!charId) {
     const avatarHtml = `<span class="session-avatar session-avatar--placeholder ${statusClass}">
           <i class="ph ph-chat-circle-dots"></i>
         </span>`;
-    return avatarWrap(avatarHtml, badge + (extras.extra ?? ""));
+    return avatarWrap(avatarHtml, badge + dot + (extras.extra ?? ""));
   }
   const id = escapeHtml(charId);
   const url = characterIconUrl(charId);
@@ -104,5 +107,5 @@ export function leadingVisual(
           <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
           <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
         </span>`;
-  return avatarWrap(avatarHtml, badge + (extras.extra ?? ""));
+  return avatarWrap(avatarHtml, badge + dot + (extras.extra ?? ""));
 }
