@@ -49,6 +49,21 @@ fn turn_is_close(session: &Session) -> bool {
         .unwrap_or(false)
 }
 
+/// Registry `awaiting` value for a `/close` turn that ended without ever
+/// confirming via the `close_session` tool (todo 436): the model deviated
+/// mid-chain (e.g. ran a terminal-kill script instead) rather than the tool
+/// call erroring. Reuses `awaiting` (the single status source) instead of a
+/// second flag.
+const CLOSE_FAILED_AWAITING: &str = "close_failed";
+
+/// True when a `/close` turn's stand-down (closing flagged, tool never
+/// confirmed) is a genuine failure rather than an intentional `--dont-close`
+/// dry run. Pure so it's unit-testable without a live `Session`/`ChildStdin`
+/// (mirrors `hook_session_end_should_close` in `hooks_server::lifecycle`).
+fn close_stand_down_is_failure(last_prompt: &str, close_confirmed: bool) -> bool {
+    !close_confirmed && !last_prompt.contains("--dont-close")
+}
+
 /// Daemon-authoritative `/close` teardown: mark the session ended and force the
 /// `claude` process tree down. Fired when the `close_session` MCP tool's
 /// `close_requested` flag is observed at turn end. Idempotent - `mark_ended`
@@ -361,6 +376,18 @@ pub(crate) async fn run_stdout_pump(
                                 // snapshot below so it never persists `closing: true`.
                                 if closing_flagged {
                                     closing_flagged = false;
+                                    let prompt = pump_session.last_prompt.lock().ok()
+                                        .map(|p| p.clone()).unwrap_or_default();
+                                    if close_stand_down_is_failure(&prompt, close_confirmed) {
+                                        log::warn!(
+                                            "daemon: session {} /close armed but never confirmed via close_session tool; chat still open",
+                                            pump_session.session_id
+                                        );
+                                        state_for_pump.registry.set_awaiting(
+                                            &pump_session.session_id,
+                                            Some(CLOSE_FAILED_AWAITING.to_string()),
+                                        );
+                                    }
                                     state_for_pump.registry.set_closing(&pump_session.session_id, false);
                                 }
                                 // Persist at turn end so a daemon restart keeps each
@@ -433,18 +460,37 @@ pub(crate) async fn run_stdout_pump(
                 pump_session.session_id, expired
             );
         }
-        // The turn is over either way - drop the broadcast closing flag
-        // before any snapshot below can persist `closing: true`. (No
-        // reassignment: the pump loop is done, the flag is never read again.)
-        if closing_flagged {
-            state_for_pump.registry.set_closing(&pump_session.session_id, false);
-        }
         // /close's Phase 6 script also kills the `claude -p` child, which can
         // take the process down BEFORE its result line flushes - so a close the
         // `close_session` MCP tool confirmed must also be honored on EOF, not
         // just at TurnUsage. Idempotent with the result-line path: whichever
         // consumes `close_requested` first tears down; the other is a no-op.
-        if state_for_pump.registry.take_close_requested(&pump_session.session_id) {
+        let close_confirmed_at_eof =
+            state_for_pump.registry.take_close_requested(&pump_session.session_id);
+        // The turn is over either way - drop the broadcast closing flag
+        // before any snapshot below can persist `closing: true`. (No
+        // reassignment: the pump loop is done, the flag is never read again.)
+        if closing_flagged {
+            // The process died before flushing a result line at all (the
+            // kill-script race above), so an unconfirmed close here is
+            // always the real failure, never an intentional --dont-close
+            // (that path completes its turn normally).
+            if !close_confirmed_at_eof {
+                log::warn!(
+                    "daemon: session {} process exited mid-/close without close_session confirmation; chat still open",
+                    pump_session.session_id
+                );
+                state_for_pump.registry.set_awaiting(
+                    &pump_session.session_id,
+                    Some(CLOSE_FAILED_AWAITING.to_string()),
+                );
+                // So a daemon restart doesn't wipe the failure back to
+                // whatever awaiting was before this turn.
+                crate::sessions::persistence::save_snapshot_default(&state_for_pump.registry);
+            }
+            state_for_pump.registry.set_closing(&pump_session.session_id, false);
+        }
+        if close_confirmed_at_eof {
             finalize_close(&state_for_pump, &pump_session);
             crate::sessions::persistence::save_snapshot_default(&state_for_pump.registry);
         }
@@ -467,4 +513,29 @@ pub(crate) async fn run_stdout_pump(
         let _ = std::fs::remove_file(p);
     }
     let _ = child.wait().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact todo 436 bug: a real `/close` turn ends without the
+    /// `close_session` tool ever firing (model deviated, e.g. ran a
+    /// terminal-kill script instead) - must be flagged as a failure.
+    #[test]
+    fn close_stand_down_is_failure_when_never_confirmed() {
+        assert!(close_stand_down_is_failure("/close", false));
+    }
+
+    #[test]
+    fn close_stand_down_not_failure_when_confirmed() {
+        assert!(!close_stand_down_is_failure("/close", true));
+    }
+
+    /// `--dont-close` is an intentional dry run; standing down unconfirmed
+    /// is expected there, not a failure.
+    #[test]
+    fn close_stand_down_not_failure_on_dont_close_flag() {
+        assert!(!close_stand_down_is_failure("/close --dont-close", false));
+    }
 }
