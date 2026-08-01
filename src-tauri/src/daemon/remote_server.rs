@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -46,6 +46,11 @@ use super::remote_voice::transcribe_ws;
 /// Fixed localhost port for the remote API. Stable so the user's
 /// `tailscale serve` config can target it. Distinct from the hook port (27182).
 pub const REMOTE_PORT: u16 = 27183;
+
+/// Body-size cap for `/api/rpc` (raises axum's 2 MiB default). Phone photos
+/// arrive as base64 JSON (~1.33x raw size) and routinely exceed 2 MiB raw on
+/// stock Android cameras; 30 MiB covers a ~22 MiB raw file.
+const MAX_RPC_BODY_BYTES: usize = 30 * 1024 * 1024;
 
 pub(super) struct RemoteCtx {
     pub(super) state: Arc<DaemonState>,
@@ -102,7 +107,10 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
         .route("/api/sessions", get(list_sessions))
         .route("/api/sessions/:id/send", post(send_message))
         .route("/api/sessions/:id/cancel", post(cancel_turn))
-        .route("/api/rpc", post(rpc_dispatch))
+        .route(
+            "/api/rpc",
+            post(rpc_dispatch).layer(DefaultBodyLimit::max(MAX_RPC_BODY_BYTES)),
+        )
         // Web Push enrolment (ai_todo 119). Token-gated like the rest.
         .route("/api/push/vapid-public-key", get(push_vapid_key))
         .route("/api/push/subscribe", post(push_subscribe))
