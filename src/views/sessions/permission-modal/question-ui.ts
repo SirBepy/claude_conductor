@@ -494,7 +494,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
         <button type="button" class="btn btn-primary" data-act="primary"></button>
       `;
-      host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track">${panelsHtml}</div>`, footerHtml);
+      host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml);
 
       const card = host.querySelector<HTMLElement>(".prompt-card");
       if (!firstRender) card?.classList.add("prompt-card--no-anim");

@@ -580,21 +580,33 @@
 }
 
 /* ── Horizontal question track ─────────────────────────────────────────────
- * One panel per question, each exactly the card's width. Positioned via
- * transform (not scroll) so step nav can animate a persistent node - see
+ * .prompt-track-viewport is the fixed, never-transformed window; .prompt-track
+ * is the sliding reel inside it. They used to be the same element, but a
+ * transform on the clipping element itself moves the clip box WITH the
+ * content it's supposed to be framing, so the active panel slides out from
+ * under its own clip rect on every step but 0. Splitting them fixes that: the
+ * viewport clips a fixed rect, the reel is free to translate inside it. See
  * stepTab()/positionTrack() in question-ui.ts. */
-.prompt-track {
-  display: flex;
-  align-items: flex-start;
-  overflow-x: hidden;
-  overflow-y: hidden;
-  transition: transform 0.22s ease-out;
+.prompt-track-viewport {
+  /* clip, not hidden, on BOTH axes: hidden still creates a scroll container,
+   * so native scrollIntoView (focus jump, find-in-page, Playwright's click)
+   * sets scrollLeft and fights the reel's transform. clip has no scroll
+   * container, so scrollLeft can never move - but Chromium only honors clip
+   * when both axes agree, mixing clip with hidden silently reverts to
+   * hidden's scrollable behavior on both. */
+  overflow-x: clip;
+  overflow-y: clip;
   /* flex-basis:auto (not the old flex:1's 0%) so question-ui.ts's per-render
    * `track.style.height` - set to just the active panel's own content height -
    * actually takes effect instead of being overridden by flex-grow filling
    * whatever space the (now-obsolete) tallest-sibling auto-sizing implied. */
   flex: none;
   min-height: 0;
+}
+.prompt-track {
+  display: flex;
+  align-items: flex-start;
+  transition: transform 0.22s ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
   .prompt-track {
