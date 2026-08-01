@@ -4,8 +4,15 @@
 
 const PAD_SIDE = 10;
 const PAD_ABOVE = 8;
+// Backstop for a tap that shows the tooltip but is then followed by
+// navigation away, so the box (parented to document.body) can't survive
+// past this on a view where nothing else ever dismisses it.
+const AUTO_HIDE_MS = 3000;
 
 let box: HTMLElement | null = null;
+let currentAnchor: HTMLElement | null = null;
+let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+let globalDismissWired = false;
 
 function ensureBox(): HTMLElement {
   if (box?.isConnected) return box;
@@ -17,6 +24,30 @@ function ensureBox(): HTMLElement {
 
 export function hideRowTooltip(): void {
   if (box) box.style.display = "none";
+  currentAnchor = null;
+  if (autoHideTimer) {
+    clearTimeout(autoHideTimer);
+    autoHideTimer = null;
+  }
+}
+
+// Touch has no hover-out, so mouseover/mouseout alone (below) never dismiss a
+// tap-shown tooltip. Mobile's touch-to-mouse mapping fires pointerdown BEFORE
+// the compatibility mouseover, so this always resolves the PREVIOUS tooltip
+// before show() reacts to the new tap - wired lazily on first show().
+function wireGlobalDismiss(): void {
+  if (globalDismissWired) return;
+  globalDismissWired = true;
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!currentAnchor) return;
+      const target = e.target as Node;
+      if (currentAnchor.contains(target) || box?.contains(target)) return;
+      hideRowTooltip();
+    },
+    true,
+  );
 }
 
 // Prefer the right side (sidebar rail lives on the left edge); flip left when
@@ -51,6 +82,10 @@ function show(anchor: HTMLElement, text: string, placement: "side" | "above"): v
   const { left, top } = placement === "above" ? placeAbove(a, t) : placeSide(a, t);
   el.style.left = `${left}px`;
   el.style.top = `${top}px`;
+  currentAnchor = anchor;
+  if (autoHideTimer) clearTimeout(autoHideTimer);
+  autoHideTimer = setTimeout(hideRowTooltip, AUTO_HIDE_MS);
+  wireGlobalDismiss();
 }
 
 export interface TooltipOpts {
