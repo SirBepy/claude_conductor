@@ -79,9 +79,10 @@ test.describe("view-harness / AUQ review-step extra message rides in the SAME se
     await card.locator('.prompt-opt input[data-label="X"]').click();
     await card.locator('.prompt-pager [data-nav="1"]').click();
 
-    // Summary screen: type the extra message, then Submit.
+    // Summary screen: type the extra message, then Submit (the footer's single
+    // primary button, which reads Submit only on review).
     await card.locator(".prompt-extra-input").fill("Also check the CI logs while you're at it.");
-    await card.locator('[data-act="submit"]').click();
+    await card.locator('[data-act="primary"]').click();
 
     await expect(card).toHaveCount(0);
 

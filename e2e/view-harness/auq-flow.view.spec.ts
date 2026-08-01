@@ -162,19 +162,30 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await openCard(page);
 
     const card = page.locator(".prompt-card");
-    const submitBtn = card.locator('[data-act="submit"]');
-    await expect(submitBtn).toBeDisabled();
+    // Dots aren't gated, so jump straight to review (dot 3) with nothing
+    // answered yet - the primary button there is Submit, disabled until every
+    // question is answered, regardless of how review was reached.
+    await card.locator('.prompt-dot[data-dot="3"]').click();
+    const primaryBtn = card.locator('[data-act="primary"]');
+    await expect(primaryBtn).toHaveText(/Submit/);
+    await expect(primaryBtn).toBeDisabled();
 
+    await card.locator('.prompt-summary-row').nth(0).click();
     await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("A (typed)");
-    await card.locator('.prompt-dot[data-dot="1"]').click();
-    await expect(submitBtn).toBeDisabled();
-    await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
-    await card.locator('.prompt-dot[data-dot="2"]').click();
-    await expect(submitBtn).toBeDisabled();
-    await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("nothing else");
-    await expect(submitBtn).toBeEnabled();
+    await card.locator('.prompt-dot[data-dot="3"]').click();
+    await expect(primaryBtn).toBeDisabled();
 
-    await submitBtn.click();
+    await card.locator('.prompt-summary-row').nth(1).click();
+    await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
+    await card.locator('.prompt-dot[data-dot="3"]').click();
+    await expect(primaryBtn).toBeDisabled();
+
+    await card.locator('.prompt-summary-row').nth(2).click();
+    await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("nothing else");
+    await card.locator('.prompt-dot[data-dot="3"]').click();
+    await expect(primaryBtn).toBeEnabled();
+
+    await primaryBtn.click();
     const result = await page.evaluate(() => window.__auqResult);
     expect(result?.submitted).toEqual({
       "Which approach?": "A (typed)",
@@ -182,6 +193,26 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
       "Anything else?": "nothing else",
     });
     await expect(card).toHaveCount(0);
+  });
+
+  test("footer primary button reads Next and Submit is absent on every question panel; only review shows Submit", async ({ page }) => {
+    await mountView(page);
+    await openCard(page);
+
+    const card = page.locator(".prompt-card");
+    const primaryBtn = card.locator('[data-act="primary"]');
+    await expect(primaryBtn).toHaveText(/Next/);
+    await expect(primaryBtn).toBeDisabled();
+    await expect(card.locator('[data-act="submit"]')).toHaveCount(0);
+
+    await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("A (typed)");
+    await expect(primaryBtn).toBeEnabled();
+    await primaryBtn.click();
+
+    // Now on question 2 of 3 - still Next, Submit still absent.
+    await expect(card.locator(".prompt-panel.is-active .prompt-q__text")).toHaveText("Which features?");
+    await expect(primaryBtn).toHaveText(/Next/);
+    await expect(card.locator('[data-act="submit"]')).toHaveCount(0);
   });
 
   test("multiSelect: a real option, 'None of the above', or free text alone all unlock the arrow; None is exclusive", async ({ page }) => {
@@ -223,7 +254,7 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(arrow).toBeEnabled();
   });
 
-  test("Ctrl+Enter advances to the next unanswered panel, and submits once everything is answered", async ({ page }) => {
+  test("Ctrl+Enter advances to the next unanswered panel, lands on review (not a submit) after the last one, and submits from review", async ({ page }) => {
     await mountView(page);
     await openCard(page);
 
@@ -242,8 +273,13 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(activePanel.locator(".prompt-q__text")).toHaveText("Anything else?");
 
     await activePanel.locator(".prompt-q__other-input").fill("nothing else");
+    // Last question now answered - Ctrl+Enter advances to review, it does NOT submit.
     await activePanel.locator(".prompt-q__other-input").press("Control+Enter");
+    await expect(card.locator(".prompt-panel.is-active")).toHaveAttribute("data-panel", "3");
+    expect(await page.evaluate(() => window.__auqResult?.submitted)).toBeUndefined();
 
+    // Ctrl+Enter from review submits.
+    await page.keyboard.press("Control+Enter");
     const result = await page.evaluate(() => window.__auqResult);
     expect(result?.submitted).toEqual({
       "Which approach?": "A (typed)",

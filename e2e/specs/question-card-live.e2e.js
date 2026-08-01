@@ -85,7 +85,10 @@ describe("AskUserQuestion full real-path (BILLED)", () => {
       const opt = Array.from(document.querySelectorAll(".prompt-opt")).find((el) => /tabs/i.test(el.textContent));
       opt?.querySelector("input")?.click();
     });
-    await browser.execute(() => document.querySelector('.prompt-card [data-act="submit"]')?.click());
+    // This built-in-tool flow (showPermissionCard) never sets supportsExtras, and
+    // it's a single question, so there's no review panel - the footer's one
+    // primary button is Submit directly on this question.
+    await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.click());
 
     await card.waitForExist({ reverse: true, timeout: 15000, timeoutMsg: "card did not clear after answering" });
     await browser.waitUntil(
