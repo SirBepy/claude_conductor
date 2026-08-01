@@ -1,10 +1,8 @@
 import type { Instance, ScheduledItem } from "../../types/ipc.generated";
-import { STATUS_ICON, markerToStatusClass } from "../../shared/status-icons";
+import { markerToStatusClass } from "../../shared/status-icons";
 
 export type SessionSort = "status" | "recent" | "name" | "drain";
-export type SessionStateStyle = "icons" | "dots";
 
-export const LS_STATE_STYLE = "cc_session_state_style";
 export const LS_SORT = "cc_session_sort";
 export const LS_UNREAD = "cc_session_unread";
 export const LS_HIDDEN = "cc_hidden_sessions";
@@ -311,18 +309,10 @@ export function saveSort(v: SessionSort): void {
   catch { /* ignore */ }
 }
 
-export function loadStateStyle(): SessionStateStyle {
-  try {
-    const v = localStorage.getItem(LS_STATE_STYLE);
-    if (v === "icons" || v === "dots") return v;
-  } catch { /* ignore */ }
-  return "icons";
-}
-
-/** The `st-*` status modifier for a session, shared by the dots-style indicator
- * and the hero-avatar corner dot. Priority matches `statusIndicator`. Marker
- * classes (question/working/waiting/done) funnel through markerToStatusClass;
- * attention/external/rate-limited/unread are statusDotClass-only states. */
+/** The `st-*` status modifier for a session, driving the sidebar/header avatar
+ * ring color. Marker classes (question/working/waiting/done) funnel through
+ * markerToStatusClass; attention/external/rate-limited/unread are
+ * statusDotClass-only states. */
 export function statusDotClass(
   i: Instance,
   unread: Set<string>,
@@ -339,55 +329,4 @@ export function statusDotClass(
   if (rateLimited.has(i.session_id)) return "st-rate-limited";
   if (unread.has(i.session_id)) return "st-done";
   return markerToStatusClass("done");
-}
-
-export function statusIndicator(
-  i: Instance,
-  unread: Set<string>,
-  attention: Set<string>,
-  question: Set<string>,
-  style: SessionStateStyle,
-  escapeHtmlFn: (s: string) => string,
-  rateLimited: ReadonlySet<string> = new Set(),
-): string {
-  const tooltip = escapeHtmlFn(stateTooltip(i, unread, attention, question, rateLimited));
-  const needsAttention = attention.has(i.session_id);
-  const isExternal = i.kind === "external" || i.kind === "automated";
-  const isQuestion = !needsAttention && !isExternal && (!i.busy || i.awaiting === "question") && question.has(i.session_id);
-  const isRateLimited = !needsAttention && !isExternal && !i.busy && rateLimited.has(i.session_id);
-  if (style === "dots") {
-    const cls = `session-status-dot ${statusDotClass(i, unread, attention, question, rateLimited)}`;
-    return `<span class="${cls}" title="${tooltip}"></span>`;
-  }
-  // icons mode
-  if (needsAttention) {
-    return `<i class="session-state-icon ph ph-shield-warning s-attention attention-pulse" title="${tooltip}"></i>`;
-  }
-  if (i.kind === "external") {
-    return `<i class="session-state-icon ph ph-eye s-external" title="${tooltip}"></i>`;
-  }
-  if (i.kind === "automated") {
-    return `<i class="session-state-icon ph ph-robot s-external" title="${tooltip}"></i>`;
-  }
-  if (i.busy && i.awaiting !== "question") {
-    return `<i class="session-state-icon ph ph-spinner s-working spinning" title="${tooltip}"></i>`;
-  }
-  if (isQuestion) {
-    return `<i class="session-state-icon ph ${STATUS_ICON.question} s-question" title="${tooltip}"></i>`;
-  }
-  if (i.awaiting === "working") {
-    return `<i class="session-state-icon ph ${STATUS_ICON.working} s-working spinning" title="${tooltip}"></i>`;
-  }
-  if (i.awaiting === "waiting") {
-    return `<i class="session-state-icon ph ${STATUS_ICON.waiting} s-waiting" title="${tooltip}"></i>`;
-  }
-  if (isRateLimited) {
-    return `<i class="session-state-icon ph ph-hourglass-high s-rate-limited" title="${tooltip}"></i>`;
-  }
-  if (unread.has(i.session_id)) {
-    return `<i class="session-state-icon ph ph-check-circle s-done" title="${tooltip}"></i>`;
-  }
-  // Done / your turn: a calm muted check, NOT the old red exclamation. The red
-  // alarm is reserved for genuine permission prompts (attention-pulse above).
-  return `<i class="session-state-icon ph ${STATUS_ICON.done} s-your-turn" title="${tooltip}"></i>`;
 }

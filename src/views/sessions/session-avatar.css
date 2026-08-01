@@ -216,20 +216,15 @@
   gap: 1px;
 }
 
-/* A chat that parked a permission/question prompt while backgrounded. Pulse
-   the icon and tint the row so the user knows to click in and answer. This is
-   the needs-input (red) family - "needs your attention". */
-.session-state-icon.attention-pulse { color: var(--chat-state-needs-input); animation: attention-pulse 1.4s ease-in-out infinite; }
-
+/* A chat that parked a permission/question prompt while backgrounded. Tint
+   the row so the user knows to click in and answer. This is the needs-input
+   (red) family - "needs your attention". */
 .sessions-list li.needs-attention {
   background: color-mix(in srgb, var(--chat-state-needs-input) 12%, transparent);
   box-shadow: inset 3px 0 0 var(--chat-state-needs-input);
 }
 .sessions-list li.needs-attention:hover { background: color-mix(in srgb, var(--chat-state-needs-input) 20%, transparent); }
 .sessions-list li.needs-attention.active { background: var(--color-primary); box-shadow: none; }
-.sessions-list li.needs-attention.active .session-state-icon.attention-pulse {
-  color: var(--color-background) !important;
-}
 
 @keyframes attention-pulse {
   0%, 100% { opacity: 1; }

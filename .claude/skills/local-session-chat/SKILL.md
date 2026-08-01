@@ -9,7 +9,7 @@ description: Use when invoked via /local-session-chat. Loads full context for th
 
 1. Read these files (in order, skim for current state):
    - `src/views/sessions/sessions.ts` - full view orchestration, state machine, sidebar render, pending-session flow
-   - `src/views/sessions/sessions-helpers.ts` - sort, unread, statusPriority, stateTooltip, loadStateStyle
+   - `src/views/sessions/sessions-helpers.ts` - sort, unread, statusPriority, stateTooltip, statusDotClass
    - `src/views/sessions/sessions.css` - all layout/styling for the sidebar + rows
    - `src/shared/chat/chat-renderer.ts` - virtualized chat DOM, markdown + shiki pass
    - `src/shared/chat/composer.ts` - textarea, image paste, mountId race guard
@@ -30,7 +30,7 @@ description: Use when invoked via /local-session-chat. Loads full context for th
 
 **Unread tracking.** `prevBusyMap` diff on every `instances-changed` event: `busy true→false` while not selected = mark unread. GC'd when session ends.
 
-**Sidebar sort options.** `status` (Working > Done-unread > YourTurn > External), `recent`, `name`. Persisted in localStorage key `cc_session_sort`. State style (icons vs dots) in `cc_session_state_style`.
+**Sidebar sort options.** `status` (Working > Done-unread > YourTurn > External), `recent`, `name`. Persisted in localStorage key `cc_session_sort`. Row style (`classic` vs `portrait`, default portrait) in `cc_chat_row_style`.
 
 **Context-menu.** Per-row 3-dot menu: "New agent here", "Run /close" (interactive non-busy only), "Open in VS Code".
 

@@ -159,17 +159,6 @@ async function hydrateUsageColorsAndInterface(): Promise<void> {
     });
   }
 
-  const sessionStateStyle = $("sessionStateStyle") as HTMLSelectElement | null;
-  if (sessionStateStyle) {
-    try {
-      sessionStateStyle.value = localStorage.getItem("cc_session_state_style") || "icons";
-    } catch { /* ignore */ }
-    sessionStateStyle.addEventListener("change", () => {
-      try { localStorage.setItem("cc_session_state_style", sessionStateStyle.value); }
-      catch { /* ignore */ }
-    });
-  }
-
   const sidebarAnimations = $("sidebarAnimations") as HTMLInputElement | null;
   if (sidebarAnimations) {
     try { sidebarAnimations.checked = localStorage.getItem(LS_ANIM) !== "off"; }
@@ -299,13 +288,6 @@ function template() {
             <select id="chatRowStyle">
               <option value="portrait">Portrait</option>
               <option value="classic">Classic</option>
-            </select>
-          </div>
-          <div class="kit-row">
-            <span class="kit-row-label">Session state style</span>
-            <select id="sessionStateStyle">
-              <option value="icons">Icons</option>
-              <option value="dots">Dots</option>
             </select>
           </div>
           ${toggleRow({ label: "Sidebar animations", inputId: "sidebarAnimations", checked: true })}

@@ -122,10 +122,9 @@ function buildTooltip(totals: TurnUsageTotals): string {
 }
 
 /** Title for each `<cc-status:..>` value; icons come from the shared
- *  STATUS_ICON table (also used by sessions-helpers.ts statusIndicator) so
- *  the same states read the same way in both places. "done" is deliberately
- *  left uncolored (no `turn-chip--status-*` modifier) - a settled turn is
- *  the calm default, not something to highlight. */
+ *  STATUS_ICON table. "done" is deliberately left uncolored (no
+ *  `turn-chip--status-*` modifier) - a settled turn is the calm default,
+ *  not something to highlight. */
 const STATUS_CHIP_META: Record<string, { icon: string; title: string }> = {
   question: { icon: STATUS_ICON.question, title: "Ended with a question" },
   working: { icon: STATUS_ICON.working, title: "Working in the background" },

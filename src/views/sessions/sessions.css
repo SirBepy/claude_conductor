@@ -136,8 +136,7 @@
 
 /* Centered daemon-boot state in the pane (replaces "Select or create a
    session" while the daemon is connecting). The spinner MUST be animated:
-   the spin rule is scoped here because the generic .spinning helper only
-   targets .session-state-icon. */
+   there's no shared spinning helper here, so it's scoped locally. */
 .session-empty--setup {
   display: flex;
   flex-direction: column;

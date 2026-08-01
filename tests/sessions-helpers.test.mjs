@@ -7,7 +7,6 @@ import {
   sortSessions,
   sessionSegment,
   statusDotClass,
-  statusIndicator,
   deriveQuestionSet,
   isJarvisOrWorker,
 } from "../src/views/sessions/sessions-helpers.ts";
@@ -226,28 +225,6 @@ describe("statusDotClass", () => {
     // The question class must win over the busy spinner so the row keeps
     // flagging until the daemon clears awaiting on answer.
     expect(cls(makeInstance({ session_id: "auq", busy: true, awaiting: "question" }))).toBe("st-question");
-  });
-});
-
-describe("statusIndicator (icons mode)", () => {
-  const none = new Set();
-  const esc = (s) => s;
-  const icon = (i) => statusIndicator(i, none, none, deriveQuestionSet([i]), "icons", esc);
-
-  it("busy renders the spinner", () => {
-    expect(icon(makeInstance({ busy: true }))).toContain("ph-spinner");
-  });
-  it("awaiting 'working' renders the spinner too", () => {
-    expect(icon(makeInstance({ awaiting: "working" }))).toContain("ph-spinner");
-  });
-  it("awaiting 'question' renders the question icon", () => {
-    expect(icon(makeInstance({ session_id: "q", awaiting: "question" }))).toContain("ph-chat-circle-dots");
-  });
-  it("awaiting 'waiting' renders the hourglass", () => {
-    expect(icon(makeInstance({ awaiting: "waiting" }))).toContain("ph-hourglass-medium");
-  });
-  it("idle read renders the calm check", () => {
-    expect(icon(makeInstance({}))).toContain("ph-check");
   });
 });
 

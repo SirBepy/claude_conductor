@@ -178,9 +178,8 @@
   opacity: 0.85;
 }
 
-/* Thin blocked stripe, layered on top of whatever else the row shows (e.g.
-   the hourglass icon from statusIndicator) rather than replacing it - this
-   project's convention is grey out / mark, never hide. */
+/* Thin blocked stripe, layered on top of whatever else the row shows rather
+   than replacing it - this project's convention is grey out / mark, never hide. */
 .sessions-list li.is-rate-limited::before {
   content: "";
   position: absolute;
@@ -209,14 +208,6 @@
 
 .session-row-badge.readonly i {
   font-size: 0.95rem;
-}
-
-
-.session-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 .session-row-text {
@@ -315,37 +306,6 @@
 .sessions-list li.active .session-row-subtitle {
   opacity: 0.8;
 }
-
-.session-state-icon {
-  font-size: 1.05rem;
-  flex-shrink: 0;
-}
-
-.session-state-icon.s-working   { color: var(--st-working); }
-.session-state-icon.s-done      { color: var(--st-done); }
-.session-state-icon.s-attention { color: var(--st-attention); }
-.session-state-icon.s-external  { color: var(--st-external); }
-.session-state-icon.s-question  { color: var(--st-question); }
-.session-state-icon.s-waiting       { color: var(--st-waiting); }
-.session-state-icon.s-rate-limited  { color: var(--st-rate-limited); }
-.session-state-icon.s-your-turn { color: #8b91a0; }
-
-.sessions-list li.active .session-state-icon { color: var(--color-background) !important; opacity: 0.9; }
-
-.session-state-icon.spinning {
-  display: inline-block;
-  animation: spin 1.2s linear infinite;
-}
-
-/* Dot mode overrides (when icons are disabled) */
-.session-status-dot.st-working   { background: var(--st-working);   box-shadow: 0 0 6px var(--st-working-glow); }
-.session-status-dot.st-done      { background: var(--st-done);      box-shadow: 0 0 5px var(--st-done-glow); }
-.session-status-dot.st-question  { background: var(--st-question);  box-shadow: 0 0 6px var(--st-question-glow); }
-.session-status-dot.st-waiting        { background: var(--st-waiting);       box-shadow: 0 0 6px var(--st-waiting-glow); }
-.session-status-dot.st-rate-limited   { background: var(--st-rate-limited);   box-shadow: 0 0 6px var(--st-rate-limited-glow); }
-.session-status-dot.st-your-turn { background: #8b91a0; }
-.session-status-dot.st-external  { background: var(--st-external);  box-shadow: 0 0 5px var(--st-external-glow); }
-.session-status-dot.st-attention { background: var(--st-attention); box-shadow: 0 0 6px var(--st-attention-glow); animation: attention-pulse 1.4s ease-in-out infinite; }
 
 /* 3-dot menu button */
 .session-row-menu-btn {
