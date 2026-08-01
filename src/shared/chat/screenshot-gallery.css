@@ -9,6 +9,7 @@
   top: 0;
   left: 0;
   right: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -73,9 +74,9 @@
 /* Fixed to fill the overlay (not sized to the img's own pre-transform box),
    same fix as .lightbox-content--image - overflow:hidden needs a boundary as
    big as the viewing area, or a zoomed image clips at its own native size.
-   header/prevBtn/nextBtn are position:absolute so they still stack above
-   this despite it now spanning the full overlay (positioned elements always
-   paint above static ones, regardless of DOM order). */
+   The img itself carries a transform (image-zoom-pan.ts), which promotes it
+   into the same z-index:auto paint tier as header/prevBtn/nextBtn below - see
+   their explicit z-index, needed to stay above it regardless of DOM order. */
 .screenshot-gallery-stage {
   width: 100%;
   height: 100%;
@@ -97,6 +98,7 @@
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 1;
   width: 44px;
   height: 44px;
   flex-shrink: 0;

@@ -18,6 +18,10 @@
   position: absolute;
   top: 16px;
   right: 16px;
+  /* The img can carry a transform (image-zoom-pan.ts, even at scale 1), which
+     promotes it into the same z-index:auto paint tier as this absolute-
+     positioned button - explicit z-index is needed to stay on top. */
+  z-index: 1;
   background: rgba(255, 255, 255, 0.15);
   border: none;
   color: #fff;
