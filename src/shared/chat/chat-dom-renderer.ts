@@ -9,7 +9,8 @@ import { wrapBlockquotes, RenderedMessage, renderMessage, isBoundaryMessage } fr
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { hydrateAttachments } from "./attachment-hydrator";
 import { toolSummary } from "./tool-meta";
-import { applyTurnCollapse, groupToolRange, clampUserMessages } from "./turn-collapse";
+import { applyTurnCollapse, groupToolRange } from "./tool-strip";
+import { clampUserMessages } from "./turn-collapse";
 import { renderQuestionCardHtml } from "./tool-views";
 import { type TurnUsageTotals } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";

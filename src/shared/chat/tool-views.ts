@@ -1,5 +1,5 @@
 // Shared custom views for tool chips, used by BOTH the in-chat per-turn chip
-// panels (turn-collapse.ts) and the statusline tally popover (session-tally.ts)
+// panels (tool-strip.ts) and the statusline tally popover (session-tally.ts)
 // so the two never drift. Each renderer takes the chat's message list and a
 // range ([0, len] for the whole session, a turn's bounds for one turn) and
 // returns an HTML string:

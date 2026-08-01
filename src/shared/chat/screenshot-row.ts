@@ -3,7 +3,7 @@ import { extractAttachedFilePaths } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
 import { type ScreenshotShot } from "./screenshot-gallery";
-import type { ToolGroup } from "./turn-collapse";
+import type { ToolGroup } from "./tool-strip";
 
 // ---------------------------------------------------------------------------
 // Screenshot blocks (ai_todo 313, split off of turn-collapse.ts): any tool's
