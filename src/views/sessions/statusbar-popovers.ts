@@ -8,7 +8,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
-import { EFFORTS, readModels, modelDisplayLabel } from "../../shared/effort-presets";
+import { EFFORTS, readModels, modelDisplayLabel, modelFamilyFromId } from "../../shared/effort-presets";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { AiTodoEntry, ChatDrain, ServerInfo } from "../../types/ipc.generated";
 import { drainCache } from "./session-statusbar-helpers";
@@ -388,7 +388,10 @@ export class ModelPopover {
     }
     const models = readModels({});
     const isDraft = !!ctx.onModelChange;
-    this.shell.open(anchor, this.buildEditableHtml(models, ctx.model, isDraft), {
+    // ctx.model is a full API id (e.g. "claude-sonnet-4-5-20250929") once a turn
+    // has landed, but `models` is the canonical family list - compare families
+    // or the active-stop lookup below always misses and defaults to index 0.
+    this.shell.open(anchor, this.buildEditableHtml(models, modelFamilyFromId(ctx.model), isDraft), {
       className: "sb-model-popover",
       wire: (el) => {
         const slider = el.querySelector<HTMLInputElement>(".sb-model-slider");

@@ -74,9 +74,33 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 state.registry.set_model(&p.session_id, &p.model);
                 crate::sessions::chat_config::record(&p.session_id, &p.model, "");
+
+                // A live process ignores the Registry update above; kill+respawn
+                // now (resuming the transcript) so the switch actually applies.
+                // Snapshot "was blocked" before the kill - EOF teardown clears it.
+                let mut restarted = false;
+                if state.sessions.get(&p.session_id).is_some() {
+                    let was_busy = state.registry.get(&p.session_id).map(|i| i.busy).unwrap_or(false);
+                    let was_asked = state.list_prompts().await.iter()
+                        .any(|v| v["payload"]["session_id"].as_str() == Some(p.session_id.as_str()));
+                    match crate::daemon::lifecycle::restart_session(&state, &p.session_id).await {
+                        Ok(_) => {
+                            restarted = true;
+                            if was_busy || was_asked {
+                                if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
+                                    &state, &p.session_id, "continue", false,
+                                ).await {
+                                    log::warn!("set_session_model: auto-continue failed for {}: {}", p.session_id, e);
+                                }
+                            }
+                        }
+                        Err(e) => log::warn!("set_session_model: restart failed for {}: {}", p.session_id, e),
+                    }
+                }
+
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
-                Ok(json!({"ok": true}))
+                Ok(json!({"ok": true, "restarted": restarted}))
             }
         });
     }

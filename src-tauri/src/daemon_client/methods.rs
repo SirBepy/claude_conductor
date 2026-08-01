@@ -222,9 +222,14 @@ impl PersistentClient {
         Ok(())
     }
 
-    pub async fn set_session_model(&self, session_id: &str, model: &str) -> Result<(), ClientError> {
-        self.call("set_session_model", json!({"session_id": session_id, "model": model})).await?;
-        Ok(())
+    /// Returns whether the daemon killed+respawned the session's live process
+    /// to apply the new model immediately (false when the session wasn't live,
+    /// so the change is only cached for its next natural respawn).
+    pub async fn set_session_model(&self, session_id: &str, model: &str) -> Result<bool, ClientError> {
+        let res = self
+            .call("set_session_model", json!({"session_id": session_id, "model": model}))
+            .await?;
+        Ok(res.get("restarted").and_then(Value::as_bool).unwrap_or(false))
     }
 
     pub async fn set_auto_accept(&self, session_id: &str, value: bool) -> Result<(), ClientError> {

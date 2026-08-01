@@ -214,13 +214,22 @@ pub async fn set_session_model(
     session_id: String,
     model: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<(), String> {
     if !crate::daemon::lifecycle::is_valid_model(&model) {
         return Err(format!("invalid model: {model}"));
     }
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
-    client.set_session_model(&session_id, &model).await.map_err(|e| e.to_string())?;
+    let restarted = {
+        let guard = state.daemon_client.lock().await;
+        let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+        client.set_session_model(&session_id, &model).await.map_err(|e| e.to_string())?
+    };
+    // The daemon respawned the live process on a NEW broadcast channel - force a
+    // fresh attach so this window keeps streaming, exactly like the -32004
+    // respawn-and-retry path below does after its own daemon-side respawn.
+    if restarted {
+        super::daemon_bridge::reattach(&app, &session_id).await?;
+    }
     Ok(())
 }
 
