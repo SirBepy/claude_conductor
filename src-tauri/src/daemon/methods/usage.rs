@@ -253,4 +253,24 @@ pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!(map))
         }
     });
+
+    // Pipe-side push from the app's scheduler (`scheduler::poll_once_scoped`)
+    // on every fresh poll. Just fans the snapshot out over the global notifier
+    // -> `/api/global/stream` for local consumers (e.g. a taskbar widget); not
+    // in `remote_handlers::SAFE_METHODS`; so it can't be called over the HTTP
+    // remote API.
+    {
+        let state = state.clone();
+        router.register("notify_usage_snapshot", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let snap: crate::types::UsageSnapshot = serde_json::from_value(
+                    params.ok_or_else(|| RpcError::invalid_params("missing snapshot"))?,
+                )
+                .map_err(|e| RpcError::invalid_params(format!("bad snapshot: {e}")))?;
+                state.notifier.publish("usage_snapshot", json!(snap));
+                Ok(json!({}))
+            }
+        });
+    }
 }

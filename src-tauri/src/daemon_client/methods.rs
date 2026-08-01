@@ -317,6 +317,17 @@ impl PersistentClient {
     pub async fn get_preview(&self, id: &str) -> Result<Value, ClientError> {
         self.call("get_preview", json!({"id": id})).await
     }
+
+    /// Forward a freshly-polled usage snapshot to the daemon so it can fan it
+    /// out over `/api/global/stream` (see `daemon/methods/usage.rs`'s
+    /// `notify_usage_snapshot` handler) to non-Tauri local consumers. Pipe-side
+    /// only - not in `remote_handlers::SAFE_METHODS`.
+    pub async fn notify_usage_snapshot(&self, snap: &crate::types::UsageSnapshot) -> Result<(), ClientError> {
+        let v = serde_json::to_value(snap)
+            .map_err(|e| ClientError::Rpc { code: -32000, message: format!("serialize snapshot: {e}") })?;
+        self.call("notify_usage_snapshot", v).await?;
+        Ok(())
+    }
 }
 
 #[cfg(all(test, windows))]

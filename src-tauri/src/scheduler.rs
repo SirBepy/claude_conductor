@@ -182,6 +182,17 @@ pub async fn poll_once_scoped(
     crate::tray::render_tray_now(app);
     if let Ok(snap) = &result {
         let _ = app.emit("usage-updated", snap.clone());
+        // Common exit path for both the legacy and per-account polls (see
+        // `do_poll`) - forwarding here covers both without a second call site.
+        // Fire-and-forget: no daemon connection just means the widget falls
+        // back to polling `companion.db` instead.
+        let state = app.state::<AppState>();
+        let guard = state.daemon_client.lock().await;
+        if let Some(client) = guard.as_ref() {
+            if let Err(e) = client.notify_usage_snapshot(snap).await {
+                log::warn!("notify_usage_snapshot failed: {e}");
+            }
+        }
     }
     result
 }
