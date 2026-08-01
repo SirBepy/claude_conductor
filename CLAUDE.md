@@ -17,7 +17,7 @@ Deploy: GitHub Releases (NSIS / DMG / DEB + AppImage via CI)
 
 - Dev: `cargo tauri dev` (runs from anywhere in the repo; the Tauri CLI auto-locates `src-tauri/tauri.conf.json`)
 - Verify: `cargo build --manifest-path src-tauri/Cargo.toml`
-- Worktree bootstrap: `pwsh -File scripts/bootstrap-worktree.ps1` (run once right after `git worktree add`/`EnterWorktree`, before any build/verify - inits the `vendor/tauri_kit` submodule, runs `pnpm install`, and seeds the gitignored `src/types/ipc.generated.ts`; idempotent)
+- Worktree bootstrap: `powershell -File scripts/bootstrap-worktree.ps1` (run once right after `git worktree add`/`EnterWorktree`, before any build/verify - inits the `vendor/tauri_kit` submodule, runs `pnpm install`, and seeds the gitignored `src/types/ipc.generated.ts`; idempotent, cwd-independent). Not `pwsh`: PowerShell 7 is not installed here. Takes ~9s when it can copy `ipc.generated.ts` from an existing worktree, but several minutes on a fresh clone with no sibling to copy from, since it falls back to `cargo test --test export_types`.
 
 ## Rules
 
