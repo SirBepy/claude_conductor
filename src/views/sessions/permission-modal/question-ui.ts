@@ -206,14 +206,17 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     return typeof a === "string" && a ? a : "Not answered";
   };
 
-  // Ctrl/Cmd+Enter: submit once every question is answered, otherwise jump to
-  // the next unanswered panel - but only from a panel that's itself already
-  // answered, so it can't skip past the one you're mid-typing.
+  // Ctrl/Cmd+Enter never skips review: it submits only from the review panel,
+  // or when there is no review panel at all (single bare question).
   const triggerPrimaryShortcut = () => {
-    if (questions.every((_, i) => answeredAt(i))) { submit(); return; }
-    if (activeTab < questions.length && !answeredAt(activeTab)) return;
+    if (!hasSummary) {
+      if (answeredAt(0)) submit();
+      return;
+    }
+    if (activeTab === questions.length) { submit(); return; }
+    if (!answeredAt(activeTab)) return;
     const next = questions.findIndex((_, i) => !answeredAt(i));
-    if (next >= 0) { activeTab = next; render(); }
+    goToTab(next >= 0 ? next : questions.length);
   };
 
   function domainVar(domain?: QuestionDomain): string {
@@ -376,7 +379,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     const dotsHtml = `<span class="prompt-dots">${dots}</span>`;
     if (totalPanels < 2) return `<span class="prompt-pager">${dotsHtml}</span>`;
 
-    const nextDisabled = activeTab >= totalPanels - 1 || (activeTab < questions.length && !answeredAt(activeTab));
+    const nextDisabled = nextArrowDisabled();
     return `<span class="prompt-pager">
       <button type="button" class="prompt-icon-btn" data-nav="-1" ${activeTab === 0 ? "disabled" : ""}><i class="ph ph-caret-left"></i></button>
       ${dotsHtml}
@@ -399,6 +402,80 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     `;
   }
 
+  // One definition of "can advance", shared by pagerHtml() and the two
+  // in-place patch paths below (free-text keystroke, step-only nav).
+  function nextArrowDisabled(): boolean {
+    return activeTab >= totalPanels - 1 || (activeTab < questions.length && !answeredAt(activeTab));
+  }
+
+  // Moves the persistent track to the current activeTab. `instant` skips the
+  // transition (full rebuild - a fresh node has no prior position to slide
+  // from); the animated path is only for step-only nav on the SAME node.
+  function positionTrack(instant: boolean): void {
+    const track = host.querySelector<HTMLElement>(".prompt-track");
+    if (!track) return;
+    if (instant) {
+      track.style.transition = "none";
+      track.style.transform = `translateX(-${activeTab * 100}%)`;
+      void track.offsetHeight;
+      track.style.transition = "";
+    } else {
+      track.style.transform = `translateX(-${activeTab * 100}%)`;
+    }
+    const activePanel = track.querySelector<HTMLElement>(`.prompt-panel[data-panel="${activeTab}"]`);
+    if (activePanel) track.style.height = `${activePanel.offsetHeight}px`;
+  }
+
+  // Single source for the footer's primary button: Next on any question
+  // panel, Submit only on review (or on the lone question when there's no
+  // review panel at all).
+  function updatePrimaryButton(): void {
+    const btn = host.querySelector<HTMLButtonElement>('[data-act="primary"]');
+    if (!btn) return;
+    const isSubmitMode = !hasSummary || activeTab === questions.length;
+    btn.disabled = isSubmitMode ? !questions.every((_, i) => answeredAt(i)) : nextArrowDisabled();
+    btn.innerHTML = `<i class="ph ${isSubmitMode ? opts.submitIcon : "ph-caret-right"}"></i> ${escapeHtml(isSubmitMode ? opts.submitLabel : "Next")}`;
+    btn.onclick = isSubmitMode ? submit : advance;
+  }
+
+  // Step-only nav: patches the track/dots/arrows/footer in place instead of
+  // rebuilding host.innerHTML, so .prompt-track's transition has a real "from"
+  // position to slide from. Only for moves that don't change any panel's
+  // rendered content - see goToTab.
+  function stepTab(prevTab: number): void {
+    positionTrack(false);
+    host.querySelector(`.prompt-panel[data-panel="${prevTab}"]`)?.classList.remove("is-active");
+    host.querySelector(`.prompt-panel[data-panel="${activeTab}"]`)?.classList.add("is-active");
+    host.querySelectorAll<HTMLElement>(".prompt-dot").forEach((dot) => {
+      dot.classList.toggle("is-current", Number(dot.dataset.dot) === activeTab);
+    });
+    const prevArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="-1"]');
+    if (prevArrow) prevArrow.disabled = activeTab === 0;
+    const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
+    if (nextArrow) nextArrow.disabled = nextArrowDisabled();
+    updatePrimaryButton();
+    syncMessagesPadding();
+    opts.onDraftChange?.(currentDraft());
+  }
+
+  // All nav funnels through here so review - whose panel summarizes live
+  // answers - always gets a full rebuild on entry, never the no-rebuild slide
+  // path (which would show whatever it looked like at the last full render).
+  function goToTab(target: number): void {
+    const clamped = Math.min(Math.max(target, 0), totalPanels - 1);
+    if (clamped === activeTab) return;
+    if (hasSummary && clamped === questions.length) {
+      activeTab = clamped;
+      render();
+      return;
+    }
+    const prevTab = activeTab;
+    activeTab = clamped;
+    stepTab(prevTab);
+  }
+
+  const advance = () => goToTab(activeTab + 1);
+
   const render = () => {
     // The old textareas (and the popups anchored to them) are about to be
     // thrown away by the innerHTML rebuild below - drop the popups' own
@@ -413,48 +490,32 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     } else {
       const headerHtml = `${pagerHtml()}<span class="prompt-head__spacer"></span><button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi)).join("") + (hasSummary ? summaryPanelHtml() : "");
-      const allAnswered = questions.every((_, i) => answeredAt(i));
       const footerHtml = `
         <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
-        <button type="button" class="btn btn-primary" data-act="submit" ${allAnswered ? "" : "disabled"}>
-          <i class="ph ${opts.submitIcon}"></i> ${escapeHtml(opts.submitLabel)}
-        </button>
+        <button type="button" class="btn btn-primary" data-act="primary"></button>
       `;
       host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track">${panelsHtml}</div>`, footerHtml);
 
       const card = host.querySelector<HTMLElement>(".prompt-card");
       if (!firstRender) card?.classList.add("prompt-card--no-anim");
 
-      // Scroll position doesn't survive the innerHTML rebuild above - a fresh
-      // track element always starts at scrollLeft 0, so without this an
-      // option click (which re-renders) would silently snap back to Q1.
-      // scroll-behavior: smooth is CSS-level, so syncing scrollLeft on this
-      // brand-new node would animate FROM that fresh 0 (Q1) TO activeTab -
-      // visibly snapping to Q1 first. Force the sync instant, then hand
-      // back to CSS smooth for any real user scroll/swipe on the track.
-      const track = host.querySelector<HTMLElement>(".prompt-track");
-      if (track) {
-        track.style.scrollBehavior = "auto";
-        track.scrollLeft = activeTab * track.clientWidth;
-        track.style.scrollBehavior = "";
-        // Flex's auto cross-size is the TALLEST sibling panel's height, so a
-        // 2-option question next to a long one rendered as tall as the long
-        // one. Pin the track's height to just the active panel's own content
-        // instead (align-items:flex-start above only stops it from stretching).
-        const activePanel = track.querySelector<HTMLElement>(`.prompt-panel[data-panel="${activeTab}"]`);
-        if (activePanel) track.style.height = `${activePanel.offsetHeight}px`;
-      }
+      // Flex's auto cross-size is the TALLEST sibling panel's height, so a
+      // 2-option question next to a long one rendered as tall as the long
+      // one - positionTrack pins the track's height to just the active
+      // panel's own content instead.
+      positionTrack(true);
+      updatePrimaryButton();
 
       host.querySelectorAll<HTMLButtonElement>(".prompt-dot").forEach((dot) => {
         dot.addEventListener("click", () => {
           const idx = Number(dot.dataset.dot);
-          if (Number.isFinite(idx)) { activeTab = idx; render(); }
+          if (Number.isFinite(idx)) goToTab(idx);
         });
       });
       host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="-1"]')
-        ?.addEventListener("click", () => { activeTab -= 1; render(); });
+        ?.addEventListener("click", () => goToTab(activeTab - 1));
       host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]')
-        ?.addEventListener("click", () => { activeTab += 1; render(); });
+        ?.addEventListener("click", advance);
       host.querySelector<HTMLButtonElement>('[data-act="minimize"]')
         ?.addEventListener("click", () => { minimized = true; render(); });
 
@@ -517,18 +578,17 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
           // keystroke would destroy and recreate this textarea, dropping
           // focus and cursor position mid-type.
           freeText.set(qi, otherEl.value);
-          const allAnsweredNow = questions.every((_, i) => answeredAt(i));
-          const submitBtn = host.querySelector<HTMLButtonElement>('[data-act="submit"]');
-          if (submitBtn) submitBtn.disabled = !allAnsweredNow;
           const dotEl = host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${qi}"]`);
           if (dotEl) dotEl.classList.toggle("is-answered", answeredAt(qi));
-          if (qi === activeTab) {
-            const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
-            if (nextArrow) nextArrow.disabled = activeTab >= totalPanels - 1 || !answeredAt(activeTab);
-          }
           if (hasSummary) {
+            const allAnsweredNow = questions.every((_, i) => answeredAt(i));
             const summaryDot = host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${questions.length}"]`);
             if (summaryDot) summaryDot.classList.toggle("is-answered", allAnsweredNow);
+          }
+          if (qi === activeTab) {
+            const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
+            if (nextArrow) nextArrow.disabled = nextArrowDisabled();
+            updatePrimaryButton();
           }
           syncMessagesPadding();
           opts.onDraftChange?.(currentDraft());
@@ -552,14 +612,12 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
       host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
 
-      host.querySelector<HTMLButtonElement>('[data-act="submit"]')
-        ?.addEventListener("click", submit);
       host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
         ?.addEventListener("click", cancel);
       host.querySelectorAll<HTMLButtonElement>('[data-summary-tab]').forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.dataset.summaryTab);
-          if (Number.isFinite(idx)) { activeTab = idx; render(); }
+          if (Number.isFinite(idx)) goToTab(idx);
         });
       });
     }

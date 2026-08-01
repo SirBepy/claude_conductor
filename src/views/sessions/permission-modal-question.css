@@ -536,6 +536,7 @@
   align-items: center;
   gap: 10px;
   max-width: 640px;
+  margin: 0 auto;
   padding: 8px 10px 8px 12px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -543,6 +544,10 @@
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   cursor: pointer;
+  /* Host is pointer-events:none in all 3 modes (permission-modal-shell.css);
+   * only .prompt-card reasserts it, so without this the bar and its restore
+   * caret are both inert. */
+  pointer-events: auto;
 }
 .prompt-collapsed__q {
   font-size: 0.88rem;
@@ -575,30 +580,29 @@
 }
 
 /* ── Horizontal question track ─────────────────────────────────────────────
- * One panel per question, each exactly the card's width, snapped. Native CSS
- * scrolling - header/footer sit outside the track so the pager never moves. */
+ * One panel per question, each exactly the card's width. Positioned via
+ * transform (not scroll) so step nav can animate a persistent node - see
+ * stepTab()/positionTrack() in question-ui.ts. */
 .prompt-track {
   display: flex;
   align-items: flex-start;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
+  transition: transform 0.22s ease-out;
   /* flex-basis:auto (not the old flex:1's 0%) so question-ui.ts's per-render
    * `track.style.height` - set to just the active panel's own content height -
    * actually takes effect instead of being overridden by flex-grow filling
    * whatever space the (now-obsolete) tallest-sibling auto-sizing implied. */
   flex: none;
   min-height: 0;
-  scrollbar-width: none;
 }
-.prompt-track::-webkit-scrollbar {
-  display: none;
+@media (prefers-reduced-motion: reduce) {
+  .prompt-track {
+    transition: none;
+  }
 }
 .prompt-panel {
   flex: 0 0 100%;
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
   min-width: 0;
   overflow-y: auto;
   display: flex;
