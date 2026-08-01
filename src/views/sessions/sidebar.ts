@@ -355,7 +355,6 @@ export function renderSidebar(listEl: HTMLElement): void {
   // applies regardless of sort mode.
   refreshScheduledCounts();
   const sorted = sortSessions(filtered, sort, closing, drainMap);
-  state.sortedSessionIds = sorted.map(s => s.session_id);
 
   const isManualSlots = getChatSlotMode() === "manual";
   const slotBySession: Record<string, number> = {};
@@ -405,6 +404,9 @@ export function renderSidebar(listEl: HTMLElement): void {
   }
 
   let sessionIndex = 0;
+  // Same order as the data-kbd-hint badges below, so Ctrl+N always opens the
+  // row visually numbered N (a flat pre-segmentation sort drifted from this).
+  const kbdOrderIds: string[] = [];
   const renderSeg = (seg: number) => {
     const group = segmented.get(seg)!;
     if (group.length === 0) {
@@ -422,6 +424,7 @@ export function renderSidebar(listEl: HTMLElement): void {
     if (!segCollapsed) {
       for (const s of group) {
         const i = sessionIndex++;
+        kbdOrderIds[i] = s.session_id;
         const isActive = s.session_id === state.selectedId;
         let kbdHint = "";
         if (isManualSlots) {
@@ -483,6 +486,8 @@ export function renderSidebar(listEl: HTMLElement): void {
   // Scheduled, then Closing (transient, so it stays the true bottom).
   renderSeg(6);
   renderSeg(3);
+
+  state.sortedSessionIds = kbdOrderIds;
 
   reconcileList(listEl, entries, loadAnimEnabled());
   // Delegated, so it survives every reconcile without rebinding per row.
