@@ -360,6 +360,17 @@ impl Registry {
                 i.busy = false;
                 return true;
             }
+            // `gen == 0` means the pump never captured a generation, which today
+            // only happens when a turn emitted no AssistantDelta: the row then
+            // stays "In progress" forever. Logged separately from a genuine
+            // newer-turn mismatch, which is the guard working as intended.
+            if i.busy {
+                log::warn!(
+                    "registry: busy NOT cleared for {session_id}: pump gen {gen} != registry gen {} ({})",
+                    i.turn_gen,
+                    if gen == 0 { "uncaptured, turn emitted no text delta" } else { "newer turn started" }
+                );
+            }
         }
         false
     }
@@ -650,6 +661,23 @@ mod tests {
         let registry = Registry::new();
         registry.set_busy("missing", true);
         assert!(registry.get("missing").is_none());
+    }
+
+    /// Pins the latch documented in todo 475: `pump_turn_gen` starts at 0 and is
+    /// only assigned from the AssistantDelta arm, so a turn emitting no text
+    /// clears with gen 0, never matches, and the row stays "In progress".
+    #[test]
+    fn set_busy_false_with_uncaptured_gen_zero_never_clears() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-06-23T00:00:00Z");
+        registry.set_busy("s", true);
+        assert_eq!(registry.get("s").unwrap().turn_gen, 1);
+        assert!(!registry.set_busy_false_if_gen("s", 0));
+        assert!(registry.get("s").unwrap().busy, "busy latches on when the pump never captured a gen");
+        // The captured-gen path still clears, so the guard itself is sound.
+        assert!(registry.set_busy_false_if_gen("s", 1));
+        assert!(!registry.get("s").unwrap().busy);
     }
 
     #[test]
