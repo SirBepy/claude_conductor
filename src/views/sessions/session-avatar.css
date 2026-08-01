@@ -12,6 +12,15 @@
   display: block;
   background: #0d0f15;
 }
+/* Character-less fallback: base rule above already supplies the 40px strip,
+   negative margins, and dark fill - this only centres the glyph. */
+.session-avatar--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 1.15rem;
+}
 .session-char-backdrop,
 .session-char-img {
   position: absolute;

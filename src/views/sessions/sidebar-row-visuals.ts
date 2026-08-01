@@ -1,7 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
-import type { Instance } from "../../types/ipc.generated";
-import { characterForSession, characterIconUrl } from "./session-characters";
-import { statusDotClass, scheduledTooltip } from "./sessions-helpers";
+import { characterIconUrl } from "./session-characters";
+import { scheduledTooltip } from "./sessions-helpers";
 import { modelFamilyFromId } from "../../shared/effort-presets";
 import { modelLabel } from "../../shared/model-name";
 
@@ -76,50 +75,34 @@ export interface LeadingExtras {
   extra?: string;
 }
 
-/** Leading visual for a live session row: character portrait + status glow + optional project badge. */
+/** Leading visual for ANY sidebar row - live session, draft, or parked draft.
+ *  `statusClass` is "" for draft/parked (nothing in flight, no glow). Always
+ *  emits the same 40px avatar-wrap structure, even with no character assigned
+ *  yet: a centred placeholder glyph inside `.session-avatar`, never a bare
+ *  icon that would collapse the row's geometry. */
 export function leadingVisual(
-  s: Instance,
-  indicator: string,
-  unread: Set<string>,
-  attention: Set<string>,
-  question: Set<string>,
-  rateLimited: ReadonlySet<string> = new Set(),
+  charId: string | null | undefined,
+  statusClass: string,
+  cwd: string | null,
   extras: LeadingExtras = {},
 ): string {
-  const charId = characterForSession(s);
-  if (!charId) return indicator;
+  const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
+  if (!charId) {
+    const avatarHtml = `<span class="session-avatar session-avatar--placeholder ${statusClass}">
+          <i class="ph ph-chat-circle-dots"></i>
+        </span>`;
+    return avatarWrap(avatarHtml, badge + (extras.extra ?? ""));
+  }
   const id = escapeHtml(charId);
-  const st = statusDotClass(s, unread, attention, question, rateLimited);
   const url = characterIconUrl(charId);
-  // Inline the preloaded data URL so the image is filled on first paint and
-  // doesn't flash broken when the row is rebuilt. data-hydrated makes the
-  // post-render hydrate pass a no-op for already-filled images.
+  // Preloaded data URL so the image fills on first paint; data-hydrated makes
+  // the post-render hydrate pass a no-op once already filled.
   const preload = url ? ` src="${escapeHtml(url)}" data-hydrated="${id}"` : "";
-  // Two layers share the same src so the single hydrate pass fills both:
-  //  - backdrop: same art blurred + scaled to cover, fills the strip edge to
-  //    edge so a transparent (hexagonal) portrait's corners reveal blurred hero
-  //    colours instead of the row background — no hexagon silhouette.
-  //  - foreground: the sharp portrait on top.
-  const avatarHtml = `<span class="session-avatar ${st}">
+  // Backdrop: same art blurred+scaled to cover, so a transparent (hexagonal)
+  // portrait's corners reveal hero colours instead of the row background.
+  const avatarHtml = `<span class="session-avatar ${statusClass}">
           <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
           <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
         </span>`;
-  const badge = projBadgeHtml(s.cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
   return avatarWrap(avatarHtml, badge + (extras.extra ?? ""));
-}
-
-/** Leading visual for a draft/parked-draft row: same structure as live rows
- * but no status glow (nothing is in flight). Falls back to a muted icon when
- * the session has no character assigned yet. */
-export function draftLeadingVisual(charId: string | null | undefined, cwd: string): string {
-  if (!charId) return `<i class="session-state-icon ph ph-chat-circle-dots"></i>`;
-  const id = escapeHtml(charId);
-  const url = characterIconUrl(charId);
-  const preload = url ? ` src="${escapeHtml(url)}" data-hydrated="${id}"` : "";
-  const avatarHtml = `<span class="session-avatar">
-          <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
-          <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
-        </span>`;
-  const badge = projBadgeHtml(cwd, "session-proj-badge");
-  return avatarWrap(avatarHtml, badge);
 }

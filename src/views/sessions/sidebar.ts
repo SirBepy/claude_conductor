@@ -10,7 +10,6 @@ import {
   loadUnreadSet,
   saveUnreadSet,
   loadSort,
-  loadStateStyle,
   loadHiddenSessions,
   saveHiddenSessions,
   loadHiddenProjects,
@@ -29,7 +28,7 @@ import { reconcileList, loadAnimEnabled } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
-import { renderSessionRow, renderDraftRow, renderParkedDraftRow } from "./sidebar-rows";
+import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
 import { loadRowStyle } from "./row-style";
 import { attachRowTooltips } from "../../shared/row-tooltip";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
@@ -286,7 +285,6 @@ export function renderSidebar(listEl: HTMLElement): void {
   // Registry-backed only (see deriveQuestionSet): one source of truth for the
   // question flag, covering background sessions too.
   const question = deriveQuestionSet(listSessions);
-  const style = loadStateStyle();
   const isPortrait = loadRowStyle() === "portrait";
   const rowClass = isPortrait ? "row-portrait" : "";
   const sort = loadSort();
@@ -384,14 +382,14 @@ export function renderSidebar(listEl: HTMLElement): void {
 
   if (pending && !pendingHidden && !pendingRealVisible) {
     const isPendingActive = state.selectedId === pending.placeholderId;
-    const html = renderDraftRow(pending, isPendingActive, isPortrait, rowClass);
+    const html = renderSidebarRow(draftRowOptions(pending, isPendingActive, isPortrait, rowClass));
     entries.push({ key: `p:${pending.placeholderId}`, html });
   }
 
   for (const d of visibleParked) {
     entries.push({
       key: `p:${d.placeholderId}`,
-      html: renderParkedDraftRow(d, isPortrait, rowClass),
+      html: renderSidebarRow(parkedRowOptions(d, isPortrait, rowClass)),
     });
   }
 
@@ -434,9 +432,9 @@ export function renderSidebar(listEl: HTMLElement): void {
         }
         entries.push({
           key: `s:${s.session_id}`,
-          html: renderSessionRow(s, {
-            isActive, unread, attention, question, rateLimited, closing, style, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint,
-          }),
+          html: renderSidebarRow(sessionRowOptions(s, {
+            isActive, unread, attention, question, rateLimited, closing, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint,
+          })),
         });
       }
     }
@@ -474,9 +472,9 @@ export function renderSidebar(listEl: HTMLElement): void {
         const isActive = s.session_id === state.selectedId;
         entries.push({
           key: `s:${s.session_id}`,
-          html: renderSessionRow(s, {
-            isActive, unread, attention, question, rateLimited, closing, style, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint: "",
-          }),
+          html: renderSidebarRow(sessionRowOptions(s, {
+            isActive, unread, attention, question, rateLimited, closing, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint: "",
+          })),
         });
       }
     }
