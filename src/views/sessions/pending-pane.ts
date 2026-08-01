@@ -263,6 +263,11 @@ export async function renderPendingPane(
               remote: config.remote !== false,
               placeholderId,
               accountId: config.accountId ?? null,
+              // Persisted server-side in the SAME registration call the daemon
+              // makes before this RPC returns (not just the setAutoAccept
+              // follow-up below), so a remote/phone caller's first-turn tool
+              // call can't race ahead of it under real network latency.
+              autoAccept: config.autoAccept !== false,
             });
             if (state.mountId !== myMount) return;
             if (sessionId) {

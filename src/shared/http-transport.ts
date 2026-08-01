@@ -134,6 +134,11 @@ export class HttpTransport implements Transport {
           remote: args.remote,
           placeholder_id: args.placeholderId ?? args.placeholder_id,
           account_id: args.accountId ?? args.account_id ?? null,
+          // Must land in this same RPC (not a follow-up set_auto_accept call):
+          // the send_message below fires immediately after this resolves, with
+          // no wait for the "session_started" WS event that would otherwise
+          // drive that follow-up call - see pending-pane.ts's autoAccept comment.
+          auto_accept: (args.autoAccept ?? args.auto_accept) !== false,
         });
         const sid = spawnResult.session_id;
         const promptText = typeof args.prompt === "string" ? args.prompt.trim() : "";

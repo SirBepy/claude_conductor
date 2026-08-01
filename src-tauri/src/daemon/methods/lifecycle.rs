@@ -98,7 +98,12 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
         router.register("start_session", move |params, _ctx| {
             let state = state.clone();
             async move {
-                let p: StartSessionParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                let params_value = params.unwrap_or(Value::Null);
+                // Persist before the RPC returns, not via a client follow-up call -
+                // a network-latency caller's own send_message can otherwise race
+                // ahead of it (same pattern move_session_to_account guards against).
+                let auto_accept = params_value.get("auto_accept").and_then(Value::as_bool).unwrap_or(false);
+                let p: StartSessionParams = serde_json::from_value(params_value)
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 let cwd = p.cwd.clone();
                 let model = p.model.clone();
@@ -108,7 +113,7 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let account_id = session.account_id.clone();
                 let now = chrono::Utc::now().to_rfc3339();
                 crate::daemon::session_registration::register_new_session(
-                    &state, &sid, &cwd, &model, &effort, &account_id, &now, false, None,
+                    &state, &sid, &cwd, &model, &effort, &account_id, &now, auto_accept, None,
                 );
                 // Deliberately NOT set_busy(true) here: no turn is in flight yet
                 // (claude emits nothing until its first stdin message, so the

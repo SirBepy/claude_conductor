@@ -23,10 +23,11 @@ pub async fn start_session(
     remote: bool,
     placeholder_id: Option<String>,
     account_id: Option<String>,
+    auto_accept: Option<bool>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    start_session_daemon(cwd, prompt, model, effort, remote, placeholder_id, account_id, &state, &app).await
+    start_session_daemon(cwd, prompt, model, effort, remote, placeholder_id, account_id, auto_accept.unwrap_or(false), &state, &app).await
 }
 
 /// Daemon-backed new session: spawn via RPC, bridge events, hand the real id
@@ -39,6 +40,7 @@ async fn start_session_daemon(
     remote: bool,
     placeholder_id: Option<String>,
     account_id: Option<String>,
+    auto_accept: bool,
     state: &State<'_, AppState>,
     app: &AppHandle,
 ) -> Result<String, String> {
@@ -49,7 +51,7 @@ async fn start_session_daemon(
         // user's explicit pick; None (unbound project, default untouched)
         // resolves to Settings.default_account_id daemon-side (see
         // docs/multi-account/02-chat-routing.md step 5).
-        client.start_session(&cwd, &model, &effort, None, remote, account_id.as_deref()).await.map_err(|e| e.to_string())?
+        client.start_session(&cwd, &model, &effort, None, remote, account_id.as_deref(), auto_accept).await.map_err(|e| e.to_string())?
     };
 
     // Bridge daemon chat_event -> chat:<real_id> BEFORE sending the prompt so
@@ -166,7 +168,10 @@ async fn send_message_daemon(
                 let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
                 client
                     // Resume respawn: never request a fresh remote-control bridge.
-                    .start_session(cwd, model, effort, Some(session_id), false, account_id)
+                    // auto_accept: false - this session_id already exists, so
+                    // register_new_session's "only write when true" semantics
+                    // leave its already-persisted chat_config flag untouched.
+                    .start_session(cwd, model, effort, Some(session_id), false, account_id, false)
                     .await
                     .map_err(|e| e.to_string())?;
             }

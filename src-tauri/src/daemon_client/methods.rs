@@ -119,6 +119,7 @@ impl PersistentClient {
         resume_id: Option<&str>,
         remote: bool,
         account_id: Option<&str>,
+        auto_accept: bool,
     ) -> Result<String, ClientError> {
         let res = self
             .call("start_session", json!({
@@ -128,6 +129,7 @@ impl PersistentClient {
                 "resume_id": resume_id,
                 "remote": remote,
                 "account_id": account_id,
+                "auto_accept": auto_accept,
             }))
             .await?;
         res.get("session_id")
