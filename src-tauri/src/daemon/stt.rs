@@ -331,4 +331,56 @@ mod tests {
         // Port 1 is a reserved low port that is never listening in this test env.
         assert!(!probe_alive_on(1).await);
     }
+
+    // ADVERSARIAL: a real WS-speaking server on a scratch port must be ADOPTED.
+    #[tokio::test]
+    async fn probe_accepts_real_websocket_server() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                if let Ok(ws) = tokio_tungstenite::accept_async(stream).await {
+                    // Hold the accepted socket open briefly so the client's
+                    // close handshake (probe_alive_on calls ws.close()) has
+                    // something to complete against.
+                    let _ = ws;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        });
+        assert!(probe_alive_on(port).await);
+    }
+
+    // ADVERSARIAL: a listener that accepts the TCP connection then closes it
+    // immediately (no WS upgrade response at all) must NOT be adopted.
+    #[tokio::test]
+    async fn probe_rejects_accept_then_close() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                drop(stream); // accept, then slam the connection shut
+            }
+        });
+        assert!(!probe_alive_on(port).await);
+    }
+
+    // ADVERSARIAL: a listener that speaks valid HTTP but never upgrades to
+    // WebSocket (e.g. a stray HTTP server squatting the port) must NOT be
+    // mistaken for the sidecar.
+    #[tokio::test]
+    async fn probe_rejects_plain_http_non_websocket() {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                    .await;
+                let _ = stream.shutdown().await;
+            }
+        });
+        assert!(!probe_alive_on(port).await);
+    }
 }
