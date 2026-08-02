@@ -590,6 +590,12 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
             if (nextArrow) nextArrow.disabled = nextArrowDisabled();
             updatePrimaryButton();
           }
+          // The free-text box's own auto-resize (ComposerCore, attached above)
+          // already grew the textarea itself - but .prompt-track's height was
+          // pinned to the panel's height as of the last tab change, so the
+          // clipping viewport around it needs the same re-measure or the grown
+          // box just scrolls inside a too-short window instead of showing.
+          positionTrack(true);
           syncMessagesPadding();
           opts.onDraftChange?.(currentDraft());
         });
@@ -604,6 +610,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
         slashPopup.attach(extraEl, extraHighlightEl);
         extraEl.addEventListener("input", () => {
           additionalMessage = extraEl.value;
+          positionTrack(true);
           syncMessagesPadding();
           opts.onDraftChange?.(currentDraft());
         });
