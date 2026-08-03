@@ -64,11 +64,10 @@ const SAFE_METHODS: &[&str] = &[
     // rendered empty.
     "list_history",
     "load_history",
-    // Write: History view's "Continue this chat" action re-registers an ended
-    // session as Interactive so Sessions can find it. Narrow mutation (only
-    // touches the registry entry for the given session_id) - strictly weaker
-    // than start_session, which the phone already has. Without this the
-    // button silently no-op'd on remote (403, swallowed by the caller).
+    // Write: re-registers an ended session as Interactive (History's "Continue
+    // this chat"). Narrow mutation, strictly weaker than start_session
+    // (already remote-callable). Without this the button silently no-op'd on
+    // remote (403, swallowed by the caller).
     "register_historical",
     "read_attachment",
     // Write: phone composer paperclip upload. Bytes land in the path-validated

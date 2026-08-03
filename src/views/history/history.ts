@@ -81,11 +81,10 @@ async function fetchEntries(): Promise<void> {
 }
 
 async function selectHistorySession(sessionId: string, pane: HTMLElement): Promise<void> {
-  // Mobile single-pane: opening a chat reveals the chat pane and hides the
-  // filter bar + list (mirrors Sessions' data-mobile-pane toggle; CSS only
-  // acts on this attribute inside the ≤768px media query, so desktop is
-  // unaffected). Without this the filter bar, session list, and chat content
-  // were all visible at once on the phone.
+  // Mobile single-pane: reveals the chat pane, hides filter bar + list (mirrors
+  // Sessions' data-mobile-pane toggle; CSS-gated to ≤768px, desktop unaffected).
+  // Without this the filter bar, list, and chat content were all visible at
+  // once on the phone.
   document.querySelector(".view-history")?.setAttribute("data-mobile-pane", "chat");
   const myMount = state.mountId;
   state.selectedId = sessionId;
@@ -238,10 +237,9 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
 
   // If session-detail asked us to open a specific closed chat, select it now.
-  // Otherwise auto-select the most recent session so the pane isn't blank -
-  // except on the phone, where the mobile single-pane layout should land on
-  // the filterable list first (matches Sessions' isRemote() gate on its own
-  // auto-select fallback) rather than jumping straight into a chat.
+  // Otherwise auto-select the most recent session - except on the phone,
+  // which should land on the filterable list first (matches Sessions'
+  // isRemote() gate) rather than jumping straight into a chat.
   const pendingOrFirst = _pendingSelect ?? (isRemote() ? null : state.entries[0]?.session_id ?? null);
   if (pendingOrFirst) {
     if (_pendingSelect) _pendingSelect = null;
