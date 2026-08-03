@@ -324,6 +324,11 @@ export async function renderDetachedSession(
     console.error("[sessions] detached template missing #session-pane");
     return () => { /* no-op */ };
   }
+  // Main window's `renderSessionsView` does this too (see below) - without it
+  // `updateThinkingBar()` no-ops forever (its `_pane` stays null), so the
+  // pause button/held-messages "Send Now" bar never appears in this window
+  // (Jarvis's only in-app surface - see jarvis-kebab-menu.ts's header note).
+  initThinkingBar(pane);
 
   // We need state.sessions populated so selectSession can find the entry.
   await refreshSessions();
@@ -357,6 +362,10 @@ export async function renderDetachedSession(
         state.composer?.refreshBlockedState();
       }
     }
+    // Same busy-flag refresh the main window's instances-changed handler does
+    // (sessions-wiring.ts) - without it, the pause button/Send-Now chip never
+    // reacts once Jarvis starts or stops a turn after this initial mount.
+    updateThinkingBar();
   });
 
   await selectSession(sessionId, pane);
