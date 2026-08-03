@@ -383,15 +383,22 @@ class PreviewPanel implements PreviewController {
     this.renderRail();
   }
 
-  /** `preview` notifier broadcast handler — the fast path. Ignores pushes for
-   * any chat other than the one currently in scope (see class docs). Always
-   * follows the live push (Joe, 2026-07-20: "we always want auto refresh" —
-   * no opt-out) and always opens the panel if it's closed, so the dev never
-   * has to manually opt in to seeing something Claude just produced;
-   * minimizing afterward is the escape hatch, not the default. */
+  /** `preview` notifier broadcast handler — the fast path. Always follows the
+   * live push (Joe, 2026-07-20: "we always want auto refresh" — no opt-out)
+   * and always opens the panel if it's closed, so the dev never has to
+   * manually opt in to seeing something Claude just produced; minimizing
+   * afterward is the escape hatch, not the default.
+   *
+   * A push for a chat other than the one in scope never switches the sidebar
+   * or steals focus (Joe, 2026-08-03: "never forcefully switch my view to
+   * that chat") — it only flags that chat's own open state, so switching to
+   * it later (setSessionScope) finds it already open. */
   private onLivePush(meta: PreviewMeta | undefined): void {
     if (!meta) return;
-    if (meta.session_id !== this.currentSessionId) return;
+    if (meta.session_id !== this.currentSessionId) {
+      if (meta.session_id) saveOpen(meta.session_id, true);
+      return;
+    }
     this.seenIds.add(meta.id);
 
     const idx = this.snapshots.findIndex((s) => s.id === meta.id);
