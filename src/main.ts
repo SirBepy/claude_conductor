@@ -201,6 +201,12 @@ if (isScheduleWindow) {
   document.getElementById("sidemenuBackdrop")?.remove();
 }
 
+// Opt out of the back-forward cache: bfcache-freezing this tab while
+// Android's native file picker is open on top of it drops the picker's
+// result on return with no error - the mobile "picker opens, nothing
+// attaches" bug. A no-op unload listener is the standard bfcache opt-out.
+window.addEventListener("unload", () => {});
+
 // Browser-only token gate: shows a full-screen form when no bearer token is
 // stored. Complete NO-OP inside the Tauri webview (window.__TAURI__ present).
 // Halt boot when the gate rendered its form so no commands are sent without auth.
