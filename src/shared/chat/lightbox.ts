@@ -81,32 +81,6 @@ export function openLightbox(content: LightboxContent): void {
     inner.appendChild(img);
     setupImageZoomPan(img, inner);
     overlay.appendChild(buildMoreMenuButton(content));
-    if (composerBridge) {
-      const wrap = document.createElement("div");
-      wrap.className = "lightbox-composer-wrap cc-typing-wrap";
-      const highlight = document.createElement("div");
-      highlight.className = "cc-typing-highlight cc-typing-highlight--lightbox";
-      highlight.setAttribute("aria-hidden", "true");
-      const box = document.createElement("textarea");
-      box.className = "lightbox-composer cc-typing-input";
-      box.placeholder = "Type a message...";
-      box.value = composerBridge.getDraftText();
-      wrap.append(highlight, box);
-      overlay.appendChild(wrap);
-
-      const cwd = composerBridge.getCwd?.() ?? null;
-      slashProvider = new SlashProvider();
-      fileProvider = new FileProvider();
-      void slashProvider.start(cwd);
-      fileProvider.start(cwd);
-      composerCore = new ComposerCore({
-        textarea: box,
-        highlightEl: highlight,
-        anchor: wrap,
-        providers: [slashProvider, fileProvider] as unknown as SuggestProvider<unknown>[],
-        features: { paste: false },
-      });
-    }
   } else if (content.type === "pdf") {
     const blob = b64toBlob(content.base64, "application/pdf");
     const url = URL.createObjectURL(blob);
@@ -119,6 +93,35 @@ export function openLightbox(content: LightboxContent): void {
     const pre = document.createElement("pre");
     pre.textContent = content.content;
     inner.appendChild(pre);
+  }
+
+  // Caption/reply textbox: same draft box regardless of preview type (image,
+  // pdf, or text), gated only on a bridge being wired (active-session-mount.ts).
+  if (composerBridge) {
+    const wrap = document.createElement("div");
+    wrap.className = "lightbox-composer-wrap cc-typing-wrap";
+    const highlight = document.createElement("div");
+    highlight.className = "cc-typing-highlight cc-typing-highlight--lightbox";
+    highlight.setAttribute("aria-hidden", "true");
+    const box = document.createElement("textarea");
+    box.className = "lightbox-composer cc-typing-input";
+    box.placeholder = "Type a message...";
+    box.value = composerBridge.getDraftText();
+    wrap.append(highlight, box);
+    overlay.appendChild(wrap);
+
+    const cwd = composerBridge.getCwd?.() ?? null;
+    slashProvider = new SlashProvider();
+    fileProvider = new FileProvider();
+    void slashProvider.start(cwd);
+    fileProvider.start(cwd);
+    composerCore = new ComposerCore({
+      textarea: box,
+      highlightEl: highlight,
+      anchor: wrap,
+      providers: [slashProvider, fileProvider] as unknown as SuggestProvider<unknown>[],
+      features: { paste: false },
+    });
   }
 
   overlay.appendChild(close);
