@@ -31,6 +31,12 @@ import { openModelEffortModal } from "./model-effort-modal";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer, mountComposer } from "./active-session-mount";
 import { openJarvisKebabMenu } from "./jarvis-kebab-menu";
+import {
+  backgroundRetainedChat,
+  dropRetainedChat,
+  isRetainedRenderer,
+  rekeyRetainedChat,
+} from "./chat-pane-cache";
 
 const HEADER_STATUS_CLASSES = [
   "st-working", "st-question", "st-done", "st-your-turn", "st-external", "st-attention", "st-rate-limited",
@@ -182,7 +188,8 @@ export function unwatchCurrentExternalSession(): void {
 export function dismountActivePane(opts?: { rerenderSidebar?: boolean }): void {
   state.statusbar?.destroy();
   state.statusbar = null;
-  state.renderer?.detach();
+  if (state.selectedId) backgroundRetainedChat(state.selectedId);
+  if (state.renderer && !isRetainedRenderer(state.renderer)) state.renderer.detach();
   state.renderer = null;
   state.composer?.destroy();
   state.composer = null;
@@ -231,6 +238,9 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   if (state.selectedId) {
     const draft = snapshotActiveCardDraft(state.selectedId);
     if (draft) savePendingPromptDraft(state.selectedId, draft);
+    // Scroll position must be read BEFORE the pane's DOM is replaced below - a
+    // detached transcript reports scrollTop 0.
+    backgroundRetainedChat(state.selectedId);
   }
   // Tear down before innerHTML replacement below: otherwise the registry
   // entry, its keydown listener, and ResizeObserver dangle past their DOM.
@@ -338,6 +348,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   if (readOnly) {
     pane.querySelector<HTMLButtonElement>(".refresh-btn")?.addEventListener("click", async () => {
       sessionEvents.bust(sessionId);
+      // Busting the events alone would still re-show the retained transcript.
+      dropRetainedChat(sessionId);
       // Clear selectedId so selectSession doesn't bail on the equality check.
       setActiveSession(null);
       await selectSession(sessionId, pane);
@@ -374,6 +386,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
         // repoint identity silently instead of switching the visible chat.
         if (newId !== originalId) {
           setActiveSession(newId);
+          rekeyRetainedChat(originalId, newId);
           if (_watchedId === originalId) {
             void invoke<void>("unwatch_session_transcript", { sessionId: originalId }).catch(() => {});
             sessionEvents.stopWatchListener(originalId);

@@ -13,6 +13,7 @@ import { api } from "../../shared/api";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
 import { mountUsageDials } from "./usage-dials";
 import { sessionEvents } from "../../shared/chat/event-store";
+import { dropRetainedChat } from "./chat-pane-cache";
 import { getTransport, isRemote } from "../../shared/transport";
 import { initWhenDone, subscribeWhenDone } from "./when-done";
 import {
@@ -56,7 +57,12 @@ export function reconcileEndedSessions(previousIds: Set<string>, refreshed: bool
   const currentIds = new Set(state.sessions.map((s) => s.session_id));
   for (const id of currentIds) sessionEvents.unmarkEnded(id);
   for (const id of previousIds) {
-    if (!currentIds.has(id)) sessionEvents.evictEnded(id);
+    if (!currentIds.has(id)) {
+      sessionEvents.evictEnded(id);
+      // A retained pane keeps a live subscriber, which would defer the store
+      // teardown above forever. The open chat is spared: its pane is on screen.
+      if (id !== state.selectedId) dropRetainedChat(id);
+    }
   }
 }
 

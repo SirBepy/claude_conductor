@@ -102,6 +102,9 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   for (const ev of buffered) {
     handleChatEvent(r, ev);
   }
+  // Backgrounded mid-load (fast session switch): the pane cache parked this
+  // renderer while we owned liveBuffer, so hand the buffer back to it.
+  if (r._liveParked) r.liveBuffer = [];
   // The scroll above runs before async content settles: shiki code
   // highlighting and attachment/image hydration grow the transcript height
   // AFTER it, so the newest turn's chips ended up cut off below the fold on

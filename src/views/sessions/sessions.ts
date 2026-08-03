@@ -26,6 +26,7 @@ import { loadSessionCharacters } from "./session-characters";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
 import { getTransport, isRemote } from "../../shared/transport";
 import { closeViewMoreMenu } from "./view-more-menu";
+import { backgroundRetainedChat, isRetainedRenderer } from "./chat-pane-cache";
 import {
   dismissQuestionCard,
   getSelectedSessionId,
@@ -289,8 +290,12 @@ function teardownState(): void {
     clearInterval(instancesPollTimer);
     instancesPollTimer = null;
   }
+  // Leaving the Sessions view parks the open chat rather than tearing it down,
+  // so coming back reopens it instantly. Non-retained renderers (pending pane)
+  // still detach here.
+  if (state.selectedId) backgroundRetainedChat(state.selectedId);
   if (state.renderer) {
-    state.renderer.detach();
+    if (!isRetainedRenderer(state.renderer)) state.renderer.detach();
     state.renderer = null;
   }
   if (state.statusbar) {

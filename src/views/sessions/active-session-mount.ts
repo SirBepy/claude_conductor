@@ -28,6 +28,13 @@ import type { SessionHeader } from "./session-header";
 import { setThinkingActivity, setThinkingProgress, setThinkingTodoActivity, isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { completeHandoff } from "./handoff";
+import {
+  takeRetainedChat,
+  retainChat,
+  isRetainedRenderer,
+  restoreRetainedScroll,
+  type RetainedChat,
+} from "./chat-pane-cache";
 
 /** Mount the statusbar for the session pane. Returns null if the host slot
  * isn't in the DOM (shouldn't happen given the pane skeleton, but mirrors the
@@ -40,8 +47,9 @@ export async function mountStatusbar(
 ): Promise<SessionStatusbar | null> {
   const sbHost = pane.querySelector<HTMLElement>(".session-statusbar-host");
   if (!sbHost) return null;
-  const rows = await loadStatuslineRows();
-  const hideZero = await loadStatuslineHideZero();
+  // Both read the same in-memory settings blob; awaiting them in series put two
+  // avoidable IPC round-trips in front of every chat open.
+  const [rows, hideZero] = await Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
   let effortDisplay = sess.effort ?? "";
   if (!effortDisplay && sess.kind === "external" && sess.cwd) {
     try {
@@ -69,6 +77,103 @@ export async function mountStatusbar(
   return sb;
 }
 
+/** Point the visible chrome (statusbar, changes panel, thinking bar, CTAs) at
+ *  `renderer`. Shared by the cold mount and the retained-pane remount. Retained
+ *  renderers stay subscribed off-screen, so every shared-chrome callback checks
+ *  it is still the visible one - else a background turn drives the open chat. */
+function wireRenderer(
+  pane: HTMLElement,
+  sess: Instance,
+  header: SessionHeader,
+  sessionId: string,
+  renderer: ChatRenderer,
+  panel: ChangesPanel,
+): void {
+  state.renderer = renderer;
+  state.changesPanel = panel;
+  const sb = state.statusbar;
+  if (sb) {
+    renderer.onMetaUpdate = (meta) => {
+      if (state.statusbar === sb) sb.updateMeta(meta);
+    };
+    renderer.onToolTally = (t) => {
+      if (state.statusbar === sb) sb.updateToolTally(t);
+    };
+    // Tool-chip popovers reuse the in-chat custom views (Read/File Changes/
+    // Skills/Questions), built from this renderer's messages.
+    sb.setToolViewProvider((tool) => renderer.customToolView(tool));
+    // Reopened chat: surface its already-accrued meta + tool counts immediately.
+    // Only push meta a renderer actually has - updateMeta writes through to
+    // metaCache, so a fresh renderer's zeros would clobber the cached chips.
+    sb.updateToolTally(renderer.toolTally);
+    const known = renderer.getMeta();
+    if (known.hasUsage || known.model) sb.updateMeta(known);
+  }
+  panel.mount(pane, renderer.container);
+  renderer.onFileEditsChanged = (edits) => {
+    panel.onUpdate(edits);
+    header.setChangesBadge(dedupeByPath(edits).length);
+  };
+  // Let the file viewer's Diff tab resolve this session's edits for any file.
+  setFileEditsProvider(() => renderer.getFileEdits());
+  // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
+  // resolve this session's working directory.
+  setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));
+  renderer.onActivityUpdate = (activity) => {
+    if (state.renderer === renderer) setThinkingActivity(activity);
+  };
+  renderer.onProgressUpdate = (n, m) => {
+    if (state.renderer === renderer) setThinkingProgress(n, m);
+  };
+  renderer.onTodoActivityUpdate = (activeForm) => {
+    if (state.renderer === renderer) setThinkingTodoActivity(activeForm);
+  };
+  renderer.onNextAiPromptDone = () => {
+    if (state.renderer !== renderer) return;
+    renderer.injectCta("pickup");
+  };
+  renderer.onHandoffReady = () => {
+    if (state.renderer !== renderer) return;
+    if (state.selectedId !== sessionId) return;
+    void completeHandoff(sessionId);
+  };
+  // NOTE: the sidebar/header question flag is NOT derived here anymore. The
+  // renderer's marker detection only ever ran for the OPEN chat, so it went
+  // stale the moment a session was backgrounded (a later turn's "done" never
+  // cleared an old "question", and vice versa), and it fired on intermediate
+  // markers mid-turn. The registry's `awaiting` (set by the daemon from the
+  // result line, gen-guarded) is the single source of truth now - see
+  // deriveQuestionSet in sessions-helpers.ts.
+  header.onChangesClick = () => panel.toggle();
+  // Expose the panel toggle through the state seam so view-more-menu and
+  // sidebar-ctx-menu can offer "View changes" for the active session.
+  state.activeChatActions = { viewChanges: () => panel.toggle() };
+}
+
+/** Re-show a cached chat: swap the pane's empty `.session-messages` for the
+ *  retained element, re-point the chrome at the surviving renderer, drain what
+ *  streamed in while off-screen. No replay, re-highlight, or loading overlay. */
+function remountRetained(
+  pane: HTMLElement,
+  sess: Instance,
+  header: SessionHeader,
+  sessionId: string,
+  hit: RetainedChat,
+  slot: HTMLElement,
+): void {
+  const renderer = hit.renderer;
+  slot.replaceWith(hit.messagesEl);
+  const panel = new ChangesPanel();
+  wireRenderer(pane, sess, header, sessionId, renderer, panel);
+  renderer.resumeLiveRender();
+  const edits = renderer.getFileEdits();
+  panel.onUpdate(edits);
+  header.setChangesBadge(dedupeByPath(edits).length);
+  setThinkingActivity(renderer.lastActivity);
+  restoreRetainedScroll(hit);
+  void sessionEvents.reconcileLatest(sessionId, sess.cwd ? String(sess.cwd) : undefined);
+}
+
 /** Attach the ChatRenderer + all-changes panel, wire status/CTA callbacks,
  * load history, and reconcile against the live transcript. Owns the stall
  * guard (ai_todo 226: ring the loading overlay after 150ms, show a
@@ -86,11 +191,20 @@ export async function mountRenderer(
   myMount: number,
   onStalledRetry: () => void,
 ): Promise<boolean> {
-  if (state.renderer) state.renderer.detach();
+  // Never detach a renderer the pane cache still owns - it is the whole point
+  // of the cache. Anything else (pending-pane renderer, evicted chat) is dead
+  // the moment the pane's DOM is replaced.
+  if (state.renderer && !isRetainedRenderer(state.renderer)) state.renderer.detach();
   state.changesPanel?.unmount();
   state.changesPanel = null;
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
   if (!messagesEl) return true;
+
+  const hit = takeRetainedChat(sessionId);
+  if (hit) {
+    remountRetained(pane, sess, header, sessionId, hit, messagesEl);
+    return true;
+  }
 
   let loadSettled = false;
   const ringTimer = window.setTimeout(() => {
@@ -120,59 +234,8 @@ export async function mountRenderer(
   };
 
   const renderer = new ChatRenderer(messagesEl);
-  state.renderer = renderer;
-  // Wire meta updates to statusbar (model, tokens, thinking, cost).
-  const sbForRenderer = state.statusbar;
-  if (sbForRenderer) {
-    renderer.onMetaUpdate = (meta) => {
-      if (state.statusbar === sbForRenderer) sbForRenderer.updateMeta(meta);
-    };
-    renderer.onToolTally = (t) => {
-      if (state.statusbar === sbForRenderer) sbForRenderer.updateToolTally(t);
-    };
-    // Tool-chip popovers reuse the in-chat custom views (Read/File Changes/
-    // Skills/Questions), built from this renderer's messages.
-    sbForRenderer.setToolViewProvider((tool) => renderer.customToolView(tool));
-    // Reopened chat: surface its already-accrued tool counts immediately.
-    sbForRenderer.updateToolTally(renderer.toolTally);
-  }
-  // Mount the all-changes panel + wire renderer callbacks. Panel listens
-  // for file mutations; activity feed routes to the thinking bar.
-  const panel = new ChangesPanel();
-  panel.mount(pane, messagesEl);
-  state.changesPanel = panel;
-  renderer.onFileEditsChanged = (edits) => {
-    panel.onUpdate(edits);
-    header.setChangesBadge(dedupeByPath(edits).length);
-  };
-  // Let the file viewer's Diff tab resolve this session's edits for any file.
-  setFileEditsProvider(() => renderer.getFileEdits());
-  // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
-  // resolve this session's working directory.
-  setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));
-  renderer.onActivityUpdate = (activity) => setThinkingActivity(activity);
-  renderer.onProgressUpdate = (n, m) => setThinkingProgress(n, m);
-  renderer.onTodoActivityUpdate = (activeForm) => setThinkingTodoActivity(activeForm);
-  renderer.onNextAiPromptDone = () => {
-    if (state.renderer !== renderer) return;
-    renderer.injectCta("pickup");
-  };
-  renderer.onHandoffReady = () => {
-    if (state.renderer !== renderer) return;
-    if (state.selectedId !== sessionId) return;
-    void completeHandoff(sessionId);
-  };
-  // NOTE: the sidebar/header question flag is NOT derived here anymore. The
-  // renderer's marker detection only ever ran for the OPEN chat, so it went
-  // stale the moment a session was backgrounded (a later turn's "done" never
-  // cleared an old "question", and vice versa), and it fired on intermediate
-  // markers mid-turn. The registry's `awaiting` (set by the daemon from the
-  // result line, gen-guarded) is the single source of truth now - see
-  // deriveQuestionSet in sessions-helpers.ts.
-  header.onChangesClick = () => panel.toggle();
-  // Expose the panel toggle through the state seam so view-more-menu and
-  // sidebar-ctx-menu can offer "View changes" for the active session.
-  state.activeChatActions = { viewChanges: () => panel.toggle() };
+  // Panel listens for file mutations; activity feed routes to the thinking bar.
+  wireRenderer(pane, sess, header, sessionId, renderer, new ChangesPanel());
   await renderer.attach(sessionId);
   // Bail if a newer mount or selectSession superseded us during await.
   if (state.mountId !== myMount || state.selectedId !== sessionId) {
@@ -208,6 +271,9 @@ export async function mountRenderer(
   // anything the live channel dropped. Fire-and-forget so reopen stays instant;
   // recovered events arrive via the live subscriber path.
   void sessionEvents.reconcileLatest(sessionId, sess.cwd ? String(sess.cwd) : undefined);
+  // Built and painted: hand this transcript to the pane cache so the next
+  // switch back is an element swap instead of another full rebuild.
+  retainChat(sessionId, renderer, messagesEl);
   // Sync sidebar once after replay (no per-event re-renders fired during it).
   const rootEl = document.querySelector<HTMLElement>(".view-sessions");
   const listAfterLoad = rootEl?.querySelector<HTMLElement>("#sessions-list");

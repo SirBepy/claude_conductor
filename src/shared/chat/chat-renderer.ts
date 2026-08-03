@@ -57,6 +57,10 @@ export class ChatRenderer {
   unsubscribe: (() => void) | null = null;
   streamingIndex: number | null = null;
   liveBuffer: ChatEvent[] | null = null;
+  // True while the retained pane cache holds this renderer off-screen (see
+  // pauseLiveRender). Distinct from `liveBuffer !== null`, which a bulk load
+  // also sets - the flag is what tells bulkLoadEvents to re-park on finish.
+  _liveParked = false;
   // Pending trailing-edge flush timer for scheduleFlush's throttle (ai_todo
   // streaming-render O(n^2) fix, Fix 2). Non-null while a coalescing window
   // is open; cleared by flushRenderNow or by detach() so a stray timer never
@@ -242,6 +246,8 @@ export class ChatRenderer {
     this.messageEls = [];
     this.dirtyIndices.clear();
     this.streamingIndex = null;
+    this._liveParked = false;
+    this.liveBuffer = null;
     this.meta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
     this._cumulative = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
     this.fileEdits = [];
@@ -268,6 +274,29 @@ export class ChatRenderer {
     } else {
       handleChatEvent(this, ev);
     }
+  }
+
+  /** Park incoming live events instead of rendering them (retained pane cache,
+   *  chat off-screen). Staying subscribed keeps the transcript complete without
+   *  a re-fetch, at the cost of an array push instead of a detached DOM build. */
+  pauseLiveRender(): void {
+    if (this._liveParked) return;
+    this._liveParked = true;
+    if (this.liveBuffer === null) this.liveBuffer = [];
+  }
+
+  /** Render everything parked since {@link pauseLiveRender}, in arrival order. */
+  resumeLiveRender(): void {
+    if (!this._liveParked) return;
+    this._liveParked = false;
+    const buffered = this.liveBuffer ?? [];
+    this.liveBuffer = null;
+    for (const ev of buffered) handleChatEvent(this, ev);
+  }
+
+  /** How many live events are waiting for a resume. */
+  get parkedEventCount(): number {
+    return this._liveParked ? (this.liveBuffer?.length ?? 0) : 0;
   }
 
   /** Feed a single event through the renderer (live or test-driven). */
@@ -299,6 +328,8 @@ export class ChatRenderer {
     }
     this.streamingIndex = null;
     this.dirtyIndices.clear();
+    this._liveParked = false;
+    this.liveBuffer = null;
     this.activeTurnStart = null;
     this.resetActiveTurnMeta();
     this.turnFooters.clear();
