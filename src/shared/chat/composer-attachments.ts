@@ -89,14 +89,19 @@ export class ComposerAttachments {
     this.fileInput.click();
   }
 
-  private onFileInputChange = (): void => {
-    const files = this.fileInput?.files;
+  // Reads off the event's own target, not `this.fileInput` - a render()
+  // between openFilePicker()'s click and the native picker resolving swaps in
+  // a fresh empty input, and the field then silently sees zero files. Was the
+  // mobile "picker opens, nothing attaches" bug (ai_todo 409).
+  private onFileInputChange = (e: Event): void => {
+    const target = e.target as HTMLInputElement;
+    const files = target.files;
     if (!files?.length) return;
     void (async () => {
       for (const file of Array.from(files)) {
         await this.attachBlob(file, file.name);
       }
-      if (this.fileInput) this.fileInput.value = "";
+      target.value = "";
     })();
   };
 
