@@ -219,6 +219,10 @@ export class Composer {
 
   private render(): void {
     const placeholder = this.computePlaceholder();
+    // .composer-file-input's native-picker click is mobile-only (the "Attach
+    // image" menu item); narrowed from a mixed accept list so Android favours
+    // its streamlined Photo Picker over the generic Files app, which appeared
+    // to silently drop the picked file on-device (ai_todo 409).
     this.root.innerHTML = `
       <div class="composer-attachments"></div>
       <div class="composer-row">
@@ -241,7 +245,7 @@ export class Composer {
         </div>
       </div>
       <div class="composer-notice" hidden></div>
-      <input type="file" class="composer-file-input" accept="image/*,application/pdf,text/plain,.log,.md,.csv,.json" multiple hidden>
+      <input type="file" class="composer-file-input" accept="image/*" multiple hidden>
     `;
     this.textarea = this.root.querySelector<HTMLTextAreaElement>(".composer-textarea");
     this.highlightEl = this.root.querySelector<HTMLElement>(".composer-highlight");
