@@ -208,10 +208,9 @@ impl PersistentClient {
     }
 
     /// Force-end the Jarvis singleton's live child and respawn a genuinely
-    /// fresh one - the kebab menu's "Clear context" action
-    /// (`daemon::methods::jarvis::register_jarvis`'s `clear_jarvis_context`
-    /// RPC). Unlike `restart_jarvis_session`, the returned id is NEW; the old
-    /// transcript is discarded.
+    /// fresh one - the kebab menu's "Clear context" action. Unlike
+    /// `restart_jarvis_session`, the returned id is NEW; the old transcript
+    /// is discarded.
     pub async fn clear_jarvis_context(&self, session_id: &str) -> Result<String, ClientError> {
         let res = self
             .call("clear_jarvis_context", json!({"session_id": session_id}))

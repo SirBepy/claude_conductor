@@ -81,8 +81,7 @@ async function restartJarvis(sessionId: string): Promise<void> {
 }
 
 /** "Clear context": unlike Restart above, this discards the whole transcript
- *  and lands on a NEW session id, so (unlike restartJarvis) there's no
- *  "already selected" bail-out to route around - it's a normal fresh mount.
+ *  and lands on a NEW session id - a normal fresh mount, no bail-out needed.
  *  Confirms first since a menu click carries no typed intent the way "/clear"
  *  does, and the wipe can't be undone. */
 async function clearContext(sessionId: string): Promise<void> {

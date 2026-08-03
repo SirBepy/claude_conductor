@@ -128,9 +128,7 @@ fn jarvis_home_dir() -> Result<std::path::PathBuf, RpcError> {
 /// Spawns a brand-new Jarvis singleton (fresh cwd seed, fresh session id,
 /// jarvis-flagged, `jarvis_session_id` repointed) and publishes the same
 /// notifications `ensure_jarvis_session`'s fresh-spawn branch always has.
-/// Shared by that branch and `clear_jarvis_context`'s discard-and-restart -
-/// the only difference between the two callers is what happens to the OLD
-/// pointer/session before this runs (nothing, vs. force-ended).
+/// Shared by that branch and `clear_jarvis_context`.
 async fn spawn_fresh_jarvis(state: &Arc<DaemonState>) -> Result<String, RpcError> {
     let cwd = jarvis_home_dir()?;
     seed_jarvis_home_files(&cwd)?;
@@ -231,11 +229,8 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
 
     // Kebab menu's "Clear context": unlike Restart above, this permanently
     // discards the singleton's whole transcript. Force-ends the live child
-    // (graceful stdin-close/wait/force-kill via `end_session`, tolerating
-    // NotFound if it already died), marks the OLD session ended in the
-    // Registry (so it doesn't linger as a live-looking zombie), then spawns
-    // a genuinely fresh singleton via the same path `ensure_jarvis_session`
-    // uses when its pointer is stale/gone. Same is-jarvis guard as Restart.
+    // via `end_session` (tolerating NotFound), marks it ended, then spawns a
+    // genuinely fresh singleton. Same is-jarvis guard as Restart.
     router.register("clear_jarvis_context", move |params, _ctx| {
         let state = state.clone();
         async move {

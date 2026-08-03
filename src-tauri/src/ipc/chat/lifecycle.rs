@@ -290,10 +290,9 @@ pub async fn restart_jarvis_session(
 }
 
 /// Kebab menu's "Clear context" (Jarvis window only, same gating as Restart
-/// above): force-ends the daemon's live child for `session_id`, discards its
-/// transcript, and spawns a genuinely fresh singleton. Returns the NEW
-/// session id - unlike Restart, the frontend must re-mount the pane against
-/// a different id, not just re-select the same one.
+/// above): force-ends the daemon's live child, discards its transcript, and
+/// spawns a genuinely fresh singleton. Returns the NEW session id - unlike
+/// Restart, the frontend must re-mount against a different id.
 #[tauri::command]
 pub async fn clear_jarvis_context(
     session_id: String,
