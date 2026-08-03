@@ -15,6 +15,7 @@ import {
   scrollToBottomWhenSettled,
 } from "./chat-dom-renderer";
 import { handleChatEvent } from "./chat-event-handler";
+import { perfPhase } from "../perf";
 import type { ChatRenderer } from "./chat-renderer";
 
 export interface BulkLoadOpts {
@@ -55,17 +56,25 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   // shiki recolors code - all in ~100ms. We reveal the finished frame in one
   // fade once the settle pass has folded, pinned, and highlighted it.
   beginRevealHold(r);
+  let slowestChunkMs = 0;
+  const donePhase = perfPhase(
+    "bulk-load",
+    () => `(${events.length} events, slowest chunk ${Math.round(slowestChunkMs)}ms)`,
+  );
   const CHUNK = 8;
   for (let i = 0; i < events.length; i += CHUNK) {
-    if (r._bulkGen !== myGen) { r.liveBuffer = null; r.hydrating = false; return; }
+    if (r._bulkGen !== myGen) { r.liveBuffer = null; r.hydrating = false; donePhase(); return; }
+    const chunkStart = performance.now();
     for (let j = i; j < Math.min(i + CHUNK, events.length); j++) {
       handleChatEvent(r, events[j]!, { silent: true, skipScroll: true });
     }
     flushRender(r);
+    slowestChunkMs = Math.max(slowestChunkMs, performance.now() - chunkStart);
     if (i + CHUNK < events.length) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
+  donePhase();
   if (r._bulkGen !== myGen) { r.liveBuffer = null; r.hydrating = false; return; }
   // History replay is done: deliver the FINAL header badge + thinking-bar
   // state in ONE shot (per-event updates were gated above so the badge didn't

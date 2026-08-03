@@ -3,6 +3,7 @@
 // it are themselves lazy dynamic imports, so unused languages cost nothing.
 import { loadShiki } from "./shiki-loader";
 import { escapeHtml } from "../escape-html";
+import { perfPhase } from "../perf";
 
 function extractFenceLang(className: string): string | null {
   const m = className.match(/language-(\S+)/);
@@ -39,6 +40,8 @@ export async function highlightCodeBlocks(container: HTMLElement): Promise<void>
   const codes = Array.from(
     container.querySelectorAll<HTMLElement>("pre > code:not([data-highlighted])"),
   );
+  if (codes.length === 0) return;
+  const donePhase = perfPhase("shiki-highlight", () => `(${codes.length} blocks)`);
   for (let i = 0; i < codes.length; i++) {
     const code = codes[i];
     if (!code) continue;
@@ -66,4 +69,5 @@ export async function highlightCodeBlocks(container: HTMLElement): Promise<void>
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
+  donePhase();
 }
