@@ -86,6 +86,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const savedScrollTop = messagesEl?.scrollTop ?? 0;
   const savedPaddingBottom = messagesEl?.style.paddingBottom ?? "";
   let resizeObs: ResizeObserver | null = null;
+  // Same threshold chat-dom-renderer.ts's isNearBottom() uses for its own
+  // stick-to-bottom check - kept as a local literal since that constant isn't
+  // exported and this file has no other reason to import that module.
+  const STICK_TO_BOTTOM_THRESHOLD_PX = 64;
   const syncMessagesPadding = (): void => {
     if (!messagesEl) return;
     // Broadened to the minimized bar too - it replaces .prompt-card wholesale
@@ -93,8 +97,14 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // would stop measuring anything once minimized.
     const card = host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed");
     if (!card) return;
+    // Only re-pin to bottom if the user was already there - otherwise typing
+    // in the free-text box (which grows the card via ResizeObserver) yanks
+    // someone who scrolled up to reread earlier messages back down every
+    // keystroke.
+    const wasNearBottom =
+      messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight <= STICK_TO_BOTTOM_THRESHOLD_PX;
     messagesEl.style.paddingBottom = `${card.offsetHeight + 12}px`;
-    messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
+    if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
   };
 
   // Phone back button skips the question (same as Escape / the Skip button) so
