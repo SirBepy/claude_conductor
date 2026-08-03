@@ -8,6 +8,8 @@ import { showChatLoadingOverlay } from "../../shared/chat/chat-loading";
 import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
 import { queueHistoryResume } from "../sessions/sessions";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
+import { showToast } from "../../shared/toast";
+import { isRemote } from "../../shared/transport";
 import "../../shared/chat/chat.css";
 import "../sessions/sessions.css";
 import "../sessions/session-avatar.css";
@@ -79,6 +81,12 @@ async function fetchEntries(): Promise<void> {
 }
 
 async function selectHistorySession(sessionId: string, pane: HTMLElement): Promise<void> {
+  // Mobile single-pane: opening a chat reveals the chat pane and hides the
+  // filter bar + list (mirrors Sessions' data-mobile-pane toggle; CSS only
+  // acts on this attribute inside the ≤768px media query, so desktop is
+  // unaffected). Without this the filter bar, session list, and chat content
+  // were all visible at once on the phone.
+  document.querySelector(".view-history")?.setAttribute("data-mobile-pane", "chat");
   const myMount = state.mountId;
   state.selectedId = sessionId;
   state.statusbar?.destroy();
@@ -140,6 +148,8 @@ async function selectHistorySession(sessionId: string, pane: HTMLElement): Promi
         await invoke<void>("register_historical_session", { sessionId: entry.session_id, cwd: entry.cwd, accountId });
       } catch (err) {
         console.error("[history] register_historical_session failed", err);
+        showToast(`Couldn't continue this chat: ${err instanceof Error ? err.message : String(err)}`);
+        return;
       }
       queueHistoryResume(entry.session_id);
       showView("sessions");
@@ -214,6 +224,12 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
     return () => { /* no-op */ };
   }
 
+  // Mobile back button: return from the chat pane to the filterable list.
+  // Only visible on ≤768px in chat mode (CSS-driven); a no-op on desktop.
+  root.querySelector<HTMLButtonElement>("#historyBackBtn")?.addEventListener("click", () => {
+    root.querySelector(".view-history")?.setAttribute("data-mobile-pane", "list");
+  });
+
   void loadSessionCharacters();
   renderListLoading(listEl);
   await fetchEntries();
@@ -222,8 +238,11 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
 
   // If session-detail asked us to open a specific closed chat, select it now.
-  // Otherwise auto-select the most recent session so the pane isn't blank.
-  const pendingOrFirst = _pendingSelect ?? state.entries[0]?.session_id ?? null;
+  // Otherwise auto-select the most recent session so the pane isn't blank -
+  // except on the phone, where the mobile single-pane layout should land on
+  // the filterable list first (matches Sessions' isRemote() gate on its own
+  // auto-select fallback) rather than jumping straight into a chat.
+  const pendingOrFirst = _pendingSelect ?? (isRemote() ? null : state.entries[0]?.session_id ?? null);
   if (pendingOrFirst) {
     if (_pendingSelect) _pendingSelect = null;
     const li = listEl.querySelector<HTMLLIElement>(`li[data-session-id="${CSS.escape(pendingOrFirst)}"]`);

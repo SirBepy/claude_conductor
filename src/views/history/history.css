@@ -255,6 +255,13 @@
   opacity: 0.85;
 }
 
+/* The back button belongs only to the mobile single-pane flow - hidden
+   everywhere except mobile chat mode (revealed by the rule inside the query),
+   same pattern as .sessions-back. */
+.history-back {
+  display: none;
+}
+
 /* ── Mobile (phone/remote client) ─────────────────────────────────────────── */
 @media (max-width: 768px) {
   .view-history .history-filter-bar {
@@ -280,5 +287,23 @@
     max-height: 42vh;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
+  }
+
+  /* The attribute decides which pane is shown, so the filter bar + list and
+     the selected chat's content are never both on screen at once. Default
+     (list mode): filters + list visible, chat pane hidden. */
+  .view-history:not([data-mobile-pane="chat"]) .history-pane {
+    display: none;
+  }
+  /* Chat mode: chat visible, filters + list hidden, back button revealed. */
+  .view-history[data-mobile-pane="chat"] .history-filter-bar,
+  .view-history[data-mobile-pane="chat"] .history-sidebar {
+    display: none;
+  }
+  .view-history[data-mobile-pane="chat"] .history-back {
+    display: inline-flex;
+  }
+  .view-history[data-mobile-pane="chat"] .icon-btn.burger {
+    display: none;
   }
 }

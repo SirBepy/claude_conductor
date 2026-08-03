@@ -81,6 +81,13 @@ export function template() {
         >
           <i class="ph ph-list"></i>
         </button>
+        <button
+          class="icon-btn history-back"
+          id="historyBackBtn"
+          title="Back to list"
+        >
+          <i class="ph ph-arrow-left"></i>
+        </button>
         <h2>History</h2>
         <button
           class="icon-btn"
