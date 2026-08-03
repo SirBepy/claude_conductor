@@ -125,6 +125,58 @@ fn jarvis_home_dir() -> Result<std::path::PathBuf, RpcError> {
     Ok(dir)
 }
 
+/// Spawns a brand-new Jarvis singleton (fresh cwd seed, fresh session id,
+/// jarvis-flagged, `jarvis_session_id` repointed) and publishes the same
+/// notifications `ensure_jarvis_session`'s fresh-spawn branch always has.
+/// Shared by that branch and `clear_jarvis_context`'s discard-and-restart -
+/// the only difference between the two callers is what happens to the OLD
+/// pointer/session before this runs (nothing, vs. force-ended).
+async fn spawn_fresh_jarvis(state: &Arc<DaemonState>) -> Result<String, RpcError> {
+    let cwd = jarvis_home_dir()?;
+    seed_jarvis_home_files(&cwd)?;
+    let params = StartSessionParams {
+        cwd: cwd.clone(),
+        model: JARVIS_MODEL.to_string(),
+        effort: JARVIS_EFFORT.to_string(),
+        resume_id: None,
+        remote: false,
+        account_id: None,
+        fork: false,
+        new_session_id: None,
+    };
+    // check_metered_billing already gates inside spawn_session.
+    let session = lifecycle::spawn_session(state, params).await.map_err(err_to_rpc)?;
+    let sid = session.session_id.clone();
+    let account_id = session.account_id.clone();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // auto_accept=true, no character: Jarvis runs unattended, so
+    // requiring manual approval on every tool call would stall the
+    // whole fleet on a prompt no one is watching for.
+    crate::daemon::session_registration::register_new_session(
+        state, &sid, &cwd, JARVIS_MODEL, JARVIS_EFFORT, &account_id, &now, true, None,
+    );
+    // Atomic coupling lives in `flag_as_jarvis` (session_registration.rs):
+    // flagging the registry AND forcing chat_config's auto_accept happen
+    // together so a future change here can't decouple them.
+    crate::daemon::session_registration::flag_as_jarvis(state, &sid);
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
+    // Idempotent - see the function doc for why a respawn never duplicates
+    // this, so it's safe to call again from clear_jarvis_context too.
+    seed_jarvis_hygiene_schedule();
+
+    // Instant in-memory read for this and any other daemon-side
+    // consumer; the app process persists the same value to
+    // settings.json off the `jarvis_session_created` notification
+    // below (daemon has no direct write access to that file - see
+    // `SettingsCache`'s module header).
+    state.settings.set_jarvis_session_id(&sid);
+    state.notifier.publish("jarvis_session_created", json!({"session_id": sid}));
+    state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+
+    Ok(sid)
+}
+
 pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
@@ -145,48 +197,7 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
                 }
             }
 
-            let cwd = jarvis_home_dir()?;
-            seed_jarvis_home_files(&cwd)?;
-            let params = StartSessionParams {
-                cwd: cwd.clone(),
-                model: JARVIS_MODEL.to_string(),
-                effort: JARVIS_EFFORT.to_string(),
-                resume_id: None,
-                remote: false,
-                account_id: None,
-                fork: false,
-                new_session_id: None,
-            };
-            // check_metered_billing already gates inside spawn_session.
-            let session = lifecycle::spawn_session(&state, params).await.map_err(err_to_rpc)?;
-            let sid = session.session_id.clone();
-            let account_id = session.account_id.clone();
-            let now = chrono::Utc::now().to_rfc3339();
-
-            // auto_accept=true, no character: Jarvis runs unattended, so
-            // requiring manual approval on every tool call would stall the
-            // whole fleet on a prompt no one is watching for.
-            crate::daemon::session_registration::register_new_session(
-                &state, &sid, &cwd, JARVIS_MODEL, JARVIS_EFFORT, &account_id, &now, true, None,
-            );
-            // Atomic coupling lives in `flag_as_jarvis` (session_registration.rs):
-            // flagging the registry AND forcing chat_config's auto_accept happen
-            // together so a future change here can't decouple them.
-            crate::daemon::session_registration::flag_as_jarvis(&state, &sid);
-            crate::sessions::persistence::save_snapshot_default(&state.registry);
-            // Fresh-spawn only (never on pointer reuse, above) and idempotent -
-            // see the function doc for why a respawn never duplicates this.
-            seed_jarvis_hygiene_schedule();
-
-            // Instant in-memory read for this and any other daemon-side
-            // consumer; the app process persists the same value to
-            // settings.json off the `jarvis_session_created` notification
-            // below (daemon has no direct write access to that file - see
-            // `SettingsCache`'s module header).
-            state.settings.set_jarvis_session_id(&sid);
-            state.notifier.publish("jarvis_session_created", json!({"session_id": sid}));
-            state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
-
+            let sid = spawn_fresh_jarvis(&state).await?;
             Ok(json!({"session_id": sid}))
         }
         });
@@ -198,7 +209,34 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
     // jarvis-flagged session_id only; the frontend only ever surfaces this
     // action inside the Jarvis window, but the daemon re-checks so a stray
     // call against an ordinary session can't nuke its live process.
-    router.register("restart_jarvis_session", move |params, _ctx| {
+    {
+        let state = state.clone();
+        router.register("restart_jarvis_session", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: RestartJarvisParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let is_jarvis = state.registry.get(&p.session_id).map(|i| i.jarvis).unwrap_or(false);
+                if !is_jarvis {
+                    return Err(RpcError::invalid_params(format!(
+                        "session {} is not the Jarvis singleton", p.session_id
+                    )));
+                }
+                let new_id = lifecycle::restart_session(&state, &p.session_id).await.map_err(err_to_rpc)?;
+                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                Ok(json!({"session_id": new_id}))
+            }
+        });
+    }
+
+    // Kebab menu's "Clear context": unlike Restart above, this permanently
+    // discards the singleton's whole transcript. Force-ends the live child
+    // (graceful stdin-close/wait/force-kill via `end_session`, tolerating
+    // NotFound if it already died), marks the OLD session ended in the
+    // Registry (so it doesn't linger as a live-looking zombie), then spawns
+    // a genuinely fresh singleton via the same path `ensure_jarvis_session`
+    // uses when its pointer is stale/gone. Same is-jarvis guard as Restart.
+    router.register("clear_jarvis_context", move |params, _ctx| {
         let state = state.clone();
         async move {
             let p: RestartJarvisParams = serde_json::from_value(params.unwrap_or(Value::Null))
@@ -209,9 +247,15 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
                     "session {} is not the Jarvis singleton", p.session_id
                 )));
             }
-            let new_id = lifecycle::restart_session(&state, &p.session_id).await.map_err(err_to_rpc)?;
-            state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
-            Ok(json!({"session_id": new_id}))
+            if let Err(e) = lifecycle::end_session(&state.sessions, &p.session_id).await {
+                if !matches!(e, LifecycleError::NotFound(_)) {
+                    return Err(err_to_rpc(e));
+                }
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            state.registry.mark_ended(&p.session_id, crate::types::EndReason::Manual, &now);
+            let sid = spawn_fresh_jarvis(&state).await?;
+            Ok(json!({"session_id": sid}))
         }
     });
 }

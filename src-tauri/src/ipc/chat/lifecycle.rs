@@ -289,6 +289,21 @@ pub async fn restart_jarvis_session(
     client.restart_jarvis_session(&session_id).await.map_err(|e| e.to_string())
 }
 
+/// Kebab menu's "Clear context" (Jarvis window only, same gating as Restart
+/// above): force-ends the daemon's live child for `session_id`, discards its
+/// transcript, and spawns a genuinely fresh singleton. Returns the NEW
+/// session id - unlike Restart, the frontend must re-mount the pane against
+/// a different id, not just re-select the same one.
+#[tauri::command]
+pub async fn clear_jarvis_context(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let guard = state.daemon_client.lock().await;
+    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    client.clear_jarvis_context(&session_id).await.map_err(|e| e.to_string())
+}
+
 /// Debug builds only: fake a usage-limit rejection on `session_id` so the
 /// blocked banner, the red chat state, and the staggered scheduled resume can
 /// all be exercised without waiting for a real window to run out. Everything

@@ -207,6 +207,21 @@ impl PersistentClient {
             .ok_or_else(|| ClientError::Rpc { code: -32000, message: "restart_jarvis_session: no session_id in result".into() })
     }
 
+    /// Force-end the Jarvis singleton's live child and respawn a genuinely
+    /// fresh one - the kebab menu's "Clear context" action
+    /// (`daemon::methods::jarvis::register_jarvis`'s `clear_jarvis_context`
+    /// RPC). Unlike `restart_jarvis_session`, the returned id is NEW; the old
+    /// transcript is discarded.
+    pub async fn clear_jarvis_context(&self, session_id: &str) -> Result<String, ClientError> {
+        let res = self
+            .call("clear_jarvis_context", json!({"session_id": session_id}))
+            .await?;
+        res.get("session_id")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string())
+            .ok_or_else(|| ClientError::Rpc { code: -32000, message: "clear_jarvis_context: no session_id in result".into() })
+    }
+
     pub async fn mark_session_ended(&self, session_id: &str) -> Result<(), ClientError> {
         self.call("mark_session_ended", json!({"session_id": session_id})).await?;
         Ok(())

@@ -300,6 +300,7 @@ pub fn run() {
             ipc::takeover_manual,
             ipc::move_session_to_account,
             ipc::restart_jarvis_session,
+            ipc::clear_jarvis_context,
             ipc::simulate_rate_limit,
             ipc::load_history,
             ipc::load_history_page,

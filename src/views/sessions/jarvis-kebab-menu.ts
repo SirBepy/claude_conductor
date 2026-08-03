@@ -1,10 +1,11 @@
 // Kebab (⋮) menu for the Jarvis singleton's detached window (Part B). Jarvis
 // has no in-app pane - it only ever lives at `#detached?session=<id>`, which
 // otherwise has zero header chrome (see `session-header.ts`'s
-// `addKebabButton`, wired only when `Instance.jarvis` is true). Four actions:
-// restart (kill+resume the same session id), change character (reused
-// verbatim from active-session.ts), open jarvis-home in VS Code/Explorer, and
-// copy PID. No Auto-accept toggle here - Part A locks it permanently on.
+// `addKebabButton`, wired only when `Instance.jarvis` is true). Five actions:
+// restart (kill+resume the same session id), clear context (kill+discard,
+// lands on a NEW id), change character (reused verbatim from
+// active-session.ts), open jarvis-home in VS Code/Explorer, and copy PID. No
+// Auto-accept toggle here - Part A locks it permanently on.
 //
 // `buildChatMenuBlock` (chat-menu.ts) builds a much bigger "This chat" menu
 // and its `appendSubMenu`/`makeSubParent`/`makeItem` helpers are private to
@@ -79,6 +80,26 @@ async function restartJarvis(sessionId: string): Promise<void> {
   }
 }
 
+/** "Clear context": unlike Restart above, this discards the whole transcript
+ *  and lands on a NEW session id, so (unlike restartJarvis) there's no
+ *  "already selected" bail-out to route around - it's a normal fresh mount.
+ *  Confirms first since a menu click carries no typed intent the way "/clear"
+ *  does, and the wipe can't be undone. */
+async function clearContext(sessionId: string): Promise<void> {
+  if (!confirm("Clear Jarvis's context? This permanently discards its whole conversation history and starts fresh.")) return;
+  try {
+    const newId = await invoke<string>("clear_jarvis_context", { sessionId });
+    const pane = document.querySelector<HTMLElement>("#session-pane");
+    if (!pane) return;
+    const m = await import("./active-session");
+    setActiveSession(null);
+    await m.selectSession(newId, pane);
+  } catch (e) {
+    console.error("[jarvis-menu] clear context failed", e);
+    alert(`Failed to clear Jarvis's context: ${e}`);
+  }
+}
+
 // Dynamic import of active-session.ts (not a static one) avoids a module
 // cycle: active-session.ts statically imports `openJarvisKebabMenu` from
 // this file to wire the header button.
@@ -99,6 +120,7 @@ export function openJarvisKebabMenu(anchor: HTMLElement, sessionId: string): voi
   _menu = menu;
 
   menu.appendChild(makeItem("arrow-clockwise", "Restart Jarvis", () => restartJarvis(sessionId)));
+  menu.appendChild(makeItem("eraser", "Clear context", () => clearContext(sessionId)));
   menu.appendChild(makeItem("user-switch", "Change character", () => changeCharacter(sessionId)));
 
   // "Open jarvis-home in ▸" submenu - same open-in machinery as chat-menu.ts's
