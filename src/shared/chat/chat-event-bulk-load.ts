@@ -63,7 +63,10 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   );
   const CHUNK = 8;
   for (let i = 0; i < events.length; i += CHUNK) {
-    if (r._bulkGen !== myGen) { r.liveBuffer = null; r.hydrating = false; donePhase(); return; }
+    // A superseding call already re-owns liveBuffer/hydrating from its own
+    // line 29/53 - clearing them here would clobber ITS in-flight state
+    // (only bulkLoadEvents bumps _bulkGen, so a mismatch always means one).
+    if (r._bulkGen !== myGen) { donePhase(); return; }
     const chunkStart = performance.now();
     for (let j = i; j < Math.min(i + CHUNK, events.length); j++) {
       handleChatEvent(r, events[j]!, { silent: true, skipScroll: true });
@@ -75,7 +78,7 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
     }
   }
   donePhase();
-  if (r._bulkGen !== myGen) { r.liveBuffer = null; r.hydrating = false; return; }
+  if (r._bulkGen !== myGen) { return; } // see the identical guard above
   // History replay is done: deliver the FINAL header badge + thinking-bar
   // state in ONE shot (per-event updates were gated above so the badge didn't
   // count up and the bar didn't flip through every past activity). A done turn
