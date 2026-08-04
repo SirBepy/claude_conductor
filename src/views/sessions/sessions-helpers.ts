@@ -20,8 +20,12 @@ export function cwdToProjectName(cwd: string): string {
   return parts[parts.length - 1] ?? cwd;
 }
 
+/** Fallback title for a chat with no name yet - a live session before Claude
+ *  names it, or a draft/parked row with no backing session at all. */
+export const NO_NAME_TITLE = "New chat";
+
 export function sessionSubtitle(i: Instance): string {
-  return i.name || "New chat";
+  return i.name || NO_NAME_TITLE;
 }
 
 /**
