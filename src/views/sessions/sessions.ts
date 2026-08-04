@@ -45,6 +45,7 @@ import {
   wireKeyboardShortcuts,
   wireDaemonStatusListeners,
   wireInstancesChangedListener,
+  wireChatRecoveryHeartbeat,
   wireStaticListeners,
   wireDocumentListeners,
   reconcileEndedSessions,
@@ -79,6 +80,11 @@ let _setupStallTimer: ReturnType<typeof setTimeout> | null = null;
 /** Poll-fallback timer for the lossy instances-changed broadcast (see the
  * setInterval at the listener registration site). Cleared in teardownState. */
 let instancesPollTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Dispose function for the chat live-channel recovery heartbeat (see
+ * wireChatRecoveryHeartbeat). Shared by both entry points below; cleared in
+ * teardownState. */
+let chatHeartbeatDispose: (() => void) | null = null;
 
 function armSetupStallTimer(listEl: HTMLElement, pane: HTMLElement, myMount: number): void {
   if (_setupStallTimer !== null) clearTimeout(_setupStallTimer);
@@ -226,6 +232,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     ev, listEl, pane, myMount, armSetupStallTimer, disarmSetupStallTimer,
   );
   instancesPollTimer = await wireInstancesChangedListener(ev, listEl, pane, myMount, _ensuredSessionIds);
+  chatHeartbeatDispose = wireChatRecoveryHeartbeat(myMount);
 
   wireStaticListeners(root, view, pane, listEl, newBtn);
 
@@ -289,6 +296,10 @@ function teardownState(): void {
   if (instancesPollTimer !== null) {
     clearInterval(instancesPollTimer);
     instancesPollTimer = null;
+  }
+  if (chatHeartbeatDispose) {
+    chatHeartbeatDispose();
+    chatHeartbeatDispose = null;
   }
   // Leaving the Sessions view parks the open chat rather than tearing it down,
   // so coming back reopens it instantly. Non-retained renderers (pending pane)
@@ -374,6 +385,7 @@ export async function renderDetachedSession(
   });
 
   await selectSession(sessionId, pane);
+  chatHeartbeatDispose = wireChatRecoveryHeartbeat(myMount);
 
   return teardownState;
 }

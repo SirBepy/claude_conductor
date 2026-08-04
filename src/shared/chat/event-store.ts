@@ -193,8 +193,11 @@ class SessionEventStore {
       };
       if (cwd) args.cwd = cwd;
       page = await invoke<HistoryPage>("load_history_page", args);
-    } catch {
-      return; // no transcript yet / read error - nothing to reconcile against
+    } catch (err) {
+      // Shares this path with "no transcript yet", so a brand-new session
+      // warns briefly - worth it now the recovery heartbeat depends on it.
+      console.warn(`[event-store] reconcileLatest(${sessionId}) failed`, err);
+      return;
     }
     const have = new Set<string>();
     for (const ev of entry.events) {
@@ -594,6 +597,19 @@ class SessionEventStore {
       if (payload.type === "user_message" && !(payload as { remote_echo?: boolean }).remote_echo) return;
       this.deliver(sessionId, payload);
     });
+  }
+
+  /** Recovery for a channel that died silently: ensureListener's guard never
+   *  re-arms once set, so unlisten first to force a rebuild. Heartbeat-only,
+   *  so ensureListener's other callers keep their cheap no-op path. */
+  async reviveListener(sessionId: string): Promise<void> {
+    const entry = this.cache.get(sessionId);
+    if (!entry) return;
+    if (entry.unlisten) {
+      try { entry.unlisten(); } catch { /* ignore */ }
+      entry.unlisten = null;
+    }
+    await this.ensureListener(sessionId);
   }
 
   // Subscribes to chat-watch:<id> events emitted by the JSONL file watcher.

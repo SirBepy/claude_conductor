@@ -428,6 +428,32 @@ export async function wireInstancesChangedListener(
   return null;
 }
 
+/** Self-heals the visible chat's live channel, mirroring the 15s poll above -
+ *  chat events have no such fallback and a dead listener never re-arms itself.
+ *  Scoped to `state.selectedId`, so retained sessions stay off the poll loop. */
+export function wireChatRecoveryHeartbeat(myMount: number): () => void {
+  const recover = (): void => {
+    if (state.mountId !== myMount) return;
+    const id = state.selectedId;
+    if (!id) return;
+    const sess = state.sessions.find((s) => s.session_id === id);
+    const cwd = sess?.cwd ? String(sess.cwd) : undefined;
+    void sessionEvents.reviveListener(id).catch((err) => console.warn(`[sessions] reviveListener(${id}) failed`, err));
+    void sessionEvents.reconcileLatest(id, cwd);
+  };
+  const timer = setInterval(recover, 15_000);
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === "visible") recover();
+  };
+  window.addEventListener("focus", recover);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  return () => {
+    clearInterval(timer);
+    window.removeEventListener("focus", recover);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+  };
+}
+
 /** Wires the +New button, its floating FAB twin, the mobile back button,
  * the sidebar's right-click context menu, and the sidebar's main click
  * handler (row menu buttons, parked/pending/draft rows, session rows). None
