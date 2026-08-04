@@ -2,7 +2,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import type { Instance } from "../../types/ipc.generated";
 import { markerToStatusClass } from "../../shared/status-icons";
 import { characterForSession } from "./session-characters";
-import { NO_NAME_TITLE, projectName, sessionSubtitle, statusDotClass } from "./sessions-helpers";
+import { projectName, sessionSubtitle, statusDotClass } from "./sessions-helpers";
 import type { SessionSort } from "./sessions-helpers";
 import type { PendingNewSession, ParkedDraft } from "./state";
 import {
@@ -28,8 +28,8 @@ export interface RowOptions {
   statusClass: string;
   avatarExtras?: LeadingExtras;
   isPortrait: boolean;
-  /** Chat title / draft state text, escaped plain text - safe as both the
-   *  landscape project-slot content and the portrait tooltip value. */
+  /** Chat title, escaped plain text - the landscape project-slot content and
+   *  the portrait tooltip value. "" for draft/parked - no name to show. */
   title: string;
   /** Project folder name, escaped. */
   projectLabel: string;
@@ -48,11 +48,15 @@ export interface RowOptions {
 
 /** The one `<li>` template for the whole sidebar list. */
 export function renderSidebarRow(o: RowOptions): string {
+  // `title` is "" for draft/parked rows (no chat name to show) - classic falls
+  // back to a single project-name line instead of an empty heading over it.
   const text = o.isPortrait
     ? `<span class="session-row-project" data-tip="${o.title}"><span class="proj-name">${o.projectLabel}</span>${o.badges}</span>
               <span class="session-chips">${o.portraitSecondary}</span>`
-    : `<span class="session-row-project">${o.titlePrefix}${o.title}${o.badges}</span>
-              <span class="session-row-subtitle">${o.projectLabel}${o.drainChip}</span>`;
+    : o.title
+      ? `<span class="session-row-project">${o.titlePrefix}${o.title}${o.badges}</span>
+              <span class="session-row-subtitle">${o.projectLabel}${o.drainChip}</span>`
+      : `<span class="session-row-project">${o.titlePrefix}${o.projectLabel}${o.badges}</span>`;
   return `<li data-${o.idAttr}="${escapeHtml(o.id)}"${o.liExtraAttrs} class="${o.liClasses}">
             ${leadingVisual(o.charId, o.statusClass, o.cwd, o.avatarExtras)}
             <div class="session-row-text">
@@ -195,7 +199,7 @@ export function draftRowOptions(
     },
     charId: pending.config.characterId,
     cwd: pending.projectPath,
-    title: NO_NAME_TITLE,
+    title: "",
     projectLabel: pending.projectName || "New session",
     isPortrait,
     avatarStatusClass: IDLE_DOT_CLASS,
@@ -222,7 +226,7 @@ export function parkedRowOptions(d: ParkedDraft, isPortrait: boolean, rowClass: 
     },
     charId: d.config.characterId,
     cwd: d.projectPath,
-    title: NO_NAME_TITLE,
+    title: "",
     projectLabel: d.projectName || "New session",
     isPortrait,
     avatarStatusClass: IDLE_DOT_CLASS,
