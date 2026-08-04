@@ -86,12 +86,19 @@ export function dropRetainedChat(sessionId: string): void {
   hit.messagesEl.remove();
 }
 
-/** Follow a session id change (pending placeholder -> real id, takeover). */
-export function rekeyRetainedChat(oldId: string, newId: string): void {
+/** Follow a session id change (pending placeholder -> real id, takeover).
+ *  Carries the renderer's live subscription across via swapSubscription -
+ *  without this the renderer stays bound to `oldId` in the event store and
+ *  every future event for `newId` silently never reaches it. */
+export async function rekeyRetainedChat(oldId: string, newId: string): Promise<void> {
   const hit = retained.get(oldId);
   if (!hit) return;
-  retained.delete(oldId);
   dropRetainedChat(newId);
+  // hit stays under oldId across this await so isRetainedRenderer keeps
+  // seeing it as retained mid-swap - delete+reinsert only happen back-to-back
+  // once the await settles, never straddling it.
+  await hit.renderer.swapSubscription(newId);
+  retained.delete(oldId);
   retained.set(newId, hit);
 }
 

@@ -163,6 +163,10 @@ function remountRetained(
 ): void {
   const renderer = hit.renderer;
   slot.replaceWith(hit.messagesEl);
+  // Self-heal: a cache hit only proves the pane/DOM survived, not that the
+  // store subscription did (e.g. a rekey that ran before this fix, or any
+  // future path that severs it). No-op when already correctly subscribed.
+  renderer.ensureSubscribed(sessionId);
   const panel = new ChangesPanel();
   wireRenderer(pane, sess, header, sessionId, renderer, panel);
   renderer.resumeLiveRender();

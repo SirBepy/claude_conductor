@@ -342,6 +342,22 @@ export class ChatRenderer {
     revealTranscript(this);
   }
 
+  /** Idempotent (re-)subscribe. `sessionId`/`unsubscribe` are only ever set
+   *  together by attach/swapSubscription/detach, so the pair alone proves
+   *  membership. Self-heals a retained renderer whose subscription was severed
+   *  by a path that moved its pane-cache slot without repointing it. */
+  ensureSubscribed(sessionId: string): void {
+    if (this.sessionId === sessionId && this.unsubscribe !== null) return;
+    if (this.unsubscribe) {
+      try { this.unsubscribe(); } catch { /* ignore */ }
+      this.unsubscribe = null;
+    }
+    this.sessionId = sessionId;
+    this.unsubscribe = sessionEvents.subscribe(sessionId, (ev) => {
+      this.handleLive(ev);
+    });
+  }
+
   async swapSubscription(newSessionId: string): Promise<void> {
     if (this.sessionId === newSessionId) return;
     const oldId = this.sessionId;

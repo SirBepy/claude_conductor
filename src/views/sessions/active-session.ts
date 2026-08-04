@@ -386,7 +386,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
         // repoint identity silently instead of switching the visible chat.
         if (newId !== originalId) {
           setActiveSession(newId);
-          rekeyRetainedChat(originalId, newId);
+          await rekeyRetainedChat(originalId, newId);
           if (_watchedId === originalId) {
             void invoke<void>("unwatch_session_transcript", { sessionId: originalId }).catch(() => {});
             sessionEvents.stopWatchListener(originalId);
@@ -396,6 +396,9 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
               .catch(() => {});
           }
         }
+        // rekeyRetainedChat above awaits; bail if the user left this pane
+        // meanwhile instead of mutating a pane that's no longer on screen.
+        if (state.selectedId !== newId) return;
         pane.querySelector(".readonly-banner")?.remove();
         mountComposer(pane, updatedSess, newId, false);
         state.statusbar?.setReadOnlyEffort(false);
