@@ -366,7 +366,7 @@ fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
                     if p.delta { s.snapshot_event() } else { s.legacy_snapshot_event() }
                 };
                 let delta_capable = p.delta;
-                let outbound = ctx.outbound.clone();
+                let outbound = ctx.clone();
                 let session_id_for_task = p.session_id.clone();
                 let session_for_task = Arc::clone(&session);
                 let handle = tokio::spawn(async move {
@@ -381,7 +381,7 @@ fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
                         })
                     };
                     if let Some(snap) = resync {
-                        if outbound.send(frame(&snap)).await.is_err() {
+                        if outbound.send_outbound(frame(&snap)).await.is_err() {
                             return;
                         }
                     }
@@ -404,7 +404,7 @@ fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
                                     }
                                     other => other,
                                 };
-                                if outbound.send(frame(&ev)).await.is_err() {
+                                if outbound.send_outbound(frame(&ev)).await.is_err() {
                                     break;
                                 }
                             }
@@ -420,7 +420,7 @@ fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
                                 if delta_capable {
                                     let snap = session_for_task.streaming.lock().unwrap().snapshot_event();
                                     if let Some(snap) = snap {
-                                        if outbound.send(frame(&snap)).await.is_err() {
+                                        if outbound.send_outbound(frame(&snap)).await.is_err() {
                                             break;
                                         }
                                     }
@@ -479,12 +479,12 @@ pub fn register_notifier(router: &mut Router, notifier: Notifier) {
         let notifier = notifier.clone();
         async move {
             let mut rx = notifier.subscribe();
-            let outbound = ctx.outbound.clone();
+            let outbound = ctx.clone();
             let handle = tokio::spawn(async move {
                 loop {
                     match rx.recv().await {
                         Ok(notif) => {
-                            if outbound.send(notif).await.is_err() {
+                            if outbound.send_outbound(notif).await.is_err() {
                                 break;
                             }
                         }

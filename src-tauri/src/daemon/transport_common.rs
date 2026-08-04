@@ -55,7 +55,20 @@ where
         tokio::select! {
             biased;
             Some(notif) = rx.recv() => {
-                if let Err(e) = write_frame(&mut stream, &notif).await {
+                // Dequeued: this frame is off the queue regardless of whether the
+                // write below succeeds, so decrement before timing the write.
+                ctx.outbound_depth.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                let started = std::time::Instant::now();
+                let write_result = write_frame(&mut stream, &notif).await;
+                let elapsed = started.elapsed();
+                if elapsed >= crate::daemon::rpc::SLOW_SEND_THRESHOLD {
+                    log::warn!(
+                        "outbound send slow: conn={} elapsed={elapsed:?} queue_depth={}",
+                        ctx.conn_id,
+                        ctx.outbound_depth.load(std::sync::atomic::Ordering::Relaxed)
+                    );
+                }
+                if let Err(e) = write_result {
                     break Err(e);
                 }
             }
@@ -92,13 +105,13 @@ where
                         // adds no new concurrency class.
                         let router = router.clone();
                         let req_ctx = ctx.clone();
-                        let out = ctx.outbound.clone();
+                        let out = ctx.clone();
                         tokio::spawn(async move {
                             let resp = router.dispatch(req, req_ctx).await;
                             match serde_json::to_value(resp) {
                                 // Send fails only when the connection is already
                                 // gone; the response has nowhere to go either way.
-                                Ok(v) => { let _ = out.send(v).await; }
+                                Ok(v) => { let _ = out.send_outbound(v).await; }
                                 Err(e) => log::warn!("daemon: response serialize failed: {e}"),
                             }
                         });

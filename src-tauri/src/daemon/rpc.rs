@@ -3,7 +3,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// Shared with the app-side reader so one grep finds either half of a stall.
+pub const SLOW_SEND_THRESHOLD: Duration = Duration::from_millis(250);
+
+static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Request {
@@ -142,6 +149,11 @@ mod tests {
 #[derive(Clone)]
 pub struct ConnectionContext {
     pub outbound: tokio::sync::mpsc::Sender<Value>,
+    /// Depth of `outbound`'s queue, since mpsc exposes no `len()`. Decremented
+    /// at the dequeue in `transport_common::serve_connection`.
+    pub outbound_depth: Arc<AtomicUsize>,
+    /// Pairs this connection's log lines across a repro.
+    pub conn_id: u64,
     /// Session IDs this connection has attached to. Per-session subscription
     /// tasks are spawned by attach_session and aborted on detach_session OR
     /// on connection close.
@@ -156,9 +168,22 @@ impl ConnectionContext {
     pub fn new(outbound: tokio::sync::mpsc::Sender<Value>) -> Self {
         Self {
             outbound,
+            outbound_depth: Arc::new(AtomicUsize::new(0)),
+            conn_id: NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed),
             subscriptions: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             global_sub: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
+    }
+
+    /// Single funnel so a future call site can't skip the counter. A failed
+    /// send never enters the queue, so undo its increment or the gauge leaks.
+    pub async fn send_outbound(&self, msg: Value) -> Result<(), tokio::sync::mpsc::error::SendError<Value>> {
+        self.outbound_depth.fetch_add(1, Ordering::Relaxed);
+        let result = self.outbound.send(msg).await;
+        if result.is_err() {
+            self.outbound_depth.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
     }
 }
 
