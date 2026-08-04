@@ -46,9 +46,6 @@
   color: #fff;
   vertical-align: 1px;
 }
-.caret-popup .badge.builtin { background: #6b7280; }
-.caret-popup .badge.user-skill { background: #3b82f6; }
-.caret-popup .badge.user-command { background: #22c55e; }
-.caret-popup .badge.project-command { background: #a855f7; }
-.caret-popup .badge.plugin-skill,
-.caret-popup .badge.plugin-command { background: #f59e0b; }
+/* Only project-local kinds render a badge (see SlashProvider.renderRow). */
+.caret-popup .badge.project-skill,
+.caret-popup .badge.project-command { background: #7cb6ff; }

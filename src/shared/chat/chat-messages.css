@@ -12,23 +12,18 @@
   border: 1px solid transparent;
   white-space: nowrap;
 }
-.slash-mention.slash-builtin {
+/* Two colours: project-local (skill/command defined in this repo) vs
+ * everything else. Kind is no longer finer-grained than that axis. */
+.slash-mention.slash-project-skill,
+.slash-mention.slash-project-command {
   color: #7cb6ff;
   background: rgba(124, 182, 255, 0.10);
   border-color: rgba(124, 182, 255, 0.25);
 }
+.slash-mention.slash-builtin,
 .slash-mention.slash-user-command,
-.slash-mention.slash-project-command {
-  color: #6ed6c8;
-  background: rgba(110, 214, 200, 0.10);
-  border-color: rgba(110, 214, 200, 0.25);
-}
-.slash-mention.slash-plugin-command {
-  color: #f0b67f;
-  background: rgba(240, 182, 127, 0.10);
-  border-color: rgba(240, 182, 127, 0.25);
-}
 .slash-mention.slash-user-skill,
+.slash-mention.slash-plugin-command,
 .slash-mention.slash-plugin-skill {
   color: #c794f5;
   background: rgba(199, 148, 245, 0.12);
@@ -60,12 +55,21 @@
   animation: rainbow-shift 1.8s linear infinite;
 }
 
-.cm-slash-builtin { color: #7cb6ff; }
+/* Same project-local vs everything-else split as .slash-mention above. */
+.cm-slash-project-skill,
+.cm-slash-project-command { color: #7cb6ff; }
+.cm-slash-builtin,
 .cm-slash-user-command,
-.cm-slash-project-command { color: #6ed6c8; }
-.cm-slash-plugin-command { color: #f0b67f; }
 .cm-slash-user-skill,
+.cm-slash-plugin-command,
 .cm-slash-plugin-skill { color: #c794f5; }
+
+/* @file-path token wash, composer backdrop only. Background + radius only
+ * (no padding/border/font) - same glyph-alignment constraint as .cm-slash. */
+.cm-at-path {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+}
 
 .msg {
   position: relative;

@@ -43,11 +43,15 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    const badge = document.createElement("span");
     const kind = (e.source as { kind: string }).kind;
-    badge.className = `badge ${kind}`;
-    badge.textContent = sourceLabel(e.source);
-    meta.appendChild(badge);
+    // Only project-local kinds get a badge; everything else (builtin, user,
+    // plugin) renders quietly with just the description.
+    if (kind === "project-skill" || kind === "project-command") {
+      const badge = document.createElement("span");
+      badge.className = `badge ${kind}`;
+      badge.textContent = sourceLabel(e.source);
+      meta.appendChild(badge);
+    }
     if (e.description) {
       meta.append(e.description);
     }
@@ -86,11 +90,11 @@ function sourceLabel(s: SlashSource): string {
     case "user-command":
       return "cmd";
     case "project-command":
-      return "proj";
+      return "local";
     case "user-skill":
       return "skill";
     case "project-skill":
-      return (s as { project: string }).project;
+      return "local";
     case "plugin-skill":
       return `plugin:${(s as { plugin: string }).plugin}`;
     case "plugin-command":

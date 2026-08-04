@@ -43,6 +43,12 @@ export function linkifyInlineCodeUrls(html: string, inst: MarkdownIt): string {
 // the text-node level using a tag-skipping regex). Unknown names stay plain.
 const SLASH_MENTION_RE = /(^|[\s(>])\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b/g;
 
+// @file-path token for the composer backdrop, unconditional (no registry
+// gate). Combined with the slash pattern in one regex.replace so the @
+// branch can't re-scan HTML the slash branch already emitted in the same
+// pass (see highlightComposerInput).
+const COMPOSER_TOKEN_RE = /(^|[\s(>])(?:\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b|@([\w./\\-]+))/g;
+
 const ULTRATHINK_RE = /\b(ultrathink)\b/gi;
 
 export function highlightKeywords(html: string): string {
@@ -86,11 +92,17 @@ export function highlightSlashMentions(html: string): string {
  */
 export function highlightComposerInput(text: string): string {
   const escaped = escapeHtml(text);
-  const withSpans = escaped.replace(SLASH_MENTION_RE, (_match, pre: string, raw: string) => {
-    const hit = lookupSlash(raw);
-    if (!hit) return `${pre}/${raw}`;
-    return `${pre}<span class="cm-slash cm-slash-${slashKindClass(hit.source)}">/${raw}</span>`;
-  });
+  const withSpans = escaped.replace(
+    COMPOSER_TOKEN_RE,
+    (_match, pre: string, slashName?: string, atPath?: string) => {
+      if (slashName !== undefined) {
+        const hit = lookupSlash(slashName);
+        if (!hit) return `${pre}/${slashName}`;
+        return `${pre}<span class="cm-slash cm-slash-${slashKindClass(hit.source)}">/${slashName}</span>`;
+      }
+      return `${pre}<span class="cm-at-path">@${atPath}</span>`;
+    },
+  );
   // pre-wrap drops a trailing newline; pad it so the backdrop height (and thus
   // scroll position) tracks the textarea exactly.
   const padded = withSpans.endsWith("\n") ? withSpans + " " : withSpans;

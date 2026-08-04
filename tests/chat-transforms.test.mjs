@@ -318,6 +318,16 @@ describe("highlightComposerInput — live /slash coloring", () => {
     expect(unknown).toContain("/asdasdasd");
   });
 
+  it("gives project-local kinds a distinct class from every other kind (two-colour split)", () => {
+    setSlashEntries([
+      { name: "deploy", source: { kind: "project-command" } },
+      { name: "clear", source: { kind: "builtin" } },
+    ]);
+    const out = highlightComposerInput("/deploy then /clear");
+    expect(out).toContain('<span class="cm-slash cm-slash-project-command">/deploy</span>');
+    expect(out).toContain('<span class="cm-slash cm-slash-builtin">/clear</span>');
+  });
+
   it("escapes HTML so raw input can't inject markup", () => {
     setSlashEntries([]);
     const out = highlightComposerInput("<b>hi</b> & stuff");
@@ -329,6 +339,22 @@ describe("highlightComposerInput — live /slash coloring", () => {
   it("pads a trailing newline so backdrop height tracks the textarea", () => {
     setSlashEntries([]);
     expect(highlightComposerInput("hello\n")).toBe("hello\n ");
+  });
+
+  it("tints an @ file path with a background wash, unconditionally", () => {
+    setSlashEntries([]);
+    const out = highlightComposerInput("check @src/main.ts please");
+    expect(out).toContain('<span class="cm-at-path">@src/main.ts</span>');
+  });
+
+  it("handles a line with both a /slash mention and an @ path without corrupting either", () => {
+    setSlashEntries([{ name: "commit", source: { kind: "user-skill" } }]);
+    const out = highlightComposerInput("/commit @src/main.ts now");
+    expect(out).toContain('<span class="cm-slash cm-slash-user-skill">/commit</span>');
+    expect(out).toContain('<span class="cm-at-path">@src/main.ts</span>');
+    // Neither span's markup should leak into the other's text content.
+    expect(out).not.toContain("cm-at-path\">/commit");
+    expect(out).not.toContain("cm-slash-user-skill\">@src");
   });
 });
 
