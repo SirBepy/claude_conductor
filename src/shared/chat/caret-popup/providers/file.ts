@@ -52,9 +52,8 @@ export class FileProvider implements SuggestProvider<string> {
 
   onPick(p: string, ta: HTMLTextAreaElement, [start, end]: [number, number]): void {
     const insert = `@${p} `;
-    ta.value = ta.value.slice(0, start) + insert + ta.value.slice(end);
-    const newPos = start + insert.length;
-    ta.selectionStart = ta.selectionEnd = newPos;
+    // setRangeText (not .value assignment) keeps the edit on the native undo stack.
+    ta.setRangeText(insert, start, end, "end");
     ta.dispatchEvent(new Event("input", { bubbles: true }));
     ta.focus();
   }
