@@ -127,6 +127,7 @@ impl Registry {
             worker_of: None,
             closing: false,
             turn_gen: 0,
+            channel_epoch: 0,
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
@@ -186,6 +187,7 @@ impl Registry {
             worker_of: None,
             closing: false,
             turn_gen: 0,
+            channel_epoch: 0,
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
@@ -235,6 +237,7 @@ impl Registry {
             worker_of: None,
             closing: false,
             turn_gen: 0,
+            channel_epoch: 0,
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
@@ -334,6 +337,16 @@ impl Registry {
             if busy {
                 i.turn_gen = i.turn_gen.wrapping_add(1);
             }
+        }
+    }
+
+    /// Bumps `channel_epoch` for `session_id`. Called from
+    /// `daemon::lifecycle::spawn_session`, the one chokepoint every
+    /// spawn/respawn/restart path shares.
+    pub fn bump_channel_epoch(&self, session_id: &str) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.channel_epoch = i.channel_epoch.wrapping_add(1);
         }
     }
 

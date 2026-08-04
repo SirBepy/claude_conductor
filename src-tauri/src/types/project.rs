@@ -147,6 +147,11 @@ pub struct Instance {
     #[serde(skip, default)]
     #[ts(skip)]
     pub turn_gen: u64,
+    /// Bumped daemon-side each time this session's broadcast channel is
+    /// (re)created. Unlike `turn_gen`, this crosses the RPC boundary.
+    #[serde(default)]
+    #[ts(skip)]
+    pub channel_epoch: u64,
     /// The registry account this session was spawned under. `None` for
     /// sessions that predate milestone 02, or for terminal-observed
     /// (non-app-spawned) sessions, which are attributed to the terminal's
@@ -312,6 +317,7 @@ mod tests {
             worker_of: None,
             closing: false,
             turn_gen: 0,
+            channel_epoch: 0,
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,

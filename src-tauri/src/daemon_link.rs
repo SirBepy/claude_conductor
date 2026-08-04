@@ -214,7 +214,7 @@ pub(crate) async fn fetch_and_reseed_instances(
 /// ended (`ended_at` set) or have vanished from the snapshot entirely. Used to
 /// stop the per-session bridge pump when a session ends (ai_todo 66 #2).
 fn stale_attached_sessions(
-    attached: &std::collections::HashSet<String>,
+    attached: &std::collections::HashMap<String, u64>,
     instances: &[crate::types::Instance],
 ) -> Vec<String> {
     let live: std::collections::HashSet<&str> = instances
@@ -223,9 +223,23 @@ fn stale_attached_sessions(
         .map(|i| i.session_id.as_str())
         .collect();
     attached
-        .iter()
+        .keys()
         .filter(|id| !live.contains(id.as_str()))
         .cloned()
+        .collect()
+}
+
+/// Attached sessions whose `channel_epoch` moved past what we attached at -
+/// a daemon-internal respawn swapped the channel without the -32004 path.
+fn respawned_attached_sessions(
+    attached: &std::collections::HashMap<String, u64>,
+    instances: &[crate::types::Instance],
+) -> Vec<String> {
+    instances
+        .iter()
+        .filter(|i| i.ended_at.is_none())
+        .filter(|i| attached.get(&i.session_id).is_some_and(|e| *e != i.channel_epoch))
+        .map(|i| i.session_id.clone())
         .collect()
 }
 
@@ -240,9 +254,9 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
                     // Detach any attached session that just ended/vanished so its
                     // bridge pump task exits instead of leaking (ai_todo 66 #2).
                     // Collect under the sync lock, then release it BEFORE awaiting.
-                    let stale = {
+                    let (stale, respawned) = {
                         let attached = state.attached_sessions.lock().unwrap();
-                        stale_attached_sessions(&attached, &parsed)
+                        (stale_attached_sessions(&attached, &parsed), respawned_attached_sessions(&attached, &parsed))
                     };
                     if !stale.is_empty() {
                         let guard = state.daemon_client.lock().await;
@@ -251,6 +265,14 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
                                 let _ = client.detach_session(id).await;
                             }
                         }
+                    }
+                    // Re-subscribe sessions whose channel was replaced by a
+                    // respawn; `reattach` is idempotent, so a race is harmless.
+                    for id in respawned {
+                        let app2 = app.clone();
+                        tokio::spawn(async move {
+                            let _ = crate::ipc::chat::daemon_bridge::reattach(&app2, &id).await;
+                        });
                     }
                     store_cached_instances(&state, parsed);
                 }
@@ -455,10 +477,10 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
 
 #[cfg(test)]
 mod tests {
-    use super::stale_attached_sessions;
+    use super::{respawned_attached_sessions, stale_attached_sessions};
     use crate::sessions::kinds::InstanceKind;
     use crate::types::Instance;
-    use std::collections::HashSet;
+    use std::collections::HashMap;
 
     fn instance(session_id: &str, ended: bool) -> Instance {
         Instance {
@@ -483,14 +505,25 @@ mod tests {
             worker_of: None,
             closing: false,
             turn_gen: 0,
+            channel_epoch: 0,
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
         }
     }
 
-    fn attached(ids: &[&str]) -> HashSet<String> {
-        ids.iter().map(|s| s.to_string()).collect()
+    fn instance_with_epoch(session_id: &str, ended: bool, channel_epoch: u64) -> Instance {
+        let mut i = instance(session_id, ended);
+        i.channel_epoch = channel_epoch;
+        i
+    }
+
+    fn attached(ids: &[&str]) -> HashMap<String, u64> {
+        ids.iter().map(|s| (s.to_string(), 0)).collect()
+    }
+
+    fn attached_at(pairs: &[(&str, u64)]) -> HashMap<String, u64> {
+        pairs.iter().map(|(id, ep)| (id.to_string(), *ep)).collect()
     }
 
     #[test]
@@ -517,5 +550,37 @@ mod tests {
         // We only detach sessions we are actually attached to.
         let stale = stale_attached_sessions(&attached(&[]), &[instance("a", true)]);
         assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn same_epoch_is_not_respawned() {
+        let attached = attached_at(&[("a", 3)]);
+        let out = respawned_attached_sessions(&attached, &[instance_with_epoch("a", false, 3)]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn bumped_epoch_on_live_session_is_respawned() {
+        // A daemon-internal respawn (jarvis wake / schedule fire / etc) bumped
+        // the epoch without ever calling the app's -32004 reattach path.
+        let attached = attached_at(&[("a", 3)]);
+        let out = respawned_attached_sessions(&attached, &[instance_with_epoch("a", false, 4)]);
+        assert_eq!(out, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn bumped_epoch_on_ended_session_is_ignored() {
+        // stale_attached_sessions already detaches an ended session; this must
+        // not also try to reattach it.
+        let attached = attached_at(&[("a", 3)]);
+        let out = respawned_attached_sessions(&attached, &[instance_with_epoch("a", true, 4)]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn unattached_session_epoch_change_is_ignored() {
+        // Only currently-attached sessions are candidates for reattach.
+        let out = respawned_attached_sessions(&attached(&[]), &[instance_with_epoch("a", false, 4)]);
+        assert!(out.is_empty());
     }
 }

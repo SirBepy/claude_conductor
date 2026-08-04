@@ -35,9 +35,10 @@ pub struct AppState {
     /// `channels_changed` notifications. Replaces the app-owned `channels`
     /// Manager for read paths now that the daemon owns channel processes.
     pub cached_channels: Arc<Mutex<Vec<serde_json::Value>>>,
-    /// session_ids for which a daemon `attach_session` pump task is already
-    /// running (so we don't double-attach). Daemon chat mode only.
-    pub attached_sessions: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// session_id -> the `channel_epoch` a live `attach_session` pump task is
+    /// subscribed at, so a daemon-internal respawn can be detected. Daemon
+    /// chat mode only.
+    pub attached_sessions: Arc<Mutex<std::collections::HashMap<String, u64>>>,
     /// Connected persistent client to the daemon. `None` until startup wiring
     /// in `lib.rs` connects and subscribes.
     pub daemon_client: Arc<tokio::sync::Mutex<Option<crate::daemon_client::PersistentClient>>>,
@@ -117,7 +118,7 @@ impl AppState {
             preview,
             cached_instances: Arc::new(Mutex::new(Vec::new())),
             cached_channels: Arc::new(Mutex::new(Vec::new())),
-            attached_sessions: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            attached_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             daemon_client: Arc::new(tokio::sync::Mutex::new(None)),
             hook_registration_pending: Mutex::new(false),
             update_state: Mutex::new(serde_json::json!({ "state": "idle" })),

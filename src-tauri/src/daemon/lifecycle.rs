@@ -226,6 +226,11 @@ pub async fn spawn_session(
         account.id.clone(),
     );
     map.insert(session_id.clone(), Arc::clone(&session));
+    // Every spawn/respawn/restart path funnels through this one insertion
+    // point, so bumping the epoch here (not at each of the five daemon-
+    // internal respawn callers) covers all of them by construction - see
+    // Registry::bump_channel_epoch.
+    state.registry.bump_channel_epoch(&session_id);
     log::info!(
         "daemon: session {} live (pid={}, resume={})",
         session_id, pid, params.resume_id.is_some()

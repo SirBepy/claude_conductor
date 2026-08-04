@@ -8,13 +8,8 @@ use crate::types::chat::ChatEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Force a fresh daemon attach for `session_id`, even if we believe we are
-/// already attached. Used after a respawn (cancel-then-continue): the daemon
-/// session was recreated with a NEW broadcast channel, so the prior
-/// subscription is dead and the old pump task is blocked on a receiver that
-/// never closes. Dropping the stale `attached_sessions` entry lets
-/// `ensure_attached` issue a new `attach_session` RPC; the daemon replaces its
-/// relay handle and the client replaces the per-session sender (dropping the
-/// stale receiver, which unblocks and ends the orphaned pump task).
+/// already attached at the current epoch: unconditionally drops the
+/// `attached_sessions` entry so `ensure_attached` below treats it as a miss.
 pub async fn reattach(app: &AppHandle, session_id: &str) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
@@ -23,18 +18,24 @@ pub async fn reattach(app: &AppHandle, session_id: &str) -> Result<(), String> {
     ensure_attached(app, session_id).await
 }
 
-/// Ensure a pump task is running for `session_id`: attaches to the daemon's
-/// per-session stream and re-emits each `chat_event`'s inner ChatEvent onto
-/// `chat:<session_id>`. Idempotent - a second call for the same id is a no-op.
-/// Returns Err only if the daemon client is unconnected or attach fails.
+/// Ensure a pump task is running for `session_id` at its current
+/// `channel_epoch`; a cached-epoch mismatch forces a fresh attach.
 pub async fn ensure_attached(app: &AppHandle, session_id: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
+    let epoch = state
+        .cached_instances
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|i| i.session_id == session_id)
+        .map(|i| i.channel_epoch)
+        .unwrap_or(0);
     {
-        let mut set = state.attached_sessions.lock().unwrap();
-        if set.contains(session_id) {
+        let mut map = state.attached_sessions.lock().unwrap();
+        if map.get(session_id) == Some(&epoch) {
             return Ok(());
         }
-        set.insert(session_id.to_string());
+        map.insert(session_id.to_string(), epoch);
     }
 
     let mut rx = {
@@ -43,7 +44,10 @@ pub async fn ensure_attached(app: &AppHandle, session_id: &str) -> Result<(), St
         match client.attach_session(session_id).await {
             Ok(rx) => rx,
             Err(e) => {
-                state.attached_sessions.lock().unwrap().remove(session_id);
+                let mut map = state.attached_sessions.lock().unwrap();
+                if map.get(session_id) == Some(&epoch) {
+                    map.remove(session_id);
+                }
                 return Err(e.to_string());
             }
         }
@@ -60,7 +64,12 @@ pub async fn ensure_attached(app: &AppHandle, session_id: &str) -> Result<(), St
             }
         }
         let state = app.state::<AppState>();
-        state.attached_sessions.lock().unwrap().remove(&sid);
+        let mut map = state.attached_sessions.lock().unwrap();
+        // Only clear if still ours: a later epoch bump may have already
+        // replaced this entry, and its own task owns clearing it now.
+        if map.get(&sid) == Some(&epoch) {
+            map.remove(&sid);
+        }
     });
 
     Ok(())
