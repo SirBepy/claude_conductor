@@ -397,8 +397,8 @@ export function renderSidebar(listEl: HTMLElement): void {
   // also show the clock badge.
   const scheduledIds = new Set(scheduledCountMap.keys());
 
-  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled"];
-  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []]]);
+  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote"];
+  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []]]);
   for (const s of sorted) {
     segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds))!.push(s);
   }
@@ -443,14 +443,13 @@ export function renderSidebar(listEl: HTMLElement): void {
     }
   };
 
-  // "Waiting" (5) renders right after "In Progress" (2). "Scheduled" (6) and
-  // "Closing" (3) both defer past Hidden below - see the renderSeg(6)/(3)
-  // calls at the bottom of this function.
-  for (const seg of [0, 1, 2, 5, 4]) {
+  // "Waiting" (5) renders right after "In Progress" (2). "Closing" (3) alone
+  // defers past Hidden below - see the renderSeg(3) call at the bottom.
+  for (const seg of [0, 1, 2, 5, 4, 6, 7]) {
     renderSeg(seg);
   }
 
-  if (entries.length === 0 && segmented.get(3)!.length === 0 && segmented.get(6)!.length === 0 && state.daemonConnected === true) {
+  if (entries.length === 0 && segmented.get(3)!.length === 0 && state.daemonConnected === true) {
     // While the daemon is NOT connected the pane shows the centered
     // "Setting up..." / stalled state (paneEmptyStateHtml); the sidebar
     // stays blank rather than duplicating it in a cramped row.
@@ -483,8 +482,7 @@ export function renderSidebar(listEl: HTMLElement): void {
     }
   }
 
-  // Scheduled, then Closing (transient, so it stays the true bottom).
-  renderSeg(6);
+  // Closing (transient, so it stays the true bottom).
   renderSeg(3);
 
   state.sortedSessionIds = kbdOrderIds;

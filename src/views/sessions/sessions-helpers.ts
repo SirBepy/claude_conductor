@@ -153,7 +153,9 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
 /** Maps a session to its display segment index.
  *  0=Input Needed, 1=Done, 2=In Progress, 3=Closing, 4=Waiting for Reset,
  *  5=Waiting (external process), 6=Scheduled (pending scheduled msg, not
- *  Input Needed/Done). Closing and rate-limited both still win over Scheduled. */
+ *  Input Needed/Done), 7=Remote (is_remote, wins over every other state -
+ *  the row's own status dot still conveys the real state). Closing and
+ *  rate-limited both still win over Scheduled. */
 export function sessionSegment(
   s: Instance,
   unread: Set<string>,
@@ -163,6 +165,7 @@ export function sessionSegment(
   rateLimited: ReadonlySet<string> = new Set(),
   scheduled: ReadonlySet<string> = new Set(),
 ): number {
+  if (s.is_remote) return 7;
   if (closing.has(s.session_id)) return 3;
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);
@@ -279,8 +282,8 @@ export function saveHiddenCollapsed(collapsed: boolean): void {
 }
 
 // ── Per-segment collapse state (in-memory only, resets to default on section disappear) ──
-// Segments collapsed by default: 3 = Closing, 6 = Scheduled
-const SEG_DEFAULT_COLLAPSED = new Set([3, 6]);
+// Segments collapsed by default: 3 = Closing, 6 = Scheduled, 7 = Remote
+const SEG_DEFAULT_COLLAPSED = new Set([3, 6, 7]);
 const segCollapseOverrides = new Map<number, boolean>();
 
 export function isSegCollapsed(seg: number): boolean {
