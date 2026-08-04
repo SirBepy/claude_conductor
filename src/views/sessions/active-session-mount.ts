@@ -78,10 +78,10 @@ export async function mountStatusbar(
 }
 
 /** Point the visible chrome (statusbar, changes panel, thinking bar, CTAs) at
- *  `renderer`. Shared by the cold mount and the retained-pane remount. Retained
- *  renderers stay subscribed off-screen, so every shared-chrome callback checks
- *  it is still the visible one - else a background turn drives the open chat. */
-function wireRenderer(
+ *  `renderer`. Shared by the cold mount, the retained-pane remount and draft
+ *  promotion. Retained renderers stay subscribed off-screen, so every shared-chrome
+ *  callback checks it is still the visible one - else a background turn drives it. */
+export function wireRenderer(
   pane: HTMLElement,
   sess: Instance,
   header: SessionHeader,

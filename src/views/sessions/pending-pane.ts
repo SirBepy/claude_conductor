@@ -22,6 +22,8 @@ import { savePendingSession, clearPendingSession } from "./pending-draft-storage
 import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import { SessionHeader } from "./session-header";
 import { showToast } from "../../shared/toast";
+import { wireRenderer } from "./active-session-mount";
+import { retainChat } from "./chat-pane-cache";
 
 let _pendingHeader: SessionHeader | null = null;
 
@@ -58,7 +60,10 @@ export async function renderPendingPane(
   pane.insertBefore(_pendingHeader.el, pane.firstChild);
 
   pane.querySelector<HTMLButtonElement>(".thinking-pause-btn")?.addEventListener("click", async () => {
-    const cancelTarget = state.pendingNewSession?.realId || placeholderId;
+    // Same source of truth the established pane's button closes over: the
+    // renderer's own tracked session id, which swapSubscription flips to the
+    // real id on promotion (state.pendingNewSession goes null right after).
+    const cancelTarget = state.renderer?.currentSessionId() ?? placeholderId;
     try { await invoke<void>("cancel_turn", { sessionId: cancelTarget }); }
     catch (err) { console.error("[sessions] cancel_turn failed", err); }
   });
@@ -395,18 +400,22 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
 
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
   const renderer = state.renderer;
-  if (messagesEl && renderer) {
+  if (messagesEl && renderer && sess) {
     state.changesPanel?.unmount();
+    // Full shared wiring (tool-view provider, activity/progress/todo/CTA/handoff
+    // callbacks, activeChatActions) - not just the changes-panel subset this used
+    // to hand-roll, which is exactly why a promoted draft looked like a chat but
+    // wasn't wired like one (ai_todo: draft-promotion lookalike bug).
     const panel = new ChangesPanel();
-    panel.mount(pane, messagesEl);
-    state.changesPanel = panel;
-    renderer.onFileEditsChanged = (edits) => {
-      panel.onUpdate(edits);
-      h.setChangesBadge(dedupeByPath(edits).length);
-    };
+    wireRenderer(pane, sess, h, sessionId, renderer, panel);
+    // onFileEditsChanged above is a fresh listener; edits from before promotion
+    // (nothing was listening yet) need seeding, same as a retained-pane remount.
     const seeded = renderer.getFileEdits();
     panel.onUpdate(seeded);
     h.setChangesBadge(dedupeByPath(seeded).length);
-    h.onChangesClick = () => panel.toggle();
+    // Register with the pane cache so the next navigate-away-and-back is a
+    // cache hit (element swap) instead of the cold rebuild that used to be
+    // the only thing that fully re-wired a promoted chat.
+    retainChat(sessionId, renderer, messagesEl);
   }
 }
