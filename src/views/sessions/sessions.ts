@@ -39,18 +39,20 @@ import {
   consumePendingNewChat,
 } from "./session-controls";
 import {
-  wirePreviewPanel,
   wireRateLimitBanner,
-  wireOverflowMenu,
-  wireKeyboardShortcuts,
   wireDaemonStatusListeners,
   wireInstancesChangedListener,
   wireChatRecoveryHeartbeat,
-  wireStaticListeners,
-  wireDocumentListeners,
   reconcileEndedSessions,
   refreshPaneEmptyState,
 } from "./sessions-wiring";
+import {
+  wirePreviewPanel,
+  wireOverflowMenu,
+  wireKeyboardShortcuts,
+  wireStaticListeners,
+  wireDocumentListeners,
+} from "./sessions-dom-wiring";
 export {
   queueHistoryResume,
   queueSessionSelect,
