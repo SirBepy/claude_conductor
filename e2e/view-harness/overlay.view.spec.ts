@@ -1,5 +1,31 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
+
+// .oc-reset-pop fades/scales in over a 200ms CSS transition (overlay.css) - a
+// box read mid-transition gives a smaller, timing-dependent width, which is
+// the real cause of the reset-popup containment flake under parallel workers.
+// Poll via rAF until the width holds steady for 3 frames (transition settled).
+async function waitForStableBox(page: Page, selector: string): Promise<void> {
+  await page.evaluate((sel) => {
+    return new Promise<void>((resolve) => {
+      const el = document.querySelector(sel) as HTMLElement;
+      let last = el.getBoundingClientRect().width;
+      let stableFrames = 0;
+      function check() {
+        const cur = el.getBoundingClientRect().width;
+        if (Math.abs(cur - last) < 0.01) {
+          stableFrames++;
+          if (stableFrames >= 3) return resolve();
+        } else {
+          stableFrames = 0;
+        }
+        last = cur;
+        requestAnimationFrame(check);
+      }
+      requestAnimationFrame(check);
+    });
+  }, selector);
+}
 
 // Proof spec for the browser view-harness: the overlay window boots against a
 // fully mocked backend and shows the reset-countdown popup (2026-07-28) on
@@ -58,6 +84,8 @@ test.describe("view-harness / overlay reset popup", () => {
 
     await page.screenshot({ path: "test-results/overlay-reset-popup-live.png" });
 
+    await waitForStableBox(page, ".oc-cell[data-acc-id='acc1'] .oc-reset-pop");
+
     // The real overlay window is sized to #ocPanel's own bounding box
     // (overlay-drag.ts's resizeOverlayToContent) - a plain browser tab has no
     // such limit, so the only way this harness can catch "popup renders
@@ -69,9 +97,15 @@ test.describe("view-harness / overlay reset popup", () => {
     const popupBox = await popup.boundingBox();
     expect(panelBox).not.toBeNull();
     expect(popupBox).not.toBeNull();
+    // .oc-reset-pop centers via left:50%+translateX(-50%) (overlay.css): odd/even
+    // pixel-width parity between popup and panel can still leave a sub-pixel
+    // rounding residue even with fonts settled - tolerate under 1px of it.
+    const SUBPIXEL_TOLERANCE = 1;
     expect(popupBox!.y).toBeGreaterThanOrEqual(panelBox!.y);
-    expect(popupBox!.x).toBeGreaterThanOrEqual(panelBox!.x);
-    expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width);
+    expect(popupBox!.x).toBeGreaterThanOrEqual(panelBox!.x - SUBPIXEL_TOLERANCE);
+    expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(
+      panelBox!.x + panelBox!.width + SUBPIXEL_TOLERANCE,
+    );
 
     const unmocked = errors.filter((e) => e.includes("unmocked command"));
     expect(unmocked, `unmocked commands:\n${unmocked.join("\n")}`).toEqual([]);

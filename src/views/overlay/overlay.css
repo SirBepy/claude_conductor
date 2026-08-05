@@ -64,14 +64,15 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
  * the window resize on hover in/out (the exact behaviour that used to
  * stutter/wander here). Costs a small always-present dead-click zone around
  * the row when nothing's hovered - the tradeoff Joe picked over the
- * alternative of a window that grows/shrinks live. Left/right padding (65px)
+ * alternative of a window that grows/shrinks live. Left/right padding (78px)
  * covers the popup's worst-case overhang for the FIRST/LAST dial in the row
- * (measured: a 168px popup centred over a ~60px dial overhangs ~54px each
- * side, see e2e/view-harness/overlay.view.spec.ts) - an interior dial's
- * popup overlapping a neighbour's icon is fine (a hover tooltip covering
+ * (re-measured 2026-08-05: the abs-time row makes it ~200px wide over a
+ * ~62px dial, overhanging ~69px each side with margin - see
+ * e2e/view-harness/overlay.view.spec.ts) - an interior dial's popup
+ * overlapping a neighbour's icon is fine (a hover tooltip covering
  * something briefly is normal), only the row's own outer edges are a hard
  * window-clipping risk. */
-.oc-dial-row { display: flex; align-items: flex-start; gap: 6px; padding: 13px 65px 13px 65px; padding-top: 70px; }
+.oc-dial-row { display: flex; align-items: flex-start; gap: 6px; padding: 13px 78px 13px 78px; padding-top: 70px; }
 
 /* Card mode: one shared rounded card behind the whole dial row instead of a
  * per-dial disc (which circles mode uses). Same tint as .oc-disc and honours
