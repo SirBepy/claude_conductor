@@ -18,6 +18,8 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         created_at: "2026-04-21T00:00:00Z".into(),
         last_active_at: None,
         preferred_account_id: None,
+        last_worktree_path: None,
+        last_start_folder_rel: None,
     }
 }
 
