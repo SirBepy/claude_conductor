@@ -43,4 +43,29 @@ test.describe("view-harness / dashboard", () => {
     const unmocked = errors.filter((e) => e.includes("unmocked command"));
     expect(unmocked, `unmocked commands during boot:\n${unmocked.join("\n")}`).toEqual([]);
   });
+
+  // 9965c966: get_auth_state_map feeds a "Needs login" badge onto the affected
+  // account's card only - a healthy sibling account must stay clean.
+  test("shows the needs-login badge on the affected account only", async ({ page }) => {
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [
+          { id: "acc-healthy", label: "Healthy", icon: "user", colour: "#8b5cf6" },
+          { id: "acc-expired", label: "Expired", icon: "user", colour: "#f59e0b" },
+        ],
+        get_usage_map: {},
+        get_auth_state_map: { "acc-expired": "needslogin" },
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        poll_now: null,
+      },
+    });
+
+    const healthyCard = page.locator('.dash-acard[data-acc-id="acc-healthy"]');
+    const expiredCard = page.locator('.dash-acard[data-acc-id="acc-expired"]');
+    await expect(expiredCard.locator(".dash-acard-warning")).toContainText("Needs login");
+    await expect(healthyCard.locator(".dash-acard-warning")).toHaveCount(0);
+  });
 });
