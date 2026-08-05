@@ -14,6 +14,7 @@
   const errorUrlEl = document.getElementById("error-url");
   const retryBtn = document.getElementById("retry-btn");
   const changeServerBtn = document.getElementById("change-server-btn");
+  const scanQrBtn = document.getElementById("scan-qr-btn");
 
   function showScreen(name) {
     for (const key of Object.keys(screens)) {
@@ -67,11 +68,15 @@
     }
   }
 
-  async function connect(baseUrl) {
+  // `navigateTo`, when given, is the full scanned URL (e.g. the desktop's
+  // pairing QR: https://host/?pair=CODE) - navigate to that instead of the
+  // bare origin so the SPA's ?pair= gate (remote-gate.ts) can consume the
+  // code. Manual entry has no code to carry, so it just uses baseUrl.
+  async function connect(baseUrl, navigateTo) {
     showScreen("connecting");
     const healthy = await checkHealth(baseUrl);
     if (healthy) {
-      window.location.href = baseUrl;
+      window.location.href = navigateTo ?? baseUrl;
       return;
     }
     errorUrlEl.textContent = baseUrl;
@@ -90,6 +95,43 @@
     storeUrl(normalized);
     connect(normalized);
   });
+
+  // Scans the same pairing QR the desktop's Settings > Remote access tab
+  // shows (https://host/?pair=CODE) - connect() carries the full URL through
+  // so the SPA auto-exchanges the code instead of the user re-pairing by hand.
+  if (!window.__TAURI__?.barcodeScanner) {
+    scanQrBtn.hidden = true;
+  } else {
+    scanQrBtn.addEventListener("click", () => {
+      void (async () => {
+        const { barcodeScanner } = window.__TAURI__;
+        scanQrBtn.disabled = true;
+        try {
+          let state = await barcodeScanner.checkPermissions();
+          if (state !== "granted") state = await barcodeScanner.requestPermissions();
+          if (state !== "granted") {
+            setupError.textContent = "Camera permission denied - enable it in app settings.";
+            setupError.hidden = false;
+            return;
+          }
+          const result = await barcodeScanner.scan({ windowed: true, formats: [barcodeScanner.Format.QRCode] });
+          const normalized = normalizeUrl(result.content);
+          if (!normalized) {
+            setupError.textContent = "That QR code isn't a valid https:// server URL.";
+            setupError.hidden = false;
+            return;
+          }
+          setupError.hidden = true;
+          storeUrl(normalized);
+          connect(normalized, result.content);
+        } catch {
+          // scan() also rejects on user cancel - not worth surfacing as an error.
+        } finally {
+          scanQrBtn.disabled = false;
+        }
+      })();
+    });
+  }
 
   retryBtn.addEventListener("click", () => {
     const stored = getStoredUrl();

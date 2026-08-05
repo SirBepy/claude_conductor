@@ -138,6 +138,12 @@ body {
   margin: 0;
 }
 
+.divider {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
 button {
   appearance: none;
   border: none;

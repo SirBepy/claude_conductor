@@ -7,6 +7,11 @@ pub fn run() {
                 .on_navigation(|_webview, url| allow_navigation(url))
                 .build(),
         )
+        .setup(|app| {
+            #[cfg(mobile)]
+            app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
