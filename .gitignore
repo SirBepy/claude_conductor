@@ -20,6 +20,9 @@ playwright-report/
 .for_bepy/autopilot-cartoons/
 .for_bepy/autopilot-resource/
 .for_bepy/mockups/
+.for_bepy/screenshots/
+.for_bepy/autopilot-logs/
+.for_bepy/pr-review-mockup.html
 .claude/scheduled_tasks.lock
 docs/superpowers/
 src/types/ipc.generated.ts
