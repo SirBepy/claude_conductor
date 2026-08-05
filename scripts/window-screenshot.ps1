@@ -31,7 +31,8 @@
 
 .PARAMETER OutPath
     Where to write the PNG. Defaults to a timestamped file under
-    .for_bepy/screenshots/ (project's disposable screenshot scratch dir).
+    .for_bepy/screenshots/<pid>-<start-ticks>/ (this session's disposable
+    screenshot scratch subfolder, scoped so /close can purge it by ownership).
 
 .EXAMPLE
     powershell -NoProfile -File scripts/window-screenshot.ps1
@@ -146,11 +147,9 @@ $width = $winRect.Right - $winRect.Left
 $height = $winRect.Bottom - $winRect.Top
 
 if (-not $OutPath) {
+    . (Join-Path $PSScriptRoot 'screenshot-session-dir.ps1')
     $projectRoot = Split-Path -Parent $PSScriptRoot
-    $screenshotDir = Join-Path $projectRoot '.for_bepy\screenshots'
-    if (-not (Test-Path $screenshotDir)) {
-        New-Item -ItemType Directory -Path $screenshotDir -Force | Out-Null
-    }
+    $screenshotDir = Resolve-SessionScreenshotDir $projectRoot
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $OutPath = Join-Path $screenshotDir "window-$timestamp.png"
 }

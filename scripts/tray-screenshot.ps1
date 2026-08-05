@@ -21,8 +21,9 @@
     this machine; clicking via cursor position + mouse_event does not need it).
 
 .PARAMETER OutPath
-    Where to write the cropped+zoomed PNG. Defaults to a timestamped file under
-    .for_bepy/screenshots/ (project's disposable screenshot scratch dir).
+    Where to write the cropped+zoomed PNG. Defaults to a timestamped file
+    under .for_bepy/screenshots/<pid>-<start-ticks>/ (this session's
+    disposable screenshot scratch subfolder, scoped for /close's purge).
 
 .PARAMETER TrayWidth
     Width in pixels of the crop, measured from the right edge of the taskbar
@@ -151,11 +152,9 @@ $zoomGraphics.Dispose()
 $crop.Dispose()
 
 if (-not $OutPath) {
+    . (Join-Path $PSScriptRoot 'screenshot-session-dir.ps1')
     $projectRoot = Split-Path -Parent $PSScriptRoot
-    $screenshotDir = Join-Path $projectRoot '.for_bepy\screenshots'
-    if (-not (Test-Path $screenshotDir)) {
-        New-Item -ItemType Directory -Path $screenshotDir -Force | Out-Null
-    }
+    $screenshotDir = Resolve-SessionScreenshotDir $projectRoot
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $OutPath = Join-Path $screenshotDir "tray-$timestamp.png"
 }
