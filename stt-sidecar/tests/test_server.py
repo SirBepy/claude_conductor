@@ -45,3 +45,21 @@ async def test_start_audio_stop_emits_ready_partial_final(monkeypatch):
             assert kinds.get("partial") == "wor"
             await ws.send(json.dumps({"cmd": "stop"}))
             assert json.loads(await ws.recv()) == {"type": "final", "text": "world"}
+
+
+# todo 317 regression: shutdown/logoff/close must exit fast, not fall through
+# to Windows' own ~5s per-console shutdown wait.
+@pytest.mark.skipif(sys.platform != "win32", reason="console ctrl handler is Windows-only")
+def test_console_event_shutdown_triggers_exit(monkeypatch):
+    exited = []
+    monkeypatch.setattr(server.os, "_exit", lambda code: exited.append(code))
+    server._on_console_event(6)  # CTRL_SHUTDOWN_EVENT
+    assert exited == [0]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="console ctrl handler is Windows-only")
+def test_console_event_ignores_unrelated_events(monkeypatch):
+    exited = []
+    monkeypatch.setattr(server.os, "_exit", lambda code: exited.append(code))
+    server._on_console_event(0)  # CTRL_C_EVENT: Python's own handler owns this
+    assert exited == []

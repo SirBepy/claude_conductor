@@ -5,6 +5,22 @@ import argparse, asyncio, concurrent.futures, json, os, pathlib, sys
 import websockets
 from engine import StreamingEngine, build_asr
 
+# todo 317: CTRL_CLOSE/LOGOFF/SHUTDOWN have no Python signal mapping (only
+# CTRL_C/BREAK do), so unhandled, Windows waits out its ~5s per-console
+# shutdown timeout on this process before force-killing it (winsrvext id 100).
+if sys.platform == "win32":
+    import ctypes
+
+    _CTRL_SHUTDOWN_EVENTS = {2, 5, 6}  # CTRL_CLOSE, CTRL_LOGOFF, CTRL_SHUTDOWN
+
+    def _on_console_event(event):
+        if event in _CTRL_SHUTDOWN_EVENTS:
+            os._exit(0)
+        return False
+
+    _console_handler_ref = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)(_on_console_event)
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler_ref, True)
+
 
 def make_handler(app_data, asr_future):
     async def handle(ws):
