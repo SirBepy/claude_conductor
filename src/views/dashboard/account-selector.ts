@@ -9,7 +9,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { accountIconBadgeHtml } from "../../shared/account-chip";
 import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes } from "../../shared/formatters";
 import type { ValueColorSettings } from "../../shared/formatters";
-import type { Account, UsageRecord } from "../../shared/api";
+import type { Account, AuthState, UsageRecord } from "../../shared/api";
 
 const SESSION_WINDOW_MS = 5 * 3_600_000;
 const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
@@ -131,7 +131,7 @@ function ringHtml(
   </div>`;
 }
 
-function accountCardHtml(account: Account, usage: UsageRecord | undefined, selected: boolean, settings: ValueColorSettings): string {
+function accountCardHtml(account: Account, usage: UsageRecord | undefined, selected: boolean, settings: ValueColorSettings, authState?: AuthState): string {
   const sessionSafe = usage ? computeSafePacePct(usage.session_resets_at, SESSION_WINDOW_MS) : null;
   const weeklySafe = usage
     ? computeSafePacePct(usage.weekly_resets_at || new Date(Date.now() + 3_600_000).toISOString(), WEEKLY_WINDOW_MS)
@@ -144,9 +144,17 @@ function accountCardHtml(account: Account, usage: UsageRecord | undefined, selec
       </div>`
     : `<div class="dash-ring-empty">No data yet</div>`;
 
+  // Additive, not a replacement for `body` - a network/timeout failure never
+  // reaches "needslogin" (see get_auth_state_map), so this never masks stale
+  // but still-valid usage numbers. Mirrors accounts.css's `.acc-drift-warning`.
+  const needsLoginBadge = authState === "needslogin"
+    ? `<div class="dash-acard-warning"><i class="ph ph-warning"></i> Needs login</div>`
+    : "";
+
   return `<div class="dash-acard${selected ? " active" : ""}" data-acc-id="${escapeHtml(account.id)}" style="--acc:${escapeHtml(account.colour)}">
     <div class="dash-ah">${accountIconBadgeHtml(account)}<span class="dash-who">${escapeHtml(account.label)}</span></div>
     ${body}
+    ${needsLoginBadge}
   </div>`;
 }
 
@@ -181,10 +189,11 @@ export function buildAccountCardsHTML(
   usageByAccount: Record<string, UsageRecord>,
   selectedAccountId: string | null,
   settings: ValueColorSettings,
+  authStateByAccount: Record<string, AuthState> = {},
 ): string {
   if (!accounts.length) return "";
   return `<div class="dash-sel-row">${accounts
-    .map((a) => accountCardHtml(a, usageByAccount[a.id], a.id === selectedAccountId, settings))
+    .map((a) => accountCardHtml(a, usageByAccount[a.id], a.id === selectedAccountId, settings, authStateByAccount[a.id]))
     .join("")}</div>`;
 }
 

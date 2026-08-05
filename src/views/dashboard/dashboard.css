@@ -138,6 +138,8 @@
 .view-dashboard .dash-ring-time .dash-ring-time-hot { color: #e05252; }
 .view-dashboard .dash-ring-time .dash-ring-time-dim { font-size: 0.64rem; color: var(--color-text-muted, #8a8aa0); opacity: 0.65; }
 .view-dashboard .dash-ring-empty { font-size: 0.66rem; color: var(--color-text-muted, #8a8aa0); margin-top: 8px; min-height: 1.1em; text-align: center; }
+/* Same red/icon language as accounts.css's .acc-drift-warning. */
+.view-dashboard .dash-acard-warning { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 600; color: var(--color-danger, #f87171); margin-top: 6px; }
 
 /* ── Widget shell ──────────────────────────────────────────────────────── */
 .view-dashboard .dash-widgets { display: flex; flex-direction: column; gap: 12px; }

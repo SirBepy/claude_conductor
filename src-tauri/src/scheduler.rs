@@ -287,10 +287,32 @@ async fn do_poll_legacy(app: &AppHandle) -> Result<UsageSnapshot, PollErr> {
     Ok(snap)
 }
 
+/// Whether a scrape failure means the session needs re-login. Only a 401/403
+/// counts - a network error, timeout, or org-lookup miss is not proof the
+/// login expired (see `get_auth_state_map` daemon comment).
+fn is_auth_failure(e: &ScrapeError) -> bool {
+    matches!(e, ScrapeError::Unauthorized | ScrapeError::Forbidden)
+}
+
+/// One account's poll failure, keeping the 401/403-vs-other distinction alive
+/// through `poll_accounts_isolated` (which only threads an error type, not a
+/// bool) so `do_poll_accounts` can act on it below.
+enum AccountPollErr {
+    NeedsLogin(String),
+    Other(String),
+}
+impl AccountPollErr {
+    fn message(&self) -> &str {
+        match self { Self::NeedsLogin(m) | Self::Other(m) => m }
+    }
+}
+
 /// Polls every account that has a stored cookie, independently: one
 /// account's failure (expired cookie, network error, its `org_uuid` missing
-/// from the session's org list, ...) is recorded as that account's own
-/// `AuthState::NeedsLogin` and never drops the others. Persists a tagged
+/// from the session's org list, ...) never drops the others. Only a 401/403
+/// (`is_auth_failure`) is recorded as that account's `AuthState::NeedsLogin`;
+/// any other failure leaves the account's prior auth state untouched, since
+/// a network blip is not proof of an expired login. Persists a tagged
 /// snapshot per successful account, fires that account's OWN threshold
 /// notification (milestone 08 - compared against ITS previous snapshot, not
 /// some other account's), then returns the "default" account's snapshot
@@ -306,16 +328,17 @@ async fn do_poll_accounts(
 
     let outcomes = poll_accounts_isolated(accounts, |account| async move {
         let session_path = paths::account_session_file(&account.id)
-            .map_err(|e| format!("{e:#}"))?;
+            .map_err(|e| AccountPollErr::Other(format!("{e:#}")))?;
         let Some(session_key) = session::load(&session_path) else {
-            return Err("no session".to_string());
+            return Err(AccountPollErr::NeedsLogin("no session".to_string()));
         };
         match fetch_usage_for_org(BASE_URL, &session_key, Some(&account.org_uuid)).await {
             Ok(mut snap) => {
                 snap.account_id = Some(account.id.clone());
                 Ok(snap)
             }
-            Err(e) => Err(format!("{e:#}")),
+            Err(e) if is_auth_failure(&e) => Err(AccountPollErr::NeedsLogin(format!("{e:#}"))),
+            Err(e) => Err(AccountPollErr::Other(format!("{e:#}"))),
         }
     })
     .await;
@@ -354,8 +377,10 @@ async fn do_poll_accounts(
                 }
             }
             Err(e) => {
-                log::warn!("poll failed for account {account_id}: {e}");
-                state.auth_state_by_account.lock().unwrap().insert(account_id.clone(), AuthState::NeedsLogin);
+                log::warn!("poll failed for account {account_id}: {}", e.message());
+                if matches!(e, AccountPollErr::NeedsLogin(_)) {
+                    state.auth_state_by_account.lock().unwrap().insert(account_id.clone(), AuthState::NeedsLogin);
+                }
             }
         }
     }
@@ -375,13 +400,13 @@ async fn do_poll_accounts(
 /// attempted. Extracted as a standalone async fn (independent of `AppState`/
 /// `AppHandle`) so the isolation guarantee is unit-testable with a fake
 /// `fetch` instead of real HTTP (see `tests::poll_accounts_isolated_*`).
-pub(crate) async fn poll_accounts_isolated<F, Fut>(
+pub(crate) async fn poll_accounts_isolated<F, Fut, E>(
     accounts: &[Account],
     mut fetch: F,
-) -> Vec<(String, Result<UsageSnapshot, String>)>
+) -> Vec<(String, Result<UsageSnapshot, E>)>
 where
     F: FnMut(Account) -> Fut,
-    Fut: std::future::Future<Output = Result<UsageSnapshot, String>>,
+    Fut: std::future::Future<Output = Result<UsageSnapshot, E>>,
 {
     let mut out = Vec::with_capacity(accounts.len());
     for account in accounts {
@@ -445,8 +470,9 @@ fn maybe_notify_threshold_crossed(
 
 #[cfg(test)]
 mod tests {
-    use super::{next_target_ts, poll_accounts_isolated, threshold_crossing};
+    use super::{is_auth_failure, next_target_ts, poll_accounts_isolated, threshold_crossing};
     use crate::accounts::Account;
+    use crate::scraping::ScrapeError;
     use crate::tray::ColorStop;
     use crate::types::{UsageSnapshot, WindowUsage};
 
@@ -529,6 +555,17 @@ mod tests {
         assert_eq!(threshold_crossing(&personal_prev, &personal_new, &thresholds), None);
     }
 
+    /// Only 401/403 counts as an auth failure - a network error, timeout, or
+    /// org-lookup miss must not be treated as an expired login.
+    #[test]
+    fn is_auth_failure_only_401_403() {
+        assert!(is_auth_failure(&ScrapeError::Unauthorized));
+        assert!(is_auth_failure(&ScrapeError::Forbidden));
+        assert!(!is_auth_failure(&ScrapeError::NoOrgs));
+        assert!(!is_auth_failure(&ScrapeError::OrgNotFound("x".into())));
+        assert!(!is_auth_failure(&ScrapeError::Other(anyhow::anyhow!("timeout"))));
+    }
+
     /// The load-bearing milestone-03 acceptance criterion: one account
     /// failing must not drop the accounts after it in the iteration order.
     #[tokio::test]
@@ -571,7 +608,7 @@ mod tests {
     #[tokio::test]
     async fn empty_account_list_yields_empty_outcomes() {
         let outcomes = poll_accounts_isolated(&[], |account: Account| async move {
-            Ok(snap_for(&account.id))
+            Ok::<_, String>(snap_for(&account.id))
         })
         .await;
         assert!(outcomes.is_empty());

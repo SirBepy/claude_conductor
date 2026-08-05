@@ -18,6 +18,7 @@ test.describe("view-harness / dashboard", () => {
         get_accounts_setup_prompt_state: { shouldShow: false },
         list_accounts: [],
         get_usage_map: {},
+        get_auth_state_map: {},
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
         poll_now: null,

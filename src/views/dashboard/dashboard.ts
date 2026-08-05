@@ -4,7 +4,7 @@ import "./dashboard.css";
 import "../../shared/account-chip.css";
 import { getSettings, setSettings, setUsageHistory, getUsageHistory } from "../../shared/state";
 import { api } from "../../shared/api";
-import type { UsageRecord } from "../../shared/api";
+import type { AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
 import { navigateTo } from "../../router";
 import { escapeHtml } from "../../shared/escape-html";
@@ -40,6 +40,7 @@ let selectedAccountId: string | null = null;
 // isn't mounted yet, or applied immediately when it already is.
 let pendingFocusAccountId: string | null = null;
 let usageMapCache: Record<string, UsageRecord> = {};
+let authStateMapCache: Record<string, AuthState> = {};
 let dashboardWidgets: DashboardWidgetEntry[] = [];
 let editMode = false;
 const widgetTeardowns = new Map<string, () => void>();
@@ -309,7 +310,7 @@ function renderShell(container: HTMLElement): void {
   const history = getHistory() || [];
   const accountsCache = listCachedAccounts();
   const cardsHtml = accountsCache.length > 0
-    ? buildAccountCardsHTML(accountsCache, usageMapCache, selectedAccountId, getSettings())
+    ? buildAccountCardsHTML(accountsCache, usageMapCache, selectedAccountId, getSettings(), authStateMapCache)
     : legacyStatCardsHtml(history);
 
   const enabled = dashboardWidgets.filter((e) => e.enabled && getWidget(e.id));
@@ -460,9 +461,12 @@ async function fullRefresh(container: HTMLElement): Promise<void> {
   if (!hadPersistedLayout) persistDashboardWidgets();
 
   try {
-    const [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
+    const [accounts, usageMap, authStateMap] = await Promise.all([
+      api.listAccounts(), api.getUsageMap(), api.getAuthStateMap(),
+    ]);
     setCachedAccounts(accounts);
     usageMapCache = usageMap;
+    authStateMapCache = authStateMap;
   } catch (e) {
     console.error("[dashboard] account/usage fetch failed", e);
   }
