@@ -65,6 +65,23 @@ pub(super) async fn on_refresh(
                 // DB failed to open at daemon startup; nothing to persist to.
                 return;
             };
+
+            // Fires on every Stop hook, every session, machine-wide, but a
+            // token record is written once per session_id - skip if so.
+            let already = {
+                let db = db.clone();
+                let session_id = session_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mgr = db.lock().unwrap_or_else(|p| p.into_inner());
+                    token_store::token_record_exists(mgr.conn(), &session_id).unwrap_or(false)
+                })
+                .await
+                .unwrap_or(false)
+            };
+            if already {
+                return;
+            }
+
             let transcript = PathBuf::from(transcript_path);
             let totals = tokio::task::spawn_blocking({
                 let t = transcript.clone();
@@ -98,10 +115,9 @@ pub(super) async fn on_refresh(
             let history = tokio::task::spawn_blocking(move || {
                 let mgr = db.lock().unwrap_or_else(|p| p.into_inner());
                 let conn = mgr.conn();
-                // Skip if this session was already recorded (append_session was
-                // a no-op on duplicate session_id; preserve that).
-                let already = token_store::get_token_records(conn, 0)
-                    .map(|recs| recs.iter().any(|r| r.session_id == record.session_id))
+                // Re-check under the insert's lock - the fast-path check
+                // above released it first, so alone it can't rule out a race.
+                let already = token_store::token_record_exists(conn, &record.session_id)
                     .unwrap_or(false);
                 if !already {
                     if let Err(e) = token_store::insert_token_record(conn, &record) {
