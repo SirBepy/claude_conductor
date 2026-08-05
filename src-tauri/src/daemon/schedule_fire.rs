@@ -84,6 +84,15 @@ async fn fire_message(
     {
         return Err(format!("{RATE_LIMITED_PREFIX}{resets_at}"));
     }
+    // Mirror jarvis_fleet::send_to_session's guard: the daemon has no turn
+    // queue, so writing into a mid-turn child's stdin is undefined behavior.
+    if state.registry.get(session_id).map(|i| i.busy).unwrap_or(false) {
+        return Err(
+            "target session is still mid-turn; the daemon has no turn queue so sending now \
+             would be undefined behavior - wait until it goes idle and retry"
+                .to_string(),
+        );
+    }
     let session = match state.sessions.get(session_id).map(|s| s.clone()) {
         Some(s) => s,
         None => respawn_for_message(state, session_id, cwd).await?,
@@ -196,6 +205,21 @@ mod tests {
         let state = test_state();
         let result = fire_message(&state, "no-such-session", "Z:\\does\\not\\exist", "hi").await;
         assert!(result.is_err(), "respawn of a session with a missing cwd must fail, not panic");
+    }
+
+    #[tokio::test]
+    async fn fire_message_refuses_a_busy_target_instead_of_writing_stdin() {
+        // No live ChildStdin exists in this test, so a successful send would
+        // panic - exactly why the busy guard must short-circuit before ever
+        // reaching lifecycle::send_message.
+        let state = test_state();
+        state.registry.upsert_interactive("sess-1", std::path::Path::new("."), "proj-1", "2026-08-01T00:00:00Z");
+        state.registry.set_busy("sess-1", true);
+
+        let result = fire_message(&state, "sess-1", ".", "hi").await;
+
+        let err = result.expect_err("a busy target must refuse, not write into its stdin");
+        assert!(err.contains("mid-turn"), "{err}");
     }
 
     // --- ScheduledKind::JarvisHygiene fire path ---

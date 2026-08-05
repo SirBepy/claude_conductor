@@ -178,8 +178,9 @@ fn is_message_session_busy(state: &Arc<DaemonState>, item: &ScheduledItem) -> bo
 /// for the next tick. No-ops if the item is unknown or not Pending (including
 /// "not Pending because the tick loop just claimed it" - the same atomic
 /// claim that guards against the tick loop racing itself also guards this
-/// explicit user action). Deliberately has no busy check: an explicit "fire
-/// now" click keeps its existing behavior regardless of in-flight turns.
+/// explicit user action). Has no busy check of its own for `NewChat`/
+/// `JarvisHygiene` (neither can collide with a mid-turn session), but a
+/// `Message` fire into a busy target still refuses inside `fire_message`.
 pub async fn fire_now(state: &Arc<DaemonState>, id: &str) {
     let Some(claimed) = scheduled_items::claim_for_fire(id) else { return };
     let now = Utc::now();
