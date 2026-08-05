@@ -33,7 +33,7 @@ export interface LightboxComposerBridge {
   getCwd?(): string | null;
 }
 
-// Set by the sessions view (active-session-mount.ts) to the currently mounted
+// Set by the sessions view (active-session-composer.ts) to the currently mounted
 // Composer, so the lightbox's own textbox can seed from / hand back to the
 // real draft without importing the views layer - same seam as
 // setFileEditsProvider in file-viewer.ts.
@@ -96,7 +96,7 @@ export function openLightbox(content: LightboxContent): void {
   }
 
   // Caption/reply textbox: same draft box regardless of preview type (image,
-  // pdf, or text), gated only on a bridge being wired (active-session-mount.ts).
+  // pdf, or text), gated only on a bridge being wired (active-session-composer.ts).
   if (composerBridge) {
     const wrap = document.createElement("div");
     wrap.className = "lightbox-composer-wrap cc-typing-wrap";
