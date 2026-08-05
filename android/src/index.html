@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Conductor</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="shell">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>Conductor</h1>
+    </div>
+
+    <section id="screen-connecting" class="screen" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="status-text">Connecting to your PC&hellip;</p>
+    </section>
+
+    <section id="screen-setup" class="screen" hidden>
+      <p class="lead">Enter the address of your Claude Conductor server.</p>
+      <form id="setup-form" novalidate>
+        <label for="server-url">Server URL</label>
+        <input
+          id="server-url"
+          type="url"
+          inputmode="url"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
+          placeholder="https://your-pc.ts.net"
+          required
+        >
+        <p id="setup-error" class="field-error" hidden></p>
+        <button type="submit">Save &amp; Connect</button>
+      </form>
+    </section>
+
+    <section id="screen-error" class="screen" hidden>
+      <p class="lead">Can&rsquo;t reach your PC.</p>
+      <p class="server-url" id="error-url"></p>
+      <p class="hint">Make sure Claude Conductor is running there and the tunnel is up.</p>
+      <div class="actions">
+        <button id="retry-btn" type="button">Retry</button>
+        <button id="change-server-btn" type="button" class="secondary">Change server</button>
+      </div>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

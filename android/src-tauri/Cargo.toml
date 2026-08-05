@@ -1,0 +1,20 @@
+# Explicit empty workspace table: makes this crate its own workspace root so
+# cargo never absorbs it into the desktop crate's tree (they share a repo but
+# must build independently - see CLAUDE.md).
+[workspace]
+
+[package]
+name = "conductor-mobile"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "conductor_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
