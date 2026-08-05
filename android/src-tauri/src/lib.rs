@@ -11,9 +11,12 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Host varies per user, so scheme is all we can pin. https covers both the local
-/// asset origin (tauri.localhost on Android) and whichever server the user enters.
+/// The bundled shell is served from http://tauri.localhost on Android (useHttpsScheme
+/// is false), so an https-only guard silently refuses our own first page load.
 fn allow_navigation(url: &tauri::Url) -> bool {
+    if url.host_str() == Some("tauri.localhost") {
+        return true;
+    }
     url.scheme() == "https"
 }
 
@@ -26,6 +29,12 @@ mod tests {
     fn allows_https() {
         assert!(allow_navigation(&Url::parse("https://example.ts.net/api/health").unwrap()));
         assert!(allow_navigation(&Url::parse("https://tauri.localhost/index.html").unwrap()));
+    }
+
+    /// Android serves the bundled shell over http, so refusing this is a blank white app.
+    #[test]
+    fn allows_the_local_asset_origin_over_http() {
+        assert!(allow_navigation(&Url::parse("http://tauri.localhost/index.html").unwrap()));
     }
 
     #[test]
