@@ -64,6 +64,12 @@ fn close_stand_down_is_failure(last_prompt: &str, close_confirmed: bool) -> bool
     !close_confirmed && !last_prompt.contains("--dont-close")
 }
 
+/// EOF counterpart of `close_stand_down_is_failure`: skips the `--dont-close`
+/// exemption, since a process dying mid-turn is always a failure regardless of prompt.
+fn close_stand_down_is_failure_at_eof(close_confirmed_at_eof: bool) -> bool {
+    !close_confirmed_at_eof
+}
+
 /// Daemon-authoritative `/close` teardown: mark the session ended and force the
 /// `claude` process tree down. Fired when the `close_session` MCP tool's
 /// `close_requested` flag is observed at turn end. Idempotent - `mark_ended`
@@ -101,14 +107,15 @@ pub(crate) async fn run_stdout_pump(
     let mut ctx = ParserContext::new_live();
     let mut buf_reader = BufReader::new(stdout);
     let mut line_buf = Vec::new();
-    // True once the current turn has streamed at least one content delta,
+    // True once the current turn has emitted at least one `stream_event` line,
     // meaning it is a live turn (not a replayed history result line from
-    // `--resume`). Reset to false after each TurnUsage so each turn is
-    // evaluated independently. Without this guard, resumed sessions fire one
-    // sound per prior completed turn on top of the real one.
+    // `--resume`, which never carries that envelope). Reset to false after
+    // each TurnUsage so each turn is evaluated independently. Without this
+    // guard, resumed sessions fire one sound per prior completed turn.
     let mut saw_stream_turn = false;
-    // Generation counter captured at the start of each live turn (when the
-    // first streamed text delta arrives). At turn-end we only call
+    // Generation counter captured at the start of each live turn (todo 475:
+    // on the turn's first `stream_event` line, not the first text delta, so a
+    // tool-only/textless turn still captures it). At turn-end we only call
     // set_busy(false) if the registry's turn_gen still matches, preventing
     // a stale result line from an interrupted turn from clearing the
     // busy=true that a new send_message set in the meantime.
@@ -156,7 +163,27 @@ pub(crate) async fn run_stdout_pump(
                                 }
                             }
                         }
-                        for ev in ctx.feed(&line_buf) {
+                        let feed_events = ctx.feed(&line_buf);
+                        // `--resume` history replay never emits `stream_event` lines, so this
+                        // is the earliest live-exclusive signal, firing even for tool-only turns.
+                        if !saw_stream_turn && ctx.take_stream_event_seen() {
+                            saw_stream_turn = true;
+                            pump_turn_gen = state_for_pump
+                                .registry
+                                .current_turn_gen(&pump_session.session_id);
+                            // Mark the row "Closing" now (daemon-authoritative, no text marker)
+                            // so every window's sidebar shows it; close_requested drives teardown.
+                            if turn_is_close(&pump_session) {
+                                closing_flagged = true;
+                                if state_for_pump.registry.set_closing(&pump_session.session_id, true) {
+                                    state_for_pump.notifier.publish(
+                                        "instances_changed",
+                                        serde_json::json!({"instances": state_for_pump.registry.list()}),
+                                    );
+                                }
+                            }
+                        }
+                        for ev in feed_events {
                             // Suppress SessionStarted: claude re-emits a system/init
                             // line at the start of EVERY turn. The app shows the
                             // session via its own synthetic SessionStarted handoff,
@@ -164,37 +191,8 @@ pub(crate) async fn run_stdout_pump(
                             if matches!(ev, ChatEvent::SessionStarted { .. }) {
                                 continue;
                             }
-                            // A streamed text delta marks the current turn as live
-                            // (not a replayed history line from --resume). On the
-                            // FIRST one per turn, snapshot the registry's turn_gen
-                            // so the turn-end guard can detect if a newer
-                            // send_message arrived before the result line was
-                            // processed. Deltas are held + concatenated instead of
-                            // broadcast immediately - see the coalescing comment
-                            // above `pending_delta`.
                             let ev = match ev {
                                 ChatEvent::AssistantDelta { text, block, timestamp, .. } => {
-                                    if !saw_stream_turn {
-                                        pump_turn_gen = state_for_pump
-                                            .registry
-                                            .current_turn_gen(&pump_session.session_id);
-                                        // First live output of a turn the user opened
-                                        // with `/close`: mark the row "Closing" now, so
-                                        // EVERY window's sidebar shows it (daemon-
-                                        // authoritative, no `<cc-close:starting>` marker).
-                                        // Teardown is separate - the `close_session` MCP
-                                        // tool sets `close_requested`, honored at turn end.
-                                        if !closing_flagged && turn_is_close(&pump_session) {
-                                            closing_flagged = true;
-                                            if state_for_pump.registry.set_closing(&pump_session.session_id, true) {
-                                                state_for_pump.notifier.publish(
-                                                    "instances_changed",
-                                                    serde_json::json!({"instances": state_for_pump.registry.list()}),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    saw_stream_turn = true;
                                     match pending_delta {
                                         Some((pb, ref mut buf, _)) if pb == block => buf.push_str(&text),
                                         _ => {
@@ -471,11 +469,7 @@ pub(crate) async fn run_stdout_pump(
         // before any snapshot below can persist `closing: true`. (No
         // reassignment: the pump loop is done, the flag is never read again.)
         if closing_flagged {
-            // The process died before flushing a result line at all (the
-            // kill-script race above), so an unconfirmed close here is
-            // always the real failure, never an intentional --dont-close
-            // (that path completes its turn normally).
-            if !close_confirmed_at_eof {
+            if close_stand_down_is_failure_at_eof(close_confirmed_at_eof) {
                 log::warn!(
                     "daemon: session {} process exited mid-/close without close_session confirmation; chat still open",
                     pump_session.session_id
@@ -537,5 +531,90 @@ mod tests {
     #[test]
     fn close_stand_down_not_failure_on_dont_close_flag() {
         assert!(!close_stand_down_is_failure("/close --dont-close", false));
+    }
+
+    /// A tool-only turn never emits `AssistantDelta`; without capturing `pump_turn_gen`
+    /// on the first `stream_event` line instead, busy would latch on forever.
+    #[test]
+    fn tool_only_turn_captures_gen_and_clears_busy_at_turn_end() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
+        registry.set_busy("s", true);
+
+        let mut ctx = ParserContext::new_live();
+        let mut saw_stream_turn = false;
+        let mut pump_turn_gen: u64 = 0;
+        for line in [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_9","name":"Bash","input":{}}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+        ] {
+            ctx.feed(format!("{line}\n").as_bytes());
+            if !saw_stream_turn && ctx.take_stream_event_seen() {
+                saw_stream_turn = true;
+                pump_turn_gen = registry.current_turn_gen("s");
+            }
+        }
+        assert!(saw_stream_turn, "tool-only turn must still be recognised as live");
+        assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "busy must clear at turn end");
+        assert!(!registry.get("s").unwrap().busy);
+    }
+
+    /// The EOF branch's own logic (todo 467 blind spot 1), previously
+    /// untested: a process death mid-`/close` is always a failure.
+    #[test]
+    fn close_stand_down_is_failure_at_eof_when_never_confirmed() {
+        assert!(close_stand_down_is_failure_at_eof(false));
+        assert!(!close_stand_down_is_failure_at_eof(true));
+    }
+
+    /// Unlike the result-line path, EOF grants no `--dont-close` exemption - that
+    /// flag always completes normally, so reaching EOF still-closing is a genuine crash.
+    #[test]
+    fn eof_path_diverges_from_result_line_path_on_dont_close() {
+        assert!(!close_stand_down_is_failure("/close --dont-close", false));
+        assert!(close_stand_down_is_failure_at_eof(false));
+    }
+
+    /// A `/close` turn whose first content is tool_use (no preceding text) must
+    /// still be flagged on death, since closing_flagged arms on stream_event, not AssistantDelta.
+    #[test]
+    fn text_free_tool_call_first_close_still_flagged_on_eof() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
+
+        // Mirrors turn_is_close's check without needing a live Session/ChildStdin.
+        let last_prompt = "/close";
+        let mut ctx = ParserContext::new_live();
+        let mut saw_stream_turn = false;
+        let mut closing_flagged = false;
+        for line in [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}}}"#,
+        ] {
+            ctx.feed(format!("{line}\n").as_bytes());
+            if !saw_stream_turn && ctx.take_stream_event_seen() {
+                saw_stream_turn = true;
+                if last_prompt.trim_start().starts_with("/close") {
+                    closing_flagged = true;
+                }
+            }
+        }
+        assert!(closing_flagged, "text-free tool-call-first /close must still arm closing_flagged");
+
+        // The process now dies mid-turn (EOF) before any close_session confirmation.
+        let close_confirmed_at_eof = false;
+        if closing_flagged && close_stand_down_is_failure_at_eof(close_confirmed_at_eof) {
+            registry.set_awaiting("s", Some(CLOSE_FAILED_AWAITING.to_string()));
+        }
+        assert_eq!(registry.get("s").unwrap().awaiting.as_deref(), Some(CLOSE_FAILED_AWAITING));
     }
 }

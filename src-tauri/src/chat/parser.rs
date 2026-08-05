@@ -54,6 +54,10 @@ pub struct ParserContext {
     /// History replay (bare `parse_line`, no `result` line) is unaffected and
     /// keeps per-assistant-line usage. Defaults to false for back-compat.
     live: bool,
+    /// Set whenever a `stream_event` line is fed. `--resume` history replay never
+    /// emits that envelope, so this is a turn-liveness signal that fires even for
+    /// tool-only turns, unlike `AssistantDelta`/`ToolUse` (both present on replay).
+    saw_stream_event: bool,
 }
 
 impl ParserContext {
@@ -63,6 +67,7 @@ impl ParserContext {
             text_block: 0,
             has_thinking: false,
             live: false,
+            saw_stream_event: false,
         }
     }
 
@@ -70,6 +75,13 @@ impl ParserContext {
     /// `live` field for why the full `assistant` line is suppressed.
     pub fn new_live() -> Self {
         Self { live: true, ..Self::new() }
+    }
+
+    /// Read and clear `saw_stream_event` (todo 475). The daemon pump polls this
+    /// once per line read to detect the live turn's earliest signal, before any
+    /// content (text or tool) has streamed.
+    pub fn take_stream_event_seen(&mut self) -> bool {
+        std::mem::replace(&mut self.saw_stream_event, false)
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<ChatEvent> {
@@ -89,6 +101,7 @@ impl ParserContext {
             // handles `result` (also stateful: reads has_thinking). parse_line
             // covers the remaining stateless lines.
             if let Some(stream_events) = self.parse_stream_event_line(&line_str) {
+                self.saw_stream_event = true;
                 events.extend(stream_events);
             } else if let Some(result_events) = self.parse_result_line(&line_str) {
                 events.extend(result_events);
@@ -702,6 +715,38 @@ mod tests {
             })
             .collect();
         assert_eq!(tool_uses, vec![("Edit", "toolu_1")], "one ToolUse salvaged from the suppressed assistant line");
+    }
+
+    /// A tool-only live turn never emits `AssistantDelta`, but it does stream
+    /// `stream_event` lines before its tool_use content_block.
+    #[test]
+    fn stream_event_seen_fires_before_tool_use_content_on_a_tool_only_turn() {
+        let mut ctx = ParserContext::new_live();
+        let stream_lines = [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_9","name":"Bash","input":{}}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+        ];
+        for l in stream_lines {
+            ctx.feed(format!("{l}\n").as_bytes());
+            assert!(ctx.take_stream_event_seen(), "every stream_event line must set the flag: {l}");
+        }
+    }
+
+    /// `--resume` history replay never wraps lines in a `stream_event` envelope,
+    /// so a replayed tool-use-only turn must NOT trip the liveness signal.
+    #[test]
+    fn stream_event_seen_stays_false_for_a_replayed_tool_use_turn() {
+        let mut ctx = ParserContext::new_live();
+        let lines = [
+            r#"{"type":"assistant","timestamp":0,"message":{"role":"assistant","stop_reason":"tool_use","usage":null,"content":[{"type":"tool_use","id":"toolu_old","name":"Bash","input":{}}]}}"#,
+            r#"{"type":"result","subtype":"success","timestamp":1,"result":"","total_cost_usd":0.0,"duration_ms":1,"usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ];
+        for l in lines {
+            ctx.feed(format!("{l}\n").as_bytes());
+        }
+        assert!(!ctx.take_stream_event_seen(), "replayed lines carry no stream_event envelope");
     }
 
     #[test]
