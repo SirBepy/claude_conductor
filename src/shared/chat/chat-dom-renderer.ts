@@ -16,7 +16,7 @@ import { type TurnUsageTotals } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";
 
 /** Distance (px) from the bottom within which we still treat the user as "at the bottom". */
-const SCROLL_BOTTOM_THRESHOLD = 64;
+export const SCROLL_BOTTOM_THRESHOLD = 64;
 
 export function describeActivity(toolName: string, input: unknown): string {
   const { target } = toolSummary(toolName, input);
@@ -352,13 +352,17 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
   return el;
 }
 
+/** Element-level variant, for callers that have no ChatRenderer to hand. */
+export function isElNearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
+}
+
 /**
  * True when the scroll position is at (or within SCROLL_BOTTOM_THRESHOLD px of)
  * the bottom of the container, so a live update should keep following along.
  */
 export function isNearBottom(r: ChatRenderer): boolean {
-  const el = r.container;
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
+  return isElNearBottom(r.container);
 }
 
 export function scrollToBottom(r: ChatRenderer): void {

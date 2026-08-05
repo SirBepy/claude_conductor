@@ -4,6 +4,7 @@
 // fade-in rebuild that, rather than the JSONL read, was the switch latency.
 
 import type { ChatRenderer } from "../../shared/chat/chat-renderer";
+import { isElNearBottom } from "../../shared/chat/chat-dom-renderer";
 
 /** Hot chats kept warm; each costs a live renderer + a detached DOM tree. */
 const CAPACITY = 5;
@@ -11,9 +12,6 @@ const CAPACITY = 5;
 /** Parked-event count past which draining costs more than a cold reload, so
  *  the retained pane is dropped instead. */
 const MAX_PARKED_EVENTS = 300;
-
-/** Distance from the bottom still treated as "pinned to the newest message". */
-const BOTTOM_SLOP_PX = 40;
 
 export interface RetainedChat {
   renderer: ChatRenderer;
@@ -65,9 +63,8 @@ export function backgroundRetainedChat(sessionId: string): void {
   const hit = retained.get(sessionId);
   if (!hit) return;
   const el = hit.messagesEl;
-  const maxScroll = el.scrollHeight - el.clientHeight;
   hit.scrollTop = el.scrollTop;
-  hit.atBottom = maxScroll <= 0 || maxScroll - el.scrollTop <= BOTTOM_SLOP_PX;
+  hit.atBottom = isElNearBottom(el);
   hit.renderer.pauseLiveRender();
 }
 
