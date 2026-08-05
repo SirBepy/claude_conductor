@@ -214,6 +214,7 @@ function openViewMoreMenu(btn: HTMLButtonElement): void {
         autoAcceptOn: isAutoAccept(sid),
         isHidden: hiddenSet.has(sid),
         isJarvis: sess?.jarvis === true,
+        isFrozen: sess?.frozen === true,
         viewChanges: state.activeChatActions?.viewChanges,
         onAfterAction: () => closeViewMoreMenu(),
       };
@@ -229,6 +230,7 @@ function openViewMoreMenu(btn: HTMLButtonElement): void {
         autoAcceptOn: false,
         isHidden: false,
         isJarvis: false,
+        isFrozen: false,
         onDiscard: () => {
           closeViewMoreMenu();
           // Signal sessions.ts to handle draft discard.

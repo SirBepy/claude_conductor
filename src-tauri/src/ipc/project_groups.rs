@@ -397,6 +397,8 @@ mod build_groups_tests {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            frozen: false,
+            frozen_needs_continue: false,
         };
         let groups = build_groups(&[], &[], &[inst], 1714389600000);
         assert_eq!(groups.len(), 1);
@@ -433,6 +435,8 @@ mod build_groups_tests {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            frozen: false,
+            frozen_needs_continue: false,
         };
         let groups = build_groups(&[], &[], &[inst], 0);
         assert_eq!(groups.len(), 0, "ended instances must not appear");

@@ -44,6 +44,8 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         account_id: None,
         rate_limited_resets_at: None,
         rate_limited_type: None,
+        frozen: false,
+        frozen_needs_continue: false,
     }
 }
 

@@ -301,6 +301,8 @@ pub fn run() {
             ipc::move_session_to_account,
             ipc::restart_jarvis_session,
             ipc::clear_jarvis_context,
+            ipc::freeze_session,
+            ipc::unfreeze_session,
             ipc::simulate_rate_limit,
             ipc::load_history,
             ipc::load_history_page,

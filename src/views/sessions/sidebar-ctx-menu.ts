@@ -56,6 +56,7 @@ export function openDraftCtxMenu(
     autoAcceptOn: false,
     isHidden: false,
     isJarvis: false,
+    isFrozen: false,
     onDiscard: () => { closeCtxMenu(); onDiscard(); },
     onAfterAction: () => closeCtxMenu(),
   };
@@ -97,6 +98,7 @@ export function openCtxMenu(
     autoAcceptOn: isAutoAccept(sessionId),
     isHidden,
     isJarvis: sess.jarvis === true,
+    isFrozen: sess.frozen === true,
     viewChanges,
     onAfterAction: () => {
       closeCtxMenu();

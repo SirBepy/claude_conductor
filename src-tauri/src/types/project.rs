@@ -168,6 +168,15 @@ pub struct Instance {
     /// `rate_limited_resets_at`; meaningless on its own.
     #[serde(default)]
     pub rate_limited_type: Option<String>,
+    /// True once the user froze this session (Chat menu toggle) - live child
+    /// force-killed; only explicit unfreeze respawns it. Never implies `ended_at`.
+    #[serde(default)]
+    pub frozen: bool,
+    /// Set when freezing cancelled an in-flight turn; consumed once by
+    /// unfreeze to auto-send "continue". Internal only, never sent to the webview.
+    #[serde(skip, default)]
+    #[ts(skip)]
+    pub frozen_needs_continue: bool,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -321,6 +330,8 @@ mod tests {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            frozen: false,
+            frozen_needs_continue: false,
         };
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();

@@ -83,6 +83,8 @@ pub enum LifecycleError {
     AccountNotFound(String),
     #[error("account drift: {0}")]
     AccountDrift(String),
+    #[error("session {0} is frozen - unfreeze it first")]
+    Frozen(String),
 }
 
 pub async fn spawn_session(
@@ -145,6 +147,11 @@ pub async fn spawn_session(
     };
     if map.contains_key(&session_id) {
         return Err(LifecycleError::AlreadyExists(session_id));
+    }
+    // Single chokepoint every spawn/respawn/restart path shares - blocks
+    // silent resurrection everywhere, including the desktop app's -32004 retry.
+    if state.registry.get(&session_id).map(|i| i.frozen).unwrap_or(false) {
+        return Err(LifecycleError::Frozen(session_id));
     }
 
     // Resume path: `session_id` is the pre-existing registry entry (see the
@@ -364,6 +371,7 @@ async fn respawn_interactive(
         .get(session_id)
         .filter(|i| i.ended_at.is_none())
         .filter(|i| matches!(i.kind, crate::sessions::kinds::InstanceKind::Interactive))
+        .filter(|i| !i.frozen)
         .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?;
 
     let model = if inst.model.is_empty() { "opus".to_string() } else { inst.model };
@@ -384,21 +392,9 @@ async fn respawn_interactive(
     .await
 }
 
-/// Force-kill `session_id`'s live child (if any) and respawn it resuming the
-/// SAME session id - the Jarvis kebab menu's "Restart Jarvis" action. Never
-/// forks, never marks the session ended in the Registry (unlike
-/// `end_session`), so the fleet-ownership/persisted-name/awaiting bookkeeping
-/// survives untouched across the restart.
-///
-/// Waits for the pump task's own EOF teardown to remove the killed session
-/// from the `SessionMap` before respawning: `run_stdout_pump`'s exit path does
-/// an unconditional `map_for_pump.remove(session_id)` keyed only by id, so if
-/// the fresh spawn's `map.insert` landed first, that stale removal would
-/// delete the brand-new live entry out from under it.
-pub async fn restart_session(
-    state: &Arc<DaemonState>,
-    session_id: &str,
-) -> Result<String, LifecycleError> {
+/// Force-kills `session_id`'s live child and waits for pump teardown,
+/// without respawning - shared by `restart_session` and `freeze_session`.
+pub async fn kill_and_wait_for_teardown(state: &Arc<DaemonState>, session_id: &str) {
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         crate::channels::kill::kill_tree(session.pid);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -406,6 +402,18 @@ pub async fn restart_session(
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     }
+}
+
+/// Force-kill `session_id`'s live child (if any) and respawn it resuming the
+/// SAME session id - the Jarvis kebab menu's "Restart Jarvis" action. Never
+/// forks, never marks the session ended in the Registry (unlike
+/// `end_session`), so the fleet-ownership/persisted-name/awaiting bookkeeping
+/// survives untouched across the restart.
+pub async fn restart_session(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+) -> Result<String, LifecycleError> {
+    kill_and_wait_for_teardown(state, session_id).await;
     let session = respawn_interactive(state, session_id).await?;
     Ok(session.session_id.clone())
 }

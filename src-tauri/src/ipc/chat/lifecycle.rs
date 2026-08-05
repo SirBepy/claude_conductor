@@ -303,6 +303,24 @@ pub async fn clear_jarvis_context(
     client.clear_jarvis_context(&session_id).await.map_err(|e| e.to_string())
 }
 
+/// Chat menu's "Freeze chat": cancels any in-flight turn, marks the session
+/// frozen (blocks silent respawn), shown after in the sidebar's Frozen segment.
+#[tauri::command]
+pub async fn freeze_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let guard = state.daemon_client.lock().await;
+    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    client.freeze_session(&session_id).await.map_err(|e| e.to_string())
+}
+
+/// Chat menu's "Unfreeze chat" - counterpart to `freeze_session`; auto-
+/// continues a cancelled turn, otherwise a no-op resume.
+#[tauri::command]
+pub async fn unfreeze_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let guard = state.daemon_client.lock().await;
+    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    client.unfreeze_session(&session_id).await.map_err(|e| e.to_string())
+}
+
 /// Debug builds only: fake a usage-limit rejection on `session_id` so the
 /// blocked banner, the red chat state, and the staggered scheduled resume can
 /// all be exercised without waiting for a real window to run out. Everything

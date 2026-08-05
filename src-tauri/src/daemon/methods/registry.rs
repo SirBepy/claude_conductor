@@ -104,6 +104,74 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // Chat menu's "Freeze chat": force-kills the live child (if any) and
+    // flips the frozen flag - never marks the session ended, so it keeps its
+    // sidebar slot (new Frozen segment). Interactive-only; External/Automated
+    // no-op + log, same shape as `externalize_session`'s guards.
+    {
+        let state = state.clone();
+        router.register("freeze_session", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let Some(inst) = state.registry.get(&p.session_id) else {
+                    return Err(RpcError::invalid_params(format!("session {} not found", p.session_id)));
+                };
+                if !matches!(inst.kind, crate::sessions::kinds::InstanceKind::Interactive) {
+                    log::warn!("freeze_session: {} is not Interactive (kind={:?}) - ignoring", p.session_id, inst.kind);
+                    return Ok(json!({"ok": false}));
+                }
+                if inst.frozen {
+                    return Ok(json!({"ok": true}));
+                }
+                // Same busy/asked signal `set_session_model` uses to decide the
+                // kill cancelled real work, not just an already-idle process -
+                // remembered so unfreeze knows to auto-continue.
+                let was_busy = inst.busy;
+                let was_asked = state.list_prompts().await.iter()
+                    .any(|v| v["payload"]["session_id"].as_str() == Some(p.session_id.as_str()));
+                crate::daemon::lifecycle::kill_and_wait_for_teardown(&state, &p.session_id).await;
+                state.registry.set_frozen(&p.session_id, true);
+                state.registry.set_frozen_needs_continue(&p.session_id, was_busy || was_asked);
+                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::sessions::persistence::save_snapshot_default(&state.registry);
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    // Chat menu's "Unfreeze chat": clears frozen, then auto-sends "continue"
+    // if a turn/prompt was cancelled by the freeze, so interrupted work
+    // resumes. Clears frozen BEFORE that send - it may respawn, and
+    // `spawn_session`'s frozen guard would otherwise refuse its own respawn.
+    {
+        let state = state.clone();
+        router.register("unfreeze_session", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let Some(inst) = state.registry.get(&p.session_id) else {
+                    return Err(RpcError::invalid_params(format!("session {} not found", p.session_id)));
+                };
+                if !matches!(inst.kind, crate::sessions::kinds::InstanceKind::Interactive) {
+                    log::warn!("unfreeze_session: {} is not Interactive (kind={:?}) - ignoring", p.session_id, inst.kind);
+                    return Ok(json!({"ok": false}));
+                }
+                state.registry.set_frozen(&p.session_id, false);
+                if state.registry.take_frozen_needs_continue(&p.session_id) {
+                    if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
+                        &state, &p.session_id, "continue", false,
+                    ).await {
+                        log::warn!("unfreeze_session: auto-continue failed for {}: {}", p.session_id, e);
+                    }
+                }
+                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::sessions::persistence::save_snapshot_default(&state.registry);
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
     // Persist a chat's auto-accept-permissions toggle. The daemon is the sole
     // writer of chat-config.json, so both the desktop app (forwarding via the
     // daemon client) and the phone (direct remote RPC) funnel through here.

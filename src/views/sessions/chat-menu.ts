@@ -28,6 +28,10 @@ export interface ChatMenuCtx {
   /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is
    *  disabled for them so flipping it off can't silently stall the fleet. */
   isJarvis?: boolean;
+  /** Daemon-authoritative frozen flag (`Instance.frozen`). Freeze/Unfreeze is
+   *  only offered for Interactive sessions - callers gate that via `readOnly`
+   *  (true for external/automated), same as every other agent-only action. */
+  isFrozen?: boolean;
   viewChanges?: () => void;
   onAfterAction?: () => void;
   onDiscard?: () => void;
@@ -188,6 +192,23 @@ export function buildChatMenuBlock(
             catch (err) { alert(`Failed to open terminal: ${err}`); }
           },
       disabledReason: isDraft ? "No active agent" : (!sessionId ? "No session" : undefined),
+    },
+    {
+      icon: ctx.isFrozen ? "play-circle" : "snowflake",
+      label: ctx.isFrozen ? "Unfreeze chat" : "Freeze chat",
+      run: isDraft || !sessionId || ctx.readOnly
+        ? undefined
+        : async () => {
+            try {
+              await invoke<void>(ctx.isFrozen ? "unfreeze_session" : "freeze_session", { sessionId });
+            } catch (err) {
+              alert(`Failed to ${ctx.isFrozen ? "unfreeze" : "freeze"} chat: ${err}`);
+            }
+            ctx.onAfterAction?.();
+          },
+      disabledReason: isDraft
+        ? "Not available until the chat starts"
+        : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" : undefined)),
     },
     {
       icon: "git-diff",

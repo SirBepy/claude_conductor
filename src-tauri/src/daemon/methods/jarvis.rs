@@ -103,7 +103,8 @@ fn err_to_rpc(e: LifecycleError) -> RpcError {
         | LifecycleError::NoAccounts
         | LifecycleError::NoDefault
         | LifecycleError::AccountNotFound(_)
-        | LifecycleError::AccountDrift(_) => RpcError::invalid_params(e.to_string()),
+        | LifecycleError::AccountDrift(_)
+        | LifecycleError::Frozen(_) => RpcError::invalid_params(e.to_string()),
         LifecycleError::NotFound(_) => RpcError { code: -32004, message: e.to_string(), data: None },
         LifecycleError::AlreadyExists(_) => RpcError { code: -32005, message: e.to_string(), data: None },
         LifecycleError::MeteredBilling(_) | LifecycleError::Io(_) => RpcError::internal(e.to_string()),

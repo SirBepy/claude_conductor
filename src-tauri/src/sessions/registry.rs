@@ -131,6 +131,8 @@ impl Registry {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            frozen: false,
+            frozen_needs_continue: false,
         };
         guard.insert(input.session_id, instance);
         (project_id, true)
@@ -191,6 +193,8 @@ impl Registry {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            frozen: false,
+            frozen_needs_continue: false,
         };
         guard.insert(session_id.to_string(), instance);
         project_id
@@ -241,6 +245,8 @@ impl Registry {
             account_id: None,
             rate_limited_resets_at: None,
             rate_limited_type: None,
+            frozen: false,
+            frozen_needs_continue: false,
         };
         guard.insert(session_id.to_string(), instance);
     }
@@ -298,6 +304,42 @@ impl Registry {
             }
         }
         false
+    }
+
+    /// Flip the frozen flag (Chat menu's Freeze/Unfreeze toggle). Returns true
+    /// if the value actually changed, mirroring `set_closing`. No-op false for
+    /// unknown sessions.
+    pub fn set_frozen(&self, session_id: &str, frozen: bool) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            if i.frozen != frozen {
+                i.frozen = frozen;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Record whether the session had a turn/prompt in flight at freeze time
+    /// - set at freeze, consumed once at unfreeze via `take_frozen_needs_continue`.
+    /// No-op if session is unknown.
+    pub fn set_frozen_needs_continue(&self, session_id: &str, needs: bool) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.frozen_needs_continue = needs;
+        }
+    }
+
+    /// Read and clear `frozen_needs_continue` in one step, so a stale flag can
+    /// never fire the auto-continue twice - same one-shot pattern as
+    /// `take_close_requested`. Returns the pre-clear value; false for unknown
+    /// sessions.
+    pub fn take_frozen_needs_continue(&self, session_id: &str) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        let needs = i.frozen_needs_continue;
+        i.frozen_needs_continue = false;
+        needs
     }
 
     /// Set the autopilot-active flag. `true` = /autopilot running; `false` = finished.
@@ -1007,5 +1049,34 @@ mod tests {
     fn set_account_unknown_session_is_noop() {
         let registry = Registry::new();
         assert!(!registry.set_account("ghost", "acct-work"));
+    }
+
+    #[test]
+    fn set_frozen_toggles_and_reports_change() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
+        assert!(!registry.get("s").unwrap().frozen);
+        assert!(registry.set_frozen("s", true), "flipping false->true must report a change");
+        assert!(registry.get("s").unwrap().frozen);
+        assert!(!registry.set_frozen("s", true), "already true - no change");
+        assert!(registry.set_frozen("s", false), "flipping true->false must report a change");
+        assert!(!registry.get("s").unwrap().frozen);
+    }
+
+    #[test]
+    fn set_frozen_unknown_session_is_noop() {
+        let registry = Registry::new();
+        assert!(!registry.set_frozen("ghost", true));
+    }
+
+    #[test]
+    fn frozen_needs_continue_is_consumed_once() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
+        registry.set_frozen_needs_continue("s", true);
+        assert!(registry.take_frozen_needs_continue("s"), "first take must return the set value");
+        assert!(!registry.take_frozen_needs_continue("s"), "a second take must find it already cleared");
     }
 }

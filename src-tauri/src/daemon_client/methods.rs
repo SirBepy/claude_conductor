@@ -231,6 +231,19 @@ impl PersistentClient {
         Ok(())
     }
 
+    /// Chat menu's "Freeze chat" (`daemon::methods::registry::register_chat_registry`'s
+    /// `freeze_session` RPC).
+    pub async fn freeze_session(&self, session_id: &str) -> Result<(), ClientError> {
+        self.call("freeze_session", json!({"session_id": session_id})).await?;
+        Ok(())
+    }
+
+    /// Chat menu's "Unfreeze chat" - counterpart to `freeze_session`.
+    pub async fn unfreeze_session(&self, session_id: &str) -> Result<(), ClientError> {
+        self.call("unfreeze_session", json!({"session_id": session_id})).await?;
+        Ok(())
+    }
+
     pub async fn set_session_effort(&self, session_id: &str, effort: &str) -> Result<(), ClientError> {
         self.call("set_session_effort", json!({"session_id": session_id, "effort": effort})).await?;
         Ok(())

@@ -63,7 +63,8 @@ pub(super) fn err_to_rpc(e: LifecycleError) -> RpcError {
         | NoAccounts
         | NoDefault
         | AccountNotFound(_)
-        | AccountDrift(_) => RpcError::invalid_params(e.to_string()),
+        | AccountDrift(_)
+        | Frozen(_) => RpcError::invalid_params(e.to_string()),
         NotFound(_) => RpcError {
             code: -32004,
             message: e.to_string(),

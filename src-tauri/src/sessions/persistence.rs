@@ -50,6 +50,15 @@ pub struct PersistedInteractive {
     /// `#[serde(default)]` for pre-existing snapshots.
     #[serde(default)]
     pub worker_of: Option<String>,
+    /// User-frozen flag (Chat menu's Freeze/Unfreeze toggle). Must survive a
+    /// daemon restart same as every other Interactive field here - freeze
+    /// never implies `ended_at`, so a frozen session stays in this snapshot.
+    #[serde(default)]
+    pub frozen: bool,
+    /// Whether the frozen turn was cancelled mid-flight (vs already idle),
+    /// so unfreeze still auto-continues after a daemon restart in between.
+    #[serde(default)]
+    pub frozen_needs_continue: bool,
 }
 
 /// Best-effort write of every live Interactive entry to `path`. Failures
@@ -86,6 +95,8 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             awaiting: i.awaiting,
             jarvis: i.jarvis,
             worker_of: i.worker_of,
+            frozen: i.frozen,
+            frozen_needs_continue: i.frozen_needs_continue,
         })
         .collect();
     if snapshot.is_empty() && load_snapshot(path).len() > 1 {
@@ -184,6 +195,12 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.worker_of.is_some() {
             registry.set_worker_of(&s.session_id, s.worker_of.clone());
         }
+        if s.frozen {
+            registry.set_frozen(&s.session_id, true);
+        }
+        if s.frozen_needs_continue {
+            registry.set_frozen_needs_continue(&s.session_id, true);
+        }
         // A /close rename written since the last save lives in the transcript,
         // so a fresh override beats everything; then the AI milestone title (so
         // a chat that re-titled itself keeps that name across a restart); then
@@ -244,6 +261,8 @@ mod tests {
             awaiting: None,
             jarvis: false,
             worker_of: None,
+            frozen: false,
+            frozen_needs_continue: false,
         }];
         let added = populate_registry(&registry, sessions);
         assert_eq!(added, 0);
@@ -351,6 +370,35 @@ mod tests {
         // The original 3 entries must survive untouched.
         let loaded = load_snapshot(&path);
         assert_eq!(loaded.len(), 3, "empty save over a populated file must be refused");
+    }
+
+    /// Freeze is orthogonal to `ended_at`, so a frozen session must survive
+    /// a save/load roundtrip like any other live Interactive entry.
+    #[test]
+    fn save_includes_frozen_entries() {
+        let registry = Registry::new();
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let path = tmp.path().join("snap.json");
+
+        registry.upsert_interactive("frozen-1", &cwd, "p", "2026-08-05T00:00:00Z");
+        registry.set_frozen("frozen-1", true);
+        registry.set_frozen_needs_continue("frozen-1", true);
+
+        save_snapshot(&registry, &path);
+        let loaded = load_snapshot(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].session_id, "frozen-1");
+        assert!(loaded[0].frozen);
+        assert!(loaded[0].frozen_needs_continue);
+
+        // Replaying into a fresh registry must restore both flags.
+        let registry2 = Registry::new();
+        populate_registry(&registry2, loaded);
+        let restored = registry2.get("frozen-1").unwrap();
+        assert!(restored.frozen, "frozen must survive a daemon restart");
+        assert!(restored.frozen_needs_continue);
+        assert!(restored.ended_at.is_none(), "frozen must never imply ended");
     }
 
     /// The guard must not block the legitimate case: closing the single
