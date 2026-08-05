@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -18,6 +19,17 @@ val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
         keystorePropertiesFile.inputStream().use { load(it) }
     }
+}
+
+// Fails at configuration time with the real fix, instead of letting Kotlin compilation
+// surface a misleading "Unresolved reference: TauriActivity" - see .claude/todos/504.
+val generatedTauriActivity = file("src/main/java/com/sirbepy/conductor/mobile/generated/TauriActivity.kt")
+if (!generatedTauriActivity.exists()) {
+    throw GradleException(
+        "Missing generated/TauriActivity.kt (gitignored codegen output). Run `cargo tauri android " +
+            "init` from android/ (or scripts/bootstrap-worktree.ps1) to regenerate it - do NOT add " +
+            "an import or extend WryActivity instead, that crashes the app on launch."
+    )
 }
 
 android {
@@ -55,9 +67,17 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
-            if (keystorePropertiesFile.exists()) {
-                signingConfig = signingConfigs.getByName("release")
+            // A missing keystore.properties must fail loud, not silently sign with a
+            // different (debug/unsigned) identity - see .claude/todos/504.
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException(
+                    "Release build requires gen/android/keystore.properties (gitignored, " +
+                        "machine-specific) pointing at the shared release keystore. See " +
+                        "C:\\Users\\tecno\\.android-keystores\\README.txt for the path + " +
+                        "password. Refusing to build an unsigned/differently-signed release APK."
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
