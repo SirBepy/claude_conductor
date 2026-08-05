@@ -1,11 +1,14 @@
 import { discardComposerDraft } from "../../shared/chat/composer";
+import { invoke } from "../../shared/ipc";
+import { showToast } from "../../shared/toast";
 import { state, setActiveSession, type ParkedDraft } from "./state";
 import { pickProject } from "./project-picker";
 import { renderSidebar } from "./sidebar";
 import { openModelEffortModal, type SessionConfig } from "./model-effort-modal";
 import { savePendingSession, loadPendingSession, clearPendingSession } from "./pending-draft-storage";
 import { renderPendingPane } from "./pending-pane";
-import { paneEmptyStateHtml } from "./sessions-helpers";
+import { paneEmptyStateHtml, ownedScheduledNewChatIds } from "./sessions-helpers";
+import type { ScheduledItem } from "../../types/ipc.generated";
 
 /**
  * Generate a placeholder session id used to subscribe `chat:<id>` BEFORE
@@ -22,6 +25,26 @@ export function makePlaceholderId(): string {
   return `pending-${ts}-${rnd}`;
 }
 
+
+/**
+ * Fire-and-forget, so it never blocks the discard UI. Known gap: a parked draft
+ * resumed under a new placeholderId leaves the old schedule stale.
+ */
+async function cancelOwnedSchedule(placeholderId: string): Promise<void> {
+  try {
+    const items = await invoke<ScheduledItem[]>("schedule_list");
+    const owned = ownedScheduledNewChatIds(items, placeholderId);
+    if (owned.length === 0) return;
+    await Promise.all(owned.map((id) => invoke<void>("schedule_delete", { id })));
+    showToast(
+      owned.length === 1
+        ? "Also canceled the chat that was scheduled from this draft."
+        : `Also canceled ${owned.length} chats that were scheduled from this draft.`,
+    );
+  } catch (err) {
+    console.error("[sessions] failed to cancel scheduled item for discarded draft", err);
+  }
+}
 
 export function loadAndRestorePendingSession(): void {
   const pending = loadPendingSession();
@@ -54,6 +77,7 @@ export function discardDraft(pane: HTMLElement): void {
   state.pendingNewSession = null;
   clearPendingSession();
   discardComposerDraft(pending.placeholderId);
+  void cancelOwnedSchedule(pending.placeholderId);
 
   if (wasOnDraft) {
     state.statusbar?.destroy();

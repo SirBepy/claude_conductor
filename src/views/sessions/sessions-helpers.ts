@@ -119,6 +119,21 @@ export function scheduledPendingPlaceholderIds(items: ScheduledItem[]): Set<stri
   return ids;
 }
 
+/**
+ * Pending/firing scheduled NewChat ids owned by `placeholderId`. Recurring items
+ * are excluded: a recurring NewChat outlives any single draft.
+ */
+export function ownedScheduledNewChatIds(items: ScheduledItem[], placeholderId: string): string[] {
+  return items
+    .filter((it) =>
+      it.kind.type === "new_chat" &&
+      it.kind.placeholder_id === placeholderId &&
+      it.recurrence == null &&
+      (it.status.type === "pending" || it.status.type === "firing")
+    )
+    .map((it) => it.id);
+}
+
 /** 0=NeedsPermission, 1=Question, 2=Working, 3=Waiting(external process),
  * 4=Done(unread), 5=YourTurn, 6=External/Automated.
  * Question (Claude is waiting on the user) sorts above Working so idle-blocked
