@@ -292,11 +292,45 @@ impl SttSupervisor {
     }
 
     pub async fn kill(&self) {
+        self.kill_on_port(SIDECAR_PORT).await;
+    }
+
+    /// Port-parameterized so tests can target a scratch listener instead of
+    /// the real `SIDECAR_PORT` - mirrors `probe_sidecar_alive`/`probe_alive_on`.
+    async fn kill_on_port(&self, port: u16) {
         if let Some(mut c) = self.child.lock().await.take() {
             let _ = c.kill().await;
             log::info!("stt-sidecar killed (idle/shutdown)");
+            return;
+        }
+        // No owned Child to signal for an ADOPTED sidecar - killing by PID
+        // would act on a process only ever verified via a WS handshake.
+        // Request shutdown over that same verified channel instead.
+        if self.adopted.load(Ordering::SeqCst) {
+            if send_shutdown_cmd(port).await {
+                self.adopted.store(false, Ordering::SeqCst);
+                log::info!("stt-sidecar: sent shutdown to adopted sidecar on port {port}");
+            } else {
+                log::warn!("stt-sidecar: could not reach adopted sidecar on {port} to shut it down");
+            }
         }
     }
+}
+
+/// Sends the sidecar's `{"cmd":"shutdown"}` control message (server.py's
+/// `handle`) over a fresh WS connection to `port`. `true` iff connect + send
+/// both succeeded.
+async fn send_shutdown_cmd(port: u16) -> bool {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let url = format!("ws://127.0.0.1:{port}");
+    let Ok(Ok((mut ws, _))) =
+        tokio::time::timeout(Duration::from_millis(500), tokio_tungstenite::connect_async(&url)).await
+    else {
+        return false;
+    };
+    ws.send(Message::Text(r#"{"cmd":"shutdown"}"#.to_string())).await.is_ok()
 }
 
 #[cfg(test)]
@@ -382,5 +416,68 @@ mod tests {
             }
         });
         assert!(!probe_alive_on(port).await);
+    }
+
+    // todo 466 regression: an ADOPTED sidecar (no owned Child) must still be
+    // reachable for shutdown - the control message itself must go out.
+    #[tokio::test]
+    async fn send_shutdown_cmd_delivers_the_control_message() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            if let Ok((stream, _)) = listener.accept().await {
+                if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                    if let Some(Ok(msg)) = ws.next().await {
+                        let _ = tx.send(msg.into_text().unwrap_or_default());
+                    }
+                }
+            }
+        });
+        assert!(send_shutdown_cmd(port).await);
+        let received = rx.await.expect("server must receive the shutdown message");
+        assert_eq!(received, r#"{"cmd":"shutdown"}"#);
+    }
+
+    #[tokio::test]
+    async fn send_shutdown_cmd_fails_on_closed_port() {
+        assert!(!send_shutdown_cmd(1).await);
+    }
+
+    // todo 466 regression: kill() on an ADOPTED sidecar (child=None,
+    // adopted=true) must actually request shutdown, not silently no-op.
+    #[tokio::test]
+    async fn kill_shuts_down_an_adopted_sidecar_instead_of_noop() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            use futures_util::StreamExt;
+            if let Ok((stream, _)) = listener.accept().await {
+                if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                    if let Some(Ok(msg)) = ws.next().await {
+                        let _ = tx.send(msg.into_text().unwrap_or_default());
+                    }
+                }
+            }
+        });
+
+        let sup = SttSupervisor::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        sup.adopted.store(true, Ordering::SeqCst);
+        sup.kill_on_port(port).await;
+
+        let received = rx.await.expect("kill() must send the shutdown control message");
+        assert_eq!(received, r#"{"cmd":"shutdown"}"#);
+        assert!(!sup.adopted.load(Ordering::SeqCst), "adopted flag must clear once shutdown is sent");
+    }
+
+    // A non-adopted, non-owned sidecar (never spawned, never adopted) has
+    // nothing this daemon may act on - kill() must stay a true no-op.
+    #[tokio::test]
+    async fn kill_is_a_noop_when_neither_owned_nor_adopted() {
+        let sup = SttSupervisor::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        sup.kill_on_port(1).await; // closed port: would fail loudly if it tried to connect
+        assert!(!sup.adopted.load(Ordering::SeqCst));
     }
 }

@@ -1,7 +1,7 @@
 # STT sidecar: localhost-only WebSocket server on 127.0.0.1:27184.
 # Binary frames = raw 16 kHz mono Int16LE PCM. Text frames = JSON control
 # {"cmd": "start"|"stop"|"reload_vocab"|"shutdown"}. Emits JSON results.
-import argparse, asyncio, concurrent.futures, json, pathlib, sys
+import argparse, asyncio, concurrent.futures, json, os, pathlib, sys
 import websockets
 from engine import StreamingEngine, build_asr
 
@@ -40,8 +40,11 @@ def make_handler(app_data, asr_future):
                 elif cmd == "reload_vocab":
                     eng.reload_vocab()
                 elif cmd == "shutdown":
+                    # Terminate the whole process, not just this connection -
+                    # the daemon's kill() for an ADOPTED sidecar has no PID to
+                    # signal, only this control channel.
                     await ws.close()
-                    return
+                    os._exit(0)
             except Exception as e:  # never let one bad frame kill the loop
                 await ws.send(json.dumps({"type": "error", "message": str(e)}))
         executor.shutdown(wait=False)
