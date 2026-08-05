@@ -4,7 +4,10 @@
 // schedule-picker.ts and composer-menu.ts, which both hand-rolled the same
 // lifecycle. Callers own the popover's DOM/content and call `reposition()`
 // themselves whenever content changes size (a re-render can grow/shrink the
-// popover, which affects the flip decision).
+// popover, which affects the flip decision). The outside-dismiss half itself
+// lives in outside-dismiss.ts, shared with row-tooltip.ts (ai_todo 470).
+
+import { wireOutsideDismiss } from "../outside-dismiss";
 
 export interface AnchoredPopoverOptions {
   /** Element the popover is positioned relative to. */
@@ -43,32 +46,18 @@ export function openAnchoredPopover(opts: AnchoredPopoverOptions): AnchoredPopov
     }
   }
 
-  function onOutside(e: MouseEvent): void {
-    if (!el.contains(e.target as Node) && !anchor.contains(e.target as Node)) close();
-  }
-
-  function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-    }
-  }
-
   function close(): void {
     if (closed) return;
     closed = true;
-    document.removeEventListener("mousedown", onOutside, true);
-    document.removeEventListener("keydown", onKey, true);
+    dismiss.dispose();
     opts.onClose();
   }
 
-  // Deferred so the click that opened the popover doesn't itself register as
-  // an "outside" mousedown and immediately close it.
-  setTimeout(() => {
-    if (closed) return;
-    document.addEventListener("mousedown", onOutside, true);
-    document.addEventListener("keydown", onKey, true);
-  }, 0);
+  const dismiss = wireOutsideDismiss({
+    isInside: (target) => el.contains(target) || anchor.contains(target),
+    onDismiss: close,
+    escape: true,
+  });
 
   return { reposition, close };
 }

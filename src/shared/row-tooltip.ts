@@ -1,6 +1,10 @@
 // Shared hover tooltip for `.info-tooltip` boxes (widgets.css), delegated so
 // it survives re-renders. Two placements: "side" (sidebar rows, anchor via
 // [data-tip]) and "above" (settings info-icons, anchor + text via .info-wrap).
+// Outside-tap dismiss builds on outside-dismiss.ts, shared with
+// anchored-popover.ts (ai_todo 470).
+
+import { wireOutsideDismiss } from "./outside-dismiss";
 
 const PAD_SIDE = 10;
 const PAD_ABOVE = 8;
@@ -38,16 +42,11 @@ export function hideRowTooltip(): void {
 function wireGlobalDismiss(): void {
   if (globalDismissWired) return;
   globalDismissWired = true;
-  document.addEventListener(
-    "pointerdown",
-    (e) => {
-      if (!currentAnchor) return;
-      const target = e.target as Node;
-      if (currentAnchor.contains(target) || box?.contains(target)) return;
-      hideRowTooltip();
-    },
-    true,
-  );
+  wireOutsideDismiss({
+    isInside: (target) => !currentAnchor || currentAnchor.contains(target) || !!box?.contains(target),
+    onDismiss: hideRowTooltip,
+    eventType: "pointerdown",
+  });
 }
 
 // Prefer the right side (sidebar rail lives on the left edge); flip left when
