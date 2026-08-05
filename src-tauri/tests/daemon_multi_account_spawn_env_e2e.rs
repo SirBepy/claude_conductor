@@ -103,6 +103,7 @@ async fn per_account_spawn_sets_config_dir_and_scrubs_auth_env() {
         org_uuid: "org-e2e-test".into(),
         subscription_tier: "claude_max".into(),
         created_at: chrono::Utc::now().to_rfc3339(),
+        fleet_eligible: false,
     };
 
     // `accounts.json` is shared, real, unsandboxed state - see the file-level
