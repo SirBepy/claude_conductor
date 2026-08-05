@@ -67,6 +67,11 @@ body {
   text-align: center;
 }
 
+/* Any author display rule beats the UA [hidden] rule, so restate it here. */
+.screen[hidden] {
+  display: none;
+}
+
 .lead {
   font-size: 16px;
   margin: 0;
