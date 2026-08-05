@@ -52,15 +52,19 @@
     }
   }
 
+  // no-cors: cross-origin from the shell's own http://tauri.localhost to the
+  // daemon (no CORS headers), so a normal fetch's response is unreadable.
+  // An opaque response still REJECTS on a real network failure - enough for a liveness check.
   async function checkHealth(baseUrl) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
     try {
-      const res = await fetch(baseUrl + "/api/health", {
+      await fetch(baseUrl + "/api/health", {
         signal: controller.signal,
         cache: "no-store",
+        mode: "no-cors",
       });
-      return res.ok;
+      return true;
     } catch {
       return false;
     } finally {
@@ -96,25 +100,31 @@
     connect(normalized);
   });
 
+  // Low-level IPC bridge instead of window.__TAURI__.barcodeScanner (needs
+  // withGlobalTauri:true) - that global also leaks into the SPA once we
+  // navigate there, making it think it's the native app, not a remote client.
+  function scannerInvoke(cmd, args) {
+    return window.__TAURI_INTERNALS__.invoke(`plugin:barcode-scanner|${cmd}`, args);
+  }
+
   // Scans the same pairing QR the desktop's Settings > Remote access tab
   // shows (https://host/?pair=CODE) - connect() carries the full URL through
   // so the SPA auto-exchanges the code instead of the user re-pairing by hand.
-  if (!window.__TAURI__?.barcodeScanner) {
+  if (!window.__TAURI_INTERNALS__?.invoke) {
     scanQrBtn.hidden = true;
   } else {
     scanQrBtn.addEventListener("click", () => {
       void (async () => {
-        const { barcodeScanner } = window.__TAURI__;
         scanQrBtn.disabled = true;
         try {
-          let state = await barcodeScanner.checkPermissions();
-          if (state !== "granted") state = await barcodeScanner.requestPermissions();
+          let { camera: state } = await scannerInvoke("check_permissions");
+          if (state !== "granted") ({ camera: state } = await scannerInvoke("request_permissions"));
           if (state !== "granted") {
             setupError.textContent = "Camera permission denied - enable it in app settings.";
             setupError.hidden = false;
             return;
           }
-          const result = await barcodeScanner.scan({ windowed: true, formats: [barcodeScanner.Format.QRCode] });
+          const result = await scannerInvoke("scan", { windowed: true, formats: ["QR_CODE"] });
           const normalized = normalizeUrl(result.content);
           if (!normalized) {
             setupError.textContent = "That QR code isn't a valid https:// server URL.";
