@@ -120,9 +120,11 @@ async fn per_account_spawn_sets_config_dir_and_scrubs_auth_env() {
     let port_file = app_data.join(format!("hooks_port-{INSTANCE}.txt"));
     let _ = std::fs::remove_file(&port_file);
 
-    let mut daemon_exe = std::env::current_dir().unwrap();
-    daemon_exe.push("target");
-    daemon_exe.push("debug");
+    // Derive from this test binary rather than assuming ./target: .cargo/config.toml
+    // redirects target-dir off the repo.
+    let mut daemon_exe = std::env::current_exe().unwrap();
+    daemon_exe.pop();
+    daemon_exe.pop();
     daemon_exe.push("cc-conductor-daemon.exe");
 
     let build = Command::new("cargo")

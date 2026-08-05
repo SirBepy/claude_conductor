@@ -29,9 +29,11 @@ async fn app_binary_daemon_mode_serves_and_shuts_down() {
         .expect("cargo build");
     assert!(build.success(), "cargo build --bin claude-conductor failed");
 
-    let mut exe = std::env::current_dir().unwrap();
-    exe.push("target");
-    exe.push("debug");
+    // Derive from this test binary rather than assuming ./target: .cargo/config.toml
+    // redirects target-dir off the repo.
+    let mut exe = std::env::current_exe().unwrap();
+    exe.pop();
+    exe.pop();
     exe.push("claude-conductor.exe");
     assert!(exe.exists(), "app exe missing: {}", exe.display());
 

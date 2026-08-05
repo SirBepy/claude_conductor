@@ -50,9 +50,11 @@ async fn external_session_without_matching_channel_stays_external() {
         .status()
         .expect("cargo build");
     assert!(build.success());
-    let mut exe = std::env::current_dir().unwrap();
-    exe.push("target");
-    exe.push("debug");
+    // Derive from this test binary rather than assuming ./target: .cargo/config.toml
+    // redirects target-dir off the repo.
+    let mut exe = std::env::current_exe().unwrap();
+    exe.pop();
+    exe.pop();
     exe.push("cc-conductor-daemon.exe");
     let mut child = Command::new(&exe)
         .env("CC_DAEMON_INSTANCE", INSTANCE)

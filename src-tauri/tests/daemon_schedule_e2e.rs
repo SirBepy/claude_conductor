@@ -33,18 +33,11 @@ mod support;
 use support::ChildGuard;
 
 fn daemon_exe() -> std::path::PathBuf {
-    // Respects `CARGO_TARGET_DIR` if the environment sets it (e.g. to avoid
-    // colliding with a currently-running daemon locking the default
-    // `target/debug/cc-conductor-daemon.exe`); falls back to the default
-    // `<cwd>/target/debug` otherwise, matching `daemon_session_e2e.rs`.
-    let mut p = std::env::var_os("CARGO_TARGET_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let mut p = std::env::current_dir().unwrap();
-            p.push("target");
-            p
-        });
-    p.push("debug");
+    // Derived from this test binary's own path, so a `CARGO_TARGET_DIR`
+    // override (e.g. to dodge a running daemon's lock) is honored for free.
+    let mut p = std::env::current_exe().unwrap();
+    p.pop();
+    p.pop();
     p.push("cc-conductor-daemon.exe");
     p
 }

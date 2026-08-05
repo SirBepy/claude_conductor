@@ -417,9 +417,11 @@ mod tests {
         }
         assert!(build_ok, "cargo build --bin cc-conductor-daemon failed after retries");
 
-        let mut exe = std::env::current_dir().unwrap();
-        exe.push("target");
-        exe.push("debug");
+        // Derive from this test binary (<target-dir>/debug/deps/x.exe) rather than
+        // assuming ./target: .cargo/config.toml redirects target-dir off the repo.
+        let mut exe = std::env::current_exe().unwrap();
+        exe.pop();
+        exe.pop();
         exe.push("cc-conductor-daemon.exe");
         let child = Command::new(&exe)
             .env("CC_DAEMON_INSTANCE", INSTANCE)
