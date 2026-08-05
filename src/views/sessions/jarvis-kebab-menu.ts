@@ -14,6 +14,7 @@
 // looks identical to every other 3-dot menu in the app.
 
 import { invoke } from "../../shared/ipc";
+import { askConfirm } from "../../shared/confirm";
 import { state, setActiveSession } from "./state";
 import { positionDropdown, positionSubmenu } from "./position-dropdown";
 
@@ -61,42 +62,39 @@ function makeItem(
   return btn;
 }
 
-/** "Restart Jarvis": force-kills the daemon's live child and respawns it
- *  resuming the SAME session id (never a fork). The id doesn't change, so
- *  `selectSession` would otherwise early-return on "already selected" -
- *  clearing the active id first forces the full re-mount (same precedent
- *  `active-session.ts`'s `mountRenderer` bail-out callback uses). */
-async function restartJarvis(sessionId: string): Promise<void> {
+/** Shared by restart and clear-context: invoke, then re-mount the pane on the
+ *  returned session id. Clearing the active id first forces a full re-mount
+ *  even when the id is unchanged (restart's case). */
+async function invokeAndRemount(sessionId: string, command: string, failLabel: string): Promise<void> {
   try {
-    const newId = await invoke<string>("restart_jarvis_session", { sessionId });
+    const newId = await invoke<string>(command, { sessionId });
     const pane = document.querySelector<HTMLElement>("#session-pane");
     if (!pane) return;
     const m = await import("./active-session");
     setActiveSession(null);
     await m.selectSession(newId, pane);
   } catch (e) {
-    console.error("[jarvis-menu] restart failed", e);
-    alert(`Failed to restart Jarvis: ${e}`);
+    console.error(`[jarvis-menu] ${failLabel} failed`, e);
+    alert(`Failed to ${failLabel}: ${e}`);
   }
 }
 
-/** "Clear context": unlike Restart above, this discards the whole transcript
- *  and lands on a NEW session id - a normal fresh mount, no bail-out needed.
+/** "Restart Jarvis": force-kills the daemon's live child and respawns it
+ *  resuming the SAME session id (never a fork). */
+async function restartJarvis(sessionId: string): Promise<void> {
+  await invokeAndRemount(sessionId, "restart_jarvis_session", "restart Jarvis");
+}
+
+/** "Clear context": discards the whole transcript, lands on a NEW session id.
  *  Confirms first since a menu click carries no typed intent the way "/clear"
  *  does, and the wipe can't be undone. */
 async function clearContext(sessionId: string): Promise<void> {
-  if (!confirm("Clear Jarvis's context? This permanently discards its whole conversation history and starts fresh.")) return;
-  try {
-    const newId = await invoke<string>("clear_jarvis_context", { sessionId });
-    const pane = document.querySelector<HTMLElement>("#session-pane");
-    if (!pane) return;
-    const m = await import("./active-session");
-    setActiveSession(null);
-    await m.selectSession(newId, pane);
-  } catch (e) {
-    console.error("[jarvis-menu] clear context failed", e);
-    alert(`Failed to clear Jarvis's context: ${e}`);
-  }
+  const ok = await askConfirm(
+    "Clear Jarvis's context? This permanently discards its whole conversation history and starts fresh.",
+    { confirmLabel: "Clear", danger: true },
+  );
+  if (!ok) return;
+  await invokeAndRemount(sessionId, "clear_jarvis_context", "clear Jarvis's context");
 }
 
 // Dynamic import of active-session.ts (not a static one) avoids a module
