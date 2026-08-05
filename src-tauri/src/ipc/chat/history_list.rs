@@ -103,15 +103,10 @@ fn parse_date_bound(s: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.timestamp())
 }
 
-/// Core of `list_history`, split out so it can be unit-tested against a temp
-/// projects dir, and reused by the daemon RPC mirror (`daemon::methods::history`)
-/// so the remote/phone client shares the exact same walk + cache. Does the
-/// cheap walk + stat + sort + slice FIRST, then parses titles for the returned
-/// page only. Title `search` and `model_filter` need parsed data: search falls
-/// back to the full-parse path (it inherently needs every title), while
-/// `model_filter` alone streams the sort-order list, parsing only until
-/// `limit` matches are collected past `offset` (the History view passes both
-/// `None`, so the common case stays cheap).
+/// Core of `list_history`: cheap walk + stat + sort + slice FIRST, then parse
+/// titles for the returned page only. `search` needs every title so it takes
+/// the full-parse path; `model_filter` alone streams the sorted list, parsing
+/// only until `limit` matches are collected past `offset`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_history(
     projects_dir: &std::path::Path,
@@ -237,14 +232,9 @@ fn paginate<T: Clone>(items: Vec<T>, offset: u32, limit: u32) -> Vec<T> {
     items[start..end].to_vec()
 }
 
-/// List past sessions by walking `~/.claude/projects/<encoded-cwd>/*.jsonl`.
-/// `~/.claude/sessions/` is pid-keyed metadata, not transcripts. Returns a
-/// paginated, optionally-filtered list sorted newest first by mtime.
-///
-/// `project_id` filters by the encoded-cwd dir name (the same slug
-/// `tokens::encode_cwd_as_project_dir` produces). Pass `None` to list all.
-///
-/// Runs on the blocking pool: the dir walk + (page-only) title parses are
+/// Lists past sessions by walking `~/.claude/projects/<encoded-cwd>/*.jsonl`
+/// (`~/.claude/sessions/` is pid-keyed metadata, not transcripts). Runs on
+/// the blocking pool since the dir walk + page-only title parses are
 /// synchronous filesystem IO that would otherwise stall the async runtime.
 #[tauri::command]
 pub async fn list_history(

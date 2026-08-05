@@ -1,7 +1,6 @@
 // Tool-chip-folding machinery (ai_todo 313, split off of turn-collapse.ts):
 // groups a turn's compact tool rows into one strip of chips per tool type,
-// with nested strips for subagent children. See groupToolRange's own doc for
-// the strip/panel DOM shape this builds.
+// with nested strips for subagent children.
 
 import type { RenderedMessage } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
@@ -130,19 +129,10 @@ function rebuildCustomBucket(
 // Nested-strip helpers (child tool calls under a parent Agent/Task chip)
 // ---------------------------------------------------------------------------
 
-/**
- * Lazily get or create the nested strip pair that lives inside the Agent
- * chip's bucket element. The nested strip is a standard tool-strip /
- * tool-strip-panel pair so the existing delegated handleToolChipClick
- * toggles it identically to the main strip.
- *
- * Layout inside parentBucket:
- *   <div class="tool-strip-group" data-tool="Task"> <!-- parentBucket -->
- *     <div class="tool-strip">…nested chips…</div>
- *     <div class="tool-strip-panel" hidden>…nested buckets…</div>
- *     …child tool rows…
- *   </div>
- */
+/** Lazily creates/gets the nested strip pair inside an Agent chip's bucket.
+ *  Uses the same .tool-strip/.tool-strip-panel shape as the main strip, so
+ *  the existing delegated handleToolChipClick toggles it identically
+ *  without any nested-specific click handling. */
 function getOrCreateNestedStripInBucket(
   parentBucket: HTMLElement,
   nestedGroups: Map<string, ToolGroup>,
@@ -180,37 +170,10 @@ function getOrCreateNestedStripInBucket(
 // Main grouping function
 // ---------------------------------------------------------------------------
 
-/**
- * Fold a turn's compact tool rows into ONE inline strip of chips (one chip per
- * tool type). Clicking a chip opens an accordion panel with that type's rows.
- *
- * Main-strip structure inserted into the container:
- *   <div class="tool-strip">
- *     <button class="tool-chip" data-tool="Task">…Subagent x1</button>
- *     <button class="tool-chip" data-tool="Bash">…Ran x3</button>
- *     …
- *   </div>
- *   <div class="tool-strip-panel" hidden>
- *     <div class="tool-strip-group" data-tool="Task" hidden>
- *       <!-- nested strip for child calls -->
- *       <div class="tool-strip">…child chips…</div>
- *       <div class="tool-strip-panel" hidden>…child buckets…</div>
- *     </div>
- *     <div class="tool-strip-group" data-tool="Bash" hidden>…rows…</div>
- *     …
- *   </div>
- *
- * Child tool_use rows (parentToolUseId !== null) are routed into the nested
- * strip inside their parent Agent chip's bucket. Main-strip chip counts
- * EXCLUDE child calls; only the Subagent chip represents the subagent.
- *
- * Idempotent: rows already moved into a bucket carry `data-tool-grouped` and
- * are skipped, so the live path can call this every flush to grow the count.
- * Rich inline edit cards (.tool-use--file) stay where they are.
- *
- * The `groups` map (keyed by canonical tool name) persists for the active turn;
- * pass a fresh map for closed ranges.
- */
+/** Folds a turn's compact tool rows into one chip strip per tool type;
+ *  child tool_use rows nest under their parent Task/Agent chip's bucket
+ *  instead of the main strip. Idempotent via `data-tool-grouped`, so the
+ *  live render path can call this every flush to grow existing counts. */
 export function groupToolRange(
   messages: RenderedMessage[],
   messageEls: HTMLElement[],

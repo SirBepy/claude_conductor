@@ -94,9 +94,8 @@ export interface SessionsState {
   previewController: PreviewController | null;
   /** Session ids currently mid-takeover (external -> interactive promotion).
    *  The takeover-btn handler owns reconciling its own pane in place; the
-   *  global instances-changed listener's readonly-banner-mismatch reload
-   *  (sessions.ts) skips ids in this set so the two don't race to both
-   *  tear down and rebuild the same pane. */
+   *  global instances-changed listener (sessions-wiring.ts) skips ids in
+   *  this set so the two don't race to both rebuild the pane. */
   takeoverInFlightIds: Set<string>;
 }
 

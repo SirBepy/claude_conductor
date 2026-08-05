@@ -34,24 +34,10 @@ import {
  * one re-reading `window.__TAURI__?.event`. */
 export type TauriEventApi = NonNullable<Window["__TAURI__"]>["event"];
 
-/**
- * Reclaim the event-store cache entry (listeners + buffered events) of any
- * session that just ended or vanished from `state.sessions` (refreshSessions()
- * replaces it with only the LIVE ones - sidebar.ts's isLive filters out
- * ended_at). `previousIds` must be snapshotted BEFORE the refresh that
- * produced `refreshed`; ids still present un-latch a stale `ended` mark left
- * by an earlier transient vanish (e.g. daemon restart) so closing the pane
- * later doesn't tear down a live session's cache. Eviction is deferred by
- * evictEnded itself if the session is still open in this pane.
- *
- * Gated on `refreshed`: refreshSessions()'s catch empties state.sessions on
- * ANY list_instances failure, which this diff cannot tell apart from
- * "everything ended" - evicting there would flush every background cache on
- * a transient IPC blip. A successful-but-empty list still evicts (those
- * sessions genuinely ended). Shared by the main sessions view's and the
- * detached window's instances-changed handlers, each with their own
- * event-store singleton (separate webviews).
- */
+/** Evicts the event-store cache for sessions that ended/vanished from
+ *  `state.sessions`. `previousIds` must be snapshotted BEFORE the refresh
+ *  that produced `refreshed`. Gated on `refreshed`: refreshSessions()'s catch
+ *  empties state.sessions on ANY failure, indistinguishable from "all ended". */
 export function reconcileEndedSessions(previousIds: Set<string>, refreshed: boolean): void {
   if (!refreshed) return;
   const currentIds = new Set(state.sessions.map((s) => s.session_id));
@@ -377,11 +363,9 @@ export async function wireInstancesChangedListener(
       pane.innerHTML = paneEmptyStateHtml(state.daemonConnected, state.daemonSetupStalled);
     }
     // If the selected session's kind changed (e.g. Interactive -> External
-    // after "Open in Terminal"), the pane must re-render to show the correct
-    // read-only UI. Detect by comparing pane DOM vs current kind. Skipped
-    // while the takeover-btn handler owns this same transition in place
-    // (see takeoverInFlightIds doc) so the two don't race to both rebuild
-    // the pane.
+    // after "Open in Terminal"), re-render to show the correct read-only UI.
+    // Skipped for ids in takeoverInFlightIds - the takeover-btn handler owns
+    // that transition in place and would otherwise race this reload.
     if (!state.pendingNewSession && state.selectedId && !state.takeoverInFlightIds.has(state.selectedId)) {
       const updatedSess = state.sessions.find((s) => s.session_id === state.selectedId);
       if (updatedSess) {

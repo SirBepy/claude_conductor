@@ -66,15 +66,10 @@ pub fn takeover(
     // typical hardware without making the takeover UX feel laggy.
     std::thread::sleep(std::time::Duration::from_millis(250));
 
-    // 4. Promote registry entry to Interactive. record_interactive_session
-    //    is upsert-with-takeover semantics: existing entry's project_id
-    //    and pid are preserved while kind, busy, ended_at, end_reason
-    //    are reset. If the on-disk file (step 2) disagreed with the
-    //    registry, this upserts under a NEW key instead of updating the
-    //    entry found by pid - retire that old entry now (same EndReason
-    //    the account-move path uses for its pre-move stub) so it doesn't
-    //    linger as a live-looking zombie until the 5s detector poll
-    //    reconciles the now-dead pid.
+    // 4. Promote registry entry to Interactive (upsert-with-takeover:
+    //    project_id/pid preserved, kind/busy/ended_at/end_reason reset).
+    //    A session_id mismatch upserts under a NEW key, so retire the old
+    //    one now instead of leaving a zombie for the 5s detector to catch.
     let now = Utc::now().to_rfc3339();
     if session_id != session_id_from_registry {
         registry.mark_ended(&session_id_from_registry, EndReason::Moved, &now);
