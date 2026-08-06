@@ -41,6 +41,12 @@ pub struct SttSupervisor {
     consecutive_failures: AtomicUsize,
     backoff_until: Mutex<Option<Instant>>,
     adopted: std::sync::atomic::AtomicBool,
+    /// Last child's real lifetime, stamped at stderr EOF. Arc'd for the task.
+    last_run: Arc<Mutex<Option<Duration>>>,
+    /// Past `GIVE_UP_THRESHOLD`: stop spawning until a healthy sidecar appears.
+    gave_up: std::sync::atomic::AtomicBool,
+    /// First stderr line of the streak; a broken sidecar logs its reason once.
+    last_stderr: Arc<Mutex<Option<String>>>,
 }
 
 /// Exponential backoff after consecutive fast spawn failures, capped so a
@@ -96,6 +102,9 @@ impl SttSupervisor {
             consecutive_failures: AtomicUsize::new(0),
             backoff_until: Mutex::new(None),
             adopted: std::sync::atomic::AtomicBool::new(false),
+            last_run: Arc::new(Mutex::new(None)),
+            gave_up: std::sync::atomic::AtomicBool::new(false),
+            last_stderr: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -163,16 +172,23 @@ impl SttSupervisor {
                     // diagnostic output either time. Surface the exit status so a
                     // future occurrence at least has a reason instead of silence.
                     log::warn!("stt-sidecar exited unexpectedly (status {status:?}); respawning");
-                    let fast_fail = matches!(
-                        *self.spawn_started.lock().await,
-                        Some(t) if t.elapsed() < FAST_FAIL_WINDOW
-                    );
+                    // Real lifetime, not time-until-noticed: a child that died in
+                    // 1s measured as 11s, so it never counted as a fast failure.
+                    let lifetime = *self.last_run.lock().await;
+                    let fast_fail = match lifetime {
+                        Some(d) => d < FAST_FAIL_WINDOW,
+                        None => matches!(
+                            *self.spawn_started.lock().await,
+                            Some(t) if t.elapsed() < FAST_FAIL_WINDOW
+                        ),
+                    };
                     *guard = None; // drop the reaped handle so it isn't re-detected next call
                     if fast_fail {
                         self.note_fast_failure().await;
                     } else {
                         self.consecutive_failures.store(0, Ordering::SeqCst);
                         *self.backoff_until.lock().await = None;
+                        *self.last_stderr.lock().await = None;
                     }
                 }
                 Err(e) => {
@@ -193,6 +209,8 @@ impl SttSupervisor {
         if probe_sidecar_alive().await {
             self.consecutive_failures.store(0, Ordering::SeqCst);
             *self.backoff_until.lock().await = None;
+            *self.last_stderr.lock().await = None;
+            self.gave_up.store(false, Ordering::SeqCst);
             // Log once per adoption, not once per WS connect that re-checks it.
             if !self.adopted.swap(true, Ordering::SeqCst) {
                 log::info!("stt-sidecar: adopting existing healthy sidecar on port {SIDECAR_PORT}");
@@ -200,6 +218,13 @@ impl SttSupervisor {
             return Ok(());
         }
         self.adopted.store(false, Ordering::SeqCst);
+
+        if self.gave_up.load(Ordering::SeqCst) {
+            return Err(format!(
+                "stt-sidecar: gave up after {GIVE_UP_THRESHOLD} consecutive failures; \
+                 restart the app (or fix the sidecar) to retry"
+            ));
+        }
 
         if let Some(until) = *self.backoff_until.lock().await {
             if Instant::now() < until {
@@ -238,17 +263,31 @@ impl SttSupervisor {
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("spawn stt-sidecar in {dir:?}: {e}"))?;
-        *self.spawn_started.lock().await = Some(Instant::now());
+        let started = Instant::now();
+        *self.spawn_started.lock().await = Some(started);
+        *self.last_run.lock().await = None;
         log::info!("stt-sidecar spawned (pid {:?})", child.id());
         // Drain stderr in the background so an early crash (e.g. a port-bind
         // race against a not-yet-exited previous instance) leaves a reason in
         // the log instead of vanishing into the piped-but-never-read handle.
         if let Some(stderr) = child.stderr.take() {
+            let last_run = self.last_run.clone();
+            let last_stderr = self.last_stderr.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
+                let mut first: Option<String> = None;
                 while let Ok(Some(line)) = lines.next_line().await {
-                    log::warn!("stt-sidecar stderr: {line}");
+                    // First line of a NEW reason only (was: whole traceback, per respawn).
+                    if first.is_none() {
+                        first = Some(line.clone());
+                        let mut seen = last_stderr.lock().await;
+                        if seen.as_deref() != Some(line.as_str()) {
+                            log::warn!("stt-sidecar stderr: {line}");
+                            *seen = Some(line);
+                        }
+                    }
                 }
+                *last_run.lock().await = Some(started.elapsed());
             });
         }
         *guard = Some(child);
@@ -262,12 +301,15 @@ impl SttSupervisor {
         let n = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
         let wait = backoff_for(n);
         *self.backoff_until.lock().await = Some(Instant::now() + wait);
-        if n == GIVE_UP_THRESHOLD {
-            log::warn!(
-                "stt-sidecar: {n} consecutive bind failures on port {SIDECAR_PORT}; giving up on \
-                 fast retries, settling into a {wait:?} cadence"
-            );
-        } else if n < GIVE_UP_THRESHOLD {
+        if n >= GIVE_UP_THRESHOLD {
+            if !self.gave_up.swap(true, Ordering::SeqCst) {
+                log::warn!(
+                    "stt-sidecar: {n} consecutive failures; giving up until a healthy sidecar \
+                     appears or the daemon restarts. Last error: {}",
+                    self.last_stderr.lock().await.as_deref().unwrap_or("(none captured)")
+                );
+            }
+        } else {
             log::warn!("stt-sidecar: bind failure {n} in a row; backing off {wait:?}");
         }
     }
