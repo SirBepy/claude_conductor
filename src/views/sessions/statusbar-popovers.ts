@@ -11,8 +11,11 @@ import { invoke } from "../../shared/ipc";
 import { EFFORTS, readModels, modelDisplayLabel, modelFamilyFromId } from "../../shared/effort-presets";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { AiTodoEntry, ChatDrain, ServerInfo } from "../../types/ipc.generated";
-import type { ChatImageCollection } from "../../shared/chat/chat-image-gallery-data";
+import { collectChatImages, type ChatImageCollection } from "../../shared/chat/chat-image-gallery-data";
 import { openChatImageGallery } from "../../shared/chat/chat-image-gallery";
+import type { RenderedMessage } from "../../shared/chat/chat-transforms";
+import { sessionEvents } from "../../shared/chat/event-store";
+import { startBackgroundImageFill, shadowMessageEls } from "../../shared/chat/chat-image-history-fill";
 import { drainCache } from "./session-statusbar-helpers";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -241,16 +244,35 @@ export class AiTodosPopover {
 export class ImagesPopover {
   collection: ChatImageCollection | null = null;
   private hasMoreOlder = false;
+  private sessionId: string | null = null;
+  private cwd: string | undefined;
   private shell = new PopoverShell();
+  // Scoped to "popover is open" - started on open(), cancelled via the shell's
+  // onClose hook so every close path (button toggle, outside-click) stops it.
+  private fillCancel: (() => void) | null = null;
+  private lastAnchor: HTMLElement | null = null;
+  private extraMessages: RenderedMessage[] = [];
+  private baseMessages: RenderedMessage[] = [];
+  private baseMessageEls: HTMLElement[] = [];
 
   get isOpen(): boolean { return this.shell.isOpen; }
 
-  /** `hasMore` mirrors event-store's hasMore for the session, so the list can
-   *  show a trailing "loading earlier images" row while older history hasn't
-   *  been fetched yet. */
-  refresh(collection: ChatImageCollection, hasMore = false): void {
-    this.collection = collection;
+  // Recomputes `collection` from the live snapshot merged with whatever the
+  // background fill (see open()) has accumulated, so neither source clobbers
+  // the other. Called on every render and after each fill page.
+  refresh(messages: RenderedMessage[], messageEls: HTMLElement[], hasMore: boolean, sessionId: string | null, cwd: string | undefined): void {
     this.hasMoreOlder = hasMore;
+    this.sessionId = sessionId;
+    this.cwd = cwd;
+    this.baseMessages = messages;
+    this.baseMessageEls = messageEls;
+    this.collection = this.mergedCollection();
+  }
+
+  private mergedCollection(): ChatImageCollection {
+    if (this.extraMessages.length === 0) return collectChatImages(this.baseMessages, this.baseMessageEls);
+    const extraEls = this.extraMessages.map((m) => shadowMessageEls.get(m) ?? document.createElement("div"));
+    return collectChatImages([...this.extraMessages, ...this.baseMessages], [...extraEls, ...this.baseMessageEls]);
   }
 
   renderChip(animClass: (key: string) => string): string {
@@ -265,8 +287,14 @@ export class ImagesPopover {
    *  No-op when there are no images. */
   open(anchor: HTMLElement): void {
     if (!this.collection || this.collection.images.length === 0) { this.shell.close(); return; }
+    this.lastAnchor = anchor;
     this.shell.open(anchor, this.buildHtml(), {
       className: "sb-images-popover",
+      onClose: () => {
+        this.fillCancel?.();
+        this.fillCancel = null;
+        this.extraMessages = [];
+      },
       wire: (el) => {
         el.querySelector<HTMLElement>(".sb-images-popover-close")?.addEventListener("click", () => this.close());
         el.querySelectorAll<HTMLElement>(".sb-images-row").forEach((row) => {
@@ -278,6 +306,7 @@ export class ImagesPopover {
         });
       },
     });
+    this.startFillIfNeeded();
   }
 
   close(): void { this.shell.close(); }
@@ -285,6 +314,20 @@ export class ImagesPopover {
   toggle(anchor: HTMLElement): void {
     if (this.shell.isOpen) this.shell.close();
     else this.open(anchor);
+  }
+
+  /** Starts paging older history into `collection` in the background, once,
+   *  for the lifetime of this open popover. No-op if already running or there
+   *  is nothing older to fetch. */
+  private startFillIfNeeded(): void {
+    if (this.fillCancel || !this.sessionId || !sessionEvents.hasMore(this.sessionId)) return;
+    const sid = this.sessionId;
+    this.fillCancel = startBackgroundImageFill(sid, this.cwd, (extraMessages, hasMore) => {
+      this.extraMessages = extraMessages;
+      this.hasMoreOlder = hasMore;
+      this.collection = this.mergedCollection();
+      if (this.isOpen && this.lastAnchor) this.open(this.lastAnchor);
+    });
   }
 
   private buildHtml(): string {

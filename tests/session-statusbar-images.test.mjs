@@ -43,7 +43,7 @@ beforeEach(() => {
 describe("images chip", () => {
   it("hides when there are no images", () => {
     const { el, sb } = mount();
-    setChatImageDataProvider(() => ({ messages: [userMsg("hi")], messageEls: [document.createElement("div")] }));
+    setChatImageDataProvider(() => ({ messages: [userMsg("hi")], messageEls: [document.createElement("div")], sessionId: "sess-1", cwd: undefined }));
     sb.updateToolTally({ byType: [] });
     expect(el.querySelector(".sb-images")).toBeNull();
   });
@@ -52,7 +52,7 @@ describe("images chip", () => {
     const { el, sb } = mount();
     const msgEl = document.createElement("div");
     msgEl.appendChild(attachmentThumb("image/png", "AAAA", "shot.png"));
-    setChatImageDataProvider(() => ({ messages: [userMsg("here is a file")], messageEls: [msgEl] }));
+    setChatImageDataProvider(() => ({ messages: [userMsg("here is a file")], messageEls: [msgEl], sessionId: "sess-1", cwd: undefined }));
     sb.updateToolTally({ byType: [] });
 
     const chip = el.querySelector(".sb-images-btn");
@@ -73,7 +73,7 @@ describe("images chip", () => {
     const { el, sb } = mount();
     const msgEl = document.createElement("div");
     msgEl.appendChild(attachmentThumb("image/png", "AAAA", "shot.png"));
-    setChatImageDataProvider(() => ({ messages: [userMsg("file")], messageEls: [msgEl] }));
+    setChatImageDataProvider(() => ({ messages: [userMsg("file")], messageEls: [msgEl], sessionId: "sess-1", cwd: undefined }));
     sb.updateToolTally({ byType: [] });
 
     el.querySelector(".sb-images-btn").dispatchEvent(new MouseEvent("click", { bubbles: true }));

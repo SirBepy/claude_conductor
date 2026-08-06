@@ -33,6 +33,11 @@ export interface PopoverShellOptions {
   className?: string;
   /** Wire event handlers on the freshly built content before it is positioned. */
   wire?: (el: HTMLElement) => void;
+  /** Fired from close() only (not from open()'s in-place rebuild teardown), so
+   *  a popover can stop a background job tied to "is this popover open" no
+   *  matter which path closed it (button toggle, outside-click, a sibling
+   *  popover taking over). */
+  onClose?: () => void;
 }
 
 /**
@@ -44,6 +49,7 @@ export class PopoverShell {
   private el: HTMLElement | null = null;
   private anchor: HTMLElement | null = null;
   private cleanup: (() => void) | null = null;
+  private onCloseCb: (() => void) | null = null;
 
   get isOpen(): boolean { return this.el !== null; }
 
@@ -58,6 +64,7 @@ export class PopoverShell {
     document.body.appendChild(pop);
     this.el = pop;
     this.anchor = anchor;
+    this.onCloseCb = opts.onClose ?? null;
     opts.wire?.(pop);
 
     positionPopoverShell(pop, anchor);
@@ -81,5 +88,8 @@ export class PopoverShell {
     this.el?.remove();
     this.el = null;
     this.anchor = null;
+    const onClose = this.onCloseCb;
+    this.onCloseCb = null;
+    onClose?.();
   }
 }

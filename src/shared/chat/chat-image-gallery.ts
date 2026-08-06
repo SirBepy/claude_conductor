@@ -5,7 +5,11 @@
 import { escapeHtml } from "../escape-html";
 import { setupImageZoomPan } from "./image-zoom-pan";
 import { registerOverlayBack } from "../back-button";
-import type { ChatImageCollection } from "./chat-image-gallery-data";
+import { collectChatImages, type ChatImageCollection } from "./chat-image-gallery-data";
+import type { RenderedMessage } from "./chat-transforms";
+import { getChatRendererSnapshot } from "./chat-renderer-bridge";
+import { sessionEvents } from "./event-store";
+import { startBackgroundImageFill, shadowMessageEls } from "./chat-image-history-fill";
 
 const RAIL_PEEK_MS = 1600;
 
@@ -18,9 +22,14 @@ let idx = 0;
 let railPinned = false;
 let peekTimer: ReturnType<typeof setTimeout> | null = null;
 let lastEntryIndex = -1;
+// Scoped to "gallery is open" - cancelled the moment it closes (ARCH: a
+// permanent background job would keep paging history nobody is looking at).
+let fillCancel: (() => void) | null = null;
 
 export function closeChatImageGallery(): void {
   if (!overlay) return;
+  fillCancel?.();
+  fillCancel = null;
   backDisposer?.();
   backDisposer = null;
   overlay.remove();
@@ -95,43 +104,49 @@ export function openChatImageGallery(collection: ChatImageCollection, startIndex
   const railList = document.createElement("div");
   railList.className = "gallery-rail-list";
 
-  // Built once at open time (entries don't change mid-session-view); render()
-  // only toggles .current and scrolls, it never rebuilds this list.
-  const entryRows: HTMLDivElement[] = [];
-  collection.entries.forEach((entry) => {
-    const row = document.createElement("div");
-    row.className = "gallery-rail-entry";
+  // Rebuilt whenever the background history fill grows `collection` (see
+  // rebuildRail below) - render() only toggles .current and scrolls, it never
+  // rebuilds this list itself.
+  let entryRows: HTMLDivElement[] = [];
+  function rebuildRail(): void {
+    railList.innerHTML = "";
+    entryRows = [];
+    collection.entries.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "gallery-rail-entry";
 
-    const top = document.createElement("div");
-    top.className = "gallery-rail-entry-top";
-    const name = document.createElement("span");
-    name.className = "gallery-rail-entry-name";
-    name.textContent = entry.name;
-    const count = document.createElement("span");
-    count.className = "gallery-rail-entry-count";
-    count.textContent = entry.images.length === 1 ? "1 img" : `${entry.images.length} imgs`;
-    top.appendChild(name);
-    top.appendChild(count);
+      const top = document.createElement("div");
+      top.className = "gallery-rail-entry-top";
+      const name = document.createElement("span");
+      name.className = "gallery-rail-entry-name";
+      name.textContent = entry.name;
+      const count = document.createElement("span");
+      count.className = "gallery-rail-entry-count";
+      count.textContent = entry.images.length === 1 ? "1 img" : `${entry.images.length} imgs`;
+      top.appendChild(name);
+      top.appendChild(count);
 
-    const thumbs = document.createElement("div");
-    thumbs.className = "gallery-rail-entry-thumbs";
-    for (let i = 0; i < entry.images.length; i++) {
-      const thumb = document.createElement("span");
-      thumb.className = "gallery-rail-entry-thumb";
-      thumbs.appendChild(thumb);
-    }
+      const thumbs = document.createElement("div");
+      thumbs.className = "gallery-rail-entry-thumbs";
+      for (let i = 0; i < entry.images.length; i++) {
+        const thumb = document.createElement("span");
+        thumb.className = "gallery-rail-entry-thumb";
+        thumbs.appendChild(thumb);
+      }
 
-    row.appendChild(top);
-    row.appendChild(thumbs);
-    row.addEventListener("click", () => {
-      idx = entry.images[0]!;
-      lastEntryIndex = collection.images[idx]!.entryIndex;
-      render();
+      row.appendChild(top);
+      row.appendChild(thumbs);
+      row.addEventListener("click", () => {
+        idx = entry.images[0]!;
+        lastEntryIndex = collection.images[idx]!.entryIndex;
+        render();
+      });
+
+      railList.appendChild(row);
+      entryRows.push(row);
     });
-
-    railList.appendChild(row);
-    entryRows.push(row);
-  });
+  }
+  rebuildRail();
 
   railDrawer.appendChild(railDrawerHeader);
   railDrawer.appendChild(railList);
@@ -166,10 +181,26 @@ export function openChatImageGallery(collection: ChatImageCollection, startIndex
   overlay.appendChild(nextBtn);
   document.body.appendChild(overlay);
 
-  function render(): void {
+  // Counter/rail-label/nav-button state, factored out so the background fill
+  // (which must never disturb the currently-displayed image) can refresh these
+  // without touching the stage.
+  function updateChrome(): void {
     const image = collection.images[idx]!;
     const entry = collection.entries[image.entryIndex]!;
     const posInEntry = entry.images.indexOf(idx) + 1;
+
+    totalCounter.textContent = `${idx + 1} of ${collection.images.length}`;
+    railChipLabel.textContent = entry.name;
+    railChipCount.textContent = `${posInEntry}/${entry.images.length}`;
+    entryRows.forEach((row, i) => {
+      row.classList.toggle("current", i === image.entryIndex);
+    });
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === collection.images.length - 1;
+  }
+
+  function render(): void {
+    const image = collection.images[idx]!;
 
     disposeZoomPan?.();
     // base64's alphabet can't contain &<>"', so escaping image.data (can be
@@ -178,18 +209,8 @@ export function openChatImageGallery(collection: ChatImageCollection, startIndex
     const img = stage.querySelector("img");
     disposeZoomPan = img ? setupImageZoomPan(img, stage) : null;
 
-    totalCounter.textContent = `${idx + 1} of ${collection.images.length}`;
-
-    railChipLabel.textContent = entry.name;
-    railChipCount.textContent = `${posInEntry}/${entry.images.length}`;
-
-    entryRows.forEach((row, i) => {
-      row.classList.toggle("current", i === image.entryIndex);
-    });
+    updateChrome();
     entryRows[image.entryIndex]?.scrollIntoView?.({ block: "nearest" });
-
-    prevBtn.disabled = idx === 0;
-    nextBtn.disabled = idx === collection.images.length - 1;
   }
 
   function go(delta: number): void {
@@ -221,4 +242,26 @@ export function openChatImageGallery(collection: ChatImageCollection, startIndex
     return true;
   });
   render();
+
+  const snapshot = getChatRendererSnapshot();
+  if (snapshot?.sessionId && sessionEvents.hasMore(snapshot.sessionId)) {
+    const baseMessages = snapshot.messages;
+    const baseMessageEls = snapshot.messageEls;
+    // event-store's hasMore already drives the fill's own loop; the gallery has
+    // no "loading earlier" chrome to reflect it against (unlike ImagesPopover).
+    fillCancel = startBackgroundImageFill(snapshot.sessionId, snapshot.cwd, (extraMessages: RenderedMessage[], _hasMore: boolean) => {
+      const extraEls = extraMessages.map((m) => shadowMessageEls.get(m) ?? document.createElement("div"));
+      const newCollection = collectChatImages([...extraMessages, ...baseMessages], [...extraEls, ...baseMessageEls]);
+      // Older pages are always prepended, so the growth shifts every existing
+      // image/entry index by a constant offset - remap idx/lastEntryIndex
+      // instead of touching the currently-displayed image.
+      const imageShift = newCollection.images.length - collection.images.length;
+      const entryShift = newCollection.entries.length - collection.entries.length;
+      collection = newCollection;
+      idx += imageShift;
+      lastEntryIndex += entryShift;
+      rebuildRail();
+      updateChrome();
+    });
+  }
 }

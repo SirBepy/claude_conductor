@@ -8,6 +8,10 @@ import type { RenderedMessage } from "./chat-transforms";
 export interface ChatRendererSnapshot {
   messages: RenderedMessage[];
   messageEls: HTMLElement[];
+  /** Null for a not-yet-started (draft) session, which has no history to page. */
+  sessionId: string | null;
+  /** The paginator's cwd hint - same value ChatPaginator.fetchOlder passes to loadOlder. */
+  cwd: string | undefined;
 }
 
 let provider: (() => ChatRendererSnapshot) | null = null;

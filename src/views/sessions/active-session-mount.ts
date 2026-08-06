@@ -111,7 +111,12 @@ export function wireRenderer(
   // Let a sent-attachment thumb's click listener (attachment-hydrator.ts,
   // no `this`-bound renderer access of its own) build a fresh gallery
   // collection from this session's messages.
-  setChatImageDataProvider(() => ({ messages: renderer.messages, messageEls: renderer.messageEls }));
+  setChatImageDataProvider(() => ({
+    messages: renderer.messages,
+    messageEls: renderer.messageEls,
+    sessionId: renderer.sessionId,
+    cwd: renderer.paginator.cwdHint,
+  }));
   // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
   // resolve this session's working directory.
   setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));

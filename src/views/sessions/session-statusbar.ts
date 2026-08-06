@@ -7,7 +7,6 @@ import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { type ChipType, type StaticChipType, isToolChip, chipToolName, STATIC_CHIPS } from "./statusline-catalog";
 import { getCachedAccount, capitalize } from "../../shared/accounts-cache";
-import { collectChatImages } from "../../shared/chat/chat-image-gallery-data";
 import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
 import { sessionEvents } from "../../shared/chat/event-store";
 import {
@@ -541,9 +540,8 @@ export class SessionStatusbar {
     if (!this.hasChip("images")) return;
     const snapshot = getChatRendererSnapshot();
     if (!snapshot) return;
-    const collection = collectChatImages(snapshot.messages, snapshot.messageEls);
-    const hasMore = this.sessionId ? sessionEvents.hasMore(this.sessionId) : false;
-    this.imagesPopover.refresh(collection, hasMore);
+    const hasMore = snapshot.sessionId ? sessionEvents.hasMore(snapshot.sessionId) : false;
+    this.imagesPopover.refresh(snapshot.messages, snapshot.messageEls, hasMore, snapshot.sessionId, snapshot.cwd);
   }
 
   private render(): void {
