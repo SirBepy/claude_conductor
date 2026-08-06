@@ -13,6 +13,7 @@ pub mod health;
 pub mod hooks_server;
 pub mod idle;
 pub mod instance;
+pub mod iroh_tunnel;
 pub mod jarvis_wake;
 pub mod jsonl_tail;
 pub mod lifecycle;
@@ -191,6 +192,11 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // never fails daemon startup. See daemon/remote_server.rs for the security
     // boundary.
     let stt = remote_server::spawn(state.clone(), app_data.clone(), router.clone());
+
+    // iroh tunnel to that same server (todo 506 phase 2) - reaches the phone
+    // without Tailscale. Runs alongside `tailscale serve`, not instead of it,
+    // until it is verified on a real device. Same best-effort contract.
+    let _iroh = iroh_tunnel::spawn(app_data.clone());
 
     // Idle-shutdown tick for the STT voice sidecar: every 60s, kill it if it has
     // been idle (zero active /ws/transcribe connections) past the 5-min timeout,

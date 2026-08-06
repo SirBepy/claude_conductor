@@ -2,7 +2,7 @@
 name = "claude-conductor"
 version = "0.1.110"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.91"
 # Two bins live here (the app + cc-conductor-daemon). `cargo tauri dev`/`cargo
 # run` need this to know which one is the app.
 default-run = "claude-conductor"
@@ -74,6 +74,7 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # crate. Uses http 1.x (matches reqwest 0.12) and re-exports p256/jwt-simple.
 web-push-native = "0.4.0"
 base64ct = { version = "1.6", features = ["alloc", "std"] }
+iroh = "1.0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
