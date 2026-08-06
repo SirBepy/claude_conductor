@@ -248,13 +248,18 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
 }
 
 /** A prompt closed on the daemon (answered elsewhere or timed out). Clear its
- *  park so it doesn't re-surface on session switch, but leave the card on
- *  screen - the user dismisses it explicitly. */
-function handlePromptResolved(id: string): void {
+ *  park so it doesn't re-surface on session switch. Durable prompts (built-in
+ *  AskUserQuestion) can ONLY resolve via an explicit answer/skip, never a
+ *  timeout, so it's safe to tear down their card here too - this is what lets
+ *  answering on one screen dismiss the card on every other connected screen.
+ *  Non-durable prompts (permission relay, MCP ask_user_question) keep a real
+ *  timeout-removal path, so their card is left up for the user to dismiss. */
+function handlePromptResolved(id: string, durable = false): void {
   clearPendingPromptById(id);
   // No-op if this id never had a draft (permission-shaped prompt, or a
   // question already answered/skipped through the normal submit/cancel path).
   clearQuestionDraft(id);
+  if (durable) dismissQuestionCard(id);
   rerenderSidebar();
 }
 
@@ -266,7 +271,7 @@ function handlePromptResolved(id: string): void {
  * permission prompts raised during a phone-driven turn never surfaced.
  */
 function startRemotePromptPoll(): void {
-  const emitted = new Set<string>();
+  const emitted = new Map<string, boolean>();
   const cb = {
     onQuestion: handleQuestionRequested,
     onPermission: handlePermissionRequested,
@@ -308,9 +313,9 @@ export function installPermissionModalListener(): void {
   ev.listen<QuestionRequestedPayload>("question-requested", (event) => handleQuestionRequested(event.payload));
   // The reliable pending-prompt poll (daemon_link.rs) emits this, so it survives
   // the lossy broadcast.
-  ev.listen<{ id: string }>("prompt-resolved", (event) => {
+  ev.listen<{ id: string; durable?: boolean }>("prompt-resolved", (event) => {
     const id = event.payload?.id;
-    if (id) handlePromptResolved(id);
+    if (id) handlePromptResolved(id, event.payload?.durable === true);
   });
 }
 

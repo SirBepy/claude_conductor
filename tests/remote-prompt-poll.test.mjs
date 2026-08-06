@@ -24,7 +24,7 @@ const PERMISSION = { id: "p1", event: "permission-requested", payload: { id: "p1
 describe("reconcilePendingPrompts", () => {
   let emitted;
   let cb;
-  beforeEach(() => { emitted = new Set(); cb = cbs(); });
+  beforeEach(() => { emitted = new Map(); cb = cbs(); });
 
   it("surfaces a new question prompt once and marks it emitted", () => {
     reconcilePendingPrompts([QUESTION], emitted, cb);
@@ -50,7 +50,7 @@ describe("reconcilePendingPrompts", () => {
     reconcilePendingPrompts([QUESTION], emitted, cb);
     reconcilePendingPrompts([], emitted, cb);
     expect(cb.onResolved).toHaveBeenCalledTimes(1);
-    expect(cb.onResolved).toHaveBeenCalledWith("q1");
+    expect(cb.onResolved).toHaveBeenCalledWith("q1", false);
     expect(emitted.has("q1")).toBe(false);
     // A further empty poll must not re-resolve it.
     reconcilePendingPrompts([], emitted, cb);

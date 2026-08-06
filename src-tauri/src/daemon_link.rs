@@ -105,7 +105,7 @@ fn spawn_pending_prompt_poll(app_handle: tauri::AppHandle) {
 
     tokio::spawn(async move {
         let state = app_handle.state::<crate::state::AppState>();
-        let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut emitted: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
         let mut was_connected = false;
         let mut empty_streak: u32 = 0;
         let mut interval = MIN_POLL_INTERVAL;
@@ -140,7 +140,7 @@ fn spawn_pending_prompt_poll(app_handle: tauri::AppHandle) {
             for p in &arr {
                 let Some(id) = p.get("id").and_then(|v| v.as_str()) else { continue };
                 present.insert(id.to_string());
-                if emitted.contains(id) {
+                if emitted.contains_key(id) {
                     continue;
                 }
                 let event = p.get("event").and_then(|v| v.as_str()).unwrap_or("");
@@ -149,16 +149,17 @@ fn spawn_pending_prompt_poll(app_handle: tauri::AppHandle) {
                 }
                 if let Some(payload) = p.get("payload") {
                     let _ = app_handle.emit(event, payload.clone());
-                    emitted.insert(id.to_string());
+                    let durable = p.get("durable").and_then(|v| v.as_bool()).unwrap_or(false);
+                    emitted.insert(id.to_string(), durable);
                 }
             }
             // A prompt we'd shown is no longer pending (answered or timed out):
             // tell the UI to remove its card via the RELIABLE poll channel (the
             // lossy broadcast can't be trusted to deliver a removal).
-            for id in emitted.iter().filter(|id| !present.contains(*id)) {
-                let _ = app_handle.emit("prompt-resolved", serde_json::json!({ "id": id }));
+            for (id, durable) in emitted.iter().filter(|(id, _)| !present.contains(*id)) {
+                let _ = app_handle.emit("prompt-resolved", serde_json::json!({ "id": id, "durable": durable }));
             }
-            emitted.retain(|id| present.contains(id));
+            emitted.retain(|id, _| present.contains(id));
 
             let any_busy = state.cached_instances.lock().unwrap().iter().any(|i| i.busy);
             if !arr.is_empty() || any_busy {

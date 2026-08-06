@@ -16,26 +16,28 @@ import type { PermissionRequestedPayload, QuestionRequestedPayload } from "./typ
 export interface PromptPollCallbacks {
   onQuestion: (p: QuestionRequestedPayload) => void;
   onPermission: (p: PermissionRequestedPayload) => void;
-  onResolved: (id: string) => void;
+  onResolved: (id: string, durable: boolean) => void;
 }
 
 /** One stored prompt as returned by `list_pending_prompts`:
- *  `{ id, event, payload }` (see daemon state.rs::add_prompt). */
+ *  `{ id, event, payload, durable }` (see daemon state.rs::add_prompt). */
 interface StoredPrompt {
   id?: unknown;
   event?: unknown;
   payload?: unknown;
+  durable?: unknown;
 }
 
 /**
- * Diff a fresh `list_pending_prompts` snapshot against the set of ids already
+ * Diff a fresh `list_pending_prompts` snapshot against the ids already
  * surfaced. New question/permission prompts fire their callback exactly once
- * (and are added to `emitted`); ids that vanished from the snapshot fire
- * `onResolved` and are dropped. Mutates `emitted` in place.
+ * (and are added to `emitted`, mapped to their durability); ids that vanished
+ * from the snapshot fire `onResolved` with that durability and are dropped.
+ * Mutates `emitted` in place.
  */
 export function reconcilePendingPrompts(
   prompts: unknown,
-  emitted: Set<string>,
+  emitted: Map<string, boolean>,
   cb: PromptPollCallbacks,
 ): void {
   if (!Array.isArray(prompts)) return;
@@ -48,17 +50,18 @@ export function reconcilePendingPrompts(
     if (emitted.has(id)) continue;
     const event = typeof p.event === "string" ? p.event : "";
     if (p.payload == null) continue;
+    const durable = typeof p.durable === "boolean" ? p.durable : false;
     if (event === "question-requested") {
       cb.onQuestion(p.payload as QuestionRequestedPayload);
-      emitted.add(id);
+      emitted.set(id, durable);
     } else if (event === "permission-requested") {
       cb.onPermission(p.payload as PermissionRequestedPayload);
-      emitted.add(id);
+      emitted.set(id, durable);
     }
   }
-  for (const id of Array.from(emitted)) {
+  for (const [id, durable] of Array.from(emitted)) {
     if (!present.has(id)) {
-      cb.onResolved(id);
+      cb.onResolved(id, durable);
       emitted.delete(id);
     }
   }
