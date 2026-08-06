@@ -11,6 +11,8 @@ import { invoke } from "../../shared/ipc";
 import { EFFORTS, readModels, modelDisplayLabel, modelFamilyFromId } from "../../shared/effort-presets";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { AiTodoEntry, ChatDrain, ServerInfo } from "../../types/ipc.generated";
+import type { ChatImageCollection } from "../../shared/chat/chat-image-gallery-data";
+import { openChatImageGallery } from "../../shared/chat/chat-image-gallery";
 import { drainCache } from "./session-statusbar-helpers";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -230,6 +232,85 @@ export class AiTodosPopover {
       <div class="sb-ai-todos-popover-list">
         ${this.files.map((f) => `<div class="sb-ai-todos-popover-file" role="button" tabindex="0" data-path="${escapeHtml(f.path)}">${escapeHtml(f.name)}</div>`).join("")}
       </div>
+    `;
+  }
+}
+
+// ─────────────────────────────── Images ────────────────────────────────────
+
+export class ImagesPopover {
+  collection: ChatImageCollection | null = null;
+  private hasMoreOlder = false;
+  private shell = new PopoverShell();
+
+  get isOpen(): boolean { return this.shell.isOpen; }
+
+  /** `hasMore` mirrors event-store's hasMore for the session, so the list can
+   *  show a trailing "loading earlier images" row while older history hasn't
+   *  been fetched yet. */
+  refresh(collection: ChatImageCollection, hasMore = false): void {
+    this.collection = collection;
+    this.hasMoreOlder = hasMore;
+  }
+
+  renderChip(animClass: (key: string) => string): string {
+    const c = this.collection;
+    if (!c || c.images.length === 0) return "";
+    const n = c.images.length;
+    const label = `${n} image${n === 1 ? "" : "s"} in this chat (attachments + tool screenshots). Click to view.`;
+    return `<span class="sb-chip sb-images sb-images-btn${animClass("images")}" role="button" tabindex="0" title="${escapeHtml(label)}"><i class="ph ph-image"></i>${n} img${n === 1 ? "" : "s"}</span>`;
+  }
+
+  /** Rebuilds in-place when called while open (re-anchor / background refresh).
+   *  No-op when there are no images. */
+  open(anchor: HTMLElement): void {
+    if (!this.collection || this.collection.images.length === 0) { this.shell.close(); return; }
+    this.shell.open(anchor, this.buildHtml(), {
+      className: "sb-images-popover",
+      wire: (el) => {
+        el.querySelector<HTMLElement>(".sb-images-popover-close")?.addEventListener("click", () => this.close());
+        el.querySelectorAll<HTMLElement>(".sb-images-row").forEach((row) => {
+          row.addEventListener("click", () => {
+            const idx = Number(row.dataset.imageIndex);
+            if (this.collection && !Number.isNaN(idx)) openChatImageGallery(this.collection, idx);
+            this.close();
+          });
+        });
+      },
+    });
+  }
+
+  close(): void { this.shell.close(); }
+
+  toggle(anchor: HTMLElement): void {
+    if (this.shell.isOpen) this.shell.close();
+    else this.open(anchor);
+  }
+
+  private buildHtml(): string {
+    const c = this.collection;
+    if (!c) return "";
+    const rows = c.images.map((img) => {
+      const turnNumber = c.entries[img.entryIndex]?.turnNumber ?? "";
+      return `
+        <div class="sb-images-row" role="button" tabindex="0" data-agent="${escapeHtml(img.agentKind)}" data-image-index="${img.index}">
+          <div class="sb-images-row-thumb"><i class="ph ph-image"></i></div>
+          <div class="sb-images-row-main">
+            <div class="sb-images-row-name">${escapeHtml(img.title)}</div>
+            <div class="sb-images-row-turn">Turn ${turnNumber}</div>
+          </div>
+          <span class="sb-images-row-tag">${escapeHtml(img.agentTag)}</span>
+        </div>`;
+    }).join("");
+    const loading = this.hasMoreOlder
+      ? `<div class="sb-images-loading"><span class="sb-images-spinner"></span>loading earlier images…</div>`
+      : "";
+    return `
+      <div class="sb-images-popover-header">
+        <span>Images (${c.images.length})</span>
+        <span class="sb-images-popover-close" role="button" tabindex="0" aria-label="Close"><i class="ph ph-x"></i></span>
+      </div>
+      <div class="sb-images-list">${rows}${loading}</div>
     `;
   }
 }

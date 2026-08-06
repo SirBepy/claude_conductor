@@ -7,6 +7,9 @@ import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { type ChipType, type StaticChipType, isToolChip, chipToolName, STATIC_CHIPS } from "./statusline-catalog";
 import { getCachedAccount, capitalize } from "../../shared/accounts-cache";
+import { collectChatImages } from "../../shared/chat/chat-image-gallery-data";
+import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
+import { sessionEvents } from "../../shared/chat/event-store";
 import {
   formatDuration,
   shortModelName,
@@ -19,7 +22,7 @@ import {
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
-import { DrainPopover, AiTodosPopover, ServersPopover, EffortPopover, ModelPopover, BranchPopover, CommitsPopover, type BranchEntry, type CommitSync } from "./statusbar-popovers";
+import { DrainPopover, AiTodosPopover, ServersPopover, ImagesPopover, EffortPopover, ModelPopover, BranchPopover, CommitsPopover, type BranchEntry, type CommitSync } from "./statusbar-popovers";
 export {
   loadStatuslineRows,
   saveStatuslineRows,
@@ -88,6 +91,7 @@ export class SessionStatusbar {
   private serversPopover = new ServersPopover();
   // Polls the server_supervisor for this project's running dev servers.
   private serversTimer: ReturnType<typeof setInterval> | null = null;
+  private imagesPopover = new ImagesPopover();
   private effortPopover = new EffortPopover();
   private modelPopover = new ModelPopover();
   private branchPopover = new BranchPopover();
@@ -454,6 +458,7 @@ export class SessionStatusbar {
       case "ai_todos": return this.aiTodosPopover.renderChip(this.cwd, (k) => this.animClass(k));
       case "drain": return this.drainPopover.renderChip((k) => this.animClass(k));
       case "servers": return this.serversPopover.renderChip(this.cwd, (k) => this.animClass(k));
+      case "images": return this.imagesPopover.renderChip((k) => this.animClass(k));
       case "separator":
         return `<span class="sb-separator" aria-hidden="true"></span>`;
       case "flex_separator":
@@ -528,7 +533,21 @@ export class SessionStatusbar {
     return `<span class="sb-chip sb-cost${this.animClass("cost")}" title="Estimated session cost (local estimate, not a charge)"><i class="ph ph-currency-dollar"></i>~$${(c ?? 0).toFixed(2)}</span>`;
   }
 
+  /** Recomputed each render from the live renderer's messages/messageEls (a
+   *  single linear pass, same cost class as the other per-render chip data) so
+   *  the images chip stays in sync with mid-turn attachment/screenshot arrivals
+   *  without a dedicated refresh trigger. */
+  private refreshImages(): void {
+    if (!this.hasChip("images")) return;
+    const snapshot = getChatRendererSnapshot();
+    if (!snapshot) return;
+    const collection = collectChatImages(snapshot.messages, snapshot.messageEls);
+    const hasMore = this.sessionId ? sessionEvents.hasMore(this.sessionId) : false;
+    this.imagesPopover.refresh(collection, hasMore);
+  }
+
   private render(): void {
+    this.refreshImages();
     const rowsHtml = this.rows.map((row) => {
       const chips = row.map((t) => this.renderChip(t)).filter(Boolean).join("");
       return chips ? `<div class="sb-row">${chips}</div>` : "";
@@ -604,6 +623,14 @@ export class SessionStatusbar {
       if (!wasOpen) this.serversPopover.open(anchor);
     });
 
+    this.container.querySelector<HTMLElement>(".sb-images-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const anchor = e.currentTarget as HTMLElement;
+      const wasOpen = this.imagesPopover.isOpen;
+      this.closeChipPopovers();
+      if (!wasOpen) this.imagesPopover.open(anchor);
+    });
+
     this.container.querySelector<HTMLElement>(".sb-branch-btn")?.addEventListener("click", async (e) => {
       e.stopPropagation();
       const anchor = e.currentTarget as HTMLElement;
@@ -631,6 +658,7 @@ export class SessionStatusbar {
     this.reanchorIfOpen(this.drainPopover, ".sb-drain-btn", (a) => this.drainPopover.open(a));
     this.reanchorIfOpen(this.aiTodosPopover, ".sb-ai-todos-btn", (a) => this.aiTodosPopover.open(a));
     this.reanchorIfOpen(this.serversPopover, ".sb-servers-btn", (a) => this.serversPopover.open(a));
+    this.reanchorIfOpen(this.imagesPopover, ".sb-images-btn", (a) => this.imagesPopover.open(a));
     this.reanchorIfOpen(this.branchPopover, ".sb-branch-btn", (a) => this.branchPopover.reanchor(a));
     this.reanchorIfOpen(this.commitsPopover, ".sb-commits-btn", (a) => this.commitsPopover.reanchor(a));
     this.reanchorIfOpen(this.effortPopover, ".sb-effort-btn", (a) => this.effortPopover.reanchor(a));
@@ -651,6 +679,7 @@ export class SessionStatusbar {
     this.drainPopover.close();
     this.aiTodosPopover.close();
     this.serversPopover.close();
+    this.imagesPopover.close();
     this.effortPopover.close();
     this.modelPopover.close();
     this.branchPopover.close();

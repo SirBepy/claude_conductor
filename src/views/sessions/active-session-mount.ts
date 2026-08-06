@@ -8,7 +8,7 @@ import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { showChatLoadingOverlay } from "../../shared/chat/chat-loading";
 import { setFileEditsProvider } from "../../shared/chat/file-viewer";
-import { setChatImageDataProvider } from "../../shared/chat/attachment-hydrator";
+import { setChatImageDataProvider } from "../../shared/chat/chat-renderer-bridge";
 import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
