@@ -148,6 +148,10 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
+          # dev-machine-only D: path (be0d209f), which hid the bundle from the
+          # staging steps and broke every 0.2.53 platform. Env outranks config.
+          CARGO_TARGET_DIR: target
         working-directory: src-tauri
         # Invoke cargo-tauri directly, not `cargo tauri`. On macos-14 runners
         # `/opt/homebrew/bin/cargo` is a rustup-init shim that shadows the real
