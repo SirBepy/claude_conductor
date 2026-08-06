@@ -12,6 +12,7 @@
  *  - pr-preview.css:         PR preview card + modal (the /create-pr skill preview)
  *  - chat-overlays.css:      shared lightbox overlay chrome
  *  - screenshot-gallery.css: screenshot gallery lightbox (screenshot-gallery.ts)
+ *  - chat-image-gallery.css: chat-wide image gallery lightbox (chat-image-gallery.ts)
  *  - file-viewer.css:        in-app file viewer overlay + panel (file-viewer.ts)
  *  - edit-window.css:        stacked diff + inline tool-call preview (edit-window.ts)
  *  - diff-enhancer.css:      unified diff hunk upgrade (diff-enhancer.ts)
@@ -30,6 +31,7 @@
 @import "./pr-preview.css";
 @import "./chat-overlays.css";
 @import "./screenshot-gallery.css";
+@import "./chat-image-gallery.css";
 @import "./file-viewer.css";
 @import "./edit-window.css";
 @import "./diff-enhancer.css";
