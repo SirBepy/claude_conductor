@@ -4,7 +4,6 @@
 // fade-in rebuild that, rather than the JSONL read, was the switch latency.
 
 import type { ChatRenderer } from "../../shared/chat/chat-renderer";
-import { isElNearBottom } from "../../shared/chat/chat-dom-renderer";
 
 /** Hot chats kept warm; each costs a live renderer + a detached DOM tree. */
 const CAPACITY = 5;
@@ -17,8 +16,6 @@ export interface RetainedChat {
   renderer: ChatRenderer;
   /** The `.session-messages` element `renderer` owns and renders into. */
   messagesEl: HTMLElement;
-  scrollTop: number;
-  atBottom: boolean;
 }
 
 // Insertion-ordered, and every hit re-inserts, so the first key is always the
@@ -48,7 +45,7 @@ export function isRetainedRenderer(renderer: ChatRenderer): boolean {
 
 export function retainChat(sessionId: string, renderer: ChatRenderer, messagesEl: HTMLElement): void {
   retained.delete(sessionId);
-  retained.set(sessionId, { renderer, messagesEl, scrollTop: 0, atBottom: true });
+  retained.set(sessionId, { renderer, messagesEl });
   while (retained.size > CAPACITY) {
     const lru = retained.keys().next().value;
     if (lru === undefined) break;
@@ -56,23 +53,11 @@ export function retainChat(sessionId: string, renderer: ChatRenderer, messagesEl
   }
 }
 
-/** Snapshot scroll and park live rendering for a chat leaving the screen. MUST
- *  run before the pane's DOM is replaced: a detached element reports scrollTop
- *  0, so reading it later loses the user's position. */
+/** Park live rendering for a chat leaving the screen. */
 export function backgroundRetainedChat(sessionId: string): void {
   const hit = retained.get(sessionId);
   if (!hit) return;
-  const el = hit.messagesEl;
-  hit.scrollTop = el.scrollTop;
-  hit.atBottom = isElNearBottom(el);
   hit.renderer.pauseLiveRender();
-}
-
-/** Re-pin the transcript after its element is back in the document. A chat
- *  parked at the bottom follows whatever arrived while it was away. */
-export function restoreRetainedScroll(hit: RetainedChat): void {
-  const el = hit.messagesEl;
-  el.scrollTop = hit.atBottom ? el.scrollHeight : hit.scrollTop;
 }
 
 export function dropRetainedChat(sessionId: string): void {

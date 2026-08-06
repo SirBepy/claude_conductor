@@ -18,11 +18,12 @@ import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import type { SessionHeader } from "./session-header";
 import { setThinkingActivity, setThinkingProgress, setThinkingTodoActivity } from "./session-thinking-bar";
 import { completeHandoff } from "./handoff";
+import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
+import { flushRenderNow } from "../../shared/chat/flush-scheduler";
 import {
   takeRetainedChat,
   retainChat,
   isRetainedRenderer,
-  restoreRetainedScroll,
   type RetainedChat,
 } from "./chat-pane-cache";
 
@@ -160,11 +161,19 @@ function remountRetained(
   const panel = new ChangesPanel();
   wireRenderer(pane, sess, header, sessionId, renderer, panel);
   renderer.resumeLiveRender();
+  // Force any trailing coalesced flush from the drained events above so the
+  // scroll below measures the FULL restored transcript, not a partial one
+  // still waiting on scheduleFlush's 80ms window.
+  flushRenderNow(renderer);
   const edits = renderer.getFileEdits();
   panel.onUpdate(edits);
   header.setChangesBadge(dedupeByPath(edits).length);
   setThinkingActivity(renderer.lastActivity);
-  restoreRetainedScroll(hit);
+  // Reselecting a chat always lands on the newest message, same as a cold
+  // load - it doesn't restore wherever the user had scrolled to before
+  // leaving (ai_todo scroll regression: clicking a chat used to always land
+  // at the bottom before the retained-pane cache started preserving position).
+  scrollToBottom(renderer);
   void sessionEvents.reconcileLatest(sessionId, sess.cwd ? String(sess.cwd) : undefined);
 }
 
