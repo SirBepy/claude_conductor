@@ -269,6 +269,7 @@ pub(crate) async fn run_stdout_pump(
                                             "session_id": pump_session.session_id,
                                             "cwd": pump_session.cwd.to_string_lossy(),
                                             "awaiting": awaiting.as_deref(),
+                                            "fired_at_ms": chrono::Utc::now().timestamp_millis(),
                                         }),
                                     );
                                 }

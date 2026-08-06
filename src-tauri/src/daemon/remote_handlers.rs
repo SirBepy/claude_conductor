@@ -357,6 +357,10 @@ pub(super) async fn stream_ws(
 /// detect a silently-dead connection instead.
 const GLOBAL_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// Frames buffered while the host was asleep and older than this are dropped
+/// rather than forwarded - see the `turn_sound` staleness check below.
+const TURN_SOUND_STALE_MS: i64 = 15_000;
+
 /// Not session-scoped: the remote (browser) equivalent of the internal
 /// daemon<->app `subscribe_global` pipe link (see `daemon_link.rs`'s
 /// `run_app_subscription`). Self-authenticates via `?token=` exactly like
@@ -429,6 +433,18 @@ async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonState>) {
                     if frame.get("method").and_then(serde_json::Value::as_str) == Some("instances_changed") {
                         if let Some(arr) = frame.pointer_mut("/params/instances").and_then(serde_json::Value::as_array_mut) {
                             strip_hidden_instances_json(arr);
+                        }
+                    }
+                    // A suspended host doesn't cleanly close this socket, so `turn_sound`
+                    // frames pile up in the broadcast buffer and blast out all at once on
+                    // wake. Dropping ones older than the cutoff is intentional (user wants
+                    // "missed while asleep" to mean missed), not a bug - every other event
+                    // type still forwards unconditionally.
+                    if frame.get("method").and_then(serde_json::Value::as_str) == Some("turn_sound") {
+                        let fired_at_ms = frame.pointer("/params/fired_at_ms").and_then(serde_json::Value::as_i64);
+                        let age_ms = fired_at_ms.map(|t| chrono::Utc::now().timestamp_millis() - t);
+                        if age_ms.is_some_and(|age| age > TURN_SOUND_STALE_MS) {
+                            continue;
                         }
                     }
                     let txt = match serde_json::to_string(&frame) {
