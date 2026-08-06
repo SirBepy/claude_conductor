@@ -1,5 +1,5 @@
 // Screenshot block (turn-collapse.ts's mountScreenshotBlock) + gallery
-// (screenshot-gallery.ts): a tool's image tool_results are pulled out of the
+// (chat-image-gallery.ts): a tool's image tool_results are pulled out of the
 // raw action-log accordion into an always-visible thumbnail row, tagged by
 // which agent (main turn vs Nth subagent) captured them. The tool's real chip
 // relocates into the block's header but keeps toggling the same accordion for
@@ -134,26 +134,26 @@ describe("screenshot block", () => {
     expect(thumbs.length).toBe(2);
     thumbs[0].click();
 
-    const overlay = document.querySelector(".screenshot-gallery-overlay");
+    const overlay = document.querySelector(".chat-image-gallery-overlay");
     expect(overlay).not.toBeNull();
-    expect(overlay.querySelector(".screenshot-gallery-counter").textContent).toBe("1 of 2");
+    expect(overlay.querySelector(".gallery-total-counter").textContent).toBe("1 of 2");
     const prevBtn = overlay.querySelector(".screenshot-gallery-nav--prev");
     const nextBtn = overlay.querySelector(".screenshot-gallery-nav--next");
     expect(prevBtn.disabled).toBe(true); // clamped at the first image
     expect(nextBtn.disabled).toBe(false);
 
     nextBtn.click();
-    expect(overlay.querySelector(".screenshot-gallery-counter").textContent).toBe("2 of 2");
+    expect(overlay.querySelector(".gallery-total-counter").textContent).toBe("2 of 2");
     expect(overlay.querySelector(".screenshot-gallery-nav--next").disabled).toBe(true); // clamped at the last
 
     // ArrowRight is a no-op past the end; ArrowLeft steps back.
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight" }));
-    expect(overlay.querySelector(".screenshot-gallery-counter").textContent).toBe("2 of 2");
+    expect(overlay.querySelector(".gallery-total-counter").textContent).toBe("2 of 2");
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowLeft" }));
-    expect(overlay.querySelector(".screenshot-gallery-counter").textContent).toBe("1 of 2");
+    expect(overlay.querySelector(".gallery-total-counter").textContent).toBe("1 of 2");
 
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
-    expect(document.querySelector(".screenshot-gallery-overlay")).toBeNull();
+    expect(document.querySelector(".chat-image-gallery-overlay")).toBeNull();
     r.detach();
   });
 });

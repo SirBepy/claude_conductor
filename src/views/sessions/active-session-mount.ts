@@ -8,6 +8,7 @@ import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { showChatLoadingOverlay } from "../../shared/chat/chat-loading";
 import { setFileEditsProvider } from "../../shared/chat/file-viewer";
+import { setChatImageDataProvider } from "../../shared/chat/attachment-hydrator";
 import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
@@ -107,6 +108,10 @@ export function wireRenderer(
   };
   // Let the file viewer's Diff tab resolve this session's edits for any file.
   setFileEditsProvider(() => renderer.getFileEdits());
+  // Let a sent-attachment thumb's click listener (attachment-hydrator.ts,
+  // no `this`-bound renderer access of its own) build a fresh gallery
+  // collection from this session's messages.
+  setChatImageDataProvider(() => ({ messages: renderer.messages, messageEls: renderer.messageEls }));
   // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
   // resolve this session's working directory.
   setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));

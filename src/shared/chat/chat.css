@@ -11,7 +11,6 @@
  *  - chat-turn-footer.css:   per-turn footer meta chips, progress bar, todo checklist
  *  - pr-preview.css:         PR preview card + modal (the /create-pr skill preview)
  *  - chat-overlays.css:      shared lightbox overlay chrome
- *  - screenshot-gallery.css: screenshot gallery lightbox (screenshot-gallery.ts)
  *  - chat-image-gallery.css: chat-wide image gallery lightbox (chat-image-gallery.ts)
  *  - file-viewer.css:        in-app file viewer overlay + panel (file-viewer.ts)
  *  - edit-window.css:        stacked diff + inline tool-call preview (edit-window.ts)
@@ -30,7 +29,6 @@
 @import "./chat-turn-footer.css";
 @import "./pr-preview.css";
 @import "./chat-overlays.css";
-@import "./screenshot-gallery.css";
 @import "./chat-image-gallery.css";
 @import "./file-viewer.css";
 @import "./edit-window.css";

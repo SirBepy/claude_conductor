@@ -1,9 +1,6 @@
-// Chat-wide image gallery lightbox (chunk 2 of the gallery feature): opens
-// over EVERY image in a chat session (chat-image-gallery-data.ts's
-// ChatImageCollection), not just one turn's screenshot row. Same overlay-
-// singleton pattern as screenshot-gallery.ts, plus a collapsible top-left
-// "rail" listing every turn that has images, so a long chat's images stay
-// navigable without scrolling the transcript.
+// Chat-wide image gallery: navigates every image in the chat (not one turn's
+// screenshot row), plus a collapsible top-left rail listing turns with images.
+// Same overlay-singleton pattern as lightbox.ts.
 
 import { escapeHtml } from "../escape-html";
 import { setupImageZoomPan } from "./image-zoom-pan";
@@ -189,7 +186,7 @@ export function openChatImageGallery(collection: ChatImageCollection, startIndex
     entryRows.forEach((row, i) => {
       row.classList.toggle("current", i === image.entryIndex);
     });
-    entryRows[image.entryIndex]?.scrollIntoView({ block: "nearest" });
+    entryRows[image.entryIndex]?.scrollIntoView?.({ block: "nearest" });
 
     prevBtn.disabled = idx === 0;
     nextBtn.disabled = idx === collection.images.length - 1;

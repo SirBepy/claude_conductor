@@ -1,13 +1,13 @@
 // Cursor-anchored zoom (scroll wheel, continuous; or a plain click, toggling
 // between fit and a fixed zoomed-in level) + drag-to-pan for an <img> inside
 // a fixed-size container. Shared by lightbox.ts (single-image view) and
-// screenshot-gallery.ts (multi-shot view) - same interaction on both.
+// chat-image-gallery.ts (multi-image view) - same interaction on both.
 //
 // The container must be sized to the actual viewing area (not shrunk to the
 // image's own pre-transform size) and have `overflow: hidden` - otherwise a
 // zoomed-in image gets clipped at its own original box instead of the real
 // viewing area (see the `.lightbox-content--image` CSS fix in chat-overlays.css
-// and its `.screenshot-gallery-stage` twin in screenshot-gallery.css).
+// and its `.screenshot-gallery-stage` twin in chat-image-gallery.css).
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 8;

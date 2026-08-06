@@ -5,8 +5,12 @@ import { armLazyDiffEnhance } from "./diff-enhancer";
 import { type FileEditView } from "./file-edits";
 import { type ToolTally } from "./tool-meta";
 import { ToolTallyState } from "./tool-tally-state";
-import { handleCopyClick, handleSlashClick, handleAttachmentClick, handleBlockImageClick, handlePastedLogClick, handleAuqAnswerClick, handleTableFullscreen, handlePrPreviewClick, handleScreenshotThumbClick } from "./chat-click-handlers";
+import { handleCopyClick, handleSlashClick, handleAttachmentClick, handlePastedLogClick, handleAuqAnswerClick, handleTableFullscreen, handlePrPreviewClick } from "./chat-click-handlers";
 import { openFileViewer } from "./file-viewer";
+import { getScreenshotRowShots } from "./screenshot-row";
+import { collectChatImages } from "./chat-image-gallery-data";
+import { openChatImageGallery } from "./chat-image-gallery";
+import { openLightbox } from "./lightbox";
 import { clampUserMessages } from "./turn-collapse";
 import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
@@ -201,8 +205,8 @@ export class ChatRenderer {
     this.container.addEventListener("click", handleCopyClick);
     this.container.addEventListener("click", handleSlashClick);
     this.container.addEventListener("click", handleAttachmentClick);
-    this.container.addEventListener("click", handleBlockImageClick);
-    this.container.addEventListener("click", handleScreenshotThumbClick);
+    this.container.addEventListener("click", this.handleBlockImageClick);
+    this.container.addEventListener("click", this.handleScreenshotThumbClick);
     this.container.addEventListener("click", handlePastedLogClick);
     this.container.addEventListener("click", handleAuqAnswerClick);
     this.container.addEventListener("click", handleTableFullscreen);
@@ -422,6 +426,43 @@ export class ChatRenderer {
   async loadHistory(events: ChatEvent[], opts: BulkLoadOpts = {}): Promise<void> {
     await bulkLoadEvents(this, events, opts);
   }
+
+  /** Tapping an inline rendered image block (screenshots, image tool results)
+   *  opens the chat-wide gallery at that image, matched by content since the
+   *  collection is recomputed fresh each click. */
+  private handleBlockImageClick = (e: MouseEvent): void => {
+    const img = (e.target as Element).closest<HTMLImageElement>("img.block.image");
+    if (!img) return;
+    const match = /^data:([^;]+);base64,(.+)$/.exec(img.src);
+    const mime = match?.[1];
+    const base64 = match?.[2];
+    if (!mime || !base64) return;
+    const collection = collectChatImages(this.messages, this.messageEls);
+    const foundIndex = collection.images.findIndex((ci) => ci.kind === "screenshot" && ci.data === base64 && ci.mime === mime);
+    if (foundIndex >= 0) openChatImageGallery(collection, foundIndex);
+    else openLightbox({ type: "image", mime, base64 });
+  };
+
+  /** Tapping a screenshot-row thumbnail (turn-collapse.ts's screenshot-block)
+   *  opens the chat-wide gallery, starting at the clicked shot. The shot is
+   *  resolved via screenshot-row.ts's WeakMap, then matched by content into
+   *  the freshly-collected gallery collection. */
+  private handleScreenshotThumbClick = (e: MouseEvent): void => {
+    const thumb = (e.target as Element).closest<HTMLElement>(".screenshot-thumb");
+    if (!thumb) return;
+    const row = thumb.closest<HTMLElement>(".screenshot-row");
+    if (!row) return;
+    const shots = getScreenshotRowShots(row);
+    if (!shots) return;
+    const shotIdx = Number(thumb.dataset.shotIndex);
+    if (!Number.isFinite(shotIdx)) return;
+    const shot = shots[shotIdx];
+    if (!shot) return;
+    const collection = collectChatImages(this.messages, this.messageEls);
+    const foundIndex = collection.images.findIndex((ci) => ci.kind === "screenshot" && ci.data === shot.data && ci.mime === shot.mime);
+    if (foundIndex >= 0) openChatImageGallery(collection, foundIndex);
+    else openLightbox({ type: "image", mime: shot.mime, base64: shot.data });
+  };
 
   // Custom chip-panel file rows (Read / File Changes) open their target in the
   // in-app file viewer (ai_todo 95). The external-editor jump is preserved via

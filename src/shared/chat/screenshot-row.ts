@@ -2,8 +2,24 @@ import type { RenderedMessage } from "./chat-transforms";
 import { extractAttachedFilePaths } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
-import { type ScreenshotShot } from "./screenshot-gallery";
 import type { ToolGroup } from "./tool-strip";
+
+/** One screenshot surfaced from a turn's tool_result image outputs. */
+export interface ScreenshotShot {
+  /** tool_use id whose result produced this screenshot. */
+  toolUseId: string;
+  mime: string;
+  /** base64-encoded image bytes. */
+  data: string;
+  /** Short label shown as the gallery header title + thumbnail title attr. */
+  title: string;
+  /** "main" for a top-level call, "sub" for any subagent's call (styling hook). */
+  agentKind: "main" | "sub";
+  /** Corner-tag text on the inline thumbnail: "Main" or "Sub N". */
+  agentTag: string;
+  /** Full label for the gallery header chip: "Main agent" or "Subagent N". */
+  agentLabel: string;
+}
 
 // ---------------------------------------------------------------------------
 // Screenshot blocks (ai_todo 313, split off of turn-collapse.ts): any tool's

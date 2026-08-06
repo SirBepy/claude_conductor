@@ -2,8 +2,20 @@ import { invoke } from "../ipc";
 import { escapeHtml } from "../escape-html";
 import { openLightbox, type LightboxContent } from "./lightbox";
 import { basename } from "../path-utils";
+import type { RenderedMessage } from "./chat-transforms";
+import { collectChatImages } from "./chat-image-gallery-data";
+import { openChatImageGallery } from "./chat-image-gallery";
 
 const chipData = new WeakMap<HTMLElement, { mime: string; base64: string; path: string }>();
+
+// Lets a free function (this module has no `this`-bound ChatRenderer access)
+// resolve the currently-displayed renderer's messages/messageEls, so a thumb
+// click can build a fresh gallery collection. Wired by wireRenderer, same
+// module-singleton-provider pattern as setFileEditsProvider (file-viewer.ts).
+let chatImageDataProvider: (() => { messages: RenderedMessage[]; messageEls: HTMLElement[] }) | null = null;
+export function setChatImageDataProvider(fn: (() => { messages: RenderedMessage[]; messageEls: HTMLElement[] }) | null): void {
+  chatImageDataProvider = fn;
+}
 
 /** Per-thumb attachment payload, so the chat-wide image gallery
  *  (chat-image-gallery-data.ts) can read a sent attachment's image data
@@ -43,6 +55,15 @@ export async function hydrateAttachments(el: HTMLElement): Promise<void> {
         const { mime, base64 } = data;
         attachmentShots.set(thumb, { mime, base64, filename: name, sourcePath: path });
         thumb.addEventListener("click", () => {
+          const provider = chatImageDataProvider?.();
+          if (provider) {
+            const collection = collectChatImages(provider.messages, provider.messageEls);
+            const foundIndex = collection.images.findIndex((ci) => ci.kind === "attachment" && ci.data === base64 && ci.mime === mime);
+            if (foundIndex >= 0) {
+              openChatImageGallery(collection, foundIndex);
+              return;
+            }
+          }
           openLightbox({ type: "image", mime, base64, filename: name, sourcePath: path });
         });
         chip.replaceWith(thumb);
