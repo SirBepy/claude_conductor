@@ -20,7 +20,7 @@ import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/p
 import { api } from "../../shared/api";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
-import { isAutoAccept, setAutoAccept, replayPendingPrompt, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
+import { isAutoAccept, setAutoAccept, replayPendingPrompt, rehydratePendingPrompts, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
 import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { SessionHeader } from "./session-header";
@@ -373,6 +373,14 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
 
   // If this chat parked a permission/question prompt while it was in the
   // background, surface it now that the pane (and composer anchor) is mounted.
-  replayPendingPrompt(sessionId);
+  if (!replayPendingPrompt(sessionId)) {
+    // Nothing parked locally. The park does NOT survive a window rebuild (each
+    // window is its own module realm) and the daemon push fires each id once,
+    // so ask the daemon directly before concluding there's nothing to show -
+    // otherwise the card is gone for good while the turn still waits on it.
+    void (async () => {
+      if (await rehydratePendingPrompts(sessionId)) replayPendingPrompt(sessionId);
+    })();
+  }
 }
 

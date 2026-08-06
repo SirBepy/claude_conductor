@@ -19,8 +19,8 @@
 import { invoke } from "../../../shared/ipc";
 import { getTransport } from "../../../shared/transport";
 import { state } from "../state";
-import { reconcilePendingPrompts } from "./remote-prompt-poll";
-import { extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
+import { findPendingPromptsForSession, reconcilePendingPrompts } from "./remote-prompt-poll";
+import { dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
 import { showPermissionCard } from "./permission-card";
 import { AUQ_ANSWER_SENTINEL } from "../../../shared/chat/chat-transforms";
 import type { ContentBlock } from "../../../types/ipc.generated";
@@ -35,8 +35,10 @@ import {
   resolveCwdForSession,
   storePendingPrompt,
   takePendingPrompt,
+  peekPendingPrompt,
   clearPendingPromptById,
 } from "./gating";
+import type { PendingPrompt } from "./gating";
 import type { PermissionRequestedPayload, Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 
 export {
@@ -335,15 +337,23 @@ export function autoAcceptParked(sessionId: string): void {
  * Replay a parked permission/question prompt for a session the user just
  * selected. Mirrors the arrival path (auto-accept, remembered-rule auto-allow,
  * then the card) so a switch-back surfaces exactly what would have shown had
- * the chat been focused when the tool fired. No-op if nothing is parked.
+ * the chat been focused when the tool fired. False if nothing is parked, so the
+ * caller can fall back to {@link rehydratePendingPrompts}.
  *
  * Called from selectSession AFTER the pane is mounted so the card anchors over
  * the right composer.
  */
-export function replayPendingPrompt(sessionId: string): void {
+export function replayPendingPrompt(sessionId: string): boolean {
   const pending = takePendingPrompt(sessionId);
-  if (!pending) return;
+  if (!pending) return false;
   rerenderSidebar(); // clear the attention marker now that we're surfacing it
+  surfacePending(pending);
+  return true;
+}
+
+/** Shared tail of replay/reopen: render the parked prompt's card, applying the
+ *  arrival path's auto-accept / remembered-rule shortcuts. */
+function surfacePending(pending: PendingPrompt): void {
   if (pending.kind === "question") {
     showQuestionCard(pending.payload, pending.draft);
     return;
@@ -361,4 +371,44 @@ export function replayPendingPrompt(sessionId: string): void {
     if (await autoAllowIfRemembered(payload)) return;
     showPermissionCard(payload);
   })();
+}
+
+/** Ask the DAEMON what it is still waiting on for `sessionId` and re-park it.
+ *  The push path sends each id once, so a park lost with its webview is never
+ *  re-sent - pull instead. No-op if already parked (may hold a live draft). */
+export async function rehydratePendingPrompts(sessionId: string): Promise<boolean> {
+  if (!sessionId || peekPendingPrompt(sessionId)) return false;
+  let prompts: unknown;
+  try {
+    prompts = await getTransport().call("list_pending_prompts");
+  } catch (e) {
+    console.warn("[perm-gate] rehydrate failed:", e);
+    return false;
+  }
+  // One park per session, so take the longest-waiting if the daemon holds two.
+  const [rec] = findPendingPromptsForSession(prompts, sessionId);
+  if (!rec) return false;
+  storePendingPrompt(sessionId, rec.kind === "question"
+    ? { kind: "question", payload: rec.payload }
+    : { kind: "permission", payload: rec.payload });
+  rerenderSidebar();
+  return true;
+}
+
+/** Put the real card back up for a transcript card the user clicked: local park
+ *  first, then the daemon's store. False when nothing is open for this chat, so
+ *  the caller can say so - silently doing nothing is the whole complaint. */
+export async function reopenPendingPrompt(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false;
+  let pending = takePendingPrompt(sessionId);
+  if (!pending) {
+    await rehydratePendingPrompts(sessionId);
+    pending = takePendingPrompt(sessionId);
+  }
+  if (!pending) return false;
+  // Only safe to drop what's on screen now we hold a replacement.
+  dismissQuestionCard();
+  rerenderSidebar();
+  surfacePending(pending);
+  return true;
 }

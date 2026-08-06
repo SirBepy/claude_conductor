@@ -28,10 +28,10 @@ import { getTransport, isRemote } from "../../shared/transport";
 import { closeViewMoreMenu } from "./view-more-menu";
 import { backgroundRetainedChat, isRetainedRenderer } from "./chat-pane-cache";
 import {
-  dismissQuestionCard,
   getSelectedSessionId,
-  replayPendingPrompt,
+  reopenPendingPrompt,
 } from "./permission-modal";
+import { showToast } from "../../shared/toast";
 import {
   setPaneRef,
   consumePendingOpenPicker,
@@ -203,18 +203,19 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   let previewController = wirePreviewPanel(root, pane);
   initThinkingBar(pane);
 
-  // Clicking anywhere on an unanswered AUQ card in the chat dismisses any
-  // active floating card and re-surfaces it. Handles the case where the modal
-  // somehow got closed without answering (navigated away and back, dismissed
-  // by mistake). Gated on a `.tool-qa-a--pending` row still being present so a
-  // fully answered/skipped/timed-out card doesn't reopen on click.
+  // Click an unanswered AUQ card to put the real (answerable) card back up.
+  // Gated on `.tool-qa-a--pending` so a resolved one doesn't reopen.
+  // reopenPendingPrompt falls back to the daemon store when the in-memory park
+  // died with its window; a dead click must say why - that was the bug.
   pane.addEventListener("click", (e) => {
     const card = (e.target as HTMLElement).closest(".msg.question-card");
     if (!card || !card.querySelector(".tool-qa-a--pending")) return;
     const sid = getSelectedSessionId();
     if (!sid) return;
-    dismissQuestionCard();
-    replayPendingPrompt(sid);
+    void (async () => {
+      if (await reopenPendingPrompt(sid)) return;
+      showToast("This question is no longer waiting for an answer.");
+    })();
   });
 
   const teardownUsageDials = wireRateLimitBanner(root, pane, listEl, myMount);

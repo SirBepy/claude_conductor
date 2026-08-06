@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { reconcilePendingPrompts } from "../src/views/sessions/permission-modal/remote-prompt-poll.ts";
+import {
+  reconcilePendingPrompts,
+  findPendingPromptsForSession,
+} from "../src/views/sessions/permission-modal/remote-prompt-poll.ts";
 
 // The phone had no way to learn about AskUserQuestion / permission prompts: the
 // desktop got them via a Rust-side poll + Tauri events, but the phone's
@@ -70,5 +73,47 @@ describe("reconcilePendingPrompts", () => {
     expect(cb.onQuestion).not.toHaveBeenCalled();
     expect(cb.onPermission).not.toHaveBeenCalled();
     expect(emitted.size).toBe(0);
+  });
+});
+
+// The bug: the parked-prompt Map is in-memory and per-window-realm, and the
+// push path emits each id once, so a chats-window rebuild lost the card for
+// good - transcript stuck on "awaiting answer", clicking it a silent no-op.
+describe("findPendingPromptsForSession", () => {
+  const OTHER = { id: "q2", event: "question-requested", payload: { id: "q2", session_id: "s2", questions: [] } };
+
+  it("finds a question the daemon still holds for this session", () => {
+    const found = findPendingPromptsForSession([QUESTION], "s1");
+    expect(found).toEqual([{ kind: "question", id: "q1", payload: QUESTION.payload }]);
+  });
+
+  it("finds a permission prompt too", () => {
+    const found = findPendingPromptsForSession([PERMISSION], "s1");
+    expect(found).toEqual([{ kind: "permission", id: "p1", payload: PERMISSION.payload }]);
+  });
+
+  it("never returns another chat's prompt", () => {
+    expect(findPendingPromptsForSession([OTHER], "s1")).toEqual([]);
+    expect(findPendingPromptsForSession([QUESTION, OTHER], "s1")).toHaveLength(1);
+  });
+
+  it("is stateless - repeated calls keep returning the same open prompt", () => {
+    expect(findPendingPromptsForSession([QUESTION], "s1")).toHaveLength(1);
+    expect(findPendingPromptsForSession([QUESTION], "s1")).toHaveLength(1);
+  });
+
+  it("preserves snapshot order so the oldest waiter surfaces first", () => {
+    const second = { id: "q9", event: "question-requested", payload: { id: "q9", session_id: "s1", questions: [] } };
+    expect(findPendingPromptsForSession([QUESTION, second], "s1").map((r) => r.id)).toEqual(["q1", "q9"]);
+  });
+
+  it("returns nothing for a bad snapshot, empty session id, or malformed rows", () => {
+    expect(findPendingPromptsForSession(null, "s1")).toEqual([]);
+    expect(findPendingPromptsForSession([QUESTION], "")).toEqual([]);
+    expect(findPendingPromptsForSession([
+      { event: "question-requested", payload: { session_id: "s1" } }, // no id
+      { id: "x", event: "question-requested" },                       // no payload
+      { id: "y", event: "nope", payload: { session_id: "s1" } },      // unknown event
+    ], "s1")).toEqual([]);
   });
 });

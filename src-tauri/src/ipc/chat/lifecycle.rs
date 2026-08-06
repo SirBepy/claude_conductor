@@ -455,3 +455,18 @@ pub async fn respond_question(
         .await
         .map_err(|e| e.to_string())
 }
+
+/// Every prompt the daemon still has open (`{ id, event, payload }` records).
+/// `spawn_pending_prompt_poll` pushes each id once, so a webview that lost its
+/// in-memory park needs this pull side to rebuild the card.
+#[tauri::command]
+pub async fn list_pending_prompts(state: State<'_, AppState>) -> Result<Value, String> {
+    let client_guard = state.daemon_client.lock().await;
+    let client = client_guard
+        .as_ref()
+        .ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .list_pending_prompts()
+        .await
+        .map_err(|e| e.to_string())
+}

@@ -334,6 +334,7 @@ pub fn run() {
             ipc::list_project_servers,
             ipc::respond_permission,
             ipc::respond_question,
+            ipc::list_pending_prompts,
             ipc::list_news,
             ipc::refresh_news,
             ipc::mark_news_read,

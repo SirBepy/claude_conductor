@@ -117,6 +117,13 @@ export function takePendingPrompt(sessionId: string): PendingPrompt | null {
   return p;
 }
 
+/** Non-destructive read - "is anything parked for this chat?". Callers that
+ *  intend to surface the prompt want `takePendingPrompt`; this is for deciding
+ *  whether a daemon re-fetch is even needed (see `rehydratePendingPrompts`). */
+export function peekPendingPrompt(sessionId: string): PendingPrompt | null {
+  return _pendingPrompts.get(sessionId) ?? null;
+}
+
 export function clearPendingPrompt(sessionId: string): void {
   _pendingPrompts.delete(sessionId);
 }

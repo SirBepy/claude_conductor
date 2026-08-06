@@ -1,14 +1,14 @@
 /**
- * Phone-side reconciliation of the daemon's pending-prompt store.
+ * Reading of the daemon's pending-prompt store, for both transports.
  *
  * The desktop learns about AskUserQuestion / permission prompts through a
  * reliable poll in the Rust app (daemon_link.rs::spawn_pending_prompt_poll):
  * it lists `list_pending_prompts`, emits each open prompt's Tauri event once,
  * and emits `prompt-resolved` when one disappears. The phone has no Tauri event
- * bus, so AUQs never reached it. This is the same demux, in JS, driven by the
- * HttpTransport poll in index.ts.
+ * bus, so AUQs never reached it. `reconcilePendingPrompts` is that same demux,
+ * in JS, driven by the HttpTransport poll in index.ts.
  *
- * Pure (no DOM / transport imports) so the reconciliation is unit-testable.
+ * Pure (no DOM / transport imports) so both exports are unit-testable.
  */
 
 import type { PermissionRequestedPayload, QuestionRequestedPayload } from "./types";
@@ -62,4 +62,34 @@ export function reconcilePendingPrompts(
       emitted.delete(id);
     }
   }
+}
+
+/** One demuxed record from a `list_pending_prompts` snapshot. */
+export type PendingPromptRecord =
+  | { kind: "question"; id: string; payload: QuestionRequestedPayload }
+  | { kind: "permission"; id: string; payload: PermissionRequestedPayload };
+
+/** Every still-open prompt for `sessionId`, in snapshot order. Stateless unlike
+ *  {@link reconcilePendingPrompts} - no "already emitted" memory - so a lost
+ *  card can be rebuilt on demand however many times it takes. */
+export function findPendingPromptsForSession(
+  prompts: unknown,
+  sessionId: string,
+): PendingPromptRecord[] {
+  if (!Array.isArray(prompts) || !sessionId) return [];
+  const out: PendingPromptRecord[] = [];
+  for (const raw of prompts) {
+    const p = raw as StoredPrompt;
+    const id = typeof p?.id === "string" ? p.id : undefined;
+    if (!id || p.payload == null) continue;
+    const payload = p.payload as { session_id?: unknown };
+    if (payload.session_id !== sessionId) continue;
+    const event = typeof p.event === "string" ? p.event : "";
+    if (event === "question-requested") {
+      out.push({ kind: "question", id, payload: p.payload as QuestionRequestedPayload });
+    } else if (event === "permission-requested") {
+      out.push({ kind: "permission", id, payload: p.payload as PermissionRequestedPayload });
+    }
+  }
+  return out;
 }
