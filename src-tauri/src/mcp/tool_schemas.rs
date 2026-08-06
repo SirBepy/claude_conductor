@@ -14,6 +14,10 @@ pub const TOOL_CLOSE: &str = "close_session";
 pub const TOOL_LIST_PEERS: &str = "list_peers";
 pub const TOOL_POST_MESSAGE: &str = "post_message";
 pub const TOOL_READ_MESSAGES: &str = "read_messages";
+// Turn-status signaling (todo 435): replaces the `<cc-status:..>`/`<cc-title:..>`
+// text markers. Unconditional like the coordination-channel tools above -
+// every session reports its own status, not just Jarvis workers.
+pub const TOOL_REPORT_STATUS: &str = "report_turn_status";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -117,6 +121,18 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {}
+            }
+        }),
+        json!({
+            "name": TOOL_REPORT_STATUS,
+            "description": "Report this turn's status and title as the LAST thing you do, every turn (even a tool-only one). status: done=fully finished, not blocked; question=awaiting the user's input; working=your own background subagents/tasks in THIS session are still running and will re-invoke you; waiting=parked on an external process (CI, deploy, scheduled wake) that resumes you later. Never done/waiting while your own tasks are still running - that's working. title: fresh 3-6 word topic summary, sent every turn - the app decides which become the visible chat title.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["done", "question", "waiting", "working"]},
+                    "title": {"type": "string"}
+                },
+                "required": ["status"]
             }
         }),
     ];

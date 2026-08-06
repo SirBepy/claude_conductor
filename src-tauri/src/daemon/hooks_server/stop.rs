@@ -21,11 +21,6 @@ pub(super) struct StopPayload {
     /// this same turn - the CLI's loop guard. Never block when set.
     #[serde(default)]
     pub stop_hook_active: Option<bool>,
-    /// Final assistant text of the turn. `None` on CLI versions that don't
-    /// send the field - enforcement must then stay off (blocking on an absent
-    /// field would block every turn forever).
-    #[serde(default)]
-    pub last_assistant_message: Option<String>,
     /// Background tasks still live at turn end - ground truth for the
     /// "working" status, unlike the self-reported marker.
     #[serde(default)]
@@ -60,22 +55,27 @@ pub(super) async fn on_stop(
         let bg_count = payload.background_tasks.as_ref().map(Vec::len).unwrap_or(0);
         ctx.state.registry.set_background_tasks(&session_id, bg_count);
 
-        // Marker enforcement: a turn that ends without a parseable
-        // <cc-status:..> marker is blocked once so the model re-emits it -
-        // the retry loop the marker channel never had. Guards: the CLI's
-        // `stop_hook_active` loop flag caps it at one retry, and enforcement
-        // stays off entirely when the CLI doesn't send the final text.
-        if payload.stop_hook_active != Some(true) {
-            if let Some(msg) = payload.last_assistant_message.as_deref() {
-                if crate::chat::parser::detect_awaiting(msg).is_none() {
-                    log::info!("hook /hooks/stop: blocking {session_id} - no status marker in final text");
-                    return (
-                        StatusCode::OK,
-                        Json(json!({
-                            "decision": "block",
-                            "reason": "End your response with the two required bare marker lines: <cc-title:3-6 word topic summary> then <cc-status:done|question|waiting|working> (colon form, e.g. <cc-status:done>).",
-                        })),
-                    );
+        // Enforcement (todo 435): block once (stop_hook_active caps the
+        // retry) if report_turn_status wasn't called this turn.
+        let gen = ctx.state.registry.current_turn_gen(&session_id);
+        let reported = ctx.state.registry.peek_reported_status(&session_id);
+        let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
+        if payload.stop_hook_active != Some(true) && !has_current_report {
+            log::info!("hook /hooks/stop: blocking {session_id} - report_turn_status not called this turn");
+            return (
+                StatusCode::OK,
+                Json(json!({
+                    "decision": "block",
+                    "reason": "Call the report_turn_status tool as the very last thing you do before ending your turn - required every turn, even a tool-only one with no chat reply.",
+                })),
+            );
+        }
+        // Title: durable transcript record, mirrors /close's manual rename.
+        // Best-effort - a write failure must never block the turn.
+        if let Some(title) = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.title.as_deref()) {
+            if !title.trim().is_empty() {
+                if let Err(e) = crate::tokens::append_ai_title_record(std::path::Path::new(&transcript_path), title) {
+                    log::warn!("hook /hooks/stop: failed to append ai-title record for {session_id}: {e}");
                 }
             }
         }

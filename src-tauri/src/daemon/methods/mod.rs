@@ -23,6 +23,10 @@ mod permission;
 mod preview;
 mod registry;
 mod schedule;
+// pub(crate): `hooks_server::turn_status` (the `report_turn_status` MCP
+// tool's HTTP route, todo 435) calls this module's `report_status` directly -
+// same non-RPC shape as `channel` above.
+pub(crate) mod turn_status;
 mod usage;
 
 pub use channels::register_channels;

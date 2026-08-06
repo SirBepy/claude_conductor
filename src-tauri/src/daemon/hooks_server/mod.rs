@@ -19,6 +19,7 @@ mod permission;
 mod preview;
 mod relay;
 mod stop;
+mod turn_status;
 
 use crate::daemon::state::DaemonState;
 use crate::settings::paths;
@@ -153,6 +154,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/channel/list-peers", post(channel::on_list_peers))
         .route("/channel/read-messages", post(channel::on_read_messages))
         .route("/channel/post-message", post(channel::on_post_message))
+        .route("/turn/report-status", post(turn_status::on_report_status))
         .with_state(ctx);
 
     tokio::spawn(async move {

@@ -548,16 +548,15 @@ mod tests {
 
     #[test]
     fn base_args_carry_turn_status_prompt() {
-        // The status marker instruction must ride on every spawn so Claude
-        // self-reports done-vs-question; the sidebar icon depends on it.
+        // The report_turn_status nudge must ride on every spawn (todo 435).
+        // cc-progress is unmigrated this pass, so its marker still rides too.
         let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
         let p = args
             .iter()
             .position(|a| a == "--append-system-prompt")
             .expect("--append-system-prompt must be present");
         let prompt = args.get(p + 1).map(String::as_str).unwrap_or("");
-        assert!(prompt.contains("<cc-status:done|question|waiting|working>"), "prompt must describe the status marker: {prompt}");
-        assert!(prompt.contains("<cc-title:"), "prompt must request the title marker: {prompt}");
+        assert!(prompt.contains("report_turn_status"), "prompt must nudge the report_turn_status tool: {prompt}");
         assert!(prompt.contains("<cc-progress:"), "prompt must request the progress marker: {prompt}");
     }
 

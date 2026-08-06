@@ -1,5 +1,30 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+
+/// Record type `ai_milestone_title` looks for, appended by the Stop hook when
+/// `report_turn_status`'s `title` arg is set (todo 435 - retires the
+/// `<cc-title:…>` text marker). Mirrors `/close`'s manual-rename lines: a
+/// durable, offline-readable record, not daemon-only state.
+pub fn append_ai_title_record(transcript_path: &Path, title: &str) -> std::io::Result<()> {
+    let line = serde_json::json!({"type": "ai-title", "aiTitle": title}).to_string();
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(transcript_path)?;
+    // Defensive: a real transcript's last byte is always a newline (the
+    // CLI's own JSONL writer), but if it somehow isn't, appending straight
+    // onto that line would merge with it and fail to parse as JSON on read.
+    if f.metadata().map(|m| m.len()).unwrap_or(0) > 0 {
+        let mut last_byte = [0u8; 1];
+        use std::io::{Read, Seek, SeekFrom};
+        let mut check = std::fs::File::open(transcript_path)?;
+        let len = check.metadata()?.len();
+        check.seek(SeekFrom::Start(len - 1))?;
+        check.read_exact(&mut last_byte)?;
+        if last_byte[0] != b'\n' {
+            writeln!(f)?;
+        }
+    }
+    writeln!(f, "{line}")?;
+    f.flush()
+}
 
 /// Extracts the inner text of `<tag>…</tag>` from `s`, if present.
 fn tag_inner<'a>(s: &'a str, tag: &str) -> Option<&'a str> {
@@ -220,10 +245,10 @@ pub(crate) fn assistant_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// AI title, snapshotting the newest `<cc-title:…>` seen each time a milestone
-/// turn (1/5/15) completes, and using the newest marker directly before the
-/// first milestone lands. Demanding an exact-turn hit used to forfeit any
-/// milestone whose turn ended on a tool call. None when the chat has no marker.
+/// AI title, snapshotting the newest candidate each time a milestone turn
+/// (1/5/15) completes. Two sources per line: a `type:"ai-title"` record
+/// (todo 435's `report_turn_status`) or the pre-435 `<cc-title:…>` marker -
+/// so a chat spanning the migration still titles itself correctly.
 pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -242,7 +267,11 @@ pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
             continue;
         }
         if turn == 0 { continue; }
-        if let Some(text) = assistant_text(&v) {
+        if v.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
+            if let Some(t) = v.get("aiTitle").and_then(|s| s.as_str()) {
+                if !t.trim().is_empty() { latest = Some(t.to_string()); }
+            }
+        } else if let Some(text) = assistant_text(&v) {
             if let Some(t) = extract_cc_title(&text) {
                 if !t.trim().is_empty() { latest = Some(t); }
             }
@@ -484,6 +513,66 @@ mod tests {
         assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Auth Setup Help"));
         // session_title surfaces it when there's no human override.
         assert_eq!(session_title(&path, 60).as_deref(), Some("Auth Setup Help"));
+    }
+
+    fn ai_title_line(title: &str) -> String {
+        serde_json::json!({"type": "ai-title", "aiTitle": title}).to_string()
+    }
+
+    #[test]
+    fn append_ai_title_record_then_milestone_reads_it() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [user_line("help me with auth"), assistant_line("Sure, on it.")].join("\n");
+        std::fs::write(&path, format!("{body}\n")).unwrap();
+        append_ai_title_record(&path, "Auth Setup Help").unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Auth Setup Help"));
+    }
+
+    /// Self-heals a missing trailing newline (a real transcript's last byte is always `\n`).
+    #[test]
+    fn append_ai_title_record_self_heals_missing_trailing_newline() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [user_line("help me with auth"), assistant_line("Sure, on it.")].join("\n");
+        std::fs::write(&path, &body).unwrap(); // no trailing "\n" - the edge case
+        append_ai_title_record(&path, "Auth Setup Help").unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents.lines().count(), 3, "the merge bug collapses this to 2 lines");
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Auth Setup Help"));
+    }
+
+    #[test]
+    fn milestone_title_prefers_ai_title_record_over_legacy_marker_same_turn() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [
+            user_line("help me with auth"),
+            assistant_line("Sure.\n<cc-title:Legacy Marker Title>"),
+            ai_title_line("New Tool Title"),
+        ].join("\n");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("New Tool Title"));
+    }
+
+    /// Legacy marker on turn 1, new `ai-title` record by turn 5: milestone 1
+    /// freezes the legacy title, holds through turns 2-4, then milestone 5
+    /// re-snapshots onto the newer source.
+    #[test]
+    fn milestone_title_mixes_legacy_and_new_sources_across_turns() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let mut lines = vec![
+            user_line("turn one"),
+            assistant_line("First.\n<cc-title:Old Style Title>"),
+        ];
+        for i in 2..=5 {
+            lines.push(user_line(&format!("turn {i}")));
+        }
+        lines.push(ai_title_line("New Style Title"));
+        let body = lines.join("\n");
+        std::fs::write(&path, format!("{body}\n")).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("New Style Title"));
     }
 
     #[test]

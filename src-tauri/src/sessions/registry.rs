@@ -46,6 +46,18 @@ pub struct Registry {
     /// an `Instance` field: it's a transient one-shot signal, never serialized.
     /// Deterministic replacement for parsing a `<cc-close:done>` text marker.
     close_requested: Mutex<std::collections::HashSet<String>>,
+    /// This turn's self-reported status (`report_turn_status` MCP tool,
+    /// todo 435), keyed by session_id. Side map, not an `Instance` field:
+    /// transient, never serialized to the frontend.
+    reported_status: Mutex<HashMap<String, ReportedStatus>>,
+}
+
+/// See `Registry::reported_status`.
+#[derive(Clone, Debug)]
+pub struct ReportedStatus {
+    pub turn_gen: u64,
+    pub status: String,
+    pub title: Option<String>,
 }
 
 impl Registry {
@@ -55,6 +67,7 @@ impl Registry {
             rate_limits: Mutex::new(HashMap::new()),
             background_tasks: Mutex::new(HashMap::new()),
             close_requested: Mutex::new(std::collections::HashSet::new()),
+            reported_status: Mutex::new(HashMap::new()),
         }
     }
 
@@ -68,6 +81,28 @@ impl Registry {
     /// a stale flag can never re-tear-down a resumed session on a later turn.
     pub fn take_close_requested(&self, session_id: &str) -> bool {
         self.close_requested.lock().unwrap().remove(session_id)
+    }
+
+    /// Record this turn's self-reported status, stamped with the CURRENT
+    /// `turn_gen` so a later consumer can spot a stale report.
+    pub fn set_reported_status(&self, session_id: &str, turn_gen: u64, status: String, title: Option<String>) {
+        self.reported_status
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), ReportedStatus { turn_gen, status, title });
+    }
+
+    /// Peek without consuming - the Stop hook fires before the pump's
+    /// result-line handler, which is the one that `take`s it.
+    pub fn peek_reported_status(&self, session_id: &str) -> Option<ReportedStatus> {
+        self.reported_status.lock().unwrap().get(session_id).cloned()
+    }
+
+    /// Consume: always removes the entry, but only returns it on a gen
+    /// match - mirrors `set_awaiting_if_gen`'s stale-turn guard.
+    pub fn take_reported_status_if_gen(&self, session_id: &str, gen: u64) -> Option<ReportedStatus> {
+        let entry = self.reported_status.lock().unwrap().remove(session_id)?;
+        if entry.turn_gen == gen { Some(entry) } else { None }
     }
 
     /// Record the live background-task count the Stop hook reported for this
@@ -833,6 +868,33 @@ mod tests {
     fn current_turn_gen_returns_zero_for_unknown() {
         let registry = Registry::new();
         assert_eq!(registry.current_turn_gen("ghost"), 0);
+    }
+
+    #[test]
+    fn reported_status_peek_then_take_roundtrip() {
+        let registry = Registry::new();
+        registry.set_reported_status("s", 1, "done".into(), Some("Fix login bug".into()));
+        let peeked = registry.peek_reported_status("s").unwrap();
+        assert_eq!(peeked.status, "done");
+        assert_eq!(peeked.title.as_deref(), Some("Fix login bug"));
+        let taken = registry.take_reported_status_if_gen("s", 1).unwrap();
+        assert_eq!(taken.status, "done");
+        assert!(registry.peek_reported_status("s").is_none(), "take must consume the entry");
+    }
+
+    #[test]
+    fn reported_status_take_rejects_stale_gen_but_still_consumes() {
+        let registry = Registry::new();
+        registry.set_reported_status("s", 1, "done".into(), None);
+        assert!(registry.take_reported_status_if_gen("s", 2).is_none(), "stale gen must not apply");
+        assert!(registry.peek_reported_status("s").is_none(), "must consume even on mismatch");
+    }
+
+    #[test]
+    fn reported_status_unknown_session_peek_and_take_are_none() {
+        let registry = Registry::new();
+        assert!(registry.peek_reported_status("ghost").is_none());
+        assert!(registry.take_reported_status_if_gen("ghost", 0).is_none());
     }
 
     #[test]

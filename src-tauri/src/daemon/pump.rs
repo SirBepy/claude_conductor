@@ -253,16 +253,29 @@ pub(crate) async fn run_stdout_pump(
                                 // client attaching between turns doesn't get a stale
                                 // resync snapshot of the finished turn's text.
                                 pump_session.streaming.lock().unwrap().clear();
+                                let live_turn = saw_stream_turn;
+                                saw_stream_turn = false;
+                                // report_turn_status (todo 435) is authoritative for a live
+                                // turn; a replayed history line keeps the legacy marker scan.
+                                let awaiting = if live_turn {
+                                    state_for_pump
+                                        .registry
+                                        .take_reported_status_if_gen(&pump_session.session_id, pump_turn_gen)
+                                        .map(|r| r.status)
+                                        .or(awaiting)
+                                } else {
+                                    awaiting
+                                };
                                 // Character "work finished" / "asking" sound. The in-app chat's
                                 // turn completion is NOT covered by the global Stop/Notification
                                 // hooks (those only drive skill-usage + external sessions), so
                                 // fire the sound here off the same `result` line that sets
                                 // awaiting. The app maps this to `notifications::fire`, which
                                 // resolves the session character + slot + mute/meeting gating.
-                                // Guard on saw_stream_turn so replayed history result lines
+                                // Guard on live_turn so replayed history result lines
                                 // (emitted by claude on --resume before the live turn starts)
                                 // don't each trigger their own sound.
-                                if saw_stream_turn && matches!(awaiting.as_deref(), Some("done") | Some("question")) {
+                                if live_turn && matches!(awaiting.as_deref(), Some("done") | Some("question")) {
                                     state_for_pump.notifier.publish(
                                         "turn_sound",
                                         serde_json::json!({
@@ -277,13 +290,11 @@ pub(crate) async fn run_stdout_pump(
                                 // whatever window we had recorded is over.
                                 // Hygiene only: every consumer already treats
                                 // a past `resets_at` as unblocked.
-                                if saw_stream_turn {
+                                if live_turn {
                                     state_for_pump
                                         .registry
                                         .clear_rate_limit_for_account(&pump_session.account_id);
                                 }
-                                let live_turn = saw_stream_turn;
-                                saw_stream_turn = false;
                                 // Only a LIVE turn's result may update the self-reported
                                 // status, and only if no newer turn started meanwhile
                                 // (gen guard, mirroring set_busy_false_if_gen). Without
