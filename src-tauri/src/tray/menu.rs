@@ -20,13 +20,14 @@ pub fn setup(app: &AppHandle) -> Result<()> {
     let idle_bytes = icon::render(&IconCtx { updating: false, in_meeting: false, dev: cfg!(debug_assertions) });
     let idle_icon = Image::from_bytes(&idle_bytes)?;
 
-    TrayIconBuilder::with_id(TRAY_ID)
+    let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(idle_icon)
         .icon_as_template(false)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip("Claude Conductor")
         .on_menu_event(|app, event| {
+            log::info!("tray: menu event {:?}", event.id.as_ref());
             match event.id.as_ref() {
                 "open" => crate::ipc::open_dashboard(app.clone()),
                 "open-chats" => {
@@ -94,7 +95,14 @@ pub fn setup(app: &AppHandle) -> Result<()> {
                 on_left_click(tray.app_handle().clone(), rect);
             }
         })
-        .build(app)?;
+        .build(app);
+    // Boot diagnostics: on 2026-08-06 the autostarted app ran healthily for 10
+    // minutes with NO reachable entry point, and nothing said which link died.
+    match &tray {
+        Ok(_) => log::info!("tray: icon registered (id {TRAY_ID})"),
+        Err(e) => log::error!("tray: icon FAILED to register: {e} - app is unreachable from the tray"),
+    }
+    let _tray = tray?;
 
     // Listener: settings-changed -> rebuild menu + re-render.
     {
@@ -146,6 +154,7 @@ fn on_left_click(app: AppHandle, icon_rect: tauri::Rect) {
         *app.state::<AppState>().auth_state.lock().unwrap(),
         AuthState::LoggedIn
     );
+    log::info!("tray: left-click received (logged_in={logged_in})");
     if !logged_in {
         // Not logged in — kick login. `start_login` exists in ipc.rs.
         tauri::async_runtime::spawn(async move {

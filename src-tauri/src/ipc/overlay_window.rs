@@ -169,7 +169,9 @@ pub fn toggle_overlay_window(app: &AppHandle, icon_rect: tauri::Rect) {
         return;
     }
     if let Err(e) = build_overlay_window(app, icon_rect) {
-        log::warn!("build_overlay_window failed: {e}");
+        log::error!("build_overlay_window failed: {e} - tray click produced no window");
+    } else {
+        log::info!("overlay: built on tray click");
     }
 }
 

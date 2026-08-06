@@ -44,25 +44,27 @@ use tauri::Manager;
 /// to `<app-data>/daemon.log` (append). `RUST_LOG` overrides the default `info`
 /// level. Best-effort: falls back to stderr if the file can't be opened, never
 /// panics. Safe to call once at daemon startup.
+/// Write every panic to `<app-data>/<file_name>` before the process dies.
+/// Bypasses the `log` facade: a panic inside the logger would deadlock on it.
+fn install_panic_hook(file_name: &str, tag: &'static str) {
+    let Ok(path) = paths::data_dir().map(|dir| dir.join(file_name)) else { return };
+    let orig = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let ts = chrono::Utc::now().to_rfc3339();
+            let thread = std::thread::current();
+            let who = thread.name().unwrap_or("<unnamed>");
+            let _ = writeln!(f, "[{ts} ERROR claude_conductor_lib] {tag} PANIC on thread '{who}': {info}");
+            let _ = f.flush();
+        }
+        orig(info);
+    }));
+}
+
 fn init_daemon_file_logger() {
     let log_path = paths::data_dir().ok().map(|dir| dir.join("daemon.log"));
-
-    // Panic hook: writes directly to the log file instead of going through the
-    // logger (avoids a potential mutex deadlock if the panic happened inside the
-    // logger). This is the only reliable way to capture daemon panics given that
-    // stderr is discarded for the detached, console-less process.
-    if let Some(path) = log_path.clone() {
-        let orig = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-                let ts = chrono::Utc::now().to_rfc3339();
-                let _ = writeln!(f, "[{ts} ERROR claude_conductor_lib] daemon PANIC: {info}");
-                let _ = f.flush();
-            }
-            orig(info);
-        }));
-    }
+    install_panic_hook("daemon.log", "daemon");
 
     let file = log_path.and_then(|path| {
         std::fs::OpenOptions::new()
@@ -105,6 +107,9 @@ pub fn run() {
         return;
     }
     let _ = paths::ensure_data_dir();
+    // `panic = "abort"` means ONE panic anywhere kills the app instantly, and
+    // until now silently: the 2026-08-05 aborts left no log, only a WER record.
+    install_panic_hook("crash.log", "app");
     match crate::characters::bundled::ensure_bundled() {
         Ok(n) if n > 0 => log::info!("characters: copied {n} bundled character(s) into app-data"),
         Ok(_) => {}
@@ -135,6 +140,9 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Surface the dashboard on a second launch, building it if the user
             // has not opened it yet this session (main is lazy - ai_todo 143).
+            // Relaunching is the fallback when the tray is unreachable; no line
+            // here means the handoff never fired.
+            log::info!("single-instance: second launch handed off, surfacing dashboard");
             crate::ipc::open_dashboard(app.clone());
         }));
     }

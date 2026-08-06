@@ -209,12 +209,17 @@ pub fn build_main_window(app: &AppHandle, nav: Option<&str>) -> Result<(), Strin
                     if let Some(state) = w.app_handle().try_state::<crate::state::AppState>() {
                         state.main_window_loaded.store(true, Ordering::SeqCst);
                     }
+                    log::info!("build_main_window: page loaded, showing window");
                     let _ = w.show();
                     let _ = w.set_focus();
                 }
             })
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                log::error!("build_main_window FAILED: {e}");
+                e.to_string()
+            })?;
+    log::info!("build_main_window: built (hidden until on_page_load finishes)");
     attach_hide_to_tray(&window);
     Ok(())
 }
