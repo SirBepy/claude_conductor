@@ -5,6 +5,15 @@ import { basename } from "../path-utils";
 
 const chipData = new WeakMap<HTMLElement, { mime: string; base64: string; path: string }>();
 
+/** Per-thumb attachment payload, so the chat-wide image gallery
+ *  (chat-image-gallery-data.ts) can read a sent attachment's image data
+ *  without duplicating it into DOM attributes. Mirrors screenshot-row.ts's
+ *  rowShots map. */
+export const attachmentShots = new WeakMap<
+  HTMLElement,
+  { mime: string; base64: string; filename?: string; sourcePath?: string }
+>();
+
 export function mimeToIcon(mime: string): string {
   if (mime === "application/pdf") return "ph-file-pdf";
   if (mime.startsWith("text/") || mime === "application/json") return "ph-file-text";
@@ -32,6 +41,7 @@ export async function hydrateAttachments(el: HTMLElement): Promise<void> {
         img.title = "Click to enlarge";
         thumb.appendChild(img);
         const { mime, base64 } = data;
+        attachmentShots.set(thumb, { mime, base64, filename: name, sourcePath: path });
         thumb.addEventListener("click", () => {
           openLightbox({ type: "image", mime, base64, filename: name, sourcePath: path });
         });
