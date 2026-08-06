@@ -544,14 +544,16 @@ class PreviewPanel implements PreviewController {
 
   private openInBrowser(): void {
     if (!this.selected) return;
-    // No dedicated backend "open preview in browser" endpoint exists (the
-    // hook server only has a write route) — a self-contained data: URL is the
-    // simplest escape hatch that needs no new IPC surface. Payload is already
-    // capped (~2MB) daemon-side, well within what a data: URL can carry.
-    const dataUrl = "data:text/html;charset=utf-8," + encodeURIComponent(this.selected.html);
-    void invoke("open_external", { url: dataUrl }).catch((err) =>
-      console.error("[preview-panel] open_external failed", err),
-    );
+    // Windows' ShellExecuteW has no protocol handler for data: URLs, so we
+    // write a real temp .html file and open that path instead.
+    void (async () => {
+      try {
+        const path = await invoke<string>("write_temp_html", { html: this.selected!.html });
+        await invoke("open_external", { url: path });
+      } catch (err) {
+        console.error("[preview-panel] open_external failed", err);
+      }
+    })();
   }
 
   private setDeviceWidth(w: DeviceWidth): void {

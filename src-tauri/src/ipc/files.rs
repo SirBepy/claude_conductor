@@ -229,6 +229,21 @@ pub async fn write_temp_image(mime: String, base64: String) -> Result<String, St
     .map_err(|e| format!("write_temp_image join error: {e}"))?
 }
 
+/// Write HTML to a temp `.html` file so "Open in browser" can hand the OS a
+/// real file path instead of a `data:` URL - Windows' `ShellExecuteW` has no
+/// protocol handler for `data:` and fails trying to treat the whole URI as a
+/// filename.
+#[tauri::command]
+pub async fn write_temp_html(html: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::env::temp_dir().join(format!("claude-conductor-{}.html", uuid::Uuid::new_v4()));
+        std::fs::write(&path, html.as_bytes()).map_err(|e| e.to_string())?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("write_temp_html join error: {e}"))?
+}
+
 /// Reveal (and select, where the OS supports it) a specific FILE in the OS
 /// file manager. Unlike `open_in_explorer` (which opens a directory), this
 /// takes a file path and highlights it in its parent folder.
