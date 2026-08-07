@@ -28,6 +28,7 @@ mod remote_handlers;
 mod remote_pairing;
 mod remote_push;
 pub mod remote_server;
+mod remote_static;
 mod remote_voice;
 pub mod repo_channel_wake;
 pub mod rpc;
