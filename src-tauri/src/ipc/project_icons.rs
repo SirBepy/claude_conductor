@@ -32,6 +32,10 @@ const ICON_CANDIDATES: &[&str] = &[
     "src-tauri/icons/128x128.png", "src-tauri/icons/icon.png",
 ];
 
+/// Common monorepo container dirs - checked one level deep, only when a
+/// dir's own ICON_CANDIDATES come up empty (e.g. hubbub's `apps/web/public/`).
+const WORKSPACE_CONTAINERS: &[&str] = &["apps", "packages", "services"];
+
 fn mime_for(ext: &str) -> Option<&'static str> {
     match ext.to_ascii_lowercase().as_str() {
         "svg" => Some("image/svg+xml"),
@@ -123,29 +127,56 @@ pub fn get_project_tech(root: String) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// ICON_CANDIDATES lookup against a single dir. Shared by the direct
+/// ancestor check and the workspace-container scan below.
+fn find_icon_in_dir(dir: &Path) -> Option<AttachmentData> {
+    use base64::Engine;
+    for cand in ICON_CANDIDATES {
+        let path = dir.join(cand);
+        let Ok(meta) = std::fs::metadata(&path) else { continue };
+        if !meta.is_file() || meta.len() > MAX_ICON_BYTES {
+            continue;
+        }
+        let Some(mime) = path.extension().and_then(|e| e.to_str()).and_then(mime_for) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        return Some(AttachmentData { mime: mime.to_string(), base64 });
+    }
+    None
+}
+
+/// One level into `dir`'s workspace containers, subdirs sorted for
+/// determinism - first icon match wins.
+fn find_icon_in_workspace_containers(dir: &Path) -> Option<AttachmentData> {
+    for container in WORKSPACE_CONTAINERS {
+        let Ok(entries) = std::fs::read_dir(dir.join(container)) else { continue };
+        let mut subdirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        subdirs.sort();
+        if let Some(icon) = subdirs.iter().find_map(|sub| find_icon_in_dir(sub)) {
+            return Some(icon);
+        }
+    }
+    None
+}
+
 /// The project's own icon/logo file as `{mime, base64}`, or None when no
 /// candidate exists / it's too big / unreadable - walks up to the repo root
 /// (see `ancestors_upto_repo_root`) so a subfolder chat inherits the repo
 /// root's icon instead of missing it. Closest dir wins: `root` itself is
-/// checked before any ancestor. Runs on the blocking pool (file IO) so it
-/// never stalls the webview, mirroring `read_image_file`.
+/// checked before any ancestor, then falls back to a one-level workspace-
+/// container scan. Runs on the blocking pool (file IO) so it never stalls
+/// the webview, mirroring `read_image_file`.
 #[tauri::command]
 pub async fn get_project_icon(root: String) -> Option<AttachmentData> {
     tauri::async_runtime::spawn_blocking(move || {
-        use base64::Engine;
         for dir in ancestors_upto_repo_root(Path::new(&root), 8) {
-            for cand in ICON_CANDIDATES {
-                let path = dir.join(cand);
-                let Ok(meta) = std::fs::metadata(&path) else { continue };
-                if !meta.is_file() || meta.len() > MAX_ICON_BYTES {
-                    continue;
-                }
-                let Some(mime) = path.extension().and_then(|e| e.to_str()).and_then(mime_for) else {
-                    continue;
-                };
-                let Ok(bytes) = std::fs::read(&path) else { continue };
-                let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                return Some(AttachmentData { mime: mime.to_string(), base64 });
+            if let Some(icon) = find_icon_in_dir(&dir) {
+                return Some(icon);
+            }
+            if let Some(icon) = find_icon_in_workspace_containers(&dir) {
+                return Some(icon);
             }
         }
         None
@@ -212,6 +243,23 @@ mod tests {
         let icon = get_project_icon(frontend.to_string_lossy().to_string()).await;
         assert!(icon.is_some(), "expected the repo root's icon.png to be inherited");
         assert_eq!(icon.unwrap().mime, "image/png");
+    }
+
+    /// Monorepo root, favicons only under `apps/<name>/public/` (hubbub's
+    /// layout) - workspace scan must find the alphabetically-first one.
+    #[tokio::test]
+    async fn workspace_container_scan_finds_per_app_favicon() {
+        let root = tempdir().unwrap();
+        std::fs::write(root.path().join(".git"), "").unwrap();
+        for app in ["web", "controller"] {
+            let public = root.path().join("apps").join(app).join("public");
+            std::fs::create_dir_all(&public).unwrap();
+            std::fs::write(public.join("favicon.svg"), b"<svg/>").unwrap();
+        }
+
+        let icon = get_project_icon(root.path().to_string_lossy().to_string()).await;
+        assert!(icon.is_some(), "expected apps/controller/public/favicon.svg (alphabetically first)");
+        assert_eq!(icon.unwrap().mime, "image/svg+xml");
     }
 
     /// The walk-up must not escape the repo boundary: a `.git`-bearing dir is
