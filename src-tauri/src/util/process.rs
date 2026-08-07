@@ -65,6 +65,81 @@ pub fn mark_listener_non_inheritable(listener: &tokio::net::TcpListener) {
     }
 }
 
+/// Lazily-built process-wide job object, stored as a raw handle value because
+/// `HANDLE` is neither Send nor Sync. Deliberately never closed: the daemon
+/// exiting is what closes it, and that close is the reap trigger. `None` means
+/// creation failed, in which case callers silently skip the guard.
+#[cfg(windows)]
+fn orphan_guard_job() -> Option<usize> {
+    use windows::Win32::System::JobObjects::{
+        CreateJobObjectW, SetInformationJobObject, JobObjectExtendedLimitInformation,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    static JOB: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    *JOB.get_or_init(|| unsafe {
+        let job = CreateJobObjectW(None, windows::core::PCWSTR::null()).ok()?;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+        .ok()?;
+        Some(job.0 as usize)
+    })
+}
+
+/// Bind a just-spawned child and every process it goes on to spawn to the
+/// daemon's job object, so the OS reaps the whole tree the moment the daemon
+/// dies - including a hard kill that never reaches `kill_tree`, whose snapshot
+/// BFS also misses grandchildren spawned after the snapshot. Best-effort.
+pub fn guard_orphan_tree(child: &tokio::process::Child) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::JobObjects::AssignProcessToJobObject;
+        let (Some(job), Some(handle)) = (orphan_guard_job(), child.raw_handle()) else {
+            return;
+        };
+        // SAFETY: `handle` is owned by `child`, which outlives this call.
+        if let Err(e) = unsafe { AssignProcessToJobObject(HANDLE(job as _), HANDLE(handle as _)) } {
+            log::warn!("orphan guard: AssignProcessToJobObject failed: {e}");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = child;
+    }
+}
+
+#[cfg(all(test, windows))]
+mod orphan_guard_tests {
+    #[tokio::test]
+    async fn guard_orphan_tree_assigns_child_to_the_job() {
+        use windows::Win32::Foundation::{BOOL, HANDLE};
+        use windows::Win32::System::JobObjects::IsProcessInJob;
+
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        super::guard_orphan_tree(&child);
+
+        let job = HANDLE(super::orphan_guard_job().expect("job created") as _);
+        let proc = HANDLE(child.raw_handle().expect("child handle") as _);
+        let mut in_job = BOOL(0);
+        let probe = unsafe { IsProcessInJob(proc, job, &mut in_job) };
+        let _ = child.kill().await;
+
+        probe.expect("IsProcessInJob");
+        assert!(in_job.as_bool(), "child never landed in the orphan-guard job");
+    }
+}
+
 /// Process-wide shared `System`, so repeated live-pid checks (lockfile
 /// startup, the detector's 5s tick, the channel-adopt exit watcher's 5s poll)
 /// refresh the same process table in place instead of each allocating and

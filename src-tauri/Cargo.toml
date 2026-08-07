@@ -87,6 +87,8 @@ windows = { version = "0.58", features = [
     "Win32_Security",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Pipes",
+    # Job object that reaps daemon-spawned claude trees (see util::process)
+    "Win32_System_JobObjects",
     "Win32_System_Com",
     "Win32_System_Registry",
     "Win32_Media_Audio",

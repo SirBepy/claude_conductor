@@ -216,6 +216,11 @@ pub async fn spawn_session(
     cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn()?;
+    // Extends kill_on_drop above from the direct child to the whole tree (the
+    // cmd/npx shims and MCP servers claude starts). Chat sessions are already
+    // daemon-lifetime-bound, so this changes no semantics; channels are left
+    // out on purpose since channel_adopt relies on them outliving the daemon.
+    crate::util::process::guard_orphan_tree(&child);
     let pid = child.id().expect("pid");
     let stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
