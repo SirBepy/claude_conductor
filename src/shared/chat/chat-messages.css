@@ -71,6 +71,16 @@
   border-radius: 3px;
 }
 
+/* Raw narration (assistant prose, tool calls/results) - hidden by default so
+ * the chat reads as a quiet inbox; a per-session toggle (chat-menu.ts) adds
+ * show-raw-chat to the container to reveal it live, no rebuild. */
+.chat-narration {
+  display: none;
+}
+.show-raw-chat .chat-narration {
+  display: block;
+}
+
 .msg {
   position: relative;
   margin-bottom: 12px;

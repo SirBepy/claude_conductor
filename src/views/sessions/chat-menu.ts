@@ -16,6 +16,8 @@ import {
   saveHiddenSessions,
 } from "./sessions-helpers";
 import { triggerHandoff } from "./handoff";
+import { isRawViewEnabled, setRawViewEnabled } from "../../shared/chat/message-filter-pref";
+import { state } from "./state";
 
 export interface ChatMenuCtx {
   kind: "live" | "draft";
@@ -240,6 +242,22 @@ export function buildChatMenuBlock(
       disabledReason: isDraft
         ? "Available once the chat starts"
         : (!sessionId ? "No session" : (ctx.isJarvis ? "Jarvis always auto-accepts" : undefined)),
+    },
+    {
+      icon: "eye",
+      label: "Show raw activity",
+      isOn: !isDraft && !!sessionId && isRawViewEnabled(sessionId),
+      checkDot: !isDraft && !!sessionId && isRawViewEnabled(sessionId),
+      run: isDraft || !sessionId
+        ? undefined
+        : () => {
+            const next = !isRawViewEnabled(sessionId);
+            setRawViewEnabled(sessionId, next);
+            if (state.renderer && state.renderer.sessionId === sessionId) {
+              state.renderer.container.classList.toggle("show-raw-chat", next);
+            }
+          },
+      disabledReason: isDraft ? "Available once the chat starts" : (!sessionId ? "No session" : undefined),
     },
     {
       icon: "user-switch",

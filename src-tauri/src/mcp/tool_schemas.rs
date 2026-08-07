@@ -18,6 +18,9 @@ pub const TOOL_READ_MESSAGES: &str = "read_messages";
 // text markers. Unconditional like the coordination-channel tools above -
 // every session reports its own status, not just Jarvis workers.
 pub const TOOL_REPORT_STATUS: &str = "report_turn_status";
+// Chat text/tool narration is hidden from Joe's view by default; this is the
+// only channel that reaches him. Unconditional, same as report_turn_status.
+pub const TOOL_SEND_MESSAGE: &str = "send_message";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -133,6 +136,17 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     "title": {"type": "string"}
                 },
                 "required": ["status"]
+            }
+        }),
+        json!({
+            "name": TOOL_SEND_MESSAGE,
+            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him by default - regular assistant text and tool-call narration are hidden from the chat view entirely. Call this when you have something Joe genuinely needs to see: a finished result, a blocker, a decision point, or an explicit FYI. Keep it terse - there's no need to narrate elsewhere, it won't be shown. Not for peer-session coordination, use post_message for that.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The message to show Joe."}
+                },
+                "required": ["text"]
             }
         }),
     ];

@@ -15,6 +15,7 @@ mod context;
 mod decision;
 mod jarvis;
 mod lifecycle;
+mod messages;
 mod permission;
 mod preview;
 mod relay;
@@ -155,6 +156,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/channel/read-messages", post(channel::on_read_messages))
         .route("/channel/post-message", post(channel::on_post_message))
         .route("/turn/report-status", post(turn_status::on_report_status))
+        .route("/messages/send", post(messages::on_send_message))
         .with_state(ctx);
 
     tokio::spawn(async move {

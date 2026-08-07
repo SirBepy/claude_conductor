@@ -284,6 +284,15 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         touched = true;
         break;
       }
+      // Explicit inbox message: the AI's opt-in way to surface a chat bubble
+      // (vs. narration tool calls, hidden by default - see message-filter-pref.ts).
+      if (ev.tool_name === "mcp__cc_conductor__send_message" && !ev.parent_tool_use_id) {
+        const text = typeof (ev.input as { text?: unknown })?.text === "string"
+          ? (ev.input as { text: string }).text : "";
+        r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null });
+        touched = true;
+        break;
+      }
       // TodoWrite drives the step-checklist that replaces the visual role of
       // the <cc-progress:N/M> marker bar (chat-tools.css .todo-checklist).
       // Renders straight into the turn footer via turnFooters - never a
@@ -397,6 +406,13 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
           r.dirtyIndices.add(qIdx);
         }
         r.onToolTally?.(r.tallyState.build());
+        touched = true;
+        break;
+      }
+      // Ack for a send_message call: text already came from the tool_use
+      // input, so absorb silently - no visible tool_result row.
+      const mIdx = r.messages.findIndex((m) => m.kind === "message" && m.id === ev.tool_use_id);
+      if (mIdx >= 0) {
         touched = true;
         break;
       }

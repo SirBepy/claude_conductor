@@ -21,6 +21,7 @@ import { setThinkingActivity, setThinkingProgress, setThinkingTodoActivity } fro
 import { completeHandoff } from "./handoff";
 import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
 import { flushRenderNow } from "../../shared/chat/flush-scheduler";
+import { isRawViewEnabled } from "../../shared/chat/message-filter-pref";
 import {
   takeRetainedChat,
   retainChat,
@@ -247,6 +248,9 @@ export async function mountRenderer(
   };
 
   const renderer = new ChatRenderer(messagesEl);
+  // Initial raw-activity view state (device-local pref, see message-filter-pref.ts).
+  // Retained across pane-cache remounts since messagesEl itself is reused.
+  messagesEl.classList.toggle("show-raw-chat", isRawViewEnabled(sessionId));
   // Panel listens for file mutations; activity feed routes to the thinking bar.
   wireRenderer(pane, sess, header, sessionId, renderer, new ChangesPanel());
   await renderer.attach(sessionId);

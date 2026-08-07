@@ -315,6 +315,10 @@ export function renderMessage(m: RenderedMessage): string {
       }
       return `<div class="msg assistant${m.streaming ? " streaming" : ""}"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${renderBlocks(blocks)}${retryBtn}${prCard}</div>`;
     }
+    // Explicit send_message call - same bubble shape as "assistant", sourced
+    // from m.text instead of m.content (see chat-event-handler.ts tool_use).
+    case "message":
+      return `<div class="msg assistant"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button><div class="block text">${renderMarkdown(stripStatusToken(m.text ?? ""))}</div></div>`;
     case "tool_use": {
       const view = parseFileEdit(m.tool ?? "", m.input);
       if (view) return `<div class="msg tool-use tool-use--file">${renderEditWindow(view)}</div>`;

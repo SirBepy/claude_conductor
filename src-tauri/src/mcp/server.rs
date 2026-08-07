@@ -1,6 +1,6 @@
 //! stdio MCP server mode. Entered when the binary is spawned with
 //! `--mcp-permission`. Implements MCP JSON-RPC 2.0 over stdin/stdout
-//! (one JSON object per line). Exposes seven tools unconditionally:
+//! (one JSON object per line). Exposes eight tools unconditionally:
 //!   - `approval_prompt`: used as `--permission-prompt-tool` by the runner
 //!   - `ask_user_question`: lets claude ask the user a question mid-turn
 //!   - `close_session`: the `/close` skill confirms teardown; the daemon ends
@@ -10,6 +10,8 @@
 //!   - `report_turn_status`: self-reported status/title, replacing the
 //!     `<cc-status:..>`/`<cc-title:..>` text markers (todo 435, see
 //!     `daemon::methods::turn_status`)
+//!   - `send_message`: the only channel that reaches Joe by default, since
+//!     chat prose/tool narration is hidden from the chat view
 //!
 //! HTTP coordination piggybacks on the existing hooks server.
 
@@ -19,7 +21,7 @@ use std::io::{BufRead, Write};
 use super::tool_schemas::{
     tool_list_response, TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS,
     TOOL_POST_MESSAGE, TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS,
-    TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_TO_SESSION, TOOL_SPAWN_WORKER,
+    TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_WORKER,
 };
 
 /// Read the hooks port from <app-data>/hooks_port.txt.
@@ -266,6 +268,21 @@ pub fn run_stdio() {
                                 Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
                             }
                         }
+                        TOOL_SEND_MESSAGE => {
+                            let url = format!("http://127.0.0.1:{port}/messages/send");
+                            let body = json!({
+                                "session_id": session_id,
+                                "text": arguments["text"],
+                            });
+                            match http_post(&rt, &url, body) {
+                                Ok(resp) if resp["ok"].as_bool() == Some(false) => {
+                                    let err = resp["error"].as_str().unwrap_or("invalid message");
+                                    tool_error_result(&id, err)
+                                }
+                                Ok(resp) => tool_result(&id, &resp.to_string()),
+                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
+                            }
+                        }
                         // The four arms below are only ever advertised to a
                         // Jarvis child's `tools/list` (see `is_jarvis` above),
                         // but a `tools/call` for a tool the model was never
@@ -404,14 +421,14 @@ mod tests {
         // Non-jarvis (the default for every normal session): base set is the
         // original 3 permission/question/close tools plus the 3 unconditional
         // coordination-channel tools (list_peers/post_message/read_messages)
-        // plus report_turn_status (todo 435).
+        // plus report_turn_status (todo 435) plus send_message.
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -422,6 +439,7 @@ mod tests {
         assert!(names.contains(&"post_message"));
         assert!(names.contains(&"read_messages"));
         assert!(names.contains(&"report_turn_status"));
+        assert!(names.contains(&"send_message"));
     }
 
     #[test]
@@ -433,7 +451,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 11, "7 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 12, "8 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -444,6 +462,7 @@ mod tests {
         assert!(names.contains(&"post_message"));
         assert!(names.contains(&"read_messages"));
         assert!(names.contains(&"report_turn_status"));
+        assert!(names.contains(&"send_message"));
         assert!(names.contains(&"spawn_worker"));
         assert!(names.contains(&"send_to_session"));
         assert!(names.contains(&"fleet_status"));

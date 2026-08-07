@@ -339,6 +339,11 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
   const wrap = document.createElement("div");
   wrap.innerHTML = renderMessage(m);
   const el = wrap.firstElementChild as HTMLElement;
+  // Raw narration (assistant prose, tool calls/results): hidden by default,
+  // shown only when the container carries show-raw-chat (see message-filter-pref.ts).
+  if (m.kind === "assistant" || m.kind === "tool_use" || m.kind === "tool_result") {
+    el.classList.add("chat-narration");
+  }
   // Hover-timestamp label. History lines carry a real epoch (parsed from the
   // transcript's RFC3339 string backend-side); live `-p` stream events carry
   // ts=0, so approximate those with the render moment (≈ arrival). Display-only:

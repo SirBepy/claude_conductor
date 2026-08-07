@@ -149,7 +149,7 @@ export function detectProgressToken(text: string): { n: number; m: number } | nu
 }
 
 export interface RenderedMessage {
-  kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question";
+  kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question" | "message";
   content?: ContentBlock[];
   text?: string;
   tool?: string;
