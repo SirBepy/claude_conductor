@@ -245,7 +245,6 @@ export class ChatRenderer {
 
   async attach(sessionId: string): Promise<void> {
     this.detach();
-    this.sessionId = sessionId;
     this.messages = [];
     this.messageEls = [];
     this.dirtyIndices.clear();
@@ -267,9 +266,7 @@ export class ChatRenderer {
     this.resetActiveTurnMeta();
     this.turnFooters.clear();
     this.closeTurnQueue = [];
-    this.unsubscribe = sessionEvents.subscribe(sessionId, (ev) => {
-      this.handleLive(ev);
-    });
+    this._resubscribe(sessionId);
   }
 
   private handleLive(ev: ChatEvent): void {
@@ -346,12 +343,10 @@ export class ChatRenderer {
     revealTranscript(this);
   }
 
-  /** Idempotent (re-)subscribe. `sessionId`/`unsubscribe` are only ever set
-   *  together by attach/swapSubscription/detach, so the pair alone proves
-   *  membership. Self-heals a retained renderer whose subscription was severed
-   *  by a path that moved its pane-cache slot without repointing it. */
-  ensureSubscribed(sessionId: string): void {
-    if (this.sessionId === sessionId && this.unsubscribe !== null) return;
+  /** Shared unsubscribe-then-subscribe tail for attach/ensureSubscribed/
+   *  swapSubscription. `sessionId`/`unsubscribe` are assigned ONLY here, so
+   *  the pair is always written together - no other writer to grep for. */
+  private _resubscribe(sessionId: string): void {
     if (this.unsubscribe) {
       try { this.unsubscribe(); } catch { /* ignore */ }
       this.unsubscribe = null;
@@ -362,18 +357,26 @@ export class ChatRenderer {
     });
   }
 
+  /** Idempotent (re-)subscribe. `sessionId`/`unsubscribe` are only ever set
+   *  together by attach/swapSubscription/detach, so the pair alone proves
+   *  membership. Self-heals a retained renderer whose subscription was severed
+   *  by a path that moved its pane-cache slot without repointing it. */
+  ensureSubscribed(sessionId: string): void {
+    if (this.sessionId === sessionId && this.unsubscribe !== null) return;
+    this._resubscribe(sessionId);
+  }
+
   async swapSubscription(newSessionId: string): Promise<void> {
     if (this.sessionId === newSessionId) return;
     const oldId = this.sessionId;
-    if (this.unsubscribe) {
-      try { this.unsubscribe(); } catch { /* ignore */ }
-      this.unsubscribe = null;
+    if (oldId) {
+      // Unsubscribe (without clearing the field - _resubscribe's own guard
+      // handles that) BEFORE the swap, so its subscriber-set merge never
+      // copies this renderer's own listener into the target and duplicates it.
+      try { this.unsubscribe?.(); } catch { /* ignore */ }
+      await sessionEvents.swap(oldId, newSessionId);
     }
-    this.sessionId = newSessionId;
-    if (oldId) await sessionEvents.swap(oldId, newSessionId);
-    this.unsubscribe = sessionEvents.subscribe(newSessionId, (ev) => {
-      this.handleLive(ev);
-    });
+    this._resubscribe(newSessionId);
   }
 
   /** Exposed for tests that drive pagination without a real IntersectionObserver. */
