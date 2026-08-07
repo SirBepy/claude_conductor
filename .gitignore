@@ -15,14 +15,7 @@ Thumbs.db
 test-results/
 playwright-report/
 .superpowers/
-.for_bepy/spike_fixtures/
-.for_bepy/autopilot-hots/
-.for_bepy/autopilot-cartoons/
-.for_bepy/autopilot-resource/
-.for_bepy/mockups/
-.for_bepy/screenshots/
-.for_bepy/autopilot-logs/
-.for_bepy/pr-review-mockup.html
+.for_bepy/
 .claude/scheduled_tasks.lock
 docs/superpowers/
 src/types/ipc.generated.ts
