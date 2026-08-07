@@ -12,6 +12,7 @@ pub mod login_step;
 pub mod wizard;
 pub mod env;
 pub mod drift;
+pub mod credentials;
 pub mod migration;
 
 pub use model::*;

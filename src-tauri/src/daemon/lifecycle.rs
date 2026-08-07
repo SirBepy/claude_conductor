@@ -83,6 +83,8 @@ pub enum LifecycleError {
     AccountNotFound(String),
     #[error("account drift: {0}")]
     AccountDrift(String),
+    #[error("account credentials: {0}")]
+    AccountCredentials(String),
     #[error("session {0} is frozen - unfreeze it first")]
     Frozen(String),
 }
@@ -119,6 +121,11 @@ pub async fn spawn_session(
     // time (someone ran `/login` inside it since onboarding).
     crate::accounts::drift::check(&account)
         .map_err(|e| LifecycleError::AccountDrift(e.to_string()))?;
+    // Drift only asks whether credentials EXIST. A failed refresh leaves the
+    // record in place with both tokens blanked, which passes that test and
+    // then fails at the CLI with an opaque auth error - this catches it here.
+    crate::accounts::credentials::check_now(&account)
+        .map_err(|e| LifecycleError::AccountCredentials(e.to_string()))?;
 
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
     // Billing gate evaluates the CHILD's effective env (parent env + this
