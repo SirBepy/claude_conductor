@@ -244,42 +244,112 @@ fn respawned_attached_sessions(
         .collect()
 }
 
+/// `instances_changed`: detach any attached session that just ended/vanished
+/// (ai_todo 66 #2), reattach any whose channel was replaced by a daemon-internal
+/// respawn, reseed `cached_instances`, then forward the raw payload.
+async fn handle_instances_changed(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::{Emitter, Manager};
+    let state = app.state::<crate::state::AppState>();
+    if let Some(instances) = params.get("instances").cloned() {
+        if let Ok(parsed) = serde_json::from_value::<Vec<crate::types::Instance>>(instances.clone()) {
+            // Collect under the sync lock, then release it BEFORE awaiting.
+            let (stale, respawned) = {
+                let attached = state.attached_sessions.lock().unwrap();
+                (stale_attached_sessions(&attached, &parsed), respawned_attached_sessions(&attached, &parsed))
+            };
+            if !stale.is_empty() {
+                let guard = state.daemon_client.lock().await;
+                if let Some(client) = guard.as_ref() {
+                    for id in &stale {
+                        let _ = client.detach_session(id).await;
+                    }
+                }
+            }
+            // `reattach` is idempotent, so a race with the -32004 path is harmless.
+            for id in respawned {
+                let app2 = app.clone();
+                tokio::spawn(async move {
+                    let _ = crate::ipc::chat::daemon_bridge::reattach(&app2, &id).await;
+                });
+            }
+            store_cached_instances(&state, parsed);
+        }
+        let _ = app.emit("instances-changed", instances);
+    }
+}
+
+/// The daemon already updated its own in-memory settings cache for an instant
+/// read; here the app process (if running) merges the same project upsert into
+/// its AppState and persists it to settings.json.
+fn handle_project_created(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::{Emitter, Manager};
+    if let (Some(project_id), Some(cwd), Some(now)) = (
+        params.get("project_id").and_then(|v| v.as_str()),
+        params.get("cwd").and_then(|v| v.as_str()),
+        params.get("now").and_then(|v| v.as_str()),
+    ) {
+        let state = app.state::<crate::state::AppState>();
+        let mut settings_guard = state.settings.lock().unwrap();
+        crate::settings::upsert_project_with_id_for_cwd(
+            &mut settings_guard,
+            project_id,
+            &std::path::PathBuf::from(cwd),
+            now,
+        );
+        let snapshot = settings_guard.clone();
+        drop(settings_guard);
+        if let Ok(path) = crate::settings::paths::settings_file() {
+            let _ = crate::settings::save(&path, &snapshot);
+        }
+        let _ = app.emit("settings-changed", &snapshot);
+    }
+}
+
+/// The daemon assigned a character to a session created on the remote
+/// (phone/browser) transport, where there is no app-process Tauri command to
+/// do this in-process (ipc/characters.rs's `ensure_session_character`).
+/// Mirrors `handle_project_created` above.
+fn handle_session_character_assigned(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::{Emitter, Manager};
+    if let (Some(session_id), Some(character_id)) = (
+        params.get("session_id").and_then(|v| v.as_str()),
+        params.get("character_id").and_then(|v| v.as_str()),
+    ) {
+        let state = app.state::<crate::state::AppState>();
+        let mut settings_guard = state.settings.lock().unwrap();
+        settings_guard.session_characters.insert(session_id.to_string(), character_id.to_string());
+        let snapshot = settings_guard.clone();
+        drop(settings_guard);
+        if let Ok(path) = crate::settings::paths::settings_file() {
+            let _ = crate::settings::save(&path, &snapshot);
+        }
+        let _ = app.emit("settings-changed", &snapshot);
+    }
+}
+
+/// The daemon spawned the singleton Jarvis session (ensure_jarvis_session,
+/// todo 272) and updated its own in-memory settings cache for an instant read.
+/// Mirrors `handle_session_character_assigned` above.
+fn handle_jarvis_session_created(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::{Emitter, Manager};
+    if let Some(session_id) = params.get("session_id").and_then(|v| v.as_str()) {
+        let state = app.state::<crate::state::AppState>();
+        let mut settings_guard = state.settings.lock().unwrap();
+        settings_guard.jarvis_session_id = Some(session_id.to_string());
+        let snapshot = settings_guard.clone();
+        drop(settings_guard);
+        if let Ok(path) = crate::settings::paths::settings_file() {
+            let _ = crate::settings::save(&path, &snapshot);
+        }
+        let _ = app.emit("settings-changed", &snapshot);
+    }
+}
+
 /// Routes daemon-side notifications into app-side Tauri events + cache updates.
 async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params: serde_json::Value) {
     use tauri::{Emitter, Manager};
     match method {
-        "instances_changed" => {
-            let state = app.state::<crate::state::AppState>();
-            if let Some(instances) = params.get("instances").cloned() {
-                if let Ok(parsed) = serde_json::from_value::<Vec<crate::types::Instance>>(instances.clone()) {
-                    // Detach any attached session that just ended/vanished so its
-                    // bridge pump task exits instead of leaking (ai_todo 66 #2).
-                    // Collect under the sync lock, then release it BEFORE awaiting.
-                    let (stale, respawned) = {
-                        let attached = state.attached_sessions.lock().unwrap();
-                        (stale_attached_sessions(&attached, &parsed), respawned_attached_sessions(&attached, &parsed))
-                    };
-                    if !stale.is_empty() {
-                        let guard = state.daemon_client.lock().await;
-                        if let Some(client) = guard.as_ref() {
-                            for id in &stale {
-                                let _ = client.detach_session(id).await;
-                            }
-                        }
-                    }
-                    // Re-subscribe sessions whose channel was replaced by a
-                    // respawn; `reattach` is idempotent, so a race is harmless.
-                    for id in respawned {
-                        let app2 = app.clone();
-                        tokio::spawn(async move {
-                            let _ = crate::ipc::chat::daemon_bridge::reattach(&app2, &id).await;
-                        });
-                    }
-                    store_cached_instances(&state, parsed);
-                }
-                let _ = app.emit("instances-changed", instances);
-            }
-        }
+        "instances_changed" => handle_instances_changed(app, params).await,
         "channels_changed" => {
             let state = app.state::<crate::state::AppState>();
             // params is the channel-snapshot JSON array (see daemon::channels::emit_changed).
@@ -406,70 +476,9 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "quit_requested" => {
             app.exit(0);
         }
-        "project_created" => {
-            if let (Some(project_id), Some(cwd), Some(now)) = (
-                params.get("project_id").and_then(|v| v.as_str()),
-                params.get("cwd").and_then(|v| v.as_str()),
-                params.get("now").and_then(|v| v.as_str()),
-            ) {
-                let state = app.state::<crate::state::AppState>();
-                let mut settings_guard = state.settings.lock().unwrap();
-                crate::settings::upsert_project_with_id_for_cwd(
-                    &mut settings_guard,
-                    project_id,
-                    &std::path::PathBuf::from(cwd),
-                    now,
-                );
-                let snapshot = settings_guard.clone();
-                drop(settings_guard);
-                if let Ok(path) = crate::settings::paths::settings_file() {
-                    let _ = crate::settings::save(&path, &snapshot);
-                }
-                let _ = app.emit("settings-changed", &snapshot);
-            }
-        }
-        // The daemon assigned a character to a session created on the remote
-        // (phone/browser) transport, where there is no app-process Tauri
-        // command to do this in-process (ipc/characters.rs's
-        // `ensure_session_character`). The daemon already updated its own
-        // in-memory settings cache for an instant read; here the app process
-        // (if running) merges the same assignment into its AppState and
-        // persists it to settings.json, mirroring the `project_created`
-        // handler above.
-        "session_character_assigned" => {
-            if let (Some(session_id), Some(character_id)) = (
-                params.get("session_id").and_then(|v| v.as_str()),
-                params.get("character_id").and_then(|v| v.as_str()),
-            ) {
-                let state = app.state::<crate::state::AppState>();
-                let mut settings_guard = state.settings.lock().unwrap();
-                settings_guard.session_characters.insert(session_id.to_string(), character_id.to_string());
-                let snapshot = settings_guard.clone();
-                drop(settings_guard);
-                if let Ok(path) = crate::settings::paths::settings_file() {
-                    let _ = crate::settings::save(&path, &snapshot);
-                }
-                let _ = app.emit("settings-changed", &snapshot);
-            }
-        }
-        // The daemon spawned the singleton Jarvis session (ensure_jarvis_session,
-        // todo 272) and updated its own in-memory settings cache for an instant
-        // read; here the app process (if running) merges the pointer into its
-        // AppState and persists it to settings.json, mirroring the
-        // `session_character_assigned` handler above.
-        "jarvis_session_created" => {
-            if let Some(session_id) = params.get("session_id").and_then(|v| v.as_str()) {
-                let state = app.state::<crate::state::AppState>();
-                let mut settings_guard = state.settings.lock().unwrap();
-                settings_guard.jarvis_session_id = Some(session_id.to_string());
-                let snapshot = settings_guard.clone();
-                drop(settings_guard);
-                if let Ok(path) = crate::settings::paths::settings_file() {
-                    let _ = crate::settings::save(&path, &snapshot);
-                }
-                let _ = app.emit("settings-changed", &snapshot);
-            }
-        }
+        "project_created" => handle_project_created(app, params),
+        "session_character_assigned" => handle_session_character_assigned(app, params),
+        "jarvis_session_created" => handle_jarvis_session_created(app, params),
         other => {
             log::debug!("daemon notif ignored: {other}");
         }
