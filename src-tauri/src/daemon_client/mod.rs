@@ -129,10 +129,11 @@ impl PersistentClient {
                     if let Some(tx) = subs.get(&session_id) {
                         let started = std::time::Instant::now();
                         let send_result = tx.send(frame).await;
-                        let elapsed = started.elapsed();
-                        if elapsed >= crate::daemon::rpc::SLOW_SEND_THRESHOLD {
-                            log::warn!("reader dispatch slow: session={session_id:?} elapsed={elapsed:?}");
-                        }
+                        crate::daemon::rpc::log_if_slow(
+                            started,
+                            "reader dispatch",
+                            format_args!("session={session_id:?} elapsed={:?}", started.elapsed()),
+                        );
                         let _ = send_result;
                     }
                 } else if let Some(id) = frame.get("id").and_then(Value::as_u64) {

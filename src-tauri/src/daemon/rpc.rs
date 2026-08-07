@@ -5,10 +5,18 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Shared with the app-side reader so one grep finds either half of a stall.
 pub const SLOW_SEND_THRESHOLD: Duration = Duration::from_millis(250);
+
+/// Warns once `started.elapsed()` crosses `SLOW_SEND_THRESHOLD`. `extra` is the
+/// caller's own pre-formatted fields, so each site keeps its distinct, greppable message.
+pub fn log_if_slow(started: Instant, label: &str, extra: impl std::fmt::Display) {
+    if started.elapsed() >= SLOW_SEND_THRESHOLD {
+        log::warn!("{label} slow: {extra}");
+    }
+}
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 

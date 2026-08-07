@@ -60,14 +60,16 @@ where
                 ctx.outbound_depth.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 let started = std::time::Instant::now();
                 let write_result = write_frame(&mut stream, &notif).await;
-                let elapsed = started.elapsed();
-                if elapsed >= crate::daemon::rpc::SLOW_SEND_THRESHOLD {
-                    log::warn!(
-                        "outbound send slow: conn={} elapsed={elapsed:?} queue_depth={}",
+                crate::daemon::rpc::log_if_slow(
+                    started,
+                    "outbound send",
+                    format_args!(
+                        "conn={} elapsed={:?} queue_depth={}",
                         ctx.conn_id,
+                        started.elapsed(),
                         ctx.outbound_depth.load(std::sync::atomic::Ordering::Relaxed)
-                    );
-                }
+                    ),
+                );
                 if let Err(e) = write_result {
                     break Err(e);
                 }
