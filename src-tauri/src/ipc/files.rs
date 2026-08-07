@@ -200,6 +200,15 @@ pub async fn read_text_file(path: String) -> Result<TextFileData, String> {
     .map_err(|e| format!("read_text_file join error: {e}"))?
 }
 
+/// Shared scaffolding for `write_temp_image`/`write_temp_html`: pick a
+/// `claude-conductor-<uuid>.<ext>` path in the OS temp dir and write `bytes`
+/// to it off the async runtime thread.
+fn write_temp_file(ext: &str, bytes: Vec<u8>) -> Result<String, String> {
+    let path = std::env::temp_dir().join(format!("claude-conductor-{}.{ext}", uuid::Uuid::new_v4()));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Write base64 image bytes to a temp file so it can be revealed in the OS
 /// file manager. Used by the lightbox "Show in File Explorer" menu item for
 /// images that have no known source path (inline chat-block images from an
@@ -221,9 +230,7 @@ pub async fn write_temp_image(mime: String, base64: String) -> Result<String, St
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&base64)
             .map_err(|e| e.to_string())?;
-        let path = std::env::temp_dir().join(format!("claude-conductor-{}.{ext}", uuid::Uuid::new_v4()));
-        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-        Ok(path.to_string_lossy().into_owned())
+        write_temp_file(ext, bytes)
     })
     .await
     .map_err(|e| format!("write_temp_image join error: {e}"))?
@@ -235,13 +242,9 @@ pub async fn write_temp_image(mime: String, base64: String) -> Result<String, St
 /// filename.
 #[tauri::command]
 pub async fn write_temp_html(html: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = std::env::temp_dir().join(format!("claude-conductor-{}.html", uuid::Uuid::new_v4()));
-        std::fs::write(&path, html.as_bytes()).map_err(|e| e.to_string())?;
-        Ok(path.to_string_lossy().into_owned())
-    })
-    .await
-    .map_err(|e| format!("write_temp_html join error: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || write_temp_file("html", html.into_bytes()))
+        .await
+        .map_err(|e| format!("write_temp_html join error: {e}"))?
 }
 
 /// Reveal (and select, where the OS supports it) a specific FILE in the OS
