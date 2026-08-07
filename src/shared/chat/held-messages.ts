@@ -6,15 +6,17 @@
 // This controller owns the per-session held set and renders the chip + a
 // floating dropdown of editable rows. It is a singleton (stored on
 // `state.heldMessages`); the active pane re-`attach()`es it on every mount so
-// the held set survives session switches. See
+// the held set survives session switches, and is ALSO mirrored to localStorage
+// (held-messages-persistence.ts) so it survives a full reload too. See
 // docs/superpowers/specs/2026-06-13-held-messages-while-busy-design.md.
 
 import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
 import { AUQ_ANSWER_SENTINEL } from "./chat-transforms";
+import { loadAllHeld, saveAllHeld } from "./held-messages-persistence";
 import "./held-messages.css";
 
-interface HeldItem {
+export interface HeldItem {
   id: number;
   blocks: ContentBlock[];
 }
@@ -78,13 +80,26 @@ export function bundleHeld(items: ContentBlock[][], draftBlocks: ContentBlock[] 
 }
 
 export class HeldMessages {
-  private map = new Map<string, HeldItem[]>();
+  private map: Map<string, HeldItem[]>;
   private attached: HeldAttach | null = null;
   private expanded = false;
   private deferredSid: string | null = null;
   private deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
   private closeDropdownOutside: ((e: MouseEvent) => void) | null = null;
+
+  // Rehydrate any queue a prior reload would otherwise have dropped. nextId
+  // continues past the highest restored id so a fresh stage() can't collide.
+  constructor() {
+    this.map = loadAllHeld();
+    for (const items of this.map.values()) {
+      for (const item of items) if (item.id >= this.nextId) this.nextId = item.id + 1;
+    }
+  }
+
+  private persist(): void {
+    saveAllHeld(this.map);
+  }
 
   /** Point the controller at the freshly-mounted active pane. */
   attach(opts: HeldAttach): void {
@@ -106,6 +121,7 @@ export class HeldMessages {
       this.map.set(to, [...existing, ...items]);
     }
     this.map.delete(from);
+    this.persist();
     if (this.attached && this.attached.sessionId === from) {
       this.attached.sessionId = to;
       this.renderChip();
@@ -138,6 +154,7 @@ export class HeldMessages {
     const list = this.map.get(sid) ?? [];
     list.push({ id: this.nextId++, blocks });
     this.map.set(sid, list);
+    this.persist();
     this.attached?.onChange();
   }
 
@@ -153,6 +170,7 @@ export class HeldMessages {
     const bundle = bundleHeld(items.map((i) => i.blocks), draftBlocks);
     // Clear state BEFORE sending so a re-render mid-send can't double-fire.
     this.map.set(sid, []);
+    this.persist();
     this.deferredSid = null;
     this.clearDeferRetry();
     this.expanded = false;
@@ -185,6 +203,7 @@ export class HeldMessages {
     const items = this.itemsForActive();
     const bundle = bundleHeld(items.map((i) => i.blocks), draftBlocks);
     this.map.set(sid, []);
+    this.persist();
     this.deferredSid = null;
     this.clearDeferRetry();
     this.expanded = false;
@@ -215,6 +234,7 @@ export class HeldMessages {
     const bundle = bundleHeld(items.map((i) => i.blocks));
     // Clear state BEFORE sending so a concurrent flush path can't double-fire.
     this.map.set(sid, []);
+    this.persist();
     if (this.deferredSid === sid) this.deferredSid = null;
     if (bundle.length === 0) return;
     try {
@@ -335,6 +355,7 @@ export class HeldMessages {
       row.addEventListener("input", () => {
         // Update the model live (no re-render -> caret stays put).
         item.blocks = [{ type: "text", text: row.textContent ?? "" }];
+        this.persist();
       });
       row.addEventListener("blur", () => {
         if (!(row.textContent ?? "").trim()) this.removeItem(item.id);
@@ -362,6 +383,7 @@ export class HeldMessages {
     const list = this.map.get(sid) ?? [];
     const next = list.filter((i) => i.id !== id);
     this.map.set(sid, next);
+    this.persist();
     if (next.length === 0) this.expanded = false;
     this.renderChip();
     this.attached?.onChange();
