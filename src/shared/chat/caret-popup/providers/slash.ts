@@ -2,6 +2,7 @@ import type { SlashEntry, SlashSource } from "../../../../types/ipc.generated";
 import { invoke } from "../../../ipc";
 import { getTransport } from "../../../transport";
 import { setSlashEntries, slashEntryQualifiedName } from "../../slash-registry";
+import { insertAtCaret } from "../insert-at-caret";
 import { match } from "../match";
 import type { SuggestProvider } from "../types";
 
@@ -63,9 +64,7 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
 
   onPick(e: SlashEntry, ta: HTMLTextAreaElement, [start, end]: [number, number]): void {
     const insert = `/${slashEntryQualifiedName(e) ?? e.name} `;
-    // setRangeText (not .value assignment) keeps the edit on the native undo stack.
-    ta.setRangeText(insert, start, end, "end");
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    insertAtCaret(ta, insert, start, end);
     ta.focus();
   }
 

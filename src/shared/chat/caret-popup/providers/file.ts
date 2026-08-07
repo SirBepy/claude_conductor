@@ -1,4 +1,5 @@
 import { invoke } from "../../../ipc";
+import { insertAtCaret } from "../insert-at-caret";
 import { matchFiles } from "../match-files";
 import type { SuggestProvider } from "../types";
 
@@ -52,9 +53,7 @@ export class FileProvider implements SuggestProvider<string> {
 
   onPick(p: string, ta: HTMLTextAreaElement, [start, end]: [number, number]): void {
     const insert = `@${p} `;
-    // setRangeText (not .value assignment) keeps the edit on the native undo stack.
-    ta.setRangeText(insert, start, end, "end");
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    insertAtCaret(ta, insert, start, end);
     ta.focus();
   }
 
