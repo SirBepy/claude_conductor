@@ -60,6 +60,15 @@ pub fn frontend_ready(app: AppHandle) {
     }
 }
 
+/// Heartbeat for the lib.rs renderer-crash watchdog; catches a WebView2
+/// crash after boot that `frontend_alive` (one-way, set-once) can't see.
+#[tauri::command]
+pub fn frontend_ping(app: AppHandle) {
+    if let Some(state) = app.try_state::<crate::state::AppState>() {
+        *state.last_frontend_ping.lock().unwrap() = Some(std::time::Instant::now());
+    }
+}
+
 #[tauri::command]
 pub fn get_platform() -> String {
     match std::env::consts::OS {

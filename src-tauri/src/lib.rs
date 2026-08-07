@@ -355,6 +355,7 @@ pub fn run() {
             ipc::get_skill_usage_detail,
             ipc::list_installed_skills,
             ipc::frontend_ready,
+            ipc::frontend_ping,
             ipc::fetch_available_models,
             ipc::probe_models_availability,
             ipc::get_storage_info,
@@ -685,6 +686,40 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else if acted {
                 log::error!("main webview never reported ready; giving up");
+            }
+        });
+    }
+
+    // `frontend_alive` only ever latches true, so it can't see a WebView2
+    // crash after boot; a stale heartbeat means the renderer died silently.
+    // Recovers the same way tray's "Open Dashboard" does.
+    {
+        let h = app.handle().clone();
+        let alive = app.state::<AppState>().frontend_alive.clone();
+        let last_ping = app.state::<AppState>().last_frontend_ping.clone();
+        tauri::async_runtime::spawn(async move {
+            use std::sync::atomic::Ordering;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                let Some(w) = h.get_webview_window("main") else { continue };
+                if !alive.load(Ordering::SeqCst) || !w.is_visible().unwrap_or(false) {
+                    continue;
+                }
+                let stale = last_ping
+                    .lock()
+                    .unwrap()
+                    .is_some_and(|t| t.elapsed() > std::time::Duration::from_secs(30));
+                if !stale {
+                    continue;
+                }
+                let url = boot_start_url();
+                log::warn!("main webview heartbeat stale; reloading -> {url}");
+                if let Ok(parsed) = url.parse::<tauri::Url>() {
+                    let _ = w.navigate(parsed);
+                }
+                if let Some(state) = h.try_state::<AppState>() {
+                    *state.pending_main_nav.lock().unwrap() = Some("dashboard".to_string());
+                }
             }
         });
     }

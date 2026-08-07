@@ -182,6 +182,16 @@ function detachedSessionFromHash(): string | null {
 // at boot (autostart racing the network / vite dev server).
 void invoke("frontend_ready").catch(() => {});
 
+// Heartbeat for the lib.rs renderer-crash watchdog (WebView2 can crash
+// silently, no navigation error to catch). Fires on visibility change too,
+// so a backgrounded window doesn't wait a full interval for its first ping.
+function pingFrontend(): void {
+  if (document.visibilityState === "visible") void invoke("frontend_ping").catch(() => {});
+}
+pingFrontend();
+setInterval(pingFrontend, 10_000);
+document.addEventListener("visibilitychange", pingFrontend);
+
 installExternalLinkInterceptor();
 
 if (new URLSearchParams(window.location.search).get("chatswindow") === "1") {
