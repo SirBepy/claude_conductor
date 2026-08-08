@@ -4,6 +4,7 @@
 
 use iroh::endpoint::presets;
 use iroh::{Endpoint, EndpointAddr, EndpointId};
+use log::{error, info};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
@@ -29,16 +30,29 @@ pub async fn start_iroh_tunnel(
         return Ok(port);
     }
 
-    let remote_id: EndpointId = endpoint_id.parse().map_err(|e| format!("bad endpoint id: {e}"))?;
+    let remote_id: EndpointId = endpoint_id.parse().map_err(|e| {
+        let msg = format!("bad endpoint id: {e}");
+        error!("{}", msg);
+        msg
+    })?;
     let endpoint = Endpoint::builder(presets::N0)
         .alpns(vec![ALPN.to_vec()])
         .bind()
         .await
-        .map_err(|e| format!("iroh bind failed: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("iroh bind failed: {e}");
+            error!("{}", msg);
+            msg
+        })?;
     let listener = TcpListener::bind(("127.0.0.1", LOOPBACK_PORT))
         .await
-        .map_err(|e| format!("loopback bind failed: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("loopback bind failed at port {}: {}", LOOPBACK_PORT, e);
+            error!("{}", msg);
+            msg
+        })?;
 
+    info!("iroh tunnel listener successfully bound on 127.0.0.1:{}", LOOPBACK_PORT);
     // A bare EndpointAddr (id only, no direct addrs) makes each connect() go
     // through the N0 preset's pkarr lookup, matching the desktop's ticket.
     tokio::spawn(accept_loop(listener, endpoint, remote_id.into()));
@@ -48,14 +62,22 @@ pub async fn start_iroh_tunnel(
 
 async fn accept_loop(listener: TcpListener, endpoint: Endpoint, remote: EndpointAddr) {
     loop {
-        let Ok((tcp, _)) = listener.accept().await else {
-            continue;
-        };
-        let endpoint = endpoint.clone();
-        let remote = remote.clone();
-        tokio::spawn(async move {
-            let _ = forward(tcp, endpoint, remote).await;
-        });
+        match listener.accept().await {
+            Ok((tcp, _)) => {
+                let endpoint = endpoint.clone();
+                let remote = remote.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = forward(tcp, endpoint, remote).await {
+                        error!("tunnel forward error: {}", e);
+                    }
+                });
+            }
+            Err(e) => {
+                error!("tunnel listener accept failed: {}", e);
+                // Don't continue in a tight loop if accept keeps failing
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        }
     }
 }
 

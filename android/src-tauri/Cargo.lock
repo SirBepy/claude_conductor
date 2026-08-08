@@ -520,6 +520,7 @@ name = "conductor-mobile"
 version = "0.1.0"
 dependencies = [
  "iroh",
+ "log",
  "tauri",
  "tauri-build",
  "tauri-plugin-barcode-scanner",

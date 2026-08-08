@@ -86,8 +86,10 @@
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);
       window.location.href = target.toString();
-    } catch {
-      errorUrlEl.textContent = "http://127.0.0.1";
+    } catch (err) {
+      console.error("iroh tunnel failed:", err);
+      const errMsg = (err && err.message) ? err.message : String(err);
+      errorUrlEl.textContent = `http://127.0.0.1 - Error: ${errMsg}`;
       showScreen("error");
     }
   }
