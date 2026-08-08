@@ -47,6 +47,22 @@ function loadBaseIcon(): Promise<HTMLImageElement | null> {
   });
 }
 
+function isLightMode(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: light)").matches
+  );
+}
+
+// Re-render on a live theme flip so the halo appears/disappears without a reload.
+// Gated like the rest of the module: a no-op listener inside the Tauri webview.
+if (isRemote() && typeof window !== "undefined" && typeof window.matchMedia === "function") {
+  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+    render(currentCount, currentColor, flashOn);
+  });
+}
+
 function render(count: number, color: string | null, on: boolean): void {
   if (!iconImg) return;
   canvas ??= document.createElement("canvas");
@@ -55,6 +71,15 @@ function render(count: number, color: string | null, on: boolean): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.clearRect(0, 0, SIZE, SIZE);
+  if (isLightMode()) {
+    // Raster source has no built-in stroke; fake one with a stacked shadow
+    // halo, then draw the crisp icon on top so the mark itself is unblurred.
+    ctx.shadowColor = "#16151f";
+    ctx.shadowBlur = 2;
+    for (let i = 0; i < 3; i++) ctx.drawImage(iconImg, 0, 0, SIZE, SIZE);
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
+  }
   ctx.drawImage(iconImg, 0, 0, SIZE, SIZE);
   if (color && on && count > 0) {
     const r = 11;
