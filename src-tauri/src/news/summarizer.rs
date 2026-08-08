@@ -59,6 +59,16 @@ pub async fn generate_summary_streaming<F: FnMut(&str)>(
         log::info!("news summarizer: skipping - {e}");
         anyhow!("no account configured for news summarization: {e}")
     })?;
+    // Same drift-then-credentials-then-billing order as daemon::lifecycle's
+    // spawn_session: drift owns the NotLoggedIn message, so it must run first.
+    crate::accounts::drift::check(&account).map_err(|e| {
+        log::info!("news summarizer: skipping - account drift: {e}");
+        anyhow!("{e}")
+    })?;
+    crate::accounts::credentials::check_now(&account).map_err(|e| {
+        log::info!("news summarizer: skipping - credentials: {e}");
+        anyhow!("{e}")
+    })?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
     let effective_env = spawn_env.effective_env(std::env::vars());
     check_metered_billing(&|k| effective_env.get(k).cloned()).map_err(|e| anyhow!("{e}"))?;
@@ -83,8 +93,13 @@ pub async fn generate_summary_streaming<F: FnMut(&str)>(
         .stderr(std::process::Stdio::piped());
     spawn_env.apply_tokio(&mut cmd);
     hide_console_tokio(&mut cmd);
+    // Same job-object orphan guard as daemon::lifecycle's chat spawn: claude
+    // loads the user's own MCP servers, so a dying daemon must not strand
+    // the cmd/npx/node subtree.
+    cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().context("spawn claude")?;
+    crate::util::process::guard_orphan_tree(&child);
     let stdout = child.stdout.take().context("claude stdout")?;
     // Drain stderr concurrently so a chatty stderr can't fill its pipe and
     // deadlock the stdout read loop.

@@ -263,6 +263,9 @@ impl SttSupervisor {
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("spawn stt-sidecar in {dir:?}: {e}"))?;
+        // Extends kill_on_drop above to the whole tree, same as lifecycle.rs -
+        // the python sidecar's own grandchildren otherwise escape a hard daemon kill.
+        crate::util::process::guard_orphan_tree(&child);
         let started = Instant::now();
         *self.spawn_started.lock().await = Some(started);
         *self.last_run.lock().await = None;
