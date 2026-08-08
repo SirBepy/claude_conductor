@@ -1,8 +1,8 @@
 [build]
 jobs = 4
-# Own D: subfolder so this project's build artifacts never collide with other
-# projects sharing the global target-dir (see ~/.cargo/config.toml comment).
-target-dir = "D:/cargo-target/claude_usage_in_taskbar__src-tauri"
+# No target-dir here on purpose: the global ~/.cargo/config.toml already points
+# at the shared D:/cargo-target, and a committed absolute path broke the 0.2.53
+# release on all four platforms (CI wrote its bundle outside the staged path).
 
 [env]
 RUST_TEST_THREADS = "4"
