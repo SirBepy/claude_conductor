@@ -29,7 +29,12 @@ which-account signal**. Adding the login is the easy part.
 - **Credential primitive: per-account `CLAUDE_CONFIG_DIR` profile dirs.** Every app account owns
   an app-created dir `~/.claude-<slug>` holding its own `.credentials.json`, minted by an
   interactive `/login` run inside that dir. Chat spawns set `CLAUDE_CONFIG_DIR` to the account's
-  dir. Claude Code's own token refresh keeps the credentials fresh in place.
+  dir. Claude Code refreshes the access token in place on invocation, but the refresh token
+  itself has a fixed lifetime anchored at `/login` and is NOT extended by those refreshes - every
+  profile needs a periodic interactive re-`/login` regardless of how actively it's used. Measured
+  2026-08-07/08: `~/.claude-personal` was used daily for 461 consecutive shell snapshots yet its
+  `refreshTokenExpiresAt` never moved and died on schedule; `~/.claude` refreshed its access token
+  overnight while its `refreshTokenExpiresAt` stayed byte-identical across the refresh.
 - **`claude setup-token` is banned.** Empirically binds tokens to the wrong account. Never use it,
   never suggest it.
 - **Never copy or seed `.credentials.json` between dirs.** OAuth refresh tokens are single-use and

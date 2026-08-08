@@ -9,6 +9,7 @@ Tauri 2.x companion app for Claude Code. Combines:
 - **History** - read-only browser of past Claude sessions from `~/.claude/sessions/`.
 - **Channel management** for headless Claude Code automation (`--remote-control`).
 - **Manual session takeover** - reach into a Claude process running in your terminal and resume it inside this app.
+- **Voice dictation** in the composer, transcribed locally by a Python `faster-whisper` sidecar. Not bundled into the installer today - it only works if this repo's `stt-sidecar/` folder (with its `.venv` set up per `stt-sidecar/requirements.txt`) is reachable from the running app, which in practice means building/running from a source checkout. An installer-only install with no repo nearby has no working dictation.
 
 Windows, macOS, and Linux (x86_64) supported.
 
@@ -94,3 +95,31 @@ Beyond tracking Claude Code usage, this app manages Claude Code channels per pro
 - Copy a phone link for any remote-control session to open it in the Claude mobile app.
 
 Replaces the previous `obsidian_claude_remote` tray app (now discontinued and archived).
+
+## Android companion app
+
+A thin native shell (`android/`) that connects to a running desktop Conductor instance over the
+network - it does not run Claude Code itself, it just renders the same remote-control web UI the
+desktop serves.
+
+**Get the APK.** No prebuilt release exists yet - the GitHub Releases pipeline only builds desktop
+installers. Building the Android app today requires a local checkout of this repo; see
+`CLAUDE.md`'s Android section for the build invocation.
+
+**Prerequisite:** both devices need to be on the same Tailscale network. On the desktop, open
+Settings > Remote access and turn it on - Conductor serves itself over your private Tailscale
+network only.
+
+**Pair the app:**
+
+1. On the desktop, Settings > Remote access shows a QR code and a copyable pairing link once
+   remote access is enabled.
+2. On the phone's first launch, tap **Scan QR code** and scan it (camera permission required), or
+   tap **Save & Connect** after entering the server's `https://` URL manually.
+3. Once connected the phone drops straight into the desktop's remote-control UI; the server URL is
+   remembered for future launches.
+
+If the phone can't reach the server, it shows a "Can't reach your PC" screen with **Retry** and
+**Change server** - check that Conductor is running and the Tailscale tunnel is up.
+
+Paired devices can be revoked any time from Settings > Remote access on the desktop.

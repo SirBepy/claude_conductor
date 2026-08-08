@@ -7,12 +7,13 @@
 //!
 //! After the PC sleeps past the access token's TTL, the app never refreshes
 //! `.credentials.json` itself (locked decision - see
-//! `docs/multi-account/00-overview.md`: "Claude Code's own token refresh
-//! keeps the credentials fresh in place"). Only the `claude` CLI refreshes
-//! it, via the refresh token, when invoked. So a 401 in `ipc/models.rs` means
-//! the ACCESS token is stale, not that the account is logged out - and the
-//! fix is to trigger the CLI (which may refresh in place) and re-probe,
-//! never to fake availability.
+//! `docs/multi-account/00-overview.md`). Only the `claude` CLI refreshes the
+//! ACCESS token in place, via the refresh token, when invoked (the refresh
+//! token itself has a fixed lifetime from `/login` and needs periodic
+//! re-login regardless - measured 2026-08-07/08, same doc). So a 401 in
+//! `ipc/models.rs` means the ACCESS token is stale, not that the account is
+//! logged out - and the fix is to trigger the CLI (which may refresh in
+//! place) and re-probe, never to fake availability.
 //!
 //! `recover_from_401` does that: it shells out to the cheapest CLI
 //! invocation that reports true auth state - `claude auth status --json` -
