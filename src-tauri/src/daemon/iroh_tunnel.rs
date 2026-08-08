@@ -11,6 +11,7 @@ use iroh::{Endpoint, EndpointId, SecretKey};
 
 use crate::daemon::device_registry::DeviceRegistry;
 use crate::daemon::remote_server::REMOTE_PORT;
+use crate::util::to_hex;
 
 /// ALPN for the forwarded remote-access stream. Bump the suffix on any wire
 /// change so an old phone build fails the handshake instead of misparsing.
@@ -18,12 +19,6 @@ pub const ALPN: &[u8] = b"conductor/remote/0";
 
 fn key_file(app_data: &Path) -> PathBuf {
     app_data.join("iroh-endpoint-key.txt")
-}
-
-/// `SecretKey` deliberately has no `Display` (so a key can never leak into a
-/// log line by accident); its `FromStr` accepts 64-char lowercase hex.
-fn to_hex(bytes: &[u8; 32]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Load the persisted endpoint secret, minting one on first run. The key is
@@ -41,6 +36,7 @@ fn load_or_create_secret(app_data: &Path) -> SecretKey {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    // `SecretKey` has no `Display`, and `FromStr` requires 64 lowercase hex chars.
     if let Err(e) = std::fs::write(&path, to_hex(&key.to_bytes())) {
         log::warn!("iroh tunnel: could not persist key to {}: {e}; the endpoint id will change on restart", path.display());
     }

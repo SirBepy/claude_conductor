@@ -1,23 +1,18 @@
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
-fn sha256_hex(s: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
+use crate::util::{sha256_hex, to_hex};
 
 fn mint_token() -> String {
     let mut bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    to_hex(&bytes)
 }
 
 fn mint_id() -> String {
     let mut bytes = [0u8; 8];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    to_hex(&bytes)
 }
 
 fn now_secs() -> u64 {

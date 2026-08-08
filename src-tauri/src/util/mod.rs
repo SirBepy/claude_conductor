@@ -1,5 +1,21 @@
 pub mod process;
 
+use sha2::{Digest, Sha256};
+
+/// Lowercase hex encoding, byte order preserved. Shared by device
+/// tokens/ids, remote-access hashes, and the iroh endpoint key file, which
+/// requires exactly 64 lowercase hex chars for `SecretKey::from_str`.
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// SHA-256 of `s`, lowercase hex.
+pub(crate) fn sha256_hex(s: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(s.as_bytes());
+    to_hex(&h.finalize())
+}
+
 /// Write `json` to `path` atomically via a `.json.tmp` sibling and rename.
 /// Creates the parent directory if absent (non-fatal). Returns an error if
 /// the write or rename fails.

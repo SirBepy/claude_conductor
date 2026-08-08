@@ -15,11 +15,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::settings::{self, paths};
 use crate::state::AppState;
+use crate::util::{sha256_hex, to_hex};
 
 // ── Token storage (mirrors daemon::remote_server, plaintext added) ────────────
 
@@ -27,17 +27,11 @@ fn token_file() -> Result<PathBuf, String> {
     Ok(paths::data_dir().map_err(|e| e.to_string())?.join("remote-access.json"))
 }
 
-fn sha256_hex(s: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Mint a fresh 32-byte hex token. Same scheme as the daemon's `ensure_token`.
 fn mint_token() -> String {
     let mut bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    to_hex(&bytes)
 }
 
 /// Write both the hash (what the daemon validates) and the plaintext token (so
@@ -221,7 +215,7 @@ pub fn start_tailscale_watcher(app: AppHandle) {
 fn do_mint_pairing_code(app_data: &std::path::Path) -> Result<String, String> {
     let mut bytes = [0u8; 32];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    let code: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let code: String = to_hex(&bytes);
     let expires_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

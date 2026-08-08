@@ -32,7 +32,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use sha2::{Digest, Sha256};
+use crate::util::sha256_hex;
 use tokio::net::TcpListener;
 
 use crate::daemon::device_registry::DeviceRegistry;
@@ -142,12 +142,6 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
-
-fn sha256_hex(s: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
     headers
