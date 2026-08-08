@@ -218,6 +218,9 @@ describe("statusDotClass", () => {
   it("awaiting 'waiting' -> st-waiting", () => {
     expect(cls(makeInstance({ awaiting: "waiting" }))).toBe("st-waiting");
   });
+  it("awaiting 'close_failed' -> st-close-failed (todo 461)", () => {
+    expect(cls(makeInstance({ awaiting: "close_failed" }))).toBe("st-close-failed");
+  });
   it("idle read -> st-your-turn", () => {
     expect(cls(makeInstance({ awaiting: "done" }))).toBe("st-your-turn");
   });
@@ -251,6 +254,9 @@ describe("stateTooltip", () => {
   });
   it("done unread", () => {
     expect(stateTooltip(makeInstance({ session_id: "abc123", busy: false }), withUnread, noAttention, noQuestion)).toBe("Claude responded - click to read");
+  });
+  it("close_failed (todo 461)", () => {
+    expect(stateTooltip(makeInstance({ busy: false, awaiting: "close_failed" }), noUnread, noAttention, noQuestion)).toBe("Close did not confirm - the chat may still be open");
   });
   it("your turn", () => {
     expect(stateTooltip(makeInstance({ busy: false }), noUnread, noAttention, noQuestion)).toBe("Done - your turn");

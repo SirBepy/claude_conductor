@@ -164,6 +164,7 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
   if (question.has(i.session_id)) return "Claude asked a question - click to answer";
   if (i.awaiting === "working") return "Working in the background (subagents / tasks running)";
   if (i.awaiting === "waiting") return "Waiting on an external process (CI / a long command)";
+  if (i.awaiting === "close_failed") return "Close did not confirm - the chat may still be open";
   if (rateLimited.has(i.session_id)) return "Usage limit reached - will auto-resume on reset";
   if (unread.has(i.session_id)) return "Claude responded - click to read";
   return "Done - your turn";
@@ -350,6 +351,7 @@ export function statusDotClass(
   if (question.has(i.session_id)) return markerToStatusClass("question");
   if (i.awaiting === "working") return markerToStatusClass("working");
   if (i.awaiting === "waiting") return markerToStatusClass("waiting");
+  if (i.awaiting === "close_failed") return markerToStatusClass("close_failed");
   if (rateLimited.has(i.session_id)) return "st-rate-limited";
   if (unread.has(i.session_id)) return "st-done";
   return markerToStatusClass("done");

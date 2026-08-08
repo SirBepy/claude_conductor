@@ -55,6 +55,7 @@
 .sessions-list li.row-portrait .avatar-status-dot.st-external  { background: var(--st-external);  box-shadow: 0 0 4px var(--st-external-glow); }
 .sessions-list li.row-portrait .avatar-status-dot.st-attention { background: var(--st-attention); box-shadow: 0 0 4px var(--st-attention-glow); animation: attention-pulse 1.4s ease-in-out infinite; }
 .sessions-list li.row-portrait .avatar-status-dot.st-closing   { background: var(--chat-state-closing); box-shadow: 0 0 4px var(--chat-state-closing-glow); }
+.sessions-list li.row-portrait .avatar-status-dot.st-close-failed { background: var(--st-close-failed); box-shadow: 0 0 4px var(--st-close-failed-glow); }
 
 /* The dot is now the sole signal for portrait rows - scoped to .row-portrait
    so classic keeps its stripes. 4-class specificity beats .closing.row-entering

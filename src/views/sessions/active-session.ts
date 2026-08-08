@@ -40,6 +40,7 @@ import {
 
 const HEADER_STATUS_CLASSES = [
   "st-working", "st-question", "st-done", "st-your-turn", "st-external", "st-attention", "st-rate-limited",
+  "st-close-failed",
 ];
 
 /** Status class (st-working / st-question / …) for an open session, using the

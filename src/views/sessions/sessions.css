@@ -23,10 +23,12 @@
                                       override; token reserved here so the slot
                                       is documented (sky-blue, distinct from the
                                       external azure so the two never collide).
-   error          orange  #fb923c    Reserved: rate-limited / errored row. No
-                                      render site binds this yet (the rate-limit
-                                      banner is a global banner, not a row), but
-                                      the hue is reserved so it can't be reused.
+   error          orange  #fb923c    close_failed (todo 461): a `/close` turn
+                                      ended without the daemon confirming the
+                                      session actually closed. Also used
+                                      directly (not via --st-*) by the portrait
+                                      rate-limited dot so it doesn't duplicate
+                                      the red needs-input/closing family.
    ─────────────────────────────────────────────────────────────────────────── */
 :root {
   --chat-state-closing:      #ef4444;
@@ -68,6 +70,8 @@
   --st-rate-limited-line: rgba(239, 68, 68, 0.35);
   --st-attention:     var(--chat-state-needs-input);
   --st-attention-glow:var(--chat-state-needs-input-glow);
+  --st-close-failed:      var(--chat-state-error);
+  --st-close-failed-glow: var(--chat-state-error-glow);
   --st-external:      var(--chat-state-external);
   --st-external-glow: var(--chat-state-external-glow);
   --st-your-turn:     var(--chat-state-your-turn);

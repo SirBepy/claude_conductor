@@ -9,7 +9,11 @@ export const STATUS_ICON: Record<"question" | "working" | "waiting" | "done", st
   done: "ph-check",
 };
 
-type StatusMarker = "question" | "working" | "waiting" | "done";
+// close_failed (todo 461) isn't a turn-end `<cc-status:..>` marker - the daemon
+// sets it on `awaiting` when a `/close` turn ends without the close_session
+// tool confirming. Not added to STATUS_ICON (that table is turn-footer-chip
+// only); markerToStatusClass is the one place both vocabularies share.
+type StatusMarker = "question" | "working" | "waiting" | "done" | "close_failed";
 
 /**
  * `st-*` sidebar-dot class for a marker value. "done" maps to the calm
@@ -24,6 +28,7 @@ export function markerToStatusClass(marker: string): string | null {
     case "working": return "st-working";
     case "waiting": return "st-waiting";
     case "done": return "st-your-turn";
+    case "close_failed": return "st-close-failed";
     default: return null;
   }
 }

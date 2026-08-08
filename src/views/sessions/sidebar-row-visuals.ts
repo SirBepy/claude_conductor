@@ -81,17 +81,21 @@ export interface LeadingExtras {
  *  `statusClass` is "" for draft/parked (nothing in flight, no glow). Always
  *  emits the same 40px avatar-wrap structure, even with no character assigned
  *  yet: a centred placeholder glyph inside `.session-avatar`, never a bare
- *  icon that would collapse the row's geometry. */
+ *  icon that would collapse the row's geometry. `statusTitle` is "" for every
+ *  state except close_failed (todo 461) - other states have no hover copy
+ *  wired here yet, so this stays scoped rather than rolling out tooltips app-wide. */
 export function leadingVisual(
   charId: string | null | undefined,
   statusClass: string,
   cwd: string | null,
   extras: LeadingExtras = {},
+  statusTitle = "",
 ): string {
   const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
   const dot = extras.dotClass ? `<span class="avatar-status-dot ${extras.dotClass}"></span>` : "";
+  const titleAttr = statusTitle ? ` title="${escapeHtml(statusTitle)}"` : "";
   if (!charId) {
-    const avatarHtml = `<span class="session-avatar session-avatar--placeholder ${statusClass}">
+    const avatarHtml = `<span class="session-avatar session-avatar--placeholder ${statusClass}"${titleAttr}>
           <i class="ph ph-chat-circle-dots"></i>
         </span>`;
     return avatarWrap(avatarHtml, badge + dot + (extras.extra ?? ""));
@@ -103,7 +107,7 @@ export function leadingVisual(
   const preload = url ? ` src="${escapeHtml(url)}" data-hydrated="${id}"` : "";
   // Backdrop: same art blurred+scaled to cover, so a transparent (hexagonal)
   // portrait's corners reveal hero colours instead of the row background.
-  const avatarHtml = `<span class="session-avatar ${statusClass}">
+  const avatarHtml = `<span class="session-avatar ${statusClass}"${titleAttr}>
           <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
           <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
         </span>`;

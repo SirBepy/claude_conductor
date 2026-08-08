@@ -59,6 +59,7 @@
 .session-avatar.st-your-turn { --st-color: var(--st-your-turn); --st-glow: var(--st-your-turn-glow); }
 .session-avatar.st-working   { --st-color: var(--st-working);   --st-glow: var(--st-working-glow); }
 .session-avatar.st-attention { --st-color: var(--st-attention); --st-glow: var(--st-attention-glow); }
+.session-avatar.st-close-failed { --st-color: var(--st-close-failed); --st-glow: var(--st-close-failed-glow); }
 
 .session-avatar::before {
   content: "";
@@ -170,6 +171,7 @@
 .session-header-avatar.st-your-turn { border-color: var(--st-your-turn); }
 .session-header-avatar.st-working   { border-color: var(--st-working);   animation: header-char-pulse 1.5s ease-in-out infinite; }
 .session-header-avatar.st-attention { border-color: var(--st-attention); animation: header-char-pulse 1.3s ease-in-out infinite; }
+.session-header-avatar.st-close-failed { border-color: var(--st-close-failed); box-shadow: 0 0 6px 1px var(--st-close-failed-glow); }
 @keyframes header-char-pulse {
   0%, 100% { box-shadow: 0 0 4px 0 var(--st-working-glow); }
   50%      { box-shadow: 0 0 9px 2px var(--st-working-glow); }
