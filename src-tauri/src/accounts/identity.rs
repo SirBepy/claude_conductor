@@ -43,33 +43,44 @@ pub fn terminal_identity(home_dir: &Path) -> Option<OauthAccountInfo> {
     read_from_state_file(&home_dir.join(".claude.json"))
 }
 
-/// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth.expiresAt`
-/// (unix-ms epoch), for the read-only "token expiry" line on the Settings >
-/// Accounts identity surface (multi-account milestone 07). The app never
-/// writes this file (locked decision, 00-overview.md) - display-only. `None`
-/// when the file is missing, unparsable, or has no `claudeAiOauth.expiresAt`
-/// (never logged in yet, or a shape Claude Code hasn't written this key for).
-pub fn read_token_expiry(config_dir: &Path) -> Option<i64> {
-    let raw = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    v.get("claudeAiOauth")?.get("expiresAt")?.as_i64()
+/// The `claudeAiOauth` fields from `.credentials.json`. Absent and wrong-typed
+/// values land as empty/`None`, which `credentials::assess` treats as unusable.
+/// Single owner of this file - do not add a fourth parser (ai_todo 558).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct OauthRecord {
+    pub access_token: String,
+    pub expires_at: Option<i64>,
+    pub refresh_token: String,
+    pub refresh_token_expires_at: Option<i64>,
 }
 
-/// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth.accessToken`, the
-/// live OAuth access token used to authenticate the `/v1/models` and
-/// `/v1/messages/count_tokens` calls in `ipc/models.rs` (consolidated here
-/// per ai_todo 275 - was a second, duplicate `.credentials.json` parser
-/// living in `ipc/models.rs`). The app never writes this file (locked
-/// decision, 00-overview.md) - read-only, mirrors `read_token_expiry`. `None`
-/// when the file is missing, unparsable, or has no
-/// `claudeAiOauth.accessToken`.
-pub fn read_access_token(config_dir: &Path) -> Option<String> {
+/// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth`. `None` if the
+/// file is missing, unparsable, or has no `claudeAiOauth` block. The app
+/// never writes this file (locked decision, 00-overview.md) - read-only.
+pub fn read_oauth_record(config_dir: &Path) -> Option<OauthRecord> {
     let raw = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    v.get("claudeAiOauth")?
-        .get("accessToken")?
-        .as_str()
-        .map(String::from)
+    let o = v.get("claudeAiOauth")?;
+    let str_of = |k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    Some(OauthRecord {
+        access_token: str_of("accessToken"),
+        expires_at: o.get("expiresAt").and_then(|x| x.as_i64()),
+        refresh_token: str_of("refreshToken"),
+        refresh_token_expires_at: o.get("refreshTokenExpiresAt").and_then(|x| x.as_i64()),
+    })
+}
+
+/// `claudeAiOauth.expiresAt` (unix-ms epoch), for the read-only "token expiry"
+/// line on the Settings > Accounts identity surface (multi-account milestone 07).
+pub fn read_token_expiry(config_dir: &Path) -> Option<i64> {
+    read_oauth_record(config_dir)?.expires_at
+}
+
+/// `None` for a missing record OR a blanked token, so callers never send an
+/// empty bearer to `/v1/models`.
+pub fn read_access_token(config_dir: &Path) -> Option<String> {
+    let token = read_oauth_record(config_dir)?.access_token;
+    (!token.is_empty()).then_some(token)
 }
 
 #[cfg(test)]

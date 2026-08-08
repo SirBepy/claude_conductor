@@ -3,6 +3,7 @@
 //! tokens blanked to `""` and `expiresAt` zeroed, so it passes drift and then
 //! dies at the CLI instead. Observed 2026-08-07 on `~/.claude-personal`.
 
+use super::identity::OauthRecord;
 use super::model::Account;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -11,16 +12,6 @@ pub enum CredentialError {
     Blanked { label: String, config_dir: String },
     #[error("\"{label}\" has an expired OAuth session at {config_dir} that cannot be refreshed - run /login inside it again")]
     Unrefreshable { label: String, config_dir: String },
-}
-
-/// The `claudeAiOauth` fields this guard reads. Absent keys and wrong-typed
-/// values both land as `None`/empty, which the assessment treats as unusable.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct OauthRecord {
-    pub access_token: String,
-    pub expires_at: Option<i64>,
-    pub refresh_token: String,
-    pub refresh_token_expires_at: Option<i64>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,24 +41,11 @@ pub fn assess(record: &OauthRecord, now_ms: i64) -> Verdict {
     Verdict::Usable
 }
 
-fn read_record(config_dir: &std::path::Path) -> Option<OauthRecord> {
-    let raw = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    let o = v.get("claudeAiOauth")?;
-    let str_of = |k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
-    Some(OauthRecord {
-        access_token: str_of("accessToken"),
-        expires_at: o.get("expiresAt").and_then(|x| x.as_i64()),
-        refresh_token: str_of("refreshToken"),
-        refresh_token_expires_at: o.get("refreshTokenExpiresAt").and_then(|x| x.as_i64()),
-    })
-}
-
 /// Reads `<account.config_dir>/.credentials.json` and runs [`assess`]. A
 /// missing/unparsable/`claudeAiOauth`-less file is not this guard's error -
 /// `drift::check` runs first and already reports that as `NotLoggedIn`.
 pub fn check(account: &Account, now_ms: i64) -> Result<(), CredentialError> {
-    let Some(record) = read_record(&account.config_dir) else {
+    let Some(record) = super::identity::read_oauth_record(&account.config_dir) else {
         return Ok(());
     };
     match assess(&record, now_ms) {
