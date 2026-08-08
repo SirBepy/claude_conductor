@@ -17,7 +17,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+iroh = "1.0.3"
 tauri = { version = "2", features = [] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync"] }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2.4.5"

@@ -236,6 +236,7 @@ fn do_mint_pairing_code(app_data: &std::path::Path) -> Result<String, String> {
 pub struct PairingQrResult {
     pub svg: String,
     pub url: String,
+    pub iroh: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -287,6 +288,20 @@ pub fn regenerate_remote_token() -> Result<String, String> {
     Ok(String::new())
 }
 
+/// Pure URL construction so the four branches unit-test without tailscale, a
+/// daemon or disk. The `conductor://` form is the android client's fallback
+/// for when tailscale is down, which is the whole point of the iroh tunnel.
+fn build_pairing_url(dnsname: Option<&str>, iroh_id: Option<&str>, code: &str) -> Result<String, String> {
+    match (dnsname, iroh_id) {
+        (Some(d), Some(id)) => Ok(format!("https://{d}/?pair={code}&iroh={id}")),
+        (Some(d), None) => Ok(format!("https://{d}/?pair={code}")),
+        (None, Some(id)) => Ok(format!("conductor://pair?iroh={id}&pair={code}")),
+        (None, None) => {
+            Err("neither tailscale nor iroh is available (run `tailscale up`, or wait for the daemon to finish starting)".to_string())
+        }
+    }
+}
+
 /// Mint a fresh pairing code, return SVG QR + URL.
 /// Both encode the same code, so only one IPC call is needed per QR refresh.
 #[tauri::command]
@@ -294,14 +309,14 @@ pub fn remote_access_qr() -> Result<PairingQrResult, String> {
     use qrcode::render::svg;
     use qrcode::QrCode;
 
-    let dnsname = tailscale_dnsname()
-        .ok_or_else(|| "tailscale is not connected (run `tailscale up` first)".to_string())?;
     let app_data = paths::data_dir().map_err(|e| e.to_string())?;
+    let dnsname = tailscale_dnsname();
+    let iroh_id = crate::daemon::iroh_tunnel::endpoint_id_from_disk(&app_data).map(|id| id.to_string());
     let code = do_mint_pairing_code(&app_data)?;
-    let url = format!("https://{dnsname}/?pair={code}");
+    let url = build_pairing_url(dnsname.as_deref(), iroh_id.as_deref(), &code)?;
     let qr = QrCode::new(url.as_bytes()).map_err(|e| format!("QR encode failed: {e}"))?;
     let svg = qr.render::<svg::Color>().min_dimensions(220, 220).build();
-    Ok(PairingQrResult { svg, url })
+    Ok(PairingQrResult { svg, url, iroh: iroh_id })
 }
 
 /// Return just the pairing URL (re-mints a code). Prefer remote_access_qr() to get both.
@@ -426,6 +441,35 @@ mod tests {
             .as_secs();
         assert!(expires_at > now);
         assert!(expires_at <= now + 120);
+    }
+
+    #[test]
+    fn build_pairing_url_tailscale_only_is_byte_identical_to_before_iroh() {
+        assert_eq!(
+            build_pairing_url(Some("box.tailnet.ts.net"), None, "abc123").unwrap(),
+            "https://box.tailnet.ts.net/?pair=abc123"
+        );
+    }
+
+    #[test]
+    fn build_pairing_url_tailscale_and_iroh_matches_android_contract() {
+        assert_eq!(
+            build_pairing_url(Some("box.tailnet.ts.net"), Some("deadbeef"), "abc123").unwrap(),
+            "https://box.tailnet.ts.net/?pair=abc123&iroh=deadbeef"
+        );
+    }
+
+    #[test]
+    fn build_pairing_url_iroh_only_matches_android_contract() {
+        assert_eq!(
+            build_pairing_url(None, Some("deadbeef"), "abc123").unwrap(),
+            "conductor://pair?iroh=deadbeef&pair=abc123"
+        );
+    }
+
+    #[test]
+    fn build_pairing_url_errs_when_neither_transport_is_available() {
+        assert!(build_pairing_url(None, None, "abc123").is_err());
     }
 
     #[test]
