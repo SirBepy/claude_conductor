@@ -36,7 +36,7 @@ pub struct ChannelMessage {
 const MAX_MESSAGES: usize = 50;
 /// Hard cap on a single message's length, so a runaway/looping agent can't
 /// blow up the store or the text every peer gets woken with.
-const MAX_TEXT_LEN: usize = 2000;
+pub(crate) const MAX_TEXT_LEN: usize = 2000;
 
 /// Serialize read-modify-write within a process, same rationale as
 /// `scheduled_items::WRITE_LOCK` - cross-process integrity comes from the

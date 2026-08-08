@@ -5,14 +5,11 @@
 //! left with zero visible messages.
 
 use super::HookCtx;
+use crate::sessions::repo_channel::MAX_TEXT_LEN;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-
-/// Hard cap mirroring `sessions::repo_channel::MAX_TEXT_LEN`, so a runaway
-/// agent can't blow up the chat view with one message.
-const MAX_TEXT_LEN: usize = 2000;
 
 #[derive(Deserialize)]
 pub(super) struct SendMessageBody {
