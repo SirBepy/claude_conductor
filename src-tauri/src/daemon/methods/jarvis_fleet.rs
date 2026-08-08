@@ -136,6 +136,7 @@ pub(crate) async fn spawn_worker(
     lifecycle::send_message(&session, task, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
+    crate::sessions::chat_state::set_busy(&sid, true);
     state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
     Ok(sid)
 }

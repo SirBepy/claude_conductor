@@ -145,6 +145,7 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 lifecycle::send_message(&session, &p.text, false).await.map_err(err_to_rpc)?;
                 state.registry.set_awaiting(&p.session_id, None);
                 state.registry.set_busy(&p.session_id, true);
+                crate::sessions::chat_state::set_busy(&p.session_id, true);
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 // Jarvis wake (todo 272 chunk 3): this is the one user-facing send
                 // path both desktop (`ipc/chat/run.rs`) and the remote/phone
@@ -180,6 +181,7 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 lifecycle::cancel_turn(&map, &p.session_id).await.map_err(err_to_rpc)?;
                 state.registry.set_busy(&p.session_id, false);
+                crate::sessions::chat_state::set_busy(&p.session_id, false);
                 // The interrupted turn's verdict (an AUQ's "question", a prior
                 // turn's "waiting") is dead with the cancel - clear it so the
                 // sidebar doesn't keep flagging a question nobody is asking.
@@ -289,6 +291,7 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
 
                 lifecycle::send_message(&session, &prompt, false).await.map_err(err_to_rpc)?;
                 state.registry.set_busy(&new_id, true);
+                crate::sessions::chat_state::set_busy(&new_id, true);
 
                 // Retire the old session. A rate-limited session's `claude -p` child
                 // has usually already exited, so a NotFound error here is expected
@@ -415,6 +418,15 @@ fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
                                 log::warn!(
                                     "attach forwarding lagged for {session_id_for_task}: dropped {n} chat events"
                                 );
+                                // Non-delta events (finalized messages, tool
+                                // calls, notifications) are gone for good -
+                                // tell the client to force a transcript re-read.
+                                let lagged = crate::types::chat::ChatEvent::EventsLagged {
+                                    timestamp: chrono::Utc::now().timestamp_millis(),
+                                };
+                                if outbound.send_outbound(frame(&lagged)).await.is_err() {
+                                    break;
+                                }
                                 // Deltas don't compose across a gap: resync the
                                 // streamed text before continuing. (Legacy clients
                                 // self-heal - their next converted delta reads the

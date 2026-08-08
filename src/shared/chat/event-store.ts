@@ -111,6 +111,13 @@ class SessionEventStore {
     return !!this.cache.get(sessionId)?.initialLoaded;
   }
 
+  /** Cached session ids, most-recently-accessed first. */
+  cachedSessionIdsByRecency(): string[] {
+    return [...this.cache.entries()]
+      .sort((a, b) => b[1].lastAccess - a[1].lastAccess)
+      .map(([id]) => id);
+  }
+
   hasMore(sessionId: string): boolean {
     return !!this.cache.get(sessionId)?.hasMore;
   }
@@ -120,9 +127,9 @@ class SessionEventStore {
    * the live listener. Idempotent: subsequent calls return the cached array
    * without re-fetching. Returns the live (mutable internal) event array.
    */
-  async loadInitial(sessionId: string, cwd?: string): Promise<ChatEvent[]> {
+  async loadInitial(sessionId: string, cwd?: string, opts?: { force?: boolean }): Promise<ChatEvent[]> {
     let entry = this.cache.get(sessionId);
-    if (entry?.initialLoaded) {
+    if (entry?.initialLoaded && !opts?.force) {
       touchAccess(entry);
       await this.ensureListener(sessionId);
       return entry.events;
@@ -179,11 +186,16 @@ class SessionEventStore {
    * only events whose content signature is absent from the cache are recovered.
    * A finalized assistant whose text matches a cached streaming partial counts
    * as already present (the partial covers its finalized form). No-op until
-   * initialLoaded - there is nothing to reconcile against before the first load.
+   * initialLoaded unless `opts.force`, which delegates to a full `loadInitial`
+   * since there is nothing to diff against before the first load.
    */
-  async reconcileLatest(sessionId: string, cwd?: string): Promise<void> {
+  async reconcileLatest(sessionId: string, cwd?: string, opts?: { force?: boolean }): Promise<void> {
     const entry = this.cache.get(sessionId);
-    if (!entry || !entry.initialLoaded) return;
+    if (!entry || !entry.initialLoaded) {
+      if (!opts?.force) return;
+      await this.loadInitial(sessionId, cwd, { force: true });
+      return;
+    }
     touchAccess(entry);
     let page: HistoryPage;
     try {
@@ -364,6 +376,11 @@ class SessionEventStore {
     // session the app is attached to, selected or not.
     if (ev.type === "notification" && (ev as { kind?: string }).kind === "rate_limit") {
       this.rateLimitHandler?.(sessionId, (ev as { body: string }).body);
+      return;
+    }
+    // Dropped non-delta events: force a transcript read, never render as a bubble.
+    if (ev.type === "events_lagged") {
+      void this.reconcileLatest(sessionId, undefined, { force: true });
       return;
     }
     const entry = this.cache.get(sessionId);

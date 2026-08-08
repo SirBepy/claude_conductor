@@ -471,6 +471,17 @@ async fn pump_events(mut socket: WebSocket, state: Arc<DaemonState>, session_id:
                     // before continuing (a delta client drops anything its
                     // accumulator already covers).
                     log::warn!("remote stream lagged for {session_id}: dropped {n} chat events");
+                    // Non-delta events (finalized messages, tool calls,
+                    // notifications) are gone for good - tell the client to
+                    // force a transcript re-read.
+                    let lagged = crate::types::chat::ChatEvent::EventsLagged {
+                        timestamp: chrono::Utc::now().timestamp_millis(),
+                    };
+                    if let Ok(txt) = serde_json::to_string(&lagged) {
+                        if socket.send(Message::Text(txt)).await.is_err() {
+                            break;
+                        }
+                    }
                     // Look the session up fresh: after a respawn+resubscribe
                     // (`wait_for_respawn` below) the captured `session` is the
                     // OLD object and its accumulator would be stale.

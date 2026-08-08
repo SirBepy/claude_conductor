@@ -30,3 +30,9 @@ export function remoteEchoUserEvent(text, ts = 0) {
 export function deltaEvent(text, block, seq, snapshot = false, ts = 0) {
   return { type: "assistant_delta", text, block, seq, snapshot, timestamp: ts };
 }
+
+/** Broadcast-lag signal (see ChatEvent::EventsLagged in types/chat.rs): tells
+ *  the store non-delta events were dropped and a forced re-read is needed. */
+export function eventsLaggedEvent(ts = 0) {
+  return { type: "events_lagged", timestamp: ts };
+}

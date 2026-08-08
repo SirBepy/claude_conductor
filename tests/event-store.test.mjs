@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { userEvent, assistantEvent, streamingEvent, finalEvent, toolUseEvent, deltaEvent } from "./helpers/chat-events.mjs";
+import { userEvent, assistantEvent, streamingEvent, finalEvent, toolUseEvent, deltaEvent, eventsLaggedEvent } from "./helpers/chat-events.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
@@ -228,6 +228,74 @@ describe("SessionEventStore pagination", () => {
     await sessionEvents.reconcileLatest(sid);
     unsub();
     expect(seen).toHaveLength(0);
+  });
+
+  it("reconcileLatest without force is a no-op on an uncached session", async () => {
+    const sid = "sess-reconcile-uncached";
+    await sessionEvents.reconcileLatest(sid);
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(sessionEvents.isLoaded(sid)).toBe(false);
+  });
+
+  it("reconcileLatest with force loads an uncached session via loadInitial", async () => {
+    const sid = "sess-reconcile-force-uncached";
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("u1", 0)],
+      oldest_seq: 0,
+      newest_seq: 0,
+      has_more: false,
+    });
+    await sessionEvents.reconcileLatest(sid, undefined, { force: true });
+    expect(sessionEvents.isLoaded(sid)).toBe(true);
+    expect(sessionEvents.events(sid)).toHaveLength(1);
+  });
+
+  it("loadInitial with force bypasses the cache-hit early return and re-fetches", async () => {
+    const sid = "sess-loadinitial-force";
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("u1", 0)],
+      oldest_seq: 0,
+      newest_seq: 0,
+      has_more: false,
+    });
+    await sessionEvents.loadInitial(sid);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("u1", 0), assistantEvent("a1", 0)],
+      oldest_seq: 0,
+      newest_seq: 1,
+      has_more: false,
+    });
+    const events = await sessionEvents.loadInitial(sid, undefined, { force: true });
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(events).toHaveLength(2);
+  });
+
+  it("an events_lagged live event forces a reconcile instead of rendering as a message", async () => {
+    const sid = "sess-events-lagged";
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("u1", 0)],
+      oldest_seq: 0,
+      newest_seq: 0,
+      has_more: false,
+    });
+    await sessionEvents.loadInitial(sid);
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("u1", 0), assistantEvent("a1 recovered", 0)],
+      oldest_seq: 0,
+      newest_seq: 1,
+      has_more: false,
+    });
+    const seen = [];
+    const unsub = sessionEvents.subscribe(sid, (ev) => seen.push(ev));
+    sessionEvents.pushSynthetic(sid, eventsLaggedEvent(0));
+    // deliver() fires the reconcile fire-and-forget; flush microtasks.
+    await Promise.resolve();
+    await Promise.resolve();
+    unsub();
+    expect(seen.every((ev) => ev.type !== "events_lagged")).toBe(true);
+    expect(sessionEvents.events(sid).some((e) => e.type === "events_lagged")).toBe(false);
+    expect(sessionEvents.events(sid).filter((e) => e.type === "assistant_message")).toHaveLength(1);
   });
 
   it("loadOlder returns null when hasMore is false", async () => {

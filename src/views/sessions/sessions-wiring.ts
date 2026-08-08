@@ -275,18 +275,38 @@ export async function wireInstancesChangedListener(
   return null;
 }
 
+/** Cap on how many OTHER cached sessions the slow background sweep
+ *  reconciles per tick - bounds worst-case `load_history_page` fan-out to a
+ *  small, predictable number no matter how many chats Joe has backgrounded. */
+const BACKGROUND_RECONCILE_CAP = 5;
+const BACKGROUND_RECONCILE_EVERY_N_TICKS = 4;
+
 /** Self-heals the visible chat's live channel, mirroring the 15s poll above -
  *  chat events have no such fallback and a dead listener never re-arms itself.
- *  Scoped to `state.selectedId`, so retained sessions stay off the poll loop. */
+ *  Every tick force-reconciles `state.selectedId`; every 4th tick also sweeps
+ *  the most-recently-active backgrounded sessions, which get zero
+ *  reconciliation otherwise because the notifier is lossy. */
 export function wireChatRecoveryHeartbeat(myMount: number): () => void {
+  let tick = 0;
   const recover = (): void => {
     if (state.mountId !== myMount) return;
     const id = state.selectedId;
-    if (!id) return;
-    const sess = state.sessions.find((s) => s.session_id === id);
-    const cwd = sess?.cwd ? String(sess.cwd) : undefined;
-    void sessionEvents.reviveListener(id).catch((err) => console.warn(`[sessions] reviveListener(${id}) failed`, err));
-    void sessionEvents.reconcileLatest(id, cwd);
+    if (id) {
+      const sess = state.sessions.find((s) => s.session_id === id);
+      const cwd = sess?.cwd ? String(sess.cwd) : undefined;
+      void sessionEvents.reviveListener(id).catch((err) => console.warn(`[sessions] reviveListener(${id}) failed`, err));
+      void sessionEvents.reconcileLatest(id, cwd, { force: true });
+    }
+    tick++;
+    if (tick % BACKGROUND_RECONCILE_EVERY_N_TICKS !== 0) return;
+    const others = sessionEvents.cachedSessionIdsByRecency()
+      .filter((sid) => sid !== id)
+      .slice(0, BACKGROUND_RECONCILE_CAP);
+    for (const sid of others) {
+      const sess = state.sessions.find((s) => s.session_id === sid);
+      const cwd = sess?.cwd ? String(sess.cwd) : undefined;
+      void sessionEvents.reconcileLatest(sid, cwd);
+    }
   };
   const timer = setInterval(recover, 15_000);
   const onVisibilityChange = (): void => {

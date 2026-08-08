@@ -23,6 +23,14 @@ pub fn list_auto_accept() -> Vec<String> {
     crate::sessions::chat_config::list_auto_accept()
 }
 
+/// A chat's durable busy/last-reconciled marker (`sessions::chat_state`). Lets
+/// a freshly-opened window (no in-memory dedup state yet) judge whether a
+/// cached session may have moved on without it. None if never recorded.
+#[tauri::command]
+pub fn get_chat_state(session_id: String) -> Option<crate::sessions::chat_state::ChatState> {
+    crate::sessions::chat_state::get(&session_id)
+}
+
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
     use std::sync::atomic::Ordering;

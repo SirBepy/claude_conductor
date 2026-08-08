@@ -87,6 +87,12 @@ pub enum ChatEvent {
         exit_code: Option<i32>,
         timestamp: i64,
     },
+    /// Broadcast lagged: every non-delta event in the gap is permanently gone
+    /// from the live channel, since only the streaming accumulator self-heals.
+    /// Frontend must force a fresh transcript re-read to recover the rest.
+    EventsLagged {
+        timestamp: i64,
+    },
     /// Emitted once per completed turn from the `result` line.
     /// `input_tokens` = full context window usage for this turn (not additive).
     /// `total_cost_usd` = cumulative session cost estimate.

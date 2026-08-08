@@ -110,6 +110,12 @@ pub fn token_history_file() -> Result<PathBuf> {
     Ok(data_dir()?.join("token-history.json"))
 }
 
+/// Durable `busy` + last-reconciled marker per chat (`sessions::chat_state`).
+/// Mirrors `chat-config.json`'s shape/ownership: daemon-only writer, atomic.
+pub fn chat_state_file() -> Result<PathBuf> {
+    Ok(data_dir()?.join("chat-state.json"))
+}
+
 /// Persisted self-calibrating window-capacity estimate, in cost-weighted drain
 /// units (see `tokens::capacity`). Drives each chat's "% of a 5h session".
 pub fn session_capacity_file() -> Result<PathBuf> {

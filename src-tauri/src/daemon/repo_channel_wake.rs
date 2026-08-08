@@ -74,6 +74,7 @@ pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
         Ok(()) => {
             state.registry.set_awaiting(target_session_id, None);
             state.registry.set_busy(target_session_id, true);
+            crate::sessions::chat_state::set_busy(target_session_id, true);
             state.notifier.publish(
                 "instances_changed",
                 serde_json::json!({"instances": state.registry.list()}),

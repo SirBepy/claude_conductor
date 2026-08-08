@@ -347,7 +347,9 @@ pub(crate) async fn run_stdout_pump(
                                         }
                                     }
                                 }
-                                state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen);
+                                if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) {
+                                    crate::sessions::chat_state::set_busy(&pump_session.session_id, false);
+                                }
                                 // Drain-on-jarvis-idle (todo 272 chunk 3): this session IS
                                 // Jarvis and it just went idle - flush anything that queued
                                 // up while it was mid-turn. No-op (via the busy/ended guards
@@ -451,7 +453,9 @@ pub(crate) async fn run_stdout_pump(
         .unwrap_or(false);
     if is_interactive {
         // Clear busy in case the process exited mid-turn without a result line.
-        state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen);
+        if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) {
+            crate::sessions::chat_state::set_busy(&pump_session.session_id, false);
+        }
         // Ghost prompts: an open AskUserQuestion/permission prompt can only
         // exist mid-turn, so any prompt still recorded when the process
         // exits is orphaned - its hook curl died with the process, axum

@@ -216,6 +216,7 @@ pub fn run() {
             ipc::take_pending_new_chat,
             ipc::get_session_config,
             ipc::list_auto_accept,
+            ipc::get_chat_state,
             ipc::quit_app,
             ipc::logout,
             ipc::poll_now,
