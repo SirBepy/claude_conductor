@@ -252,7 +252,8 @@ pub async fn get_git_info(cwd: String) -> GitInfo {
     .unwrap_or(GitInfo { branch: None, repo: None, ahead: None, behind: None, sha: None, insertions: None, deletions: None })
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct BranchEntry {
     pub name: String,
     pub current: bool,

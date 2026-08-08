@@ -183,8 +183,9 @@ fn create_worktree_sync(
     if branch_exists {
         run_git(repo_path, &["worktree", "add", &target_str, branch_name])?;
     } else {
+        let resolved_base = base_branch.map(str::trim).filter(|s| !s.is_empty()).map(|b| fetch_and_resolve_base(repo_path, b));
         let mut args = vec!["worktree", "add", &target_str, "-b", branch_name];
-        if let Some(base) = base_branch.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(base) = resolved_base.as_deref() {
             args.push(base);
         }
         run_git(repo_path, &args)?;
@@ -198,6 +199,19 @@ fn create_worktree_sync(
         stale: false,
         stale_reason: None,
     })
+}
+
+/// Best-effort `git fetch origin <base>` so the new worktree branches off
+/// latest upstream, not a stale local ref. Falls back to the plain local
+/// name on any failure (no network, no such remote) - never blocks creation.
+fn fetch_and_resolve_base(repo_path: &str, base: &str) -> String {
+    let _ = run_git(repo_path, &["fetch", "origin", base]);
+    let remote_ref = format!("origin/{base}");
+    if run_git(repo_path, &["show-ref", "--verify", "--quiet", &format!("refs/remotes/{remote_ref}")]).is_ok() {
+        remote_ref
+    } else {
+        base.to_string()
+    }
 }
 
 /// Lowercases, replaces any run of non-alphanumeric characters with a single

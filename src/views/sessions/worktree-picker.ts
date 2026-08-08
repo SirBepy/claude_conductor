@@ -2,7 +2,8 @@ import { html, render } from "lit-html";
 import { invoke } from "../../shared/ipc";
 import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { askConfirm } from "../../shared/confirm";
-import type { ProjectGroup, WorktreeDetail } from "../../types/ipc.generated";
+import { randomName } from "../../shared/random-name";
+import type { ProjectGroup, WorktreeDetail, BranchEntry } from "../../types/ipc.generated";
 
 type Step = "choice" | "existing" | "new";
 
@@ -30,8 +31,11 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
     let cleanupError: string | null = null;
 
     let newBranch = "";
-    let newName = "";
+    let branches: BranchEntry[] | null = null;
+    let branchesError: string | null = null;
     let newBase = "";
+    let baseExpanded = false;
+    let baseFilter = "";
     let creating = false;
     let createError: string | null = null;
 
@@ -53,6 +57,27 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
     };
 
     const goExisting = () => { step = "existing"; void loadDetails(); };
+
+    const loadBranches = async () => {
+      branches = null;
+      branchesError = null;
+      renderModal();
+      try {
+        const result = await invoke<BranchEntry[]>("get_recent_branches", { cwd: project.path });
+        branches = result;
+        newBase = result.find((b) => b.current)?.name ?? result[0]?.name ?? "";
+      } catch (e) {
+        branchesError = String(e);
+        branches = [];
+      }
+      renderModal();
+    };
+
+    const goNew = () => {
+      step = "new";
+      newBranch = randomName();
+      void loadBranches();
+    };
 
     const confirmAndCleanup = async () => {
       const targets = details?.filter((d) => selectedForCleanup.has(d.path)) ?? [];
@@ -81,7 +106,7 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
 
     const submitNew = async () => {
       const branch = newBranch.trim();
-      if (!branch) return;
+      if (!branch || !newBase) return;
       creating = true;
       createError = null;
       renderModal();
@@ -89,8 +114,8 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
         const wt = await invoke<WorktreeDetail>("create_worktree", {
           repoPath: project.path,
           branchName: branch,
-          worktreeName: newName.trim() || null,
-          baseBranch: newBase.trim() || null,
+          worktreeName: null,
+          baseBranch: newBase,
         });
         finish({ path: wt.path, name: wt.name });
       } catch (e) {
@@ -104,7 +129,7 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
       <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Open ${project.name}">
         <header class="modal-header"><h3>Open ${project.name}</h3></header>
         <div class="modal-body wt-picker-body">
-          <button class="wt-picker-choice" @click=${() => { step = "new"; renderModal(); }}>
+          <button class="wt-picker-choice" @click=${goNew}>
             <i class="ph ph-git-fork"></i>
             <div class="wt-picker-choice-text">
               <span class="wt-picker-choice-title">New worktree</span>
@@ -194,45 +219,76 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
       `;
     };
 
+    // Base branch picker mirrors location-picker.ts's renderScopeField chip
+    // pattern (collapsed chip -> filterable list), reusing its .loc-* CSS.
+    const renderBaseBranchField = () => html`
+      <div class="loc-field">
+        <span class="loc-field-label">Base branch</span>
+        ${branches === null ? html`
+          <div class="wt-picker-loading"><i class="ph ph-spinner-gap wt-spin"></i> Loading branches&hellip;</div>
+        ` : branchesError ? html`
+          <div class="wt-picker-error">${branchesError}</div>
+        ` : !baseExpanded ? html`
+          <button class="loc-chip" @click=${() => { baseExpanded = true; renderModal(); }}>
+            <i class="ph ph-git-branch"></i>
+            <div class="loc-chip-text">
+              <span class="loc-chip-value">${newBase || "Pick a branch"}</span>
+              ${branches!.find((b) => b.name === newBase)?.current ? html`<span class="loc-chip-sub">current branch</span>` : ""}
+            </div>
+            <i class="ph ph-pencil-simple"></i>
+          </button>
+        ` : html`
+          <input
+            class="loc-search"
+            type="text"
+            autocomplete="off"
+            placeholder="Filter branches&hellip;"
+            .value=${baseFilter}
+            @input=${(e: Event) => { baseFilter = (e.target as HTMLInputElement).value; renderModal(); }}
+          />
+          <ul class="wt-picker-list">
+            ${branches!
+              .filter((b) => !baseFilter.trim() || b.name.toLowerCase().includes(baseFilter.trim().toLowerCase()))
+              .map((b) => html`
+                <li class="wt-picker-row">
+                  <span class="loc-check">${b.name === newBase ? html`<i class="ph ph-check"></i>` : ""}</span>
+                  <i class="ph ph-git-branch loc-row-icon"></i>
+                  <div class="wt-picker-row-info" @click=${() => { newBase = b.name; baseExpanded = false; baseFilter = ""; renderModal(); }}>
+                    <span class="wt-picker-row-name">${b.name}</span>
+                    <span class="wt-picker-row-sub">${b.current ? "current branch" : b.short_sha ?? ""}</span>
+                  </div>
+                </li>
+              `)}
+          </ul>
+          <button class="btn btn-secondary loc-field-cancel" @click=${() => { baseExpanded = false; baseFilter = ""; renderModal(); }}>Cancel</button>
+        `}
+      </div>
+    `;
+
     const renderNew = () => html`
       <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="New worktree">
         <header class="modal-header"><h3>New worktree</h3></header>
         <div class="modal-body wt-picker-body">
           <div class="wt-picker-field">
-            <label>Branch name</label>
-            <input
-              type="text"
-              autocomplete="off"
-              placeholder="feature-x"
-              .value=${newBranch}
-              @input=${(e: Event) => { newBranch = (e.target as HTMLInputElement).value; }}
-            />
+            <label>Name</label>
+            <div class="wt-new-name-row">
+              <input
+                type="text"
+                autocomplete="off"
+                .value=${newBranch}
+                @input=${(e: Event) => { newBranch = (e.target as HTMLInputElement).value; }}
+              />
+              <button type="button" class="wt-new-name-reroll" title="Generate another name" @click=${() => { newBranch = randomName(); renderModal(); }}>
+                <i class="ph ph-shuffle"></i>
+              </button>
+            </div>
           </div>
-          <div class="wt-picker-field">
-            <label>Worktree folder name <span class="wt-picker-field-optional">(optional)</span></label>
-            <input
-              type="text"
-              autocomplete="off"
-              placeholder=${newBranch.trim() || "auto from branch name"}
-              .value=${newName}
-              @input=${(e: Event) => { newName = (e.target as HTMLInputElement).value; }}
-            />
-          </div>
-          <div class="wt-picker-field">
-            <label>Base branch <span class="wt-picker-field-optional">(optional)</span></label>
-            <input
-              type="text"
-              autocomplete="off"
-              placeholder="current branch"
-              .value=${newBase}
-              @input=${(e: Event) => { newBase = (e.target as HTMLInputElement).value; }}
-            />
-          </div>
+          ${renderBaseBranchField()}
           ${createError ? html`<div class="wt-picker-error">${createError}</div>` : ""}
         </div>
         <footer class="modal-footer">
           <button class="btn btn-secondary" ?disabled=${creating} @click=${() => { step = "choice"; renderModal(); }}>Back</button>
-          <button class="btn btn-primary" ?disabled=${creating || !newBranch.trim()} @click=${() => void submitNew()}>
+          <button class="btn btn-primary" ?disabled=${creating || !newBranch.trim() || !newBase} @click=${() => void submitNew()}>
             ${creating ? html`<i class="ph ph-spinner-gap wt-spin"></i> Creating&hellip;` : html`<i class="ph ph-git-fork"></i> Create`}
           </button>
         </footer>
