@@ -16,6 +16,7 @@ import { settingsHeader } from "../../ui";
 import "../../settings.css";
 import "./statusline.css";
 import "../../../sessions/session-statusbar.css";
+import "../../../sessions/session-statusbar-images.css";
 
 interface ChipDisplay { icon: string; sample: string; tooltip: string; }
 

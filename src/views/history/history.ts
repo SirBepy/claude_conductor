@@ -16,6 +16,7 @@ import "../sessions/session-avatar.css";
 import "../sessions/session-list.css";
 import "../sessions/session-row-portrait.css";
 import "../sessions/session-statusbar.css";
+import "../sessions/session-statusbar-images.css";
 import "./history.css";
 import type { HistoryEntry } from "../../types/ipc.generated";
 import { cwdToProjectName } from "../sessions/sessions-helpers";

@@ -19,7 +19,7 @@
 import { invoke } from "../../../shared/ipc";
 import { getTransport } from "../../../shared/transport";
 import { state } from "../state";
-import { findPendingPromptsForSession, reconcilePendingPrompts } from "./remote-prompt-poll";
+import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
 import { showPermissionCard } from "./permission-card";
 import { AUQ_ANSWER_SENTINEL } from "../../../shared/chat/chat-transforms";
@@ -34,11 +34,8 @@ import {
   gateDiag,
   resolveCwdForSession,
   storePendingPrompt,
-  takePendingPrompt,
-  peekPendingPrompt,
   clearPendingPromptById,
 } from "./gating";
-import type { PendingPrompt } from "./gating";
 import type { PermissionRequestedPayload, Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 
 export {
@@ -50,6 +47,7 @@ export {
   pendingPromptSessionIds,
 } from "./gating";
 export { dismissQuestionCard } from "./question-ui";
+export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, reopenPendingPrompt } from "./resurface";
 
 // Sidebar re-render is injected rather than statically imported: a direct
 // `import { renderSidebar } from "../sidebar"` would close a module cycle
@@ -63,8 +61,9 @@ export function setSidebarRerenderHook(fn: () => void): void {
 }
 
 /** Re-render the sessions sidebar so a newly-parked prompt's attention marker
- *  appears (or clears) on the row. No-op until the hook is wired. */
-function rerenderSidebar(): void {
+ *  appears (or clears) on the row. No-op until the hook is wired. Exported for
+ *  resurface.ts (split out of this file, ai_todo 517). */
+export function rerenderSidebar(): void {
   _rerenderSidebar?.();
 }
 
@@ -84,7 +83,8 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
   state.renderer?.updateQuestionProgress(promptId, liveAnswered);
 }
 
-function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: QuestionDraft): void {
+// Exported for resurface.ts (split out of this file, ai_todo 517).
+export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: QuestionDraft): void {
   // Park the prompt while it's on screen so switching chats and back re-surfaces
   // it (the reliable poll only emits each id once, so a card torn down by
   // navigation is otherwise lost while the daemon turn hangs). Cleared when the
@@ -317,103 +317,4 @@ export function installPermissionModalListener(): void {
     const id = event.payload?.id;
     if (id) handlePromptResolved(id, event.payload?.durable === true);
   });
-}
-
-/**
- * Drain a parked permission prompt for a session that just had auto-accept
- * toggled ON: allow it immediately and clear the sidebar attention dot. A
- * parked question (never auto-answered) is left in place. No-op if nothing is
- * parked. Called from the auto-accept toggle so flipping it on retroactively
- * clears an already-waiting prompt instead of leaving the dot until switch-back.
- */
-export function autoAcceptParked(sessionId: string): void {
-  const pending = takePendingPrompt(sessionId);
-  if (!pending) return;
-  if (pending.kind === "permission" && extractQuestions(pending.payload.input) === null) {
-    allowPermission(pending.payload, "flush respond_permission");
-    rerenderSidebar();
-    return;
-  }
-  // Can't auto-answer (question / AskUserQuestion-shaped): leave it parked.
-  storePendingPrompt(sessionId, pending);
-}
-
-/**
- * Replay a parked permission/question prompt for a session the user just
- * selected. Mirrors the arrival path (auto-accept, remembered-rule auto-allow,
- * then the card) so a switch-back surfaces exactly what would have shown had
- * the chat been focused when the tool fired. False if nothing is parked, so the
- * caller can fall back to {@link rehydratePendingPrompts}.
- *
- * Called from selectSession AFTER the pane is mounted so the card anchors over
- * the right composer.
- */
-export function replayPendingPrompt(sessionId: string): boolean {
-  const pending = takePendingPrompt(sessionId);
-  if (!pending) return false;
-  rerenderSidebar(); // clear the attention marker now that we're surfacing it
-  surfacePending(pending);
-  return true;
-}
-
-/** Shared tail of replay/reopen: render the parked prompt's card, applying the
- *  arrival path's auto-accept / remembered-rule shortcuts. */
-function surfacePending(pending: PendingPrompt): void {
-  if (pending.kind === "question") {
-    showQuestionCard(pending.payload, pending.draft);
-    return;
-  }
-  const payload = pending.payload;
-  if (
-    payload.session_id
-    && isAutoAccept(payload.session_id)
-    && extractQuestions(payload.input) === null
-  ) {
-    allowPermission(payload, "replay respond_permission");
-    return;
-  }
-  void (async () => {
-    if (await autoAllowIfRemembered(payload)) return;
-    showPermissionCard(payload);
-  })();
-}
-
-/** Ask the DAEMON what it is still waiting on for `sessionId` and re-park it.
- *  The push path sends each id once, so a park lost with its webview is never
- *  re-sent - pull instead. No-op if already parked (may hold a live draft). */
-export async function rehydratePendingPrompts(sessionId: string): Promise<boolean> {
-  if (!sessionId || peekPendingPrompt(sessionId)) return false;
-  let prompts: unknown;
-  try {
-    prompts = await getTransport().call("list_pending_prompts");
-  } catch (e) {
-    console.warn("[perm-gate] rehydrate failed:", e);
-    return false;
-  }
-  // One park per session, so take the longest-waiting if the daemon holds two.
-  const [rec] = findPendingPromptsForSession(prompts, sessionId);
-  if (!rec) return false;
-  storePendingPrompt(sessionId, rec.kind === "question"
-    ? { kind: "question", payload: rec.payload }
-    : { kind: "permission", payload: rec.payload });
-  rerenderSidebar();
-  return true;
-}
-
-/** Put the real card back up for a transcript card the user clicked: local park
- *  first, then the daemon's store. False when nothing is open for this chat, so
- *  the caller can say so - silently doing nothing is the whole complaint. */
-export async function reopenPendingPrompt(sessionId: string): Promise<boolean> {
-  if (!sessionId) return false;
-  let pending = takePendingPrompt(sessionId);
-  if (!pending) {
-    await rehydratePendingPrompts(sessionId);
-    pending = takePendingPrompt(sessionId);
-  }
-  if (!pending) return false;
-  // Only safe to drop what's on screen now we hold a replacement.
-  dismissQuestionCard();
-  rerenderSidebar();
-  surfacePending(pending);
-  return true;
 }

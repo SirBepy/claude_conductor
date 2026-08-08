@@ -21,7 +21,14 @@ import {
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
-import { DrainPopover, AiTodosPopover, ServersPopover, ImagesPopover, EffortPopover, ModelPopover, BranchPopover, CommitsPopover, type BranchEntry, type CommitSync } from "./statusbar-popovers";
+import { DrainPopover } from "./drain-popover";
+import { AiTodosPopover } from "./ai-todos-popover";
+import { ServersPopover } from "./servers-popover";
+import { ImagesPopover } from "./images-popover";
+import { EffortPopover } from "./effort-popover";
+import { ModelPopover } from "./model-popover";
+import { BranchPopover, type BranchEntry } from "./branch-popover";
+import { CommitsPopover, type CommitSync } from "./commits-popover";
 export {
   loadStatuslineRows,
   saveStatuslineRows,
