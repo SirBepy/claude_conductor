@@ -14,7 +14,9 @@
 // data to show, so a network-only HTML entrypoint costs no real offline
 // capability.
 
-const CACHE_NAME = "claude-companion-v2";
+// Bump on any cached-asset content change: the icons keep their filenames, so
+// an installed PWA serves the stale cached copy until this name changes.
+const CACHE_NAME = "claude-companion-v3";
 
 self.addEventListener("install", () => {
   // Activate immediately so the first browser visit gets this SW.
