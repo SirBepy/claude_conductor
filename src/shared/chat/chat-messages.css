@@ -406,6 +406,38 @@
   padding: 4px;
 }
 
+/* Collapsed long system note (see renderSystemNote) - the base .msg.system
+   centered-italic-caption look only reads well for short text; a long
+   relayed message gets a one-line truncated summary that expands. */
+.msg.system.system-long > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.msg.system.system-long > summary::-webkit-details-marker {
+  display: none;
+}
+.msg.system.system-long > summary::before {
+  content: "▸ ";
+}
+.msg.system.system-long[open] > summary::before {
+  content: "▾ ";
+}
+.msg.system.system-long > summary:hover {
+  color: var(--color-text);
+}
+.system-note-full {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  font-style: normal;
+  text-align: left;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
 .msg.system.compact-marker {
   font-style: normal;
   padding: 8px 4px;

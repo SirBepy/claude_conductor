@@ -131,6 +131,23 @@ describe("renderMessage — tool_use branches to edit-window for file mutations"
   });
 });
 
+describe("renderMessage — system notes (todo: Auto-continued wall-of-text fix)", () => {
+  it("renders a short system note as the plain centered caption, not collapsed", () => {
+    const html = renderMessage({ kind: "system", text: "Continuing session…", ts: 0 });
+    expect(html).toBe('<div class="msg system">Continuing session…</div>');
+  });
+
+  it("renders a long system note (e.g. relayed repo-channel text) as a collapsed <details>", () => {
+    const longText = "Auto-continued: " + "a".repeat(500);
+    const html = renderMessage({ kind: "system", text: longText, ts: 0 });
+    expect(html).toMatch(/^<details class="msg system system-long">/);
+    expect(html).not.toMatch(/<details[^>]*\sopen/);
+    // Full text is preserved (not silently dropped), just tucked behind the toggle.
+    expect(html).toContain(longText);
+    expect(html).toContain("system-note-full");
+  });
+});
+
 describe("renderMessage — non-file tool_use renders a collapsed details row", () => {
   it("renders a <details> tool-row with name + target, NOT open by default", () => {
     const html = renderMessage({

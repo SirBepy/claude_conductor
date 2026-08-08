@@ -285,13 +285,26 @@ export function renderBlocks(blocks: ContentBlock[], breaks = false, fileChips =
     .join("");
 }
 
+// is_meta system notes can carry an entire relayed message (e.g. a
+// repo-channel dump), not just a short caption - collapse long ones behind
+// a toggle instead of a giant wall of centered italic text.
+const SYSTEM_NOTE_PREVIEW_LEN = 160;
+
+function renderSystemNote(text: string): string {
+  if (text.length <= SYSTEM_NOTE_PREVIEW_LEN) {
+    return `<div class="msg system">${escapeHtml(text)}</div>`;
+  }
+  const preview = escapeHtml(text.slice(0, SYSTEM_NOTE_PREVIEW_LEN).trimEnd());
+  return `<details class="msg system system-long"><summary>${preview}…</summary><div class="system-note-full">${escapeHtml(text)}</div></details>`;
+}
+
 export function renderMessage(m: RenderedMessage): string {
   switch (m.kind) {
     case "system":
       if (m.compactionN != null) {
         return `<div class="msg system compact-marker"><span class="compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
       }
-      return `<div class="msg system">${escapeHtml(m.text ?? "")}</div>`;
+      return renderSystemNote(m.text ?? "");
     case "user":
       return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;
     case "assistant": {
