@@ -1,16 +1,7 @@
-/* ── Project picker modal v2 (search + sort + persistence) ────────────── */
-#modal-host {
-  display: none;
-}
-#modal-host.open {
-  display: block;
-}
-#modal-host .modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 2500;
-}
+/* ── Project picker modal v2 (search + sort + persistence) ──────────────
+   #modal-host / .modal-backdrop / the shrink-expand morph transition live in
+   src/shared/modal.css - shared with worktree-picker.css and
+   model-effort-modal.css. */
 #modal-host .modal-card.project-picker-modal {
   position: fixed;
   top: 50%;

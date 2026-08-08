@@ -1,7 +1,9 @@
 /* ── Worktree sub-picker modal (New / Existing / Default) ─────────────────
    Opened from the project picker for a repo that has git worktrees. Reuses the
-   shared #modal-host, .modal-backdrop, .modal-header/body/footer and .btn base
-   classes (see project-picker.css); only the wt-picker-* internals live here. */
+   shared #modal-host, .modal-backdrop (src/shared/modal.css),
+   .modal-header/body/footer and .btn base classes (see project-picker.css);
+   only the wt-picker-* internals live here. Also reused as-is by
+   location-picker.ts for the "Open <project>" card. */
 #modal-host .modal-card.wt-picker-modal {
   position: fixed;
   top: 50%;

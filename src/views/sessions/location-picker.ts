@@ -1,6 +1,6 @@
 import { html, render } from "lit-html";
 import { invoke } from "../../shared/ipc";
-import { ensureModalHost, closeModal } from "../../shared/modal";
+import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { openWorktreePickerModal } from "./worktree-picker";
 import type { ProjectGroup, ClaudeMdScope } from "../../types/ipc.generated";
 import "./location-picker.css";
@@ -14,12 +14,15 @@ import "./location-picker.css";
 /// CLAUDE.md) - same auto-skip principle the worktree picker already used.
 export function openLocationModal(project: ProjectGroup): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
-    const host = ensureModalHost();
+    const slot = modalCardSlot();
     let resolved = false;
+    // Deliberately does NOT close the shared host - this picker is always
+    // reached via project-picker.ts's selectProjectRow, which decides what
+    // shows next (its own card on cancel, or hands off further down the
+    // chain on success). Only the chain's outermost function closes it.
     const finish = (val: { path: string; name: string } | null) => {
       if (resolved) return;
       resolved = true;
-      closeModal();
       resolve(val);
     };
 
@@ -57,21 +60,24 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     };
 
     const changeWorktree = async () => {
-      host.classList.remove("open");
       const result = await openWorktreePickerModal(project);
+      setBackdropCancel(() => finish(null));
       if (result) {
         currentWt = result;
         scopes = null;
         scopesError = null;
         scopeExpanded = false;
         filter = "";
-        host.classList.add("open");
-        renderModal();
-        await loadScopes();
-      } else {
-        host.classList.add("open");
       }
-      renderModal();
+      // Morph back to location-picker's card either way (cancelled, or a new
+      // worktree was picked) - both are a transition off worktree-picker's
+      // card. A freshly-picked worktree still needs its scopes reloaded;
+      // that re-render happens in place, no second morph.
+      await presentHostCard(renderModal);
+      if (result) {
+        await loadScopes();
+        renderModal();
+      }
     };
 
     const toggleScopeField = () => {
@@ -166,7 +172,6 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     const renderModal = () => {
       const busy = scopes === null;
       const tpl = html`
-        <div class="modal-backdrop" @click=${() => finish(null)}></div>
         <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Open ${project.name}">
           <header class="modal-header"><h3>Open ${project.name}</h3></header>
           <div class="modal-body wt-picker-body loc-fields">
@@ -181,7 +186,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
           </footer>
         </div>
       `;
-      render(tpl, host);
+      render(tpl, slot);
     };
 
     // Zero worktrees is the only case where the whole modal can potentially
@@ -191,18 +196,17 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     // after it's already visible, matching the existing-worktree list's own
     // lazy-load pattern.
     const start = async () => {
+      setBackdropCancel(() => finish(null));
       if (project.worktrees.length === 0) {
         await loadScopes();
         if ((scopes?.length ?? 0) <= 1 && !scopesError) {
           finish({ path: currentWt.path, name: currentWt.name });
           return;
         }
-        host.classList.add("open");
-        renderModal();
+        await presentHostCard(renderModal);
         return;
       }
-      host.classList.add("open");
-      renderModal();
+      await presentHostCard(renderModal);
       await loadScopes();
       renderModal();
     };

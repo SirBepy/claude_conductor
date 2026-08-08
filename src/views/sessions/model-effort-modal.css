@@ -1,16 +1,14 @@
-/* ── Model / effort picker modal ─────────────────────────────────────────── */
-
-.model-effort-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* ── Model / effort picker modal ─────────────────────────────────────────────
+ * Renders into the shared #modal-host card slot (src/shared/modal.ts/.css) -
+ * same backdrop + shrink/expand morph transition as project-picker.css /
+ * worktree-picker.css, so chaining in from pickProject() never flickers. */
 
 .model-effort-modal-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2501;
   background: var(--color-surface, #1c1c24);
   color: var(--color-text, #e8e8ee);
   border: 1px solid var(--color-border, #2a2a36);

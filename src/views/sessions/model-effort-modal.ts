@@ -1,7 +1,9 @@
+import { html, render } from "lit-html";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
 import type { Account } from "../../shared/api";
+import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
   accountPickIncomplete,
@@ -9,7 +11,7 @@ import {
   attachAccountFieldHandlers,
   type AccountFieldState,
 } from "./account-field";
-import { createCharacterPane, cancelCharacterPaneSound } from "./character-pane";
+import { createCharacterPane, cancelCharacterPaneSound, type CharacterPane } from "./character-pane";
 import {
   EFFORTS,
   DEFAULT_PRESETS,
@@ -74,8 +76,12 @@ export async function openModelEffortModal(
   const resolvedAccountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
 
   return new Promise<SessionConfig | null>((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "model-effort-modal-overlay";
+    // Assigned once the shared host's morph transition (presentHostCard,
+    // below) has mounted our card - every function here is only ever
+    // CALLED after that (renderBody etc. are all deferred closures), so the
+    // definite-assignment gap is safe.
+    let card: HTMLElement;
+    let charPane: CharacterPane;
 
     let model = initial.model;
     let effort = initial.effort;
@@ -105,9 +111,6 @@ export async function openModelEffortModal(
       remember: false,
     };
 
-    // ── Character pane (see character-pane.ts) ──────────────────────────────
-    const charPane = createCharacterPane(overlay, projectId);
-
     function syncActivePreset() {
       activePresetIndex = presets.findIndex((p) => p.model === model && p.effort === effort);
     }
@@ -132,8 +135,8 @@ export async function openModelEffortModal(
         <span class="slider-stop-label${i === effortIdx() ? " active" : ""}" data-stop="${i}">${escapeHtml(e)}</span>
       `).join("");
 
-      overlay.innerHTML = `
-        <div class="model-effort-modal-card" role="dialog" aria-modal="true" aria-label="Pick model and effort">
+      card.innerHTML = `
+        <div class="me-columns">
           <div class="me-columns">
             <div class="me-left-col">
               <h3 class="me-title">New session in ${escapeHtml(projectName)}</h3>
@@ -177,14 +180,13 @@ export async function openModelEffortModal(
             </div>
             <div class="me-char-pane"></div>
           </div>
-        </div>
       `;
       attachHandlers();
       charPane.render();
     }
 
     function attachHandlers() {
-      overlay.querySelectorAll<HTMLButtonElement>(".preset-btn").forEach((btn) => {
+      card.querySelectorAll<HTMLButtonElement>(".preset-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.dataset.idx);
           const p = presets[idx];
@@ -196,7 +198,7 @@ export async function openModelEffortModal(
         });
       });
 
-      const modelSlider = overlay.querySelector<HTMLInputElement>(".me-model-slider");
+      const modelSlider = card.querySelector<HTMLInputElement>(".me-model-slider");
       modelSlider?.addEventListener("input", () => {
         const i = Number(modelSlider.value);
         model = models[i] ?? model;
@@ -204,7 +206,7 @@ export async function openModelEffortModal(
         renderBody();
       });
 
-      const effortSlider = overlay.querySelector<HTMLInputElement>(".me-effort-slider");
+      const effortSlider = card.querySelector<HTMLInputElement>(".me-effort-slider");
       effortSlider?.addEventListener("input", () => {
         const i = Number(effortSlider.value);
         effort = EFFORTS[i] ?? effort;
@@ -212,16 +214,16 @@ export async function openModelEffortModal(
         renderBody();
       });
 
-      overlay.querySelector<HTMLInputElement>(".me-auto-accept-input")?.addEventListener("change", (e) => {
+      card.querySelector<HTMLInputElement>(".me-auto-accept-input")?.addEventListener("change", (e) => {
         autoAccept = (e.target as HTMLInputElement).checked;
       });
 
-      overlay.querySelector<HTMLInputElement>(".me-remote-input")?.addEventListener("change", (e) => {
+      card.querySelector<HTMLInputElement>(".me-remote-input")?.addEventListener("change", (e) => {
         remote = (e.target as HTMLInputElement).checked;
       });
 
       // ── Account picker (multi-account milestone 04) ──────────────────────────
-      attachAccountFieldHandlers(overlay, accountField, renderBody, () => {
+      attachAccountFieldHandlers(card, accountField, renderBody, () => {
         close(null);
         // Route through the dashboard window rather than this window's own
         // router - navigating this (chats) window to settings-accounts left
@@ -229,8 +231,8 @@ export async function openModelEffortModal(
         void invoke("open_dashboard_settings_accounts");
       });
 
-      overlay.querySelector<HTMLButtonElement>(".me-cancel")?.addEventListener("click", () => close(null));
-      overlay.querySelector<HTMLButtonElement>(".me-confirm")?.addEventListener("click", () => {
+      card.querySelector<HTMLButtonElement>(".me-cancel")?.addEventListener("click", () => close(null));
+      card.querySelector<HTMLButtonElement>(".me-confirm")?.addEventListener("click", () => {
         void startWithCurrentConfig();
       });
     }
@@ -275,7 +277,7 @@ export async function openModelEffortModal(
 
     function close(result: SessionConfig | null) {
       cancelCharacterPaneSound();
-      overlay.remove();
+      closeHostCard();
       document.removeEventListener("keydown", onKey);
       resolve(result);
     }
@@ -290,41 +292,45 @@ export async function openModelEffortModal(
       }
     }
 
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) close(null);
-    });
+    setBackdropCancel(() => close(null));
     document.addEventListener("keydown", onKey);
 
-    document.body.appendChild(overlay);
-    renderBody();
+    void presentHostCard(() => {
+      render(
+        html`<div
+          class="modal-card model-effort-modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-label="New session in ${projectName}"
+        ></div>`,
+        modalCardSlot(),
+      );
+      card = modalCardSlot().querySelector<HTMLElement>(".model-effort-modal-card")!;
+      charPane = createCharacterPane(card, projectId);
+      renderBody();
 
-    // ── Load character pool in background (see character-pane.ts) ───────────
-    charPane.loadPool();
+      // ── Load character pool in background (see character-pane.ts) ────────
+      charPane.loadPool();
 
-    // ── Probe model availability in background ────────────────────────────────
-    // Probe needs full ids (count_tokens rejects bare family aliases), so map
-    // each family -> its latest id, probe those, then key results back by
-    // family. Families with no API id (exotic user models) are left selectable.
-    // When it resolves, re-render so a disabled model (e.g. Fable 5) blocks
-    // Start. Fails open only for transient/network errors: any probe
-    // TRANSPORT error (throw/reject) leaves every model selectable, but a
-    // resolved result with `authExpired: true` (backend already tried a
-    // CLI-driven token refresh and it still failed) is never treated as
-    // available - see api.ts's ModelAvailability doc.
-    const idByFamily = new Map<string, string>();
-    for (const fam of models) {
-      const id = latestIdForFamily(fam);
-      if (id) idByFamily.set(fam, id);
-    }
-    if (idByFamily.size > 0) {
-      void api.probeModelsAvailability([...idByFamily.values()])
-        .then((results) => {
-          authExpired = results.some((r) => r.authExpired);
-          const byId = new Map(results.map((r) => [r.id, r.available]));
-          for (const [fam, id] of idByFamily) availability[fam] = byId.get(id) ?? true;
-          renderBody();
-        })
-        .catch(() => { /* fail open — leave all models enabled */ });
-    }
+      // ── Probe model availability in background ───────────────────────────
+      // Map family -> latest id (count_tokens rejects bare aliases), probe
+      // those, key results back by family. Fails open on a transport error;
+      // `authExpired: true` never does - see api.ts's ModelAvailability doc.
+      const idByFamily = new Map<string, string>();
+      for (const fam of models) {
+        const id = latestIdForFamily(fam);
+        if (id) idByFamily.set(fam, id);
+      }
+      if (idByFamily.size > 0) {
+        void api.probeModelsAvailability([...idByFamily.values()])
+          .then((results) => {
+            authExpired = results.some((r) => r.authExpired);
+            const byId = new Map(results.map((r) => [r.id, r.available]));
+            for (const [fam, id] of idByFamily) availability[fam] = byId.get(id) ?? true;
+            renderBody();
+          })
+          .catch(() => { /* fail open — leave all models enabled */ });
+      }
+    });
   });
 }

@@ -48,6 +48,7 @@ import { installExternalLinkInterceptor } from "./shared/external-links";
 import { invoke } from "./shared/ipc";
 import { sessionEvents } from "./shared/chat/event-store";
 import { openModelEffortModal } from "./views/sessions/model-effort-modal";
+import { startNewSession } from "./views/sessions/pending-flow";
 import { updateMissedPanel } from "./missed-panel";
 import { setupRemoteVoicelines } from "./shared/remote-voiceline";
 import "./missed-panel.css";
@@ -128,6 +129,12 @@ if (import.meta.env.DEV) {
     projectPath?: string,
     projectName?: string,
   ): Promise<unknown> => openModelEffortModal(projectPath ?? "C:/test/proj", projectName ?? "Test Project");
+
+  // Popup-chain e2e seam: drives the real pickProject() chain without a
+  // mounted sessions pane - a scratch element stands in (tests assert
+  // mid-chain, never reaching launchNewSession's real pane render).
+  (window as unknown as Record<string, unknown>).__startNewSession = (): Promise<void> =>
+    startNewSession(document.createElement("div"));
 }
 
 registerView("dashboard", renderDashboard);

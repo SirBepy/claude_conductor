@@ -37,7 +37,7 @@ test.describe("view-harness / new-chat account picker", () => {
     await mountView(page, { invoke: { ...BASE_INVOKE, list_accounts: [FAKE_ACCOUNT] } });
     await openModal(page);
 
-    const overlay = page.locator(".model-effort-modal-overlay");
+    const overlay = page.locator(".model-effort-modal-card");
     await expect(overlay).toBeVisible();
 
     // The account resolved (sole account) -> not the empty state, chip shown.
@@ -52,7 +52,7 @@ test.describe("view-harness / new-chat account picker", () => {
     await mountView(page, { invoke: { ...BASE_INVOKE, list_accounts: [] } });
     await openModal(page);
 
-    const overlay = page.locator(".model-effort-modal-overlay");
+    const overlay = page.locator(".model-effort-modal-card");
     await expect(overlay).toBeVisible();
 
     // This is exactly what mobile saw when list_accounts was unrouted.

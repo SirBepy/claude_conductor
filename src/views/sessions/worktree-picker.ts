@@ -1,6 +1,6 @@
 import { html, render } from "lit-html";
 import { invoke } from "../../shared/ipc";
-import { ensureModalHost, closeModal } from "../../shared/modal";
+import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { askConfirm } from "../../shared/confirm";
 import type { ProjectGroup, WorktreeDetail } from "../../types/ipc.generated";
 
@@ -11,12 +11,13 @@ type Step = "choice" | "existing" | "new";
 /// need to branch on which picker produced the result.
 export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
-    const host = ensureModalHost();
+    const slot = modalCardSlot();
     let resolved = false;
+    // Deliberately does NOT close the shared host - always reached via
+    // location-picker.ts's changeWorktree, which decides what shows next.
     const finish = (val: { path: string; name: string } | null) => {
       if (resolved) return;
       resolved = true;
-      closeModal();
       resolve(val);
     };
 
@@ -100,7 +101,6 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
     };
 
     const renderChoice = () => html`
-      <div class="modal-backdrop" @click=${() => finish(null)}></div>
       <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Open ${project.name}">
         <header class="modal-header"><h3>Open ${project.name}</h3></header>
         <div class="modal-body wt-picker-body">
@@ -135,7 +135,6 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
     const renderExisting = () => {
       const stale = details?.filter((d) => selectedForCleanup.has(d.path)) ?? [];
       return html`
-        <div class="modal-backdrop" @click=${() => finish(null)}></div>
         <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Existing worktrees">
           <header class="modal-header">
             <h3>Existing worktrees</h3>
@@ -196,7 +195,6 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
     };
 
     const renderNew = () => html`
-      <div class="modal-backdrop" @click=${() => finish(null)}></div>
       <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="New worktree">
         <header class="modal-header"><h3>New worktree</h3></header>
         <div class="modal-body wt-picker-body">
@@ -245,10 +243,10 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
       const tpl = step === "existing" ? renderExisting()
         : step === "new" ? renderNew()
         : renderChoice();
-      render(tpl, host);
+      render(tpl, slot);
     };
 
-    host.classList.add("open");
-    renderModal();
+    setBackdropCancel(() => finish(null));
+    void presentHostCard(renderModal);
   });
 }

@@ -1,7 +1,7 @@
 import { html, render } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { invoke } from "../../shared/ipc";
-import { ensureModalHost, closeModal } from "../../shared/modal";
+import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal";
@@ -80,11 +80,12 @@ export function openProjectPickerModal(
 ): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const host = ensureModalHost();
+    const slot = modalCardSlot();
     let resolved = false;
     const finish = (val: { path: string; name: string } | null) => {
       if (resolved) return;
       resolved = true;
-      closeModal();
+      closeHostCard();
       resolve(val);
     };
 
@@ -148,11 +149,10 @@ export function openProjectPickerModal(
     // on a result or restore + re-render on cancel.
     const selectProjectRow = async (p: ProjectGroup): Promise<void> => {
       if (p.path_exists === false) return;
-      host.classList.remove("open");
       const result = await openLocationModal(p);
       if (!result) {
-        host.classList.add("open");
-        renderModal();
+        setBackdropCancel(() => finish(null));
+        await presentHostCard(renderModal);
         return;
       }
       finish(result);
@@ -161,7 +161,6 @@ export function openProjectPickerModal(
     const renderModal = () => {
       const rows = computeRows();
       const tpl = html`
-        <div class="modal-backdrop" @click=${() => finish(null)}></div>
         <div
           class="modal-card project-picker-modal"
           role="dialog"
@@ -321,7 +320,7 @@ export function openProjectPickerModal(
           </footer>
         </div>
       `;
-      render(tpl, host);
+      render(tpl, slot);
       hydrateProjectTechIcons(host).catch(() => {});
       hydrateCharacterAvatars(host).catch(() => {});
       // Autofocus the search input on first render. Re-focus on subsequent
@@ -343,7 +342,7 @@ export function openProjectPickerModal(
       }
     };
 
-    host.classList.add("open");
-    renderModal();
+    setBackdropCancel(() => finish(null));
+    void presentHostCard(renderModal);
   });
 }

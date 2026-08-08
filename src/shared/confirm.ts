@@ -16,21 +16,55 @@ export interface ConfirmOptions {
   danger?: boolean;
 }
 
+/** Splits "Question? rest of the explanation" into a bold title (up to and
+ *  including the first "?") and a muted description (everything after). No
+ *  "?" at all just becomes the whole title with no description - every
+ *  existing single-sentence call site still reads fine. */
+function splitTitle(text: string): { title: string; desc: string } {
+  const idx = text.indexOf("?");
+  if (idx === -1) return { title: text, desc: "" };
+  return { title: text.slice(0, idx + 1), desc: text.slice(idx + 1).trim() };
+}
+
 /** Shows an in-app modal confirm; resolves `true` only on explicit confirm.
  * Escape, the cancel button, and clicking the backdrop all resolve `false`. */
 export function askConfirm(text: string, options: ConfirmOptions = {}): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
+    const danger = options.danger !== false;
+    const { title, desc } = splitTitle(text);
+
+    // The project/location/worktree/new-session popup chain shares one
+    // backdrop (#modal-host); don't paint a second tint on top of it when
+    // it's already showing - see confirm.css's --bare modifier.
+    const chainOpen = document.getElementById("modal-host")?.classList.contains("open") ?? false;
+
     const overlay = document.createElement("div");
-    overlay.className = "app-confirm-overlay";
+    overlay.className = chainOpen ? "app-confirm-overlay app-confirm-overlay--bare" : "app-confirm-overlay";
 
     const box = document.createElement("div");
-    box.className = "app-confirm";
+    box.className = `app-confirm${danger ? "" : " app-confirm--safe"}`;
     box.setAttribute("role", "alertdialog");
     box.setAttribute("aria-modal", "true");
 
-    const msg = document.createElement("div");
-    msg.className = "app-confirm-text";
-    msg.textContent = text;
+    const icon = document.createElement("div");
+    icon.className = "app-confirm-icon";
+    icon.innerHTML = `<i class="ph-fill ${danger ? "ph-warning" : "ph-question"}"></i>`;
+
+    const textWrap = document.createElement("div");
+    const titleEl = document.createElement("p");
+    titleEl.className = "app-confirm-title";
+    titleEl.textContent = title;
+    textWrap.appendChild(titleEl);
+    if (desc) {
+      const descEl = document.createElement("p");
+      descEl.className = "app-confirm-text";
+      descEl.textContent = desc;
+      textWrap.appendChild(descEl);
+    }
+
+    const head = document.createElement("div");
+    head.className = "app-confirm-head";
+    head.append(icon, textWrap);
 
     const actions = document.createElement("div");
     actions.className = "app-confirm-actions";
@@ -40,7 +74,7 @@ export function askConfirm(text: string, options: ConfirmOptions = {}): Promise<
     cancelBtn.textContent = options.cancelLabel ?? "Cancel";
 
     const confirmBtn = document.createElement("button");
-    confirmBtn.className = `app-confirm-ok ${options.danger === false ? "btn-primary" : "btn-danger"}`;
+    confirmBtn.className = `app-confirm-ok ${danger ? "btn-danger" : "btn-primary"}`;
     confirmBtn.textContent = options.confirmLabel ?? "Confirm";
 
     function finish(result: boolean): void {
@@ -66,7 +100,7 @@ export function askConfirm(text: string, options: ConfirmOptions = {}): Promise<
     document.addEventListener("keydown", onKey, true);
 
     actions.append(cancelBtn, confirmBtn);
-    box.append(msg, actions);
+    box.append(head, actions);
     overlay.append(box);
     document.body.appendChild(overlay);
     cancelBtn.focus();

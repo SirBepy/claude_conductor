@@ -1,0 +1,39 @@
+/* Shared popup-chain host (#modal-host): one persistent backdrop + card
+ * slot reused across the project -> location -> worktree -> new-session
+ * chain, so the backdrop never flickers off between steps. See modal.ts. */
+#modal-host {
+  display: none;
+}
+#modal-host.open {
+  display: block;
+}
+#modal-host .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2500;
+}
+#modal-host-card-slot {
+  /* Mount point only - the card itself owns position/z-index. */
+  display: contents;
+}
+
+/* Shrink-to-a-line -> expand morph on whichever element carries the
+ * `modal-card` class. Asymmetric on purpose: collapse eases in fast,
+ * expand (base rule) eases out slower - reads as a natural sheet motion. */
+#modal-host .modal-card {
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 160ms ease;
+}
+#modal-host .modal-card.modal-card-collapsing {
+  transition:
+    transform 150ms cubic-bezier(0.4, 0, 1, 1),
+    opacity 100ms ease;
+}
+/* Shrink target AND the incoming card's pre-paint start state (added before
+ * insertion, removed next frame - the standard FLIP enter trick). */
+#modal-host .modal-card.modal-card-morph-hidden {
+  transform: translate(-50%, -50%) scaleY(0.05);
+  opacity: 0;
+}

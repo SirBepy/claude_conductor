@@ -1,77 +1,111 @@
-import { html, render, type TemplateResult } from "lit-html";
+import { html, render } from "lit-html";
 import { registerOverlayBack } from "./back-button";
+import "./modal.css";
 
-export interface ModalOptions {
-  title: string;
-  body: TemplateResult;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  onConfirm?: () => void;
-  onCancel?: () => void;
-}
+// Shared host for the project -> location -> worktree -> new-session chain.
+// One backdrop + one card slot; content morphs (shrink -> swap -> expand)
+// between steps instead of tearing the host down, so the backdrop never
+// flickers, even across the pickProject() -> openModelEffortModal() boundary.
 
-// Phone back button closes an open modal (as Cancel), mirroring the backdrop
-// tap and Escape. Registered on open, disposed on close.
-let modalBackDisposer: (() => void) | null = null;
+const COLLAPSE_MS = 150; // must match modal.css's .modal-card-collapsing duration
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const nextFrame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
 
-export function openModal(opts: ModalOptions): void {
-  const host = ensureModalHost();
-  render(modalTemplate(opts, closeModal), host);
-  host.classList.add("open");
-  document.addEventListener("keydown", onEsc);
-  modalBackDisposer?.();
-  modalBackDisposer = registerOverlayBack(() => {
-    opts.onCancel?.();
-    closeModal();
-    return true;
-  });
-}
+// Bumped on every present/close call so a stale async continuation (a sleep
+// or a debounced teardown) can no-op instead of stomping a newer call.
+let hostGeneration = 0;
+let closeTimer: ReturnType<typeof setTimeout> | null = null;
+let backDisposer: (() => void) | null = null;
 
-export function closeModal(): void {
-  modalBackDisposer?.();
-  modalBackDisposer = null;
-  const host = document.getElementById("modal-host");
-  if (!host) return;
-  host.classList.remove("open");
-  render(html``, host);
-  document.removeEventListener("keydown", onEsc);
-}
-
-function onEsc(e: KeyboardEvent): void {
-  if (e.key === "Escape") closeModal();
-}
+// What a shared-backdrop click (or hardware back) should do right now - see
+// setBackdropCancel.
+let backdropCancel: (() => void) | null = null;
 
 export function ensureModalHost(): HTMLElement {
   let host = document.getElementById("modal-host");
   if (!host) {
     host = document.createElement("div");
     host.id = "modal-host";
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.addEventListener("click", () => backdropCancel?.());
+    const slot = document.createElement("div");
+    slot.id = "modal-host-card-slot";
+    host.append(backdrop, slot);
     document.body.appendChild(host);
   }
   return host;
 }
 
-function modalTemplate(
-  { title, body, confirmLabel = "OK", cancelLabel = "Cancel", onConfirm, onCancel }: ModalOptions,
-  close: () => void,
-) {
-  const cancel = () => {
-    onCancel?.();
-    close();
-  };
-  const confirm = () => {
-    onConfirm?.();
-    close();
-  };
-  return html`
-    <div class="modal-backdrop" @click=${cancel}></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-label=${title}>
-      <header class="modal-header"><h3>${title}</h3></header>
-      <div class="modal-body">${body}</div>
-      <footer class="modal-footer">
-        <button class="btn btn-secondary" @click=${cancel}>${cancelLabel}</button>
-        <button class="btn btn-primary" @click=${confirm}>${confirmLabel}</button>
-      </footer>
-    </div>
-  `;
+/** Mount point each step renders into (never the host itself, a sibling of
+ *  the backdrop). Root element needs the `modal-card` class for the morph CSS. */
+export function modalCardSlot(): HTMLElement {
+  return ensureModalHost().querySelector<HTMLElement>("#modal-host-card-slot")!;
+}
+
+/** Call at the start of every step-owning function, and again after a nested
+ *  sub-picker resolves (to restore its own handler). */
+export function setBackdropCancel(fn: (() => void) | null): void {
+  backdropCancel = fn;
+}
+
+/** Renders a step's card via `renderFn`, morphing from whatever was showing
+ *  (shrink -> swap -> expand), or fading in if nothing was. Safe right after
+ *  an unrelated closeHostCard() - reuses its still-collapsing card as the
+ *  morph's start point instead of re-collapsing, so the backdrop never drops. */
+export async function presentHostCard(renderFn: () => void): Promise<void> {
+  const myGen = ++hostGeneration;
+  const host = ensureModalHost();
+  if (closeTimer) {
+    clearTimeout(closeTimer);
+    closeTimer = null;
+  }
+
+  const slot = modalCardSlot();
+  const prevCard = host.classList.contains("open")
+    ? slot.querySelector<HTMLElement>(".modal-card")
+    : null;
+  if (prevCard && !prevCard.classList.contains("modal-card-morph-hidden")) {
+    prevCard.classList.add("modal-card-collapsing", "modal-card-morph-hidden");
+    await sleep(COLLAPSE_MS);
+    if (myGen !== hostGeneration) return;
+  }
+
+  host.classList.add("open");
+  if (!backDisposer) {
+    backDisposer = registerOverlayBack(() => {
+      backdropCancel?.();
+      return true;
+    });
+  }
+  renderFn();
+  if (myGen !== hostGeneration) return;
+
+  const nextCard = slot.querySelector<HTMLElement>(".modal-card");
+  if (nextCard) {
+    nextCard.classList.add("modal-card-morph-hidden");
+    await nextFrame();
+    if (myGen !== hostGeneration) return;
+    nextCard.classList.remove("modal-card-morph-hidden", "modal-card-collapsing");
+  }
+}
+
+/** Closes the whole chain. Only the outermost function (pickProject(),
+ *  openModelEffortModal) calls this - nested steps just resolve. Debounced
+ *  by COLLAPSE_MS so a presentHostCard() arriving first cancels the teardown. */
+export function closeHostCard(): void {
+  const myGen = ++hostGeneration;
+  const host = document.getElementById("modal-host");
+  setBackdropCancel(null);
+  if (!host) return;
+  const card = modalCardSlot().querySelector<HTMLElement>(".modal-card");
+  if (card) card.classList.add("modal-card-collapsing", "modal-card-morph-hidden");
+  closeTimer = setTimeout(() => {
+    if (myGen !== hostGeneration) return;
+    host.classList.remove("open");
+    render(html``, modalCardSlot());
+    backDisposer?.();
+    backDisposer = null;
+    closeTimer = null;
+  }, COLLAPSE_MS);
 }
