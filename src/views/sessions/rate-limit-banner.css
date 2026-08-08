@@ -126,3 +126,39 @@
 .rate-limit-banner.rate-limit-banner--min .rlb-icon {
   font-size: 1.1rem;
 }
+
+/* Mobile kebab trigger, hidden on desktop where the 3 actions show inline. */
+.rate-limit-banner .rlb-kebab {
+  display: none;
+}
+
+/* ── Mobile (<=768px, same breakpoint as composer.ts's isMobileViewport) ──
+   Icon + title/time/countdown + up to 3 action buttons no longer fit one
+   row at phone width. Collapse Continue-on-X / View-in-Schedule / Minimize
+   into a single kebab trigger; desktop layout above is untouched. */
+@media (max-width: 768px) {
+  .rate-limit-banner .rlb-actions {
+    display: none;
+  }
+
+  .rate-limit-banner .rlb-kebab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+  }
+
+  .rate-limit-banner .rlb-kebab:hover {
+    background: color-mix(in srgb, var(--st-rate-limited) 12%, transparent);
+    color: var(--color-text);
+  }
+}

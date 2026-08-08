@@ -19,7 +19,60 @@ import { showView } from "../navigation";
 import type { Instance } from "../../types/ipc.generated";
 import { setCachedAccounts, listCachedAccounts, getCachedAccount, capitalize } from "../accounts-cache";
 import { formatRelativeMinutes } from "../formatters";
+import { positionDropdown } from "../../views/sessions/position-dropdown";
+import { registerMenuCloser, closeAllMenus } from "../../views/sessions/menu-registry";
 export { getCachedAccount, capitalize } from "../accounts-cache";
+
+// Mobile (<=768px, matching composer.ts's isMobileViewport) kebab holding all
+// 3 banner actions. Reuses the session-more-menu chrome (see lightbox-more-menu.ts).
+interface RlbMenuItem {
+  icon: string;
+  label: string;
+  disabledReason?: string;
+  onClick: () => void;
+}
+
+let rlbMenu: HTMLElement | null = null;
+let rlbMenuCleanup: (() => void) | null = null;
+
+registerMenuCloser(closeRlbMenu);
+
+function closeRlbMenu(): void {
+  rlbMenu?.remove();
+  rlbMenu = null;
+  if (rlbMenuCleanup) { rlbMenuCleanup(); rlbMenuCleanup = null; }
+}
+
+function openRlbMenu(anchor: HTMLElement, items: RlbMenuItem[]): void {
+  closeAllMenus();
+  const menu = document.createElement("div");
+  menu.className = "session-more-menu";
+  document.body.appendChild(menu);
+  rlbMenu = menu;
+
+  for (const it of items) {
+    const btn = document.createElement("button");
+    btn.className = "smore-item" + (it.disabledReason ? " is-disabled" : "");
+    if (it.disabledReason) btn.title = it.disabledReason;
+    btn.innerHTML = `<i class="ph ph-${it.icon}"></i><span>${it.label}</span>`;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (it.disabledReason) return;
+      closeRlbMenu();
+      it.onClick();
+    });
+    menu.appendChild(btn);
+  }
+
+  positionDropdown(menu, anchor, { align: "right" });
+
+  const onOutside = (ev: MouseEvent) => {
+    const t = ev.target as Node;
+    if (!menu.contains(t) && t !== anchor) closeRlbMenu();
+  };
+  setTimeout(() => document.addEventListener("click", onOutside), 0);
+  rlbMenuCleanup = () => document.removeEventListener("click", onOutside);
+}
 
 /** Live predicate for "is this session's account currently blocked by a
  * usage-limit rejection". Purely time-derived (no clear-event): a session
@@ -90,6 +143,9 @@ export class RateLimitBanner {
   private now: () => number;
   private storage: Pick<Storage, "getItem" | "setItem"> | null;
   private minimized: Set<string>;
+  // Per-card data the mobile kebab menu needs at click time, keyed by the
+  // same minimizedKey() as the card - rebuilt every render().
+  private kebabData = new Map<string, { accountId: string; move: { targetId: string; label: string; disabledReason?: string } | null }>();
   private getSelectedSessionId: () => string | null = () => null;
   private onMoved: (newSessionId: string, oldSessionId: string) => void = () => {};
 
@@ -182,6 +238,7 @@ export class RateLimitBanner {
 
     const cards: string[] = [];
     const liveKeys = new Set<string>();
+    const kebabData = new Map<string, { accountId: string; move: { targetId: string; label: string; disabledReason?: string } | null }>();
     for (const [accountId, list] of groups) {
       const blockedInGroup = list.filter(isBlocked);
       // All rejections for one account share a resets_at in practice; take
@@ -214,6 +271,7 @@ export class RateLimitBanner {
       // "Continue on <other>" only when a DIFFERENT account exists.
       const other = listCachedAccounts().find((a) => a.id !== accountId);
       let moveBtn = "";
+      let move: { targetId: string; label: string; disabledReason?: string } | null = null;
       if (other) {
         const otherLabel = capitalize(other.label);
         const otherBlocked = this.instances.filter((i) => i.account_id === other.id && isBlocked(i));
@@ -222,11 +280,15 @@ export class RateLimitBanner {
             Number(b.rate_limited_resets_at) > Number(a.rate_limited_resets_at) ? b : a
           );
           const otherResetsAtMs = Number(otherRep.rate_limited_resets_at) * 1000;
-          moveBtn = `<button class="rlb-move" data-account="${escapeHtml(other.id)}" disabled title="${escapeHtml(otherLabel)} is also at its limit until ${escapeHtml(formatClockLabel(otherResetsAtMs, nowMs))}."><i class="ph ph-arrow-right"></i> Continue on ${escapeHtml(otherLabel)}</button>`;
+          const disabledReason = `${otherLabel} is also at its limit until ${formatClockLabel(otherResetsAtMs, nowMs)}.`;
+          moveBtn = `<button class="rlb-move" data-account="${escapeHtml(other.id)}" disabled title="${escapeHtml(disabledReason)}"><i class="ph ph-arrow-right"></i> Continue on ${escapeHtml(otherLabel)}</button>`;
+          move = { targetId: other.id, label: otherLabel, disabledReason };
         } else {
           moveBtn = `<button class="rlb-move" data-account="${escapeHtml(other.id)}"><i class="ph ph-arrow-right"></i> Continue on ${escapeHtml(otherLabel)}</button>`;
+          move = { targetId: other.id, label: otherLabel };
         }
       }
+      kebabData.set(key, { accountId, move });
 
       cards.push(`
         <div class="rate-limit-banner" data-account-id="${escapeHtml(accountId)}" data-key="${escapeHtml(key)}" style="--acc:${escapeHtml(colour)}">
@@ -241,6 +303,9 @@ export class RateLimitBanner {
             <button class="rlb-schedule"><i class="ph ph-calendar-dots"></i> View in Schedule</button>
             <button class="rlb-minimize" title="Minimize"><i class="ph ph-minus"></i></button>
           </div>
+          <button type="button" class="rlb-kebab" data-key="${escapeHtml(key)}" title="More options">
+            <i class="ph ph-dots-three-vertical"></i>
+          </button>
         </div>`);
     }
 
@@ -250,6 +315,7 @@ export class RateLimitBanner {
       if (!liveKeys.has(key)) this.minimized.delete(key);
     }
     this.saveMinimized();
+    this.kebabData = kebabData;
 
     this.host.innerHTML = cards.join("");
     this.wireActions();
@@ -285,6 +351,34 @@ export class RateLimitBanner {
         this.minimized.delete(key);
         this.saveMinimized();
         this.render();
+      });
+    });
+    this.host.querySelectorAll<HTMLButtonElement>(".rlb-kebab").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const key = btn.dataset.key;
+        const data = key ? this.kebabData.get(key) : undefined;
+        if (!key || !data) return;
+        const items: RlbMenuItem[] = [];
+        if (data.move) {
+          items.push({
+            icon: "arrow-right",
+            label: `Continue on ${escapeHtml(data.move.label)}`,
+            disabledReason: data.move.disabledReason,
+            onClick: () => void this.moveToAccount(data.accountId, data.move!.targetId),
+          });
+        }
+        items.push({ icon: "calendar-dots", label: "View in Schedule", onClick: () => showView("schedule") });
+        items.push({
+          icon: "minus",
+          label: "Minimize",
+          onClick: () => {
+            this.minimized.add(key);
+            this.saveMinimized();
+            this.render();
+          },
+        });
+        openRlbMenu(btn, items);
       });
     });
   }
