@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cleartext carve-out for the iroh loopback tunnel only; every other
+     origin still requires TLS via the base-config default. -->
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">127.0.0.1</domain>
+  </domain-config>
+  <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
