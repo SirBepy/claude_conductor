@@ -9,6 +9,26 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// One reason per missing combination: both checks fold into a single block
+/// because `stop_hook_active` caps the retry at one block per turn.
+const REPORT_MISSING_REASON: &str = "Call the report_turn_status tool as the very last thing you do before ending your turn - required every turn, even a tool-only one with no chat reply.";
+const SEND_MISSING_REASON: &str = "Call the send_message tool before ending your turn - it is the ONLY channel Joe sees. Your assistant text and tool-call narration are not rendered in the chat at all. Send him a terse, self-contained summary of what happened this turn.";
+const BOTH_MISSING_REASON: &str = "Before ending your turn, call BOTH tools: report_turn_status (required every turn, even a tool-only one with no chat reply) and send_message (the ONLY channel Joe sees - your assistant text and tool-call narration are not rendered in the chat at all; send him a terse, self-contained summary of what happened this turn).";
+
+/// `Some(true)` means a prior Stop already blocked this turn, so never block again.
+/// Pure so it stays testable without a live Session/ChildStdin.
+fn missing_requirement_reason(stop_hook_active: Option<bool>, has_report: bool, has_send: bool) -> Option<&'static str> {
+    if stop_hook_active == Some(true) {
+        return None;
+    }
+    match (has_report, has_send) {
+        (false, false) => Some(BOTH_MISSING_REASON),
+        (false, true) => Some(REPORT_MISSING_REASON),
+        (true, false) => Some(SEND_MISSING_REASON),
+        (true, true) => None,
+    }
+}
+
 #[derive(Deserialize, Debug, Default)]
 pub(super) struct StopPayload {
     #[serde(default)]
@@ -55,20 +75,18 @@ pub(super) async fn on_stop(
         let bg_count = payload.background_tasks.as_ref().map(Vec::len).unwrap_or(0);
         ctx.state.registry.set_background_tasks(&session_id, bg_count);
 
-        // Enforcement (todo 435): block once (stop_hook_active caps the
-        // retry) if report_turn_status wasn't called this turn.
+        // Enforcement (todo 435 + quiet-mode fix): block once (stop_hook_active
+        // caps the retry) if report_turn_status and/or send_message weren't
+        // called this turn - folded into ONE block, see missing_requirement_reason.
         let gen = ctx.state.registry.current_turn_gen(&session_id);
         let reported = ctx.state.registry.peek_reported_status(&session_id);
         let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
-        if payload.stop_hook_active != Some(true) && !has_current_report {
-            log::info!("hook /hooks/stop: blocking {session_id} - report_turn_status not called this turn");
-            return (
-                StatusCode::OK,
-                Json(json!({
-                    "decision": "block",
-                    "reason": "Call the report_turn_status tool as the very last thing you do before ending your turn - required every turn, even a tool-only one with no chat reply.",
-                })),
+        let has_current_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
+        if let Some(reason) = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send) {
+            log::info!(
+                "hook /hooks/stop: blocking {session_id} - report_turn_status={has_current_report} send_message={has_current_send}"
             );
+            return (StatusCode::OK, Json(json!({"decision": "block", "reason": reason})));
         }
         // Title: durable transcript record, mirrors /close's manual rename.
         // Best-effort - a write failure must never block the turn.
@@ -126,4 +144,41 @@ pub(super) async fn on_stop(
     });
 
     (StatusCode::OK, Json(json!({"ok": true})))
+}
+
+// Route level needs a live Session/ChildStdin (the `contains_key` gate above),
+// so the pure decision core carries the enforcement coverage instead.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_present_send_absent_blocks_with_send_reason() {
+        assert_eq!(missing_requirement_reason(None, true, false), Some(SEND_MISSING_REASON));
+    }
+
+    #[test]
+    fn report_absent_send_present_blocks_with_report_reason() {
+        assert_eq!(missing_requirement_reason(None, false, true), Some(REPORT_MISSING_REASON));
+    }
+
+    #[test]
+    fn both_absent_blocks_with_combined_reason() {
+        assert_eq!(missing_requirement_reason(None, false, false), Some(BOTH_MISSING_REASON));
+    }
+
+    #[test]
+    fn both_present_does_not_block() {
+        assert_eq!(missing_requirement_reason(None, true, true), None);
+    }
+
+    #[test]
+    fn stop_hook_active_true_never_blocks_even_with_both_missing() {
+        assert_eq!(missing_requirement_reason(Some(true), false, false), None);
+    }
+
+    #[test]
+    fn stop_hook_active_false_still_enforces() {
+        assert_eq!(missing_requirement_reason(Some(false), false, false), Some(BOTH_MISSING_REASON));
+    }
 }

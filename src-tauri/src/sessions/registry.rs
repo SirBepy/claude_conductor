@@ -50,6 +50,9 @@ pub struct Registry {
     /// todo 435), keyed by session_id. Side map, not an `Instance` field:
     /// transient, never serialized to the frontend.
     reported_status: Mutex<HashMap<String, ReportedStatus>>,
+    /// `session_id` -> `turn_gen` of the last turn `send_message` succeeded in.
+    /// Gen-stamped like `reported_status` so Stop enforces both the same way.
+    message_sent_gen: Mutex<HashMap<String, u64>>,
 }
 
 /// See `Registry::reported_status`.
@@ -68,6 +71,7 @@ impl Registry {
             background_tasks: Mutex::new(HashMap::new()),
             close_requested: Mutex::new(std::collections::HashSet::new()),
             reported_status: Mutex::new(HashMap::new()),
+            message_sent_gen: Mutex::new(HashMap::new()),
         }
     }
 
@@ -101,8 +105,21 @@ impl Registry {
     /// Consume: always removes the entry, but only returns it on a gen
     /// match - mirrors `set_awaiting_if_gen`'s stale-turn guard.
     pub fn take_reported_status_if_gen(&self, session_id: &str, gen: u64) -> Option<ReportedStatus> {
+        // Runs after the Stop hook has read both, so this is also where
+        // message_sent_gen self-cleans instead of growing per session forever.
+        self.message_sent_gen.lock().unwrap().remove(session_id);
         let entry = self.reported_status.lock().unwrap().remove(session_id)?;
         if entry.turn_gen == gen { Some(entry) } else { None }
+    }
+
+    /// Record that `send_message` succeeded for this session during
+    /// `turn_gen`. Mirrors `set_reported_status`'s gen-stamped storage.
+    pub fn mark_message_sent(&self, session_id: &str, turn_gen: u64) {
+        self.message_sent_gen.lock().unwrap().insert(session_id.to_string(), turn_gen);
+    }
+
+    pub fn peek_message_sent_gen(&self, session_id: &str) -> Option<u64> {
+        self.message_sent_gen.lock().unwrap().get(session_id).copied()
     }
 
     /// Record the live background-task count the Stop hook reported for this
@@ -895,6 +912,16 @@ mod tests {
         let registry = Registry::new();
         assert!(registry.peek_reported_status("ghost").is_none());
         assert!(registry.take_reported_status_if_gen("ghost", 0).is_none());
+    }
+
+    #[test]
+    fn message_sent_gen_peek_roundtrip() {
+        let registry = Registry::new();
+        assert!(registry.peek_message_sent_gen("s").is_none());
+        registry.mark_message_sent("s", 1);
+        assert_eq!(registry.peek_message_sent_gen("s"), Some(1));
+        registry.mark_message_sent("s", 2);
+        assert_eq!(registry.peek_message_sent_gen("s"), Some(2));
     }
 
     #[test]
