@@ -199,6 +199,7 @@ export interface RemoteAccessStatus {
 export interface PairingQrResult {
   svg: string;
   url: string;
+  iroh: string | null;
 }
 
 export interface RemoteDevice {

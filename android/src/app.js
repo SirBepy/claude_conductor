@@ -1,5 +1,6 @@
 (() => {
   const STORAGE_KEY = "conductor_server_url";
+  const IROH_STORAGE_KEY = "conductor_iroh_id";
   const HEALTH_TIMEOUT_MS = 5000;
   const UNREACHABLE_MESSAGE =
     "Can’t reach your PC. Make sure Claude Conductor is running there and the tunnel is up.";
@@ -113,6 +114,47 @@
     }
   }
 
+  // Both pairing QR shapes carry `iroh=<endpoint-id>`: the Tailscale-DNS
+  // https URL and, when Tailscale is down, `conductor://pair?iroh=...`.
+  // A plain URL parse reads searchParams from either scheme the same way.
+  function extractIrohParams(raw) {
+    try {
+      const url = new URL(raw.trim());
+      const iroh = url.searchParams.get("iroh");
+      if (!iroh) return null;
+      return { iroh, pair: url.searchParams.get("pair") };
+    } catch {
+      return null;
+    }
+  }
+
+  // Plain app command, not a plugin - no "plugin:name|" prefix needed.
+  function tunnelInvoke(cmd, args) {
+    return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  }
+
+  // The port is fixed (src-tauri LOOPBACK_PORT) so the SPA's rc_token, which
+  // lives in this origin's localStorage, survives across launches.
+  async function connectViaIroh(endpointId, pairCode) {
+    showScreen("connecting");
+    try {
+      localStorage.setItem(IROH_STORAGE_KEY, endpointId);
+    } catch {
+      // Ignore: worst case re-scanning the QR mints a fresh tunnel next time.
+    }
+    try {
+      const port = await tunnelInvoke("start_iroh_tunnel", { endpointId });
+      const target = new URL(`http://127.0.0.1:${port}/`);
+      if (pairCode) target.searchParams.set("pair", pairCode);
+      window.location.href = target.toString();
+    } catch (err) {
+      console.error("iroh tunnel failed:", err);
+      const errMsg = (err && err.message) ? err.message : String(err);
+      errorUrlEl.textContent = `http://127.0.0.1 - Error: ${errMsg}`;
+      showScreen("error");
+    }
+  }
+
   // no-cors: cross-origin from the shell's own http://tauri.localhost to the
   // daemon (no CORS headers), so a normal fetch's response is unreadable.
   // An opaque response still REJECTS on a real network failure - enough for a liveness check.
@@ -157,6 +199,12 @@
 
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    const iroh = extractIrohParams(serverUrlInput.value);
+    if (iroh) {
+      clearIdleError();
+      connectViaIroh(iroh.iroh, iroh.pair);
+      return;
+    }
     const normalized = normalizeUrl(serverUrlInput.value);
     if (!normalized) {
       showIdleError("Enter a valid https:// URL, e.g. https://your-pc.ts.net");
@@ -202,6 +250,12 @@
             return;
           }
           const result = await scannerInvoke("scan", { windowed: true, formats: ["QR_CODE"] });
+          const iroh = extractIrohParams(result.content);
+          if (iroh) {
+            clearIdleError();
+            connectViaIroh(iroh.iroh, iroh.pair);
+            return;
+          }
           normalized = normalizeUrl(result.content);
           if (!normalized) {
             showIdleError("That QR code isn't a valid https:// server URL.");

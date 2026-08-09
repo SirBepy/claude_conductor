@@ -1,3 +1,7 @@
+mod iroh_tunnel;
+
+use iroh_tunnel::{start_iroh_tunnel, IrohTunnelState, LOOPBACK_PORT};
+
 /// Bundled-shell entry point; the setup/health-check/handoff logic is in android/src/app.js.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -7,9 +11,11 @@ pub fn run() {
                 .on_navigation(|_webview, url| allow_navigation(url))
                 .build(),
         )
-        .setup(|app| {
+        .manage(IrohTunnelState::default())
+        .invoke_handler(tauri::generate_handler![start_iroh_tunnel])
+        .setup(|_app| {
             #[cfg(mobile)]
-            app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
+            _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -20,6 +26,9 @@ pub fn run() {
 /// is false), so an https-only guard silently refuses our own first page load.
 fn allow_navigation(url: &tauri::Url) -> bool {
     if url.host_str() == Some("tauri.localhost") {
+        return true;
+    }
+    if url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(LOOPBACK_PORT) {
         return true;
     }
     url.scheme() == "https"
@@ -48,6 +57,27 @@ mod tests {
         assert!(!allow_navigation(&Url::parse("file:///etc/passwd").unwrap()));
         assert!(!allow_navigation(
             &Url::parse("javascript:alert(1)").unwrap()
+        ));
+    }
+
+    #[test]
+    fn allows_the_iroh_loopback_origin() {
+        assert!(allow_navigation(
+            &Url::parse("http://127.0.0.1:27184/index.html").unwrap()
+        ));
+    }
+
+    /// The port must be the fixed one, not any loopback port - else the
+    /// guard's third branch would be a general http-on-localhost hole.
+    #[test]
+    fn rejects_loopback_on_the_wrong_port() {
+        assert!(!allow_navigation(&Url::parse("http://127.0.0.1:9999/").unwrap()));
+    }
+
+    #[test]
+    fn rejects_the_right_port_on_a_non_loopback_host() {
+        assert!(!allow_navigation(
+            &Url::parse("http://example.com:27184/").unwrap()
         ));
     }
 }

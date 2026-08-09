@@ -21,16 +21,32 @@ fn key_file(app_data: &Path) -> PathBuf {
     app_data.join("iroh-endpoint-key.txt")
 }
 
+/// Read and parse the persisted secret without ever creating or writing one.
+/// Shared by `load_or_create_secret` and `endpoint_id_from_disk`, whose caller
+/// (the app process) must never race the daemon's key creation.
+fn read_secret(path: &Path) -> Option<SecretKey> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.trim().parse::<SecretKey>().ok()
+}
+
+/// The public id of the daemon's persisted endpoint key, or `None` if the key
+/// file doesn't exist yet or is unparseable. Read-only: this runs in the app
+/// process, which must never create the key (that stays `load_or_create_secret`'s
+/// job in the daemon process).
+pub fn endpoint_id_from_disk(app_data: &Path) -> Option<EndpointId> {
+    read_secret(&key_file(app_data)).map(|s| s.public())
+}
+
 /// Load the persisted endpoint secret, minting one on first run. The key is
 /// what keeps the EndpointId stable across restarts; without it every daemon
 /// launch would strand already-paired phones on a dead id.
 fn load_or_create_secret(app_data: &Path) -> SecretKey {
     let path = key_file(app_data);
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        match text.trim().parse::<SecretKey>() {
-            Ok(key) => return key,
-            Err(e) => log::warn!("iroh tunnel: unreadable key at {}: {e}; minting a new one", path.display()),
-        }
+    if let Some(key) = read_secret(&path) {
+        return key;
+    }
+    if path.exists() {
+        log::warn!("iroh tunnel: unreadable key at {}; minting a new one", path.display());
     }
     let key = SecretKey::generate();
     if let Some(parent) = path.parent() {
@@ -176,6 +192,28 @@ mod tests {
         let key = load_or_create_secret(dir.path());
         let reloaded = load_or_create_secret(dir.path());
         assert_eq!(key.public(), reloaded.public(), "the replacement key must persist");
+    }
+
+    #[test]
+    fn endpoint_id_from_disk_none_when_key_file_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(endpoint_id_from_disk(dir.path()).is_none());
+        assert!(!key_file(dir.path()).exists(), "reading must never create the key");
+    }
+
+    #[test]
+    fn endpoint_id_from_disk_none_for_corrupt_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(key_file(dir.path()), "not-a-key").expect("write");
+        assert!(endpoint_id_from_disk(dir.path()).is_none());
+    }
+
+    #[test]
+    fn endpoint_id_from_disk_matches_the_secret_it_reads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let secret = load_or_create_secret(dir.path());
+        let id = endpoint_id_from_disk(dir.path()).expect("key file now exists");
+        assert_eq!(id, secret.public(), "must derive the same id the daemon would bind with");
     }
 
     /// Bytes written over iroh must reach the loopback TCP server and its reply
