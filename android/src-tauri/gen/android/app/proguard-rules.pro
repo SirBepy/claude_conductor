@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Rust calls MainActivity.getPluginManager() (inherited from generated TauriActivity)
+# over JNI by exact name/signature. The generated proguard-wry.pro only keeps a fixed
+# member list on WryActivity, not TauriActivity's getPluginManager(), so R8 renames it
+# on a minified release build and JNI's reflective lookup fails with NoSuchMethodError.
+# See .claude/todos/504-android-build-not-reproducible.md - same crash signature, different cause.
+-keep class com.sirbepy.conductor.mobile.MainActivity { *; }
+-keep class com.sirbepy.conductor.mobile.TauriActivity { *; }
+-keep class app.tauri.** { *; }
