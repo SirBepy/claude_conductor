@@ -70,8 +70,10 @@
   function enterFailedState(baseUrl, message, source) {
     scanBtnLabel = "Scan again";
     scanQrLabel.textContent = scanBtnLabel;
-    showIdleError(message, baseUrl);
     const keepManualOpen = source === "manual" || source === "auto";
+    // The URL chip only adds information when the form is closed (a scan
+    // failure) - when it's open, the input already shows the same URL.
+    showIdleError(message, keepManualOpen ? null : baseUrl);
     changeServerBtn.hidden = !keepManualOpen;
     if (keepManualOpen && setupForm.hidden) {
       openManualForm();
