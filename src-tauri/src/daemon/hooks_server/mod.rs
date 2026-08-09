@@ -18,6 +18,7 @@ mod lifecycle;
 mod messages;
 mod permission;
 mod preview;
+mod preview_render;
 mod relay;
 mod stop;
 mod turn_status;
@@ -143,6 +144,8 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/sessions/close-confirm", post(lifecycle::on_close_confirm))
         .route("/hooks/stop", post(stop::on_stop))
         .route("/hooks/preview", post(preview::on_preview_push))
+        .route("/hooks/preview-render", post(preview_render::on_preview_render))
+        .route("/hooks/preview-render/:id", get(preview_render::on_preview_render_get))
         .route("/permissions/request", post(permission::on_permission_request))
         .route("/questions/request", post(permission::on_question_request))
         .route("/hooks/ask-question", post(permission::on_ask_question_hook))

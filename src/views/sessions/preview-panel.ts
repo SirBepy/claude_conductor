@@ -27,6 +27,7 @@ import { formatRelativeMinutes } from "../../shared/formatters";
 import type { ChatEvent, ContentBlock, PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { wireResizeHandle, MIN_WIDTH, MAX_WIDTH } from "./preview-panel-resize";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
+import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
 import { ComposerCore } from "../../shared/chat/composer-core/core";
 import { SlashProvider } from "../../shared/chat/caret-popup/providers/slash";
 import type { SuggestProvider } from "../../shared/chat/caret-popup/types";
@@ -38,7 +39,6 @@ import { isCurrentSessionBusy } from "./session-thinking-bar";
 import { state } from "./state";
 
 export type PreviewMode = "panel" | "window";
-type DeviceWidth = "desktop" | "tablet" | "phone";
 
 export interface PreviewController {
   toggle(): void;
@@ -149,7 +149,6 @@ class PreviewPanel implements PreviewController {
    *  2026-07-20: "for now let's make it so history tab can also be toggled
    *  on/off and by default its off"). */
   private historyOpen = false;
-  private moreMenuOpen = false;
   private unlistenPreview: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
   private resizeCleanup: (() => void) | null = null;
@@ -230,6 +229,9 @@ class PreviewPanel implements PreviewController {
 
   setSessionScope(sessionId: string | null): void {
     if (this.currentSessionId === sessionId) return;
+    // Chat-switch skips DOM clicks, so the outside-click dismiss never
+    // fires for it - close explicitly or the menu stays open across it.
+    closePvMoreMenu();
     this.currentSessionId = sessionId;
     // Each chat's open/closed state is independent (loadOpen defaults false
     // for an id with no saved key yet, e.g. one that's never had the panel
@@ -349,7 +351,7 @@ class PreviewPanel implements PreviewController {
       this.snapshotCache.set(id, this.selected);
     }
     this.renderHeader();
-    this.renderIframe();
+    void this.renderIframe();
     this.renderRail();
   }
 
@@ -491,10 +493,8 @@ class PreviewPanel implements PreviewController {
   }
 
   private setDeviceWidth(w: DeviceWidth): void {
+    // Segmented buttons live in the shared menu now, not this.root.
     this.deviceWidth = w;
-    this.root.querySelectorAll<HTMLElement>(".pv-seg-btn").forEach((b) => {
-      b.classList.toggle("on", b.dataset.w === w);
-    });
     const frame = this.root.querySelector<HTMLElement>(".pv-frame");
     if (frame) frame.dataset.w = w;
   }
@@ -503,24 +503,17 @@ class PreviewPanel implements PreviewController {
     this.historyOpen = !this.historyOpen;
     const rail = this.root.querySelector<HTMLElement>("[data-rail]");
     if (rail) rail.hidden = !this.historyOpen;
-    const item = this.root.querySelector<HTMLElement>('.pv-more-item[data-act="history"]');
-    if (item) item.classList.toggle("on", this.historyOpen);
   }
 
-  private toggleMoreMenu(): void {
-    this.moreMenuOpen = !this.moreMenuOpen;
-    this.renderMoreMenuState();
-  }
-
-  private closeMoreMenu(): void {
-    if (!this.moreMenuOpen) return;
-    this.moreMenuOpen = false;
-    this.renderMoreMenuState();
-  }
-
-  private renderMoreMenuState(): void {
-    const menu = this.root.querySelector<HTMLElement>(".pv-more-menu");
-    if (menu) menu.hidden = !this.moreMenuOpen;
+  private pvMoreMenuDeps(): PvMoreMenuDeps {
+    return {
+      onRefresh: () => void this.refreshList(),
+      onOpenBrowser: () => this.openInBrowser(),
+      onToggleHistory: () => this.toggleHistory(),
+      isHistoryOpen: () => this.historyOpen,
+      onSetDeviceWidth: (w) => this.setDeviceWidth(w),
+      getDeviceWidth: () => this.deviceWidth,
+    };
   }
 
   // ── Rendering ────────────────────────────────────────────────────────────
@@ -532,21 +525,7 @@ class PreviewPanel implements PreviewController {
         <header class="pv-head">
           <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span><span class="pv-ver"></span></span>
           <span class="pv-grow"></span>
-          <div class="pv-more-wrap">
-            <button type="button" class="pv-icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
-            <div class="pv-more-menu" hidden>
-              <button type="button" class="pv-more-item" data-act="refresh"><i class="ph ph-arrow-clockwise"></i>Refresh</button>
-              <button type="button" class="pv-more-item" data-act="open-browser"><i class="ph ph-arrow-square-out"></i>Open in browser</button>
-              <button type="button" class="pv-more-item" data-act="history"><i class="ph ph-clock-counter-clockwise"></i>Show history</button>
-              <div class="pv-more-sep"></div>
-              <div class="pv-more-label">Toggle size</div>
-              <button type="button" class="pv-seg-btn on" data-w="desktop"><i class="ph ph-monitor"></i>Desktop</button>
-              <button type="button" class="pv-seg-btn" data-w="tablet"><i class="ph ph-device-tablet"></i>Tablet</button>
-              <button type="button" class="pv-seg-btn" data-w="phone"><i class="ph ph-device-mobile"></i>Phone</button>
-              <div class="pv-more-sep"></div>
-              <button type="button" class="pv-more-item" data-act="popout" disabled><i class="ph ph-arrows-out-simple"></i>Pop-out window (coming soon)</button>
-            </div>
-          </div>
+          <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
           <button type="button" class="pv-icon-btn" data-act="close" title="Close panel"><i class="ph ph-x"></i></button>
         </header>
         <div class="pv-body">
@@ -582,15 +561,27 @@ class PreviewPanel implements PreviewController {
     if (verEl) verEl.textContent = "";
   }
 
-  private renderIframe(): void {
+  private async renderIframe(): Promise<void> {
     if (!this.selected) return;
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");
     if (!canvas) return;
     canvas.innerHTML = `<div class="pv-frame" data-w="${this.deviceWidth}"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div>`;
     const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
-    // data: src (not .srcdoc) — see buildPreviewDocumentHtml's doc for why.
-    if (iframe) {
-      iframe.src = "data:text/html;charset=utf-8," + encodeURIComponent(buildPreviewDocumentHtml(this.selected.html));
+    if (!iframe) return;
+    // Served over a real local origin (not data:) so it gets its own CSP
+    // header, independent of the app shell's - see preview_render.rs.
+    const doc = buildPreviewDocumentHtml(this.selected.html);
+    try {
+      const res = await fetch("http://127.0.0.1:27182/hooks/preview-render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: doc }),
+      });
+      if (!res.ok) throw new Error(`preview-render failed: ${res.status}`);
+      const { id } = (await res.json()) as { id: string };
+      iframe.src = `http://127.0.0.1:27182/hooks/preview-render/${id}`;
+    } catch (err) {
+      console.error("[preview-panel] preview-render POST failed", err);
     }
   }
 
@@ -637,20 +628,10 @@ class PreviewPanel implements PreviewController {
     const actBtn = target.closest<HTMLElement>("[data-act]");
     if (actBtn) {
       switch (actBtn.dataset.act) {
-        case "refresh": void this.refreshList(); this.closeMoreMenu(); return;
-        case "open-browser": this.openInBrowser(); this.closeMoreMenu(); return;
-        case "history": this.toggleHistory(); this.closeMoreMenu(); return;
-        case "more": this.toggleMoreMenu(); return;
+        case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
         case "close": this.close(); return;
-        default: return; // "popout" is disabled (deferred pop-out window)
+        default: return;
       }
-    }
-
-    const segBtn = target.closest<HTMLElement>(".pv-seg-btn");
-    if (segBtn?.dataset.w) {
-      this.setDeviceWidth(segBtn.dataset.w as DeviceWidth);
-      this.closeMoreMenu();
-      return;
     }
 
     const snap = target.closest<HTMLElement>(".pv-snap");
@@ -658,8 +639,6 @@ class PreviewPanel implements PreviewController {
       void this.selectSnapshot(snap.dataset.id);
       return;
     }
-
-    if (!target.closest(".pv-more-wrap")) this.closeMoreMenu();
   }
 }
 
