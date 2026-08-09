@@ -15,7 +15,6 @@
   const urlSubmitSpinner = document.getElementById("url-submit-spinner");
   const idleError = document.getElementById("idle-error");
   const errorUrlEl = document.getElementById("error-url");
-  const changeServerBtn = document.getElementById("change-server-btn");
   const scanCancelBtn = document.getElementById("scan-cancel-btn");
 
   // Which control most recently kicked off connect(): drives which slot
@@ -35,7 +34,6 @@
   function collapseManualForm() {
     setupForm.hidden = true;
     manualToggleBtn.hidden = false;
-    changeServerBtn.hidden = true;
   }
 
   function showIdleError(message, url) {
@@ -74,9 +72,14 @@
     // The URL chip only adds information when the form is closed (a scan
     // failure) - when it's open, the input already shows the same URL.
     showIdleError(message, keepManualOpen ? null : baseUrl);
-    changeServerBtn.hidden = !keepManualOpen;
-    if (keepManualOpen && setupForm.hidden) {
-      openManualForm();
+    if (keepManualOpen) {
+      if (setupForm.hidden) {
+        openManualForm();
+      }
+      // Pre-fill is still the failed URL - select it so the next keystroke
+      // replaces it outright, no separate "change server" control needed.
+      serverUrlInput.focus();
+      serverUrlInput.select();
     }
   }
 
@@ -152,13 +155,6 @@
     serverUrlInput.focus();
   });
 
-  changeServerBtn.addEventListener("click", () => {
-    serverUrlInput.value = "";
-    clearIdleError();
-    changeServerBtn.hidden = true;
-    serverUrlInput.focus();
-  });
-
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const normalized = normalizeUrl(serverUrlInput.value);
@@ -167,7 +163,6 @@
       return;
     }
     clearIdleError();
-    changeServerBtn.hidden = true;
     storeUrl(normalized);
     activeSource = "manual";
     connect(normalized);

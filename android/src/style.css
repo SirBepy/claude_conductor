@@ -23,8 +23,8 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   min-height: 100vh;
   padding: 24px;
 }
@@ -32,13 +32,18 @@ body {
 .shell {
   width: 100%;
   max-width: 360px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 28px;
 }
 
+/* Grows to fill the space above .idle so the wordmark centers there instead
+   of the whole screen, while .idle keeps sitting at its natural position
+   at the bottom of .shell (which itself now fills the viewport). */
 .brand {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 10px;
