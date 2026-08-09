@@ -317,6 +317,8 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                         output,
                         is_error,
                         timestamp: ts,
+                        output_truncated: false,
+                        full_seq: None,
                     });
                 }
             }
@@ -418,6 +420,8 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
             output: tool_result_output(v.get("content")),
             is_error: v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false),
             timestamp: ts,
+            output_truncated: false,
+            full_seq: None,
         }],
         // "result" is handled by ParserContext::parse_result_line (stateful:
         // needs has_thinking). If it reaches here somehow, drop it.

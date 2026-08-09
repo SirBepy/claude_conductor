@@ -3,10 +3,40 @@
 //! path (replay before live attach).
 
 use crate::chat::parser::parse_line;
-use crate::types::chat::{ChatEvent, HistoryPage};
+use crate::types::chat::{ChatEvent, ContentBlock, HistoryPage};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+
+/// Chars kept inline before a `ToolResult`'s text output defers behind
+/// `load_event_detail`. Only `read_page` (paginated Sessions open) applies
+/// this - `replay` (History view) and live events stay untouched.
+const TOOL_RESULT_PREVIEW_CHARS: usize = 4000;
+
+/// If `ev`'s output text exceeds the preview cap, replace it with a
+/// truncated copy carrying `output_truncated` + `full_seq` (this line's own
+/// byte offset, reused as `load_event_detail`'s lookup key). No-op for
+/// anything else (image output, short results, non-ToolResult events).
+fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
+    match ev {
+        ChatEvent::ToolResult { tool_use_id, output: ContentBlock::Text { text }, is_error, timestamp, .. }
+            if text.len() > TOOL_RESULT_PREVIEW_CHARS =>
+        {
+            // Truncate on a char boundary: text.len() is byte length, but we
+            // want a UTF-8-safe char count, not a mid-codepoint byte slice.
+            let preview: String = text.chars().take(TOOL_RESULT_PREVIEW_CHARS).collect();
+            ChatEvent::ToolResult {
+                tool_use_id,
+                output: ContentBlock::Text { text: format!("{preview}…") },
+                is_error,
+                timestamp,
+                output_truncated: true,
+                full_seq: Some(line_offset),
+            }
+        }
+        other => other,
+    }
+}
 
 /// Resolve the JSONL transcript path for `session_id`.
 ///
@@ -165,7 +195,7 @@ pub fn read_page(
         if !s.trim().is_empty() {
             for ev in parse_line(s) {
                 let is_msg = is_message_event(&ev);
-                events.push((line_offset, ev));
+                events.push((line_offset, truncate_tool_result(ev, line_offset)));
                 if is_msg {
                     messages += 1;
                 }
@@ -205,6 +235,30 @@ fn empty_page() -> HistoryPage {
         newest_seq: 0,
         has_more: false,
     }
+}
+
+/// Read the untruncated `ToolResult` for `tool_use_id` at byte offset `seq`
+/// (the `full_seq` a preview carried). Matched by id, not "first on the
+/// line" - a line can hold more than one tool_result.
+pub fn read_single_event(path: &Path, seq: u64, tool_use_id: &str) -> Result<ChatEvent, String> {
+    let mut f = File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
+    let file_len = f.metadata().map_err(|e| e.to_string())?.len();
+    if seq >= file_len {
+        return Err(format!("seq {seq} past end of file"));
+    }
+    f.seek(SeekFrom::Start(seq)).map_err(|e| e.to_string())?;
+    let mut line = String::new();
+    BufReader::new(f)
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
+    for ev in parse_line(line.trim_end()) {
+        if let ChatEvent::ToolResult { tool_use_id: id, .. } = &ev {
+            if id == tool_use_id {
+                return Ok(ev);
+            }
+        }
+    }
+    Err(format!("no tool_result {tool_use_id} at seq {seq}"))
 }
 
 #[cfg(test)]
@@ -514,5 +568,78 @@ mod tests {
             _ => None,
         });
         assert_eq!(assistant, Some(80 * 1024));
+    }
+
+    fn tool_result_line_with(tool_use_id: &str, ts: i64, content: &str) -> String {
+        format!(
+            r#"{{"type":"tool_result","tool_use_id":{:?},"content":{:?},"is_error":false,"timestamp":{}}}"#,
+            tool_use_id, content, ts
+        )
+    }
+
+    #[test]
+    fn read_page_truncates_large_tool_result_and_tags_full_seq() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("g.jsonl");
+        let big_output = "x".repeat(TOOL_RESULT_PREVIEW_CHARS + 5000);
+        let lines = vec![
+            user_line("u0", 0),
+            tool_use_line("t1", 1),
+            tool_result_line_with("t1", 2, &big_output),
+            assistant_line("a0", 3),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_jsonl(&p, &refs);
+        // Backward walk processes the LAST line first and stops as soon as it
+        // has message_limit assistants - ask for more than the 1 present so it
+        // walks all the way to file start and the earlier tool_result is included
+        // (same trick as read_page_non_message_events_dont_count).
+        let page = read_page(&p, None, 5).unwrap();
+        let tr = page.events.iter().find_map(|e| match e {
+            ChatEvent::ToolResult { output_truncated, full_seq, output, .. } => {
+                Some((*output_truncated, *full_seq, output.clone()))
+            }
+            _ => None,
+        });
+        let (truncated, full_seq, output) = tr.expect("tool_result present");
+        assert!(truncated);
+        assert!(full_seq.is_some());
+        match output {
+            ContentBlock::Text { text } => assert_eq!(text.chars().count(), TOOL_RESULT_PREVIEW_CHARS + 1), // preview + "…"
+            _ => panic!("expected text output"),
+        }
+        // The untruncated content is recoverable from the tagged offset.
+        let full = read_single_event(&p, full_seq.unwrap(), "t1").unwrap();
+        match full {
+            ChatEvent::ToolResult { output_truncated, output: ContentBlock::Text { text }, .. } => {
+                assert!(!output_truncated);
+                assert_eq!(text, big_output);
+            }
+            _ => panic!("expected untruncated tool_result"),
+        }
+    }
+
+    #[test]
+    fn read_page_leaves_small_tool_result_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("h.jsonl");
+        let lines = vec![tool_use_line("t1", 0), tool_result_line("t1", 1), assistant_line("a0", 2)];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_jsonl(&p, &refs);
+        let page = read_page(&p, None, 5).unwrap();
+        let tr = page.events.iter().find_map(|e| match e {
+            ChatEvent::ToolResult { output_truncated, full_seq, .. } => Some((*output_truncated, *full_seq)),
+            _ => None,
+        });
+        assert_eq!(tr, Some((false, None)));
+    }
+
+    #[test]
+    fn read_single_event_errors_on_wrong_tool_use_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("i.jsonl");
+        write_jsonl(&p, &[&tool_result_line("t1", 0)]);
+        let err = read_single_event(&p, 0, "not-t1").unwrap_err();
+        assert!(err.contains("not-t1"), "err was: {err}");
     }
 }

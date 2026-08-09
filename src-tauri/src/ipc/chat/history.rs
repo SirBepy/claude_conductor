@@ -60,3 +60,24 @@ pub async fn load_history_page(
     .await
     .map_err(|e| format!("join: {}", e))?
 }
+
+/// Fetch a single `ToolResult`'s untruncated output, addressed by the
+/// `full_seq` a `read_page` preview carried plus the call's `tool_use_id`
+/// (a line can hold more than one result). Used when the user expands a
+/// tool-row whose output was too large to inline on the page load.
+#[tauri::command]
+pub async fn load_event_detail(
+    session_id: String,
+    cwd: Option<String>,
+    seq: u64,
+    tool_use_id: String,
+) -> Result<ChatEvent, String> {
+    validate_session_id(&session_id)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::chat::history::locate_transcript(&session_id, cwd.as_deref())?;
+        crate::chat::history::read_single_event(&path, seq, &tool_use_id)
+    })
+    .await
+    .map_err(|e| format!("join: {}", e))?
+}

@@ -340,7 +340,10 @@ export function renderMessage(m: RenderedMessage): string {
     }
     case "tool_result": {
       const hasImage = m.output?.type === "image";
-      return `<details class="msg tool-result tool-row${m.is_error ? " error" : ""}"${hasImage ? " open" : ""}><summary class="tool-row-summary"><i class="ph ph-arrow-bend-down-right"></i><span class="tool-row-name">${hasImage ? "screenshot" : "result"}</span></summary>${m.output ? renderBlocks([m.output]) : ""}</details>`;
+      const body = m.outputTruncated
+        ? `<button type="button" class="tool-result-load-full" data-tool-use-id="${escapeHtml(m.tool_use_id ?? "")}" data-seq="${m.fullSeq ?? ""}"><i class="ph ph-arrow-clockwise"></i>Load full output</button><div class="copyable-block code-card"><pre>${m.output?.type === "text" ? escapeHtml(m.output.text) : ""}</pre></div>`
+        : (m.output ? renderBlocks([m.output]) : "");
+      return `<details class="msg tool-result tool-row${m.is_error ? " error" : ""}"${hasImage ? " open" : ""}><summary class="tool-row-summary"><i class="ph ph-arrow-bend-down-right"></i><span class="tool-row-name">${hasImage ? "screenshot" : "result"}</span></summary>${body}</details>`;
     }
     case "notification":
       return `<div class="msg notification">${escapeHtml(m.text ?? "")}</div>`;
@@ -381,7 +384,15 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
     case "tool_use":
       return { kind: "tool_use", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: ev.parent_tool_use_id ?? null };
     case "tool_result":
-      return { kind: "tool_result", tool_use_id: ev.tool_use_id, output: ev.output, is_error: ev.is_error, ts };
+      return {
+        kind: "tool_result",
+        tool_use_id: ev.tool_use_id,
+        output: ev.output,
+        is_error: ev.is_error,
+        ts,
+        outputTruncated: ev.output_truncated,
+        fullSeq: ev.full_seq !== null ? Number(ev.full_seq) : undefined,
+      };
     case "notification":
       return { kind: "notification", text: ev.body, ts: Date.now() };
     case "session_ended":

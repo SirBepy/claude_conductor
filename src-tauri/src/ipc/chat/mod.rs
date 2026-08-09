@@ -7,7 +7,7 @@
 //! - `attachments`— image attachments: `paste_image`, `read_attachment`,
 //!                  shared `validate_session_id` + `write_attachment` helpers.
 //! - `history`    — read-only transcript replays: `load_history`,
-//!                  `load_history_page`.
+//!                  `load_history_page`, `load_event_detail`.
 //! - `history_list` — History-view listing pipeline: `list_history`.
 //! - `lifecycle`  — AppHandle / process-tree side: `gc_attachments`,
 //!                  `takeover_manual`, `detach_window`, `reattach_window`,

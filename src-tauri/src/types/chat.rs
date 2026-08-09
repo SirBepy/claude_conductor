@@ -78,6 +78,14 @@ pub enum ChatEvent {
         output: ContentBlock,
         is_error: bool,
         timestamp: i64,
+        /// Set by `read_page` (paginated Sessions load only) when `output` was
+        /// shortened to a preview. Full content fetches via `load_event_detail`.
+        #[serde(default)]
+        output_truncated: bool,
+        /// This line's own transcript byte offset, set alongside `output_truncated`
+        /// - reuses `read_page`'s existing pagination-cursor offset.
+        #[serde(default)]
+        full_seq: Option<u64>,
     },
     Notification {
         kind: String,

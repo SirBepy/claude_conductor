@@ -176,6 +176,12 @@ export interface RenderedMessage {
    *  it (ChatRenderer.updateQuestionProgress). Index-aligned with the parsed
    *  questions in `input`. Never set once `text` is populated (resolved). */
   liveAnswered?: boolean[];
+  /** Set on tool_result events whose `output` was shortened to a preview by
+   *  `read_page` (see types/chat.rs). The row renders a "Load full output"
+   *  affordance instead of the preview text; clicking it fetches the real
+   *  content via `load_event_detail`, keyed on `fullSeq` + `tool_use_id`. */
+  outputTruncated?: boolean;
+  fullSeq?: number;
 }
 
 /**

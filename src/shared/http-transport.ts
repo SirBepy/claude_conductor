@@ -189,6 +189,13 @@ export class HttpTransport implements Transport {
           before_seq: args.beforeSeq ?? args.before_seq ?? null,
           message_limit: args.messageLimit ?? args.message_limit ?? 20,
         });
+      case "load_event_detail":
+        return this.rpc<T>("load_event_detail", {
+          session_id: args.sessionId ?? args.session_id,
+          cwd: args.cwd ?? null,
+          seq: args.seq,
+          tool_use_id: args.toolUseId ?? args.tool_use_id,
+        });
       // Past-session browsing for the phone History view (mirrors desktop's
       // `list_history` / `load_history` Tauri commands - see daemon RPC
       // handlers in daemon/methods/history.rs).

@@ -34,3 +34,31 @@
   white-space: nowrap;
   color: var(--color-text-muted);
 }
+
+/* Page-truncated tool_result output (see types/chat.rs ToolResult.output_truncated):
+ * a preview only, with this button to fetch the real content on demand. */
+.tool-result-load-full {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.tool-result-load-full:hover:not(:disabled) {
+  color: var(--color-text);
+  border-color: var(--color-primary, #6e8fff);
+}
+.tool-result-load-full:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.tool-result-load-spin {
+  animation: icon-btn-spin 0.8s linear infinite;
+}

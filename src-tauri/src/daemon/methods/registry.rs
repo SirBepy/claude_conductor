@@ -353,6 +353,35 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             .map_err(|e| RpcError::internal(e))
         }
     });
+    // Mirrors the desktop `load_event_detail` Tauri command: fetch one
+    // ToolResult's untruncated output, addressed by the `full_seq` a
+    // `load_history_page` preview carried plus its tool_use_id.
+    router.register("load_event_detail", move |params, _ctx| {
+        async move {
+            #[derive(serde::Deserialize)]
+            struct EventDetailParams {
+                session_id: String,
+                cwd: Option<String>,
+                seq: u64,
+                tool_use_id: String,
+            }
+            let p: EventDetailParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            crate::ipc::chat::attachments::validate_session_id(&p.session_id)
+                .map_err(|e| RpcError::invalid_params(e))?;
+            tokio::task::spawn_blocking(move || {
+                let path = crate::chat::history::locate_transcript(
+                    &p.session_id,
+                    p.cwd.as_deref(),
+                )?;
+                crate::chat::history::read_single_event(&path, p.seq, &p.tool_use_id)
+            })
+            .await
+            .map_err(|e| RpcError::internal(format!("join: {e}")))?
+            .map(|ev| serde_json::to_value(ev).unwrap_or(serde_json::Value::Null))
+            .map_err(|e| RpcError::internal(e))
+        }
+    });
     // Read-only character/project asset + metadata methods exposed over the
     // remote-access API so the phone client renders avatars/icons/whitelists
     // without a Tauri runtime. Each mirrors the same-named Tauri command's JSON

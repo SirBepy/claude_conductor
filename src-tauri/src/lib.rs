@@ -314,6 +314,7 @@ pub fn run() {
             ipc::simulate_rate_limit,
             ipc::load_history,
             ipc::load_history_page,
+            ipc::load_event_detail,
             ipc::list_history,
             ipc::watch_session_transcript,
             ipc::unwatch_session_transcript,

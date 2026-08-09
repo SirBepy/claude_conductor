@@ -1,6 +1,7 @@
 import type { ChatEvent } from "../../types/ipc.generated";
+import { invoke } from "../ipc";
 import { sessionEvents } from "./event-store";
-import { RenderedMessage } from "./chat-transforms";
+import { RenderedMessage, renderBlocks } from "./chat-transforms";
 import { armLazyDiffEnhance } from "./diff-enhancer";
 import { type FileEditView } from "./file-edits";
 import { type ToolTally } from "./tool-meta";
@@ -213,6 +214,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", handlePrPreviewClick);
     this.container.addEventListener("click", this.handleToolChipClick);
     this.container.addEventListener("click", this.handleToolFileClick);
+    this.container.addEventListener("click", this.handleToolResultLoadFullClick);
     this.container.addEventListener("click", this.handleRetryClick);
     this.container.addEventListener("click", this.handleCtaClick);
     this.paginator = new ChatPaginator(container, {
@@ -475,6 +477,36 @@ export class ChatRenderer {
     if (!row) return;
     const path = row.dataset.path;
     if (path) openFileViewer(path);
+  };
+
+  /** A page-truncated tool_result row's "Load full output" button (ai_todo
+   *  json-cache): fetches the untruncated content on demand instead of
+   *  shipping every large Bash/Read/Grep dump on every page load. */
+  private handleToolResultLoadFullClick = (e: MouseEvent): void => {
+    const btn = (e.target as Element).closest<HTMLButtonElement>(".tool-result-load-full");
+    if (!btn || !this.sessionId) return;
+    const toolUseId = btn.dataset.toolUseId;
+    const seq = Number(btn.dataset.seq);
+    if (!toolUseId || !Number.isFinite(seq)) return;
+    const card = btn.nextElementSibling as HTMLElement | null;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="ph ph-spinner tool-result-load-spin"></i>Loading…`;
+    void invoke<ChatEvent>("load_event_detail", {
+      sessionId: this.sessionId,
+      cwd: this.paginator.cwdHint,
+      seq,
+      toolUseId,
+    })
+      .then((ev) => {
+        if (ev.type !== "tool_result") throw new Error("unexpected event type");
+        card?.remove();
+        btn.outerHTML = renderBlocks([ev.output]);
+      })
+      .catch((err) => {
+        console.error("[chat-renderer] load_event_detail failed", err);
+        btn.disabled = false;
+        btn.innerHTML = `<i class="ph ph-warning"></i>Failed to load - retry`;
+      });
   };
 
   private handleRetryClick = (e: MouseEvent): void => {
