@@ -43,11 +43,21 @@ body {
   gap: 28px;
 }
 
-/* Grows to fill the space above .idle so the wordmark centers there instead
-   of the whole screen, while .idle keeps sitting at its natural position
-   at the bottom of .shell (which itself now fills the viewport). */
-.brand {
+/* Grows to fill the space above .actions so its contents (wordmark, form,
+   errors) center there instead of the whole screen, while .actions keeps
+   sitting at its natural position at the bottom of .shell (which itself now
+   fills the viewport). */
+.center-zone {
   flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.brand {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -67,7 +77,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-.idle {
+.actions {
   width: 100%;
   display: flex;
   flex-direction: column;
