@@ -57,6 +57,10 @@ export function headerStatusClass(sess: Instance): string {
   // Registry-backed only (see deriveQuestionSet): the same single source the
   // sidebar rows read, so header ring and row can never disagree.
   const question = deriveQuestionSet(state.sessions);
+  // Mirrors sidebar-entries.ts's merge: a permission-shaped prompt has no
+  // `awaiting==="question"` fallback, so the open chat's own header ring must
+  // still see it as "needs input" once `attention` excludes it above.
+  for (const id of pendingPromptSessionIds()) question.add(id);
   const rateLimited = new Set(state.sessions.filter(isBlocked).map((s) => s.session_id));
   return statusDotClass(sess, unread, attention, question, rateLimited);
 }

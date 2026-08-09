@@ -55,6 +55,11 @@ export function buildSidebarEntries(
   // Registry-backed only (see deriveQuestionSet): one source of truth for the
   // question flag, covering background sessions too.
   const question = deriveQuestionSet(listSessions);
+  // A permission-shaped prompt never sets awaiting="question", so excluding
+  // it from `attention` above leaves the open chat with no "needs input"
+  // signal and it wrongly falls into the busy check. Union the undeleted
+  // pending-prompt set into `question` so it still outranks busy, no pulse.
+  for (const id of pendingPromptSessionIds()) question.add(id);
   const isPortrait = loadRowStyle() === "portrait";
   const rowClass = isPortrait ? "row-portrait" : "";
   const sort = loadSort();
