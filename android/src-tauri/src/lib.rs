@@ -5,6 +5,14 @@ use iroh_tunnel::{start_iroh_tunnel, IrohTunnelState, LOOPBACK_PORT};
 /// Bundled-shell entry point; the setup/health-check/handoff logic is in android/src/app.js.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Without this, iroh_tunnel's log::error!/info! calls are pure no-ops on
+    // Android - the `log` crate has no backend until one is installed (see
+    // todo 563: the tunnel's failures were invisible on-device for this reason).
+    #[cfg(target_os = "android")]
+    android_logger::init_once(
+        android_logger::Config::default().with_max_level(log::LevelFilter::Info),
+    );
+
     tauri::Builder::default()
         .plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard")
