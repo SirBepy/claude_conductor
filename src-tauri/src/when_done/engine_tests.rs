@@ -35,6 +35,7 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         model: String::new(),
         effort: String::new(),
         awaiting: None,
+        last_notified_awaiting: None,
         autopilot: false,
         jarvis: false,
         worker_of: None,

@@ -274,8 +274,12 @@ pub(crate) async fn run_stdout_pump(
                                 // resolves the session character + slot + mute/meeting gating.
                                 // Guard on live_turn so replayed history result lines
                                 // (emitted by claude on --resume before the live turn starts)
-                                // don't each trigger their own sound.
-                                if live_turn && matches!(awaiting.as_deref(), Some("done") | Some("question")) {
+                                // don't each trigger their own sound. should_notify_turn_sound
+                                // (todo 564) also dedupes repeated `question` in a row.
+                                if live_turn && state_for_pump.registry.should_notify_turn_sound(
+                                    &pump_session.session_id,
+                                    awaiting.as_deref(),
+                                ) {
                                     state_for_pump.notifier.publish(
                                         "turn_sound",
                                         serde_json::json!({

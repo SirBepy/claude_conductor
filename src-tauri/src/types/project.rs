@@ -116,6 +116,12 @@ pub struct Instance {
     /// `None` until the first turn completes or after a new turn starts.
     #[serde(default)]
     pub awaiting: Option<String>,
+    /// Last `awaiting` value used for the `turn_sound` dedup decision (todo
+    /// 564) - not what's displayed. Lets N consecutive `question` turns
+    /// notify once instead of N times.
+    #[serde(skip, default)]
+    #[ts(skip)]
+    pub last_notified_awaiting: Option<String>,
     /// True while /autopilot is active in this session. Set via `<cc-autopilot:on>`
     /// marker, cleared by `<cc-autopilot:off>` or session end.
     #[serde(default)]
@@ -321,6 +327,7 @@ mod tests {
             model: String::new(),
             effort: String::new(),
             awaiting: None,
+            last_notified_awaiting: None,
             autopilot: false,
             jarvis: false,
             worker_of: None,

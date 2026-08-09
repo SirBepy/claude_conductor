@@ -174,6 +174,7 @@ impl Registry {
             model: String::new(),
             effort: String::new(),
             awaiting: None,
+            last_notified_awaiting: None,
             autopilot: false,
             jarvis: false,
             worker_of: None,
@@ -236,6 +237,7 @@ impl Registry {
             model: String::new(),
             effort: String::new(),
             awaiting: None,
+            last_notified_awaiting: None,
             autopilot: false,
             jarvis: false,
             worker_of: None,
@@ -288,6 +290,7 @@ impl Registry {
             model: String::new(),
             effort: String::new(),
             awaiting: None,
+            last_notified_awaiting: None,
             autopilot: false,
             jarvis: false,
             worker_of: None,
@@ -326,6 +329,22 @@ impl Registry {
             }
         }
         false
+    }
+
+    /// Whether `turn_sound` should fire for a completed live turn, deduping
+    /// repeated `question` in a row (todo 564): `done` always fires,
+    /// `question` fires only if it differs from the last-notified state,
+    /// anything else resets that state without firing.
+    pub fn should_notify_turn_sound(&self, session_id: &str, awaiting: Option<&str>) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        let should_fire = match awaiting {
+            Some("done") => true,
+            Some("question") => i.last_notified_awaiting.as_deref() != Some("question"),
+            _ => false,
+        };
+        i.last_notified_awaiting = awaiting.map(str::to_string);
+        should_fire
     }
 
     /// Clear `awaiting` only if it currently reads `"question"`. Used by the
@@ -863,6 +882,43 @@ mod tests {
         let i = registry.get("s").unwrap();
         assert!(i.awaiting.is_none(), "new turn's cleared awaiting must survive");
         assert!(i.busy);
+    }
+
+    #[test]
+    fn should_notify_turn_sound_suppresses_repeated_question() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-09T00:00:00Z");
+        assert!(registry.should_notify_turn_sound("s", Some("question")), "first question must fire");
+        assert!(!registry.should_notify_turn_sound("s", Some("question")), "repeat question must not fire");
+        assert!(!registry.should_notify_turn_sound("s", Some("question")), "third in a row still suppressed");
+    }
+
+    #[test]
+    fn should_notify_turn_sound_done_always_fires() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-09T00:00:00Z");
+        assert!(registry.should_notify_turn_sound("s", Some("done")));
+        assert!(registry.should_notify_turn_sound("s", Some("done")), "done fires every time, no dedup");
+    }
+
+    #[test]
+    fn should_notify_turn_sound_refires_after_intervening_state() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-09T00:00:00Z");
+        assert!(registry.should_notify_turn_sound("s", Some("question")));
+        // A background task resumed it and it went "working" in between -
+        // not itself a firing state, but must reset the dedup key.
+        assert!(!registry.should_notify_turn_sound("s", Some("working")));
+        assert!(registry.should_notify_turn_sound("s", Some("question")), "re-asking after an intervening state must notify again");
+    }
+
+    #[test]
+    fn should_notify_turn_sound_unknown_session_is_noop() {
+        let registry = Registry::new();
+        assert!(!registry.should_notify_turn_sound("ghost", Some("question")));
     }
 
     #[test]
