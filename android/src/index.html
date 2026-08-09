@@ -13,44 +13,40 @@
       <h1>Conductor</h1>
     </div>
 
-    <section id="screen-connecting" class="screen" hidden>
-      <div class="spinner" aria-hidden="true"></div>
-      <p class="status-text">Connecting to your PC&hellip;</p>
-    </section>
-
-    <section id="screen-setup" class="screen" hidden>
-      <p class="lead">Enter the address of your Claude Conductor server.</p>
-      <button type="button" id="scan-qr-btn" class="secondary">
-        Scan QR code
+    <div class="idle">
+      <button type="button" id="scan-qr-btn">
+        <span class="spinner spinner-inline" id="scan-qr-spinner" hidden aria-hidden="true"></span>
+        <span id="scan-qr-label">Scan QR code</span>
       </button>
-      <p class="divider">or enter it manually</p>
-      <form id="setup-form" novalidate>
-        <label for="server-url">Server URL</label>
-        <input
-          id="server-url"
-          type="url"
-          inputmode="url"
-          autocapitalize="none"
-          autocorrect="off"
-          spellcheck="false"
-          placeholder="https://your-pc.ts.net"
-          required
-        >
-        <p id="setup-error" class="field-error" hidden></p>
-        <button type="submit">Save &amp; Connect</button>
-      </form>
-    </section>
 
-    <section id="screen-error" class="screen" hidden>
-      <p class="lead">Can&rsquo;t reach your PC.</p>
-      <p class="server-url" id="error-url"></p>
-      <p class="hint">Make sure Claude Conductor is running there and the tunnel is up.</p>
-      <div class="actions">
-        <button id="retry-btn" type="button">Retry</button>
-        <button id="change-server-btn" type="button" class="secondary">Change server</button>
-      </div>
-    </section>
+      <button type="button" id="manual-toggle-btn" class="link-btn">Enter address manually</button>
+
+      <form id="setup-form" novalidate hidden>
+        <div class="url-row">
+          <input
+            id="server-url"
+            type="url"
+            inputmode="url"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="https://your-pc.ts.net"
+            aria-label="Server URL"
+            required
+          >
+          <button type="submit" id="url-submit-btn" class="inline-check" aria-label="Connect">
+            <span id="url-submit-check" aria-hidden="true">✓</span>
+            <span class="spinner spinner-inline" id="url-submit-spinner" hidden aria-hidden="true"></span>
+          </button>
+        </div>
+      </form>
+
+      <p id="idle-error" class="field-error" hidden></p>
+      <p id="error-url" class="server-url" hidden></p>
+      <button type="button" id="change-server-btn" class="link-btn" hidden>Change server</button>
+    </div>
   </main>
+  <button id="scan-cancel-btn" class="scan-cancel" type="button" hidden>Cancel</button>
   <script src="./app.js"></script>
 </body>
 </html>

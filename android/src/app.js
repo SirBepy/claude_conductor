@@ -1,24 +1,80 @@
 (() => {
   const STORAGE_KEY = "conductor_server_url";
   const HEALTH_TIMEOUT_MS = 5000;
+  const UNREACHABLE_MESSAGE =
+    "Can’t reach your PC. Make sure Claude Conductor is running there and the tunnel is up.";
 
-  const screens = {
-    connecting: document.getElementById("screen-connecting"),
-    setup: document.getElementById("screen-setup"),
-    error: document.getElementById("screen-error"),
-  };
-
+  const scanQrBtn = document.getElementById("scan-qr-btn");
+  const scanQrSpinner = document.getElementById("scan-qr-spinner");
+  const scanQrLabel = document.getElementById("scan-qr-label");
+  const manualToggleBtn = document.getElementById("manual-toggle-btn");
   const setupForm = document.getElementById("setup-form");
   const serverUrlInput = document.getElementById("server-url");
-  const setupError = document.getElementById("setup-error");
+  const urlSubmitBtn = document.getElementById("url-submit-btn");
+  const urlSubmitCheck = document.getElementById("url-submit-check");
+  const urlSubmitSpinner = document.getElementById("url-submit-spinner");
+  const idleError = document.getElementById("idle-error");
   const errorUrlEl = document.getElementById("error-url");
-  const retryBtn = document.getElementById("retry-btn");
   const changeServerBtn = document.getElementById("change-server-btn");
-  const scanQrBtn = document.getElementById("scan-qr-btn");
+  const scanCancelBtn = document.getElementById("scan-cancel-btn");
 
-  function showScreen(name) {
-    for (const key of Object.keys(screens)) {
-      screens[key].hidden = key !== name;
+  // Which control most recently kicked off connect(): drives which slot
+  // (primary button vs inline checkmark) shows the connecting spinner, and
+  // whether a failure re-opens the manual form. "auto" = init()'s silent
+  // reconnect from a stored URL - visually it uses the primary button (the
+  // only slot guaranteed visible before the user has touched anything) but
+  // behaves like "manual" on failure since there's a known URL to retry.
+  let activeSource = null;
+  let scanBtnLabel = "Scan QR code";
+
+  function openManualForm() {
+    manualToggleBtn.hidden = true;
+    setupForm.hidden = false;
+  }
+
+  function collapseManualForm() {
+    setupForm.hidden = true;
+    manualToggleBtn.hidden = false;
+    changeServerBtn.hidden = true;
+  }
+
+  function showIdleError(message, url) {
+    idleError.textContent = message;
+    idleError.hidden = false;
+    if (url) {
+      errorUrlEl.textContent = url;
+      errorUrlEl.hidden = false;
+    } else {
+      errorUrlEl.hidden = true;
+    }
+  }
+
+  function clearIdleError() {
+    idleError.hidden = true;
+    errorUrlEl.hidden = true;
+  }
+
+  function setConnecting(active) {
+    scanQrBtn.disabled = active;
+    urlSubmitBtn.disabled = active;
+    serverUrlInput.disabled = active;
+    if (activeSource === "manual") {
+      urlSubmitCheck.hidden = active;
+      urlSubmitSpinner.hidden = !active;
+    } else {
+      scanQrSpinner.hidden = !active;
+      scanQrLabel.textContent = active ? "Connecting…" : scanBtnLabel;
+    }
+  }
+
+  function enterFailedState(baseUrl, message, source) {
+    scanBtnLabel = "Scan again";
+    scanQrLabel.textContent = scanBtnLabel;
+    showIdleError(message, baseUrl);
+    const keepManualOpen = source === "manual" || source === "auto";
+    changeServerBtn.hidden = !keepManualOpen;
+    if (keepManualOpen && setupForm.hidden) {
+      openManualForm();
     }
   }
 
@@ -77,26 +133,41 @@
   // bare origin so the SPA's ?pair= gate (remote-gate.ts) can consume the
   // code. Manual entry has no code to carry, so it just uses baseUrl.
   async function connect(baseUrl, navigateTo) {
-    showScreen("connecting");
+    const source = activeSource;
+    setConnecting(true);
     const healthy = await checkHealth(baseUrl);
     if (healthy) {
       window.location.href = navigateTo ?? baseUrl;
       return;
     }
-    errorUrlEl.textContent = baseUrl;
-    showScreen("error");
+    setConnecting(false);
+    enterFailedState(baseUrl, UNREACHABLE_MESSAGE, source);
   }
+
+  manualToggleBtn.addEventListener("click", () => {
+    clearIdleError();
+    openManualForm();
+    serverUrlInput.focus();
+  });
+
+  changeServerBtn.addEventListener("click", () => {
+    serverUrlInput.value = "";
+    clearIdleError();
+    changeServerBtn.hidden = true;
+    serverUrlInput.focus();
+  });
 
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const normalized = normalizeUrl(serverUrlInput.value);
     if (!normalized) {
-      setupError.textContent = "Enter a valid https:// URL, e.g. https://your-pc.ts.net";
-      setupError.hidden = false;
+      showIdleError("Enter a valid https:// URL, e.g. https://your-pc.ts.net");
       return;
     }
-    setupError.hidden = true;
+    clearIdleError();
+    changeServerBtn.hidden = true;
     storeUrl(normalized);
+    activeSource = "manual";
     connect(normalized);
   });
 
@@ -116,50 +187,59 @@
     scanQrBtn.addEventListener("click", () => {
       void (async () => {
         scanQrBtn.disabled = true;
+        clearIdleError();
+        // A scan is a fresh, independent attempt - drop any manual-retry
+        // form left open from a prior failed manual attempt.
+        collapseManualForm();
+        // windowed mode makes the native WebView transparent so the camera
+        // shows through - our own painted background has to clear out too.
+        document.body.classList.add("scanning");
+        scanCancelBtn.hidden = false;
+        let normalized = null;
+        let scannedContent = null;
         try {
           let { camera: state } = await scannerInvoke("check_permissions");
           if (state !== "granted") ({ camera: state } = await scannerInvoke("request_permissions"));
           if (state !== "granted") {
-            setupError.textContent = "Camera permission denied - enable it in app settings.";
-            setupError.hidden = false;
+            showIdleError("Camera permission denied - enable it in app settings.");
             return;
           }
           const result = await scannerInvoke("scan", { windowed: true, formats: ["QR_CODE"] });
-          const normalized = normalizeUrl(result.content);
+          normalized = normalizeUrl(result.content);
           if (!normalized) {
-            setupError.textContent = "That QR code isn't a valid https:// server URL.";
-            setupError.hidden = false;
+            showIdleError("That QR code isn't a valid https:// server URL.");
             return;
           }
-          setupError.hidden = true;
-          storeUrl(normalized);
-          connect(normalized, result.content);
+          scannedContent = result.content;
         } catch {
           // scan() also rejects on user cancel - not worth surfacing as an error.
         } finally {
+          // Drop the camera overlay as soon as the scan itself is done, before
+          // connect()'s health check runs - it needs the .shell visible again
+          // to show its own connecting spinner.
+          document.body.classList.remove("scanning");
+          scanCancelBtn.hidden = true;
           scanQrBtn.disabled = false;
+        }
+        if (normalized) {
+          storeUrl(normalized);
+          activeSource = "scan";
+          await connect(normalized, scannedContent);
         }
       })();
     });
+
+    scanCancelBtn.addEventListener("click", () => {
+      void scannerInvoke("cancel");
+    });
   }
-
-  retryBtn.addEventListener("click", () => {
-    const stored = getStoredUrl();
-    if (stored) connect(stored);
-  });
-
-  changeServerBtn.addEventListener("click", () => {
-    const stored = getStoredUrl();
-    if (stored) serverUrlInput.value = stored;
-    showScreen("setup");
-  });
 
   function init() {
     const stored = getStoredUrl();
     if (stored) {
+      serverUrlInput.value = stored;
+      activeSource = "auto";
       connect(stored);
-    } else {
-      showScreen("setup");
     }
   }
 
