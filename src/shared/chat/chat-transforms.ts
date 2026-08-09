@@ -304,7 +304,7 @@ export function renderMessage(m: RenderedMessage): string {
       if (m.compactionN != null) {
         return `<div class="msg system compact-marker"><span class="compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
       }
-      return renderSystemNote(m.text ?? "");
+      return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
     case "user":
       return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;
     case "assistant": {

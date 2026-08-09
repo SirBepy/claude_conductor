@@ -157,6 +157,15 @@ function makeTurnUsage({
   };
 }
 
+function makeMetaUserMessage(text = "Your previous response had no visible output.", tsMs = 0) {
+  return {
+    type: "user_message",
+    content: [{ type: "text", text }],
+    timestamp: BigInt(tsMs),
+    is_meta: true,
+  };
+}
+
 describe("Turn footer DOM integration", () => {
   let dom;
   let document;
@@ -502,5 +511,125 @@ describe("Turn footer DOM integration", () => {
     // Time must not keep growing after the freeze.
     vi.advanceTimersByTime(10000);
     expect(firstRow.querySelector(".turn-chip--time").textContent).toBe(timeText);
+  });
+});
+
+describe("Silent auto-continue streak merge", () => {
+  let dom;
+  let document;
+
+  beforeEach(() => {
+    const setup = setupDom();
+    dom = setup.dom;
+    document = setup.document;
+    global.document = document;
+    global.window = setup.window;
+    global.HTMLElement = setup.window.HTMLElement;
+    global.Node = setup.window.Node;
+    global.MutationObserver = setup.window.MutationObserver || class {
+      observe() {}
+      disconnect() {}
+    };
+    global.IntersectionObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+    dom.window.close();
+  });
+
+  async function createRenderer() {
+    const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    return { renderer: new ChatRenderer(container), container };
+  }
+
+  it("folds a silent turn immediately followed by more silent auto-continues into ONE footer, no visible note", async () => {
+    const { renderer, container } = await createRenderer();
+
+    // Turn 1: real user message, but the reply is pure tool activity - no
+    // assistant text at all.
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeToolUse("t1"));
+    renderer.handleEvent(makeToolResult("t1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    // Two harness-injected retries, still silent.
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 }));
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeAssistantMessage("Finally done."));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 200 }));
+
+    expect(container.querySelectorAll(".turn-footer").length).toBe(1);
+    // Turn 1 wasn't itself opened by an Auto-continued note, so there's
+    // nowhere to hang a counter - the retries stay fully invisible.
+    expect(container.textContent).not.toContain("Auto-continued");
+  });
+
+  it("tags a rendered Auto-continued note with ×N when further silent retries follow", async () => {
+    const { renderer, container } = await createRenderer();
+
+    // Turn 1 closes normally with real content.
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeAssistantMessage("Working on it."));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    // First auto-continue: turn 1 wasn't silent, so this renders normally.
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 })); // silent
+    // Two more retries - each merges into the first note's footer.
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 })); // silent
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeAssistantMessage("Fixed it."));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 200 }));
+
+    // Turn 1's own footer + ONE merged footer for the whole retry chain.
+    expect(container.querySelectorAll(".turn-footer").length).toBe(2);
+    const notes = [...container.querySelectorAll(".msg.system")].filter((el) =>
+      el.textContent.includes("Auto-continued"),
+    );
+    expect(notes.length).toBe(1);
+    expect(notes[0].textContent).toContain("×3");
+
+    // Merged footer's tokens are the SUM across all 3 retry turns, not just
+    // the last one.
+    const tokenChips = container.querySelectorAll(".turn-chip--tokens");
+    expect(tokenChips[1].textContent).toContain("300");
+  });
+
+  it("does not merge an Auto-continue that follows a turn with real content", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeAssistantMessage("Answer 1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeAssistantMessage("Answer 2"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+
+    expect(container.querySelectorAll(".turn-footer").length).toBe(2);
+  });
+
+  it("does not merge a genuine new user message into an ongoing silent streak", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeToolUse("t1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 })); // silent
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 })); // silent, merges
+    // A real user message arrives mid-streak - must close it out, not merge.
+    renderer.handleEvent(makeUserMessage("actually, do Y"));
+    renderer.handleEvent(makeAssistantMessage("On it."));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 200 }));
+
+    expect(container.querySelectorAll(".turn-footer").length).toBe(2);
   });
 });

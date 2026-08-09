@@ -213,18 +213,19 @@ export function foldClosedRange(
   applyTurnCollapse(r.messages, r.messageEls, start, end, footer);
 }
 
+/** Finalize any in-progress streaming bubble in place (else a later boundary
+ *  overwrites the wrong slot). Split out of enqueueTurnClose so the
+ *  silent-streak merge in chat-event-handler.ts can call just this half. */
+export function finalizeStreamingBubble(r: ChatRenderer): void {
+  if (r.streamingIndex === null) return;
+  const existing = r.messages[r.streamingIndex] as RenderedMessage;
+  r.messages[r.streamingIndex] = { ...existing, streaming: false };
+  r.dirtyIndices.add(r.streamingIndex);
+  r.streamingIndex = null;
+}
+
 export function enqueueTurnClose(r: ChatRenderer): void {
-  // Finalize any in-progress streaming bubble. Without this, if a turn boundary
-  // (AUQ tool_use, user_message) fires while text is still streaming,
-  // streamingIndex stays set pointing to a slot BEFORE the boundary. The next
-  // AI response then overwrites that old slot instead of appending after the
-  // boundary, making Claude's reply appear above the AUQ card or user message.
-  if (r.streamingIndex !== null) {
-    const existing = r.messages[r.streamingIndex] as RenderedMessage;
-    r.messages[r.streamingIndex] = { ...existing, streaming: false };
-    r.dirtyIndices.add(r.streamingIndex);
-    r.streamingIndex = null;
-  }
+  finalizeStreamingBubble(r);
   // The next turn folds into fresh groups; closed-turn rows already carry
   // data-tool-grouped, so processTurnCloseQueue won't re-fold them.
   clearRunningHighlight(r);

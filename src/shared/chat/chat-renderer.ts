@@ -76,6 +76,12 @@ export class ChatRenderer {
   meta: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
   _cumulative: CumulativeUsage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
   activeTurnStart: number | null = null;
+  // Silent-streak merge: index of the current chain's first "Auto-continued"
+  // system note, and how many turns have folded into it so far. Null/0 when
+  // the open turn isn't (yet) part of a merged streak. See
+  // turnProducedVisibleContent in chat-event-handler.ts.
+  silentStreakBoundaryIndex: number | null = null;
+  silentStreakCount = 0;
   // Per-renderer footer registry (instance state - chip keys are a local
   // sequence, a shared registry would collide across renderer instances).
   turnFooters = new TurnFooterRegistry();
@@ -193,6 +199,8 @@ export class ChatRenderer {
     this.activeTurnUsage = null;
     this.activeTurnFirstTs = 0;
     this.activeTurnLastTs = 0;
+    this.silentStreakBoundaryIndex = null;
+    this.silentStreakCount = 0;
   }
 
   get cumulativeUsage(): CumulativeUsage {
@@ -234,6 +242,7 @@ export class ChatRenderer {
           this.dirtyIndices = reindexed;
         }
         if (this.activeTurnStart !== null) this.activeTurnStart += n;
+        if (this.silentStreakBoundaryIndex !== null) this.silentStreakBoundaryIndex += n;
         if (this.closeTurnQueue.length > 0) {
           this.closeTurnQueue = this.closeTurnQueue.map((entry) => ({
             ...entry,

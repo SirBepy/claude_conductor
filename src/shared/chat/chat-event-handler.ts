@@ -29,6 +29,8 @@ import {
   enqueueTurnClose,
   ensureActiveTurnFooter,
   activeTurnTsSpan,
+  finalizeStreamingBubble,
+  clearRunningHighlight,
 } from "./chat-dom-renderer";
 import { scheduleFlush, flushRenderNow } from "./flush-scheduler";
 import type { ChatRenderer } from "./chat-renderer";
@@ -54,6 +56,31 @@ function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolea
       r.messages[i] = { ...m, text: answerText };
       r.dirtyIndices.add(i);
       return true;
+    }
+  }
+  return false;
+}
+
+/** True if the open turn has produced anything the user would see - real
+ *  assistant text, send_message, a user/question row, or an interrupted
+ *  notice. Tool calls/results and TodoWrite don't count. */
+function turnProducedVisibleContent(r: ChatRenderer): boolean {
+  if (r.activeTurnStart === null) return false;
+  for (let i = r.activeTurnStart; i < r.messages.length; i++) {
+    const m = r.messages[i]!;
+    switch (m.kind) {
+      case "assistant":
+        if (blocksToText(m.content ?? []).trim()) return true;
+        break;
+      case "message":
+      case "user":
+      case "question":
+        return true;
+      case "system":
+        if (m.noiseLabel) return true;
+        break;
+      default:
+        break;
     }
   }
   return false;
@@ -105,6 +132,30 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       // (a fired ScheduleWakeup prompt, an autopilot loop tick, etc.) rather
       // than something the human typed - must never look like a real message.
       const isMeta = !isCompact && !isSilent && ev.is_meta;
+
+      // Silent auto-continue streak: the harness re-invokes with a synthetic
+      // "continue" whenever the prior turn rendered nothing. Fold it into
+      // the ongoing footer (same chip key) instead of spamming a new empty
+      // row per retry.
+      if (isMeta && r.activeTurnChipKey !== null && !turnProducedVisibleContent(r)) {
+        finalizeStreamingBubble(r);
+        clearRunningHighlight(r);
+        // Deliberately NOT cleared: activeToolGroups (tool chips keep
+        // accumulating into the same strip), activeTurnUsage/Todos baseline
+        // (same reason), and no new chip key is minted.
+        r.setActivity(null);
+        r.setTurnStatus(null);
+        if (r.silentStreakBoundaryIndex !== null) {
+          r.silentStreakCount += 1;
+          const boundary = r.messages[r.silentStreakBoundaryIndex] as RenderedMessage;
+          r.messages[r.silentStreakBoundaryIndex] = { ...boundary, streakCount: r.silentStreakCount };
+          r.dirtyIndices.add(r.silentStreakBoundaryIndex);
+        }
+        r.activeTurnStart = r.messages.length;
+        touched = true;
+        break;
+      }
+
       const auqAnswerText = !isCompact && !isSilent && !isMeta ? extractAuqAnswerText(cleaned) : null;
       const resolvedQuestionCard = auqAnswerText !== null && resolvePendingQuestionCard(r, auqAnswerText);
       // Held prose bundled alongside the answer (bundleHeld keeps it as its own
@@ -130,6 +181,8 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       } else if (isSilent) {
         r.messages.push({ kind: "system", text: "Continuing session…", ts });
       } else if (isMeta) {
+        r.silentStreakBoundaryIndex = r.messages.length;
+        r.silentStreakCount = 1;
         r.messages.push({ kind: "system", text: metaTurnLabel(cleaned), ts });
       } else if (resolvedQuestionCard) {
         // Folded into the question card above instead of a separate bubble -

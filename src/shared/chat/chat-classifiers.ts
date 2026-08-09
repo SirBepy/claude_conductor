@@ -171,6 +171,11 @@ export interface RenderedMessage {
   /** Ordinal of this compaction event within the session (1-based). Present
    *  only on system messages that represent a compaction boundary. */
   compactionN?: number;
+  /** Set on an `is_meta` "Auto-continued" system note once 2+ consecutive
+   *  silent turns merged into it (see turnProducedVisibleContent in
+   *  chat-event-handler.ts). Renders as a trailing "×N" instead of a
+   *  separate note per retry. */
+  streakCount?: number;
   /** Live per-question answered state for a still-pending `kind:"question"`
    *  card, mirrored from the floating prompt card's draft as the user answers
    *  it (ChatRenderer.updateQuestionProgress). Index-aligned with the parsed
