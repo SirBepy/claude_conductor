@@ -26,7 +26,11 @@ body {
   flex-direction: column;
   align-items: center;
   min-height: 100vh;
-  padding: 24px;
+  /* enableEdgeToEdge() (MainActivity.kt) draws the WebView under the status
+     bar AND the nav bar - viewport-fit=cover (index.html) makes the
+     safe-area-inset-* env vars available, so pad past both instead of just
+     the fixed 24px, which real 3-button nav bars are taller than. */
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
 }
 
 .shell {
