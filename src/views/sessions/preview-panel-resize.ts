@@ -20,6 +20,14 @@ export function wireResizeHandle(root: HTMLElement, onCommit: (px: number) => vo
   let startWidth = 0;
   let liveWidth = 0;
 
+  // The iframe is a separate document; mousemove gets swallowed once the
+  // cursor crosses it mid-drag, stalling the resize. Disable pointer
+  // interaction on the frame wrapper for the drag's duration to prevent that.
+  const setFrameInert = (inert: boolean) => {
+    const frame = root.querySelector<HTMLElement>(".pv-frame");
+    if (frame) frame.style.pointerEvents = inert ? "none" : "";
+  };
+
   const onMove = (e: MouseEvent) => {
     if (!dragging) return;
     const delta = startX - e.clientX; // dragging left (toward the chat) grows the panel
@@ -29,8 +37,10 @@ export function wireResizeHandle(root: HTMLElement, onCommit: (px: number) => vo
   const onUp = () => {
     if (!dragging) return;
     dragging = false;
+    setFrameInert(false);
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
+    document.removeEventListener("mouseleave", onUp);
     onCommit(liveWidth);
   };
   const onDown = (e: MouseEvent) => {
@@ -38,8 +48,10 @@ export function wireResizeHandle(root: HTMLElement, onCommit: (px: number) => vo
     startX = e.clientX;
     startWidth = root.getBoundingClientRect().width;
     liveWidth = startWidth;
+    setFrameInert(true);
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
+    document.addEventListener("mouseleave", onUp);
     e.preventDefault();
   };
   handle.addEventListener("mousedown", onDown);
@@ -48,5 +60,7 @@ export function wireResizeHandle(root: HTMLElement, onCommit: (px: number) => vo
     handle.removeEventListener("mousedown", onDown);
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
+    document.removeEventListener("mouseleave", onUp);
+    setFrameInert(false);
   };
 }

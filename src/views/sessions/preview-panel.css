@@ -113,72 +113,9 @@
   color: var(--color-primary);
 }
 
-/* ── "More options" menu (refresh, open-in-browser, device-size toggle) ──── */
-
-.pv-more-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.pv-more-menu {
-  position: absolute;
-  top: 32px;
-  right: 0;
-  z-index: 20;
-  min-width: 170px;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-/* `display: flex` above would otherwise beat the UA `[hidden]` rule (same
-   gotcha as #preview-panel-host below) - without this, the menu renders
-   permanently visible regardless of moreMenuOpen. */
-.pv-more-menu[hidden] {
-  display: none;
-}
-
-.pv-more-item.on {
-  color: var(--color-primary);
-}
-
-.pv-more-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text);
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-}
-
-.pv-more-item:hover {
-  background: var(--color-surface-alt);
-}
-
-.pv-more-sep {
-  height: 1px;
-  background: var(--color-border);
-  margin: 4px 2px;
-}
-
-.pv-more-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-  padding: 2px 8px 4px;
-}
+/* ── "More options" menu: shared .session-more-menu/.smore-item chrome
+   (built by preview-panel-more-menu.ts) - only the device-size segmented
+   row below has no shared-menu equivalent, so it keeps bespoke styling. ── */
 
 .pv-seg-btn {
   width: 100%;
@@ -223,7 +160,7 @@
   gap: 7px;
 }
 
-/* Same [hidden]-vs-`display:flex` gotcha as .pv-more-menu above. */
+/* Same [hidden]-vs-`display:flex` gotcha as #preview-panel-host above. */
 .pv-rail[hidden] {
   display: none;
 }
