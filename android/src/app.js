@@ -136,7 +136,8 @@
   // The port is fixed (src-tauri LOOPBACK_PORT) so the SPA's rc_token, which
   // lives in this origin's localStorage, survives across launches.
   async function connectViaIroh(endpointId, pairCode) {
-    showScreen("connecting");
+    const source = activeSource;
+    setConnecting(true);
     try {
       localStorage.setItem(IROH_STORAGE_KEY, endpointId);
     } catch {
@@ -150,8 +151,8 @@
     } catch (err) {
       console.error("iroh tunnel failed:", err);
       const errMsg = (err && err.message) ? err.message : String(err);
-      errorUrlEl.textContent = `http://127.0.0.1 - Error: ${errMsg}`;
-      showScreen("error");
+      setConnecting(false);
+      enterFailedState("http://127.0.0.1", `Tunnel error: ${errMsg}`, source);
     }
   }
 
@@ -202,6 +203,7 @@
     const iroh = extractIrohParams(serverUrlInput.value);
     if (iroh) {
       clearIdleError();
+      activeSource = "manual";
       connectViaIroh(iroh.iroh, iroh.pair);
       return;
     }
@@ -253,6 +255,7 @@
           const iroh = extractIrohParams(result.content);
           if (iroh) {
             clearIdleError();
+            activeSource = "scan";
             connectViaIroh(iroh.iroh, iroh.pair);
             return;
           }
