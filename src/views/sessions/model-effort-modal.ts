@@ -137,7 +137,6 @@ export async function openModelEffortModal(
 
       card.innerHTML = `
         <div class="me-columns">
-          <div class="me-columns">
             <div class="me-left-col">
               <h3 class="me-title">New session in ${escapeHtml(projectName)}</h3>
               ${renderAccountFieldHtml(accountField, { accounts, preferredAccountId, resolvedAccountId, projectName })}
@@ -179,7 +178,7 @@ export async function openModelEffortModal(
               </div>
             </div>
             <div class="me-char-pane"></div>
-          </div>
+        </div>
       `;
       attachHandlers();
       charPane.render();
