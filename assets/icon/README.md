@@ -37,3 +37,12 @@ working 2026-08-07).
 The tray icon is not a separate asset - `src-tauri/src/tray/icon_render.rs` embeds
 `src-tauri/icons/32x32.png` via `include_bytes!` and stamps status dots on top at runtime, so step 1
 alone updates it (after a rebuild).
+
+**Trap hit 2026-08-10:** step 2's command silently no-ops the `android/` mipmap subfolder when run
+directly against this repo's real `android/src-tauri/icons` path - it logs
+`Android Creating mipmap-xhdpi/ic_launcher.png` etc. as if it wrote them, but nothing lands on
+disk (likely picks up the wrong `tauri.conf.json`, the desktop one at repo root). The rest of the
+output set (icon.png, icon.ico, Windows/Appx/ICNS) generates fine in the same run. Workaround:
+run step 2 against a scratch path outside the repo (e.g. `C:/tmp/icontest/android/src-tauri/icons`),
+confirm the `android/mipmap-*` output looks correct there, then copy that verified output into the
+real `android/src-tauri/icons/android/` tree before doing step 3.
