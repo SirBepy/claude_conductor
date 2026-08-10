@@ -66,7 +66,9 @@ android {
             }
         }
         getByName("release") {
-            isMinifyEnabled = true
+            // Off: barcode-scanner's consumer-rules.pro is missing, so R8 silently strips
+            // something the QR scan needs (no camera, no error - see todo 565).
+            isMinifyEnabled = false
             // A missing keystore.properties must fail loud, not silently sign with a
             // different (debug/unsigned) identity - see .claude/todos/504.
             if (!keystorePropertiesFile.exists()) {

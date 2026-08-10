@@ -5,52 +5,32 @@
   const UNREACHABLE_MESSAGE =
     "Can’t reach your PC. Make sure Claude Conductor is running there and the tunnel is up.";
 
+  const setupForm = document.getElementById("setup-form");
   const scanQrBtn = document.getElementById("scan-qr-btn");
   const scanQrSpinner = document.getElementById("scan-qr-spinner");
   const scanQrLabel = document.getElementById("scan-qr-label");
-  const manualToggleBtn = document.getElementById("manual-toggle-btn");
-  const setupForm = document.getElementById("setup-form");
   const serverUrlInput = document.getElementById("server-url");
   const urlSubmitBtn = document.getElementById("url-submit-btn");
   const urlSubmitCheck = document.getElementById("url-submit-check");
   const urlSubmitSpinner = document.getElementById("url-submit-spinner");
   const idleError = document.getElementById("idle-error");
-  const errorUrlEl = document.getElementById("error-url");
   const scanCancelBtn = document.getElementById("scan-cancel-btn");
 
   // Which control most recently kicked off connect(): drives which slot
-  // (primary button vs inline checkmark) shows the connecting spinner, and
-  // whether a failure re-opens the manual form. "auto" = init()'s silent
-  // reconnect from a stored URL - visually it uses the primary button (the
-  // only slot guaranteed visible before the user has touched anything) but
-  // behaves like "manual" on failure since there's a known URL to retry.
+  // (primary button vs inline checkmark) shows the connecting spinner. "auto"
+  // = init()'s silent reconnect from a stored URL - visually it uses the
+  // primary button, the only slot guaranteed visible before the user touches
+  // anything.
   let activeSource = null;
   let scanBtnLabel = "Scan QR code";
 
-  function openManualForm() {
-    manualToggleBtn.hidden = true;
-    setupForm.hidden = false;
-  }
-
-  function collapseManualForm() {
-    setupForm.hidden = true;
-    manualToggleBtn.hidden = false;
-  }
-
-  function showIdleError(message, url) {
+  function showIdleError(message) {
     idleError.textContent = message;
     idleError.hidden = false;
-    if (url) {
-      errorUrlEl.textContent = url;
-      errorUrlEl.hidden = false;
-    } else {
-      errorUrlEl.hidden = true;
-    }
   }
 
   function clearIdleError() {
     idleError.hidden = true;
-    errorUrlEl.hidden = true;
   }
 
   function setConnecting(active) {
@@ -66,22 +46,14 @@
     }
   }
 
-  function enterFailedState(baseUrl, message, source) {
+  // The field always shows whatever was last attempted (typed or scanned),
+  // so a failure just needs the message - select the value for retry.
+  function enterFailedState(message) {
     scanBtnLabel = "Scan again";
     scanQrLabel.textContent = scanBtnLabel;
-    const keepManualOpen = source === "manual" || source === "auto";
-    // The URL chip only adds information when the form is closed (a scan
-    // failure) - when it's open, the input already shows the same URL.
-    showIdleError(message, keepManualOpen ? null : baseUrl);
-    if (keepManualOpen) {
-      if (setupForm.hidden) {
-        openManualForm();
-      }
-      // Pre-fill is still the failed URL - select it so the next keystroke
-      // replaces it outright, no separate "change server" control needed.
-      serverUrlInput.focus();
-      serverUrlInput.select();
-    }
+    showIdleError(message);
+    serverUrlInput.focus();
+    serverUrlInput.select();
   }
 
   // https-only: the native shell's navigation guard (src-tauri/src/lib.rs)
@@ -136,7 +108,6 @@
   // The port is fixed (src-tauri LOOPBACK_PORT) so the SPA's rc_token, which
   // lives in this origin's localStorage, survives across launches.
   async function connectViaIroh(endpointId, pairCode) {
-    const source = activeSource;
     setConnecting(true);
     try {
       localStorage.setItem(IROH_STORAGE_KEY, endpointId);
@@ -152,7 +123,7 @@
       console.error("iroh tunnel failed:", err);
       const errMsg = (err && err.message) ? err.message : String(err);
       setConnecting(false);
-      enterFailedState("http://127.0.0.1", `Tunnel error: ${errMsg}`, source);
+      enterFailedState(`Tunnel error: ${errMsg}`);
     }
   }
 
@@ -181,7 +152,6 @@
   // bare origin so the SPA's ?pair= gate (remote-gate.ts) can consume the
   // code. Manual entry has no code to carry, so it just uses baseUrl.
   async function connect(baseUrl, navigateTo) {
-    const source = activeSource;
     setConnecting(true);
     const healthy = await checkHealth(baseUrl);
     if (healthy) {
@@ -189,14 +159,8 @@
       return;
     }
     setConnecting(false);
-    enterFailedState(baseUrl, UNREACHABLE_MESSAGE, source);
+    enterFailedState(UNREACHABLE_MESSAGE);
   }
-
-  manualToggleBtn.addEventListener("click", () => {
-    clearIdleError();
-    openManualForm();
-    serverUrlInput.focus();
-  });
 
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -235,9 +199,6 @@
       void (async () => {
         scanQrBtn.disabled = true;
         clearIdleError();
-        // A scan is a fresh, independent attempt - drop any manual-retry
-        // form left open from a prior failed manual attempt.
-        collapseManualForm();
         // windowed mode makes the native WebView transparent so the camera
         // shows through - our own painted background has to clear out too.
         document.body.classList.add("scanning");
@@ -252,6 +213,9 @@
             return;
           }
           const result = await scannerInvoke("scan", { windowed: true, formats: ["QR_CODE"] });
+          // Always fill the field with what was scanned, same as typing it in -
+          // so a failure just leaves it there to see and retry, no separate state.
+          serverUrlInput.value = result.content;
           const iroh = extractIrohParams(result.content);
           if (iroh) {
             clearIdleError();
@@ -265,8 +229,13 @@
             return;
           }
           scannedContent = result.content;
-        } catch {
-          // scan() also rejects on user cancel - not worth surfacing as an error.
+        } catch (err) {
+          // scan() also rejects on user cancel ("cancelled") - not worth surfacing.
+          const message = (err && err.message) ? err.message : String(err);
+          if (message !== "cancelled") {
+            console.error("QR scan failed:", err);
+            showIdleError(`Scan error: ${message}`);
+          }
         } finally {
           // Drop the camera overlay as soon as the scan itself is done, before
           // connect()'s health check runs - it needs the .shell visible again
