@@ -17,11 +17,21 @@ const BOTH_MISSING_REASON: &str = "Before ending your turn, call BOTH tools: rep
 
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
 /// Pure so it stays testable without a live Session/ChildStdin.
-fn missing_requirement_reason(stop_hook_active: Option<bool>, has_report: bool, has_send: bool) -> Option<&'static str> {
+///
+/// `status` gates the send_message half: a turn reporting `working`/`waiting`
+/// is mid-chain and something will re-invoke Claude, so silence is fine there.
+/// Only a turn that hands back to Joe (`done`/`question`) owes him a message.
+fn missing_requirement_reason(
+    stop_hook_active: Option<bool>,
+    has_report: bool,
+    has_send: bool,
+    status: Option<&str>,
+) -> Option<&'static str> {
     if stop_hook_active == Some(true) {
         return None;
     }
-    match (has_report, has_send) {
+    let send_required = !matches!(status, Some("working") | Some("waiting"));
+    match (has_report, has_send || !send_required) {
         (false, false) => Some(BOTH_MISSING_REASON),
         (false, true) => Some(REPORT_MISSING_REASON),
         (true, false) => Some(SEND_MISSING_REASON),
@@ -82,7 +92,8 @@ pub(super) async fn on_stop(
         let reported = ctx.state.registry.peek_reported_status(&session_id);
         let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
         let has_current_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
-        if let Some(reason) = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send) {
+        let status = reported.as_ref().filter(|r| r.turn_gen == gen).map(|r| r.status.as_str());
+        if let Some(reason) = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status) {
             log::info!(
                 "hook /hooks/stop: blocking {session_id} - report_turn_status={has_current_report} send_message={has_current_send}"
             );
@@ -152,33 +163,66 @@ pub(super) async fn on_stop(
 mod tests {
     use super::*;
 
+    const DONE: Option<&str> = Some("done");
+
     #[test]
     fn report_present_send_absent_blocks_with_send_reason() {
-        assert_eq!(missing_requirement_reason(None, true, false), Some(SEND_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, DONE), Some(SEND_MISSING_REASON));
     }
 
     #[test]
     fn report_absent_send_present_blocks_with_report_reason() {
-        assert_eq!(missing_requirement_reason(None, false, true), Some(REPORT_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, false, true, DONE), Some(REPORT_MISSING_REASON));
     }
 
     #[test]
     fn both_absent_blocks_with_combined_reason() {
-        assert_eq!(missing_requirement_reason(None, false, false), Some(BOTH_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, false, false, DONE), Some(BOTH_MISSING_REASON));
     }
 
     #[test]
     fn both_present_does_not_block() {
-        assert_eq!(missing_requirement_reason(None, true, true), None);
+        assert_eq!(missing_requirement_reason(None, true, true, DONE), None);
     }
 
     #[test]
     fn stop_hook_active_true_never_blocks_even_with_both_missing() {
-        assert_eq!(missing_requirement_reason(Some(true), false, false), None);
+        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE), None);
     }
 
     #[test]
     fn stop_hook_active_false_still_enforces() {
-        assert_eq!(missing_requirement_reason(Some(false), false, false), Some(BOTH_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(Some(false), false, false, DONE), Some(BOTH_MISSING_REASON));
+    }
+
+    #[test]
+    fn mid_chain_working_turn_may_stay_silent() {
+        assert_eq!(missing_requirement_reason(None, true, false, Some("working")), None);
+    }
+
+    #[test]
+    fn mid_chain_waiting_turn_may_stay_silent() {
+        assert_eq!(missing_requirement_reason(None, true, false, Some("waiting")), None);
+    }
+
+    #[test]
+    fn a_silent_working_turn_still_owes_a_status_report() {
+        assert_eq!(
+            missing_requirement_reason(None, false, false, Some("working")),
+            Some(REPORT_MISSING_REASON),
+        );
+    }
+
+    #[test]
+    fn question_turn_still_requires_a_message() {
+        assert_eq!(
+            missing_requirement_reason(None, true, false, Some("question")),
+            Some(SEND_MISSING_REASON),
+        );
+    }
+
+    #[test]
+    fn unreported_status_defaults_to_requiring_a_message() {
+        assert_eq!(missing_requirement_reason(None, true, false, None), Some(SEND_MISSING_REASON));
     }
 }
