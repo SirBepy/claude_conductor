@@ -145,6 +145,24 @@ export class ChatPaginator {
   prependEvents(events: ChatEvent[]): void {
     if (events.length === 0) return;
 
+    // A rejected send_message (validation failure, silently retried) must not
+    // leave a ghost bubble behind - drop the tool_use/tool_result pair before
+    // the main pass so the boundary/turn bookkeeping below never sees them.
+    // Mirrors chat-event-handler.ts's removeMessageAt reject path.
+    const rejectedSendIds = new Set<string>();
+    for (const ev of events) {
+      if (ev.type !== "tool_result" || !ev.is_error) continue;
+      const src = events.find((e) => e.type === "tool_use" && e.id === ev.tool_use_id);
+      if (src?.type === "tool_use" && src.tool_name === "mcp__cc_conductor__send_message" && !src.parent_tool_use_id) {
+        rejectedSendIds.add(src.id);
+      }
+    }
+    const filtered = rejectedSendIds.size === 0
+      ? events
+      : events.filter((ev) =>
+          !(ev.type === "tool_use" && rejectedSendIds.has(ev.id)) &&
+          !(ev.type === "tool_result" && rejectedSendIds.has(ev.tool_use_id)));
+
     const messages = this.cb.getMessages();
     const messageEls = this.cb.getMessageEls();
     const newMessages: RenderedMessage[] = [];
@@ -164,7 +182,7 @@ export class ChatPaginator {
     let accFirstTs = 0;
     let accLastTs = 0;
 
-    for (const ev of events) {
+    for (const ev of filtered) {
       if (ev.type === "turn_usage") {
         // Usage events render nothing; they sum into the open turn (history
         // replays one per assistant line).

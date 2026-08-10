@@ -392,6 +392,14 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       return { kind: "assistant", content: ev.content, streaming: ev.streaming, ts };
     }
     case "tool_use":
+      // Mirrors chat-event-handler.ts's live-path special-case so a send_message
+      // call renders as a bubble on the older-page (scrollback) path too,
+      // instead of hidden narration (see project_quiet_mode_chat_architecture).
+      if (ev.tool_name === "mcp__cc_conductor__send_message" && !ev.parent_tool_use_id) {
+        const text = typeof (ev.input as { text?: unknown })?.text === "string"
+          ? (ev.input as { text: string }).text : "";
+        return { kind: "message", text, id: ev.id, ts, parentToolUseId: null };
+      }
       return { kind: "tool_use", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: ev.parent_tool_use_id ?? null };
     case "tool_result":
       return {
