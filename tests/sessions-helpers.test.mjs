@@ -78,8 +78,10 @@ describe("statusPriority", () => {
   it("returns 2 for busy interactive", () => {
     expect(statusPriority(makeInstance({ busy: true }), unread, noAttention, noQuestion)).toBe(2);
   });
-  it("busy wins over a stale question flag", () => {
-    expect(statusPriority(makeInstance({ session_id: "q-id", busy: true }), unread, noAttention, question)).toBe(2);
+  it("question outranks busy even when the instance is still marked busy (permission prompt pending)", () => {
+    // A permission-shaped prompt never sets awaiting="question", so busy stays
+    // true the whole time it's pending - question must still win (2026-08-10 fix).
+    expect(statusPriority(makeInstance({ session_id: "q-id", busy: true }), unread, noAttention, question)).toBe(1);
   });
   it("returns 3 for a session parked on an external process (waiting)", () => {
     expect(statusPriority(makeInstance({ session_id: "wait-id", busy: false, awaiting: "waiting" }), unread, noAttention, noQuestion)).toBe(3);

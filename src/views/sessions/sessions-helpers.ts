@@ -146,8 +146,12 @@ export function ownedScheduledNewChatIds(items: ScheduledItem[], placeholderId: 
 export function statusPriority(i: Instance, unread: Set<string>, attention: Set<string>, question: Set<string>): number {
   if (attention.has(i.session_id)) return 0;
   if (i.kind === "external" || i.kind === "automated") return 6;
-  if (i.busy && i.awaiting !== "question") return 2;
+  // Pending-prompt check (question OR permission-shaped, see `question`'s
+  // construction in sidebar-entries.ts) must outrank the busy check - a
+  // permission prompt never sets awaiting="question", so checking busy first
+  // would misreport a session that's actually blocked on the user as "working".
   if (question.has(i.session_id)) return 1;
+  if (i.busy && i.awaiting !== "question") return 2;
   // Background subagents/tasks of this session still running: still working.
   if (i.awaiting === "working") return 2;
   // Parked on an external process (CI / long command): its own status tier.
@@ -347,8 +351,9 @@ export function statusDotClass(
 ): string {
   if (attention.has(i.session_id)) return "st-attention";
   if (i.kind === "external" || i.kind === "automated") return "st-external";
-  if (i.busy && i.awaiting !== "question") return markerToStatusClass("working");
+  // Same ordering fix as statusPriority: pending-prompt outranks busy.
   if (question.has(i.session_id)) return markerToStatusClass("question");
+  if (i.busy && i.awaiting !== "question") return markerToStatusClass("working");
   if (i.awaiting === "working") return markerToStatusClass("working");
   if (i.awaiting === "waiting") return markerToStatusClass("waiting");
   if (i.awaiting === "close_failed") return markerToStatusClass("close_failed");
