@@ -131,7 +131,7 @@ describe("renderMessage — tool_use branches to edit-window for file mutations"
   });
 });
 
-describe("renderMessage — meta-turn chips replace the old wall-of-text label", () => {
+describe("renderMessage - meta-turn chips replace the old wall-of-text label", () => {
   it("renders a peer wake as a chip carrying the label only, payload in the tooltip", () => {
     const html = renderMessage({
       kind: "system",
@@ -163,7 +163,7 @@ describe("renderMessage — meta-turn chips replace the old wall-of-text label",
   });
 });
 
-describe("renderMessage — system notes (long-note collapse)", () => {
+describe("renderMessage - system notes (long-note collapse)", () => {
   it("renders a short system note as the plain centered caption, not collapsed", () => {
     const html = renderMessage({ kind: "system", text: "Continuing session…", ts: 0 });
     expect(html).toBe('<div class="msg system">Continuing session…</div>');

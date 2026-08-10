@@ -18,7 +18,7 @@ import {
   noiseAssistantLabel,
   detectPrPreviewToken,
 } from "./chat-classifiers";
-export type { RenderedMessage, MetaTurnKind } from "./chat-classifiers";
+export type { RenderedMessage } from "./chat-classifiers";
 export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, detectHandoffToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
 
 const md = new MarkdownIt({
