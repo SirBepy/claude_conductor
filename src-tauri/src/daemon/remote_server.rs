@@ -171,9 +171,10 @@ fn pairing_file(app_data: &Path) -> PathBuf {
     app_data.join("remote-pairing.json")
 }
 
-/// Validate a one-time pairing code against remote-pairing.json.
-/// On success, deletes the file (single-use). Returns Err with reason on failure.
-pub(super) fn validate_pairing_code(code: &str, app_data: &Path) -> Result<(), &'static str> {
+/// Check a pairing code without consuming it - callers must call
+/// `consume_pairing_code` themselves, only after their own follow-up (e.g.
+/// device registration) succeeds, so a failed follow-up leaves it retryable.
+pub(super) fn check_pairing_code(code: &str, app_data: &Path) -> Result<(), &'static str> {
     let raw = std::fs::read_to_string(pairing_file(app_data))
         .map_err(|_| "no active pairing code")?;
     let v: serde_json::Value = serde_json::from_str(&raw)
@@ -193,8 +194,13 @@ pub(super) fn validate_pairing_code(code: &str, app_data: &Path) -> Result<(), &
     if sha256_hex(code) != expected_hash {
         return Err("invalid pairing code");
     }
-    let _ = std::fs::remove_file(pairing_file(app_data));
     Ok(())
+}
+
+/// Consume (delete) the one-time pairing file. Call only after the
+/// follow-up action gated by `check_pairing_code` has actually succeeded.
+pub(super) fn consume_pairing_code(app_data: &Path) {
+    let _ = std::fs::remove_file(pairing_file(app_data));
 }
 
 #[cfg(test)]
@@ -241,11 +247,15 @@ mod tests {
         let body = serde_json::json!({ "code_hash": hash, "expires_at": expires_at });
         std::fs::write(dir.path().join("remote-pairing.json"), body.to_string()).unwrap();
 
-        let result = validate_pairing_code(code, dir.path());
+        let result = check_pairing_code(code, dir.path());
         assert!(result.is_ok());
+        // Checking alone must not consume the code (deferred-delete fix).
+        assert!(dir.path().join("remote-pairing.json").exists());
+
+        consume_pairing_code(dir.path());
         assert!(!dir.path().join("remote-pairing.json").exists());
 
-        let result2 = validate_pairing_code(code, dir.path());
+        let result2 = check_pairing_code(code, dir.path());
         assert!(result2.is_err());
     }
 
@@ -258,7 +268,7 @@ mod tests {
             "expires_at": 1u64
         });
         std::fs::write(dir.path().join("remote-pairing.json"), body.to_string()).unwrap();
-        assert!(validate_pairing_code(code, dir.path()).is_err());
+        assert!(check_pairing_code(code, dir.path()).is_err());
     }
 
     #[test]
@@ -271,7 +281,7 @@ mod tests {
             .as_secs() + 120;
         let body = serde_json::json!({ "code_hash": sha256_hex(real_code), "expires_at": expires_at });
         std::fs::write(dir.path().join("remote-pairing.json"), body.to_string()).unwrap();
-        assert!(validate_pairing_code("wrongcode", dir.path()).is_err());
+        assert!(check_pairing_code("wrongcode", dir.path()).is_err());
         assert!(dir.path().join("remote-pairing.json").exists());
     }
 }
