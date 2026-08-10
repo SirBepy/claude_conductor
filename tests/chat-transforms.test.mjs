@@ -131,14 +131,46 @@ describe("renderMessage — tool_use branches to edit-window for file mutations"
   });
 });
 
-describe("renderMessage — system notes (todo: Auto-continued wall-of-text fix)", () => {
+describe("renderMessage — meta-turn chips replace the old wall-of-text label", () => {
+  it("renders a peer wake as a chip carrying the label only, payload in the tooltip", () => {
+    const html = renderMessage({
+      kind: "system",
+      text: "Peer message",
+      metaKind: "peer",
+      metaDetail: "[repo-channel] someone: " + "a".repeat(400),
+      ts: 0,
+    });
+    expect(html).toContain('class="msg system meta-marker"');
+    expect(html).toContain("Peer message");
+    expect(html).toContain('title="[repo-channel] someone:');
+    // The payload rides in the tooltip only - never as inline visible text,
+    // which is the wall-of-text being removed.
+    const visible = html.replace(/title="[^"]*"/g, "");
+    expect(visible).not.toContain("aaaa");
+  });
+
+  it("renders a retracted message as a struck placeholder, not the bubble", () => {
+    const html = renderMessage({ kind: "message", text: "tests failing", retracted: true, ts: 0 });
+    expect(html).toContain("retracted-chip");
+    expect(html).toContain("Retracted");
+    expect(html).not.toContain('class="msg assistant');
+  });
+
+  it("dims a message from an interrupted turn but keeps it readable", () => {
+    const html = renderMessage({ kind: "message", text: "committing now", dimmed: true, ts: 0 });
+    expect(html).toContain('class="msg assistant dimmed"');
+    expect(html).toContain("committing now");
+  });
+});
+
+describe("renderMessage — system notes (long-note collapse)", () => {
   it("renders a short system note as the plain centered caption, not collapsed", () => {
     const html = renderMessage({ kind: "system", text: "Continuing session…", ts: 0 });
     expect(html).toBe('<div class="msg system">Continuing session…</div>');
   });
 
   it("renders a long system note (e.g. relayed repo-channel text) as a collapsed <details>", () => {
-    const longText = "Auto-continued: " + "a".repeat(500);
+    const longText = "Relayed: " + "a".repeat(500);
     const html = renderMessage({ kind: "system", text: longText, ts: 0 });
     expect(html).toMatch(/^<details class="msg system system-long">/);
     expect(html).not.toMatch(/<details[^>]*\sopen/);
@@ -380,7 +412,7 @@ describe("eventToRenderedMessage — isMeta user turns", () => {
   // autopilot loop tick, etc.) with isMeta:true instead of wrapping it in a
   // sentinel. It must render as a system note, never a real user bubble -
   // Joe should never see what looks like a message he didn't send.
-  it("renders an isMeta:true user turn as a system message carrying the text", () => {
+  it("renders an untagged isMeta:true user turn as a Scheduled wake chip", () => {
     const msg = eventToRenderedMessage({
       type: "user_message",
       content: [{ type: "text", text: "Check on the research agent and continue once it reports back." }],
@@ -389,7 +421,22 @@ describe("eventToRenderedMessage — isMeta user turns", () => {
       is_meta: true,
     });
     expect(msg.kind).toBe("system");
-    expect(msg.text).toContain("Check on the research agent and continue once it reports back.");
+    expect(msg.text).toBe("Scheduled wake");
+    expect(msg.metaKind).toBe("wake");
+    // Payload is kept for the tooltip, but no longer part of the label.
+    expect(msg.metaDetail).toContain("Check on the research agent");
+  });
+
+  it("tags a daemon-relayed peer wake as a peer chip", () => {
+    const msg = eventToRenderedMessage({
+      type: "user_message",
+      content: [{ type: "text", text: "[repo-channel] session-b: heads up, touching pump.rs" }],
+      timestamp: 1n,
+      remote_echo: false,
+      is_meta: true,
+    });
+    expect(msg.metaKind).toBe("peer");
+    expect(msg.text).toBe("Peer message");
   });
 
   it("still renders a plain (isMeta:false) user turn as a user bubble", () => {

@@ -568,12 +568,12 @@ describe("Silent auto-continue streak merge", () => {
     renderer.handleEvent(makeTurnUsage({ outputTokens: 200 }));
 
     expect(container.querySelectorAll(".turn-footer").length).toBe(1);
-    // Turn 1 wasn't itself opened by an Auto-continued note, so there's
+    // Turn 1 wasn't itself opened by a meta-turn chip, so there's
     // nowhere to hang a counter - the retries stay fully invisible.
-    expect(container.textContent).not.toContain("Auto-continued");
+    expect(container.textContent).not.toContain("Scheduled wake");
   });
 
-  it("tags a rendered Auto-continued note with ×N when further silent retries follow", async () => {
+  it("tags a rendered meta-turn chip with ×N when further silent retries follow", async () => {
     const { renderer, container } = await createRenderer();
 
     // Turn 1 closes normally with real content.
@@ -593,7 +593,7 @@ describe("Silent auto-continue streak merge", () => {
     // Turn 1's own footer + ONE merged footer for the whole retry chain.
     expect(container.querySelectorAll(".turn-footer").length).toBe(2);
     const notes = [...container.querySelectorAll(".msg.system")].filter((el) =>
-      el.textContent.includes("Auto-continued"),
+      el.textContent.includes("Scheduled wake"),
     );
     expect(notes.length).toBe(1);
     expect(notes[0].textContent).toContain("×3");

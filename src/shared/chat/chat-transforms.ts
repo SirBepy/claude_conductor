@@ -14,12 +14,12 @@ import {
   cleanUserBlocks,
   isResumeContinuationUserMessage,
   isSilentSystemUserMessage,
-  metaTurnLabel,
+  classifyMetaTurn,
   noiseAssistantLabel,
   detectPrPreviewToken,
 } from "./chat-classifiers";
-export type { RenderedMessage } from "./chat-classifiers";
-export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, detectHandoffToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, metaTurnLabel, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
+export type { RenderedMessage, MetaTurnKind } from "./chat-classifiers";
+export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, detectHandoffToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
 
 const md = new MarkdownIt({
   html: false,
@@ -304,6 +304,10 @@ export function renderMessage(m: RenderedMessage): string {
       if (m.compactionN != null) {
         return `<div class="msg system compact-marker"><span class="compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
       }
+      if (m.metaKind) {
+        const n = m.streakCount && m.streakCount > 1 ? `<span class="compact-n">×${m.streakCount}</span>` : "";
+        return `<div class="msg system meta-marker"><span class="meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${m.metaKind === "peer" ? "ph-users-three" : m.metaKind === "fleet" ? "ph-broadcast" : "ph-alarm"}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
+      }
       return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
     case "user":
       return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;
@@ -331,7 +335,10 @@ export function renderMessage(m: RenderedMessage): string {
     // Explicit send_message call - same bubble shape as "assistant", sourced
     // from m.text instead of m.content (see chat-event-handler.ts tool_use).
     case "message":
-      return `<div class="msg assistant"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button><div class="block text">${renderMarkdown(stripStatusToken(m.text ?? ""))}</div></div>`;
+      if (m.retracted) {
+        return `<div class="msg system retracted-marker"><span class="retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
+      }
+      return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button><div class="block text">${renderMarkdown(stripStatusToken(m.text ?? ""))}</div></div>`;
     case "tool_use": {
       const view = parseFileEdit(m.tool ?? "", m.input);
       if (view) return `<div class="msg tool-use tool-use--file">${renderEditWindow(view)}</div>`;
@@ -370,7 +377,10 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       if (cleaned.length === 0) return null;
       if (isResumeContinuationUserMessage(cleaned)) return null;
       if (isSilentSystemUserMessage(cleaned)) return { kind: "system", text: "Continuing session…", ts };
-      if (ev.is_meta) return { kind: "system", text: metaTurnLabel(cleaned), ts };
+      if (ev.is_meta) {
+        const meta = classifyMetaTurn(cleaned);
+        return { kind: "system", text: meta.label, metaKind: meta.kind, metaDetail: meta.detail, ts };
+      }
       return { kind: "user", content: cleaned, ts };
     }
     case "assistant_message": {

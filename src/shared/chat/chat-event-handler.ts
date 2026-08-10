@@ -14,7 +14,8 @@ import {
   detectHandoffToken,
   isSilentSystemUserMessage,
   isResumeContinuationUserMessage,
-  metaTurnLabel,
+  classifyMetaTurn,
+  isBoundaryMessage,
   noiseAssistantLabel,
   extractAuqAnswerText,
   stripAuqAnswerBlock,
@@ -59,6 +60,41 @@ function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolea
     }
   }
   return false;
+}
+
+/** Drop a message row and its DOM element, shifting every index-bearing piece
+ *  of renderer state down past `idx`. `messages` and `messageEls` are kept in
+ *  lockstep by position, so a bare splice on one desyncs the whole pane. */
+function removeMessageAt(r: ChatRenderer, idx: number): void {
+  r.messages.splice(idx, 1);
+  if (idx < r.messageEls.length) r.messageEls.splice(idx, 1)[0]!.remove();
+  const shifted = new Set<number>();
+  for (const i of r.dirtyIndices) {
+    if (i < idx) shifted.add(i);
+    else if (i > idx) shifted.add(i - 1);
+  }
+  r.dirtyIndices = shifted;
+  if (r.streamingIndex !== null && r.streamingIndex > idx) r.streamingIndex--;
+  if (r.activeTurnStart !== null && r.activeTurnStart > idx) r.activeTurnStart--;
+  if (r.silentStreakBoundaryIndex !== null && r.silentStreakBoundaryIndex > idx) r.silentStreakBoundaryIndex--;
+}
+
+/** Resolve the 1-based `n` a revise/retract call addresses: n=1 is the newest
+ *  `kind:"message"` row. Bounded to the last two user messages so a miscount
+ *  can't rewrite something read turns ago. -1 when out of window. */
+function resolveMessageOrdinal(r: ChatRenderer, n: number): number {
+  if (!Number.isInteger(n) || n < 1) return -1;
+  let boundaries = 0;
+  let seen = 0;
+  for (let i = r.messages.length - 1; i >= 0; i--) {
+    const m = r.messages[i]!;
+    if (isBoundaryMessage(m)) {
+      if (++boundaries >= 2) return -1;
+      continue;
+    }
+    if (m.kind === "message" && !m.retracted && ++seen === n) return i;
+  }
+  return -1;
 }
 
 /** True if the open turn has produced anything the user would see - real
@@ -183,7 +219,8 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       } else if (isMeta) {
         r.silentStreakBoundaryIndex = r.messages.length;
         r.silentStreakCount = 1;
-        r.messages.push({ kind: "system", text: metaTurnLabel(cleaned), ts });
+        const meta = classifyMetaTurn(cleaned);
+        r.messages.push({ kind: "system", text: meta.label, metaKind: meta.kind, metaDetail: meta.detail, ts });
       } else if (resolvedQuestionCard) {
         // Folded into the question card above instead of a separate bubble -
         // except any held prose that rode along in the same bundle, which
@@ -225,6 +262,17 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
           // duplicate so only one resume notice shows.
           const prevMsg = r.messages[r.messages.length - 1];
           if (prevMsg?.kind === "system" && prevMsg.text === "Continuing session…") break;
+          // Everything Claude said in the cancelled turn is now suspect - it
+          // was mid-thought. Dim it on sight rather than waiting for Claude to
+          // notice; Claude clears the dim by revising or retracting the row.
+          if (noiseLabel === "Request interrupted by user" && r.activeTurnStart !== null) {
+            for (let i = r.activeTurnStart; i < r.messages.length; i++) {
+              const m = r.messages[i]!;
+              if (m.kind !== "message" || m.retracted) continue;
+              r.messages[i] = { ...m, dimmed: true };
+              r.dirtyIndices.add(i);
+            }
+          }
           r.messages.push({ kind: "system", text: noiseLabel, ts, noiseLabel: true });
           r.setTurnStatus(null);
           touched = true;
@@ -346,6 +394,24 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         touched = true;
         break;
       }
+      // Revise/retract a message Claude already sent (see resolveMessageOrdinal
+      // for the addressing scheme and its window). Edit is a silent in-place
+      // swap; retract leaves a thin struck placeholder. Either way the row
+      // clears `dimmed`, so answering an interrupt un-dims it.
+      if (ev.tool_name === "mcp__cc_conductor__update_message" && !ev.parent_tool_use_id) {
+        r._updateMsgToolUseIds.add(ev.id);
+        const input = (ev.input ?? {}) as { message?: unknown; text?: unknown; retract?: unknown };
+        const idx = resolveMessageOrdinal(r, typeof input.message === "number" ? input.message : NaN);
+        if (idx >= 0) {
+          const prev = r.messages[idx]!;
+          r.messages[idx] = input.retract === true
+            ? { ...prev, retracted: true, dimmed: false }
+            : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, dimmed: false };
+          r.dirtyIndices.add(idx);
+        }
+        touched = true;
+        break;
+      }
       // TodoWrite drives the step-checklist that replaces the visual role of
       // the <cc-progress:N/M> marker bar (chat-tools.css .todo-checklist).
       // Renders straight into the turn footer via turnFooters - never a
@@ -440,6 +506,7 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       // silently (no message row, no tool tally bump), mirroring how the AUQ
       // branch below absorbs its own result but simpler: no card to update.
       if (r._todoWriteToolUseIds.delete(ev.tool_use_id)) { touched = true; break; }
+      if (r._updateMsgToolUseIds.delete(ev.tool_use_id)) { touched = true; break; }
       // If this result is the answer to an AUQ question card, absorb it into
       // the card (update its text and dirty-flag for re-render) instead of
       // adding a raw tool_result row. The fire-and-forget PreToolUse deny
@@ -463,9 +530,13 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         break;
       }
       // Ack for a send_message call: text already came from the tool_use
-      // input, so absorb silently - no visible tool_result row.
+      // input, so absorb silently - no visible tool_result row. A REJECTED send
+      // must also drop the bubble: the row is built from the tool_use input, so
+      // without this it renders anyway and the shortened retry stacks a
+      // near-duplicate underneath it.
       const mIdx = r.messages.findIndex((m) => m.kind === "message" && m.id === ev.tool_use_id);
       if (mIdx >= 0) {
+        if (ev.is_error) removeMessageAt(r, mIdx);
         touched = true;
         break;
       }

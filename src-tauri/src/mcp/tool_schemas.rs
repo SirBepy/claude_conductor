@@ -21,6 +21,9 @@ pub const TOOL_REPORT_STATUS: &str = "report_turn_status";
 // Chat text/tool narration is hidden from Joe's view by default; this is the
 // only channel that reaches him. Unconditional, same as report_turn_status.
 pub const TOOL_SEND_MESSAGE: &str = "send_message";
+// Revise/retract an already-sent message rather than stacking a reworded
+// near-duplicate underneath it. Unconditional, same as send_message.
+pub const TOOL_UPDATE_MESSAGE: &str = "update_message";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -140,13 +143,26 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_SEND_MESSAGE,
-            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him by default - regular assistant text and tool-call narration are hidden from the chat view entirely. Call this when you have something Joe genuinely needs to see: a finished result, a blocker, a decision point, or an explicit FYI. Keep it terse - there's no need to narrate elsewhere, it won't be shown. Not for peer-session coordination, use post_message for that.",
+            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely.\n\nSEND for: the final result of a turn; a blocker or failure (lead with why); a discovery that changes the plan; a verification outcome (tests/typecheck/build); a commit or deploy landing; a short plan before starting a long task.\n\nDO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).\n\nDO NOT SEND for: step-by-step progress. Use TodoWrite instead - it renders a live step-checklist in the turn footer, which is where in-progress work belongs. Never narrate milestones as chat bubbles.\n\nA turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.\n\nFormat: short. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it.\n\nReturns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "The message to show Joe."}
                 },
                 "required": ["text"]
+            }
+        }),
+        json!({
+            "name": TOOL_UPDATE_MESSAGE,
+            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "integer", "description": "Which message, counting back from your newest (1 = newest)."},
+                    "text": {"type": "string", "description": "Replacement text. Required unless retract is true."},
+                    "retract": {"type": "boolean", "description": "Strike the message out instead of replacing its text."}
+                },
+                "required": ["message"]
             }
         }),
     ];

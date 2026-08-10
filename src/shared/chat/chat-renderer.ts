@@ -76,8 +76,8 @@ export class ChatRenderer {
   meta: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
   _cumulative: CumulativeUsage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
   activeTurnStart: number | null = null;
-  // Silent-streak merge: index of the current chain's first "Auto-continued"
-  // system note, and how many turns have folded into it so far. Null/0 when
+  // Silent-streak merge: index of the current chain's first meta-turn chip
+  // (see classifyMetaTurn), and how many turns have folded into it so far. Null/0 when
   // the open turn isn't (yet) part of a merged streak. See
   // turnProducedVisibleContent in chat-event-handler.ts.
   silentStreakBoundaryIndex: number | null = null;
@@ -103,6 +103,8 @@ export class ChatRenderer {
   // In-flight TodoWrite tool_use ids, so the paired tool_result can be
   // silently absorbed instead of rendered as a raw tool_result row.
   _todoWriteToolUseIds = new Set<string>();
+  // update_message acks: absorbed silently, same as TodoWrite's.
+  _updateMsgToolUseIds = new Set<string>();
   // Wall-clock ms when the active turn's user message arrived. Drives the
   // live elapsed display (NEVER derive elapsed from the key - it's a counter).
   activeTurnStartedAtMs = 0;

@@ -176,6 +176,13 @@ export interface RenderedMessage {
    *  chat-event-handler.ts). Renders as a trailing "×N" instead of a
    *  separate note per retry. */
   streakCount?: number;
+  /** Source of an `is_meta` note (classifyMetaTurn); renders as a chip. */
+  metaKind?: MetaTurnKind;
+  metaDetail?: string;
+  /** Retracted via `update_message`; `text` keeps the original for the tooltip. */
+  retracted?: boolean;
+  /** From a turn the user interrupted. Cleared by revising or retracting. */
+  dimmed?: boolean;
   /** Live per-question answered state for a still-pending `kind:"question"`
    *  card, mirrored from the floating prompt card's draft as the user answers
    *  it (ChatRenderer.updateQuestionProgress). Index-aligned with the parsed
@@ -303,14 +310,22 @@ export function isResumeContinuationUserMessage(cleaned: ContentBlock[]): boolea
     || /^\[request interrupted( by user)?\]$/i.test(t);
 }
 
-/** Display label for an `isMeta:true` user turn that isn't already covered by
- *  a more specific case above (compact, resume-continuation, silent-continue).
- *  Claude Code injects these for things like a fired ScheduleWakeup prompt or
- *  an autopilot loop tick - the human never typed it, so it must read as a
- *  system note carrying the actual injected text, not a real chat bubble. */
-export function metaTurnLabel(cleaned: ContentBlock[]): string {
+export type MetaTurnKind = "peer" | "fleet" | "wake";
+
+const META_KIND_LABELS: Record<MetaTurnKind, string> = {
+  peer: "Peer message",
+  fleet: "Fleet update",
+  wake: "Scheduled wake",
+};
+
+/** The daemon tags its own wakes on the way in (`[repo-channel] `, `[fleet] `);
+ *  untagged is a ScheduleWakeup/cron/loop tick. `detail` is tooltip-only. */
+export function classifyMetaTurn(cleaned: ContentBlock[]): { kind: MetaTurnKind; label: string; detail: string } {
   const text = blocksToText(cleaned).trim();
-  return text ? `Auto-continued: ${text}` : "Auto-continued";
+  const kind: MetaTurnKind = text.startsWith("[repo-channel]") ? "peer"
+    : text.startsWith("[fleet]") ? "fleet"
+    : "wake";
+  return { kind, label: META_KIND_LABELS[kind], detail: text };
 }
 
 // Assistant messages that are internal CLI noise. Returns a display label for

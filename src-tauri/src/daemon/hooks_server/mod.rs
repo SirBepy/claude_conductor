@@ -160,6 +160,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/channel/post-message", post(channel::on_post_message))
         .route("/turn/report-status", post(turn_status::on_report_status))
         .route("/messages/send", post(messages::on_send_message))
+        .route("/messages/update", post(messages::on_update_message))
         .with_state(ctx);
 
     tokio::spawn(async move {
