@@ -23,6 +23,10 @@
   // anything.
   let activeSource = null;
   let scanBtnLabel = "Scan QR code";
+  // Defense in depth: even with the scan button disabled for the whole
+  // connectViaIroh await, guard the one-time pairing code against any other
+  // caller (manual submit, init()'s auto-reconnect) racing a second attempt.
+  let irohConnectInFlight = false;
 
   function showIdleError(message) {
     idleError.textContent = message;
@@ -108,6 +112,8 @@
   // The port is fixed (src-tauri LOOPBACK_PORT) so the SPA's rc_token, which
   // lives in this origin's localStorage, survives across launches.
   async function connectViaIroh(endpointId, pairCode) {
+    if (irohConnectInFlight) return;
+    irohConnectInFlight = true;
     setConnecting(true);
     try {
       localStorage.setItem(IROH_STORAGE_KEY, endpointId);
@@ -124,6 +130,8 @@
       const errMsg = (err && err.message) ? err.message : String(err);
       setConnecting(false);
       enterFailedState(`Tunnel error: ${errMsg}`);
+    } finally {
+      irohConnectInFlight = false;
     }
   }
 
@@ -220,7 +228,7 @@
           if (iroh) {
             clearIdleError();
             activeSource = "scan";
-            connectViaIroh(iroh.iroh, iroh.pair);
+            await connectViaIroh(iroh.iroh, iroh.pair);
             return;
           }
           normalized = normalizeUrl(result.content);
@@ -257,12 +265,26 @@
     });
   }
 
+  function getStoredIroh() {
+    try {
+      return localStorage.getItem(IROH_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
   function init() {
     const stored = getStoredUrl();
     if (stored) {
       serverUrlInput.value = stored;
       activeSource = "auto";
       connect(stored);
+      return;
+    }
+    const storedIroh = getStoredIroh();
+    if (storedIroh) {
+      activeSource = "auto";
+      connectViaIroh(storedIroh, null);
     }
   }
 
