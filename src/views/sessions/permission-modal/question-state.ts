@@ -5,7 +5,12 @@
 // active-session.ts) keep working unchanged.
 
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
-import type { Answers, Question, QuestionDraft, Selection } from "./types";
+import type { Answers, OptionBadge, Question, QuestionDomain, QuestionDraft, Selection } from "./types";
+
+// Whitelists, because `extractQuestions` normalizes an untrusted payload and
+// both values are interpolated straight into a CSS var / class name downstream.
+const DOMAINS = new Set(["ux", "arch", "sec", "data", "tooling", "infra", "billing"]);
+const BADGES = new Set(["recommended", "long_term", "short_term"]);
 
 /**
  * Pure "is this question answered" check, shared between the floating card's
@@ -112,6 +117,7 @@ export function extractQuestions(input: unknown): Question[] | null {
     out.push({
       question: q.question,
       header: typeof q.header === "string" ? q.header : undefined,
+      domain: DOMAINS.has(q.domain as string) ? (q.domain as QuestionDomain) : undefined,
       multiSelect: q.multiSelect === true,
       options: Array.isArray(q.options)
         ? (q.options as unknown[]).flatMap((o) => {
@@ -121,6 +127,9 @@ export function extractQuestions(input: unknown): Question[] | null {
             return [{
               label: oo.label,
               description: typeof oo.description === "string" ? oo.description : undefined,
+              badges: Array.isArray(oo.badges)
+                ? (oo.badges as unknown[]).filter((b): b is OptionBadge => BADGES.has(b as string))
+                : undefined,
             }];
           })
         : undefined,

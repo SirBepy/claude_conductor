@@ -415,6 +415,13 @@
   line-height: 1.35;
   color: var(--color-text);
 }
+/* Fallback slot: only present when there's no context row to carry the chip.
+ * 3px nudges it onto the first line's optical centre (1.04rem/1.35 text). */
+.prompt-zone--ask .prompt-domain {
+  margin-left: auto;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
 
 .prompt-sect {
   display: flex;

@@ -106,8 +106,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   }
 
   // Zones 1+2: splitAsk() already separates the leading context from the
-  // final ask - zone 1 (dimmed context + domain chip) is omitted entirely
-  // when there's no separate ask to highlight.
+  // final ask - zone 1 (dimmed context) is omitted entirely when there's no
+  // separate ask to highlight. The domain chip rides along in whichever zone
+  // survives, so a terse one-sentence question still shows it.
   function questionZonesHtml(q: Question): string {
     const { context, ask } = splitAsk(q.question);
     const ctxZone = context
@@ -126,6 +127,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       <div class="prompt-zone prompt-zone--ask">
         <i class="ph-fill ph-question prompt-ask__icon"></i>
         <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
+        ${context ? "" : domainChipHtml(q.domain)}
       </div>
     `;
   }
