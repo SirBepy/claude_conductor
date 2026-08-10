@@ -72,6 +72,20 @@
 
 .tool-chip i { font-size: 0.85rem; }
 
+/* Meta-turn chip (peer/fleet/retry/wake) inline in the strip - static, no
+ * click/expand affordance, so it never picks up the clickable-chip cursor
+ * or highlight/running animations the tool chips use. */
+.tool-chip--meta {
+  cursor: default;
+}
+.tool-chip--meta:hover {
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+}
+.tool-chip--meta-retry i {
+  opacity: 0.55;
+}
+
 .tool-chip-label { font-weight: 600; }
 
 .tool-chip-count { opacity: 0.8; }

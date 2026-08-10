@@ -132,6 +132,13 @@ export function ensureActiveTurnFooter(r: ChatRenderer): void {
   }
 }
 
+/** True for a real user/compaction boundary OR an is_meta meta-turn row -
+ *  both mint their own footer+chip key in handleChatEvent's normal path,
+ *  so both end a "no turn open yet" leading segment. */
+function opensOwnFooter(m: RenderedMessage): boolean {
+  return isBoundaryMessage(m) || (m.kind === "system" && m.metaKind != null);
+}
+
 /**
  * Fold the loaded window's LEADING partial turn at initial load.
  *
@@ -147,14 +154,17 @@ export function ensureActiveTurnFooter(r: ChatRenderer): void {
  * arrived before any turn was open and were dropped), so the meta row stays
  * absent until pagination brings the opening message - strictly better than
  * the flat cards shown before. No-op when the window already starts at a
- * boundary (no leading partial turn) or is empty.
+ * boundary (no leading partial turn) or is empty. Stops at a meta-turn row
+ * too (opensOwnFooter), not just a real boundary: unlike a genuine mid-turn
+ * page cut, an is_meta row ALWAYS already has its own footer from the normal
+ * per-event pass - re-folding it here would mint a duplicate one.
  */
 export function foldLeadingPartialTurn(r: ChatRenderer): void {
   if (r.messages.length === 0) return;
-  if (isBoundaryMessage(r.messages[0]!)) return;
+  if (opensOwnFooter(r.messages[0]!)) return;
   let end = r.messages.length;
   for (let i = 0; i < r.messages.length; i++) {
-    if (isBoundaryMessage(r.messages[i]!)) { end = i; break; }
+    if (opensOwnFooter(r.messages[i]!)) { end = i; break; }
   }
   foldClosedRange(r, 0, end, null, 0);
 }
@@ -185,17 +195,24 @@ export function foldClosedRange(
   const totals = usage
     ? { ...usage, durationMs: usage.durationMs > 0 ? usage.durationMs : tsSpanMs }
     : null;
+  // A meta-classified row (peer/fleet/retry/wake) in range surfaces as the
+  // inline chip, not the old centered marker (now CSS-hidden) - count
+  // occurrences for a "×N" suffix, since pagination doesn't dedup consecutive
+  // meta rows into one streak the way the live path's merge does.
+  const metaRows = r.messages.slice(start, end).filter((m) => m.kind === "system" && m.metaKind);
+  const metaRow = metaRows[0];
+  let key: number | null = null;
   if (!footer) {
     // Skip the footer entirely for a turn with nothing to show (no usage,
-    // no foldable tool rows) - an empty box helps nobody.
+    // no foldable tool rows, no meta chip) - an empty box helps nobody.
     const hasToolRows = r.messages
       .slice(start, end)
       .some((m) => m.kind === "tool_use" || m.kind === "tool_result");
-    if (!totals && !hasToolRows) {
+    if (!totals && !hasToolRows && !metaRow) {
       applyTurnCollapse(r.messages, r.messageEls, start, end, null);
       return;
     }
-    const key = ++r._chipKeySeq;
+    key = ++r._chipKeySeq;
     footer = r.turnFooters.getOrCreateFooter(key);
     const anchor = r.messageEls[end] ?? null;
     if (anchor && anchor.parentElement === r.container) {
@@ -206,9 +223,20 @@ export function foldClosedRange(
       else r.container.appendChild(footer);
     }
     if (totals) r.turnFooters.settleMetaRow(key, totals);
-  } else if (totals && !footer.querySelector(".turn-meta-chips")) {
-    const key = Number(footer.dataset.turnId);
-    if (Number.isFinite(key)) r.turnFooters.settleMetaRow(key, totals);
+  } else {
+    const existingKey = Number(footer.dataset.turnId);
+    key = Number.isFinite(existingKey) ? existingKey : null;
+    if (totals && key !== null && !footer.querySelector(".turn-meta-chips")) {
+      r.turnFooters.settleMetaRow(key, totals);
+    }
+  }
+  if (metaRow?.metaKind && key !== null) {
+    r.turnFooters.ensureMetaChip(key, {
+      kind: metaRow.metaKind,
+      label: metaRow.text ?? "",
+      detail: metaRow.metaDetail ?? "",
+      streakCount: metaRows.length,
+    });
   }
   applyTurnCollapse(r.messages, r.messageEls, start, end, footer);
 }

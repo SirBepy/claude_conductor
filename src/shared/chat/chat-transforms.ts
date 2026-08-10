@@ -17,6 +17,7 @@ import {
   classifyMetaTurn,
   noiseAssistantLabel,
   detectPrPreviewToken,
+  META_KIND_ICONS,
 } from "./chat-classifiers";
 export type { RenderedMessage } from "./chat-classifiers";
 export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, detectHandoffToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
@@ -305,8 +306,11 @@ export function renderMessage(m: RenderedMessage): string {
         return `<div class="msg system compact-marker"><span class="compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
       }
       if (m.metaKind) {
+        // Bookkeeping-only row (silentStreakBoundaryIndex etc, see
+        // chat-event-handler.ts) - CSS-hidden; the visible render is the
+        // inline tool-strip chip built by TurnFooterRegistry.ensureMetaChip.
         const n = m.streakCount && m.streakCount > 1 ? `<span class="compact-n">×${m.streakCount}</span>` : "";
-        return `<div class="msg system meta-marker"><span class="meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${m.metaKind === "peer" ? "ph-users-three" : m.metaKind === "fleet" ? "ph-broadcast" : "ph-alarm"}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
+        return `<div class="msg system meta-marker"><span class="meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${META_KIND_ICONS[m.metaKind]}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
       }
       return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
     case "user":
@@ -335,6 +339,9 @@ export function renderMessage(m: RenderedMessage): string {
     // Explicit send_message call - same bubble shape as "assistant", sourced
     // from m.text instead of m.content (see chat-event-handler.ts tool_use).
     case "message":
+      if (m.failed) {
+        return `<div class="msg system failed-marker"><span class="failed-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-wifi-slash"></i>Failed to send</span></div>`;
+      }
       if (m.retracted) {
         return `<div class="msg system retracted-marker"><span class="retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
       }

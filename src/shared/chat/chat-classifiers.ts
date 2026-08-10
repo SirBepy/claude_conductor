@@ -181,6 +181,9 @@ export interface RenderedMessage {
   metaDetail?: string;
   /** Retracted via `update_message`; `text` keeps the original for the tooltip. */
   retracted?: boolean;
+  /** Set when a failed send_message's tool_result was is_error:true - stays
+   *  visible as a "failed to send" ghost instead of being deleted. */
+  failed?: boolean;
   /** From a turn the user interrupted. Cleared by revising or retracting. */
   dimmed?: boolean;
   /** Live per-question answered state for a still-pending `kind:"question"`
@@ -310,20 +313,35 @@ export function isResumeContinuationUserMessage(cleaned: ContentBlock[]): boolea
     || /^\[request interrupted( by user)?\]$/i.test(t);
 }
 
-export type MetaTurnKind = "peer" | "fleet" | "wake";
+export type MetaTurnKind = "peer" | "fleet" | "retry" | "wake";
 
 const META_KIND_LABELS: Record<MetaTurnKind, string> = {
   peer: "Peer message",
   fleet: "Fleet update",
+  retry: "Retrying",
   wake: "Scheduled wake",
 };
 
-/** The daemon tags its own wakes on the way in (`[repo-channel] `, `[fleet] `);
- *  untagged is a ScheduleWakeup/cron/loop tick. `detail` is tooltip-only. */
+/** Icon per meta-turn kind - single source shared by the (hidden) centered
+ *  marker's HTML and the inline turn-strip chip, so both stay in sync. */
+export const META_KIND_ICONS: Record<MetaTurnKind, string> = {
+  peer: "ph-users-three",
+  fleet: "ph-broadcast",
+  retry: "ph-arrow-clockwise",
+  wake: "ph-alarm",
+};
+
+// The CLI's own no-visible-output retry nudge, not a real wake. Substring
+// match tolerates the raw text's wrapping brackets.
+const RETRY_NUDGE_TEXT = "Your previous response had no visible output. Please continue and produce a user-visible response.";
+
+/** `[repo-channel]`/`[fleet]` are daemon-tagged; RETRY_NUDGE_TEXT is the CLI's
+ *  own nudge; anything else untagged is a real ScheduleWakeup/cron tick. */
 export function classifyMetaTurn(cleaned: ContentBlock[]): { kind: MetaTurnKind; label: string; detail: string } {
   const text = blocksToText(cleaned).trim();
   const kind: MetaTurnKind = text.startsWith("[repo-channel]") ? "peer"
     : text.startsWith("[fleet]") ? "fleet"
+    : text.includes(RETRY_NUDGE_TEXT) ? "retry"
     : "wake";
   return { kind, label: META_KIND_LABELS[kind], detail: text };
 }

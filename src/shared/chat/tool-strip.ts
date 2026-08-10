@@ -41,25 +41,40 @@ function makeChip(key: string, opts?: { label?: string; icon?: string; agent?: b
   return chip;
 }
 
-/**
- * Create a tool-strip + tool-strip-panel pair. When `host` is given (the
- * turn's footer) the pair is APPENDED there - after the meta chips row, so
- * the strip is the footer's second row. Without a host it falls back to the
- * legacy placement before `anchorEl` (first tool row).
- */
-function makeStripPair(anchorEl: HTMLElement, host?: HTMLElement | null): { strip: HTMLElement; panel: HTMLElement } {
+/** Shared by groupToolRange and ensureMetaChip (turn-chips.ts) so whichever
+ *  runs first for a turn creates the strip/panel pair and the other reuses
+ *  it - never two competing `.tool-strip` rows in one footer. */
+export function ensureMainStrip(host: HTMLElement): { strip: HTMLElement; panel: HTMLElement } {
+  const existingStrip = host.querySelector<HTMLElement>(":scope > .tool-strip");
+  const existingPanel = existingStrip?.nextElementSibling;
+  if (existingStrip && existingPanel instanceof HTMLElement && existingPanel.classList.contains("tool-strip-panel")) {
+    return { strip: existingStrip, panel: existingPanel };
+  }
   const strip = document.createElement("div");
   strip.className = "tool-strip";
   const panel = document.createElement("div");
   panel.className = "tool-strip-panel";
   panel.hidden = true;
-  if (host) {
-    host.appendChild(strip);
-    host.appendChild(panel);
-  } else {
-    anchorEl.parentElement?.insertBefore(strip, anchorEl);
-    strip.after(panel);
-  }
+  host.appendChild(strip);
+  host.appendChild(panel);
+  return { strip, panel };
+}
+
+/**
+ * Create a tool-strip + tool-strip-panel pair. When `host` is given (the
+ * turn's footer) the pair is reused/created there via ensureMainStrip - after
+ * the meta chips row, so the strip is the footer's second row. Without a host
+ * it falls back to the legacy placement before `anchorEl` (first tool row).
+ */
+function makeStripPair(anchorEl: HTMLElement, host?: HTMLElement | null): { strip: HTMLElement; panel: HTMLElement } {
+  if (host) return ensureMainStrip(host);
+  const strip = document.createElement("div");
+  strip.className = "tool-strip";
+  const panel = document.createElement("div");
+  panel.className = "tool-strip-panel";
+  panel.hidden = true;
+  anchorEl.parentElement?.insertBefore(strip, anchorEl);
+  strip.after(panel);
   return { strip, panel };
 }
 

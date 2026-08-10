@@ -7,6 +7,8 @@ import {
   type TodoStepStatus,
 } from "./turn-todo-checklist";
 import { STATUS_ICON } from "../status-icons";
+import { ensureMainStrip } from "./tool-strip";
+import { META_KIND_ICONS, type MetaTurnKind } from "./chat-classifiers";
 
 /**
  * Per-turn footer: a single block at the bottom of every response bundling
@@ -107,6 +109,10 @@ export interface TurnFooterState {
   /** TodoWrite-driven step checklist (chat-tools.css .todo-checklist). Null
    *  until the turn's first TodoWrite call creates it. */
   todoChecklist: TodoChecklistState | null;
+  /** Inline meta-turn chip (peer/fleet/retry/wake), static and non-clickable,
+   *  living in the same .tool-strip row as the Ran/ToolSearch chips. Null
+   *  until the turn's meta row (if any) is classified. */
+  metaChip: HTMLElement | null;
 }
 
 /** Build tooltip text for the settled token breakdown. */
@@ -165,6 +171,7 @@ export class TurnFooterRegistry {
       progressBar: null,
       progressFill: null,
       todoChecklist: null,
+      metaChip: null,
     });
     return footer;
   }
@@ -365,6 +372,34 @@ export class TurnFooterRegistry {
     const pct = m > 0 ? Math.min(100, Math.round((n / m) * 100)) : 0;
     st.progressFill.style.width = `${pct}%`;
     st.progressBar.classList.remove("turn-progress--indeterminate");
+  }
+
+  /** Calls getOrCreateFooter itself (not a bare `.get()`): chat-event-handler.ts
+   *  mints this in the SAME event as the turn's chip key, before any flush
+   *  creates footer state - skipping this made the first chip of every meta
+   *  streak silently never render. Shares its strip via ensureMainStrip. */
+  ensureMetaChip(key: TurnChipKey, meta: { kind: MetaTurnKind; label: string; detail: string; streakCount: number }): void {
+    this.getOrCreateFooter(key);
+    const st = this.turns.get(key)!;
+    const { strip } = ensureMainStrip(st.footer);
+    let chip = st.metaChip;
+    if (!chip || chip.parentElement !== strip) {
+      chip = document.createElement("span");
+      chip.appendChild(document.createElement("i"));
+      const label = document.createElement("span");
+      label.className = "tool-chip-label";
+      chip.appendChild(label);
+      const count = document.createElement("span");
+      count.className = "tool-chip-count";
+      chip.appendChild(count);
+      strip.prepend(chip);
+      st.metaChip = chip;
+    }
+    chip.className = `tool-chip tool-chip--meta tool-chip--meta-${meta.kind}`;
+    chip.title = meta.detail;
+    (chip.children[0] as HTMLElement).className = `ph ${META_KIND_ICONS[meta.kind]}`;
+    (chip.children[1] as HTMLElement).textContent = meta.label;
+    (chip.children[2] as HTMLElement).textContent = meta.streakCount > 1 ? `×${meta.streakCount}` : "";
   }
 
   /** Create the TodoWrite-driven step checklist DOM. See turn-todo-checklist.ts. */

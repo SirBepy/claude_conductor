@@ -21,6 +21,7 @@ import {
   stripAuqAnswerBlock,
   RenderedMessage,
 } from "./chat-transforms";
+import { isRawViewEnabled } from "./message-filter-pref";
 import { parseFileEdit } from "./file-edits";
 import { canonicalTool } from "./tool-meta";
 import {
@@ -62,23 +63,6 @@ function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolea
   return false;
 }
 
-/** Drop a message row and its DOM element, shifting every index-bearing piece
- *  of renderer state down past `idx`. `messages` and `messageEls` are kept in
- *  lockstep by position, so a bare splice on one desyncs the whole pane. */
-function removeMessageAt(r: ChatRenderer, idx: number): void {
-  r.messages.splice(idx, 1);
-  if (idx < r.messageEls.length) r.messageEls.splice(idx, 1)[0]!.remove();
-  const shifted = new Set<number>();
-  for (const i of r.dirtyIndices) {
-    if (i < idx) shifted.add(i);
-    else if (i > idx) shifted.add(i - 1);
-  }
-  r.dirtyIndices = shifted;
-  if (r.streamingIndex !== null && r.streamingIndex > idx) r.streamingIndex--;
-  if (r.activeTurnStart !== null && r.activeTurnStart > idx) r.activeTurnStart--;
-  if (r.silentStreakBoundaryIndex !== null && r.silentStreakBoundaryIndex > idx) r.silentStreakBoundaryIndex--;
-}
-
 /** Resolve the 1-based `n` a revise/retract call addresses: n=1 is the newest
  *  `kind:"message"` row. Bounded to the last two user messages so a miscount
  *  can't rewrite something read turns ago. -1 when out of window. */
@@ -106,9 +90,15 @@ function turnProducedVisibleContent(r: ChatRenderer): boolean {
     const m = r.messages[i]!;
     switch (m.kind) {
       case "assistant":
-        if (blocksToText(m.content ?? []).trim()) return true;
+        // Raw narration is hidden by default (chat-narration CSS, see
+        // message-filter-pref.ts) - only counts as visible when the user has
+        // the raw-chat toggle on for this session, else it wrongly blocks
+        // the silent-streak merge below.
+        if ((r.sessionId ? isRawViewEnabled(r.sessionId) : false) && blocksToText(m.content ?? []).trim()) return true;
         break;
       case "message":
+        if (!m.failed) return true;
+        break;
       case "user":
       case "question":
         return true;
@@ -186,6 +176,14 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
           const boundary = r.messages[r.silentStreakBoundaryIndex] as RenderedMessage;
           r.messages[r.silentStreakBoundaryIndex] = { ...boundary, streakCount: r.silentStreakCount };
           r.dirtyIndices.add(r.silentStreakBoundaryIndex);
+          if (boundary.metaKind) {
+            r.turnFooters.ensureMetaChip(r.activeTurnChipKey, {
+              kind: boundary.metaKind,
+              label: boundary.text ?? "",
+              detail: boundary.metaDetail ?? "",
+              streakCount: r.silentStreakCount,
+            });
+          }
         }
         r.activeTurnStart = r.messages.length;
         touched = true;
@@ -221,6 +219,14 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
         r.silentStreakCount = 1;
         const meta = classifyMetaTurn(cleaned);
         r.messages.push({ kind: "system", text: meta.label, metaKind: meta.kind, metaDetail: meta.detail, ts });
+        // Visible render is the inline chip below - this row is streak
+        // bookkeeping only now (renderMessage's meta-marker div stays hidden).
+        r.turnFooters.ensureMetaChip(r.activeTurnChipKey, {
+          kind: meta.kind,
+          label: meta.label,
+          detail: meta.detail,
+          streakCount: 1,
+        });
       } else if (resolvedQuestionCard) {
         // Folded into the question card above instead of a separate bubble -
         // except any held prose that rode along in the same bundle, which
@@ -536,7 +542,10 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
       // near-duplicate underneath it.
       const mIdx = r.messages.findIndex((m) => m.kind === "message" && m.id === ev.tool_use_id);
       if (mIdx >= 0) {
-        if (ev.is_error) removeMessageAt(r, mIdx);
+        if (ev.is_error) {
+          r.messages[mIdx] = { ...r.messages[mIdx]!, failed: true };
+          r.dirtyIndices.add(mIdx);
+        }
         touched = true;
         break;
       }
@@ -615,6 +624,10 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
             ...u,
             durationMs: u.durationMs > 0 ? u.durationMs : activeTurnTsSpan(r),
           });
+          // The turn actually completed here, not only on the next turn's
+          // start - settle any still-pulsing tool chip now (ChatEvent::SessionEnded,
+          // the other clear site, is never constructed backend-side today).
+          clearRunningHighlight(r);
         }
       }
       if (!opts.silent) {
