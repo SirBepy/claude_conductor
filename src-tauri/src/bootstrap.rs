@@ -3,6 +3,9 @@
 //! backfills). Extracted from `lib.rs` (ai_todo 515, following the earlier
 //! `run()` extraction, ai_todo 266) - pure move, no behavior change.
 
+mod migrations;
+mod watchdogs;
+
 use crate::settings::paths;
 use crate::state::AppState;
 use tauri::{Emitter, Listener, Manager};
@@ -40,7 +43,7 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     // presence of the source file is itself the idempotency gate (no
     // separate flag). The APP owns this migration for ALL datasets
     // (it controls startup order); the daemon only writes new rows.
-    run_sqlite_startup_migration(&handle);
+    migrations::run_sqlite_startup_migration(&handle);
 
     spawn_attachment_gc();
     sync_autostart_on_boot(&handle);
@@ -72,86 +75,10 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     // on a wedged event loop. See `shutdown_guard` for the full why.
     crate::shutdown_guard::arm(handle.clone());
 
-    spawn_boot_watchdog(&handle);
-    spawn_heartbeat_watchdog(&handle);
+    watchdogs::spawn_boot_watchdog(&handle);
+    watchdogs::spawn_heartbeat_watchdog(&handle);
     trigger_auto_login_if_needed(&handle);
     Ok(())
-}
-
-/// Import `history.jsonl`/`token-history.json`/`skill-usage` legacy files
-/// into SQLite, then run a one-time startup prune under the current
-/// retention policies (subsequent prunes run on each scheduler poll tick).
-fn run_sqlite_startup_migration(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    let mgr = state.db.lock().unwrap();
-    let conn = mgr.conn();
-
-    // Usage (history.jsonl -> usage_snapshots).
-    if let Ok(history_path) = paths::history_file() {
-        if history_path.exists() {
-            match crate::storage::migration::import_usage_jsonl(conn, &history_path) {
-                Ok(stats) => log::info!(
-                    "storage: imported usage history into SQLite (imported={}, skipped={})",
-                    stats.imported,
-                    stats.skipped,
-                ),
-                Err(e) => log::error!("storage: usage history import failed: {e:#}"),
-            }
-        }
-    }
-
-    // Tokens (token-history.json array -> token_records).
-    if let Ok(token_path) = paths::token_history_file() {
-        if token_path.exists() {
-            match crate::storage::migration::import_token_history_json(conn, &token_path) {
-                Ok(stats) => log::info!(
-                    "storage: imported token history into SQLite (imported={}, skipped={})",
-                    stats.imported,
-                    stats.skipped,
-                ),
-                Err(e) => log::error!("storage: token history import failed: {e:#}"),
-            }
-        }
-    }
-
-    // Skills (skill-usage/events-*.jsonl -> skill_events). The
-    // importer renames each daily file to `.bak`; a dir with no
-    // remaining events-*.jsonl is a clean no-op on later launches.
-    if let Ok(skill_dir) = paths::skill_usage_dir() {
-        let has_events = std::fs::read_dir(&skill_dir)
-            .map(|entries| {
-                entries.flatten().any(|e| {
-                    e.file_name()
-                        .to_str()
-                        .map(|n| n.starts_with("events-") && n.ends_with(".jsonl"))
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        if has_events {
-            match crate::storage::migration::import_skill_events_dir(conn, &skill_dir) {
-                Ok(stats) => log::info!(
-                    "storage: imported skill events into SQLite (imported={}, skipped={})",
-                    stats.imported,
-                    stats.skipped,
-                ),
-                Err(e) => log::error!("storage: skill events import failed: {e:#}"),
-            }
-        }
-    }
-
-    // One-time startup prune of all three datasets under the
-    // user-configured retention policies (subsequent prunes run on
-    // each scheduler poll tick).
-    let policies = state.settings.lock().unwrap().retention;
-    match crate::storage::prune_all(conn, &policies) {
-        Ok(deleted) => {
-            if deleted > 0 {
-                log::info!("storage: startup prune removed {deleted} row(s)");
-            }
-        }
-        Err(e) => log::warn!("storage: startup prune failed: {e:#}"),
-    }
 }
 
 /// Schedule chat-attachments GC: run once on startup, then every 24h.
@@ -264,7 +191,7 @@ fn spawn_token_backfill(app: &tauri::AppHandle) {
 fn spawn_hook_install_migration(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        migrate_hook_install_if_needed(&handle);
+        migrations::migrate_hook_install_if_needed(&handle);
     });
 }
 
@@ -273,7 +200,7 @@ fn spawn_hook_install_migration(app: &tauri::AppHandle) {
 fn spawn_character_backfill_migration(app: &tauri::AppHandle) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        backfill_project_characters_if_needed(&handle);
+        migrations::backfill_project_characters_if_needed(&handle);
     });
 }
 
@@ -284,81 +211,6 @@ fn spawn_character_backfill_migration(app: &tauri::AppHandle) {
 fn spawn_daemon_subscription(app: &tauri::AppHandle) {
     let app_handle = app.clone();
     tauri::async_runtime::spawn(crate::daemon_link::run_app_subscription(app_handle));
-}
-
-/// Webview boot watchdog. If `frontend_ready` IPC never fires within ~6s,
-/// force-navigate the main window back to the start URL. Covers: WebView2
-/// showing "localhost refused to connect" when the start URL was
-/// unreachable at boot (autostart racing a slow vite dev server, or just
-/// no network when something upstream needed it). Retries every 5s for up
-/// to 2 minutes.
-fn spawn_boot_watchdog(app: &tauri::AppHandle) {
-    let h = app.clone();
-    let alive = app.state::<AppState>().frontend_alive.clone();
-    tauri::async_runtime::spawn(async move {
-        use std::sync::atomic::Ordering;
-        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-        // Bound by wall-clock (~2 min from boot). The main window is
-        // lazy, so it usually does not exist here; only act when it
-        // does - an unopened dashboard is not a stalled one.
-        let mut ticks = 0u32;
-        let mut acted = false;
-        while !alive.load(Ordering::SeqCst) && ticks < 24 {
-            ticks += 1;
-            if let Some(w) = h.get_webview_window("main") {
-                acted = true;
-                let url = boot_start_url();
-                log::warn!(
-                    "main webview not ready (tick {ticks}); reloading -> {url}"
-                );
-                if let Ok(parsed) = url.parse::<tauri::Url>() {
-                    let _ = w.navigate(parsed);
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        }
-        if alive.load(Ordering::SeqCst) {
-            if acted {
-                log::info!("main webview recovered after {ticks} reload tick(s)");
-            }
-        } else if acted {
-            log::error!("main webview never reported ready; giving up");
-        }
-    });
-}
-
-/// `frontend_alive` only ever latches true, so it can't see a WebView2
-/// crash after boot; a stale heartbeat means the renderer died silently.
-/// Recovers the same way tray's "Open Dashboard" does.
-fn spawn_heartbeat_watchdog(app: &tauri::AppHandle) {
-    let h = app.clone();
-    let alive = app.state::<AppState>().frontend_alive.clone();
-    let last_ping = app.state::<AppState>().last_frontend_ping.clone();
-    tauri::async_runtime::spawn(async move {
-        use std::sync::atomic::Ordering;
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-            let Some(w) = h.get_webview_window("main") else { continue };
-            if !alive.load(Ordering::SeqCst) || !w.is_visible().unwrap_or(false) {
-                continue;
-            }
-            let stale = last_ping
-                .lock()
-                .unwrap()
-                .is_some_and(|t| t.elapsed() > std::time::Duration::from_secs(30));
-            if !stale {
-                continue;
-            }
-            let url = boot_start_url();
-            log::warn!("main webview heartbeat stale; reloading -> {url}");
-            if let Ok(parsed) = url.parse::<tauri::Url>() {
-                let _ = w.navigate(parsed);
-            }
-            if let Some(state) = h.try_state::<AppState>() {
-                *state.pending_main_nav.lock().unwrap() = Some("dashboard".to_string());
-            }
-        }
-    });
 }
 
 /// Auto-trigger login if no session on first launch.
@@ -387,94 +239,6 @@ fn trigger_auto_login_if_needed(app: &tauri::AppHandle) {
             }
         });
     }
-}
-
-/// URL the main webview was originally loaded from. Mirrors what Tauri's
-/// internal host serves for `WebviewUrl::App("index.html")` (the value in
-/// `tauri.conf.json`). Used by the boot/heartbeat watchdogs to reload the
-/// window if WebView2 ends up on an error page.
-fn boot_start_url() -> String {
-    if cfg!(dev) {
-        "http://localhost:1420/index.html".to_string()
-    } else if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
-        "tauri://localhost/index.html".to_string()
-    } else {
-        "http://tauri.localhost/index.html".to_string()
-    }
-}
-
-/// Re-writes `~/.claude/settings.json` if the user already accepted hook
-/// registration but on an older installer version. Heals the v1 entry
-/// whose `matcher: "aiusage-taskbar"` field silently suppressed every
-/// SessionStart/SessionEnd firing.
-fn migrate_hook_install_if_needed(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    let (should_run, port) = {
-        let s = state.settings.lock().unwrap();
-        let stale = s.hooks_registered
-            && s.hook_install_version < crate::hooks::CURRENT_INSTALL_VERSION;
-        (stale, s.hook_port)
-    };
-    if !should_run { return; }
-    let Some(port) = port else { return };
-    if let Err(e) = crate::hooks::install(crate::hooks::HookConfig { port }) {
-        log::warn!("hook install migration failed: {e}");
-        return;
-    }
-    let snapshot = {
-        let mut g = state.settings.lock().unwrap();
-        g.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
-        g.clone()
-    };
-    if let Ok(path) = paths::settings_file() {
-        let _ = crate::settings::save(&path, &snapshot);
-    }
-    let _ = app.emit("settings-changed", snapshot);
-    log::info!(
-        "hook install migrated to v{}",
-        crate::hooks::CURRENT_INSTALL_VERSION
-    );
-}
-
-/// Migration v2: characters are now per-SESSION, not per-project. Convert any
-/// `Avatar::Character` entries back to `Avatar::None` so projects no longer
-/// carry a character assignment. `Avatar::Emoji` and `Avatar::Image` are left
-/// untouched. Guarded by `Settings.extra["characterBackfillVersion"]` so it
-/// runs once per install.
-fn backfill_project_characters_if_needed(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    let needs = {
-        let s = state.settings.lock().unwrap();
-        let cur = s
-            .extra
-            .get("characterBackfillVersion")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        cur < crate::characters::assign::CURRENT_BACKFILL_VERSION
-    };
-    if !needs {
-        return;
-    }
-    let snapshot = {
-        let mut g = state.settings.lock().unwrap();
-        let mut cleared = 0usize;
-        for proj in &mut g.projects {
-            if matches!(proj.avatar, crate::types::Avatar::Character(_)) {
-                proj.avatar = crate::types::Avatar::None;
-                cleared += 1;
-            }
-        }
-        g.extra.insert(
-            "characterBackfillVersion".into(),
-            serde_json::json!(crate::characters::assign::CURRENT_BACKFILL_VERSION),
-        );
-        log::info!("character migration v2: cleared character avatar from {cleared} project(s)");
-        g.clone()
-    };
-    if let Ok(path) = paths::settings_file() {
-        let _ = crate::settings::save(&path, &snapshot);
-    }
-    let _ = app.emit("settings-changed", snapshot);
 }
 
 /// Background loop that polls for new releases every 6h, doing nothing or
