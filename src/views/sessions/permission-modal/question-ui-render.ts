@@ -1,24 +1,22 @@
 // The AUQ card's innerHTML-building render loop, split out of question-ui.ts
 // (ai_todo 451) to match the directory's per-concern file split. Takes its
 // dependencies explicitly instead of closing over question-ui.ts's scope.
+// HTML builders live in question-ui-templates.ts (ai_todo 600) - this file
+// keeps only the stateful render/event-wiring orchestration.
 
 import { escapeHtml } from "../../../shared/escape-html";
-import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { isElNearBottom } from "../../../shared/chat/chat-dom-renderer";
 import { renderCardShell } from "./host";
-import { splitAsk } from "./question-state";
+import {
+  collapsedHtml, extraMessageZoneHtml, nextArrowDisabled, ownZoneHtml, pagerHtml,
+  panelHtml, summaryPanelHtml,
+} from "./question-ui-templates";
+import type { QuestionRenderState } from "./question-ui-templates";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
-import { BADGE_META, DOMAIN_META } from "./types";
-import type { OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
+import type { Question, QuestionUIOpts, Selection } from "./types";
 
-/** Fields the renderer mutates that question-ui.ts also reads/writes
- *  directly (initial clamp, teardown, draft snapshots). One shared box. */
-export interface QuestionRenderState {
-  activeTab: number;
-  additionalMessage: string;
-  resizeObs: ResizeObserver | null;
-}
+export type { QuestionRenderState };
 
 export interface QuestionRenderDeps {
   host: HTMLElement;
@@ -71,198 +69,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
   };
 
-  function domainVar(domain?: QuestionDomain): string {
-    return domain ? `var(--color-domain-${domain})` : "var(--color-primary)";
-  }
-
-  function domainChipHtml(domain?: QuestionDomain): string {
-    if (!domain) return "";
-    const meta = DOMAIN_META[domain];
-    return `<span class="prompt-domain"><i class="${meta.icon}"></i>${meta.label}</span>`;
-  }
-
-  function badgesHtml(badges?: OptionBadge[]): string {
-    if (!badges?.length) return "";
-    const chips = badges.map((b) => {
-      const m = BADGE_META[b];
-      return `<span class="prompt-badge prompt-badge--${m.cls}"><i class="${m.icon}"></i>${m.label}</span>`;
-    }).join("");
-    return `<span class="prompt-badges">${chips}</span>`;
-  }
-
-  // Zones 1+2: splitAsk() already separates the leading context from the
-  // final ask - zone 1 (dimmed context) is omitted entirely when there's no
-  // separate ask to highlight. The domain chip rides along in whichever zone
-  // survives, so a terse one-sentence question still shows it.
-  function questionZonesHtml(q: Question): string {
-    const { context, ask } = splitAsk(q.question);
-    const ctxZone = context
-      ? `<div class="prompt-zone prompt-zone--ctx">
-          <span class="prompt-ctx__rail"><i class="ph ph-info"></i></span>
-          <span class="prompt-ctx__body">
-            <span class="prompt-ctx__head">
-              <span class="prompt-ctx__label">Context</span>${domainChipHtml(q.domain)}
-            </span>
-            <div class="prompt-ctx__text prompt-q__context">${renderMarkdown(context)}</div>
-          </span>
-        </div>`
-      : "";
-    return `
-      ${ctxZone}
-      <div class="prompt-zone prompt-zone--ask">
-        <i class="ph-fill ph-question prompt-ask__icon"></i>
-        <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
-        ${context ? "" : domainChipHtml(q.domain)}
-      </div>
-    `;
-  }
-
-  function optsRowsHtml(q: Question, qi: number): string {
-    return (q.options ?? []).map((opt) => {
-      const selected = q.multiSelect
-        ? (selections.get(qi) as Set<string> | undefined)?.has(opt.label) ?? false
-        : selections.get(qi) === opt.label;
-      const inputType = q.multiSelect ? "checkbox" : "radio";
-      const desc = opt.description
-        ? `<div class="prompt-opt__desc">${renderMarkdown(opt.description)}</div>`
-        : "";
-      const isNone = q.multiSelect && opt.label === noneLabel;
-      return `
-        <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}">
-          <input type="${inputType}" name="q-${qi}" data-label="${escapeHtml(opt.label)}" ${selected ? "checked" : ""} />
-          <span class="prompt-opt__body">
-            <span class="prompt-opt__top"><span class="prompt-opt__label">${escapeHtml(opt.label)}</span>${badgesHtml(opt.badges)}</span>
-            ${desc}
-          </span>
-        </label>
-      `;
-    }).join("");
-  }
-
-  function extraMessageZoneHtml(): string {
-    return `
-      <label class="prompt-q__other prompt-extra-message">
-        <span class="prompt-q__other-label">Add a message (optional):</span>
-        <div class="cc-typing-wrap">
-          <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
-          <textarea class="prompt-extra-input cc-typing-input" rows="1" placeholder="Anything else to add...">${escapeHtml(state.additionalMessage)}</textarea>
-        </div>
-      </label>
-    `;
-  }
-
-  // The per-question free-text field keeps its `.prompt-q__other` wrapper
-  // (unstyled by the new design) because slash-popup.ts anchors on
-  // `ta.closest(".prompt-q__other")` and is not this task's file to touch.
-  // Only ever rendered into the fixed `.prompt-card__answer-bar` now (via
-  // syncAnswerBar), never inline in the scrolling panel - see its doc comment.
-  function ownZoneHtml(qi: number): string {
-    const typedValue = freeText.get(qi) ?? "";
-    return `
-      <div class="prompt-sect"><i class="ph ph-pencil-simple"></i><span class="prompt-sect__label">Or answer in your own words</span><span class="prompt-sect__rule"></span></div>
-      <div class="prompt-own">
-        <label class="prompt-q__other">
-          <div class="cc-typing-wrap">
-            <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
-            <textarea class="prompt-q__other-input cc-typing-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
-          </div>
-        </label>
-      </div>
-    `;
-  }
-
-  // Every panel renders its real content always (never virtualized) - the
-  // horizontal track must show real questions on a drag/swipe, not blanks.
-  // `.is-active` marks the current one for tests and active-only logic.
-  function panelHtml(q: Question, qi: number): string {
-    const isActive = qi === state.activeTab;
-    const pickSect = q.options?.length
-      ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
-         <div class="prompt-q__opts">${optsRowsHtml(q, qi)}</div>`
-      : "";
-    const attachHtml = opts.supportsExtras && auqAttachments.attachments.length
-      ? `<div class="prompt-attachments composer-attachments"></div>`
-      : "";
-    return `
-      <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
-        ${questionZonesHtml(q)}
-        ${pickSect}
-        ${attachHtml}
-      </section>
-    `;
-  }
-
-  function summaryPanelHtml(): string {
-    const isActive = state.activeTab === questions.length;
-    const rows = questions.map((sq, qi) => {
-      const label = sq.header?.trim() || `Question ${qi + 1}`;
-      const answered = answeredAt(qi);
-      return `
-        <button type="button" class="prompt-summary-row${answered ? "" : " is-unanswered"}" data-summary-tab="${qi}">
-          <span class="prompt-summary-row__main">
-            <span class="prompt-summary-row__label">${escapeHtml(label)}</span>
-            <span class="prompt-summary-row__answer">${escapeHtml(answerPreview(qi))}</span>
-          </span>
-          <i class="ph ph-pencil-simple"></i>
-        </button>
-      `;
-    }).join("");
-
-    const attachmentsStripHtml = opts.supportsExtras && auqAttachments.attachments.length
-      ? `<div class="prompt-attachments composer-attachments"></div>`
-      : "";
-
-    return `
-      <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${questions.length}" style="--dom:var(--color-primary)">
-        <div class="prompt-summary" role="tabpanel">
-          <div class="prompt-summary__intro">Review your answers before sending:</div>
-          ${rows}
-          ${attachmentsStripHtml}
-        </div>
-      </section>
-    `;
-  }
-
-  function pagerHtml(): string {
-    const dots = Array.from({ length: totalPanels }, (_, i) => {
-      const isSummaryDot = hasSummary && i === questions.length;
-      const answered = isSummaryDot ? questions.every((_, qi) => answeredAt(qi)) : answeredAt(i);
-      const label = isSummaryDot ? "Review" : `Question ${i + 1}`;
-      return `<button type="button" class="prompt-dot${answered ? " is-answered" : ""}${i === state.activeTab ? " is-current" : ""}"
-        data-dot="${i}" aria-label="${label}, ${answered ? "answered" : "unanswered"}"></button>`;
-    }).join("");
-    const dotsHtml = `<span class="prompt-dots">${dots}</span>`;
-    if (totalPanels < 2) return `<span class="prompt-pager">${dotsHtml}</span>`;
-
-    const nextDisabled = nextArrowDisabled();
-    return `<span class="prompt-pager">
-      <button type="button" class="prompt-icon-btn" data-nav="-1" ${state.activeTab === 0 ? "disabled" : ""}><i class="ph ph-caret-left"></i></button>
-      ${dotsHtml}
-      <button type="button" class="prompt-icon-btn" data-nav="1" ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
-    </span>`;
-  }
-
-  function collapsedHtml(): string {
-    const isSummary = hasSummary && state.activeTab === questions.length;
-    const q = isSummary ? undefined : questions[state.activeTab];
-    const dom = domainVar(q?.domain);
-    const text = q ? splitAsk(q.question).ask : "Review your answers before sending";
-    return `
-      <div class="prompt-collapsed" style="--dom:${dom}">
-        <span class="prompt-collapsed__dot"></span>
-        <span class="prompt-collapsed__q">${escapeHtml(text)}</span>
-        <span class="prompt-collapsed__step">${state.activeTab + 1}/${totalPanels}</span>
-        <button type="button" class="prompt-icon-btn" data-act="restore" title="Restore"><i class="ph ph-caret-up"></i></button>
-      </div>
-    `;
-  }
-
-  // One definition of "can advance", shared by pagerHtml() and the two
-  // in-place patch paths below (free-text keystroke, step-only nav).
-  function nextArrowDisabled(): boolean {
-    return state.activeTab >= totalPanels - 1 || (state.activeTab < questions.length && !answeredAt(state.activeTab));
-  }
-
   // Moves the persistent track to the current activeTab. `instant` skips the
   // transition (full rebuild - a fresh node has no prior position to slide
   // from); the animated path is only for step-only nav on the SAME node.
@@ -288,7 +94,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const btn = host.querySelector<HTMLButtonElement>('[data-act="primary"]');
     if (!btn) return;
     const isSubmitMode = !hasSummary || state.activeTab === questions.length;
-    btn.disabled = isSubmitMode ? !questions.every((_, i) => answeredAt(i)) : nextArrowDisabled();
+    btn.disabled = isSubmitMode
+      ? !questions.every((_, i) => answeredAt(i))
+      : nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt);
     btn.innerHTML = `<i class="ph ${isSubmitMode ? opts.submitIcon : "ph-caret-right"}"></i> ${escapeHtml(isSubmitMode ? opts.submitLabel : "Next")}`;
     btn.onclick = isSubmitMode ? submit : advance;
   }
@@ -305,8 +113,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     slashPopup.destroyAll();
     const isSummary = hasSummary && state.activeTab === questions.length;
     bar.innerHTML = isSummary
-      ? (opts.supportsExtras ? extraMessageZoneHtml() : "")
-      : ownZoneHtml(state.activeTab);
+      ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
+      : ownZoneHtml(state.activeTab, freeText);
 
     const otherEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input, .prompt-extra-input");
     if (!otherEl) return;
@@ -331,7 +139,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
             ?.classList.toggle("is-answered", allAnsweredNow);
         }
         const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
-        if (nextArrow) nextArrow.disabled = nextArrowDisabled();
+        if (nextArrow) nextArrow.disabled = nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt);
         updatePrimaryButton();
         syncMessagesPadding();
         notifyDraftChange();
@@ -356,7 +164,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const prevArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="-1"]');
     if (prevArrow) prevArrow.disabled = state.activeTab === 0;
     const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
-    if (nextArrow) nextArrow.disabled = nextArrowDisabled();
+    if (nextArrow) nextArrow.disabled = nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt);
     updatePrimaryButton();
     syncAnswerBar();
     syncMessagesPadding();
@@ -390,11 +198,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     state.activeTab = Math.min(Math.max(state.activeTab, 0), totalPanels - 1);
 
     if (minimized) {
-      host.innerHTML = collapsedHtml();
+      host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels);
       host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
     } else {
-      const headerHtml = `${pagerHtml()}<span class="prompt-head__spacer"></span><button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
-      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi)).join("") + (hasSummary ? summaryPanelHtml() : "");
+      const headerHtml = `${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span><button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, auqAttachments)).join("")
+        + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
       const footerHtml = `
         <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
         <button type="button" class="btn btn-primary" data-act="primary"></button>
