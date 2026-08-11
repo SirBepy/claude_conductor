@@ -31,6 +31,14 @@ export function setThinkingTodoActivity(s: string | null): void {
   updateThinkingBar();
 }
 
+// Mirrors sessions-helpers.ts statusPriority's In Progress tier: busy = a
+// turn in flight, awaiting="working" = own background subagents/tasks still
+// running. Keeps the bar and the sidebar spinner agreeing.
+function isSessionActive(sessionId: string | null | undefined): boolean {
+  const s = sessionId ? state.sessions.find(x => x.session_id === sessionId) : undefined;
+  return !!s && (!!s.busy || s.awaiting === "working");
+}
+
 export function isCurrentSessionBusy(): boolean {
   const pending = state.pendingNewSession;
   if (pending) {
@@ -38,17 +46,17 @@ export function isCurrentSessionBusy(): boolean {
     // the pane that's actually showing the pending session.
     if (state.selectedId !== pending.placeholderId) {
       // User switched to a different session — check that session instead.
-      return !!(state.sessions.find(s => s.session_id === state.selectedId)?.busy);
+      return isSessionActive(state.selectedId);
     }
     if (pending.realId) {
-      return !!(state.sessions.find(s => s.session_id === pending.realId)?.busy);
+      return isSessionActive(pending.realId);
     }
     // First message not yet sent = draft, no work in flight.
     if (!pending.firstMessageSent) return false;
     // First message sent, awaiting realId: show busy if placeholder active.
     return true;
   }
-  return !!(state.sessions.find(s => s.session_id === state.selectedId)?.busy);
+  return isSessionActive(state.selectedId);
 }
 
 export function updateThinkingBar(): void {
