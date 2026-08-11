@@ -49,7 +49,7 @@ import { sessionEvents } from "./shared/chat/event-store";
 import { openModelEffortModal } from "./views/sessions/model-effort-modal";
 import { startNewSession } from "./views/sessions/pending-flow";
 import { setupRemoteVoicelines } from "./shared/remote-voiceline";
-import { setupNewsBadgeAndNotifications, setupScheduleMissedPopup, setupScheduledFireToast } from "./boot/notification-listeners";
+import { setupNewsBadgeAndNotifications, setupScheduleMissedPopup, setupScheduledFireToast } from "./shared/notification-listeners";
 import "./missed-panel.css";
 import type { ChatEvent } from "./types/ipc.generated";
 
