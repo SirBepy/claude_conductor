@@ -19,60 +19,8 @@ import { showView } from "../navigation";
 import type { Instance } from "../../types/ipc.generated";
 import { setCachedAccounts, listCachedAccounts, getCachedAccount, capitalize } from "../accounts-cache";
 import { formatRelativeMinutes } from "../formatters";
-import { positionDropdown } from "../../views/sessions/position-dropdown";
-import { registerMenuCloser, closeAllMenus } from "../../views/sessions/menu-registry";
+import { openRlbMenu, type RlbMenuItem } from "./rate-limit-banner-menu";
 export { getCachedAccount, capitalize } from "../accounts-cache";
-
-// Mobile (<=768px, matching composer.ts's isMobileViewport) kebab holding all
-// 3 banner actions. Reuses the session-more-menu chrome (see lightbox-more-menu.ts).
-interface RlbMenuItem {
-  icon: string;
-  label: string;
-  disabledReason?: string;
-  onClick: () => void;
-}
-
-let rlbMenu: HTMLElement | null = null;
-let rlbMenuCleanup: (() => void) | null = null;
-
-registerMenuCloser(closeRlbMenu);
-
-function closeRlbMenu(): void {
-  rlbMenu?.remove();
-  rlbMenu = null;
-  if (rlbMenuCleanup) { rlbMenuCleanup(); rlbMenuCleanup = null; }
-}
-
-function openRlbMenu(anchor: HTMLElement, items: RlbMenuItem[]): void {
-  closeAllMenus();
-  const menu = document.createElement("div");
-  menu.className = "session-more-menu";
-  document.body.appendChild(menu);
-  rlbMenu = menu;
-
-  for (const it of items) {
-    const btn = document.createElement("button");
-    btn.className = "smore-item" + (it.disabledReason ? " is-disabled" : "");
-    if (it.disabledReason) btn.title = it.disabledReason;
-    btn.innerHTML = `<i class="ph ph-${it.icon}"></i><span>${it.label}</span>`;
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (it.disabledReason) return;
-      closeRlbMenu();
-      it.onClick();
-    });
-    menu.appendChild(btn);
-  }
-
-  positionDropdown(menu, anchor, { align: "right" });
-
-  const onOutside = (ev: MouseEvent) => {
-    const t = ev.target as Node;
-    if (!menu.contains(t) && t !== anchor) closeRlbMenu();
-  };
-  setTimeout(() => document.addEventListener("click", onOutside), 0);
-  rlbMenuCleanup = () => document.removeEventListener("click", onOutside);
-}
 
 /** Live predicate for "is this session's account currently blocked by a
  * usage-limit rejection". Purely time-derived (no clear-event): a session

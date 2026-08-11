@@ -7,8 +7,8 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { getWidget } from "./widget-registry";
 import type { DashboardWidgetEntry } from "./widget-registry";
-import { positionDropdown, positionSubmenu } from "../sessions/position-dropdown";
-import { registerMenuCloser, closeAllMenus } from "../sessions/menu-registry";
+import { positionSubmenu } from "../sessions/position-dropdown";
+import { createMoreMenu } from "../sessions/more-menu-base";
 
 export interface DashMoreMenuDeps {
   isEditMode: () => boolean;
@@ -19,73 +19,61 @@ export interface DashMoreMenuDeps {
   enableWidget: (id: string) => void;
 }
 
-let dashMenu: HTMLElement | null = null;
 let dashSubmenu: HTMLElement | null = null;
-let dashMenuCleanup: (() => void) | null = null;
 
-registerMenuCloser(closeDashMenu);
+const dashMenu = createMoreMenu<[DashMoreMenuDeps]>({
+  isOutside: (target, menu, btn) =>
+    !menu.contains(target) && target !== btn && !dashSubmenu?.contains(target),
+  beforeClose: () => {
+    dashSubmenu?.remove();
+    dashSubmenu = null;
+  },
+  build: (menu, close, deps) => {
+    const editMode = deps.isEditMode();
+    const editItem = document.createElement("button");
+    editItem.className = "smore-item" + (editMode ? " is-on" : "");
+    editItem.innerHTML =
+      `<i class="ph ph-sliders-horizontal"></i>` +
+      `<span>${editMode ? "Done editing" : "Edit dashboard"}</span>` +
+      (editMode ? `<span class="smore-check-dot"></span>` : "");
+    editItem.onclick = () => { close(); deps.onToggleEditMode(); };
+    menu.appendChild(editItem);
+
+    const refreshItem = document.createElement("button");
+    refreshItem.className = "smore-item";
+    refreshItem.innerHTML = `<i class="ph ph-arrows-clockwise"></i><span>Refresh now</span>`;
+    refreshItem.onclick = () => { close(); void deps.triggerRefresh(); };
+    menu.appendChild(refreshItem);
+
+    const sep = document.createElement("div");
+    sep.className = "smore-sep";
+    menu.appendChild(sep);
+
+    const addParent = document.createElement("button");
+    addParent.className = "smore-item smore-has-sub";
+    addParent.innerHTML =
+      `<i class="ph ph-plus"></i><span>Add widget</span>` +
+      `<i class="ph ph-caret-right smore-sub-caret"></i>`;
+    addParent.onclick = (ev) => {
+      ev.stopPropagation();
+      if (dashSubmenu) { dashSubmenu.remove(); dashSubmenu = null; return; }
+      openAddWidgetSubmenu(addParent, deps);
+    };
+    menu.appendChild(addParent);
+  },
+});
 
 export function closeDashMenu(): void {
-  dashSubmenu?.remove();
-  dashSubmenu = null;
-  dashMenu?.remove();
-  dashMenu = null;
-  if (dashMenuCleanup) { dashMenuCleanup(); dashMenuCleanup = null; }
+  dashMenu.close();
 }
 
 export function onDashMoreClick(e: Event, deps: DashMoreMenuDeps): void {
   const btn = e.currentTarget as HTMLButtonElement;
-  if (dashMenu) closeDashMenu();
-  else openDashMenu(btn, deps);
+  dashMenu.toggle(btn, deps);
 }
 
 export function openDashMenu(btn: HTMLButtonElement, deps: DashMoreMenuDeps): void {
-  closeAllMenus();
-  const menu = document.createElement("div");
-  menu.className = "session-more-menu";
-  document.body.appendChild(menu);
-  dashMenu = menu;
-
-  const editMode = deps.isEditMode();
-  const editItem = document.createElement("button");
-  editItem.className = "smore-item" + (editMode ? " is-on" : "");
-  editItem.innerHTML =
-    `<i class="ph ph-sliders-horizontal"></i>` +
-    `<span>${editMode ? "Done editing" : "Edit dashboard"}</span>` +
-    (editMode ? `<span class="smore-check-dot"></span>` : "");
-  editItem.onclick = () => { closeDashMenu(); deps.onToggleEditMode(); };
-  menu.appendChild(editItem);
-
-  const refreshItem = document.createElement("button");
-  refreshItem.className = "smore-item";
-  refreshItem.innerHTML = `<i class="ph ph-arrows-clockwise"></i><span>Refresh now</span>`;
-  refreshItem.onclick = () => { closeDashMenu(); void deps.triggerRefresh(); };
-  menu.appendChild(refreshItem);
-
-  const sep = document.createElement("div");
-  sep.className = "smore-sep";
-  menu.appendChild(sep);
-
-  const addParent = document.createElement("button");
-  addParent.className = "smore-item smore-has-sub";
-  addParent.innerHTML =
-    `<i class="ph ph-plus"></i><span>Add widget</span>` +
-    `<i class="ph ph-caret-right smore-sub-caret"></i>`;
-  addParent.onclick = (ev) => {
-    ev.stopPropagation();
-    if (dashSubmenu) { dashSubmenu.remove(); dashSubmenu = null; return; }
-    openAddWidgetSubmenu(addParent, deps);
-  };
-  menu.appendChild(addParent);
-
-  positionDropdown(menu, btn);
-
-  const onOutside = (ev: MouseEvent) => {
-    const t = ev.target as Node;
-    if (!menu.contains(t) && t !== btn && !dashSubmenu?.contains(t)) closeDashMenu();
-  };
-  setTimeout(() => document.addEventListener("click", onOutside), 0);
-  dashMenuCleanup = () => document.removeEventListener("click", onOutside);
+  dashMenu.open(btn, deps);
 }
 
 /** Add-widget submenu: every registry widget is listed; already-added ones are

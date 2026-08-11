@@ -15,7 +15,8 @@
 // relocated into this menu; they stay dormant in #view-more-host.
 
 import type { TerminalAction } from "../../types/ipc.generated";
-import { positionDropdown, positionSubmenu } from "./position-dropdown";
+import { positionSubmenu } from "./position-dropdown";
+import { createMoreMenu } from "./more-menu-base";
 import {
   armOrToggleWhenDone,
   cancelWhenDone,
@@ -23,7 +24,6 @@ import {
   whenDoneMenuHtml,
   whenDoneAction,
 } from "./when-done";
-import { registerMenuCloser, closeAllMenus } from "./menu-registry";
 import { state } from "./state";
 import {
   buildChatMenuBlock,
@@ -34,32 +34,11 @@ import { loadHiddenSessions } from "./sessions-helpers";
 import { isAutoAccept } from "./permission-modal";
 import { invoke } from "../../shared/ipc";
 
-let _viewMenu: HTMLElement | null = null;
-let _viewMenuCleanup: (() => void) | null = null;
 let _whenDoneSubMenu: HTMLElement | null = null;
 
 function closeWhenDoneSub(): void {
   _whenDoneSubMenu?.remove();
   _whenDoneSubMenu = null;
-}
-
-/** Move the relocated host controls back, then drop the menu DOM + listeners. */
-export function closeViewMoreMenu(): void {
-  closeWhenDoneSub();
-  closeActiveChatSubmenu();
-  const host = document.getElementById("view-more-host");
-  if (_viewMenu && host) {
-    // Move the New chat + History + Preview-toggle buttons back (sort no longer relocated).
-    const newBtn = _viewMenu.querySelector("#newSessionBtn");
-    const histBtn = _viewMenu.querySelector("#historyBtn");
-    const previewBtn = _viewMenu.querySelector("#previewToggleBtn");
-    if (newBtn) host.appendChild(newBtn);
-    if (histBtn) host.appendChild(histBtn);
-    if (previewBtn) host.appendChild(previewBtn);
-  }
-  _viewMenu?.remove();
-  _viewMenu = null;
-  if (_viewMenuCleanup) { _viewMenuCleanup(); _viewMenuCleanup = null; }
 }
 
 export function refreshViewMoreIndicator(): void {
@@ -69,8 +48,9 @@ export function refreshViewMoreIndicator(): void {
 
 /** Rebuild the when-done parent row text in an open menu (countdown changes). */
 export function rerenderViewMenuProtocol(): void {
-  if (!_viewMenu) return;
-  const parentRow = _viewMenu.querySelector<HTMLElement>("[data-when-done-parent]");
+  const menu = viewMenu.element();
+  if (!menu) return;
+  const parentRow = menu.querySelector<HTMLElement>("[data-when-done-parent]");
   if (!parentRow) return;
   _updateWhenDoneParent(parentRow);
 }
@@ -102,175 +82,173 @@ function _updateWhenDoneParent(el: HTMLElement): void {
   }
 }
 
-function openViewMoreMenu(btn: HTMLButtonElement): void {
-  closeAllMenus();
-  const host = document.getElementById("view-more-host");
+const viewMenu = createMoreMenu<[]>({
+  className: "session-more-menu view-more-menu",
+  isOutside: (target, menu, btn) =>
+    !menu.contains(target) && target !== btn && !_whenDoneSubMenu?.contains(target),
+  /** Move the relocated host controls back before the menu DOM is dropped. */
+  beforeClose: (menu) => {
+    closeWhenDoneSub();
+    closeActiveChatSubmenu();
+    const host = document.getElementById("view-more-host");
+    if (host) {
+      const newBtn = menu.querySelector("#newSessionBtn");
+      const histBtn = menu.querySelector("#historyBtn");
+      const previewBtn = menu.querySelector("#previewToggleBtn");
+      if (newBtn) host.appendChild(newBtn);
+      if (histBtn) host.appendChild(histBtn);
+      if (previewBtn) host.appendChild(previewBtn);
+    }
+  },
+  build: (menu, close) => {
+    const host = document.getElementById("view-more-host");
 
-  const menu = document.createElement("div");
-  menu.className = "session-more-menu view-more-menu";
-  document.body.appendChild(menu);
-  _viewMenu = menu;
+    const genLabel = document.createElement("span");
+    genLabel.className = "smore-section-label";
+    genLabel.textContent = "General";
+    menu.appendChild(genLabel);
 
-  // ── GENERAL section label ──────────────────────────────────────────────────
-  const genLabel = document.createElement("span");
-  genLabel.className = "smore-section-label";
-  genLabel.textContent = "General";
-  menu.appendChild(genLabel);
-
-  // Relocate New chat + History + Preview-toggle buttons (but NOT the sort select).
-  if (host) {
-    const newBtn = host.querySelector("#newSessionBtn");
-    const histBtn = host.querySelector("#historyBtn");
-    const previewBtn = host.querySelector("#previewToggleBtn");
-    if (newBtn) menu.appendChild(newBtn);
-    if (histBtn) menu.appendChild(histBtn);
-    if (previewBtn) menu.appendChild(previewBtn);
-  }
-
-  // Scheduled: opens the standalone calendar window (open_schedule_window
-  // builds/focuses the `session-schedule` window). Works from either window
-  // since it's a plain backend command, not an in-window route.
-  const schedBtn = document.createElement("button");
-  schedBtn.className = "smore-item";
-  schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
-  schedBtn.addEventListener("click", () => {
-    void invoke("open_schedule_window").catch((err) =>
-      console.error("[view-more] open_schedule_window failed", err),
-    );
-    closeViewMoreMenu();
-  });
-  menu.appendChild(schedBtn);
-
-  // ── When done ▸ submenu parent ─────────────────────────────────────────────
-  const whenDoneParent = document.createElement("button");
-  whenDoneParent.className = "smore-item smore-has-sub" + (whenDoneArmed() ? " is-on" : "");
-  whenDoneParent.dataset.whenDoneParent = "1";
-  whenDoneParent.innerHTML =
-    `<i class="ph ph-moon-stars"></i>` +
-    `<span class="when-done-parent-text">${_whenDoneParentText()}</span>` +
-    `<i class="ph ph-caret-right smore-sub-caret"></i>` +
-    (whenDoneArmed() ? `<span class="smore-check-dot"></span>` : "");
-  menu.appendChild(whenDoneParent);
-
-  whenDoneParent.addEventListener("click", (e) => {
-    e.stopPropagation();
-
-    if (_whenDoneSubMenu) {
-      closeWhenDoneSub();
-      return;
+    // Relocate New chat + History + Preview-toggle buttons (but NOT the sort select).
+    if (host) {
+      const newBtn = host.querySelector("#newSessionBtn");
+      const histBtn = host.querySelector("#historyBtn");
+      const previewBtn = host.querySelector("#previewToggleBtn");
+      if (newBtn) menu.appendChild(newBtn);
+      if (histBtn) menu.appendChild(histBtn);
+      if (previewBtn) menu.appendChild(previewBtn);
     }
 
-    const sub = document.createElement("div");
-    sub.className = "session-more-menu smore-submenu";
-    sub.innerHTML = whenDoneMenuHtml();
-    document.body.appendChild(sub);
-    _whenDoneSubMenu = sub;
+    // Scheduled: opens the standalone calendar window (open_schedule_window
+    // builds/focuses the `session-schedule` window). Works from either window
+    // since it's a plain backend command, not an in-window route.
+    const schedBtn = document.createElement("button");
+    schedBtn.className = "smore-item";
+    schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
+    schedBtn.addEventListener("click", () => {
+      void invoke("open_schedule_window").catch((err) =>
+        console.error("[view-more] open_schedule_window failed", err),
+      );
+      close();
+    });
+    menu.appendChild(schedBtn);
 
-    // Position the submenu to the right (or left if no room) of the parent item.
-    positionSubmenu(sub, whenDoneParent);
+    // ── When done ▸ submenu parent ─────────────────────────────────────────
+    const whenDoneParent = document.createElement("button");
+    whenDoneParent.className = "smore-item smore-has-sub" + (whenDoneArmed() ? " is-on" : "");
+    whenDoneParent.dataset.whenDoneParent = "1";
+    whenDoneParent.innerHTML =
+      `<i class="ph ph-moon-stars"></i>` +
+      `<span class="when-done-parent-text">${_whenDoneParentText()}</span>` +
+      `<i class="ph ph-caret-right smore-sub-caret"></i>` +
+      (whenDoneArmed() ? `<span class="smore-check-dot"></span>` : "");
+    menu.appendChild(whenDoneParent);
 
-    sub.addEventListener("click", (ev) => {
-      const target = ev.target as HTMLElement;
-      const cancelBtn = target.closest("[data-when-done-cancel]");
-      if (cancelBtn) {
-        void cancelWhenDone();
+    whenDoneParent.addEventListener("click", (e) => {
+      e.stopPropagation();
+
+      if (_whenDoneSubMenu) {
         closeWhenDoneSub();
         return;
       }
-      const toggle = target.closest<HTMLButtonElement>("[data-when-done]");
-      if (toggle) {
-        const action = toggle.dataset.whenDone as TerminalAction;
-        void armOrToggleWhenDone(action);
-        closeWhenDoneSub();
+
+      const sub = document.createElement("div");
+      sub.className = "session-more-menu smore-submenu";
+      sub.innerHTML = whenDoneMenuHtml();
+      document.body.appendChild(sub);
+      _whenDoneSubMenu = sub;
+
+      // Position the submenu to the right (or left if no room) of the parent item.
+      positionSubmenu(sub, whenDoneParent);
+
+      sub.addEventListener("click", (ev) => {
+        const target = ev.target as HTMLElement;
+        const cancelBtn = target.closest("[data-when-done-cancel]");
+        if (cancelBtn) {
+          void cancelWhenDone();
+          closeWhenDoneSub();
+          return;
+        }
+        const toggle = target.closest<HTMLButtonElement>("[data-when-done]");
+        if (toggle) {
+          const action = toggle.dataset.whenDone as TerminalAction;
+          void armOrToggleWhenDone(action);
+          closeWhenDoneSub();
+        }
+      });
+    });
+
+    // ── "This chat" section: only when a session or draft is active ─────────
+    const hasLive = !!state.selectedId;
+    const hasDraft = !!state.pendingNewSession;
+
+    if (hasLive || hasDraft) {
+      const sep = document.createElement("div");
+      sep.className = "smore-sep";
+      menu.appendChild(sep);
+
+      const chatLabel = document.createElement("span");
+      chatLabel.className = "smore-section-label";
+      chatLabel.textContent = "This Chat";
+      menu.appendChild(chatLabel);
+
+      let ctx: ChatMenuCtx;
+      if (hasLive && state.selectedId) {
+        const sid = state.selectedId;
+        const sess = state.sessions.find(s => s.session_id === sid);
+        const hiddenSet = loadHiddenSessions();
+        ctx = {
+          kind: "live",
+          sessionId: sid,
+          cwd: sess?.cwd ? String(sess.cwd) : null,
+          pid: sess?.pid ?? null,
+          readOnly: sess?.kind === "external" || sess?.kind === "automated",
+          autoAcceptOn: isAutoAccept(sid),
+          isHidden: hiddenSet.has(sid),
+          isJarvis: sess?.jarvis === true,
+          isFrozen: sess?.frozen === true,
+          viewChanges: state.activeChatActions?.viewChanges,
+          onAfterAction: () => close(),
+        };
+      } else {
+        // draft
+        const pending = state.pendingNewSession!;
+        ctx = {
+          kind: "draft",
+          sessionId: pending.realId,
+          cwd: pending.projectPath,
+          pid: null,
+          readOnly: false,
+          autoAcceptOn: false,
+          isHidden: false,
+          isJarvis: false,
+          isFrozen: false,
+          onDiscard: () => {
+            close();
+            // Signal sessions.ts to handle draft discard.
+            document.dispatchEvent(new CustomEvent("discard-pending-draft"));
+          },
+        };
+      }
+
+      const block = buildChatMenuBlock(ctx, close);
+      menu.appendChild(block);
+    }
+
+    // Close the menu when New chat or History is clicked (their own listeners fire first).
+    menu.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("#newSessionBtn") || target.closest("#historyBtn") || target.closest("#previewToggleBtn")) {
+        close();
       }
     });
-  });
+  },
+});
 
-  // ── "This chat" section: only when a session or draft is active ───────────
-  const hasLive = !!state.selectedId;
-  const hasDraft = !!state.pendingNewSession;
-
-  if (hasLive || hasDraft) {
-    const sep = document.createElement("div");
-    sep.className = "smore-sep";
-    menu.appendChild(sep);
-
-    const chatLabel = document.createElement("span");
-    chatLabel.className = "smore-section-label";
-    chatLabel.textContent = "This Chat";
-    menu.appendChild(chatLabel);
-
-    let ctx: ChatMenuCtx;
-    if (hasLive && state.selectedId) {
-      const sid = state.selectedId;
-      const sess = state.sessions.find(s => s.session_id === sid);
-      const hiddenSet = loadHiddenSessions();
-      ctx = {
-        kind: "live",
-        sessionId: sid,
-        cwd: sess?.cwd ? String(sess.cwd) : null,
-        pid: sess?.pid ?? null,
-        readOnly: sess?.kind === "external" || sess?.kind === "automated",
-        autoAcceptOn: isAutoAccept(sid),
-        isHidden: hiddenSet.has(sid),
-        isJarvis: sess?.jarvis === true,
-        isFrozen: sess?.frozen === true,
-        viewChanges: state.activeChatActions?.viewChanges,
-        onAfterAction: () => closeViewMoreMenu(),
-      };
-    } else {
-      // draft
-      const pending = state.pendingNewSession!;
-      ctx = {
-        kind: "draft",
-        sessionId: pending.realId,
-        cwd: pending.projectPath,
-        pid: null,
-        readOnly: false,
-        autoAcceptOn: false,
-        isHidden: false,
-        isJarvis: false,
-        isFrozen: false,
-        onDiscard: () => {
-          closeViewMoreMenu();
-          // Signal sessions.ts to handle draft discard.
-          document.dispatchEvent(new CustomEvent("discard-pending-draft"));
-        },
-      };
-    }
-
-    const block = buildChatMenuBlock(ctx, closeViewMoreMenu);
-    menu.appendChild(block);
-  }
-
-  positionDropdown(menu, btn);
-
-  // Close the menu when New chat or History is clicked (their own listeners fire first).
-  menu.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    if (target.closest("#newSessionBtn") || target.closest("#historyBtn") || target.closest("#previewToggleBtn")) {
-      closeViewMoreMenu();
-    }
-  });
-
-  const onOutside = (e: MouseEvent) => {
-    const target = e.target as Node;
-    if (
-      !menu.contains(target) &&
-      target !== btn &&
-      !_whenDoneSubMenu?.contains(target)
-    ) {
-      closeViewMoreMenu();
-    }
-  };
-  setTimeout(() => document.addEventListener("click", onOutside), 0);
-  _viewMenuCleanup = () => document.removeEventListener("click", onOutside);
+export function closeViewMoreMenu(): void {
+  viewMenu.close();
 }
 
 /** Toggle the menu open/closed. */
 export function toggleViewMoreMenu(btn: HTMLButtonElement): void {
-  if (_viewMenu) closeViewMoreMenu();
-  else openViewMoreMenu(btn);
+  viewMenu.toggle(btn);
 }
-
-registerMenuCloser(closeViewMoreMenu);
