@@ -5,12 +5,8 @@
 // active-session.ts) keep working unchanged.
 
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
+import { BADGES, DOMAINS } from "./types";
 import type { Answers, OptionBadge, Question, QuestionDomain, QuestionDraft, Selection } from "./types";
-
-// Whitelists, because `extractQuestions` normalizes an untrusted payload and
-// both values are interpolated straight into a CSS var / class name downstream.
-const DOMAINS = new Set(["ux", "arch", "sec", "data", "tooling", "infra", "billing"]);
-const BADGES = new Set(["recommended", "long_term", "short_term"]);
 
 /**
  * Pure "is this question answered" check, shared between the floating card's

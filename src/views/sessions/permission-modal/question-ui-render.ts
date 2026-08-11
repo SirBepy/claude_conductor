@@ -9,23 +9,8 @@ import { renderCardShell } from "./host";
 import { splitAsk } from "./question-state";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
+import { BADGE_META, DOMAIN_META } from "./types";
 import type { OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
-
-const DOMAIN_META: Record<QuestionDomain, { icon: string; label: string }> = {
-  ux: { icon: "ph-fill ph-paint-brush-broad", label: "User experience" },
-  arch: { icon: "ph-fill ph-blueprint", label: "Architecture" },
-  sec: { icon: "ph-fill ph-shield-check", label: "Security" },
-  data: { icon: "ph-fill ph-database", label: "Data" },
-  tooling: { icon: "ph-fill ph-wrench", label: "Tooling" },
-  infra: { icon: "ph-fill ph-stack", label: "Infrastructure" },
-  billing: { icon: "ph-fill ph-currency-circle-dollar", label: "Billing" },
-};
-
-const BADGE_META: Record<OptionBadge, { cls: string; icon: string; label: string }> = {
-  recommended: { cls: "rec", icon: "ph-fill ph-star", label: "Recommended" },
-  long_term: { cls: "long", icon: "ph-fill ph-tree", label: "Long-term best" },
-  short_term: { cls: "short", icon: "ph-fill ph-lightning", label: "Short-term best" },
-};
 
 /** Fields the renderer mutates that question-ui.ts also reads/writes
  *  directly (initial clamp, teardown, draft snapshots). One shared box. */

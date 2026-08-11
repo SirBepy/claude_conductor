@@ -5,7 +5,18 @@ export interface PermissionRequestedPayload {
   session_id?: string;
 }
 
-export type OptionBadge = "recommended" | "long_term" | "short_term";
+// Single source (todo 586): the domain/badge value lists live only here, as
+// record keys - the unions, and the runtime whitelists below, both derive
+// from these instead of hand-duplicating the same strings.
+export const BADGE_META = {
+  recommended: { cls: "rec", icon: "ph-fill ph-star", label: "Recommended" },
+  long_term: { cls: "long", icon: "ph-fill ph-tree", label: "Long-term best" },
+  short_term: { cls: "short", icon: "ph-fill ph-lightning", label: "Short-term best" },
+} satisfies Record<string, { cls: string; icon: string; label: string }>;
+
+export type OptionBadge = keyof typeof BADGE_META;
+
+export const BADGES = new Set(Object.keys(BADGE_META));
 
 export interface QuestionOption {
   label: string;
@@ -14,7 +25,19 @@ export interface QuestionOption {
   badges?: OptionBadge[];
 }
 
-export type QuestionDomain = "ux" | "arch" | "sec" | "data" | "tooling" | "infra" | "billing";
+export const DOMAIN_META = {
+  ux: { icon: "ph-fill ph-paint-brush-broad", label: "User experience" },
+  arch: { icon: "ph-fill ph-blueprint", label: "Architecture" },
+  sec: { icon: "ph-fill ph-shield-check", label: "Security" },
+  data: { icon: "ph-fill ph-database", label: "Data" },
+  tooling: { icon: "ph-fill ph-wrench", label: "Tooling" },
+  infra: { icon: "ph-fill ph-stack", label: "Infrastructure" },
+  billing: { icon: "ph-fill ph-currency-circle-dollar", label: "Billing" },
+} satisfies Record<string, { icon: string; label: string }>;
+
+export type QuestionDomain = keyof typeof DOMAIN_META;
+
+export const DOMAINS = new Set(Object.keys(DOMAIN_META));
 
 export interface Question {
   question: string;
