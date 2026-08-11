@@ -6,7 +6,10 @@ import { mountView } from "./harness";
 // implementation only rendered the ACTIVE panel's zone content, leaving every
 // other `.prompt-panel` empty. This must fail if virtualization is
 // reintroduced: mount 3 questions and assert every panel's own question text
-// and own answer input exist WITHOUT any navigation away from panel 0.
+// exists WITHOUT any navigation away from panel 0. The free-text answer input
+// itself lives outside the panels now, in the fixed `.prompt-card__answer-bar`
+// (one shared field synced to the active tab - see question-ui-render.ts's
+// syncAnswerBar), so it's asserted separately, not per panel.
 
 test("mounting a 3-question card renders every panel's real content, not just the active one", async ({ page }) => {
   await mountView(page);
@@ -41,7 +44,6 @@ test("mounting a 3-question card renders every panel's real content, not just th
   for (let i = 0; i < expectedTexts.length; i++) {
     const panel = panels.nth(i);
     await expect(panel.locator(".prompt-q__text")).toHaveText(expectedTexts[i]);
-    await expect(panel.locator(".prompt-q__other-input")).toBeAttached();
   }
 
   // Only panel 0 is active - panels 1 and 2 are real content the user never
@@ -49,4 +51,7 @@ test("mounting a 3-question card renders every panel's real content, not just th
   await expect(panels.nth(0)).toHaveClass(/is-active/);
   await expect(panels.nth(1)).not.toHaveClass(/is-active/);
   await expect(panels.nth(2)).not.toHaveClass(/is-active/);
+
+  // The answer bar mirrors panel 0 (the active one) without any navigation.
+  await expect(card.locator(".prompt-card__answer-bar .prompt-q__other-input")).toBeAttached();
 });

@@ -104,16 +104,18 @@ test.describe("view-harness / AUQ slash-suggestion popup", () => {
     const nextArrow = card.locator('.prompt-pager [data-nav="1"]');
     // Answer both questions via free text, no option clicks, then reach the
     // summary/review screen where the extra-message field lives.
-    await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("A");
+    await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A");
     await nextArrow.click();
-    await card.locator(".prompt-panel.is-active .prompt-q__other-input").fill("done");
+    await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("done");
     await nextArrow.click();
 
     const extraInput = card.locator(".prompt-extra-input");
     await expect(extraInput).toBeVisible();
     await extraInput.fill("remember to /cl");
 
-    const popup = card.locator(".prompt-panel.is-active .caret-popup");
+    // The popup mounts as a child of its textarea's `.prompt-q__other` anchor,
+    // which now lives in the fixed answer bar, not the (summary) panel.
+    const popup = card.locator(".prompt-card__answer-bar .caret-popup");
     await expect(popup).toBeVisible();
     await popup.locator(".row").click();
     await expect(extraInput).toHaveValue("remember to /close ");

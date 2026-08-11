@@ -154,9 +154,23 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     }).join("");
   }
 
+  function extraMessageZoneHtml(): string {
+    return `
+      <label class="prompt-q__other prompt-extra-message">
+        <span class="prompt-q__other-label">Add a message (optional):</span>
+        <div class="cc-typing-wrap">
+          <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
+          <textarea class="prompt-extra-input cc-typing-input" rows="1" placeholder="Anything else to add...">${escapeHtml(state.additionalMessage)}</textarea>
+        </div>
+      </label>
+    `;
+  }
+
   // The per-question free-text field keeps its `.prompt-q__other` wrapper
   // (unstyled by the new design) because slash-popup.ts anchors on
   // `ta.closest(".prompt-q__other")` and is not this task's file to touch.
+  // Only ever rendered into the fixed `.prompt-card__answer-bar` now (via
+  // syncAnswerBar), never inline in the scrolling panel - see its doc comment.
   function ownZoneHtml(qi: number): string {
     const typedValue = freeText.get(qi) ?? "";
     return `
@@ -188,7 +202,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
         ${questionZonesHtml(q)}
         ${pickSect}
-        ${ownZoneHtml(qi)}
         ${attachHtml}
       </section>
     `;
@@ -213,24 +226,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const attachmentsStripHtml = opts.supportsExtras && auqAttachments.attachments.length
       ? `<div class="prompt-attachments composer-attachments"></div>`
       : "";
-    const extraMessageHtml = opts.supportsExtras
-      ? `
-        <label class="prompt-q__other prompt-extra-message">
-          <span class="prompt-q__other-label">Add a message (optional):</span>
-          <div class="cc-typing-wrap">
-            <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
-            <textarea class="prompt-extra-input cc-typing-input" rows="1" placeholder="Anything else to add...">${escapeHtml(state.additionalMessage)}</textarea>
-          </div>
-        </label>
-      `
-      : "";
 
     return `
       <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${questions.length}" style="--dom:var(--color-primary)">
         <div class="prompt-summary" role="tabpanel">
           <div class="prompt-summary__intro">Review your answers before sending:</div>
           ${rows}
-          ${extraMessageHtml}
           ${attachmentsStripHtml}
         </div>
       </section>
@@ -307,6 +308,55 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     btn.onclick = isSubmitMode ? submit : advance;
   }
 
+  // Fills + wires the fixed answer bar for the active tab: one shared
+  // textarea swapped on every tab change instead of one per panel, so the
+  // input stays pinned below the scrolling content. Called by both render()
+  // and the no-rebuild stepTab() path.
+  function syncAnswerBar(): void {
+    const bar = host.querySelector<HTMLElement>(".prompt-card__answer-bar");
+    if (!bar) return;
+    // Old textarea's popup/auto-resize core is about to be discarded along
+    // with the DOM node below - drop its document-level listeners first.
+    slashPopup.destroyAll();
+    const isSummary = hasSummary && state.activeTab === questions.length;
+    bar.innerHTML = isSummary
+      ? (opts.supportsExtras ? extraMessageZoneHtml() : "")
+      : ownZoneHtml(state.activeTab);
+
+    const otherEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input, .prompt-extra-input");
+    if (!otherEl) return;
+    const highlightEl = otherEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
+    slashPopup.attach(otherEl, highlightEl);
+
+    if (isSummary) {
+      otherEl.addEventListener("input", () => {
+        state.additionalMessage = otherEl.value;
+        syncMessagesPadding();
+        notifyDraftChange();
+      });
+    } else {
+      const qi = state.activeTab;
+      otherEl.addEventListener("input", () => {
+        freeText.set(qi, otherEl.value);
+        host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${qi}"]`)
+          ?.classList.toggle("is-answered", answeredAt(qi));
+        if (hasSummary) {
+          const allAnsweredNow = questions.every((_, i) => answeredAt(i));
+          host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${questions.length}"]`)
+            ?.classList.toggle("is-answered", allAnsweredNow);
+        }
+        const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
+        if (nextArrow) nextArrow.disabled = nextArrowDisabled();
+        updatePrimaryButton();
+        syncMessagesPadding();
+        notifyDraftChange();
+      });
+    }
+    if (opts.supportsExtras) {
+      otherEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
+    }
+  }
+
   // Step-only nav: patches the track/dots/arrows/footer in place instead of
   // rebuilding host.innerHTML, so .prompt-track's transition has a real "from"
   // position to slide from. Only for moves that don't change any panel's
@@ -323,6 +373,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
     if (nextArrow) nextArrow.disabled = nextArrowDisabled();
     updatePrimaryButton();
+    syncAnswerBar();
     syncMessagesPadding();
     notifyDraftChange();
   }
@@ -433,55 +484,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         });
       });
 
-      questions.forEach((_, qi) => {
-        const panelEl = host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${qi}"]`);
-        const otherEl = panelEl?.querySelector<HTMLTextAreaElement>(".prompt-q__other-input") ?? null;
-        if (!otherEl) return;
-        const otherHighlightEl = otherEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
-        // Attach the core (auto-resize + highlight + popup) BEFORE this input
-        // listener below, so its own "input" listener - registered first -
-        // resizes the textarea before syncMessagesPadding() measures the card.
-        slashPopup.attach(otherEl, otherHighlightEl);
-        otherEl.addEventListener("input", () => {
-          // Deliberately NOT a full render(): rebuilding the DOM on every
-          // keystroke would destroy and recreate this textarea, dropping
-          // focus and cursor position mid-type.
-          freeText.set(qi, otherEl.value);
-          const dotEl = host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${qi}"]`);
-          if (dotEl) dotEl.classList.toggle("is-answered", answeredAt(qi));
-          if (hasSummary) {
-            const allAnsweredNow = questions.every((_, i) => answeredAt(i));
-            const summaryDot = host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${questions.length}"]`);
-            if (summaryDot) summaryDot.classList.toggle("is-answered", allAnsweredNow);
-          }
-          if (qi === state.activeTab) {
-            const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
-            if (nextArrow) nextArrow.disabled = nextArrowDisabled();
-            updatePrimaryButton();
-          }
-          // The textarea auto-resized, but .prompt-track's height stays pinned to
-          // the last tab change, so re-measure it or the grown box just scrolls.
-          positionTrack(true);
-          syncMessagesPadding();
-          notifyDraftChange();
-        });
-        if (opts.supportsExtras) {
-          otherEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
-        }
-      });
-
-      const extraEl = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
-      if (extraEl) {
-        const extraHighlightEl = extraEl.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
-        slashPopup.attach(extraEl, extraHighlightEl);
-        extraEl.addEventListener("input", () => {
-          state.additionalMessage = extraEl.value;
-          positionTrack(true);
-          syncMessagesPadding();
-          notifyDraftChange();
-        });
-        extraEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
-      }
+      syncAnswerBar();
 
       host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
 
