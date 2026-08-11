@@ -522,6 +522,7 @@ mod tests {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         }
     }
 

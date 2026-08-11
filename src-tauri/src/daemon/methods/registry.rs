@@ -159,6 +159,7 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
                     return Ok(json!({"ok": false}));
                 }
                 state.registry.set_frozen(&p.session_id, false);
+                state.registry.set_auto_frozen(&p.session_id, false);
                 if state.registry.take_frozen_needs_continue(&p.session_id) {
                     if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
                         &state, &p.session_id, "continue", false,

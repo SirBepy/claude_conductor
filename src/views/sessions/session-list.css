@@ -252,6 +252,36 @@
   line-height: 1.6;
 }
 
+/* Frozen-chat chip (todo: /freeze-on-rate-limit) - same shape as
+   .autopilot-badge, icy blue so it never collides with the rate-limit red or
+   the accent purple. --auto (rate-limit auto-freeze) reuses the indigo
+   "waiting" hue (--chat-state-waiting) since it IS a waiting state; plain
+   (manual "Freeze chat") stays a neutral sky blue. */
+.frozen-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 5px;
+  padding: 0 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+  background: color-mix(in srgb, #7dd3fc 12%, transparent);
+  border: 1px solid color-mix(in srgb, #7dd3fc 35%, transparent);
+  border-radius: 3px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  line-height: 1.6;
+}
+.frozen-badge i { font-size: 0.75em; }
+.frozen-badge--auto {
+  color: var(--chat-state-waiting);
+  background: color-mix(in srgb, var(--chat-state-waiting) 12%, transparent);
+  border-color: color-mix(in srgb, var(--chat-state-waiting) 35%, transparent);
+}
+
 .session-scheduled-badge {
   display: inline-flex;
   align-items: center;

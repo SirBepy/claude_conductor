@@ -183,6 +183,12 @@ pub struct Instance {
     #[serde(skip, default)]
     #[ts(skip)]
     pub frozen_needs_continue: bool,
+    /// True when `frozen` was set by `handle_rate_limit_rejection` (out of
+    /// quota) rather than the user clicking "Freeze chat". Distinguishes the
+    /// two so the queued rate-limit resume (`schedule_fire::fire_message`) may
+    /// clear ONLY a freeze it caused itself, never a deliberate manual one.
+    #[serde(default)]
+    pub auto_frozen: bool,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -339,6 +345,7 @@ mod tests {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         };
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();

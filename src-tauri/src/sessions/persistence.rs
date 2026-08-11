@@ -59,6 +59,11 @@ pub struct PersistedInteractive {
     /// so unfreeze still auto-continues after a daemon restart in between.
     #[serde(default)]
     pub frozen_needs_continue: bool,
+    /// Whether `frozen` was set by a rate-limit rejection rather than the
+    /// user - see `Instance::auto_frozen`. Must survive a restart so the
+    /// queued resume still knows it may clear the freeze itself.
+    #[serde(default)]
+    pub auto_frozen: bool,
 }
 
 /// Best-effort write of every live Interactive entry to `path`. Failures
@@ -97,6 +102,7 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             worker_of: i.worker_of,
             frozen: i.frozen,
             frozen_needs_continue: i.frozen_needs_continue,
+            auto_frozen: i.auto_frozen,
         })
         .collect();
     if snapshot.is_empty() && load_snapshot(path).len() > 1 {
@@ -201,6 +207,9 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.frozen_needs_continue {
             registry.set_frozen_needs_continue(&s.session_id, true);
         }
+        if s.auto_frozen {
+            registry.set_auto_frozen(&s.session_id, true);
+        }
         // A /close rename written since the last save lives in the transcript,
         // so a fresh override beats everything; then the AI milestone title (so
         // a chat that re-titled itself keeps that name across a restart); then
@@ -263,6 +272,7 @@ mod tests {
             worker_of: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         }];
         let added = populate_registry(&registry, sessions);
         assert_eq!(added, 0);

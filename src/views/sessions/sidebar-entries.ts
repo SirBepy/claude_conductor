@@ -170,8 +170,8 @@ export function buildSidebarEntries(
   // also show the clock badge.
   const scheduledIds = new Set(scheduledCountMap.keys());
 
-  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote", "Frozen"];
-  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []], [8, []]]);
+  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote"];
+  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []]]);
   for (const s of sorted) {
     segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds))!.push(s);
   }
@@ -218,9 +218,7 @@ export function buildSidebarEntries(
 
   // "Waiting" (5) renders right after "In Progress" (2). "Closing" (3) alone
   // defers past Hidden below - see the renderSeg(3) call at the bottom.
-  // "Frozen" (8) renders last of the main run, just above Hidden - these are
-  // deliberately parked chats, not actively in flight like anything above.
-  for (const seg of [0, 1, 2, 5, 4, 6, 7, 8]) {
+  for (const seg of [0, 1, 2, 5, 4, 6, 7]) {
     renderSeg(seg);
   }
 

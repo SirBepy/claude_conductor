@@ -7,6 +7,7 @@ import type { SessionSort } from "./sessions-helpers";
 import type { PendingNewSession, ParkedDraft } from "./state";
 import {
   drainChipHtml,
+  frozenBadgeHtml,
   leadingVisual,
   scheduledBadgeHtml,
   scheduledCornerHtml,
@@ -99,12 +100,14 @@ function buildRowOptions(args: {
   dotClass: string;
   isRemote: boolean;
   isAutopilot: boolean;
+  frozen: boolean;
+  autoFrozen: boolean;
   scheduledCount: number | undefined;
   model: string;
   drainChip: string;
 }): RowOptions {
   const tipAttr = args.isPortrait ? "data-tip" : "title";
-  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}`;
+  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}`;
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
@@ -180,6 +183,8 @@ export function sessionRowOptions(
     dotClass,
     isRemote: !!s.is_remote,
     isAutopilot: !!s.autopilot,
+    frozen: !!s.frozen,
+    autoFrozen: !!s.auto_frozen,
     scheduledCount: ctx.scheduledCountMap.get(s.session_id),
     model: s.model,
     drainChip,
@@ -218,6 +223,8 @@ export function draftRowOptions(
     dotClass: IDLE_DOT_CLASS,
     isRemote: !!pending.config.remote,
     isAutopilot: false,
+    frozen: false,
+    autoFrozen: false,
     scheduledCount: undefined,
     model: pending.config.model,
     drainChip: "",
@@ -245,6 +252,8 @@ export function parkedRowOptions(d: ParkedDraft, isPortrait: boolean, rowClass: 
     dotClass: IDLE_DOT_CLASS,
     isRemote: !!d.config.remote,
     isAutopilot: false,
+    frozen: false,
+    autoFrozen: false,
     scheduledCount: undefined,
     model: d.config.model,
     drainChip: "",

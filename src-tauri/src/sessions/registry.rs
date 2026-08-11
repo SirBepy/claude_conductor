@@ -186,6 +186,7 @@ impl Registry {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         };
         guard.insert(input.session_id, instance);
         (project_id, true)
@@ -249,6 +250,7 @@ impl Registry {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         };
         guard.insert(session_id.to_string(), instance);
         project_id
@@ -302,6 +304,7 @@ impl Registry {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         };
         guard.insert(session_id.to_string(), instance);
     }
@@ -389,6 +392,17 @@ impl Registry {
             }
         }
         false
+    }
+
+    /// Flip `auto_frozen` - set alongside `set_frozen(true)` by
+    /// `handle_rate_limit_rejection`, cleared alongside `set_frozen(false)` by
+    /// both `unfreeze_session` and the rate-limit resume's own auto-unfreeze
+    /// (`schedule_fire::fire_message`). No-op if session is unknown.
+    pub fn set_auto_frozen(&self, session_id: &str, auto_frozen: bool) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.auto_frozen = auto_frozen;
+        }
     }
 
     /// Record whether the session had a turn/prompt in flight at freeze time
@@ -1213,6 +1227,23 @@ mod tests {
     fn set_frozen_unknown_session_is_noop() {
         let registry = Registry::new();
         assert!(!registry.set_frozen("ghost", true));
+    }
+
+    #[test]
+    fn set_auto_frozen_is_independent_of_frozen() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-11T00:00:00Z");
+        assert!(!registry.get("s").unwrap().auto_frozen);
+        registry.set_frozen("s", true);
+        registry.set_auto_frozen("s", true);
+        assert!(registry.get("s").unwrap().auto_frozen);
+        // Clearing `frozen` alone (e.g. a manual unfreeze) must not implicitly
+        // clear `auto_frozen` - callers own that pairing explicitly.
+        registry.set_frozen("s", false);
+        assert!(registry.get("s").unwrap().auto_frozen, "set_frozen must not touch auto_frozen");
+        registry.set_auto_frozen("s", false);
+        assert!(!registry.get("s").unwrap().auto_frozen);
     }
 
     #[test]

@@ -84,6 +84,12 @@ async fn fire_message(
     {
         return Err(format!("{RATE_LIMITED_PREFIX}{resets_at}"));
     }
+    // Clear an auto-freeze now that the window's clear - never a manual one
+    // (`auto_frozen` only pairs with it) - or spawn_session's guard below refuses.
+    if state.registry.get(session_id).map(|i| i.frozen && i.auto_frozen).unwrap_or(false) {
+        state.registry.set_frozen(session_id, false);
+        state.registry.set_auto_frozen(session_id, false);
+    }
     // Mirror jarvis_fleet::send_to_session's guard: the daemon has no turn
     // queue, so writing into a mid-turn child's stdin is undefined behavior.
     if state.registry.get(session_id).map(|i| i.busy).unwrap_or(false) {
@@ -222,6 +228,40 @@ mod tests {
 
         let err = result.expect_err("a busy target must refuse, not write into its stdin");
         assert!(err.contains("mid-turn"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn fire_message_clears_a_rate_limit_auto_freeze_before_respawning() {
+        // The respawn itself still fails in this test env, but never at
+        // spawn_session's frozen guard - the auto-unfreeze below runs first.
+        let state = test_state();
+        state.registry.upsert_interactive("sess-1", std::path::Path::new("."), "proj-1", "2026-08-11T00:00:00Z");
+        state.registry.set_frozen("sess-1", true);
+        state.registry.set_auto_frozen("sess-1", true);
+
+        let result = fire_message(&state, "sess-1", "Z:\\does\\not\\exist", "hi").await;
+
+        let err = result.expect_err("the respawn attempt must still fail in this test env");
+        assert!(!err.contains("frozen"), "auto-freeze must be cleared before the respawn attempt: {err}");
+        let inst = state.registry.get("sess-1").unwrap();
+        assert!(!inst.frozen, "auto-freeze must be cleared once the resume is ready to fire");
+        assert!(!inst.auto_frozen);
+    }
+
+    #[tokio::test]
+    async fn fire_message_refuses_a_manually_frozen_target_without_clearing_it() {
+        // frozen=true, auto_frozen=false: a manual freeze - never auto-cleared,
+        // regardless of which guard actually trips the failure.
+        let state = test_state();
+        state.registry.upsert_interactive("sess-1", std::path::Path::new("."), "proj-1", "2026-08-11T00:00:00Z");
+        state.registry.set_frozen("sess-1", true);
+
+        let result = fire_message(&state, "sess-1", ".", "hi").await;
+
+        assert!(result.is_err(), "a manually frozen target must not succeed");
+        let inst = state.registry.get("sess-1").unwrap();
+        assert!(inst.frozen, "a manual freeze must survive a fire attempt");
+        assert!(!inst.auto_frozen, "auto_frozen must stay false for a manual freeze");
     }
 
     // --- ScheduledKind::JarvisHygiene fire path ---

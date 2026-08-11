@@ -61,6 +61,14 @@ export function scheduledBadgeHtml(count: number | undefined): string {
   return `<span class="session-scheduled-badge" title="${title}"><i class="ph ph-clock-countdown"></i>${countHtml}</span>`;
 }
 
+/** Frozen-chat marker (styled like `.autopilot-badge`) - "Frozen" for a
+ *  manual Chat-menu freeze, "Auto-frozen" for a rate-limit auto-freeze. */
+export function frozenBadgeHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "title" | "data-tip"): string {
+  if (!frozen) return "";
+  const title = autoFrozen ? "Frozen - waiting for your usage limit to reset" : "Frozen - click Unfreeze chat to resume";
+  return `<span class="frozen-badge${autoFrozen ? " frozen-badge--auto" : ""}" ${tipAttr}="${title}"><i class="ph-bold ph-snowflake"></i>${autoFrozen ? "Auto-frozen" : "Frozen"}</span>`;
+}
+
 /** Wrap an avatar strip + optional project badge in the positioning wrapper. */
 function avatarWrap(avatarHtml: string, badge: string): string {
   return `<span class="session-avatar-wrap">${avatarHtml}${badge}</span>`;

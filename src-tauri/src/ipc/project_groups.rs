@@ -400,6 +400,7 @@ mod build_groups_tests {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         };
         let groups = build_groups(&[], &[], &[inst], 1714389600000);
         assert_eq!(groups.len(), 1);
@@ -439,6 +440,7 @@ mod build_groups_tests {
             rate_limited_type: None,
             frozen: false,
             frozen_needs_continue: false,
+            auto_frozen: false,
         };
         let groups = build_groups(&[], &[], &[inst], 0);
         assert_eq!(groups.len(), 0, "ended instances must not appear");

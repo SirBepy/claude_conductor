@@ -202,6 +202,13 @@ describe("sessionSegment", () => {
   it("idle with no verdict is Done", () => {
     expect(seg(makeInstance({ busy: false }))).toBe(1);
   });
+  it("frozen is not its own segment - falls through to its real state (rendered as a chip instead)", () => {
+    expect(seg(makeInstance({ busy: false, frozen: true }))).toBe(1);
+  });
+  it("a rate-limit auto-freeze still segments as Waiting for Reset", () => {
+    const i = makeInstance({ session_id: "fr", frozen: true, auto_frozen: true });
+    expect(seg(i, { rateLimited: new Set(["fr"]) })).toBe(4);
+  });
 });
 
 describe("statusDotClass", () => {

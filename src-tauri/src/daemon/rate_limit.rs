@@ -10,7 +10,7 @@ use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
 
-/// The CLI rejected a turn because the account is out of quota. Two effects:
+/// The CLI rejected a turn because the account is out of quota. Three effects:
 ///
 /// 1. Mark EVERY live session on that account blocked. One account's window
 ///    blocks all of its chats at once, even the idle ones, and the UI has to
@@ -18,6 +18,8 @@ use std::sync::Arc;
 /// 2. Queue a resume for THIS session only. It is the one whose turn died
 ///    mid-flight; the account's other sessions are merely unable to start, and
 ///    have no interrupted work to replay.
+/// 3. Auto-freeze THIS session (`auto_frozen`) until the queued resume above
+///    actually fires and sends - never needs a manual unfreeze.
 ///
 /// The resume is a real persisted `ScheduledItem`, not an in-process timer, so
 /// it survives an app restart and shows up in the schedule view where the user
@@ -81,6 +83,14 @@ pub(crate) fn handle_rate_limit_rejection(
         None,
     );
     crate::sessions::scheduled_items::upsert(item);
+
+    // Skip if already frozen - never stomps a manual freeze's own
+    // `frozen_needs_continue` bookkeeping (the resume above replaces it).
+    if !state.registry.get(&session.session_id).map(|i| i.frozen).unwrap_or(false) {
+        state.registry.set_frozen(&session.session_id, true);
+        state.registry.set_auto_frozen(&session.session_id, true);
+    }
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     state.notifier.publish(
         "instances_changed",
