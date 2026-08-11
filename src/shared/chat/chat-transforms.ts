@@ -291,12 +291,18 @@ export function renderBlocks(blocks: ContentBlock[], breaks = false, fileChips =
 // a toggle instead of a giant wall of centered italic text.
 const SYSTEM_NOTE_PREVIEW_LEN = 160;
 
+/** Slices `text` to `maxLen` (reserving 2 chars for the appended "…") once it
+ * exceeds that length; returns it unchanged otherwise. */
+export function truncateForSummary(text: string, maxLen: number): string {
+  return text.length > maxLen ? text.slice(0, maxLen - 2) + "…" : text;
+}
+
 function renderSystemNote(text: string): string {
   if (text.length <= SYSTEM_NOTE_PREVIEW_LEN) {
     return `<div class="msg system">${escapeHtml(text)}</div>`;
   }
-  const preview = escapeHtml(text.slice(0, SYSTEM_NOTE_PREVIEW_LEN).trimEnd());
-  return `<details class="msg system system-long"><summary>${preview}…</summary><div class="system-note-full">${escapeHtml(text)}</div></details>`;
+  const preview = escapeHtml(truncateForSummary(text, SYSTEM_NOTE_PREVIEW_LEN));
+  return `<details class="msg system system-long"><summary>${preview}</summary><div class="system-note-full">${escapeHtml(text)}</div></details>`;
 }
 
 export function renderMessage(m: RenderedMessage): string {

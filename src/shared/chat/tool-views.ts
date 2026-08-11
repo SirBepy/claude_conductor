@@ -11,7 +11,7 @@
 // + history views), so the body-appended statusline popover styles it too.
 
 import type { RenderedMessage } from "./chat-transforms";
-import { renderMarkdown } from "./chat-transforms";
+import { renderMarkdown, truncateForSummary } from "./chat-transforms";
 import { canonicalTool } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
 import { basename } from "../path-utils";
@@ -219,7 +219,7 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
     return `<div class="tool-qa">${header}<div class="tool-qa-q">${renderMarkdown(q.question)}</div>${answerHtml}</div>`;
   }).join("");
   const firstLabel = questions[0]?.header || questions[0]?.question || "";
-  const truncated = firstLabel.length > 55 ? firstLabel.slice(0, 53) + "…" : firstLabel;
+  const truncated = truncateForSummary(firstLabel, 55);
   const badge = questions.length > 1 ? `<span class="question-card-badge">${questions.length}</span>` : "";
   const summary = `<summary class="question-card-summary"><i class="ph ph-chat-circle-dots"></i><span class="question-card-label">${escapeHtml(truncated)}</span>${badge}<i class="ph ph-caret-down question-card-chevron"></i></summary>`;
   return `<details class="question-card-collapsible" open>${summary}${cards}</details>`;
