@@ -14,6 +14,7 @@ import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
 import { AUQ_ANSWER_SENTINEL } from "./chat-transforms";
 import { loadAllHeld, saveAllHeld } from "./held-messages-persistence";
+import { HeldMessagesRender } from "./held-messages-render";
 import "./held-messages.css";
 
 export interface HeldItem {
@@ -82,11 +83,10 @@ export function bundleHeld(items: ContentBlock[][], draftBlocks: ContentBlock[] 
 export class HeldMessages {
   private map: Map<string, HeldItem[]>;
   private attached: HeldAttach | null = null;
-  private expanded = false;
   private deferredSid: string | null = null;
   private deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
-  private closeDropdownOutside: ((e: MouseEvent) => void) | null = null;
+  private render = new HeldMessagesRender(this);
 
   // Rehydrate any queue a prior reload would otherwise have dropped. nextId
   // continues past the highest restored id so a fresh stage() can't collide.
@@ -103,10 +103,9 @@ export class HeldMessages {
 
   /** Point the controller at the freshly-mounted active pane. */
   attach(opts: HeldAttach): void {
-    this.detachOutsideClick();
+    this.render.reset();
     this.clearDeferRetry();
     this.attached = opts;
-    this.expanded = false;
     opts.onChange();
   }
 
@@ -124,7 +123,7 @@ export class HeldMessages {
     this.persist();
     if (this.attached && this.attached.sessionId === from) {
       this.attached.sessionId = to;
-      this.renderChip();
+      this.render.renderChip();
     }
   }
 
@@ -132,10 +131,16 @@ export class HeldMessages {
     return this.attached?.sessionId ?? null;
   }
 
-  private itemsForActive(): HeldItem[] {
+  /** HeldRenderHost. */
+  itemsForActive(): HeldItem[] {
     const sid = this.sid;
     if (!sid) return [];
     return this.map.get(sid) ?? [];
+  }
+
+  /** HeldRenderHost. */
+  getAttached(): HeldAttach | null {
+    return this.attached;
   }
 
   hasItemsForActive(): boolean {
@@ -173,8 +178,7 @@ export class HeldMessages {
     this.persist();
     this.deferredSid = null;
     this.clearDeferRetry();
-    this.expanded = false;
-    this.closeDropdown();
+    this.render.reset();
     if (includeDraft && draftBlocks.length) a.clearComposer();
     a.onChange();
     if (bundle.length === 0) return;
@@ -206,8 +210,7 @@ export class HeldMessages {
     this.persist();
     this.deferredSid = null;
     this.clearDeferRetry();
-    this.expanded = false;
-    this.closeDropdown();
+    this.render.reset();
     a.onChange();
     if (bundle.length === 0) return;
     await a.send(bundle);
@@ -301,103 +304,25 @@ export class HeldMessages {
     }
   }
 
-  // ---- rendering ---------------------------------------------------------
+  // ---- rendering (delegated to HeldMessagesRender; this class is its host) -
 
   renderChip(): void {
-    const a = this.attached;
-    if (!a || !a.chipSlot) return;
-    const items = this.itemsForActive();
-    if (items.length === 0) {
-      a.chipSlot.innerHTML = "";
-      this.closeDropdown();
-      return;
-    }
-    const n = items.length;
-    a.chipSlot.innerHTML = `
-      <button class="held-chip" type="button" title="Show unsent messages">
-        <span class="held-count">${n}</span> ${n === 1 ? "message" : "messages"} waiting
-        <i class="ph ph-caret-${this.expanded ? "up" : "down"}"></i>
-      </button>
-      <button class="held-send-now" type="button">Send now</button>
-    `;
-    a.chipSlot.querySelector<HTMLButtonElement>(".held-chip")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.expanded = !this.expanded;
-      this.renderChip();
-    });
-    a.chipSlot.querySelector<HTMLButtonElement>(".held-send-now")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void this.sendNow();
-    });
-    if (this.expanded) this.renderDropdown();
-    else this.closeDropdown();
+    this.render.renderChip();
   }
 
-  private renderDropdown(): void {
-    const a = this.attached;
-    if (!a || !a.anchor) return;
-    this.closeDropdown();
-    const items = this.itemsForActive();
-    const dd = document.createElement("div");
-    dd.className = "held-dropdown";
-    const title = document.createElement("div");
-    title.className = "held-dropdown-title";
-    title.textContent = "Unsent — these send as one message";
-    dd.appendChild(title);
-    const rows = document.createElement("div");
-    rows.className = "held-rows";
-    for (const item of items) {
-      const row = document.createElement("div");
-      row.className = "held-row";
-      row.contentEditable = "true";
-      row.spellcheck = false;
-      row.textContent = blocksToText(item.blocks);
-      row.addEventListener("input", () => {
-        // Update the model live (no re-render -> caret stays put).
-        item.blocks = [{ type: "text", text: row.textContent ?? "" }];
-        this.persist();
-      });
-      row.addEventListener("blur", () => {
-        if (!(row.textContent ?? "").trim()) this.removeItem(item.id);
-      });
-      rows.appendChild(row);
-    }
-    dd.appendChild(rows);
-    a.anchor.appendChild(dd);
-    // Outside-click closes (mirrors the statusbar popover pattern). Deferred
-    // bind so the opening click isn't immediately caught.
-    this.closeDropdownOutside = (e: MouseEvent) => {
-      if (!a.anchor.contains(e.target as Node)) {
-        this.expanded = false;
-        this.renderChip();
-      }
-    };
-    setTimeout(() => {
-      if (this.closeDropdownOutside) document.addEventListener("click", this.closeDropdownOutside);
-    }, 0);
-  }
-
-  private removeItem(id: number): void {
+  /** HeldRenderHost: drop one staged item (dropdown row emptied/removed). */
+  removeItem(id: number): void {
     const sid = this.sid;
     if (!sid) return;
-    const list = this.map.get(sid) ?? [];
-    const next = list.filter((i) => i.id !== id);
-    this.map.set(sid, next);
+    this.map.set(sid, (this.map.get(sid) ?? []).filter((i) => i.id !== id));
     this.persist();
-    if (next.length === 0) this.expanded = false;
-    this.renderChip();
-    this.attached?.onChange();
   }
 
-  private closeDropdown(): void {
-    this.attached?.anchor?.querySelector(".held-dropdown")?.remove();
-    this.detachOutsideClick();
-  }
-
-  private detachOutsideClick(): void {
-    if (this.closeDropdownOutside) {
-      document.removeEventListener("click", this.closeDropdownOutside);
-      this.closeDropdownOutside = null;
-    }
+  /** HeldRenderHost: live text edit of a staged row (caret-preserving, no re-render). */
+  editItem(id: number, text: string): void {
+    const item = this.itemsForActive().find((i) => i.id === id);
+    if (!item) return;
+    item.blocks = [{ type: "text", text }];
+    this.persist();
   }
 }
