@@ -22,12 +22,11 @@
 
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
-import { escapeHtml } from "../../shared/escape-html";
-import { formatRelativeMinutes } from "../../shared/formatters";
 import type { ChatEvent, ContentBlock, PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { wireResizeHandle, MIN_WIDTH, MAX_WIDTH } from "./preview-panel-resize";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
+import { renderPvRail, wirePvHistoryClicks, type PvHistoryDeps } from "./preview-panel-history";
 import { ComposerCore } from "../../shared/chat/composer-core/core";
 import { SlashProvider } from "../../shared/chat/caret-popup/providers/slash";
 import type { SuggestProvider } from "../../shared/chat/caret-popup/types";
@@ -105,19 +104,6 @@ function saveWidth(px: number): void {
   } catch {
     /* ignore */
   }
-}
-
-/** Past-tense relative time ("just now" / "5m ago" / "2h 3m ago") built on
- * the shared forward-looking h/m breakdown (`formatRelativeMinutes`) so the
- * math stays in one place; only the wording differs for a past timestamp. */
-function agoText(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 60_000) return "just now";
-  return formatRelativeMinutes(ms).replace(/^in /, "") + " ago";
-}
-
-function sourceDotClass(source: string): string {
-  return source === "terminal" ? "pv-dot-terminal" : "pv-dot-chat";
 }
 
 class PreviewPanel implements PreviewController {
@@ -598,28 +584,22 @@ class PreviewPanel implements PreviewController {
   }
 
   private renderRail(): void {
-    const rail = this.root.querySelector<HTMLElement>("[data-rail]");
-    if (!rail) return;
-    if (this.snapshots.length === 0) {
-      rail.innerHTML = `<div class="pv-rail-lbl">History</div>`;
-      return;
-    }
-    const liveId = this.snapshots[0]?.id;
-    const rows = this.snapshots.map((s) => {
-      const sel = this.selected?.id === s.id ? " sel" : "";
-      const liveTag = s.id === liveId ? ` <span class="pv-live-tag">LIVE</span>` : "";
-      return `<div class="pv-snap${sel}" data-id="${escapeHtml(s.id)}">
-        <div class="pv-snap-title">${escapeHtml(s.title || s.slug)}${liveTag}</div>
-        <div class="pv-snap-meta"><span class="pv-dot ${sourceDotClass(s.source)}"></span>v${s.version} · ${agoText(s.created_at)}</div>
-      </div>`;
-    }).join("");
-    rail.innerHTML = `<div class="pv-rail-lbl">History</div>${rows}`;
+    renderPvRail(this.root, this.pvHistoryDeps());
+  }
+
+  private pvHistoryDeps(): PvHistoryDeps {
+    return {
+      getSnapshots: () => this.snapshots,
+      getSelectedId: () => this.selected?.id,
+      onSelect: (id) => void this.selectSnapshot(id),
+    };
   }
 
   // ── Event wiring ─────────────────────────────────────────────────────────
 
   private wireEvents(): void {
     this.root.addEventListener("click", (e) => this.onClick(e));
+    wirePvHistoryClicks(this.root, this.pvHistoryDeps());
   }
 
   private onClick(e: MouseEvent): void {
@@ -632,12 +612,6 @@ class PreviewPanel implements PreviewController {
         case "close": this.close(); return;
         default: return;
       }
-    }
-
-    const snap = target.closest<HTMLElement>(".pv-snap");
-    if (snap?.dataset.id) {
-      void this.selectSnapshot(snap.dataset.id);
-      return;
     }
   }
 }
