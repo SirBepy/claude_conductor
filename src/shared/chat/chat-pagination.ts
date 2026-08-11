@@ -44,6 +44,25 @@ function mergeTotals(a: TurnUsageTotals | null, b: TurnUsageTotals | null): Turn
   };
 }
 
+/** Resolve an update_message ordinal within a single prepend batch only (see
+ *  prependEvents' updateMsgIds pass). Mirrors chat-event-handler.ts's
+ *  resolveMessageOrdinal but scoped to `batch` instead of the full history -
+ *  cross-batch revision ordering is out of scope (todo 590). */
+function resolveOrdinalInBatch(batch: RenderedMessage[], n: number): number {
+  if (!Number.isInteger(n) || n < 1) return -1;
+  let boundaries = 0;
+  let seen = 0;
+  for (let i = batch.length - 1; i >= 0; i--) {
+    const m = batch[i]!;
+    if (isBoundaryMessage(m)) {
+      if (++boundaries >= 2) return -1;
+      continue;
+    }
+    if (m.kind === "message" && !m.retracted && ++seen === n) return i;
+  }
+  return -1;
+}
+
 /** Walk up to the direct child of container. Used to find insertion point for prepend. */
 function rootChildOf(container: HTMLElement, el: HTMLElement): HTMLElement {
   let n = el;
@@ -157,7 +176,17 @@ export class ChatPaginator {
         rejectedSendIds.add(src.id);
       }
     }
-    const filtered = events.filter((ev) => !(ev.type === "tool_result" && rejectedSendIds.has(ev.tool_use_id)));
+    // update_message (revise/retract) never renders its own row - it mutates
+    // an earlier kind:"message" entry instead (applied in the loop below).
+    // Its tool_result is absorbed silently, same as rejectedSendIds' pairs.
+    const updateMsgIds = new Set<string>();
+    for (const ev of events) {
+      if (ev.type === "tool_use" && ev.tool_name === "mcp__cc_conductor__update_message" && !ev.parent_tool_use_id) {
+        updateMsgIds.add(ev.id);
+      }
+    }
+    const filtered = events.filter((ev) =>
+      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id))));
 
     const messages = this.cb.getMessages();
     const messageEls = this.cb.getMessageEls();
@@ -191,6 +220,21 @@ export class ChatPaginator {
         acc.durationMs = Math.max(acc.durationMs, Number(ev.duration_ms) || 0);
         // Same last-non-null fold as chat-event-handler.ts's live/bulk path.
         if (ev.awaiting) acc.awaiting = ev.awaiting;
+        continue;
+      }
+      if (ev.type === "tool_use" && updateMsgIds.has(ev.id)) {
+        const input = (ev.input ?? {}) as { message?: unknown; text?: unknown; retract?: unknown };
+        const idx = resolveOrdinalInBatch(newMessages, typeof input.message === "number" ? input.message : NaN);
+        if (idx >= 0) {
+          const prev = newMessages[idx]!;
+          const updated = input.retract === true
+            ? { ...prev, retracted: true, dimmed: false }
+            : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, dimmed: false };
+          newMessages[idx] = updated;
+          const newEl = this.cb.buildMessageEl(updated);
+          frag.replaceChild(newEl, newEls[idx]!);
+          newEls[idx] = newEl;
+        }
         continue;
       }
       const msg = eventToRenderedMessage(ev);
