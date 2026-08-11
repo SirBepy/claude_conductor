@@ -1,0 +1,130 @@
+/* .msg.system captions, system-long collapse, and compact/meta/retracted/
+ * failed marker pills. Split out of chat-messages.css. */
+
+.msg.system {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+  text-align: center;
+  background: transparent;
+  padding: 4px;
+}
+
+/* Collapsed long system note (see renderSystemNote) - the base .msg.system
+   centered-italic-caption look only reads well for short text; a long
+   relayed message gets a one-line truncated summary that expands. */
+.msg.system.system-long > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.msg.system.system-long > summary::-webkit-details-marker {
+  display: none;
+}
+.msg.system.system-long > summary::before {
+  content: "▸ ";
+}
+.msg.system.system-long[open] > summary::before {
+  content: "▾ ";
+}
+.msg.system.system-long > summary:hover {
+  color: var(--color-text);
+}
+.system-note-full {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  font-style: normal;
+  text-align: left;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.msg.system.compact-marker {
+  font-style: normal;
+  padding: 8px 4px;
+}
+
+.compact-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 100px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  cursor: default;
+  user-select: none;
+}
+
+.compact-chip i {
+  font-size: 0.82rem;
+  opacity: 0.65;
+}
+
+.compact-chip .compact-n {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  margin-left: 1px;
+}
+
+/* Meta/retraction/failed-send placeholders share the compact-marker geometry.
+ * meta-marker itself is bookkeeping only now - its visible render moved
+ * inline into the tool-strip (ensureMetaChip, turn-chips.ts). */
+.msg.system.meta-marker {
+  display: none;
+}
+.msg.system.retracted-marker,
+.msg.system.failed-marker {
+  font-style: normal;
+  padding: 8px 4px;
+}
+
+.meta-chip,
+.retracted-chip,
+.failed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 100px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  cursor: default;
+  user-select: none;
+}
+
+.meta-chip i,
+.retracted-chip i,
+.failed-chip i {
+  font-size: 0.82rem;
+  opacity: 0.65;
+}
+
+.meta-chip .compact-n {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  margin-left: 1px;
+}
+
+.meta-chip--retry {
+  color: var(--color-text-muted);
+}
+
+.retracted-chip {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.failed-chip {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+}

@@ -1,0 +1,42 @@
+/* .msg.user bubble + long-message clamp/collapse. Split out of chat-messages.css. */
+
+.msg.user {
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt));
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  align-self: flex-end;
+  max-width: 85%;
+  margin-left: 32px;
+}
+
+/* Long user messages (pasted/typed walls) collapse to ~10 lines behind a
+   toggle. Content sits in an overflow-hidden body; the toggle is a sibling so
+   it stays visible. */
+.msg.user.has-clamp { display: flex; flex-direction: column; }
+.msg.user.has-clamp .msg-clamp-body {
+  max-height: 220px;
+  overflow: hidden;
+  position: relative;
+}
+.msg.user.has-clamp.expanded .msg-clamp-body { max-height: none; }
+.msg.user.has-clamp .msg-clamp-body::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46px;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt)));
+  pointer-events: none;
+}
+.msg.user.has-clamp.expanded .msg-clamp-body::after { display: none; }
+.msg-clamp-toggle {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.msg-clamp-toggle:hover { text-decoration: underline; }

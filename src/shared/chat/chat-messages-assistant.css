@@ -1,0 +1,30 @@
+/* .msg.assistant bubble + streaming/dimmed states. Split out of chat-messages.css. */
+
+.msg.assistant {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  position: relative;
+  align-self: flex-start;
+  /* fit-content gives the bubble a definite width (= content size, capped by
+     max-width) so child percentage widths resolve and pre.shiki's overflow-x:
+     auto scrollbar fires instead of the pre spilling past the bubble edge. */
+  width: fit-content;
+  max-width: 92%;
+  margin-right: 32px;
+}
+
+.msg.assistant:hover .msg-copy-btn {
+  opacity: 1;
+}
+
+.msg.assistant.streaming::after {
+  content: " …";
+  color: var(--color-primary);
+}
+
+/* Interrupted turn: the bubble stays readable but visibly provisional until
+ * Claude either revises it or retracts it. */
+.msg.assistant.dimmed {
+  opacity: 0.5;
+  font-style: italic;
+}

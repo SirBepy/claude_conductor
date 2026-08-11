@@ -1,0 +1,23 @@
+/* .msg.tool-use/.msg.tool-result bubbles + .msg.notification. Split out of chat-messages.css. */
+
+.msg.tool-use {
+  background: var(--color-surface-alt);
+  border-left: 3px solid var(--color-primary);
+  font-size: 0.82rem;
+}
+
+.msg.tool-result {
+  background: var(--color-surface);
+  border-left: 3px solid var(--color-success);
+}
+
+.msg.tool-result.error {
+  border-left-color: var(--color-danger);
+}
+
+.msg.notification {
+  background: var(--color-surface-alt);
+  border-left: 3px solid var(--color-primary);
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}

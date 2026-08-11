@@ -1,6 +1,12 @@
 /* Shared chat-renderer + composer styles. Imported by the Sessions and
  * History views. Barrel: the rules live in purpose-scoped modules.
  *  - chat-messages.css:      message bubbles, markdown, tables, sent attachment chips
+ *  - chat-messages-user.css:      .msg.user bubble + clamp
+ *  - chat-messages-assistant.css: .msg.assistant bubble + streaming/dimmed
+ *  - chat-messages-system.css:    .msg.system + compact/meta/retracted/failed pills
+ *  - chat-messages-tool.css:      .msg.tool-use/.msg.tool-result/.msg.notification
+ *  - chat-messages-markdown.css:  markdown lists/tables/headings/blockquote/inline-code
+ *  - chat-messages-blocks.css:    copy buttons, code/card blocks, links, attachments/CTA
  *  - composer.css:           composer input, attachments, file chips, drag-over state
  *  - chat-tool-row.css:      base .tool-row/.tool-row-summary chip row
  *  - chat-tool-qa.css:       inline AskUserQuestion rendering (pre-answer)
@@ -19,6 +25,12 @@
  *                            the standalone file viewer (and, later, PR file tabs)
  */
 @import "./chat-messages.css";
+@import "./chat-messages-user.css";
+@import "./chat-messages-assistant.css";
+@import "./chat-messages-system.css";
+@import "./chat-messages-tool.css";
+@import "./chat-messages-markdown.css";
+@import "./chat-messages-blocks.css";
 @import "./composer.css";
 @import "./chat-tool-row.css";
 @import "./chat-tool-qa.css";
