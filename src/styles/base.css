@@ -11,6 +11,12 @@ html {
     overscroll-behavior: none;
 }
 
+/* Declares the resolved theme to the engine (not just via CSS vars) - without
+   this, Android WebView's auto-dark heuristic doesn't know the page already
+   handles dark mode itself and re-inverts icons/borders on top of it. */
+html[data-mode="dark"] { color-scheme: dark; }
+html[data-mode="light"] { color-scheme: light; }
+
 body {
     font-family: 'DM Sans', system-ui, sans-serif;
     background-color: var(--color-background);
