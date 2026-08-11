@@ -50,6 +50,9 @@
   --chat-state-waiting-glow: rgba(129,140,248,0.50);
   --chat-state-error:      #fb923c;
   --chat-state-error-glow: rgba(251,146,60,0.50);
+  /* Manual "Freeze chat" row chip (not a dot state, so outside the table
+     above) - sky blue, distinct from remote/external's azure. */
+  --frozen-badge: #7dd3fc;
 
   /* Per-render-class bindings. These map the st-* classes the render sites
      emit onto the documented state hues above. Question + attention bind to
