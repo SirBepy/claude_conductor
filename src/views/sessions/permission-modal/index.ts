@@ -127,13 +127,13 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
     onSubmit: async (answers, extras) => {
       clearQuestionDraft(payload.id);
       const sid = payload.session_id;
-      // Settle the daemon card FIRST: drop the durable fire-and-forget prompt
-      // record + clear "Input Needed". There's no blocking hook to resolve
-      // anymore (the asking turn already ended), so `respond_question` is pure
-      // teardown here - the answer itself travels separately, as a normal
-      // message below (settle_prompt tolerates the missing waiter).
+      // Settle the daemon card + learn whether a live oneshot was resolved:
+      // delivered=true means the answer already reached the model in-band, as
+      // the MCP tool's own result (our only live AUQ path) - see answerBlocks
+      // below, which used to send it again unconditionally and race that.
+      let delivered = false;
       try {
-        await invoke("respond_question", { id: payload.id, answers });
+        delivered = await invoke<boolean>("respond_question", { id: payload.id, answers });
       } catch (e) {
         console.warn("respond_question (settle) failed:", e);
         clearPendingPromptById(payload.id);
@@ -141,10 +141,12 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
       }
       if (!sid) return;
       // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
-      // staying its own standalone content block (cca356d8) - never merge it
-      // with extras into one block, or the card fails to fold.
-      const answerText = formatAnswersAsMessage(questions, answers);
-      const answerBlock: ContentBlock = { type: "text", text: `${AUQ_ANSWER_SENTINEL}${answerText}` };
+      // staying standalone (cca356d8). Only included when NOT delivered
+      // in-band - extras still travel either way, since the tool_result only
+      // ever carries the structured answers, never free-form extra text/files.
+      const answerBlocks: ContentBlock[] = delivered
+        ? []
+        : [{ type: "text", text: `${AUQ_ANSWER_SENTINEL}${formatAnswersAsMessage(questions, answers)}` }];
       const extraBlocks: ContentBlock[] = [];
       if (extras.additionalMessage) extraBlocks.push({ type: "text", text: extras.additionalMessage });
       for (const a of extras.attachments) {
@@ -153,12 +155,13 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
       if (state.selectedId === sid && state.heldMessages) {
         // Stage the extras FIRST so flushHeldWithDraft's single bundleHeld call
         // folds them alongside the isolated sentinel block into one bundle,
-        // instead of a second message queued behind it.
+        // instead of a second message queued behind it. A no-op if both are
+        // empty (delivered, no extras) - flush() bails on an empty bundle.
         if (extraBlocks.length) state.heldMessages.stage(extraBlocks);
-        await state.heldMessages.flushHeldWithDraft([answerBlock]);
-      } else {
+        await state.heldMessages.flushHeldWithDraft(answerBlocks);
+      } else if (answerBlocks.length || extraBlocks.length) {
         const cwd = resolveCwdForSession(sid) ?? ".";
-        await invoke("send_message", { sessionId: sid, cwd, blocks: [answerBlock, ...extraBlocks] });
+        await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...extraBlocks] });
       }
     },
     onCancel: async () => {

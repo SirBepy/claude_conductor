@@ -41,17 +41,21 @@ impl PersistentClient {
         Ok(())
     }
 
+    /// Returns whether a live blocking waiter was resolved (the answer already
+    /// went back in-band, as the tool's own result) vs. a durable/ghost prompt
+    /// with no waiter (the answer must travel separately as a chat message) -
+    /// see `respond_question_inner`'s `delivered` in methods/permission.rs.
     pub async fn respond_question(
         &self,
         request_id: &str,
         answers: serde_json::Value,
-    ) -> Result<(), ClientError> {
+    ) -> Result<bool, ClientError> {
         let params = serde_json::json!({
             "request_id": request_id,
             "answers": answers,
         });
-        self.call("respond_question", params).await?;
-        Ok(())
+        let result = self.call("respond_question", params).await?;
+        Ok(result.get("delivered").and_then(|v| v.as_bool()).unwrap_or(false))
     }
 
     /// Open prompts the app must surface (question cards), fetched over the

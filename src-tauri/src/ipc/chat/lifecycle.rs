@@ -280,13 +280,16 @@ pub async fn respond_permission(
         .map_err(|e| e.to_string())
 }
 
-/// Respond to a pending question request from the MCP server.
+/// Respond to a pending question request from the MCP server. Returns whether
+/// a live blocking waiter was resolved - the frontend uses this to skip its
+/// own redundant "answer as a chat message" send when the answer already went
+/// back in-band as the tool's result (see PersistentClient::respond_question).
 #[tauri::command]
 pub async fn respond_question(
     id: String,
     answers: Value,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let client_guard = state.daemon_client.lock().await;
     let client = client_guard
         .as_ref()
