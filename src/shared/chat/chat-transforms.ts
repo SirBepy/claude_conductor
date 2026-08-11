@@ -345,7 +345,7 @@ export function renderMessage(m: RenderedMessage): string {
       if (m.retracted) {
         return `<div class="msg system retracted-marker"><span class="retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
       }
-      return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button><div class="block text">${renderMarkdown(stripStatusToken(m.text ?? ""))}</div></div>`;
+      return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${renderTextBlock(m.text ?? "")}</div>`;
     case "tool_use": {
       const view = parseFileEdit(m.tool ?? "", m.input);
       if (view) return `<div class="msg tool-use tool-use--file">${renderEditWindow(view)}</div>`;
