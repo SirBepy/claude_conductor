@@ -12,6 +12,8 @@
  * scrolls inside the shell instead of spilling off-screen.
  */
 
+import { invoke } from "../../shared/ipc";
+
 const MARGIN = 8;
 const GAP = 4;
 
@@ -92,4 +94,36 @@ export class PopoverShell {
     this.onCloseCb = null;
     onClose?.();
   }
+}
+
+/** Wire a value-slider's change handler shared by the effort/model popovers:
+ *  a local onChange callback wins if present, else round-trip through
+ *  `invokeCmd` and call onCommit on success (logs + skips onCommit on failure). */
+export function wireCommitSlider<T>(
+  el: HTMLElement,
+  selector: string,
+  options: readonly T[],
+  cfg: {
+    onChange?: ((v: T) => void) | null;
+    sessionId: string | null;
+    invokeCmd: string;
+    paramName: string;
+    onCommit: (v: T) => void;
+  },
+): void {
+  const slider = el.querySelector<HTMLInputElement>(selector);
+  slider?.addEventListener("change", () => {
+    const next = options[Number(slider.value)];
+    if (next === undefined) return;
+    if (cfg.onChange) {
+      cfg.onChange(next);
+      cfg.onCommit(next);
+      return;
+    }
+    if (!cfg.sessionId) return;
+    const sid = cfg.sessionId;
+    void invoke<void>(cfg.invokeCmd, { sessionId: sid, [cfg.paramName]: next })
+      .then(() => cfg.onCommit(next))
+      .catch((err) => console.error(`[statusbar] ${cfg.invokeCmd} failed`, err));
+  });
 }

@@ -4,9 +4,8 @@
  */
 
 import { escapeHtml } from "../../shared/escape-html";
-import { invoke } from "../../shared/ipc";
 import { EFFORTS } from "../../shared/effort-presets";
-import { PopoverShell } from "./statusbar-popover-shell";
+import { PopoverShell, wireCommitSlider } from "./statusbar-popover-shell";
 
 export interface EffortOpenCtx {
   effort: string;
@@ -25,20 +24,12 @@ export class EffortPopover {
     this.shell.open(anchor, this.buildHtml(ctx.effort), {
       className: "sb-effort-popover",
       wire: (el) => {
-        const slider = el.querySelector<HTMLInputElement>(".sb-effort-slider");
-        slider?.addEventListener("change", () => {
-          const next = EFFORTS[Number(slider.value)];
-          if (!next) return;
-          if (ctx.onEffortChange) {
-            ctx.onEffortChange(next);
-            ctx.onCommit(next);
-            return;
-          }
-          if (!ctx.sessionId) return;
-          const sid = ctx.sessionId;
-          void invoke<void>("set_session_effort", { sessionId: sid, effort: next })
-            .then(() => ctx.onCommit(next))
-            .catch((err) => console.error("[statusbar] set_session_effort failed", err));
+        wireCommitSlider(el, ".sb-effort-slider", EFFORTS, {
+          onChange: ctx.onEffortChange,
+          sessionId: ctx.sessionId,
+          invokeCmd: "set_session_effort",
+          paramName: "effort",
+          onCommit: ctx.onCommit,
         });
       },
     });
