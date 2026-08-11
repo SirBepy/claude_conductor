@@ -72,10 +72,6 @@ export function onDashMoreClick(e: Event, deps: DashMoreMenuDeps): void {
   dashMenu.toggle(btn, deps);
 }
 
-export function openDashMenu(btn: HTMLButtonElement, deps: DashMoreMenuDeps): void {
-  dashMenu.open(btn, deps);
-}
-
 /** Add-widget submenu: every registry widget is listed; already-added ones are
  * greyed out (not clickable), the rest enable on click. */
 function openAddWidgetSubmenu(parent: HTMLElement, deps: DashMoreMenuDeps): void {
