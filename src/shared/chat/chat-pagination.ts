@@ -145,10 +145,10 @@ export class ChatPaginator {
   prependEvents(events: ChatEvent[]): void {
     if (events.length === 0) return;
 
-    // A rejected send_message (validation failure, silently retried) must not
-    // leave a ghost bubble behind - drop the tool_use/tool_result pair before
-    // the main pass so the boundary/turn bookkeeping below never sees them.
-    // Mirrors chat-event-handler.ts's removeMessageAt reject path.
+    // A rejected send_message (validation failure) renders as a "Failed to
+    // send" ghost, same as the live path - not dropped. Its paired tool_result
+    // is absorbed silently either way (see chat-event-handler.ts's tool_result
+    // is_error branch).
     const rejectedSendIds = new Set<string>();
     for (const ev of events) {
       if (ev.type !== "tool_result" || !ev.is_error) continue;
@@ -157,11 +157,7 @@ export class ChatPaginator {
         rejectedSendIds.add(src.id);
       }
     }
-    const filtered = rejectedSendIds.size === 0
-      ? events
-      : events.filter((ev) =>
-          !(ev.type === "tool_use" && rejectedSendIds.has(ev.id)) &&
-          !(ev.type === "tool_result" && rejectedSendIds.has(ev.tool_use_id)));
+    const filtered = events.filter((ev) => !(ev.type === "tool_result" && rejectedSendIds.has(ev.tool_use_id)));
 
     const messages = this.cb.getMessages();
     const messageEls = this.cb.getMessageEls();
@@ -199,6 +195,9 @@ export class ChatPaginator {
       }
       const msg = eventToRenderedMessage(ev);
       if (!msg) continue;
+      if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
+        msg.failed = true;
+      }
       if (isBoundaryMessage(msg)) {
         boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });
         acc = null;
