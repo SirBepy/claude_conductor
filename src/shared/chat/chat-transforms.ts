@@ -309,14 +309,14 @@ export function renderMessage(m: RenderedMessage): string {
   switch (m.kind) {
     case "system":
       if (m.compactionN != null) {
-        return `<div class="msg system compact-marker"><span class="compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
+        return `<div class="msg system compact-marker"><span class="chat-pill compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
       }
       if (m.metaKind) {
         // Bookkeeping-only row (silentStreakBoundaryIndex etc, see
         // chat-event-handler.ts) - CSS-hidden; the visible render is the
         // inline tool-strip chip built by TurnFooterRegistry.ensureMetaChip.
         const n = m.streakCount && m.streakCount > 1 ? `<span class="compact-n">×${m.streakCount}</span>` : "";
-        return `<div class="msg system meta-marker"><span class="meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${META_KIND_ICONS[m.metaKind]}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
+        return `<div class="msg system meta-marker"><span class="chat-pill meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${META_KIND_ICONS[m.metaKind]}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
       }
       return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
     case "user":
@@ -346,10 +346,10 @@ export function renderMessage(m: RenderedMessage): string {
     // from m.text instead of m.content (see chat-event-handler.ts tool_use).
     case "message":
       if (m.failed) {
-        return `<div class="msg system failed-marker"><span class="failed-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-wifi-slash"></i>Failed to send</span></div>`;
+        return `<div class="msg system failed-marker"><span class="chat-pill failed-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-wifi-slash"></i>Failed to send</span></div>`;
       }
       if (m.retracted) {
-        return `<div class="msg system retracted-marker"><span class="retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
+        return `<div class="msg system retracted-marker"><span class="chat-pill chat-pill--retracted retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
       }
       return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${renderTextBlock(m.text ?? "")}</div>`;
     case "tool_use": {
