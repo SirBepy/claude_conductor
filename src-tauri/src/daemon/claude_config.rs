@@ -52,12 +52,17 @@ pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool
     if is_jarvis {
         env["CC_JARVIS"] = serde_json::json!("1");
     }
+    // Floors Claude Code's own client-side MCP idle timeout (default 1800s for
+    // stdio servers) at this relay's window so the CLI doesn't abort a pending
+    // AUQ/permission card early. See mcp::server::RELAY_TIMEOUT_SECS.
+    // Requires Claude Code v2.1.203+; older clients ignore the unknown field.
     let config = serde_json::json!({
         "mcpServers": {
             "cc_conductor": {
                 "command": exe.to_string_lossy(),
                 "args": ["--mcp-permission"],
-                "env": env
+                "env": env,
+                "timeout": 3_660_000_u64
             }
         }
     });
