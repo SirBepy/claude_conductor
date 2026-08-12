@@ -55,7 +55,7 @@ test("a terse question shows the domain chip in the ask band", async ({ page }) 
   expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(askBox!.x + askBox!.width + 1);
 
   await card.screenshot({
-    path: ".for_bepy/screenshots/36652-639219531179461135/auq-domain-chip-terse.png",
+    path: ".for_bepy/screenshots/_specs/auq-domain-chip-terse.png",
   });
 });
 
@@ -75,6 +75,6 @@ test("a question WITH context keeps the chip on the context row, never both", as
   await expect(card.locator(".prompt-zone--ask .prompt-domain")).toHaveCount(0);
 
   await card.screenshot({
-    path: ".for_bepy/screenshots/36652-639219531179461135/auq-domain-chip-context.png",
+    path: ".for_bepy/screenshots/_specs/auq-domain-chip-context.png",
   });
 });

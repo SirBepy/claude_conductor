@@ -9,7 +9,8 @@ import { mountView } from "./harness";
 // - the old `.meta-chip` row is now CSS-hidden bookkeeping only, so this test
 // drives the real live pipeline (sessions view + load_history_page) instead.
 
-const SHOTS = ".for_bepy/screenshots/31948-639219629330654291";
+// Shared, gitignored, session-agnostic - never a live session's <pid>-<ticks> folder.
+const SHOTS = ".for_bepy/screenshots/_specs";
 
 const ROWS = [
   { kind: "message", text: "Pushed 3 commits, tests green.", ts: 0 },
