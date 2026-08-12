@@ -43,7 +43,17 @@ impl Registry {
         // message_sent_gen self-cleans instead of growing per session forever.
         self.message_sent_gen.lock().unwrap().remove(session_id);
         let entry = self.reported_status.lock().unwrap().remove(session_id)?;
-        if entry.turn_gen == gen { Some(entry) } else { None }
+        if entry.turn_gen == gen {
+            Some(entry)
+        } else {
+            // Mirrors `set_busy_false_if_gen`'s warning (registry_flags.rs:196-200):
+            // a newer turn bumped turn_gen before this turn's result line was consumed.
+            log::warn!(
+                "registry: reported_status DISCARDED for {session_id}: pump gen {gen} != entry gen {} (newer turn started)",
+                entry.turn_gen
+            );
+            None
+        }
     }
 
     /// Record that `send_message` succeeded for this session during

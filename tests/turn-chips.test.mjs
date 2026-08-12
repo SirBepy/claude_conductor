@@ -526,6 +526,20 @@ describe("Turn footer DOM integration", () => {
     vi.advanceTimersByTime(10000);
     expect(firstRow.querySelector(".turn-chip--time").textContent).toBe(timeText);
   });
+
+  // Regression (todo 621): a gen-mismatch race can discard the reported
+  // status, sending TurnUsage with awaiting=null. That must still resolve
+  // the turn, never leave turnStatus stuck on a prior in-progress value.
+  it("resolves turnStatus to done when the terminal TurnUsage carries no awaiting", async () => {
+    const { renderer } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("Turn 1"));
+    renderer.handleEvent(makeAssistantMessage("Working", true));
+    expect(renderer.turnStatus).toBe(null);
+
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 })); // awaiting: null
+    expect(renderer.turnStatus).toBe("done");
+  });
 });
 
 describe("Silent auto-continue streak merge", () => {

@@ -613,7 +613,9 @@ function handleTurnUsageEvent(
     if (ev.awaiting) u.awaiting = ev.awaiting;
     // Additive to the assistant_message branch's detectStatusToken calls
     // below (those still resolve pre-435 history); this drives it live.
-    if (ev.awaiting) r.setTurnStatus(ev.awaiting as "done" | "question" | "waiting" | "working");
+    // A falsy awaiting here (report_turn_status discarded by a gen-mismatch
+    // race, todo 621) still needs a terminal status, not a permanent stall.
+    r.setTurnStatus(ev.awaiting ? (ev.awaiting as "done" | "question" | "waiting" | "working") : "done");
     r.activeTurnUsage = u;
     // Live path: settle immediately so the row stops ticking the moment
     // usage lands. Watched external sessions stream one usage per
