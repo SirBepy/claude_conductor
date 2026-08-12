@@ -11,9 +11,8 @@
 // scope and won't appear — that's an accepted, unrequested-workaround-free
 // consequence of scoping being per-chat now, not a bug.
 //
-// `renderPreview(root, { mode })` takes a `mode` so a future pop-out OS
-// window can reuse this exact renderer (ai_todo 138's deferred follow-up);
-// only `mode: "panel"` is wired up today, per the frontend-chunk scope.
+// `renderPreview(root, { mode })`'s `mode` lets the pop-out OS window reuse
+// this exact renderer via `mountPreviewWindow` - not yet called from main.ts.
 //
 // Live updates arrive two ways, per `project_daemon_notifier_broadcast_lossy`:
 // a `preview` daemon-notifier broadcast (fast, but can be dropped under
@@ -43,6 +42,12 @@ export interface PreviewController {
    *  active-session switch (see state.ts). Clears and re-fetches when the
    *  id changes. */
   setSessionScope(sessionId: string | null): void;
+  /** Relocates this chat's preview to its own OS window (todo 290, panel mode
+   *  only). Docked view stays scoped but hidden until dockBack. */
+  popOut(): void;
+  /** Pop-out window's own dock-back path (window mode only) - clears the
+   *  popped flag and closes the OS window. */
+  dockBack(): void;
   destroy(): void;
 }
 
@@ -55,6 +60,7 @@ export interface PreviewController {
 // per-chat preference. ──────────────────────────────────────────────────
 const LS_OPEN_PREFIX = "cc_preview_panel_open:";
 const LS_WIDTH_KEY = "cc_preview_panel_width";
+const LS_POPPED_PREFIX = "cc_preview_panel_popped:";
 
 function openKey(sessionId: string): string {
   return LS_OPEN_PREFIX + sessionId;
@@ -71,6 +77,28 @@ function loadOpen(sessionId: string): boolean {
 function saveOpen(sessionId: string, open: boolean): void {
   try {
     localStorage.setItem(openKey(sessionId), open ? "1" : "0");
+  } catch {
+    /* quota or storage disabled */
+  }
+}
+
+function poppedKey(sessionId: string): string {
+  return LS_POPPED_PREFIX + sessionId;
+}
+
+function loadPopped(sessionId: string): boolean {
+  try {
+    return localStorage.getItem(poppedKey(sessionId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Shared localStorage; the constructor's `storage` listener is what makes
+ *  the OTHER window's docked instance react to a flip (separate realms). */
+function savePopped(sessionId: string, popped: boolean): void {
+  try {
+    localStorage.setItem(poppedKey(sessionId), popped ? "1" : "0");
   } catch {
     /* quota or storage disabled */
   }
@@ -132,6 +160,10 @@ class PreviewPanel implements PreviewController {
   private unlistenPreview: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
   private resizeCleanup: (() => void) | null = null;
+  /** Panel-mode only: set once popOut() relocates this session's view to its
+   *  own OS window; docked host stays scoped but hidden until dockBack(). */
+  private popped = false;
+  private storageHandler: ((e: StorageEvent) => void) | null = null;
   /** Reply composer docked at the panel's bottom (see preview-panel-composer.ts).
    *  Mounted once in the constructor: unlike the AUQ card, this panel's own
    *  DOM is never innerHTML-rebuilt (renderIframe/renderRail/renderHeader
@@ -165,6 +197,16 @@ class PreviewPanel implements PreviewController {
     };
     window.addEventListener("focus", this.focusHandler);
 
+    if (this.mode === "panel") {
+      this.storageHandler = (e: StorageEvent) => {
+        if (!this.currentSessionId || e.key !== poppedKey(this.currentSessionId)) return;
+        this.popped = e.newValue === "1";
+        if (this.popped) this.root.hidden = true;
+        else if (this.openState) { this.root.hidden = false; void this.refreshList(); }
+      };
+      window.addEventListener("storage", this.storageHandler);
+    }
+
     this.root.hidden = true;
     this.renderHeaderEmpty();
     this.renderCanvasEmpty();
@@ -190,6 +232,9 @@ class PreviewPanel implements PreviewController {
   open(snapshotId?: string): void {
     this.openState = true;
     if (this.currentSessionId) saveOpen(this.currentSessionId, true);
+    // Relocated to its own window (panel mode only) - stay scoped, stay
+    // hidden, until dockBack() clears the flag.
+    if (this.mode === "panel" && this.popped) return;
     this.root.hidden = false;
     void this.refreshList(snapshotId ? { selectId: snapshotId } : {});
   }
@@ -210,16 +255,19 @@ class PreviewPanel implements PreviewController {
     // fires for it - close explicitly or the menu stays open across it.
     closePvMoreMenu();
     this.currentSessionId = sessionId;
+    this.popped = this.mode === "panel" && !!sessionId && loadPopped(sessionId);
     // Each chat's open/closed state is independent (loadOpen defaults false
     // for an id with no saved key yet, e.g. one that's never had the panel
     // opened) - re-derive from THIS chat's key, never carry over the
     // previous chat's this.openState.
-    if (sessionId && loadOpen(sessionId)) {
+    if (sessionId && loadOpen(sessionId) && !this.popped) {
       this.openState = true;
       this.root.hidden = false;
       void this.refreshList();
     } else {
-      this.openState = false;
+      // Popped: still "open" per the saved flag (dockBack needs to know to
+      // re-show it), just relocated to its own window - see the class doc.
+      this.openState = this.popped && !!sessionId && loadOpen(sessionId);
       this.root.hidden = true;
       // Drop the stale cross-chat cache so a later open() never flashes the
       // previous chat's snapshots before the fresh fetch lands.
@@ -244,8 +292,30 @@ class PreviewPanel implements PreviewController {
       this.focusHandler = null;
     }
     if (this.resizeCleanup) { this.resizeCleanup(); this.resizeCleanup = null; }
+    if (this.storageHandler) {
+      window.removeEventListener("storage", this.storageHandler);
+      this.storageHandler = null;
+    }
     this.composer?.destroy();
     this.composer = null;
+  }
+
+  popOut(): void {
+    if (this.mode !== "panel" || !this.currentSessionId) return;
+    this.popped = true;
+    savePopped(this.currentSessionId, true);
+    this.root.hidden = true;
+    void invoke("open_preview_window", { sessionId: this.currentSessionId }).catch((err) => {
+      console.error("[preview-panel] open_preview_window failed", err);
+    });
+  }
+
+  dockBack(): void {
+    if (this.mode !== "window" || !this.currentSessionId) return;
+    savePopped(this.currentSessionId, false);
+    void invoke("close_preview_window").catch((err) => {
+      console.error("[preview-panel] close_preview_window failed", err);
+    });
   }
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -419,7 +489,7 @@ class PreviewPanel implements PreviewController {
           <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span><span class="pv-ver"></span></span>
           <span class="pv-grow"></span>
           <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
-          <button type="button" class="pv-icon-btn" data-act="close" title="Close panel"><i class="ph ph-x"></i></button>
+          <button type="button" class="pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
         </header>
         <div class="pv-body">
           <div class="pv-rail" data-rail hidden><div class="pv-rail-lbl">History</div></div>
@@ -516,19 +586,27 @@ class PreviewPanel implements PreviewController {
     if (actBtn) {
       switch (actBtn.dataset.act) {
         case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
-        case "close": this.close(); return;
+        case "close": if (this.mode === "window") this.dockBack(); else this.close(); return;
         default: return;
       }
     }
   }
 }
 
-/**
- * Shared preview renderer. `mode: "panel"` is the only wired-up variant today
- * (docked sibling of `.session-pane`); `"window"` is reserved for the
- * deferred pop-out OS window follow-up so that surface can mount this exact
- * component later with zero renderer changes.
- */
+/** Shared preview renderer; `mode: "window"` is the todo 290 pop-out,
+ *  mounted via `mountPreviewWindow` below. */
 export function renderPreview(root: HTMLElement, opts: { mode: PreviewMode }): PreviewController {
   return new PreviewPanel(root, opts.mode);
+}
+
+/** Pop-out window bootstrap (todo 290) - not wired from main.ts yet.
+ *  Repopulates state.sessions (separate JS module realm) so the reply
+ *  composer can resolve the session to send to. */
+export async function mountPreviewWindow(root: HTMLElement, sessionId: string): Promise<PreviewController> {
+  const { refreshSessions } = await import("./sidebar");
+  await refreshSessions();
+  const controller = renderPreview(root, { mode: "window" });
+  controller.setSessionScope(sessionId);
+  controller.open();
+  return controller;
 }

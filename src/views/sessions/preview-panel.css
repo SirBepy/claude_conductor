@@ -303,10 +303,19 @@
   padding: 1px 5px;
 }
 
+/* Docked mode only - the pop-out window (todo 290) is always its own OS
+   window regardless of width, never the collapsed-sidebar layout below. */
 @media (max-width: 860px) {
-  #preview-panel-host {
+  #preview-panel-host:has(.preview-panel[data-mode="panel"]) {
     display: none !important;
   }
+}
+
+/* ── Pop-out window mode (todo 290) ────────────────────────────────────── */
+/* Fills the standalone window edge-to-edge - no resize handle (nothing to
+   drag against) and no host-level flex/width sizing to fight. */
+.preview-panel[data-mode="window"] .pv-resize-handle {
+  display: none;
 }
 
 /* ── Reply composer ────────────────────────────────────────────────────── */
