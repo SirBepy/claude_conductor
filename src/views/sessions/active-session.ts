@@ -15,7 +15,13 @@ import {
   deriveQuestionSet,
 } from "./sessions-helpers";
 import { renderSidebar, refreshSessions } from "./sidebar";
-import { characterForSession, characterIconUrl, loadSessionCharacters } from "./session-characters";
+import {
+  characterForSession,
+  characterForSessionId,
+  characterIconUrl,
+  loadSessionCharacters,
+  setSessionCharacterLocal,
+} from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { api } from "../../shared/api";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
@@ -139,13 +145,16 @@ export async function changeCharacterForSession(sessionId: string): Promise<void
  * `daemon/methods/lifecycle.rs`. What's left is state that only exists in
  * THIS running client and has no daemon-side mirror: the in-memory
  * auto-accept gate (the runtime source of truth for the permission modal,
- * only rehydrated from disk at app launch) and any staged-but-unsent held
- * messages. Shared by both `moveSessionToAccount` callers (this module's
- * "Change account" flow and the rate-limit banner's "Continue on <Other>").
+ * only rehydrated from disk at app launch), any staged-but-unsent held
+ * messages, and the character avatar (daemon carries it too, but that's async
+ * and would flash the placeholder on the just-rendered header). Shared by
+ * both `moveSessionToAccount` callers.
  */
 export function carrySessionSettings(oldId: string, newId: string): void {
   if (isAutoAccept(oldId)) setAutoAccept(newId, true);
   state.heldMessages?.renameSession(oldId, newId);
+  const charId = characterForSessionId(oldId);
+  if (charId) setSessionCharacterLocal(newId, charId);
 }
 
 /**

@@ -50,6 +50,12 @@ export function characterForSessionId(sessionId: string): string | null {
   return sessionCharMap.get(sessionId) ?? null;
 }
 
+/** Sync write into the cache, ahead of the async `settings-changed`
+ * round-trip, so a freshly-rendered header doesn't flash the placeholder. */
+export function setSessionCharacterLocal(sessionId: string, charId: string): void {
+  sessionCharMap.set(sessionId, charId);
+}
+
 /** Preloaded icon data URL for a character id, or null if not yet cached. */
 export function characterIconUrl(charId: string): string | null {
   return cachedCharacterIconUrl(charId);
