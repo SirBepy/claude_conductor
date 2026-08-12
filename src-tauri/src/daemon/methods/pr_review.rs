@@ -8,9 +8,10 @@ use crate::settings::identity::project_key;
 use serde_json::json;
 use std::sync::Arc;
 
-// Unlike worktrees.rs's raw `cwd` params, must match a project the daemon
-// already knows - a remote client can't point `git diff` at an arbitrary path.
-fn is_known_cwd(state: &DaemonState, cwd: &str) -> bool {
+// Must match a project the daemon already knows, so a remote client can't
+// point git at an arbitrary path. Shared with `worktrees.rs`, which is in the
+// same SAFE_METHODS set and shipped without this gate (fixed 2026-08-12).
+pub(super) fn is_known_cwd(state: &DaemonState, cwd: &str) -> bool {
     let key = project_key(std::path::Path::new(cwd));
     state.registry.list().iter().any(|i| project_key(&i.cwd) == key)
         || state.settings.snapshot().projects.iter().any(|p| project_key(&p.path) == key)
