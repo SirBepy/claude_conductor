@@ -172,11 +172,8 @@ export class ChatRenderer {
   // when replay finishes. Live events (after hydration) animate normally.
   hydrating = false;
   paginator: ChatPaginator;
-  // Pauses `.rainbow-keyword`'s infinite CSS animation in `.msg` elements once
-  // scrolled off-screen (todo 185's cheap fallback - full DOM windowing is
-  // deferred as regression-prone). The MutationObserver auto-observes every
-  // new/replaced `.msg`, so it needs no per-call-site wiring in the streaming,
-  // dirty-replace, or pagination paths - they all mutate `container`'s children.
+  // Pauses `.rainbow-keyword`'s animation off-screen (todo 185). The Mutation-
+  // Observer auto-observes each new `.msg`, so no call site needs to know.
   private animObserver: IntersectionObserver | null = null;
   private animMutationObserver: MutationObserver | null = null;
 
@@ -294,22 +291,25 @@ export class ChatRenderer {
   /** (Re-)arm the off-screen animation pause (todo 185). One IntersectionObserver
    *  toggles `.anim-paused` on each `.msg`'s `.rainbow-keyword` spans; a sibling
    *  MutationObserver auto-observes/-unobserves `.msg` children as they're
-   *  added/removed by streaming, dirty-replace, or pagination - none of those
-   *  paths need to know this exists. */
+   *  added/removed by streaming, dirty-replace, or pagination. */
   private installAnimObserver(): void {
     this.removeAnimObserver();
     // Test/harness environments may lack these (jsdom has no IntersectionObserver
     // at all; some test setups don't stub MutationObserver either) - skip quietly,
     // real browsers always have both.
     if (typeof IntersectionObserver === "undefined" || typeof MutationObserver === "undefined") return;
-    const anim = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const paused = !entry.isIntersecting;
-        for (const kw of (entry.target as HTMLElement).querySelectorAll<HTMLElement>(".rainbow-keyword")) {
-          kw.classList.toggle("anim-paused", paused);
+    const anim = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const paused = !entry.isIntersecting;
+          for (const kw of (entry.target as HTMLElement).querySelectorAll<HTMLElement>(".rainbow-keyword")) {
+            kw.classList.toggle("anim-paused", paused);
+          }
         }
-      }
-    });
+      },
+      // Implicit root ignores ancestor overflow: nothing would ever pause.
+      { root: this.scrollRoot() },
+    );
     this.animObserver = anim;
     this.animMutationObserver = new MutationObserver((records) => {
       for (const rec of records) {
@@ -324,6 +324,19 @@ export class ChatRenderer {
       }
     });
     this.animMutationObserver.observe(this.container, { childList: true });
+  }
+
+  /** Nearest scrollable ancestor, null = viewport. Ignores content size, unlike
+   *  the paginator's `findScroller`, so it resolves before the chat overflows. */
+  private scrollRoot(): HTMLElement | null {
+    if (typeof getComputedStyle === "undefined") return null;
+    let n: HTMLElement | null = this.container;
+    while (n) {
+      const o = getComputedStyle(n).overflowY;
+      if (o === "auto" || o === "scroll") return n;
+      n = n.parentElement;
+    }
+    return null;
   }
 
   private removeAnimObserver(): void {
