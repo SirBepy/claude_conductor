@@ -5,7 +5,7 @@ use crate::characters::slots::Slot;
 use crate::characters::whitelist;
 use crate::state::AppState;
 use crate::settings::{paths, persist};
-use crate::types::{Avatar, CharacterWhitelist, Settings};
+use crate::types::{Avatar, CharacterWhitelist};
 use std::collections::{HashMap, HashSet};
 use tauri::{AppHandle, State};
 
