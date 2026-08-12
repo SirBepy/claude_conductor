@@ -74,14 +74,20 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
  * window-clipping risk. */
 .oc-dial-row { display: flex; align-items: flex-start; gap: 6px; padding: 13px 78px 13px 78px; padding-top: 70px; }
 
-/* Card mode: one shared rounded card behind the whole dial row instead of a
- * per-dial disc (which circles mode uses). Same tint as .oc-disc and honours
- * the overlay-opacity slider, so it stays transparent-friendly. */
-.oc-dial-row.oc-card {
+/* Card mode: one shared rounded card behind the dial row (vs circles mode's
+ * per-dial disc). Painted on ::before, inset to the row's CONTENT box (not
+ * its popup-headroom padding, see comment above .oc-dial-row), so the card
+ * doesn't show that reserved space as an empty gap at rest. */
+.oc-dial-row.oc-card { position: relative; }
+.oc-dial-row.oc-card::before {
+  content: "";
+  position: absolute;
+  inset: 70px 78px 13px 78px;
   background: color-mix(in srgb, var(--color-surface, #1f1f2c) var(--overlay-opacity, 72%), transparent);
   border: 1px solid color-mix(in srgb, var(--color-border, #2e2e40) var(--overlay-opacity, 72%), transparent);
   border-radius: 16px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  z-index: -1;
 }
 
 /* One account = one dial + its (hover-revealed) popup, both anchored to this
