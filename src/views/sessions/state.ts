@@ -52,12 +52,9 @@ export interface SessionsState {
   filter: string;
   renderer: ChatRenderer | null;
   composer: Composer | null;
-  /** Singleton controller for messages typed while Claude is busy (staged and
-   * bundled into one send). Per-session held set survives session switches;
-   * re-attached to the active pane on every mount. The singleton itself is
-   * recreated on resetState(), but the staged items it holds are mirrored to
-   * localStorage and rehydrated on construction, so a full reload no longer
-   * loses them. */
+  /** Messages typed while Claude is busy (staged, bundled into one send).
+   * Mirrored to localStorage and rehydrated on construction, so a reload
+   * doesn't lose them. */
   heldMessages: HeldMessages | null;
   /** Per-chat scheduled-message chip for the active pane. Re-created on every
    * mount (unlike heldMessages, it holds no cross-session state worth
