@@ -28,6 +28,7 @@ Deploy: GitHub Releases (NSIS / DMG / DEB + AppImage via CI)
 
 - Keep `README.md` in sync when auth flow, tray behavior, scraping approach, or project structure changes. README is user-facing; CLAUDE.md is developer rules only.
 - Chat hub is subscription-only. `check_metered_billing` in `chat/billing.rs` refuses to spawn if `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, Bedrock, or Vertex env vars are set.
+- **One ask channel: the `ask_user_question` MCP tool. The builtin `AskUserQuestion` is never used.** Enforced at spawn by `--disallowedTools AskUserQuestion` (`daemon/claude_config.rs`), with the `PreToolUse` hook as a safety net. The builtin's schema has no `domain`/`badges`, so its cards can never render the chips, and only the MCP path sets `supportsExtras` (the review step's free-text box). Do not re-enable it or add a second ask path.
 - No auto-restart on channel exit - would register a fresh bridge with Claude desktop each time, creating duplicate entries in the Code sidebar. Spawn once, stay dead until manual Restart.
 - Linux: chat hub works but channel automation (Plan C) unavailable (`SpawnError::NonWindows`).
 - Custom IPC commands need only `generate_handler!` registration - no `capabilities/default.json` entry. Capabilities entries ARE required for plugin permissions and new window labels (window labels must match `src-tauri/capabilities/default.json`, e.g. the `session-*` pattern).
