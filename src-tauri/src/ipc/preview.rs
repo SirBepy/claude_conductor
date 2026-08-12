@@ -46,3 +46,28 @@ pub async fn get_preview(id: String, state: State<'_, AppState>) -> Result<Previ
     let v = client.get_preview(&id).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
+
+/// Stages a preview document and returns the URL for the panel's iframe. Goes
+/// through Rust because the webview's own `fetch` here is cross-origin, and the
+/// hooks server answers its CORS preflight with 405 - the request never left the
+/// browser and the panel rendered blank (todo 591).
+#[tauri::command]
+pub async fn render_preview_doc(html: String) -> Result<String, String> {
+    let port = crate::daemon::claude_config::daemon_hook_port();
+    let base = format!("http://127.0.0.1:{port}/hooks/preview-render");
+    let res = reqwest::Client::new()
+        .post(&base)
+        .json(&serde_json::json!({ "html": html }))
+        .send()
+        .await
+        .map_err(|e| format!("preview-render POST failed: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("preview-render returned {}", res.status()));
+    }
+    let body: serde_json::Value = res.json().await.map_err(|e| format!("preview-render body: {e}"))?;
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "preview-render response had no id".to_string())?;
+    Ok(format!("{base}/{id}"))
+}

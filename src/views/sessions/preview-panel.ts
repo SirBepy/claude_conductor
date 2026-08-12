@@ -534,19 +534,21 @@ class PreviewPanel implements PreviewController {
     const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
     if (!iframe) return;
     // Served over a real local origin (not data:) so it gets its own CSP
-    // header, independent of the app shell's - see preview_render.rs.
+    // header, independent of the app shell's - see preview_render.rs. Staged
+    // via IPC rather than a webview fetch: that fetch was cross-origin, and its
+    // CORS preflight got a 405, so the panel silently rendered blank (todo 591).
     const doc = buildPreviewDocumentHtml(this.selected.html);
     try {
-      const res = await fetch("http://127.0.0.1:27182/hooks/preview-render", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: doc }),
-      });
-      if (!res.ok) throw new Error(`preview-render failed: ${res.status}`);
-      const { id } = (await res.json()) as { id: string };
-      iframe.src = `http://127.0.0.1:27182/hooks/preview-render/${id}`;
+      iframe.src = await invoke<string>("render_preview_doc", { html: doc });
     } catch (err) {
-      console.error("[preview-panel] preview-render POST failed", err);
+      console.error("[preview-panel] preview-render failed", err);
+      canvas.innerHTML = `
+        <div class="pv-empty">
+          <i class="ph ph-warning-circle"></i>
+          <p>Preview failed to render</p>
+          <p class="pv-empty-hint">${String(err).replace(/[<>&]/g, "")}</p>
+        </div>
+      `;
     }
   }
 

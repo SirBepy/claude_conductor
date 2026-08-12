@@ -399,6 +399,7 @@ pub fn run() {
             ipc::push_preview,
             ipc::list_previews,
             ipc::get_preview,
+            ipc::render_preview_doc,
             ipc::open_preview_window,
             ipc::close_preview_window,
             when_done::arm_when_done,
