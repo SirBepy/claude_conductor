@@ -6,6 +6,7 @@
 //! just has to resolve to a live registry entry, the same trust level as any
 //! other MCP tool call riding that session's own `CC_SESSION_ID` env.
 
+use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::channel as channel_methods;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
@@ -20,7 +21,7 @@ pub(super) struct SessionOnlyBody {
 
 pub(super) async fn on_list_peers(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<SessionOnlyBody>,
+    ValidatedJson(body): ValidatedJson<SessionOnlyBody>,
 ) -> impl IntoResponse {
     match channel_methods::list_peers(&ctx.state, &body.session_id) {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -30,7 +31,7 @@ pub(super) async fn on_list_peers(
 
 pub(super) async fn on_read_messages(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<SessionOnlyBody>,
+    ValidatedJson(body): ValidatedJson<SessionOnlyBody>,
 ) -> impl IntoResponse {
     match channel_methods::read_messages(&ctx.state, &body.session_id) {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -46,7 +47,7 @@ pub(super) struct PostMessageBody {
 
 pub(super) async fn on_post_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<PostMessageBody>,
+    ValidatedJson(body): ValidatedJson<PostMessageBody>,
 ) -> impl IntoResponse {
     match channel_methods::post_message(&ctx.state, &body.session_id, &body.text) {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -76,7 +77,7 @@ mod tests {
     #[tokio::test]
     async fn list_peers_route_errors_for_unregistered_session() {
         let body = SessionOnlyBody { session_id: "ghost".to_string() };
-        let resp = on_list_peers(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_list_peers(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
         assert_eq!(v["ok"], false);
@@ -87,7 +88,7 @@ mod tests {
         let c = ctx();
         c.state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         let body = PostMessageBody { session_id: "s1".to_string(), text: "".to_string() };
-        let resp = on_post_message(AxState(c), Json(body)).await.into_response();
+        let resp = on_post_message(AxState(c), ValidatedJson(body)).await.into_response();
         let v = body_json(resp).await;
         assert_eq!(v["ok"], false);
     }

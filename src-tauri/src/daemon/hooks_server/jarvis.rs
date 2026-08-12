@@ -18,6 +18,7 @@
 //! et al.), so the HTTP status carries no meaning to it beyond "the request
 //! reached the daemon".
 
+use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::jarvis as jarvis_methods;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
@@ -43,7 +44,7 @@ pub(super) struct SpawnWorkerBody {
 
 pub(super) async fn on_spawn_worker(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<SpawnWorkerBody>,
+    ValidatedJson(body): ValidatedJson<SpawnWorkerBody>,
 ) -> impl IntoResponse {
     let result = jarvis_methods::spawn_worker(
         &ctx.state,
@@ -70,7 +71,7 @@ pub(super) struct SendToSessionBody {
 
 pub(super) async fn on_send_to_session(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<SendToSessionBody>,
+    ValidatedJson(body): ValidatedJson<SendToSessionBody>,
 ) -> impl IntoResponse {
     let result = jarvis_methods::send_to_session(
         &ctx.state,
@@ -92,7 +93,7 @@ pub(super) struct FleetStatusBody {
 
 pub(super) async fn on_fleet_status(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<FleetStatusBody>,
+    ValidatedJson(body): ValidatedJson<FleetStatusBody>,
 ) -> impl IntoResponse {
     let result = jarvis_methods::fleet_status(&ctx.state, &body.jarvis_session_id).await;
     match result {
@@ -114,7 +115,7 @@ pub(super) struct RespondWorkerPromptBody {
 
 pub(super) async fn on_respond_worker_prompt(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<RespondWorkerPromptBody>,
+    ValidatedJson(body): ValidatedJson<RespondWorkerPromptBody>,
 ) -> impl IntoResponse {
     let result = jarvis_methods::respond_worker_prompt(
         &ctx.state,
@@ -165,7 +166,7 @@ mod tests {
             model: None,
             account: None,
         };
-        let resp = on_spawn_worker(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_spawn_worker(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
         assert_eq!(v["ok"], false);
@@ -175,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn fleet_status_rejects_non_jarvis_caller() {
         let body = FleetStatusBody { jarvis_session_id: "not-jarvis".to_string() };
-        let resp = on_fleet_status(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_fleet_status(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
         assert_eq!(v["ok"], false);

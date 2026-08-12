@@ -22,6 +22,7 @@ mod preview_render;
 mod relay;
 mod stop;
 mod turn_status;
+mod validated_json;
 
 use crate::daemon::state::DaemonState;
 use crate::settings::paths;

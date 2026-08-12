@@ -5,6 +5,7 @@
 //! `daemon::preview` and broadcast on the daemon-wide `preview` notifier
 //! channel so a connected window can refresh without polling.
 
+use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
@@ -27,7 +28,7 @@ pub(super) struct PreviewPushBody {
 
 pub(super) async fn on_preview_push(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<PreviewPushBody>,
+    ValidatedJson(body): ValidatedJson<PreviewPushBody>,
 ) -> impl IntoResponse {
     let source = body.source.filter(|s| !s.is_empty()).unwrap_or_else(|| "terminal".to_string());
     log::info!(

@@ -4,6 +4,7 @@
 //! `respond_*` in methods.rs) or the prompt timeout fires.
 
 use super::decision::deny_decision;
+use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::state::DaemonState;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
@@ -106,7 +107,7 @@ fn is_question_shaped(input: &Value) -> bool {
 
 pub(super) async fn on_permission_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<PermRequestBody>,
+    ValidatedJson(body): ValidatedJson<PermRequestBody>,
 ) -> impl IntoResponse {
     let auto_accept = body.session_id.as_deref()
         .and_then(crate::sessions::chat_config::get)
@@ -156,7 +157,7 @@ pub(super) async fn on_permission_request(
 
 pub(super) async fn on_question_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<QuestRequestBody>,
+    ValidatedJson(body): ValidatedJson<QuestRequestBody>,
 ) -> impl IntoResponse {
     let payload = json!({
         "id": body.id,

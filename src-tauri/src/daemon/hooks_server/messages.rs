@@ -3,6 +3,7 @@
 //! stream-json output; this route validates AND records the send (Stop-hook
 //! enforcement, mirroring `report_turn_status`).
 
+use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
@@ -36,7 +37,7 @@ pub(super) struct UpdateMessageBody {
 
 pub(super) async fn on_send_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<SendMessageBody>,
+    ValidatedJson(body): ValidatedJson<SendMessageBody>,
 ) -> impl IntoResponse {
     let trimmed = body.text.trim();
     if trimmed.is_empty() {
@@ -56,7 +57,7 @@ pub(super) async fn on_send_message(
 
 pub(super) async fn on_update_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<UpdateMessageBody>,
+    ValidatedJson(body): ValidatedJson<UpdateMessageBody>,
 ) -> impl IntoResponse {
     if body.message < 1 || body.message > MAX_ORDINAL {
         return (StatusCode::OK, Json(json!({"ok": false, "error": "message must be 1 or greater"})));
@@ -105,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn valid_text_route_returns_ok() {
         let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into() };
-        let resp = on_send_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await, json!({"ok": true, "message": 1}));
     }
@@ -113,7 +114,7 @@ mod tests {
     #[tokio::test]
     async fn send_accepts_text_over_the_repo_channel_cap() {
         let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(4000) };
-        let resp = on_send_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
     }
 
@@ -122,7 +123,7 @@ mod tests {
         let body = UpdateMessageBody {
             session_id: "s".into(), message: 1, text: None, retract: true,
         };
-        let resp = on_update_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
     }
 
@@ -131,7 +132,7 @@ mod tests {
         let body = UpdateMessageBody {
             session_id: "s".into(), message: 1, text: None, retract: false,
         };
-        let resp = on_update_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         let v = body_json(resp).await;
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains("text is required"));
@@ -142,7 +143,7 @@ mod tests {
         let body = UpdateMessageBody {
             session_id: "s".into(), message: 0, text: Some("x".into()), retract: false,
         };
-        let resp = on_update_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(false));
     }
 
@@ -152,7 +153,7 @@ mod tests {
         let body = UpdateMessageBody {
             session_id: "s".into(), message: 1, text: Some("fixed".into()), retract: false,
         };
-        on_update_message(AxState(c.clone()), Json(body)).await;
+        on_update_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert_eq!(c.state.registry.peek_message_sent_gen("s"), Some(0));
     }
 
@@ -160,14 +161,14 @@ mod tests {
     async fn valid_text_route_records_message_sent_for_current_gen() {
         let c = ctx();
         let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into() };
-        on_send_message(AxState(c.clone()), Json(body)).await;
+        on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert_eq!(c.state.registry.peek_message_sent_gen("s"), Some(0));
     }
 
     #[tokio::test]
     async fn empty_text_route_returns_ok_false_with_error() {
         let body = SendMessageBody { session_id: "s".into(), text: "   ".into() };
-        let resp = on_send_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
         assert_eq!(v["ok"], json!(false));
@@ -178,14 +179,14 @@ mod tests {
     async fn empty_text_route_does_not_record_message_sent() {
         let c = ctx();
         let body = SendMessageBody { session_id: "s".into(), text: "   ".into() };
-        on_send_message(AxState(c.clone()), Json(body)).await;
+        on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert!(c.state.registry.peek_message_sent_gen("s").is_none());
     }
 
     #[tokio::test]
     async fn overlong_text_route_returns_ok_false_with_error() {
         let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(MAX_MESSAGE_LEN + 1) };
-        let resp = on_send_message(AxState(ctx()), Json(body)).await.into_response();
+        let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
         assert_eq!(v["ok"], json!(false));

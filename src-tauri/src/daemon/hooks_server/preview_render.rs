@@ -3,6 +3,7 @@
 //! URL, so it gets its own CSP header instead of intersecting with the app
 //! shell's. In-memory, bounded, evict-on-insert cache - not `preview.rs`'s disk-persisted history.
 
+use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use axum::{
     extract::{Path as AxPath, State as AxState},
@@ -37,7 +38,7 @@ pub(super) struct PreviewRenderBody {
 
 pub(super) async fn on_preview_render(
     AxState(_ctx): AxState<Arc<HookCtx>>,
-    Json(body): Json<PreviewRenderBody>,
+    ValidatedJson(body): ValidatedJson<PreviewRenderBody>,
 ) -> impl IntoResponse {
     let id = uuid::Uuid::new_v4().to_string();
     let mut cache = cell().lock().unwrap_or_else(|e| e.into_inner());
