@@ -8,33 +8,6 @@ import "./styles/base.css";
 import "./styles/widgets.css";
 
 import { mountRouter, registerView } from "./router";
-import { renderDashboard } from "./views/dashboard/dashboard";
-import { renderSessionsView, renderDetachedSession, queueSessionSelect, queueNewChat } from "./views/sessions/sessions";
-import { renderHistoryView, queueHistorySelect } from "./views/history/history";
-import { renderScheduleView } from "./views/schedule/schedule";
-import { renderProjectsView } from "./views/projects/projects";
-import { renderCharactersView } from "./views/characters/characters";
-import { renderCharacterDetailView } from "./views/characters/character-detail";
-import { renderNewsView } from "./views/news/news";
-import { renderProjectDetailView } from "./views/project-detail/project-detail";
-import { renderCharacterPickView } from "./views/project-detail/subviews/character-pick/character-pick";
-import { renderAutomationView } from "./views/project-detail/subviews/automation/automation";
-import { renderFolderMappingView } from "./views/project-detail/subviews/folder-mapping/folder-mapping";
-import { renderSessionsListView } from "./views/project-detail/subviews/sessions-list/sessions-list";
-import { renderSessionDetailView } from "./views/session-detail/session-detail";
-import { renderSettingsView } from "./views/settings/settings";
-import { renderSkillDetailView } from "./views/skill-detail/skill-detail";
-import { renderSkillsView } from "./views/skills/skills";
-import { renderAppearanceView } from "./views/settings/subviews/appearance/appearance";
-import { renderNotificationsView } from "./views/settings/subviews/notifications/notifications";
-import { renderChatDefaultsView } from "./views/settings/subviews/chat-defaults/chat-defaults";
-import { renderCharactersSettingsView } from "./views/settings/subviews/characters/characters";
-import { renderSystemView } from "./views/settings/subviews/system/system";
-import { renderPermissionsView } from "./views/settings/subviews/permissions/permissions";
-import { renderStatuslineView } from "./views/settings/subviews/statusline/statusline";
-import { renderAboutView } from "./views/settings/subviews/about/about";
-import { renderRemoteAccessView } from "./views/settings/subviews/remote-access/remote-access";
-import { renderAccountsSettingsView } from "./views/settings/subviews/accounts/accounts";
 import { initBoot } from "./shared/boot";
 import { ensureRemoteToken } from "./shared/remote-gate";
 import { isRemote } from "./shared/transport";
@@ -136,33 +109,42 @@ if (import.meta.env.DEV) {
     startNewSession(document.createElement("div"));
 }
 
-registerView("dashboard", renderDashboard);
-registerView("sessions", renderSessionsView);
-registerView("history", renderHistoryView);
-registerView("schedule", renderScheduleView);
-registerView("projects", renderProjectsView);
-registerView("characters", renderCharactersView);
-registerView("character-detail", renderCharacterDetailView);
-registerView("news", renderNewsView);
-registerView("project-detail", renderProjectDetailView);
-registerView("project-character-pick", renderCharacterPickView);
-registerView("project-automation", renderAutomationView);
-registerView("project-folder-mapping", renderFolderMappingView);
-registerView("project-sessions", renderSessionsListView);
-registerView("session-detail", renderSessionDetailView);
-registerView("settings", renderSettingsView);
-registerView("skill-detail", renderSkillDetailView);
-registerView("skills", renderSkillsView);
-registerView("settings-appearance", renderAppearanceView);
-registerView("settings-notifications", renderNotificationsView);
-registerView("settings-chat-defaults", renderChatDefaultsView);
-registerView("settings-characters", renderCharactersSettingsView);
-registerView("settings-system", renderSystemView);
-registerView("settings-permissions", renderPermissionsView);
-registerView("settings-statusline", renderStatuslineView);
-registerView("settings-about", renderAboutView);
-registerView("settings-remote-access", renderRemoteAccessView);
-registerView("settings-accounts", renderAccountsSettingsView);
+// Route-level dynamic imports (todo 187): each view's chunk loads only when
+// its route mounts, so windows stop parsing code they never visit. Cast at
+// this one boundary since RenderFn wants Promise<void>|Promise<()=>void>,
+// not TS's inferred Promise<void|(()=>void)> from a plain `.then`.
+type ViewRenderFn = (root: HTMLElement) => void | Promise<void> | (() => void) | Promise<() => void>;
+function lazyView(loader: () => Promise<Record<string, unknown>>, fnName: string): (root: HTMLElement) => Promise<void> | Promise<() => void> {
+  return (root) => loader().then((m) => (m[fnName] as ViewRenderFn)(root)) as unknown as Promise<void> | Promise<() => void>;
+}
+
+registerView("dashboard", lazyView(() => import("./views/dashboard/dashboard"), "renderDashboard"));
+registerView("sessions", lazyView(() => import("./views/sessions/sessions"), "renderSessionsView"));
+registerView("history", lazyView(() => import("./views/history/history"), "renderHistoryView"));
+registerView("schedule", lazyView(() => import("./views/schedule/schedule"), "renderScheduleView"));
+registerView("projects", lazyView(() => import("./views/projects/projects"), "renderProjectsView"));
+registerView("characters", lazyView(() => import("./views/characters/characters"), "renderCharactersView"));
+registerView("character-detail", lazyView(() => import("./views/characters/character-detail"), "renderCharacterDetailView"));
+registerView("news", lazyView(() => import("./views/news/news"), "renderNewsView"));
+registerView("project-detail", lazyView(() => import("./views/project-detail/project-detail"), "renderProjectDetailView"));
+registerView("project-character-pick", lazyView(() => import("./views/project-detail/subviews/character-pick/character-pick"), "renderCharacterPickView"));
+registerView("project-automation", lazyView(() => import("./views/project-detail/subviews/automation/automation"), "renderAutomationView"));
+registerView("project-folder-mapping", lazyView(() => import("./views/project-detail/subviews/folder-mapping/folder-mapping"), "renderFolderMappingView"));
+registerView("project-sessions", lazyView(() => import("./views/project-detail/subviews/sessions-list/sessions-list"), "renderSessionsListView"));
+registerView("session-detail", lazyView(() => import("./views/session-detail/session-detail"), "renderSessionDetailView"));
+registerView("settings", lazyView(() => import("./views/settings/settings"), "renderSettingsView"));
+registerView("skill-detail", lazyView(() => import("./views/skill-detail/skill-detail"), "renderSkillDetailView"));
+registerView("skills", lazyView(() => import("./views/skills/skills"), "renderSkillsView"));
+registerView("settings-appearance", lazyView(() => import("./views/settings/subviews/appearance/appearance"), "renderAppearanceView"));
+registerView("settings-notifications", lazyView(() => import("./views/settings/subviews/notifications/notifications"), "renderNotificationsView"));
+registerView("settings-chat-defaults", lazyView(() => import("./views/settings/subviews/chat-defaults/chat-defaults"), "renderChatDefaultsView"));
+registerView("settings-characters", lazyView(() => import("./views/settings/subviews/characters/characters"), "renderCharactersSettingsView"));
+registerView("settings-system", lazyView(() => import("./views/settings/subviews/system/system"), "renderSystemView"));
+registerView("settings-permissions", lazyView(() => import("./views/settings/subviews/permissions/permissions"), "renderPermissionsView"));
+registerView("settings-statusline", lazyView(() => import("./views/settings/subviews/statusline/statusline"), "renderStatuslineView"));
+registerView("settings-about", lazyView(() => import("./views/settings/subviews/about/about"), "renderAboutView"));
+registerView("settings-remote-access", lazyView(() => import("./views/settings/subviews/remote-access/remote-access"), "renderRemoteAccessView"));
+registerView("settings-accounts", lazyView(() => import("./views/settings/subviews/accounts/accounts"), "renderAccountsSettingsView"));
 
 const app = document.getElementById("app");
 if (!app) {
@@ -259,14 +241,14 @@ if (detachedSessionId) {
   document.body.classList.add("detached-mode");
   // Hide all static legacy views from index.html so only #app renders.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
-  void renderDetachedSession(app, detachedSessionId);
+  void import("./views/sessions/sessions").then((m) => m.renderDetachedSession(app, detachedSessionId));
   // Skip mountRouter + sidemenu wiring; this window is single-purpose.
 } else if (isScheduleWindow) {
   // Solo calendar render. Hide the static legacy views and mount the schedule
   // view straight into #app; no router, no boot (this window only shows the
   // calendar and cross-navigates to the Chats window on item click).
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
-  void renderScheduleView(app);
+  void import("./views/schedule/schedule").then((m) => m.renderScheduleView(app));
 } else {
   mountRouter(app);
   initBoot();
@@ -322,20 +304,20 @@ if (detachedSessionId) {
     // main window. Fresh-created window drains the stashed request on boot;
     // an already-open window catches the live event.
     void invoke<[string, string] | null>("take_pending_chat_open").then((p) => {
-      if (p) applyChatOpenRequest(p[0], p[1]);
+      if (p) void applyChatOpenRequest(p[0], p[1]);
     }).catch(() => {});
     void invoke<PendingNewChatPayload | null>("take_pending_new_chat").then((p) => {
-      if (p) applyChatNewRequest(p);
+      if (p) void applyChatNewRequest(p);
     }).catch(() => {});
     const ev = window.__TAURI__?.event;
     if (ev?.listen) {
       void ev.listen<{ sessionId: string; mode: string }>(
         "chats-open-session",
-        (e) => applyChatOpenRequest(e.payload?.sessionId, e.payload?.mode),
+        (e) => void applyChatOpenRequest(e.payload?.sessionId, e.payload?.mode),
       );
       void ev.listen<PendingNewChatPayload>(
         "chats-new-chat",
-        (e) => applyChatNewRequest(e.payload),
+        (e) => void applyChatNewRequest(e.payload),
       );
     }
   }
@@ -413,12 +395,14 @@ if (detachedSessionId) {
  * the Sessions view; "history" opens it read-only in the History view. Both
  * route through the same select-on-mount queues the in-window flows use.
  */
-function applyChatOpenRequest(sessionId: string | undefined, mode: string | undefined): void {
+async function applyChatOpenRequest(sessionId: string | undefined, mode: string | undefined): Promise<void> {
   if (!sessionId) return;
   if (mode === "history") {
+    const { queueHistorySelect } = await import("./views/history/history");
     queueHistorySelect(sessionId);
     showView("history");
   } else {
+    const { queueSessionSelect } = await import("./views/sessions/sessions");
     queueSessionSelect(sessionId);
     showView("sessions");
   }
@@ -440,8 +424,9 @@ interface PendingNewChatPayload {
   characterId?: string | null;
 }
 
-function applyChatNewRequest(payload: PendingNewChatPayload | undefined): void {
+async function applyChatNewRequest(payload: PendingNewChatPayload | undefined): Promise<void> {
   if (!payload?.projectPath) return;
+  const { queueNewChat } = await import("./views/sessions/sessions");
   queueNewChat(
     { path: payload.projectPath, name: payload.projectName ?? payload.projectPath },
     {
