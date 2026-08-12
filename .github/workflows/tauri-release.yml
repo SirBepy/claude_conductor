@@ -69,21 +69,9 @@ jobs:
             updater_key: windows-x86_64
             os_label: windows
             arch_label: x64
-          - os: macos-14
-            target: aarch64-apple-darwin
-            updater_key: darwin-aarch64
-            os_label: macos
-            arch_label: arm64
-          - os: macos-14
-            target: x86_64-apple-darwin
-            updater_key: darwin-x86_64
-            os_label: macos
-            arch_label: x64
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            updater_key: linux-x86_64
-            os_label: linux
-            arch_label: x64
+          # macOS/Linux paused 2026-08-12; restore the three matrix entries from
+          # this commit's parent to un-pause. The os-guarded staging steps below
+          # stay put and simply never fire.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
