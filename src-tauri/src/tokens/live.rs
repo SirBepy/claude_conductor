@@ -68,6 +68,9 @@ pub fn active_sessions_from_history(history: &[TokenRecord]) -> Vec<TokenRecord>
                 recorded_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
                 live: Some(true),
                 merged_subagents: None,
+                // Scans transcripts off disk, with no `Instance` to read a kind
+                // from - stays "unknown" rather than guessed.
+                kind: None,
             });
         }
     }

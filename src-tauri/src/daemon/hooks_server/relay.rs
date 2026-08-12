@@ -91,6 +91,9 @@ pub(super) async fn on_refresh(
             .unwrap_or_default();
 
             let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            // Only writer with a live `Instance` in reach, so it's the one path
+            // that can attribute a row to its source instead of "unknown".
+            let kind = state.registry.get(&session_id).map(|i| i.kind);
             let record = token_stats::TokenRecord {
                 session_id,
                 cwd,
@@ -105,6 +108,7 @@ pub(super) async fn on_refresh(
                 recorded_at: now,
                 live: None,
                 merged_subagents: None,
+                kind,
             };
 
             // Insert (idempotent on session_id, mirroring the old

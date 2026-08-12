@@ -72,6 +72,7 @@ mod tests {
             recorded_at: "2026-08-05T00:00:00Z".into(),
             live: None,
             merged_subagents: None,
+            kind: None,
         }
     }
 

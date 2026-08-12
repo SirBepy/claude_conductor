@@ -26,6 +26,7 @@ export const WIDGET_METAS: WidgetMeta[] = [
   { id: "session-bars", scope: "account" },
   { id: "weekly-chart", scope: "account" },
   { id: "weekly-bars", scope: "account" },
+  { id: "token-source", scope: "global" },
 ];
 
 const REGISTRY_IDS = WIDGET_METAS.map((w) => w.id);

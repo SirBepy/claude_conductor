@@ -301,6 +301,7 @@ mod build_groups_tests {
             recorded_at: last.to_string(),
             live: None,
             merged_subagents: None,
+            kind: None,
         }
     }
 
