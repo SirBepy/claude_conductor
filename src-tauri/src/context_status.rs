@@ -227,20 +227,7 @@ fn resolve_transcript(
     }
 
     // 2. Fallback: scan all project dirs for <session_id>.jsonl.
-    let projects = walker::claude_projects_dir()?;
-    let target = format!("{session_id}.jsonl");
-    let entries = std::fs::read_dir(&projects).ok()?;
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        let candidate = dir.join(&target);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    scan_projects_for_session(session_id)
 }
 
 /// Resolves a session's transcript path from the app's mirrored instance
