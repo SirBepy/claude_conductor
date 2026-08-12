@@ -8,6 +8,7 @@ Cross-platform Tauri 2 app (Rust + vanilla JS webview). Usage monitoring via coo
 
 Type: other (Tauri 2 / Rust + vanilla JS webview)
 Deploy: GitHub Releases (NSIS / DMG / DEB + AppImage via CI)
+`src-tauri/tauri.conf.json`'s committed `version` is intentionally stale locally, CI-owned: `.github/workflows/tauri-release.yml:115-128` jq-rewrites it (and Cargo.toml, package.json) to the real version before every release build.
 
 ## Structure
 
