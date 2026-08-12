@@ -164,6 +164,18 @@ function detachedSessionFromHash(): string | null {
   return params.get("session");
 }
 
+// Preview pop-out window mode (todo 290), same detect-before-router shape as
+// detachedSessionFromHash: backend opens `index.html?previewwindow=1#preview?session=<id>`.
+function previewSessionFromHash(): string | null {
+  if (new URLSearchParams(window.location.search).get("previewwindow") !== "1") return null;
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#preview")) return null;
+  const qIdx = hash.indexOf("?");
+  if (qIdx < 0) return null;
+  const params = new URLSearchParams(hash.slice(qIdx + 1));
+  return params.get("session");
+}
+
 // Signal to the Rust boot watchdog that the webview loaded successfully.
 // If this never fires within ~6s, the watchdog reloads the window. Recovers
 // from WebView2 "can't reach this page" caused by an unreachable start URL
@@ -201,6 +213,14 @@ if (new URLSearchParams(window.location.search).get("chatswindow") === "1") {
 const isScheduleWindow = new URLSearchParams(window.location.search).get("schedulewindow") === "1";
 if (isScheduleWindow) {
   document.body.classList.add("schedule-window-mode");
+  document.getElementById("sidemenu")?.remove();
+  document.getElementById("sidemenuBackdrop")?.remove();
+}
+
+// Standalone Preview pop-out window (todo 290), same solo-render shape as Schedule above.
+const previewSessionId = previewSessionFromHash();
+if (previewSessionId) {
+  document.body.classList.add("preview-window-mode");
   document.getElementById("sidemenu")?.remove();
   document.getElementById("sidemenuBackdrop")?.remove();
 }
@@ -249,6 +269,10 @@ if (detachedSessionId) {
   // calendar and cross-navigates to the Chats window on item click).
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
   void import("./views/schedule/schedule").then((m) => m.renderScheduleView(app));
+} else if (previewSessionId) {
+  // Solo preview render; no router, no sidemenu, no boot.
+  document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
+  void import("./views/sessions/preview-panel").then((m) => m.mountPreviewWindow(app, previewSessionId));
 } else {
   mountRouter(app);
   initBoot();

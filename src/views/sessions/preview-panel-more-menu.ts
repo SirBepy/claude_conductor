@@ -13,6 +13,7 @@ export interface PvMoreMenuDeps {
   isHistoryOpen: () => boolean;
   onSetDeviceWidth: (w: DeviceWidth) => void;
   getDeviceWidth: () => DeviceWidth;
+  onPopOut: () => void;
 }
 
 const SIZES: Array<{ w: DeviceWidth; icon: string; label: string }> = [
@@ -73,9 +74,9 @@ const pvMenu = createMoreMenu<[PvMoreMenuDeps]>({
 
     const popoutItem = document.createElement("button");
     popoutItem.type = "button";
-    popoutItem.className = "smore-item is-disabled";
-    popoutItem.disabled = true;
-    popoutItem.innerHTML = `<i class="ph ph-arrows-out-simple"></i><span>Pop-out window (coming soon)</span>`;
+    popoutItem.className = "smore-item";
+    popoutItem.innerHTML = `<i class="ph ph-arrows-out-simple"></i><span>Pop-out window</span>`;
+    popoutItem.onclick = () => { close(); deps.onPopOut(); };
     menu.appendChild(popoutItem);
   },
 });

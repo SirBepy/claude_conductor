@@ -12,7 +12,8 @@
 // consequence of scoping being per-chat now, not a bug.
 //
 // `renderPreview(root, { mode })`'s `mode` lets the pop-out OS window reuse
-// this exact renderer via `mountPreviewWindow` - not yet called from main.ts.
+// this exact renderer via `mountPreviewWindow`, called from main.ts's
+// `previewSessionId` boot branch.
 //
 // Live updates arrive two ways, per `project_daemon_notifier_broadcast_lossy`:
 // a `preview` daemon-notifier broadcast (fast, but can be dropped under
@@ -476,6 +477,7 @@ class PreviewPanel implements PreviewController {
       isHistoryOpen: () => this.historyOpen,
       onSetDeviceWidth: (w) => this.setDeviceWidth(w),
       getDeviceWidth: () => this.deviceWidth,
+      onPopOut: () => this.popOut(),
     };
   }
 
@@ -599,7 +601,7 @@ export function renderPreview(root: HTMLElement, opts: { mode: PreviewMode }): P
   return new PreviewPanel(root, opts.mode);
 }
 
-/** Pop-out window bootstrap (todo 290) - not wired from main.ts yet.
+/** Pop-out window bootstrap (todo 290), called from main.ts's boot branch.
  *  Repopulates state.sessions (separate JS module realm) so the reply
  *  composer can resolve the session to send to. */
 export async function mountPreviewWindow(root: HTMLElement, sessionId: string): Promise<PreviewController> {
