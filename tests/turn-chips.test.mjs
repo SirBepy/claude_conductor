@@ -114,6 +114,20 @@ function makeAssistantMessage(text, streaming = false, tsMs = 0) {
   };
 }
 
+// d10bd68e: raw assistant narration is hidden by default and no longer
+// counts as "visible" for the merge gate - only send_message (or a real
+// user/question row) does. Mirrors chat-message-chips.view.spec.ts.
+function makeSendMessage(text, id = "tu1", tsMs = 0) {
+  return {
+    type: "tool_use",
+    tool_name: "mcp__cc_conductor__send_message",
+    input: { text },
+    id,
+    timestamp: BigInt(tsMs),
+    parent_tool_use_id: null,
+  };
+}
+
 function makeToolUse(id = "tool1", tsMs = 0) {
   return {
     type: "tool_use",
@@ -578,7 +592,7 @@ describe("Silent auto-continue streak merge", () => {
 
     // Turn 1 closes normally with real content.
     renderer.handleEvent(makeUserMessage("do X"));
-    renderer.handleEvent(makeAssistantMessage("Working on it."));
+    renderer.handleEvent(makeSendMessage("Working on it.", "tu1"));
     renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
     // First auto-continue: turn 1 wasn't silent, so this renders normally.
     renderer.handleEvent(makeMetaUserMessage());
@@ -587,7 +601,7 @@ describe("Silent auto-continue streak merge", () => {
     renderer.handleEvent(makeMetaUserMessage());
     renderer.handleEvent(makeTurnUsage({ outputTokens: 50 })); // silent
     renderer.handleEvent(makeMetaUserMessage());
-    renderer.handleEvent(makeAssistantMessage("Fixed it."));
+    renderer.handleEvent(makeSendMessage("Fixed it.", "tu2"));
     renderer.handleEvent(makeTurnUsage({ outputTokens: 200 }));
 
     // Turn 1's own footer + ONE merged footer for the whole retry chain.
@@ -608,10 +622,10 @@ describe("Silent auto-continue streak merge", () => {
     const { renderer, container } = await createRenderer();
 
     renderer.handleEvent(makeUserMessage("do X"));
-    renderer.handleEvent(makeAssistantMessage("Answer 1"));
+    renderer.handleEvent(makeSendMessage("Answer 1", "tu1"));
     renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
     renderer.handleEvent(makeMetaUserMessage());
-    renderer.handleEvent(makeAssistantMessage("Answer 2"));
+    renderer.handleEvent(makeSendMessage("Answer 2", "tu2"));
     renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
 
     expect(container.querySelectorAll(".turn-footer").length).toBe(2);

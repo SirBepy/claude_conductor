@@ -21,7 +21,8 @@ describe("askConfirm", () => {
   it("renders the message and resolves true on confirm click", async () => {
     const p = askConfirm("Remove personal?", { confirmLabel: "Remove" });
     expect(overlay()).not.toBeNull();
-    expect(document.querySelector(".app-confirm-text").textContent).toBe("Remove personal?");
+    // 756944a8 split text at "?" into title/desc; no desc here so it's all title.
+    expect(document.querySelector(".app-confirm-title").textContent).toBe("Remove personal?");
     const ok = document.querySelector(".app-confirm-ok");
     expect(ok.textContent).toBe("Remove");
     ok.click();

@@ -122,7 +122,7 @@ test.describe("view-harness / chat switching reuses the rendered transcript", ()
     await expect(page.locator("#session-pane .session-messages .msg[data-brand-msg='alpha']")).toHaveCount(1);
   });
 
-  test("scroll position survives the round trip", async ({ page }) => {
+  test("reselecting a chat lands at the bottom, not wherever the reader left it", async ({ page }) => {
     await mountSessions(page);
     await openChatSettled(page, "s1");
     const parked = await page.locator("#session-pane .session-messages").evaluate((el) => {
@@ -133,14 +133,16 @@ test.describe("view-harness / chat switching reuses the rendered transcript", ()
 
     await openChatSettled(page, "s2");
     await openChatSettled(page, "s1");
-    // A rebuild always lands pinned to the newest message; a retained pane
-    // comes back where the reader left it.
+    // edbb0f67 (FIX) reverted scroll-position restore: reselecting a retained
+    // chat re-pins toward the bottom, same as a cold load, instead of coming
+    // back where the reader left it. Tolerance matches chat-scroll.ts's own
+    // SCROLL_BOTTOM_THRESHOLD (64px) - the app's definition of "at the bottom".
     const restored = await page.locator("#session-pane .session-messages").evaluate((el) => ({
       top: el.scrollTop,
       max: el.scrollHeight - el.clientHeight,
     }));
     expect(restored.max).toBeGreaterThan(0);
-    expect(restored.top).toBe(0);
+    expect(restored.max - restored.top).toBeLessThanOrEqual(64);
   });
 
   test("the transcript never blanks out on the way back in", async ({ page }) => {
