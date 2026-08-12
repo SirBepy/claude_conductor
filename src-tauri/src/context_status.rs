@@ -11,8 +11,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
 
-mod commands;
-pub use commands::{context_status, session_live_cwd};
+// `pub`, not a `pub use` shim: `generate_handler!` needs the `__cmd__*` items
+// the command macro emits beside each fn, and those do not travel through a re-export.
+pub mod commands;
 
 /// How full a session's context window is, computed from its transcript.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
