@@ -2,6 +2,7 @@ pub mod kinds;
 pub mod registry;
 pub mod registry_flags;
 pub mod registry_account;
+pub mod registry_turn;
 pub mod detector;
 pub mod persistence;
 pub mod chat_config;
