@@ -135,6 +135,17 @@ export class HttpTransport implements Transport {
         });
       case "get_recent_branches":
         return this.rpc<T>("get_recent_branches", { cwd: args.cwd });
+      // PR-review Commits/Files browsing (ai_todo 244): mirrors desktop's
+      // `ipc::git_diff` Tauri commands. Daemon rejects an unrecognized cwd.
+      case "get_range_files":
+        return this.rpc<T>("get_range_files", { cwd: args.cwd, from: args.from ?? null, to: args.to });
+      case "get_file_diff":
+        return this.rpc<T>("get_file_diff", {
+          cwd: args.cwd,
+          from: args.from ?? null,
+          to: args.to,
+          path: args.path,
+        });
       case "start_session": {
         // Daemon expects snake_case; tolerate camelCase from callers (matches
         // the set_session_effort normalization pattern above). Params forwarded

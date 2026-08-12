@@ -161,6 +161,10 @@ const SAFE_METHODS: &[&str] = &[
     "create_worktree",
     "remove_worktree",
     "get_recent_branches",
+    // Read-only PR-review file browsing (ai_todo 244), mirrors desktop's
+    // `ipc::git_diff` commands; pr_review.rs rejects any unknown `cwd`.
+    "get_range_files",
+    "get_file_diff",
 ];
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -369,6 +373,7 @@ mod tests {
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview",
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
+            "get_range_files", "get_file_diff",
         ] {
             assert!(SAFE_METHODS.contains(&m), "{m} should be remotely callable");
         }
