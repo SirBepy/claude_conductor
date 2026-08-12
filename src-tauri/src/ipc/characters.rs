@@ -4,20 +4,10 @@ use crate::characters::{self, Character};
 use crate::characters::slots::Slot;
 use crate::characters::whitelist;
 use crate::state::AppState;
-use crate::settings::{self, paths};
+use crate::settings::{paths, persist};
 use crate::types::{Avatar, CharacterWhitelist, Settings};
 use std::collections::{HashMap, HashSet};
-use tauri::{AppHandle, Emitter, State};
-
-/// Save `snapshot` to `settings_file()` and emit `settings-changed`. The
-/// shared tail of every character/whitelist mutation in this file (ai_todo
-/// 281 - was hand-rolled ten times).
-fn persist(app: &AppHandle, snapshot: &Settings) {
-    if let Ok(path) = paths::settings_file() {
-        let _ = settings::save(&path, snapshot);
-    }
-    let _ = app.emit("settings-changed", snapshot);
-}
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub fn list_characters() -> Vec<Character> {

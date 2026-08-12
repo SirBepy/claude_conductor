@@ -3,6 +3,7 @@
 use crate::types::Settings;
 use anyhow::{Context, Result};
 use std::path::Path;
+use tauri::{AppHandle, Emitter};
 
 // Re-export identity helpers so existing call sites that reach into
 // `settings::store::*` keep resolving without changes.
@@ -161,6 +162,16 @@ pub fn save(path: &Path, settings: &Settings) -> Result<()> {
     std::fs::write(path, raw)
         .with_context(|| format!("writing settings to {path:?}"))?;
     Ok(())
+}
+
+/// Save `snapshot` to `settings_file()` and emit `settings-changed`. The
+/// shared tail of every settings mutation (ai_todo 555/539 - was hand-rolled
+/// six times).
+pub fn persist(app: &AppHandle, snapshot: &Settings) {
+    if let Ok(path) = super::paths::settings_file() {
+        let _ = save(&path, snapshot);
+    }
+    let _ = app.emit("settings-changed", snapshot);
 }
 
 #[cfg(test)]

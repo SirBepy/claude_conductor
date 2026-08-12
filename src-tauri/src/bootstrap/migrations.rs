@@ -3,7 +3,7 @@
 
 use crate::settings::paths;
 use crate::state::AppState;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 /// Import `history.jsonl`/`token-history.json`/`skill-usage` legacy files
 /// into SQLite, then run a one-time startup prune under the current
@@ -104,10 +104,7 @@ pub(super) fn migrate_hook_install_if_needed(app: &tauri::AppHandle) {
         g.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
         g.clone()
     };
-    if let Ok(path) = paths::settings_file() {
-        let _ = crate::settings::save(&path, &snapshot);
-    }
-    let _ = app.emit("settings-changed", snapshot);
+    crate::settings::persist(app, &snapshot);
     log::info!(
         "hook install migrated to v{}",
         crate::hooks::CURRENT_INSTALL_VERSION
@@ -149,8 +146,5 @@ pub(super) fn backfill_project_characters_if_needed(app: &tauri::AppHandle) {
         log::info!("character migration v2: cleared character avatar from {cleared} project(s)");
         g.clone()
     };
-    if let Ok(path) = paths::settings_file() {
-        let _ = crate::settings::save(&path, &snapshot);
-    }
-    let _ = app.emit("settings-changed", snapshot);
+    crate::settings::persist(app, &snapshot);
 }

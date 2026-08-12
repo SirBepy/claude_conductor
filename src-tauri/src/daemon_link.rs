@@ -282,7 +282,7 @@ async fn handle_instances_changed(app: &tauri::AppHandle, params: serde_json::Va
 /// read; here the app process (if running) merges the same project upsert into
 /// its AppState and persists it to settings.json.
 fn handle_project_created(app: &tauri::AppHandle, params: serde_json::Value) {
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     if let (Some(project_id), Some(cwd), Some(now)) = (
         params.get("project_id").and_then(|v| v.as_str()),
         params.get("cwd").and_then(|v| v.as_str()),
@@ -298,10 +298,7 @@ fn handle_project_created(app: &tauri::AppHandle, params: serde_json::Value) {
         );
         let snapshot = settings_guard.clone();
         drop(settings_guard);
-        if let Ok(path) = crate::settings::paths::settings_file() {
-            let _ = crate::settings::save(&path, &snapshot);
-        }
-        let _ = app.emit("settings-changed", &snapshot);
+        crate::settings::persist(app, &snapshot);
     }
 }
 
@@ -310,7 +307,7 @@ fn handle_project_created(app: &tauri::AppHandle, params: serde_json::Value) {
 /// do this in-process (ipc/characters.rs's `ensure_session_character`).
 /// Mirrors `handle_project_created` above.
 fn handle_session_character_assigned(app: &tauri::AppHandle, params: serde_json::Value) {
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     if let (Some(session_id), Some(character_id)) = (
         params.get("session_id").and_then(|v| v.as_str()),
         params.get("character_id").and_then(|v| v.as_str()),
@@ -320,10 +317,7 @@ fn handle_session_character_assigned(app: &tauri::AppHandle, params: serde_json:
         settings_guard.session_characters.insert(session_id.to_string(), character_id.to_string());
         let snapshot = settings_guard.clone();
         drop(settings_guard);
-        if let Ok(path) = crate::settings::paths::settings_file() {
-            let _ = crate::settings::save(&path, &snapshot);
-        }
-        let _ = app.emit("settings-changed", &snapshot);
+        crate::settings::persist(app, &snapshot);
     }
 }
 
@@ -331,17 +325,14 @@ fn handle_session_character_assigned(app: &tauri::AppHandle, params: serde_json:
 /// todo 272) and updated its own in-memory settings cache for an instant read.
 /// Mirrors `handle_session_character_assigned` above.
 fn handle_jarvis_session_created(app: &tauri::AppHandle, params: serde_json::Value) {
-    use tauri::{Emitter, Manager};
+    use tauri::Manager;
     if let Some(session_id) = params.get("session_id").and_then(|v| v.as_str()) {
         let state = app.state::<crate::state::AppState>();
         let mut settings_guard = state.settings.lock().unwrap();
         settings_guard.jarvis_session_id = Some(session_id.to_string());
         let snapshot = settings_guard.clone();
         drop(settings_guard);
-        if let Ok(path) = crate::settings::paths::settings_file() {
-            let _ = crate::settings::save(&path, &snapshot);
-        }
-        let _ = app.emit("settings-changed", &snapshot);
+        crate::settings::persist(app, &snapshot);
     }
 }
 
