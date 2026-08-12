@@ -27,21 +27,6 @@ fn token_file() -> Result<PathBuf, String> {
     Ok(paths::data_dir().map_err(|e| e.to_string())?.join("remote-access.json"))
 }
 
-/// Mint a fresh 32-byte hex token. Same scheme as the daemon's `ensure_token`.
-fn mint_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    to_hex(&bytes)
-}
-
-/// Write both the hash (what the daemon validates) and the plaintext token (so
-/// the QR is reproducible) to `remote-access.json`.
-fn write_token(path: &Path, token: &str) -> Result<(), String> {
-    let body = serde_json::json!({ "hash": sha256_hex(token), "token": token });
-    std::fs::write(path, serde_json::to_string_pretty(&body).unwrap_or_default())
-        .map_err(|e| e.to_string())
-}
-
 /// Read the current plaintext token for the QR.
 ///
 /// Two writers provision the token and they disagree on format: the APP
@@ -373,22 +358,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn write_token_stores_both_hash_and_plaintext() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("remote-access.json");
-        let token = "abc123";
-        write_token(&path, token).unwrap();
-
-        let raw = std::fs::read_to_string(&path).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        // Daemon validates against this hash.
-        assert_eq!(v["hash"].as_str().unwrap(), sha256_hex(token));
-        // Plaintext persisted so the QR is reproducible.
-        assert_eq!(v["token"].as_str().unwrap(), token);
-        assert_eq!(read_plaintext_token(&path).unwrap(), token);
-    }
-
-    #[test]
     fn read_plaintext_token_none_for_hash_only_legacy_file() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("remote-access.json");
@@ -413,17 +382,11 @@ mod tests {
     fn read_plaintext_token_prefers_json_token_over_handoff() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("remote-access.json");
-        write_token(&path, "from_json").unwrap();
+        let body = serde_json::json!({ "hash": sha256_hex("from_json"), "token": "from_json" });
+        std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap()).unwrap();
         // A stale handoff file must NOT shadow the app-written json token.
         std::fs::write(dir.path().join("remote-access-token.txt"), "stale_handoff").unwrap();
         assert_eq!(read_plaintext_token(&path).as_deref(), Some("from_json"));
-    }
-
-    #[test]
-    fn mint_token_is_64_hex_chars() {
-        let t = mint_token();
-        assert_eq!(t.len(), 64);
-        assert!(t.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
