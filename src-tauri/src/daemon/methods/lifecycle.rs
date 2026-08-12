@@ -237,6 +237,16 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 let old = state.registry.get(&p.session_id).ok_or_else(|| {
                     RpcError::invalid_params(format!("session {} not found", p.session_id))
                 })?;
+                // Jarvis's own id/account bookkeeping (and its worker_of
+                // ownership tracking) assumes a fleet-owned session's id and
+                // account don't change out from under it - block the
+                // human-facing move instead of silently forking it (todo 441).
+                if old.jarvis || old.worker_of.is_some() {
+                    return Err(RpcError::invalid_params(format!(
+                        "session {} is Jarvis-owned and cannot be moved to another account",
+                        p.session_id
+                    )));
+                }
                 if old.account_id.as_deref() == Some(p.target_account_id.as_str()) {
                     return Err(RpcError::invalid_params(format!(
                         "session {} is already on account {}",
@@ -514,6 +524,56 @@ pub fn register_notifier(router: &mut Router, notifier: Notifier) {
             Ok(serde_json::json!({"ok": true}))
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::rpc::{ConnectionContext, Request};
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+
+    fn test_state() -> Arc<DaemonState> {
+        DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    fn dummy_ctx() -> ConnectionContext {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        ConnectionContext::new(tx)
+    }
+
+    async fn try_move(state: &Arc<DaemonState>, session_id: &str) -> RpcError {
+        let mut router = Router::new();
+        register_account_move(&mut router, state.clone());
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "move_session_to_account".into(),
+            params: Some(json!({"session_id": session_id, "target_account_id": "other-acct"})),
+        };
+        router.dispatch(req, dummy_ctx()).await.error.expect("expected rejection")
+    }
+
+    #[tokio::test]
+    async fn move_session_to_account_rejects_jarvis_singleton() {
+        let state = test_state();
+        state.registry.upsert_interactive("jv-1", std::path::Path::new("."), "proj", "2026-08-12T00:00:00Z");
+        state.registry.set_jarvis("jv-1", true);
+
+        let err = try_move(&state, "jv-1").await;
+        assert!(err.message.contains("Jarvis-owned"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn move_session_to_account_rejects_worker_of_session() {
+        let state = test_state();
+        state.registry.upsert_interactive("worker-1", std::path::Path::new("."), "proj", "2026-08-12T00:00:00Z");
+        state.registry.set_worker_of("worker-1", Some("jv-1".to_string()));
+
+        let err = try_move(&state, "worker-1").await;
+        assert!(err.message.contains("Jarvis-owned"), "{}", err.message);
+    }
 }
 
 pub fn register_settings(router: &mut Router, cache: SettingsCache) {
