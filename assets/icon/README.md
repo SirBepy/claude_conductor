@@ -20,6 +20,11 @@ working 2026-08-07).
 
 ## Regenerating the icon set
 
+**Android launcher icon (padding/scale/background tweaks):** use
+`scripts/regen-android-icon.ps1 -Scale 0.60 -MarginRatio 1.4 -BackgroundColor "#0f1629"` instead
+of the manual steps below - it already generates into a scratch dir (trap 3) and copies both
+tracked mipmap locations for you.
+
 1. `cargo tauri icon assets/icon/icon-master-1024.png`
    Writes the full desktop/iOS/Android set into `src-tauri/icons/`.
 2. `cargo tauri icon assets/icon/icon-master-1024.png -o android/src-tauri/icons`
