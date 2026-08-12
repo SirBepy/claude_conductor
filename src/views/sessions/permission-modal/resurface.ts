@@ -12,6 +12,7 @@ import {
   allowPermission,
   autoAllowIfRemembered,
   isAutoAccept,
+  markLatestQuestion,
   storePendingPrompt,
   takePendingPrompt,
   peekPendingPrompt,
@@ -94,6 +95,9 @@ export async function rehydratePendingPrompts(sessionId: string): Promise<boolea
   // One park per session, so take the longest-waiting if the daemon holds two.
   const [rec] = findPendingPromptsForSession(prompts, sessionId);
   if (!rec) return false;
+  // This window may never have seen the live event (fresh reload) - seed the
+  // stale-question tracker from the daemon's own record too.
+  if (rec.kind === "question") markLatestQuestion(sessionId, rec.payload.id);
   storePendingPrompt(sessionId, rec.kind === "question"
     ? { kind: "question", payload: rec.payload }
     : { kind: "permission", payload: rec.payload });

@@ -31,6 +31,8 @@ import {
   hydrateAutoAccept,
   isAutoAccept,
   isForSelectedSession,
+  isLatestQuestion,
+  markLatestQuestion,
   gateDiag,
   resolveCwdForSession,
   storePendingPrompt,
@@ -140,6 +142,12 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
         rerenderSidebar();
       }
       if (!sid) return;
+      if (!isLatestQuestion(sid, payload.id)) {
+        // A newer question superseded this card while it sat unanswered - the
+        // conversation already moved on, so don't inject a reply into it now.
+        console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
+        return;
+      }
       // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
       // staying standalone (cca356d8). Only included when NOT delivered
       // in-band - extras still travel either way, since the tool_result only
@@ -153,6 +161,14 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
         if (a.path) extraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
       }
       if (state.selectedId === sid && state.heldMessages) {
+        // Fold whatever's half-typed in the underlying composer at answer time
+        // (the card only anchors above it, not over it) - flushHeldWithDraft
+        // only bundles what's passed in, never the live composer state itself.
+        const attach = state.heldMessages.getAttached();
+        if (attach && !attach.isDraftEmpty()) {
+          extraBlocks.push(...attach.getDraftBlocks());
+          attach.clearComposer();
+        }
         // Stage the extras FIRST so flushHeldWithDraft's single bundleHeld call
         // folds them alongside the isolated sentinel block into one bundle,
         // instead of a second message queued behind it. A no-op if both are
@@ -237,6 +253,9 @@ function handlePermissionRequested(payload: PermissionRequestedPayload): void {
  *  without a full Tauri event round-trip. */
 export function handleQuestionRequested(payload: QuestionRequestedPayload): void {
   console.info("[perm-relay] frontend received question-requested", { session: payload.session_id, ...gateDiag() });
+  // Track staleness (see gating.ts) before the park/show branch below, so a
+  // superseded card's late answer can be told apart from a live one.
+  markLatestQuestion(payload.session_id, payload.id);
   if (!isForSelectedSession(payload.session_id)) {
     if (payload.session_id) {
       storePendingPrompt(payload.session_id, { kind: "question", payload });

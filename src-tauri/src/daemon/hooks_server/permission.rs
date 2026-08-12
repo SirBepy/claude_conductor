@@ -1,7 +1,7 @@
 //! Permission/question endpoints: `/permissions/request` + `/questions/request`.
-//! Each inserts a oneshot into `state.pending`, emits a notifier event, and
-//! blocks the HTTP response until the app responds (via the daemon-side RPC
-//! `respond_*` in methods.rs) or the prompt timeout fires.
+//! `/permissions/request` blocks on a oneshot until `respond_permission`
+//! answers or the prompt times out. `/questions/request` and the AskUserQuestion
+//! hook below are fire-and-forget: post a durable card, return immediately.
 
 use super::decision::deny_decision;
 use super::validated_json::ValidatedJson;
@@ -155,6 +155,18 @@ pub(super) async fn on_permission_request(
     result
 }
 
+/// Fire-and-forget ack, echoed back verbatim as the MCP tool's result text
+/// (`mcp/server.rs`'s `relay()` just stringifies the response body).
+const QUESTION_FIRE_AND_FORGET_NOTE: &str =
+    "Your question has been shown to the user in the app and the card is now \
+waiting for their answer. Do NOT call this tool again and do NOT keep working \
+on this task - end your turn now with at most a brief acknowledgement. The \
+user will reply in a separate follow-up message when they're ready, and that \
+reply resumes the work in a fresh turn. If they send something unrelated \
+instead, treat this question as dropped.";
+
+/// Fire-and-forget, mirroring `ask_question_decision` below: no pending
+/// oneshot, no blocking wait, returns immediately.
 pub(super) async fn on_question_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<QuestRequestBody>,
@@ -164,21 +176,14 @@ pub(super) async fn on_question_request(
         "questions": body.questions,
         "session_id": body.session_id,
     });
-    let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
-    ctx.state.pending.lock().await.insert(body.id.clone(), tx);
-    // Reliable delivery: record the prompt so the app's poll surfaces it even if
-    // the lossy notifier broadcast drops the frame.
-    ctx.state.add_prompt(&body.id, "question-requested", payload.clone(), false).await;
+    // Durable: cleared only by an explicit answer/skip via `respond_question`.
+    ctx.state.add_prompt(&body.id, "question-requested", payload.clone(), true).await;
     ctx.state.fire_blocked_prompt(body.session_id.as_deref(), &body.id);
     // Wake Jarvis (todo 272 chunk 3) if this prompt belongs to one of its
     // workers - no-op for every other session.
     crate::daemon::jarvis_wake::wake_on_worker_blocked(
         &ctx.state, body.session_id.as_deref(), &body.id, Some("question"),
     ).await;
-    // Durable "waiting on the user" state + sidebar publish, mirroring the
-    // AskUserQuestion hook path below - this relay used to leave the registry
-    // untouched, so a question asked via the MCP tool never showed (or cleared)
-    // "Input Needed" except by the model's own end-of-turn marker.
     set_question_awaiting(&ctx.state, body.session_id.as_deref(), true);
     let subs = ctx.state.notifier.publish("question_request", payload);
     // Character "asking" sound (see `ask_question_decision` for the rationale).
@@ -190,20 +195,7 @@ pub(super) async fn on_question_request(
         "[perm-relay] published question_request id={} session={:?} -> {} subscriber(s)",
         body.id, body.session_id, subs
     );
-    let result = match await_answer(rx, PROMPT_TIMEOUT).await {
-        Some(val) => (StatusCode::OK, Json(val)),
-        None => {
-            ctx.state.pending.lock().await.remove(&body.id);
-            ctx.state.notifier.publish(
-                "question_expired",
-                json!({ "session_id": body.session_id, "id": body.id }),
-            );
-            (StatusCode::OK, Json(json!({"answers": {}})))
-        }
-    };
-    ctx.state.remove_prompt(&body.id).await;
-    set_question_awaiting(&ctx.state, body.session_id.as_deref(), false);
-    result
+    (StatusCode::OK, Json(json!({ "acknowledged": true, "note": QUESTION_FIRE_AND_FORGET_NOTE })))
 }
 
 /// PreToolUse-hook endpoint for the builtin `AskUserQuestion` tool. The in-app
@@ -291,11 +283,15 @@ pub(super) async fn ask_question_decision(ctx: &Arc<HookCtx>, body: Value) -> Va
 
 #[cfg(test)]
 mod tests {
-    use super::{ask_question_decision, is_auto_accept_eligible, is_question_shaped, ASK_FIRE_AND_FORGET_REASON, HookCtx};
+    use super::{
+        ask_question_decision, is_auto_accept_eligible, is_question_shaped, on_question_request,
+        AxState, QuestRequestBody, ValidatedJson, ASK_FIRE_AND_FORGET_REASON, HookCtx,
+    };
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;
     use crate::types::Settings;
+    use axum::response::IntoResponse;
     use serde_json::json;
     use std::sync::Arc;
 
@@ -391,6 +387,34 @@ mod tests {
         let expired = state.expire_prompts_for_session("s1").await;
         assert_eq!(expired, 0, "durable question must be skipped by turn-end expiry");
         assert_eq!(state.list_prompts().await.len(), 1, "card still open for the user to answer");
+    }
+
+    /// MCP `ask_user_question` now mirrors the built-in AskUserQuestion hook.
+    #[tokio::test]
+    async fn question_request_fires_and_forgets_without_blocking() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        let mut rx = state.notifier.subscribe();
+
+        let body = QuestRequestBody {
+            id: "q1".to_string(),
+            questions: json!([{ "question": "Tabs or spaces?" }]),
+            session_id: Some("s1".to_string()),
+        };
+        let resp = on_question_request(AxState(ctx), ValidatedJson(body)).await.into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let decision: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decision["acknowledged"], true);
+
+        assert!(state.pending.lock().await.is_empty(), "fire-and-forget must not insert a oneshot");
+        let prompts = state.list_prompts().await;
+        assert_eq!(prompts.len(), 1, "one recorded prompt");
+        assert_eq!(prompts[0]["event"], "question-requested");
+        assert_eq!(prompts[0]["durable"], true, "must be durable so turn-end can't wipe it");
+
+        let frame = rx.recv().await.expect("question_request published");
+        assert_eq!(frame["method"], "question_request");
+        assert_eq!(frame["params"]["session_id"], "s1");
     }
 
     #[tokio::test]
