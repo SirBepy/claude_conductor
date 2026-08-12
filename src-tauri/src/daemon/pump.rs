@@ -94,6 +94,10 @@ pub(crate) async fn run_stdout_pump(
     let mut pending_delta: Option<(u64, String, i64)> = None;
     let mut flush_deadline: Option<tokio::time::Instant> = None;
     const SNAPSHOT_FLUSH_WINDOW: std::time::Duration = std::time::Duration::from_millis(100);
+    // Raw concatenation of every AssistantDelta this turn (todo 291), scanned
+    // for a `<cc-preview:..>` sentinel at turn end and cleared there; unlike
+    // `pending_delta`/`StreamingText` this spans ALL text blocks in the turn.
+    let mut turn_text = String::new();
     loop {
         tokio::select! {
             result = buf_reader.read_until(b'\n', &mut line_buf) => {
@@ -146,6 +150,7 @@ pub(crate) async fn run_stdout_pump(
                             }
                             let ev = match ev {
                                 ChatEvent::AssistantDelta { text, block, timestamp, .. } => {
+                                    turn_text.push_str(&text);
                                     match pending_delta {
                                         Some((pb, ref mut buf, _)) if pb == block => buf.push_str(&text),
                                         _ => {
@@ -206,6 +211,25 @@ pub(crate) async fn run_stdout_pump(
                                 // client attaching between turns doesn't get a stale
                                 // resync snapshot of the finished turn's text.
                                 pump_session.streaming.lock().unwrap().clear();
+                                // Preview-push sentinel (todo 291): re-emitting the
+                                // same slug iterates the panel entry in place.
+                                if let Some((slug, html)) = crate::chat::parser::extract_cc_preview_push(&turn_text) {
+                                    let title = crate::chat::parser::preview_title_from_slug(&slug);
+                                    if let Err(e) = crate::daemon::preview::push_and_notify(
+                                        &state_for_pump,
+                                        title,
+                                        Some(slug),
+                                        html,
+                                        "chat".to_string(),
+                                        Some(pump_session.session_id.clone()),
+                                    ) {
+                                        log::warn!(
+                                            "daemon: session {} chat preview push rejected: {e}",
+                                            pump_session.session_id
+                                        );
+                                    }
+                                }
+                                turn_text.clear();
                                 let live_turn = saw_stream_turn;
                                 saw_stream_turn = false;
                                 // report_turn_status (todo 435) is authoritative for a live
