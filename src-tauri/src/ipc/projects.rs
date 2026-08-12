@@ -399,6 +399,56 @@ pub fn instance_token_stats(session_id: String, state: State<AppState>) -> serde
     })
 }
 
+fn source_label(kind: Option<crate::sessions::kinds::InstanceKind>) -> &'static str {
+    use crate::sessions::kinds::InstanceKind;
+    match kind {
+        Some(InstanceKind::Interactive) => "interactive",
+        Some(InstanceKind::Automated) => "automated",
+        Some(InstanceKind::External) => "external",
+        None => "unknown",
+    }
+}
+
+/// Sums the persisted token history by session `kind` (Interactive CLI vs
+/// Automated/External app-hosted chats) so the dashboard can compare tokens
+/// burned per source. Rows with no `kind` (written before this field existed)
+/// land in "unknown" rather than being guessed at.
+#[tauri::command]
+pub fn token_stats_by_source(state: State<AppState>) -> serde_json::Value {
+    let history = {
+        let mgr = state.db.lock().unwrap();
+        crate::storage::token_store::get_token_records(mgr.conn(), 0).unwrap_or_default()
+    };
+
+    let order = ["interactive", "automated", "external", "unknown"];
+    let mut sessions = std::collections::HashMap::new();
+    let mut tokens = std::collections::HashMap::new();
+    let mut turns = std::collections::HashMap::new();
+    for r in &history {
+        let key = source_label(r.kind);
+        *sessions.entry(key).or_insert(0u64) += 1;
+        *tokens.entry(key).or_insert(0u64) +=
+            r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_creation_tokens;
+        *turns.entry(key).or_insert(0u64) += r.turns;
+    }
+
+    let buckets: Vec<serde_json::Value> = order.iter().map(|&key| {
+        let s = *sessions.get(key).unwrap_or(&0);
+        let t = *tokens.get(key).unwrap_or(&0);
+        let tu = *turns.get(key).unwrap_or(&0);
+        let avg = if tu > 0 { t as f64 / tu as f64 } else { 0.0 };
+        serde_json::json!({
+            "kind": key,
+            "sessions": s,
+            "tokens": t,
+            "turns": tu,
+            "avgTokensPerTurn": avg,
+        })
+    }).collect();
+
+    serde_json::json!({ "buckets": buckets })
+}
+
 // --- Hook registration ---
 
 #[tauri::command]

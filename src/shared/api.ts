@@ -152,6 +152,16 @@ export interface InstanceTokenStats {
   prompts?: number;
 }
 
+/** One row of `token_stats_by_source` - `kind` is "unknown" for history rows
+ * written before session-kind tracking existed, never guessed. */
+export interface TokenSourceBucket {
+  kind: "interactive" | "automated" | "external" | "unknown";
+  sessions: number;
+  tokens: number;
+  turns: number;
+  avgTokensPerTurn: number;
+}
+
 export type CharacterSlot =
   | "work_finished"
   | "question_asked"
@@ -471,6 +481,12 @@ export const api = {
   instanceTokenStats: async (sessionId: string): Promise<InstanceTokenStats> => {
     try { return await invoke<InstanceTokenStats>("instance_token_stats", { sessionId }); }
     catch (e) { console.error("instance_token_stats failed", e); return { tokens: 0, turns: 0 }; }
+  },
+  tokenStatsBySource: async (): Promise<TokenSourceBucket[]> => {
+    try {
+      const r = await invoke<{ buckets: TokenSourceBucket[] }>("token_stats_by_source");
+      return r.buckets;
+    } catch (e) { console.error("token_stats_by_source failed", e); return []; }
   },
   /** Forks a rate-limited session's transcript onto a different (non-exhausted)
    * account, sends its pending resume prompt immediately, ends the old session,

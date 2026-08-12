@@ -82,6 +82,9 @@ pub fn backfill_all(history_path: &Path) -> Result<BackfillResult> {
             recorded_at: now,
             live: None,
             merged_subagents: None,
+            // Backfill reads historical transcripts offline, with no live
+            // `Instance` to read a kind from - stays "unknown", never guessed.
+            kind: None,
         });
         known_ids.insert(session_id);
         result.processed += 1;
@@ -138,6 +141,7 @@ pub fn backfill_all(history_path: &Path) -> Result<BackfillResult> {
                     recorded_at: now,
                     live: None,
                     merged_subagents: Some(Vec::new()),
+                    kind: None,
                 });
                 history.len() - 1
             }
@@ -206,6 +210,7 @@ mod tests {
                 recorded_at: "2026-04-20T10:31:00Z".into(),
                 live: None,
                 merged_subagents: None,
+                kind: None,
             });
             known.insert(sid);
             result.processed += 1;

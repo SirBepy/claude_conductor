@@ -34,6 +34,12 @@ pub struct TokenRecord {
     /// Kept for idempotency of repeated backfills.
     #[serde(default)]
     pub merged_subagents: Option<Vec<String>>,
+    /// Session kind at record-append time (Interactive CLI vs Automated/External
+    /// app-hosted). `None` on rows written before this field existed, or when the
+    /// writer had no live `Instance` to read it from - treated as its own
+    /// "unknown" bucket, never guessed.
+    #[serde(default)]
+    pub kind: Option<crate::sessions::kinds::InstanceKind>,
 }
 
 /// Summed token usage from a single transcript file.

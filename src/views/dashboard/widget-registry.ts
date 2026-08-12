@@ -11,6 +11,7 @@ import {
   weeklyChartWidget,
   weeklyBarsWidget,
 } from "./widgets/usage-charts";
+import { tokenSourceWidget } from "./token-source-widget";
 
 const skillUsageWidget: Widget = {
   id: "skill-usage",
@@ -28,6 +29,7 @@ export const WIDGETS: Widget[] = [
   sessionBarsWidget,
   weeklyChartWidget,
   weeklyBarsWidget,
+  tokenSourceWidget,
 ];
 
 export function getWidget(id: string): Widget | undefined {

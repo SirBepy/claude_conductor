@@ -59,6 +59,7 @@ mod tests {
             recorded_at: "2026-04-20T10:31:00Z".into(),
             live: None,
             merged_subagents: None,
+            kind: None,
         };
         save_history(&path, std::slice::from_ref(&rec)).unwrap();
         let back = load_history(&path);
