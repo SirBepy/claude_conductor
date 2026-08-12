@@ -299,10 +299,10 @@ pub async fn context_status(
     Ok(status)
 }
 
-/// Scans a transcript for the most recent line carrying a non-empty `cwd`
-/// (`last-prompt`/`mode` rows omit it), reading from the end so large
-/// transcripts stay cheap. This is where the session is *actually* operating,
-/// which differs from the daemon-recorded spawn dir once inside a worktree.
+/// Scans a transcript for the most recent line carrying a non-empty `cwd`.
+/// Claude Code writes the CLI's working directory on every `user`/`assistant`
+/// line (`last-prompt`/`mode` rows omit it); this differs from the
+/// daemon-recorded spawn dir once inside a worktree.
 fn last_transcript_cwd(path: &std::path::Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines().rev() {
@@ -323,8 +323,8 @@ fn last_transcript_cwd(path: &std::path::Path) -> Option<String> {
 
 /// Returns the session's *live* working directory - the last `cwd` recorded in
 /// its transcript - so git chips can follow the AI into a worktree instead of
-/// pinning to the spawn dir. Falls back to `fallback` (spawn cwd) when
-/// unresolved, so callers always get a usable directory.
+/// pinning to the spawn dir. Resolves the transcript the same way
+/// `context_status` does (mirrored instance cache, else a project-dir scan).
 #[tauri::command]
 pub async fn session_live_cwd(
     session_id: String,

@@ -36,8 +36,8 @@ pub(crate) fn close_stand_down_is_failure_at_eof(close_confirmed_at_eof: bool) -
 }
 
 /// Daemon-authoritative `/close` teardown: mark the session ended and force the
-/// `claude` process tree down. Idempotent - `mark_ended` no-ops after the
-/// first call and `kill_tree` on an already-dead pid is harmless - so the
+/// `claude` process tree down. Fired when the `close_session` MCP tool's
+/// `close_requested` flag is observed at turn end. Idempotent, so the
 /// result-line and EOF handlers can both call it safely.
 pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
     let now = chrono::Utc::now().to_rfc3339();
