@@ -84,6 +84,34 @@ fn http_post(rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Val
     })
 }
 
+/// Shared shape for every relay POST arm below. `fallback` opts into the
+/// `resp["ok"] == false` error check; `success` overrides the Ok text.
+/// Both `None` for arms that just relay `resp.to_string()` verbatim.
+fn relay(
+    rt: &tokio::runtime::Runtime,
+    id: &Value,
+    url: &str,
+    body: Value,
+    fallback: Option<&str>,
+    success: Option<&str>,
+) -> Value {
+    match http_post(rt, url, body) {
+        Ok(resp) => {
+            if let Some(fb) = fallback {
+                if resp["ok"].as_bool() == Some(false) {
+                    let err = resp["error"].as_str().unwrap_or(fb);
+                    return tool_error_result(id, err);
+                }
+            }
+            match success {
+                Some(text) => tool_result(id, text),
+                None => tool_result(id, &resp.to_string()),
+            }
+        }
+        Err(e) => tool_error_result(id, &format!("relay error: {e}")),
+    }
+}
+
 fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -197,10 +225,7 @@ pub fn run_stdio() {
                                 "input": input,
                                 "session_id": session_id,
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_QUESTION => {
                             let questions = arguments["questions"].clone();
@@ -210,10 +235,7 @@ pub fn run_stdio() {
                                 "questions": questions,
                                 "session_id": session_id,
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_CLOSE => {
                             // Fire-and-confirm: the daemon records the close and
@@ -221,18 +243,19 @@ pub fn run_stdio() {
                             // per-session CC_SESSION_ID env, not tool args).
                             let url = format!("http://127.0.0.1:{port}/sessions/close-confirm");
                             let body = json!({ "session_id": session_id });
-                            match http_post(&rt, &url, body) {
-                                Ok(_) => tool_result(&id, "close confirmed; session will end at turn completion"),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(
+                                &rt,
+                                &id,
+                                &url,
+                                body,
+                                None,
+                                Some("close confirmed; session will end at turn completion"),
+                            )
                         }
                         TOOL_LIST_PEERS => {
                             let url = format!("http://127.0.0.1:{port}/channel/list-peers");
                             let body = json!({ "session_id": session_id });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_POST_MESSAGE => {
                             let url = format!("http://127.0.0.1:{port}/channel/post-message");
@@ -240,18 +263,12 @@ pub fn run_stdio() {
                                 "session_id": session_id,
                                 "text": arguments["text"],
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_READ_MESSAGES => {
                             let url = format!("http://127.0.0.1:{port}/channel/read-messages");
                             let body = json!({ "session_id": session_id });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_REPORT_STATUS => {
                             let url = format!("http://127.0.0.1:{port}/turn/report-status");
@@ -260,14 +277,7 @@ pub fn run_stdio() {
                                 "status": arguments["status"],
                                 "title": arguments.get("title"),
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) if resp["ok"].as_bool() == Some(false) => {
-                                    let err = resp["error"].as_str().unwrap_or("invalid status");
-                                    tool_error_result(&id, err)
-                                }
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, Some("invalid status"), None)
                         }
                         TOOL_SEND_MESSAGE => {
                             let url = format!("http://127.0.0.1:{port}/messages/send");
@@ -275,14 +285,7 @@ pub fn run_stdio() {
                                 "session_id": session_id,
                                 "text": arguments["text"],
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) if resp["ok"].as_bool() == Some(false) => {
-                                    let err = resp["error"].as_str().unwrap_or("invalid message");
-                                    tool_error_result(&id, err)
-                                }
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, Some("invalid message"), None)
                         }
                         TOOL_UPDATE_MESSAGE => {
                             let url = format!("http://127.0.0.1:{port}/messages/update");
@@ -292,14 +295,7 @@ pub fn run_stdio() {
                                 "text": arguments.get("text"),
                                 "retract": arguments.get("retract").and_then(|v| v.as_bool()).unwrap_or(false),
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) if resp["ok"].as_bool() == Some(false) => {
-                                    let err = resp["error"].as_str().unwrap_or("invalid update");
-                                    tool_error_result(&id, err)
-                                }
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, Some("invalid update"), None)
                         }
                         // The four arms below are only ever advertised to a
                         // Jarvis child's `tools/list` (see `is_jarvis` above),
@@ -319,10 +315,7 @@ pub fn run_stdio() {
                                 "model": arguments.get("model"),
                                 "account": arguments.get("account"),
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_SEND_TO_SESSION => {
                             let url = format!("http://127.0.0.1:{port}/jarvis/send-to-session");
@@ -331,18 +324,12 @@ pub fn run_stdio() {
                                 "session_id": arguments["session_id"],
                                 "text": arguments["text"],
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_FLEET_STATUS => {
                             let url = format!("http://127.0.0.1:{port}/jarvis/fleet-status");
                             let body = json!({ "jarvis_session_id": session_id });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         TOOL_RESPOND_WORKER_PROMPT => {
                             let url = format!("http://127.0.0.1:{port}/jarvis/respond-worker-prompt");
@@ -353,10 +340,7 @@ pub fn run_stdio() {
                                 "message": arguments.get("message"),
                                 "updated_input": arguments.get("updated_input"),
                             });
-                            match http_post(&rt, &url, body) {
-                                Ok(resp) => tool_result(&id, &resp.to_string()),
-                                Err(e) => tool_error_result(&id, &format!("relay error: {e}")),
-                            }
+                            relay(&rt, &id, &url, body, None, None)
                         }
                         _ => mcp_error(&id, -32601, "unknown tool"),
                     }
