@@ -15,7 +15,16 @@ import { escapeHtml } from "../escape-html";
 import { loadShiki } from "./shiki-loader";
 import { renderStackedDiff } from "./edit-window";
 import { enhanceEditDiffs } from "./diff-enhancer";
-import { parseUnifiedDiff, renderUnifiedDiffHtml, renderSplitDiffHtml, type DiffRow } from "./file-surface-diff";
+import {
+  parseUnifiedDiff,
+  renderUnifiedDiffHtml,
+  renderSplitDiffHtml,
+  sessionEditsToDiffRows,
+  highlightDiffRows,
+  applyDiffHighlight,
+  type DiffRow,
+  type DiffHighlightMaps,
+} from "./file-surface-diff";
 import type { FileEditView } from "./file-edits";
 import type { TextFileData } from "../../types/ipc.generated";
 
@@ -138,6 +147,10 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     gitDiffRows: null as DiffRow[] | null,
     gitDiffForPath: null as string | null,
     gitDiffError: null as string | null,
+    sessionDiffRows: null as DiffRow[] | null,
+    sessionDiffRowsForPath: null as string | null,
+    diffHighlight: null as DiffHighlightMaps | null,
+    diffHighlightForPath: null as string | null,
     token: 0,
   };
 
@@ -321,7 +334,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
         }
         break;
       case "mode-split":
-        if (state.view === "diff" && state.diffMode !== "split" && !state.file.sessionEdits?.length) {
+        if (state.view === "diff" && state.diffMode !== "split") {
           state.diffMode = "split";
           updateBar();
           void renderBody();
@@ -378,9 +391,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     const hasDiff = hasDiffSource(file);
     setMenuItem("view-diff", isDiff, !hasDiff);
     setMenuItem("view-file", !isDiff, false);
-    const forceInline = !!file.sessionEdits?.length;
     setMenuItem("mode-inline", state.diffMode === "inline", !isDiff);
-    setMenuItem("mode-split", state.diffMode === "split", !isDiff || forceInline);
+    setMenuItem("mode-split", state.diffMode === "split", !isDiff);
 
     if (opts.nav) {
       const list = opts.nav.list();
@@ -503,9 +515,32 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   // ── body: diff view ──────────────────────────────────────────────────
 
+  // Shared highlight cache for both diff sources: rows are keyed by object
+  // identity, so this only fires the (lazy, one-call-per-side) shiki pass
+  // once per path and reapplies the cached maps on later mode toggles.
+  async function enhanceDiffHighlight(token: number, file: SurfaceFile, rows: DiffRow[]): Promise<void> {
+    if (state.diffHighlightForPath !== file.path) {
+      state.diffHighlightForPath = file.path; // mark before the await - no duplicate tokenize races
+      state.diffHighlight = await highlightDiffRows(rows, langFromPath(file.path));
+    }
+    if (token !== state.token || state.diffHighlightForPath !== file.path || !state.diffHighlight) return;
+    applyDiffHighlight(el.body, rows, state.diffHighlight);
+    if (search.query) runSearch(search.query); // re-mark: innerHTML was just replaced
+  }
+
   async function renderDiffBody(token: number): Promise<void> {
     const file = state.file!;
     if (file.sessionEdits && file.sessionEdits.length) {
+      if (state.diffMode === "split") {
+        if (state.sessionDiffRowsForPath !== file.path) {
+          state.sessionDiffRows = sessionEditsToDiffRows(file.sessionEdits);
+          state.sessionDiffRowsForPath = file.path;
+        }
+        const rows = state.sessionDiffRows!;
+        el.body.innerHTML = renderSplitDiffHtml(rows);
+        void enhanceDiffHighlight(token, file, rows);
+        return;
+      }
       el.body.innerHTML = `<div class="fs-session-diff">${renderStackedDiff(file.sessionEdits)}</div>`;
       const diffEl = el.body.querySelector<HTMLElement>(".fs-session-diff");
       if (diffEl) await enhanceEditDiffs(diffEl);
@@ -538,6 +573,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
           state.diffMode === "split"
             ? renderSplitDiffHtml(state.gitDiffRows)
             : renderUnifiedDiffHtml(state.gitDiffRows);
+        void enhanceDiffHighlight(token, file, state.gitDiffRows);
       }
       return;
     }
@@ -614,6 +650,14 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
       state.gitDiffRows = null;
       state.gitDiffForPath = null;
       state.gitDiffError = null;
+    }
+    if (state.sessionDiffRowsForPath !== file.path) {
+      state.sessionDiffRows = null;
+      state.sessionDiffRowsForPath = null;
+    }
+    if (state.diffHighlightForPath !== file.path) {
+      state.diffHighlight = null;
+      state.diffHighlightForPath = null;
     }
     closeMenu();
     clearSearch();
