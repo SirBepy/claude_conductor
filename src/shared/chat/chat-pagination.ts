@@ -44,16 +44,16 @@ function mergeTotals(a: TurnUsageTotals | null, b: TurnUsageTotals | null): Turn
   };
 }
 
-/** Resolve an update_message ordinal within a single prepend batch only (see
- *  prependEvents' updateMsgIds pass). Mirrors chat-event-handler.ts's
- *  resolveMessageOrdinal but scoped to `batch` instead of the full history -
- *  cross-batch revision ordering is out of scope (todo 590). */
-function resolveOrdinalInBatch(batch: RenderedMessage[], n: number): number {
+/** Resolve the 1-based `n` a revise/retract call addresses: n=1 is the newest
+ *  `kind:"message"` row, -1 when out of the last-two-boundaries window.
+ *  Shared by the live path (full history) and this module's prependEvents
+ *  (single batch only - cross-batch ordering is out of scope, todo 590). */
+export function resolveOrdinalIn(messages: RenderedMessage[], n: number): number {
   if (!Number.isInteger(n) || n < 1) return -1;
   let boundaries = 0;
   let seen = 0;
-  for (let i = batch.length - 1; i >= 0; i--) {
-    const m = batch[i]!;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
     if (isBoundaryMessage(m)) {
       if (++boundaries >= 2) return -1;
       continue;
@@ -224,7 +224,7 @@ export class ChatPaginator {
       }
       if (ev.type === "tool_use" && updateMsgIds.has(ev.id)) {
         const input = (ev.input ?? {}) as { message?: unknown; text?: unknown; retract?: unknown };
-        const idx = resolveOrdinalInBatch(newMessages, typeof input.message === "number" ? input.message : NaN);
+        const idx = resolveOrdinalIn(newMessages, typeof input.message === "number" ? input.message : NaN);
         if (idx >= 0) {
           const prev = newMessages[idx]!;
           const updated = input.retract === true

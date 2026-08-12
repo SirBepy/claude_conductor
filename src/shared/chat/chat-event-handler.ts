@@ -15,7 +15,6 @@ import {
   isSilentSystemUserMessage,
   isResumeContinuationUserMessage,
   classifyMetaTurn,
-  isBoundaryMessage,
   noiseAssistantLabel,
   extractAuqAnswerText,
   stripAuqAnswerBlock,
@@ -35,6 +34,7 @@ import {
   clearRunningHighlight,
 } from "./chat-dom-renderer";
 import { scheduleFlush, flushRenderNow } from "./flush-scheduler";
+import { resolveOrdinalIn } from "./chat-pagination";
 import type { ChatRenderer } from "./chat-renderer";
 
 export interface HandleEventOpts {
@@ -68,24 +68,6 @@ function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolea
     }
   }
   return false;
-}
-
-/** Resolve the 1-based `n` a revise/retract call addresses: n=1 is the newest
- *  `kind:"message"` row. Bounded to the last two user messages so a miscount
- *  can't rewrite something read turns ago. -1 when out of window. */
-function resolveMessageOrdinal(r: ChatRenderer, n: number): number {
-  if (!Number.isInteger(n) || n < 1) return -1;
-  let boundaries = 0;
-  let seen = 0;
-  for (let i = r.messages.length - 1; i >= 0; i--) {
-    const m = r.messages[i]!;
-    if (isBoundaryMessage(m)) {
-      if (++boundaries >= 2) return -1;
-      continue;
-    }
-    if (m.kind === "message" && !m.retracted && ++seen === n) return i;
-  }
-  return -1;
 }
 
 /** True if the open turn has produced anything the user would see - real
@@ -405,14 +387,14 @@ function handleToolUseEvent(
     r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null });
     return { touched: true, coalesce: false };
   }
-  // Revise/retract a message Claude already sent (see resolveMessageOrdinal
-  // for the addressing scheme and its window). Edit is a silent in-place
-  // swap; retract leaves a thin struck placeholder. Either way the row
-  // clears `dimmed`, so answering an interrupt un-dims it.
+  // Revise/retract a message Claude already sent (see resolveOrdinalIn in
+  // chat-pagination.ts for the addressing scheme and its window). Edit is a
+  // silent in-place swap; retract leaves a thin struck placeholder. Either
+  // way the row clears `dimmed`, so answering an interrupt un-dims it.
   if (ev.tool_name === "mcp__cc_conductor__update_message" && !ev.parent_tool_use_id) {
     r._updateMsgToolUseIds.add(ev.id);
     const input = (ev.input ?? {}) as { message?: unknown; text?: unknown; retract?: unknown };
-    const idx = resolveMessageOrdinal(r, typeof input.message === "number" ? input.message : NaN);
+    const idx = resolveOrdinalIn(r.messages, typeof input.message === "number" ? input.message : NaN);
     if (idx >= 0) {
       const prev = r.messages[idx]!;
       r.messages[idx] = input.retract === true
