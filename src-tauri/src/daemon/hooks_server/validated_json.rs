@@ -11,6 +11,7 @@ use axum::Json;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
+#[derive(Debug)]
 pub(super) struct ValidatedJson<T>(pub T);
 
 #[axum::async_trait]
@@ -40,7 +41,7 @@ mod tests {
     use axum::http::header;
     use serde::Deserialize;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Debug)]
     struct Payload {
         text: String,
     }
