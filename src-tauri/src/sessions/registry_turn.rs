@@ -79,6 +79,16 @@ impl Registry {
         self.turn_opened_by_wake.lock().unwrap().insert(session_id.to_string(), turn_gen);
     }
 
+    /// Marks a session busy for a wake-triggered turn (jarvis/repo-channel/
+    /// schedule) and stamps the wake flag to the gen `set_busy` lands on.
+    /// LOAD-BEARING ORDER: `set_busy` must run first - it's what bumps
+    /// `turn_gen`, so reading the gen before it would key the flag stale.
+    pub fn set_busy_from_wake(&self, session_id: &str) {
+        self.set_busy(session_id, true);
+        let gen = self.current_turn_gen(session_id);
+        self.set_turn_opened_by_wake(session_id, gen);
+    }
+
     /// Gen-checked peek, no `take`: a stale entry is harmless since a later
     /// turn's gen won't match it.
     pub fn is_turn_opened_by_wake(&self, session_id: &str, gen: u64) -> bool {

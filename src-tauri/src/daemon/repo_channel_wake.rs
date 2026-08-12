@@ -73,12 +73,7 @@ pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
     match lifecycle::send_message_with_respawn(state, target_session_id, &combined, true).await {
         Ok(()) => {
             state.registry.set_awaiting(target_session_id, None);
-            state.registry.set_busy(target_session_id, true);
-            // set_busy(true) just bumped turn_gen; stamp the gen it landed on so
-            // the Stop hook (todo 607) knows this turn was wake-opened, not
-            // opened by a real user message.
-            let gen = state.registry.current_turn_gen(target_session_id);
-            state.registry.set_turn_opened_by_wake(target_session_id, gen);
+            state.registry.set_busy_from_wake(target_session_id);
             crate::sessions::chat_state::set_busy(target_session_id, true);
             state.notifier.publish(
                 "instances_changed",
