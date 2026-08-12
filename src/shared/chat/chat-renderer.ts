@@ -172,6 +172,13 @@ export class ChatRenderer {
   // when replay finishes. Live events (after hydration) animate normally.
   hydrating = false;
   paginator: ChatPaginator;
+  // Pauses `.rainbow-keyword`'s infinite CSS animation in `.msg` elements once
+  // scrolled off-screen (todo 185's cheap fallback - full DOM windowing is
+  // deferred as regression-prone). The MutationObserver auto-observes every
+  // new/replaced `.msg`, so it needs no per-call-site wiring in the streaming,
+  // dirty-replace, or pagination paths - they all mutate `container`'s children.
+  private animObserver: IntersectionObserver | null = null;
+  private animMutationObserver: MutationObserver | null = null;
 
   setTurnStatus(s: "done" | "question" | "waiting" | "working" | null): void {
     if (this.turnStatus === s) return;
@@ -227,6 +234,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", this.handleToolResultLoadFullClick);
     this.container.addEventListener("click", this.handleRetryClick);
     this.container.addEventListener("click", this.handleCtaClick);
+    this.installAnimObserver();
     this.paginator = new ChatPaginator(container, {
       getSessionId: () => this.sessionId,
       getMessages: () => this.messages,
@@ -279,7 +287,50 @@ export class ChatRenderer {
     this.resetActiveTurnMeta();
     this.turnFooters.clear();
     this.closeTurnQueue = [];
+    this.installAnimObserver();
     this._resubscribe(sessionId);
+  }
+
+  /** (Re-)arm the off-screen animation pause (todo 185). One IntersectionObserver
+   *  toggles `.anim-paused` on each `.msg`'s `.rainbow-keyword` spans; a sibling
+   *  MutationObserver auto-observes/-unobserves `.msg` children as they're
+   *  added/removed by streaming, dirty-replace, or pagination - none of those
+   *  paths need to know this exists. */
+  private installAnimObserver(): void {
+    this.removeAnimObserver();
+    // Test/harness environments may lack these (jsdom has no IntersectionObserver
+    // at all; some test setups don't stub MutationObserver either) - skip quietly,
+    // real browsers always have both.
+    if (typeof IntersectionObserver === "undefined" || typeof MutationObserver === "undefined") return;
+    const anim = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const paused = !entry.isIntersecting;
+        for (const kw of (entry.target as HTMLElement).querySelectorAll<HTMLElement>(".rainbow-keyword")) {
+          kw.classList.toggle("anim-paused", paused);
+        }
+      }
+    });
+    this.animObserver = anim;
+    this.animMutationObserver = new MutationObserver((records) => {
+      for (const rec of records) {
+        for (const node of rec.addedNodes) {
+          if (node instanceof HTMLElement && node.classList.contains("msg") && node.querySelector(".rainbow-keyword")) {
+            anim.observe(node);
+          }
+        }
+        for (const node of rec.removedNodes) {
+          if (node instanceof HTMLElement && node.classList.contains("msg")) anim.unobserve(node);
+        }
+      }
+    });
+    this.animMutationObserver.observe(this.container, { childList: true });
+  }
+
+  private removeAnimObserver(): void {
+    try { this.animObserver?.disconnect(); } catch { /* ignore */ }
+    try { this.animMutationObserver?.disconnect(); } catch { /* ignore */ }
+    this.animObserver = null;
+    this.animMutationObserver = null;
   }
 
   private handleLive(ev: ChatEvent): void {
@@ -336,6 +387,7 @@ export class ChatRenderer {
     }
     this.paginator.remove();
     this.paginator.resetTurnCarry();
+    this.removeAnimObserver();
     if (this._flushTimer !== null) {
       clearTimeout(this._flushTimer);
       this._flushTimer = null;

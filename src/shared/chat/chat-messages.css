@@ -55,6 +55,11 @@
   color: transparent;
   animation: rainbow-shift 1.8s linear infinite;
 }
+/* Off-screen `.msg` rows (todo 185): IntersectionObserver in chat-renderer.ts
+   toggles this to stop the infinite animation costing reflow out of view. */
+.rainbow-keyword.anim-paused {
+  animation-play-state: paused;
+}
 
 /* Same project-local vs everything-else split as .slash-mention above. */
 .cm-slash-project-skill,
