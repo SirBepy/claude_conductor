@@ -154,6 +154,13 @@ const SAFE_METHODS: &[&str] = &[
     // to prevent - see builtins.rs's doc comment).
     "end_session",
     "mark_session_ended",
+    // Read/write worktree picker data (ai_todo 434): phone had no daemon RPC
+    // for any of these, so the picker silently showed nothing. Same git
+    // subprocess calls the desktop Tauri commands already run locally.
+    "list_worktree_details",
+    "create_worktree",
+    "remove_worktree",
+    "get_recent_branches",
 ];
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -361,6 +368,7 @@ mod tests {
             "schedule_list", "schedule_create", "schedule_update",
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview",
             "end_session", "mark_session_ended",
+            "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
         ] {
             assert!(SAFE_METHODS.contains(&m), "{m} should be remotely callable");
         }

@@ -116,6 +116,25 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_accounts", null);
       case "list_project_groups":
         return this.rpc<T>("list_project_groups", null);
+      // Worktree picker (ai_todo 434): mirrors the desktop `ipc::worktrees`
+      // Tauri commands so the phone picker isn't silently empty/dead.
+      case "list_worktree_details":
+        return this.rpc<T>("list_worktree_details", { repo_path: args.repoPath ?? args.repo_path });
+      case "create_worktree":
+        return this.rpc<T>("create_worktree", {
+          repo_path: args.repoPath ?? args.repo_path,
+          branch_name: args.branchName ?? args.branch_name,
+          worktree_name: args.worktreeName ?? args.worktree_name ?? null,
+          base_branch: args.baseBranch ?? args.base_branch ?? null,
+        });
+      case "remove_worktree":
+        return this.rpc<T>("remove_worktree", {
+          repo_path: args.repoPath ?? args.repo_path,
+          worktree_path: args.worktreePath ?? args.worktree_path,
+          force: args.force ?? false,
+        });
+      case "get_recent_branches":
+        return this.rpc<T>("get_recent_branches", { cwd: args.cwd });
       case "start_session": {
         // Daemon expects snake_case; tolerate camelCase from callers (matches
         // the set_session_effort normalization pattern above). Params forwarded
