@@ -44,8 +44,8 @@ pub fn terminal_identity(home_dir: &Path) -> Option<OauthAccountInfo> {
 }
 
 /// The `claudeAiOauth` fields from `.credentials.json`. Absent and wrong-typed
-/// values land as empty/`None`, which `credentials::assess` treats as unusable.
-/// Single owner of this file - do not add a fourth parser (ai_todo 558).
+/// values land as empty/`None`, which `credentials::assess` treats as unusable;
+/// single owner of this file, do not add a fourth parser (ai_todo 558).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct OauthRecord {
     pub access_token: String,
@@ -56,7 +56,7 @@ pub struct OauthRecord {
 
 /// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth`. `None` if the
 /// file is missing, unparsable, or has no `claudeAiOauth` block. The app
-/// never writes this file (locked decision, 00-overview.md) - read-only.
+/// never writes this file (locked decision, 00-overview.md).
 pub fn read_oauth_record(config_dir: &Path) -> Option<OauthRecord> {
     let raw = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
