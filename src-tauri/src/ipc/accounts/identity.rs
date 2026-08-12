@@ -26,6 +26,7 @@ pub fn get_terminal_identity() -> Option<OauthAccountInfo> {
 pub struct AccountIdentity {
     pub oauth_account: Option<OauthAccountInfo>,
     pub token_expires_at: Option<i64>,
+    pub refresh_token_expires_at: Option<i64>,
     pub has_cookie: bool,
     pub drift: bool,
     pub drift_message: Option<String>,
@@ -42,6 +43,7 @@ pub fn get_account_identity(account_id: String) -> Result<AccountIdentity, Strin
 
     let oauth_account = identity::read_oauth_account(&account.config_dir);
     let token_expires_at = identity::read_token_expiry(&account.config_dir);
+    let refresh_token_expires_at = identity::read_refresh_token_expires_at(&account.config_dir);
     let (is_drift, drift_message) = match drift::compare(account, oauth_account.as_ref(), token_expires_at.is_some()) {
         Ok(()) => (false, None),
         Err(e) => (true, Some(e.to_string())),
@@ -52,6 +54,7 @@ pub fn get_account_identity(account_id: String) -> Result<AccountIdentity, Strin
     Ok(AccountIdentity {
         oauth_account,
         token_expires_at,
+        refresh_token_expires_at,
         has_cookie,
         drift: is_drift,
         drift_message,

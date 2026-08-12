@@ -10,6 +10,7 @@ import {
   isLoginTimedOut,
   describeLoginOutcome,
   formatTokenExpiry,
+  formatRefreshExpiry,
   buildIdentitySurface,
 } from "../src/views/settings/subviews/accounts/wizard-logic.ts";
 
@@ -205,6 +206,32 @@ describe("formatTokenExpiry", () => {
   });
 });
 
+// ai_todo 560: refresh-token window countdown (Settings > Accounts).
+describe("formatRefreshExpiry", () => {
+  const now = new Date("2026-07-07T00:00:00Z").getTime();
+
+  it("reports unknown window when absent", () => {
+    expect(formatRefreshExpiry(null, now)).toBe("Re-login window unknown");
+    expect(formatRefreshExpiry(undefined, now)).toBe("Re-login window unknown");
+  });
+
+  it("reports required now when in the past", () => {
+    expect(formatRefreshExpiry(now - 1000, now)).toBe("Re-login required now");
+  });
+
+  it("reports days remaining", () => {
+    expect(formatRefreshExpiry(now + 27 * 86_400_000, now)).toBe("Re-login needed in 27d");
+  });
+
+  it("reports hours remaining under a day", () => {
+    expect(formatRefreshExpiry(now + 5 * 3_600_000, now)).toBe("Re-login needed in 5h");
+  });
+
+  it("accepts a bigint (ts-rs's mapping for the Rust i64 field)", () => {
+    expect(formatRefreshExpiry(BigInt(now + 27 * 86_400_000), now)).toBe("Re-login needed in 27d");
+  });
+});
+
 describe("buildIdentitySurface", () => {
   const account = { email: "registered@x.com", subscription_tier: "claude_pro" };
 
@@ -213,6 +240,7 @@ describe("buildIdentitySurface", () => {
     expect(view.loggedInAsEmail).toBeNull();
     expect(view.tierLabel).toBe("Pro");
     expect(view.tokenExpiryLabel).toBe("Token expiry unknown");
+    expect(view.refreshExpiryLabel).toBe("Re-login window unknown");
     expect(view.hasCookie).toBe(false);
     expect(view.warningMessage).toBeNull();
   });

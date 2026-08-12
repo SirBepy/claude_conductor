@@ -37,6 +37,7 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, ident
         <span class="acc-label">${escapeHtml(account.label)}${isDefault ? `<span class="acc-default-badge">default</span>` : ""}</span>
         <span class="acc-sub">${loggedInLine}</span>
         <span class="acc-sub acc-sub-expiry">${escapeHtml(surface.tokenExpiryLabel)}</span>
+        <span class="acc-sub acc-sub-expiry">${escapeHtml(surface.refreshExpiryLabel)}</span>
         ${surface.warningMessage ? `<span class="acc-drift-warning"><i class="ph ph-warning"></i> ${escapeHtml(surface.warningMessage)}</span>` : ""}
       </span>
       <span class="acc-actions">

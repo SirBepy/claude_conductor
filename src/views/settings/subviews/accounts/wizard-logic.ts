@@ -169,12 +169,28 @@ export function formatTokenExpiry(
   return `Token expires in ${minutes}m`;
 }
 
+/** Same `bigint`-vs-JSON-number caveat as `formatTokenExpiry` above applies to
+ * `refreshTokenExpiresAt` (ai_todo 560). */
+export function formatRefreshExpiry(
+  refreshExpiresAt: bigint | number | null | undefined,
+  now: number = Date.now(),
+): string {
+  if (refreshExpiresAt == null) return "Re-login window unknown";
+  const diffMs = Number(refreshExpiresAt) - now;
+  if (diffMs <= 0) return "Re-login required now";
+  const days = Math.floor(diffMs / 86_400_000);
+  if (days >= 1) return `Re-login needed in ${days}d`;
+  const hours = Math.max(1, Math.floor(diffMs / 3_600_000));
+  return `Re-login needed in ${hours}h`;
+}
+
 export interface IdentitySurfaceView {
   /** Live `oauthAccount.emailAddress` from the profile dir, or `null` when
    * the account has never completed a `/login` there. */
   loggedInAsEmail: string | null;
   tierLabel: string;
   tokenExpiryLabel: string;
+  refreshExpiryLabel: string;
   hasCookie: boolean;
   /** Non-null (drift or "not logged in yet") = show the red warning row. */
   warningMessage: string | null;
@@ -194,6 +210,7 @@ export function buildIdentitySurface(
     loggedInAsEmail: oauth?.emailAddress ?? null,
     tierLabel: tierLabel(oauth?.organizationType ?? account.subscription_tier),
     tokenExpiryLabel: formatTokenExpiry(identity?.tokenExpiresAt ?? null, now),
+    refreshExpiryLabel: formatRefreshExpiry(identity?.refreshTokenExpiresAt ?? null, now),
     hasCookie: identity?.hasCookie ?? false,
     warningMessage: identity?.drift ? (identity.driftMessage ?? "Identity mismatch - re-verify this account.") : null,
   };

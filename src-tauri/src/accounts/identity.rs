@@ -76,6 +76,13 @@ pub fn read_token_expiry(config_dir: &Path) -> Option<i64> {
     read_oauth_record(config_dir)?.expires_at
 }
 
+/// `claudeAiOauth.refreshTokenExpiresAt` (unix-ms epoch), for the Settings >
+/// Accounts "re-login by" line (ai_todo 560). Anchored at `/login`, not
+/// extended by access-token refreshes.
+pub fn read_refresh_token_expires_at(config_dir: &Path) -> Option<i64> {
+    read_oauth_record(config_dir)?.refresh_token_expires_at
+}
+
 /// `None` for a missing record OR a blanked token, so callers never send an
 /// empty bearer to `/v1/models`.
 pub fn read_access_token(config_dir: &Path) -> Option<String> {
