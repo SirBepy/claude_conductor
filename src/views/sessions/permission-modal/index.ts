@@ -274,8 +274,8 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
  *  AskUserQuestion) can ONLY resolve via an explicit answer/skip, never a
  *  timeout, so it's safe to tear down their card here too - this is what lets
  *  answering on one screen dismiss the card on every other connected screen.
- *  Non-durable prompts (permission relay, MCP ask_user_question) keep a real
- *  timeout-removal path, so their card is left up for the user to dismiss. */
+ *  MCP ask_user_question is durable too since 861b4a06; while it was not, the
+ *  asking turn's EOF expired it here and took the half-filled draft with it. */
 function handlePromptResolved(id: string, durable = false): void {
   clearPendingPromptById(id);
   // No-op if this id never had a draft (permission-shaped prompt, or a
