@@ -50,8 +50,10 @@ const ULTRATHINK_RE = /\b(ultrathink)\b/gi;
 // already emitted in the same pass. Colour swatches wrap the literal (kept
 // selectable/copyable) rather than replacing it; sent-message only, since
 // the composer backdrop's glyph-alignment constraint rules it out there.
+// The lookahead drops an all-digit 3-char run, so this repo's own `#200`
+// todo-id convention doesn't render a swatch. 6/8-digit runs are unambiguous.
 const SLASH_OR_COLOUR_RE =
-  /(^|[\s(>])\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b|#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
+  /(^|[\s(>])\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b|#(?![0-9]{3}\b)([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
 
 export function highlightKeywords(html: string): string {
   const parts = html.split(/(<(?:code|pre|a)(?:\s[^>]*)?>[\s\S]*?<\/(?:code|pre|a)>)/gi);

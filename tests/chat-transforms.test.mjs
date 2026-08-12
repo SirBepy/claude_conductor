@@ -424,6 +424,18 @@ describe("highlightSlashMentions — sent-message colour swatch (todo 489)", () 
     const out = highlightSlashMentions('<p><code>#abc123</code></p>');
     expect(out).not.toContain("colour-swatch");
   });
+
+  // This repo writes todo ids as `#200` in prose, and 3 decimal digits are
+  // also valid hex - without the guard every id reference grew a swatch.
+  it("does not swatch an all-digit 3-char todo-id reference", () => {
+    const out = highlightSlashMentions("<p>see #200 and #621</p>");
+    expect(out).not.toContain("colour-swatch");
+  });
+
+  it("still swatches a 3-char hex that contains a letter, and a 6-digit one", () => {
+    expect(highlightSlashMentions("<p>#f00</p>")).toContain('--swatch:#f00');
+    expect(highlightSlashMentions("<p>#200000</p>")).toContain('--swatch:#200000');
+  });
 });
 
 describe("eventToRenderedMessage — isMeta user turns", () => {
