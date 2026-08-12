@@ -11,6 +11,10 @@
 //! commit` invocations, and the daemon-held per-project lock
 //! (`DaemonState::try_acquire_commit_lock`) is polled for up to
 //! [`COMMIT_LOCK_POLL_BUDGET`] before giving up and denying.
+//!
+//! Decided 2026-08-12 (todo 425): deliberately does NOT auto-post into
+//! `daemon::methods::channel`'s coordination channel - that channel is
+//! voluntary by design, and auto-posting would make it enforcement.
 
 use super::decision::{allow_decision, deny_decision};
 use super::HookCtx;
