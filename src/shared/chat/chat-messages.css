@@ -40,6 +40,20 @@
   border-color: rgba(199, 148, 245, 0.55);
 }
 
+/* Inline colour-literal preview (todo 489). The hex text stays intact and
+ * selectable; ::before paints an inline swatch box so no layout shift. */
+.colour-swatch::before {
+  content: "";
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.3em;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--swatch);
+  vertical-align: -0.1em;
+}
+
 /* Composer highlight-backdrop slash coloring. COLOR ONLY (no font/padding/border
  * changes) so the backdrop stays glyph-aligned with the textarea. Mirrors the
  * sent-message .slash-mention palette so the live preview matches the result. */

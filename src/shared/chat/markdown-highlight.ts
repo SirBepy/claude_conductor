@@ -37,12 +37,6 @@ export function linkifyInlineCodeUrls(html: string, inst: MarkdownIt): string {
   });
 }
 
-// Wrap `/word` tokens in <span class="slash-mention slash-<kind>"> when the
-// name is in the shared slash registry. Only matches outside <a>/<code>/<pre>
-// (markdown-it already escapes user HTML, so we walk the rendered string at
-// the text-node level using a tag-skipping regex). Unknown names stay plain.
-const SLASH_MENTION_RE = /(^|[\s(>])\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b/g;
-
 // @file-path token for the composer backdrop, unconditional (no registry
 // gate). Combined with the slash pattern in one regex.replace so the @
 // branch can't re-scan HTML the slash branch already emitted in the same
@@ -50,6 +44,14 @@ const SLASH_MENTION_RE = /(^|[\s(>])\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b/g;
 const COMPOSER_TOKEN_RE = /(^|[\s(>])(?:\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b|@([\w./\\-]+))/g;
 
 const ULTRATHINK_RE = /\b(ultrathink)\b/gi;
+
+// Slash-mention and #rgb/#rrggbb/#rrggbbaa colour literals, combined in one
+// regex.replace so the colour branch can't rescan HTML the slash branch
+// already emitted in the same pass. Colour swatches wrap the literal (kept
+// selectable/copyable) rather than replacing it; sent-message only, since
+// the composer backdrop's glyph-alignment constraint rules it out there.
+const SLASH_OR_COLOUR_RE =
+  /(^|[\s(>])\/([a-zA-Z][\w-]*(?::[a-zA-Z][\w-]*)?)\b|#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
 
 export function highlightKeywords(html: string): string {
   const parts = html.split(/(<(?:code|pre|a)(?:\s[^>]*)?>[\s\S]*?<\/(?:code|pre|a)>)/gi);
@@ -71,14 +73,21 @@ export function highlightSlashMentions(html: string): string {
     if (i % 2 === 1) continue;
     const part = parts[i];
     if (!part) continue;
-    parts[i] = part.replace(SLASH_MENTION_RE, (_match, pre: string, raw: string) => {
-      const hit = lookupSlash(raw);
-      if (!hit) return `${pre}/${raw}`;
-      const cls = `slash-mention slash-${slashKindClass(hit.source)}`;
-      const target = skillDetailTarget(hit.name, hit.source);
-      const targetAttr = target ? ` data-skill-target="${escapeHtml(target)}"` : "";
-      return `${pre}<span class="${cls}" data-slash="${escapeHtml(raw)}"${targetAttr}>/${escapeHtml(raw)}</span>`;
-    });
+    parts[i] = part.replace(
+      SLASH_OR_COLOUR_RE,
+      (_full: string, pre: string | undefined, raw: string | undefined, hex: string | undefined) => {
+        if (hex !== undefined) {
+          const swatch = `#${hex}`;
+          return `<span class="colour-swatch" style="--swatch:${swatch}">${swatch}</span>`;
+        }
+        const hit = lookupSlash(raw!);
+        if (!hit) return `${pre}/${raw}`;
+        const cls = `slash-mention slash-${slashKindClass(hit.source)}`;
+        const target = skillDetailTarget(hit.name, hit.source);
+        const targetAttr = target ? ` data-skill-target="${escapeHtml(target)}"` : "";
+        return `${pre}<span class="${cls}" data-slash="${escapeHtml(raw!)}"${targetAttr}>/${escapeHtml(raw!)}</span>`;
+      },
+    );
   }
   return parts.join("");
 }

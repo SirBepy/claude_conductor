@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderBlocks, renderMessage, cleanUserBlocks, base64ToUtf8, detectStatusToken, highlightComposerInput, eventToRenderedMessage } from "../src/shared/chat/chat-transforms.ts";
+import { renderBlocks, renderMessage, cleanUserBlocks, base64ToUtf8, detectStatusToken, highlightComposerInput, highlightSlashMentions, eventToRenderedMessage } from "../src/shared/chat/chat-transforms.ts";
 import { setSlashEntries } from "../src/shared/chat/slash-registry.ts";
 
 // Chip conversion is a USER-message-only concern (third arg = fileChips). The
@@ -404,6 +404,25 @@ describe("highlightComposerInput — live /slash coloring", () => {
     // Neither span's markup should leak into the other's text content.
     expect(out).not.toContain("cm-at-path\">/commit");
     expect(out).not.toContain("cm-slash-user-skill\">@src");
+  });
+});
+
+describe("highlightSlashMentions — sent-message colour swatch (todo 489)", () => {
+  it("wraps a hex literal in a swatch span, keeping the hex text intact", () => {
+    const out = highlightSlashMentions("try <p>#9aa4b2</p>");
+    expect(out).toContain('<span class="colour-swatch" style="--swatch:#9aa4b2">#9aa4b2</span>');
+  });
+
+  it("handles a known /slash mention and a colour literal together without corrupting either", () => {
+    setSlashEntries([{ name: "commit", source: { kind: "user-skill" } }]);
+    const out = highlightSlashMentions("<p>/commit with #f09ab8 please</p>");
+    expect(out).toContain('class="slash-mention slash-user-skill" data-slash="commit"');
+    expect(out).toContain('<span class="colour-swatch" style="--swatch:#f09ab8">#f09ab8</span>');
+  });
+
+  it("skips colour literals inside <code>/<pre>/<a>", () => {
+    const out = highlightSlashMentions('<p><code>#abc123</code></p>');
+    expect(out).not.toContain("colour-swatch");
   });
 });
 
