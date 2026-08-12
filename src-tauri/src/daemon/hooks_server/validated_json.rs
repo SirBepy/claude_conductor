@@ -38,6 +38,9 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::header;
+    // Test-only: the lib build never needs it, so importing at module scope
+    // warns as unused and then gets "cleaned up", breaking `--all-targets`.
+    use axum::response::IntoResponse;
     use serde::Deserialize;
 
     #[derive(Deserialize, Debug)]
