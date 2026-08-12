@@ -106,6 +106,13 @@ async fn forward(
 mod tests {
     use super::*;
 
+    /// Pins the wire byte value, since src-tauri has its own copy of this
+    /// constant in a separate cargo workspace with no shared crate.
+    #[test]
+    fn alpn_matches_desktop_copy() {
+        assert_eq!(ALPN, b"conductor/remote/0");
+    }
+
     /// `Minimal` + a full `EndpointAddr` means no relay and no address lookup,
     /// so this runs offline.
     #[tokio::test]

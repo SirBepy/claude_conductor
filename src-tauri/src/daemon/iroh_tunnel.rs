@@ -173,6 +173,13 @@ async fn forward(
 mod tests {
     use super::*;
 
+    /// Pins the wire byte value, since android/src-tauri has its own copy of this
+    /// constant in a separate cargo workspace with no shared crate.
+    #[test]
+    fn alpn_matches_android_copy() {
+        assert_eq!(ALPN, b"conductor/remote/0");
+    }
+
     #[test]
     fn secret_key_round_trips_through_disk() {
         let dir = tempfile::tempdir().expect("tempdir");
