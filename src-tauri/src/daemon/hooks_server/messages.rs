@@ -1,8 +1,7 @@
 //! `/messages/send` route: the `cc_conductor` `send_message` MCP tool POSTs
 //! here. The transcript already carries the message via Claude's own
 //! stream-json output; this route validates AND records the send (Stop-hook
-//! enforcement, mirroring `report_turn_status`) so a quiet-mode chat is never
-//! left with zero visible messages.
+//! enforcement, mirroring `report_turn_status`).
 
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
