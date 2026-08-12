@@ -6,7 +6,6 @@
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Request};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::Json;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
