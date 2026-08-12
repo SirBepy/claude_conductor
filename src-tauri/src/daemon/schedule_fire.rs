@@ -106,6 +106,11 @@ async fn fire_message(
     lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(session_id, None);
     state.registry.set_busy(session_id, true);
+    // set_busy(true) just bumped turn_gen; stamp the gen it landed on so the
+    // Stop hook (todo 607) knows this turn was wake-opened, not opened by a
+    // real user message.
+    let gen = state.registry.current_turn_gen(session_id);
+    state.registry.set_turn_opened_by_wake(session_id, gen);
     crate::sessions::chat_state::set_busy(session_id, true);
     state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
     Ok(())
@@ -188,6 +193,11 @@ async fn fire_new_chat(
     lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
+    // set_busy(true) just bumped turn_gen; stamp the gen it landed on so the
+    // Stop hook (todo 607) knows this turn was wake-opened, not opened by a
+    // real user message.
+    let gen = state.registry.current_turn_gen(&sid);
+    state.registry.set_turn_opened_by_wake(&sid, gen);
     crate::sessions::chat_state::set_busy(&sid, true);
     state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
     Ok(Some(sid))

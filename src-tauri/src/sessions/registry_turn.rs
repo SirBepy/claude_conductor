@@ -72,6 +72,18 @@ impl Registry {
     pub fn background_tasks(&self, session_id: &str) -> usize {
         self.background_tasks.lock().unwrap().get(session_id).copied().unwrap_or(0)
     }
+
+    /// Record that `turn_gen` was opened by a daemon wake, not a user message.
+    /// Pass the gen AFTER `set_busy(session_id, true)`, which bumps it.
+    pub fn set_turn_opened_by_wake(&self, session_id: &str, turn_gen: u64) {
+        self.turn_opened_by_wake.lock().unwrap().insert(session_id.to_string(), turn_gen);
+    }
+
+    /// Gen-checked peek, no `take`: a stale entry is harmless since a later
+    /// turn's gen won't match it.
+    pub fn is_turn_opened_by_wake(&self, session_id: &str, gen: u64) -> bool {
+        self.turn_opened_by_wake.lock().unwrap().get(session_id).copied() == Some(gen)
+    }
 }
 
 #[cfg(test)]
@@ -123,5 +135,14 @@ mod tests {
         assert_eq!(registry.peek_message_sent_gen("s"), Some(1));
         registry.mark_message_sent("s", 2);
         assert_eq!(registry.peek_message_sent_gen("s"), Some(2));
+    }
+
+    #[test]
+    fn turn_opened_by_wake_matches_only_the_stamped_gen() {
+        let registry = Registry::new();
+        assert!(!registry.is_turn_opened_by_wake("s", 1), "unknown session never matches");
+        registry.set_turn_opened_by_wake("s", 1);
+        assert!(registry.is_turn_opened_by_wake("s", 1));
+        assert!(!registry.is_turn_opened_by_wake("s", 2), "a later user turn's gen must not match a stale wake stamp");
     }
 }

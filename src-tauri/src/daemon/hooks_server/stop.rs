@@ -20,17 +20,19 @@ const BOTH_MISSING_REASON: &str = "Before ending your turn, call BOTH tools: rep
 ///
 /// `status` gates the send_message half: a turn reporting `working`/`waiting`
 /// is mid-chain and something will re-invoke Claude, so silence is fine there.
-/// Only a turn that hands back to Joe (`done`/`question`) owes him a message.
+/// Same for `done` on a wake-opened turn (todo 607, `opened_by_wake`) - nobody
+/// asked, so `done` owes only the report, not a chat message.
 fn missing_requirement_reason(
     stop_hook_active: Option<bool>,
     has_report: bool,
     has_send: bool,
     status: Option<&str>,
+    opened_by_wake: bool,
 ) -> Option<&'static str> {
     if stop_hook_active == Some(true) {
         return None;
     }
-    let send_required = !matches!(status, Some("working") | Some("waiting"));
+    let send_required = !opened_by_wake && !matches!(status, Some("working") | Some("waiting"));
     match (has_report, has_send || !send_required) {
         (false, false) => Some(BOTH_MISSING_REASON),
         (false, true) => Some(REPORT_MISSING_REASON),
@@ -93,7 +95,8 @@ pub(super) async fn on_stop(
         let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
         let has_current_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
         let status = reported.as_ref().filter(|r| r.turn_gen == gen).map(|r| r.status.as_str());
-        if let Some(reason) = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status) {
+        let opened_by_wake = ctx.state.registry.is_turn_opened_by_wake(&session_id, gen);
+        if let Some(reason) = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status, opened_by_wake) {
             log::info!(
                 "hook /hooks/stop: blocking {session_id} - report_turn_status={has_current_report} send_message={has_current_send}"
             );
@@ -167,48 +170,48 @@ mod tests {
 
     #[test]
     fn report_present_send_absent_blocks_with_send_reason() {
-        assert_eq!(missing_requirement_reason(None, true, false, DONE), Some(SEND_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, false), Some(SEND_MISSING_REASON));
     }
 
     #[test]
     fn report_absent_send_present_blocks_with_report_reason() {
-        assert_eq!(missing_requirement_reason(None, false, true, DONE), Some(REPORT_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, false, true, DONE, false), Some(REPORT_MISSING_REASON));
     }
 
     #[test]
     fn both_absent_blocks_with_combined_reason() {
-        assert_eq!(missing_requirement_reason(None, false, false, DONE), Some(BOTH_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, false, false, DONE, false), Some(BOTH_MISSING_REASON));
     }
 
     #[test]
     fn both_present_does_not_block() {
-        assert_eq!(missing_requirement_reason(None, true, true, DONE), None);
+        assert_eq!(missing_requirement_reason(None, true, true, DONE, false), None);
     }
 
     #[test]
     fn stop_hook_active_true_never_blocks_even_with_both_missing() {
-        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE), None);
+        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE, false), None);
     }
 
     #[test]
     fn stop_hook_active_false_still_enforces() {
-        assert_eq!(missing_requirement_reason(Some(false), false, false, DONE), Some(BOTH_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(Some(false), false, false, DONE, false), Some(BOTH_MISSING_REASON));
     }
 
     #[test]
     fn mid_chain_working_turn_may_stay_silent() {
-        assert_eq!(missing_requirement_reason(None, true, false, Some("working")), None);
+        assert_eq!(missing_requirement_reason(None, true, false, Some("working"), false), None);
     }
 
     #[test]
     fn mid_chain_waiting_turn_may_stay_silent() {
-        assert_eq!(missing_requirement_reason(None, true, false, Some("waiting")), None);
+        assert_eq!(missing_requirement_reason(None, true, false, Some("waiting"), false), None);
     }
 
     #[test]
     fn a_silent_working_turn_still_owes_a_status_report() {
         assert_eq!(
-            missing_requirement_reason(None, false, false, Some("working")),
+            missing_requirement_reason(None, false, false, Some("working"), false),
             Some(REPORT_MISSING_REASON),
         );
     }
@@ -216,13 +219,37 @@ mod tests {
     #[test]
     fn question_turn_still_requires_a_message() {
         assert_eq!(
-            missing_requirement_reason(None, true, false, Some("question")),
+            missing_requirement_reason(None, true, false, Some("question"), false),
             Some(SEND_MISSING_REASON),
         );
     }
 
     #[test]
     fn unreported_status_defaults_to_requiring_a_message() {
-        assert_eq!(missing_requirement_reason(None, true, false, None), Some(SEND_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, None, false), Some(SEND_MISSING_REASON));
+    }
+
+    #[test]
+    fn wake_opened_done_turn_may_stay_silent() {
+        // todo 607: a peer-channel/Jarvis/scheduled wake that resolves to
+        // "nothing to do" has nobody to answer - report still required, but
+        // `done` no longer compels a chat message.
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, true), None);
+    }
+
+    #[test]
+    fn wake_opened_turn_still_owes_a_status_report() {
+        assert_eq!(
+            missing_requirement_reason(None, false, false, DONE, true),
+            Some(REPORT_MISSING_REASON),
+        );
+    }
+
+    #[test]
+    fn user_opened_done_turn_still_requires_a_message() {
+        // Unchanged: opened_by_wake=false is the default path every existing
+        // `DONE` test above already covers, restated here for contrast with
+        // the wake-opened cases.
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, false), Some(SEND_MISSING_REASON));
     }
 }

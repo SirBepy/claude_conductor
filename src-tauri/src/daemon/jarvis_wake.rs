@@ -64,6 +64,11 @@ pub async fn drain(state: &Arc<DaemonState>, jarvis_session_id: &str) {
         Ok(()) => {
             state.registry.set_awaiting(jarvis_session_id, None);
             state.registry.set_busy(jarvis_session_id, true);
+            // set_busy(true) just bumped turn_gen; stamp the gen it landed on so
+            // the Stop hook (todo 607) knows this turn was wake-opened, not
+            // opened by a real user message.
+            let gen = state.registry.current_turn_gen(jarvis_session_id);
+            state.registry.set_turn_opened_by_wake(jarvis_session_id, gen);
             crate::sessions::chat_state::set_busy(jarvis_session_id, true);
             state.notifier.publish(
                 "instances_changed",

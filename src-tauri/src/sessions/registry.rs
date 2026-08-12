@@ -55,6 +55,11 @@ pub struct Registry {
     /// `session_id` -> `turn_gen` of the last turn `send_message` succeeded in.
     /// Gen-stamped like `reported_status` so Stop enforces both the same way.
     pub(super) message_sent_gen: Mutex<HashMap<String, u64>>,
+    /// `session_id` -> `turn_gen` a daemon wake (repo-channel peer, Jarvis, or
+    /// scheduled fire) opened, as opposed to a real user message. Consulted by
+    /// the Stop hook (todo 607) so a wake-opened turn's `done` report doesn't
+    /// force a chat message the dev never asked for.
+    pub(super) turn_opened_by_wake: Mutex<HashMap<String, u64>>,
 }
 
 impl Registry {
@@ -66,6 +71,7 @@ impl Registry {
             close_requested: Mutex::new(std::collections::HashSet::new()),
             reported_status: Mutex::new(HashMap::new()),
             message_sent_gen: Mutex::new(HashMap::new()),
+            turn_opened_by_wake: Mutex::new(HashMap::new()),
         }
     }
 
