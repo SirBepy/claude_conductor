@@ -21,12 +21,19 @@ pub(crate) fn turn_is_close(session: &Session) -> bool {
 /// single status source) instead of a second flag.
 pub(crate) const CLOSE_FAILED_AWAITING: &str = "close_failed";
 
+/// True when `--dont-close` appears as its own whitespace-delimited token,
+/// not merely as a substring (todo 498 blind spot 4: a prompt that just
+/// mentions the flag, or types `--dont-close-yet`, must not be exempted).
+fn has_dont_close_arg(last_prompt: &str) -> bool {
+    last_prompt.split_whitespace().any(|tok| tok == "--dont-close")
+}
+
 /// True when a `/close` turn's stand-down (closing flagged, tool never
 /// confirmed) is a genuine failure rather than an intentional `--dont-close`
 /// dry run. Pure so it's unit-testable without a live `Session`/`ChildStdin`
 /// (mirrors `hook_session_end_should_close` in `hooks_server::lifecycle`).
 pub(crate) fn close_stand_down_is_failure(last_prompt: &str, close_confirmed: bool) -> bool {
-    !close_confirmed && !last_prompt.contains("--dont-close")
+    !close_confirmed && !has_dont_close_arg(last_prompt)
 }
 
 /// EOF counterpart of `close_stand_down_is_failure`: skips the `--dont-close`
@@ -88,5 +95,21 @@ mod tests {
     fn eof_path_diverges_from_result_line_path_on_dont_close() {
         assert!(!close_stand_down_is_failure("/close --dont-close", false));
         assert!(close_stand_down_is_failure_at_eof(false));
+    }
+
+    /// Todo 498 blind spot 4: a genuine `--dont-close` argument still exempts.
+    #[test]
+    fn dont_close_word_boundary_exempts_genuine_flag() {
+        assert!(!close_stand_down_is_failure("/close --dont-close", false));
+        assert!(!close_stand_down_is_failure("/close --dont-close please", false));
+    }
+
+    /// A longer token that merely contains the string (a different flag name,
+    /// or embedded mid-word) must NOT be exempted - only an exact
+    /// whitespace-delimited token counts.
+    #[test]
+    fn dont_close_word_boundary_rejects_substring_mentions() {
+        assert!(close_stand_down_is_failure("/close --dont-close-yet", false));
+        assert!(close_stand_down_is_failure("/close xx--dont-closexx", false));
     }
 }
