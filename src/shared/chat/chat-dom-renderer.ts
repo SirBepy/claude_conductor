@@ -259,6 +259,9 @@ export function enqueueTurnClose(r: ChatRenderer): void {
   // data-tool-grouped, so processTurnCloseQueue won't re-fold them.
   clearRunningHighlight(r);
   r.activeToolGroups.clear();
+  // Drop any id left outstanding by an interrupted/never-resulted tool call,
+  // else it permanently blocks the next turn's activity label from clearing.
+  r.outstandingActivityToolIds.clear();
   if (r.activeTurnChipKey !== null) {
     const turnStart = r.activeTurnStart ?? r.messages.length;
     // Trim trailing noise-tail messages (e.g. "Request interrupted by user")

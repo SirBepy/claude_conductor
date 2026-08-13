@@ -138,6 +138,11 @@ export class ChatRenderer {
   // right now pulses - not every tool that has an in-flight call. Cleared on
   // turn boundary / reset, same lifecycle as lastActivity.
   activityToolCanon: string | null = null;
+  // In-flight tool_use ids from handleToolUseEvent's generic path. Activity
+  // clears to null only once this drains empty, so back-to-back tool calls
+  // don't blank the bar between one result and the next use. Cleared at
+  // turn-close so a stale id can't block the next turn.
+  outstandingActivityToolIds = new Set<string>();
   // Set when an AUQ tool_use closes the streaming slot via enqueueTurnClose,
   // so the result line's finalizing AssistantMessage (which carries the
   // already-rendered pre-AUQ text) doesn't create a duplicate bubble.
@@ -274,6 +279,7 @@ export class ChatRenderer {
     this.fileEdits = [];
     this.lastActivity = null;
     this.activityToolCanon = null;
+    this.outstandingActivityToolIds.clear();
     this.activeToolGroups.clear();
     this.tallyState.reset();
     this.onFileEditsChanged?.([]);

@@ -152,6 +152,7 @@ function handleUserMessageEvent(
     // accumulating into the same strip), activeTurnUsage/Todos baseline
     // (same reason), and no new chip key is minted.
     r.setActivity(null);
+    r.outstandingActivityToolIds.clear();
     r.setTurnStatus(null);
     if (r.silentStreakBoundaryIndex !== null) {
       r.silentStreakCount += 1;
@@ -489,6 +490,7 @@ function handleToolUseEvent(
   }
   r.activityToolCanon = canonicalTool(ev.tool_name);
   r.setActivity(describeActivity(ev.tool_name, ev.input));
+  r.outstandingActivityToolIds.add(ev.id);
   return { touched: true, coalesce: false };
 }
 
@@ -543,6 +545,12 @@ function handleToolResultEvent(
     is_error: ev.is_error,
     ts,
   });
+  // Only clear the label once no tool from this turn is still outstanding -
+  // otherwise a parallel call's result would blank the bar while a sibling
+  // tool is still running (see chat-renderer.ts's outstandingActivityToolIds).
+  if (r.outstandingActivityToolIds.delete(ev.tool_use_id) && r.outstandingActivityToolIds.size === 0) {
+    r.setActivity(null);
+  }
   // The tally counts didn't change, but a result can complete a custom
   // view (e.g. an AskUserQuestion answer): nudge the statusline so an open
   // popover re-renders from the now-updated messages.

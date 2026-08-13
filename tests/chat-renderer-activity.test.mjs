@@ -87,6 +87,40 @@ describe("ChatRenderer — activity pinning", () => {
   });
 });
 
+describe("ChatRenderer - activity clears once a turn's tools all resolve", () => {
+  it("clears to null once the sole outstanding tool's result lands", () => {
+    const r = new ChatRenderer(document.createElement("div"));
+    const seen = [];
+    r.onActivityUpdate = (a) => seen.push(a);
+
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent(toolUse("Read", { file_path: "/foo/bar.ts" }, "t1"), { silent: true });
+    expect(seen[seen.length - 1]).toBe("Reading bar.ts");
+    r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "hi", is_error: false }, { silent: true });
+
+    expect(seen[seen.length - 1]).toBeNull();
+  });
+
+  it("does not blank the label while a sibling tool is still outstanding", () => {
+    const r = new ChatRenderer(document.createElement("div"));
+    const seen = [];
+    r.onActivityUpdate = (a) => seen.push(a);
+
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent(toolUse("Read", { file_path: "/a.ts" }, "t1"), { silent: true });
+    r.handleEvent(toolUse("Edit", { file_path: "/b.ts", old_string: "a", new_string: "b" }, "t2"), { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "hi", is_error: false }, { silent: true });
+
+    // t2 (Edit) is still outstanding - the label must still read its activity,
+    // never null, and never flip back to t1's.
+    expect(seen).not.toContain(null);
+    expect(seen[seen.length - 1]).toBe("Editing b.ts");
+
+    r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "hi", is_error: false }, { silent: true });
+    expect(seen[seen.length - 1]).toBeNull();
+  });
+});
+
 describe("ChatRenderer — per-type tool chips (inline strip)", () => {
   it("folds a turn's tool call into a chip counting tool_use only", () => {
     const container = document.createElement("div");
