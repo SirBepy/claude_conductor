@@ -1,3 +1,5 @@
+import { clearComposerDraft } from "./session-draft-sync";
+
 const DRAFT_PREFIX = "chat-draft:v1:";
 
 function draftKey(sessionId: string): string {
@@ -76,6 +78,7 @@ export function clearAttachmentsMeta(sessionId: string): void {
 export function discardComposerDraft(sessionId: string): void {
   clearDraft(sessionId);
   clearAttachmentsMeta(sessionId);
+  void clearComposerDraft(sessionId).catch((e) => console.warn("[composer-sync] discard clear failed:", e));
 }
 
 /** Move a stored draft from one session id to another. Used when a parked

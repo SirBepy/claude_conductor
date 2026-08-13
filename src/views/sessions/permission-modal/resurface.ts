@@ -62,7 +62,7 @@ export function replayPendingPrompt(sessionId: string): boolean {
  *  arrival path's auto-accept / remembered-rule shortcuts. */
 function surfacePending(pending: PendingPrompt): void {
   if (pending.kind === "question") {
-    showQuestionCard(pending.payload, pending.draft);
+    void showQuestionCard(pending.payload, pending.draft);
     return;
   }
   const payload = pending.payload;

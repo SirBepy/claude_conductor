@@ -228,6 +228,38 @@ export class HttpTransport implements Transport {
         });
       case "send_message":
         return this.sendMessage<T>(args);
+      // Cross-surface draft sync (composer/AUQ/held messages): one round trip
+      // reconciles everything, the rest are debounced writes - see
+      // shared/chat/session-draft-sync.ts, the frontend-side callers.
+      case "get_session_drafts":
+        return this.rpc<T>("get_session_drafts", { session_id: args.sessionId ?? args.session_id });
+      case "set_composer_draft":
+        return this.rpc<T>("set_composer_draft", { session_id: args.sessionId ?? args.session_id, text: args.text });
+      case "clear_composer_draft":
+        return this.rpc<T>("clear_composer_draft", { session_id: args.sessionId ?? args.session_id });
+      case "set_auq_draft":
+        return this.rpc<T>("set_auq_draft", {
+          session_id: args.sessionId ?? args.session_id,
+          prompt_id: args.promptId ?? args.prompt_id,
+          payload: args.payload,
+        });
+      case "clear_auq_draft":
+        return this.rpc<T>("clear_auq_draft", {
+          session_id: args.sessionId ?? args.session_id,
+          prompt_id: args.promptId ?? args.prompt_id,
+        });
+      case "add_held_message":
+        return this.rpc<T>("add_held_message", { session_id: args.sessionId ?? args.session_id, blocks: args.blocks });
+      case "update_held_message":
+        return this.rpc<T>("update_held_message", {
+          session_id: args.sessionId ?? args.session_id,
+          id: args.id,
+          blocks: args.blocks,
+        });
+      case "remove_held_message":
+        return this.rpc<T>("remove_held_message", { session_id: args.sessionId ?? args.session_id, id: args.id });
+      case "clear_held_messages":
+        return this.rpc<T>("clear_held_messages", { session_id: args.sessionId ?? args.session_id });
       case "load_history_page":
         return this.rpc<T>("load_history_page", {
           session_id: args.sessionId ?? args.session_id,

@@ -12,6 +12,8 @@ export interface HeldRenderHost {
   /** Mutate the backing map + persist for one item (id removal or edit). */
   removeItem(id: number): void;
   editItem(id: number, text: string): void;
+  /** Bypass the edit's debounced daemon push (row blur). */
+  flushEditPush(id: number): void;
   sendNow(): Promise<void>;
 }
 
@@ -82,6 +84,7 @@ export class HeldMessagesRender {
       });
       row.addEventListener("blur", () => {
         if (!(row.textContent ?? "").trim()) this.removeItem(item.id);
+        else this.host.flushEditPush(item.id);
       });
       rows.appendChild(row);
     }

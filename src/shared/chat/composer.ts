@@ -20,6 +20,7 @@ import "./builtins/register";
 import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
+import { ComposerDraftSync } from "./composer-draft-sync";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -79,6 +80,14 @@ export class Composer {
   private ptt: ComposerPtt;
   private att: ComposerAttachments;
   private micBtn: HTMLButtonElement | null = null;
+  // Cross-surface sync: debounced push + reconcile-on-open/regain-visibility.
+  // One instance per Composer, itself created fresh per window/pane.
+  private draftSync = new ComposerDraftSync();
+
+  private _visibilityHandler = (): void => {
+    if (document.visibilityState === "hidden") this.draftSync.flush();
+    else if (document.visibilityState === "visible") void this.reconcileFromDaemon();
+  };
 
   private _globalKeydown = (e: KeyboardEvent): void => {
     if (this.disabled || !this.textarea || this.textarea.disabled) return;
@@ -133,6 +142,7 @@ export class Composer {
     this.file.start(opts.projectDir ?? null);
     this.render();
     document.addEventListener("keydown", this._globalKeydown);
+    document.addEventListener("visibilitychange", this._visibilityHandler);
     this.ptt.mount();
     _composerInstanceCount++;
     if (_composerInstanceCount > 1) {
@@ -144,6 +154,8 @@ export class Composer {
 
   destroy(): void {
     document.removeEventListener("keydown", this._globalKeydown);
+    document.removeEventListener("visibilitychange", this._visibilityHandler);
+    this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
     this.ptt.destroy();
     if (this.noticeTimer) {
       clearTimeout(this.noticeTimer);
@@ -162,16 +174,19 @@ export class Composer {
   setSessionId(id: string, opts: { readOnly?: boolean } = {}): void {
     const prevId = this.sessionId;
     const inMemoryDraft = this.textarea?.value ?? "";
+    const isRename = !!prevId && prevId !== id;
     // Migrate any stored draft when a pending placeholder swaps to its real
     // session id, so the persisted text follows the session across the rename.
-    if (prevId && prevId !== id) {
-      const prevStored = loadDraft(prevId);
+    if (isRename) {
+      this.draftSync.flush(); // the outgoing session may become unreachable - don't lose its edit
+      const prevStored = loadDraft(prevId!);
       if (prevStored && !loadDraft(id)) saveDraft(id, prevStored);
-      clearDraft(prevId);
-      this.att.migrateSession(prevId, id);
+      clearDraft(prevId!);
+      this.att.migrateSession(prevId!, id);
     }
     this.sessionId = id;
     this.disabled = !!opts.readOnly;
+    this.draftSync.setSession();
     this.render();
     const stored = loadDraft(id);
     const restored = inMemoryDraft || stored || "";
@@ -181,11 +196,32 @@ export class Composer {
       this.updateHighlight();
       if (stored && !inMemoryDraft) saveDraft(id, stored);
     }
+    // A placeholder->real rename: the daemon never knew the placeholder id.
+    if (isRename && restored) {
+      this.draftSync.notifyTyped(id, restored);
+      this.draftSync.flush();
+    }
     // Refresh DOM so any in-memory attachments are visible in the rebuilt
     // .composer-attachments host, then async-rehydrate any persisted metas
     // from disk.
     this.att.render();
     void this.att.hydrate(id);
+    void this.reconcileFromDaemon(); // one round trip on session open; guards focus itself
+  }
+
+  /** Apply the daemon's composer draft if it's newer and this composer isn't
+   *  currently focused - NEVER overwrite an input the user is typing into. */
+  private async reconcileFromDaemon(): Promise<void> {
+    const sid = this.sessionId;
+    if (!sid) return;
+    const remoteText = await this.draftSync.reconcile(sid);
+    if (remoteText === null) return;
+    if (document.activeElement === this.textarea) return;
+    if (!this.textarea || this.textarea.value === remoteText) return;
+    this.textarea.value = remoteText;
+    saveDraft(sid, remoteText);
+    this.autoResize();
+    this.updateHighlight();
   }
 
   /** Idle placeholder text. Blocked (rate-limited but still enabled) beats the
@@ -287,7 +323,10 @@ export class Composer {
       });
     }
     if (!this.disabled && this.textarea && this.slash && this.file) {
-      this.textarea.addEventListener("blur", () => this.opts.onDraftActivity?.());
+      this.textarea.addEventListener("blur", () => {
+        this.opts.onDraftActivity?.();
+        this.draftSync.flush();
+      });
       this.sendBtn?.addEventListener("click", () => void this.send());
       this.scheduleBtn?.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -559,7 +598,11 @@ export class Composer {
     // doesn't leave the controller running against stale anchor positions.
     this.cv.reset();
     this.att.clear();
-    this.persistDraft();
+    // Explicit clear: send/discard only, never blur or navigate-away.
+    if (this.sessionId) {
+      clearDraft(this.sessionId);
+      void this.draftSync.clear(this.sessionId);
+    }
   }
 
   /** Undo a `clearComposer()` after a failed send: puts the text, attachments
@@ -637,5 +680,6 @@ export class Composer {
     const text = this.textarea?.value ?? "";
     if (text) saveDraft(this.sessionId, text);
     else clearDraft(this.sessionId);
+    this.draftSync.notifyTyped(this.sessionId, text); // even "" - discard/send clears explicitly instead
   }
 }

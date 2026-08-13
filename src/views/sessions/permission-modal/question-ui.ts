@@ -12,6 +12,7 @@ import {
   setActiveCard,
   clearActiveCardIfCurrent,
 } from "./question-state";
+import { flushAuqPush, cancelAuqPush, fetchRemoteAuqDraft } from "./auq-draft-sync";
 
 // Payload normalization, the active-card draft registry, the pure
 // answer-completeness check, and the pure question-text helpers now live in
@@ -99,6 +100,28 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
   document.addEventListener("keydown", keydownHandler);
 
+  // Flush the debounced daemon push on hidden (last reliable save point - see
+  // debounce.ts's doc); reconcile on regaining visibility, but NEVER clobber a
+  // field the user is actively focused in (the one load-bearing rule here).
+  const visibilityHandler = () => {
+    if (document.visibilityState === "hidden") {
+      flushAuqPush();
+      return;
+    }
+    if (document.visibilityState !== "visible" || !opts.sessionId || !opts.id) return;
+    void fetchRemoteAuqDraft(opts.sessionId, opts.id).then((remote) => {
+      if (!remote || host.contains(document.activeElement)) return;
+      freeText.clear();
+      remote.freeText.forEach((v, k) => freeText.set(k, v));
+      selections.clear();
+      remote.selections.forEach((v, k) => selections.set(k, v instanceof Set ? new Set(v) : v));
+      questions.forEach((q, i) => { if (q.multiSelect && !selections.has(i)) selections.set(i, new Set<string>()); });
+      state.additionalMessage = remote.additionalMessage;
+      renderer.render();
+    });
+  };
+  document.addEventListener("visibilitychange", visibilityHandler);
+
   const teardown = () => {
     backDisposer?.();
     backDisposer = null;
@@ -106,6 +129,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     slashPopup.stop();
     clearHost();
     document.removeEventListener("keydown", keydownHandler);
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    cancelAuqPush();
     if (state.resizeObs) { try { state.resizeObs.disconnect(); } catch { /* ignore */ } state.resizeObs = null; }
     if (messagesEl) {
       messagesEl.style.paddingBottom = savedPaddingBottom;

@@ -25,6 +25,7 @@ import { showPermissionCard } from "./permission-card";
 import { AUQ_ANSWER_SENTINEL } from "../../../shared/chat/chat-transforms";
 import type { ContentBlock } from "../../../types/ipc.generated";
 import { clearQuestionDraft, loadQuestionDraft, saveQuestionDraft } from "./draft-persistence";
+import { scheduleAuqPush, clearAuqPush, cancelAuqPush, fetchRemoteAuqDraft } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
@@ -86,7 +87,7 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
 }
 
 // Exported for resurface.ts (split out of this file, ai_todo 517).
-export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: QuestionDraft): void {
+export async function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: QuestionDraft): Promise<void> {
   // Park the prompt while it's on screen so switching chats and back re-surfaces
   // it (the reliable poll only emits each id once, so a card torn down by
   // navigation is otherwise lost while the daemon turn hangs). Cleared when the
@@ -98,12 +99,12 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
     ? payload.questions
     : [payload.questions];
 
-  // Snapshot draft from the old card if it belongs to this session (covers the
-  // case where the user switched away and back without another session getting
-  // an AUQ in between). Falls back to the persisted draft - the in-memory
-  // snapshot is gone after a full app restart, but localStorage isn't.
+  // Priority: in-memory snapshot (same-device switch-away/back), then the
+  // daemon's cross-surface draft, then localStorage. Nothing is focused yet
+  // at card-open time, so the focused-input rule doesn't apply here.
   const initialDraft = restoredDraft
     ?? (payload.session_id ? snapshotActiveCardDraft(payload.session_id) : undefined)
+    ?? (await fetchRemoteAuqDraft(payload.session_id, payload.id))
     ?? loadQuestionDraft(payload.id)
     ?? undefined;
 
@@ -124,10 +125,12 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
     supportsExtras: true,
     onDraftChange: (draft) => {
       saveQuestionDraft(payload.id, draft);
+      scheduleAuqPush(payload.session_id, payload.id, draft);
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
     onSubmit: async (answers, extras) => {
       clearQuestionDraft(payload.id);
+      void clearAuqPush(payload.session_id, payload.id);
       const sid = payload.session_id;
       // Settle the daemon card + learn whether a live oneshot was resolved:
       // delivered=true means the answer already reached the model in-band, as
@@ -186,6 +189,7 @@ export function showQuestionCard(payload: QuestionRequestedPayload, restoredDraf
       // "Input Needed"). No message is sent - skip means "no answer, move on",
       // and with no blocking waiter the model never even sees a skip signal.
       clearQuestionDraft(payload.id);
+      void clearAuqPush(payload.session_id, payload.id);
       try {
         await invoke("respond_question", { id: payload.id, answers: {} });
       } catch (e) {
@@ -266,7 +270,7 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
     }
     return;
   }
-  showQuestionCard(payload);
+  void showQuestionCard(payload);
 }
 
 /** A prompt closed on the daemon (answered elsewhere or timed out). Clear its
@@ -281,6 +285,10 @@ function handlePromptResolved(id: string, durable = false): void {
   // No-op if this id never had a draft (permission-shaped prompt, or a
   // question already answered/skipped through the normal submit/cancel path).
   clearQuestionDraft(id);
+  // Resolved elsewhere (another device answered it): drop our own pending push
+  // rather than re-clearing the daemon's copy - the resolving device's own
+  // submit/cancel already did that.
+  cancelAuqPush();
   if (durable) dismissQuestionCard(id);
   rerenderSidebar();
 }
