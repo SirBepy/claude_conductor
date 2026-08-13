@@ -2,9 +2,9 @@
 // (daemon/methods/drafts.rs). Hand-declared response shapes: these are raw
 // daemon JSON-RPC methods, not in ipc.generated.ts's ts-rs export.
 
-// KNOWN GAP (desktop): no `#[tauri::command]` of these names exists in
-// lib.rs's generate_handler! yet, so desktop's invoke() 404s here today.
-// Every caller already degrades to localStorage-only on a rejected promise.
+// Reachable from both surfaces: ipc/drafts.rs wraps these for desktop invoke,
+// http-transport.ts routes them for the phone. Callers still degrade to
+// localStorage-only on a rejected promise.
 
 import { invoke } from "../ipc";
 import type { ContentBlock } from "../../types/ipc.generated";
