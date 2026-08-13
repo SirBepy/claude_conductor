@@ -51,6 +51,33 @@
   width: 0;
 }
 
+/* Scroll-edge fade: JS toggles sb-row-scroll/-at-start/-at-end (overflow and
+   scroll position aren't queryable in CSS). Fades to the bar's own bg var so
+   it blends in both themes; hidden entirely on a non-overflowing row. */
+.sb-row.sb-row-scroll {
+  position: relative;
+}
+
+.sb-row.sb-row-scroll:not(.sb-row-at-start)::before,
+.sb-row.sb-row-scroll:not(.sb-row-at-end)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  pointer-events: none;
+}
+
+.sb-row.sb-row-scroll:not(.sb-row-at-start)::before {
+  left: 0;
+  background: linear-gradient(to right, var(--color-surface-alt), transparent);
+}
+
+.sb-row.sb-row-scroll:not(.sb-row-at-end)::after {
+  right: 0;
+  background: linear-gradient(to left, var(--color-surface-alt), transparent);
+}
+
 .sb-chips {
   display: flex;
   flex-wrap: nowrap;

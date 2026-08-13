@@ -668,6 +668,23 @@ export class SessionStatusbar {
     this.reanchorIfOpen(this.commitsPopover, ".sb-commits-btn", (a) => this.commitsPopover.reanchor(a));
     this.reanchorIfOpen(this.effortPopover, ".sb-effort-btn", (a) => this.effortPopover.reanchor(a));
     this.reanchorIfOpen(this.modelPopover, ".sb-model-btn", (a) => this.modelPopover.reanchor(a));
+
+    this.updateRowFades();
+  }
+
+  /** Toggle scroll-edge fade classes per row (rows rebuild on every render(),
+   *  so listeners are re-wired each time). sb-row-scroll gates the CSS fade on
+   *  actual overflow; at-start/at-end suppress it at the ends of the scroll. */
+  private updateRowFades(): void {
+    this.container.querySelectorAll<HTMLElement>(".sb-row").forEach((row) => {
+      const sync = () => {
+        row.classList.toggle("sb-row-scroll", row.scrollWidth > row.clientWidth + 1);
+        row.classList.toggle("sb-row-at-start", row.scrollLeft <= 1);
+        row.classList.toggle("sb-row-at-end", row.scrollLeft >= row.scrollWidth - row.clientWidth - 1);
+      };
+      sync();
+      row.addEventListener("scroll", sync, { passive: true });
+    });
   }
 
   /** Re-anchor an open popover to its freshly-rendered chip, or close it if the
