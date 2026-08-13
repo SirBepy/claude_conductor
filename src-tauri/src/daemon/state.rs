@@ -4,6 +4,7 @@
 //! server, RPC handlers, and detector loop.
 
 use crate::channels::manager::Manager as ChannelsManager;
+use crate::daemon::draft_store::DraftStore;
 use crate::daemon::notifier::Notifier;
 use crate::daemon::session::SessionMap;
 use crate::daemon::settings_cache::SettingsCache;
@@ -84,6 +85,10 @@ pub struct DaemonState {
     /// shape as `jarvis_wakes` above (reuses its `WakeQueue` type), but keyed
     /// by any live session id, not just a Jarvis singleton.
     pub repo_channel_wakes: crate::daemon::jarvis_wake::WakeQueue,
+    /// Cross-surface draft sync (composer text, AUQ partial answers, held
+    /// messages) - see `draft_store.rs` module doc. In-memory only, never
+    /// persisted; `held_count` on `Instance` is the separate broadcast signal.
+    pub draft_store: DraftStore,
 }
 
 impl DaemonState {
@@ -116,6 +121,7 @@ impl DaemonState {
             commit_locks: std::sync::Mutex::new(HashMap::new()),
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
             repo_channel_wakes: crate::daemon::jarvis_wake::new_queue(),
+            draft_store: DraftStore::new(),
         })
     }
 

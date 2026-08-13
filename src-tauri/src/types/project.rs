@@ -195,6 +195,12 @@ pub struct Instance {
     /// clear ONLY a freeze it caused itself, never a deliberate manual one.
     #[serde(default)]
     pub auto_frozen: bool,
+    /// Count of messages queued (held) while a turn runs - cross-surface
+    /// sync's cheap half, rides `instances_changed` so every surface shows
+    /// the chip without fetching drafts. Full content is fetched on demand
+    /// from `DaemonState::draft_store` (never broadcast).
+    #[serde(default)]
+    pub held_count: u32,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -353,6 +359,7 @@ mod tests {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
+            held_count: 0,
         };
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();

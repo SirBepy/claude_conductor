@@ -167,6 +167,7 @@ mod tests {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
+            held_count: 0,
         }
     }
 

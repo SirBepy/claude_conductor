@@ -124,6 +124,7 @@ impl Registry {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
+            held_count: 0,
         };
         guard.insert(input.session_id, instance);
         (project_id, true)
@@ -189,6 +190,7 @@ impl Registry {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
+            held_count: 0,
         };
         guard.insert(session_id.to_string(), instance);
         project_id
@@ -244,6 +246,7 @@ impl Registry {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
+            held_count: 0,
         };
         guard.insert(session_id.to_string(), instance);
     }

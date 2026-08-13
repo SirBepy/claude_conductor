@@ -8,6 +8,7 @@
 pub(crate) mod channel;
 mod channels;
 mod context;
+mod drafts;
 // pub(crate): `hooks_server::jarvis` (the fleet-tool HTTP routes, todo 272
 // chunk 2b) calls this module's `spawn_worker`/`send_to_session`/
 // `fleet_status`/`respond_worker_prompt` directly - those aren't RPC methods
@@ -34,6 +35,7 @@ mod usage;
 
 pub use channels::register_channels;
 pub use context::register_context;
+pub use drafts::register_drafts;
 pub use history::register_history;
 pub use jarvis::register_jarvis;
 pub use lifecycle::{register, register_notifier, register_settings};

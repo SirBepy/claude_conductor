@@ -240,6 +240,21 @@ impl Registry {
         i.model = model.to_string();
         true
     }
+
+    /// Cross-surface draft sync's cheap half: how many messages are queued
+    /// for this session. Rides `instances_changed` like the flags above;
+    /// full content lives in `DaemonState::draft_store`. Returns true only
+    /// if the value actually changed (unknown session: false).
+    pub fn set_held_count(&self, session_id: &str, count: u32) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            if i.held_count != count {
+                i.held_count = count;
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -504,5 +519,23 @@ mod tests {
         registry.set_frozen_needs_continue("s", true);
         assert!(registry.take_frozen_needs_continue("s"), "first take must return the set value");
         assert!(!registry.take_frozen_needs_continue("s"), "a second take must find it already cleared");
+    }
+
+    #[test]
+    fn set_held_count_toggles_and_reports_change() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-13T00:00:00Z");
+        assert_eq!(registry.get("s").unwrap().held_count, 0);
+        assert!(registry.set_held_count("s", 2), "0->2 must report a change");
+        assert_eq!(registry.get("s").unwrap().held_count, 2);
+        assert!(!registry.set_held_count("s", 2), "same value - no change");
+        assert!(registry.set_held_count("s", 0), "2->0 must report a change");
+    }
+
+    #[test]
+    fn set_held_count_unknown_session_is_noop() {
+        let registry = Registry::new();
+        assert!(!registry.set_held_count("ghost", 1));
     }
 }

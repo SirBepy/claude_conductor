@@ -174,6 +174,19 @@ const SAFE_METHODS: &[&str] = &[
     "get_commit_sync",
     "list_project_servers",
     "list_claude_md_scopes",
+    // Cross-surface draft sync: composer text, AUQ answers, held messages.
+    // Session-scoped, not path-scoped - same "session_id known to this
+    // daemon" boundary as send_message/respond_permission above. In-memory
+    // (draft_store.rs), capped + LRU-evicted, never touches disk.
+    "get_session_drafts",
+    "set_composer_draft",
+    "clear_composer_draft",
+    "set_auq_draft",
+    "clear_auq_draft",
+    "add_held_message",
+    "update_held_message",
+    "remove_held_message",
+    "clear_held_messages",
 ];
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -385,6 +398,9 @@ mod tests {
             "get_range_files", "get_file_diff",
             "get_git_info", "get_git_dirty", "get_commit_sync", "list_project_servers",
             "list_claude_md_scopes",
+            "get_session_drafts", "set_composer_draft", "clear_composer_draft",
+            "set_auq_draft", "clear_auq_draft", "add_held_message",
+            "update_held_message", "remove_held_message", "clear_held_messages",
         ] {
             assert!(SAFE_METHODS.contains(&m), "{m} should be remotely callable");
         }
