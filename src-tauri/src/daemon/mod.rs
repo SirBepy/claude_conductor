@@ -2,6 +2,7 @@
 //! consumes these via the `claude_conductor_lib` library crate.
 
 pub mod broadcast;
+pub mod busy_watchdog;
 pub mod channel_adopt;
 pub mod claude_config;
 pub mod channels;
@@ -182,6 +183,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     detector_task::spawn(state.clone());
     // Scheduled messages / scheduled new-chats (scheduling feature, Phase 1).
     schedule::spawn(state.clone());
+    // Busy-flag backstop (todo 525) - see its module doc for the threshold
+    // and why a legitimate long-running turn can't trip it.
+    busy_watchdog::spawn(state.clone());
 
     // Startup + periodic (every 24h) GC of leaked per-turn mcp-temp files
     // (`.mcp.json` / hook `.settings.json`) - see `claude_config::gc_temp_files`.

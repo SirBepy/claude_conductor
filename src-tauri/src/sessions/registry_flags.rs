@@ -143,15 +143,25 @@ impl Registry {
 
     /// Path C helper: flip the `busy` flag on a session entry. Sidebar uses
     /// this to render running vs idle. No-op if session is unknown.
-    /// When `busy=true`, also bumps `turn_gen` so the pump can detect stale
-    /// set_busy(false) calls from a prior turn draining after a new message arrived.
+    /// When `busy=true`, also bumps `turn_gen` (stale-clear guard) and
+    /// stamps `last_event_at` so the busy-watchdog sees a fresh turn.
     pub fn set_busy(&self, session_id: &str, busy: bool) {
         let mut guard = self.inner.lock().unwrap();
         if let Some(i) = guard.get_mut(session_id) {
             i.busy = busy;
             if busy {
                 i.turn_gen = i.turn_gen.wrapping_add(1);
+                i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
             }
+        }
+    }
+
+    /// Stamp `last_event_at` to now - the busy-watchdog's only liveness
+    /// signal. Called from every event-flow site, not just turn start.
+    pub fn touch_activity(&self, session_id: &str) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
         }
     }
 
@@ -337,6 +347,34 @@ mod tests {
         assert!(!cleared);
         assert_eq!(registry.get("s").unwrap().busy, true, "new turn's busy must survive");
         assert_eq!(registry.get("s").unwrap().turn_gen, 2);
+    }
+
+    /// todo 525 root cause 1: pins the fix - the bump must happen before
+    /// anything (the pump) can observe `turn_gen`, or the clear never matches.
+    #[test]
+    fn send_message_ordering_bump_before_write_lets_own_result_clear() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-13T00:00:00Z");
+
+        // OLD (buggy) order: observed before the handler's bump.
+        let observed_gen_old_order = registry.current_turn_gen("s"); // 0, stale
+        registry.set_busy("s", true); // handler bumps AFTER - too late
+        assert!(
+            !registry.set_busy_false_if_gen("s", observed_gen_old_order),
+            "the bug: a pre-bump observation can never match the post-bump gen"
+        );
+        assert!(registry.get("s").unwrap().busy, "busy latches on under the old ordering");
+
+        // Fixed order: bump happens first.
+        registry.set_busy("s", false);
+        registry.set_busy("s", true); // handler bumps BEFORE the write
+        let observed_gen_new_order = registry.current_turn_gen("s");
+        assert!(
+            registry.set_busy_false_if_gen("s", observed_gen_new_order),
+            "the fix: a post-bump observation always matches"
+        );
+        assert!(!registry.get("s").unwrap().busy);
     }
 
     #[test]

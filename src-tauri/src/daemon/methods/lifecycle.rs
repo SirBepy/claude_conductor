@@ -147,10 +147,23 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let session = map.get(&p.session_id)
                     .ok_or_else(|| err_to_rpc(LifecycleError::NotFound(p.session_id.clone())))?
                     .clone();
-                lifecycle::send_message(&session, &p.text, false).await.map_err(err_to_rpc)?;
+                // Bump turn_gen (set_busy) BEFORE the write - a warm child can
+                // emit its first stream_event before this fn resumes past the
+                // write's own .await (todo 525 root cause 1).
+                let gen_before = state.registry.current_turn_gen(&p.session_id);
                 state.registry.set_awaiting(&p.session_id, None);
                 state.registry.set_busy(&p.session_id, true);
+                log::info!(
+                    "daemon: send_message {}: turn_gen {gen_before} -> {} before stdin write",
+                    p.session_id,
+                    state.registry.current_turn_gen(&p.session_id)
+                );
                 crate::sessions::chat_state::set_busy(&p.session_id, true);
+                if let Err(e) = lifecycle::send_message(&session, &p.text, false).await {
+                    state.registry.set_busy(&p.session_id, false);
+                    crate::sessions::chat_state::set_busy(&p.session_id, false);
+                    return Err(err_to_rpc(e));
+                }
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 // Jarvis wake (todo 272 chunk 3): this is the one user-facing send
                 // path both desktop (`ipc/chat/run.rs`) and the remote/phone
@@ -304,9 +317,14 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     new_session_id: Some(new_id.clone()),
                 }).await.map_err(err_to_rpc)?;
 
-                lifecycle::send_message(&session, &prompt, false).await.map_err(err_to_rpc)?;
+                // Same pre-write bump as send_message above (todo 525 root cause 1).
                 state.registry.set_busy(&new_id, true);
                 crate::sessions::chat_state::set_busy(&new_id, true);
+                if let Err(e) = lifecycle::send_message(&session, &prompt, false).await {
+                    state.registry.set_busy(&new_id, false);
+                    crate::sessions::chat_state::set_busy(&new_id, false);
+                    return Err(err_to_rpc(e));
+                }
 
                 // Retire the old session. A rate-limited session's `claude -p` child
                 // has usually already exited, so a NotFound error here is expected

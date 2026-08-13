@@ -36,6 +36,10 @@ pub(super) async fn on_report_status(
             );
         }
     };
+    log::info!(
+        "daemon: /turn/report-status session={session_id} status={status} turn_gen={}",
+        ctx.state.registry.current_turn_gen(session_id)
+    );
     match turn_status::report_status(&ctx.state, session_id, status, title) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),

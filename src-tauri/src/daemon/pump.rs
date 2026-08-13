@@ -66,13 +66,12 @@ pub(crate) async fn run_stdout_pump(
     // each TurnUsage so each turn is evaluated independently. Without this
     // guard, resumed sessions fire one sound per prior completed turn.
     let mut saw_stream_turn = false;
-    // Generation counter captured at the start of each live turn (todo 475:
-    // on the turn's first `stream_event` line, not the first text delta, so a
-    // tool-only/textless turn still captures it). At turn-end we only call
-    // set_busy(false) if the registry's turn_gen still matches, preventing
-    // a stale result line from an interrupted turn from clearing the
-    // busy=true that a new send_message set in the meantime.
+    // Generation counter captured on the turn's first stdout line of ANY
+    // kind (todo 525 root cause 2: not gated on the first `stream_event`,
+    // so an eventless turn still captures the CURRENT gen instead of a
+    // prior turn's stale one). Guards the turn-end set_busy(false) below.
     let mut pump_turn_gen: u64 = 0;
+    let mut pump_turn_gen_captured = false;
     // True while the daemon-authoritative `closing` registry flag is set for
     // the current turn: armed at the turn's first live output when the user
     // opened it with `/close` (no text marker involved), cleared at turn end
@@ -107,6 +106,18 @@ pub(crate) async fn run_stdout_pump(
                         break;
                     }
                     Ok(_) => {
+                        // Watchdog signal: any stdout line at all counts as activity.
+                        state_for_pump.registry.touch_activity(&pump_session.session_id);
+                        if !pump_turn_gen_captured {
+                            pump_turn_gen_captured = true;
+                            pump_turn_gen = state_for_pump
+                                .registry
+                                .current_turn_gen(&pump_session.session_id);
+                            log::info!(
+                                "daemon: session {} pump_turn_gen captured = {pump_turn_gen}",
+                                pump_session.session_id
+                            );
+                        }
                         // claude -p shows an interactive workspace-trust prompt when
                         // the cwd hasn't been trusted before. With stdin piped the
                         // process blocks indefinitely waiting for keyboard input.
@@ -125,9 +136,6 @@ pub(crate) async fn run_stdout_pump(
                         // is the earliest live-exclusive signal, firing even for tool-only turns.
                         if !saw_stream_turn && ctx.take_stream_event_seen() {
                             saw_stream_turn = true;
-                            pump_turn_gen = state_for_pump
-                                .registry
-                                .current_turn_gen(&pump_session.session_id);
                             // Mark the row "Closing" now (daemon-authoritative, no text marker)
                             // so every window's sidebar shows it; close_requested drives teardown.
                             if turn_is_close(&pump_session) {
@@ -232,6 +240,7 @@ pub(crate) async fn run_stdout_pump(
                                 turn_text.clear();
                                 let live_turn = saw_stream_turn;
                                 saw_stream_turn = false;
+                                pump_turn_gen_captured = false;
                                 // report_turn_status (todo 435) is authoritative for a live
                                 // turn; a replayed history line keeps the legacy marker scan.
                                 let awaiting = if live_turn {
@@ -328,6 +337,11 @@ pub(crate) async fn run_stdout_pump(
                                         }
                                     }
                                 }
+                                log::info!(
+                                    "daemon: session {} turn end: pump_turn_gen={pump_turn_gen} registry_turn_gen={}",
+                                    pump_session.session_id,
+                                    state_for_pump.registry.current_turn_gen(&pump_session.session_id)
+                                );
                                 if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) {
                                     crate::sessions::chat_state::set_busy(&pump_session.session_id, false);
                                 }
@@ -538,6 +552,45 @@ mod tests {
         }
         assert!(saw_stream_turn, "tool-only turn must still be recognised as live");
         assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "busy must clear at turn end");
+        assert!(!registry.get("s").unwrap().busy);
+    }
+
+    /// todo 525 root cause 2: a turn that errors out before ever emitting a
+    /// `stream_event` (an immediate CLI-side rejection) must still capture
+    /// the CURRENT gen, not silently keep whatever the PRIOR turn left
+    /// behind, or its own result line can never clear busy.
+    #[test]
+    fn eventless_turn_captures_current_gen_and_clears_busy_at_turn_end() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-13T00:00:00Z");
+        registry.set_busy("s", true); // handler's pre-write bump -> turn_gen 1
+
+        let mut ctx = ParserContext::new_live();
+        let mut saw_stream_turn = false;
+        let mut pump_turn_gen: u64 = 0;
+        // Mirrors pump.rs: capture on the first line of ANY kind, gated by
+        // this flag - NOT gated on take_stream_event_seen().
+        let mut pump_turn_gen_captured = false;
+        // No stream_event at all - straight to a rejection result line.
+        let line = r#"{"type":"result","subtype":"success","is_error":true,"result":"error","timestamp":1}"#;
+        ctx.feed(format!("{line}\n").as_bytes());
+        if !pump_turn_gen_captured {
+            pump_turn_gen_captured = true;
+            pump_turn_gen = registry.current_turn_gen("s");
+        }
+        if !saw_stream_turn && ctx.take_stream_event_seen() {
+            saw_stream_turn = true;
+        }
+        assert!(pump_turn_gen_captured, "gen must be captured on the turn's first line");
+        assert!(!saw_stream_turn, "this turn never emitted a stream_event");
+        assert!(
+            registry.set_busy_false_if_gen("s", pump_turn_gen),
+            "the fix: gen captured on the turn's first line, not its first stream_event"
+        );
         assert!(!registry.get("s").unwrap().busy);
     }
 

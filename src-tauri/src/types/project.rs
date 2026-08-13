@@ -153,6 +153,12 @@ pub struct Instance {
     #[serde(skip, default)]
     #[ts(skip)]
     pub turn_gen: u64,
+    /// Wall-clock RFC3339 of the last event of ANY kind seen for this
+    /// session (turn-start bump, stdout line, report_turn_status) - the
+    /// busy-watchdog backstop's only signal. Never sent to the webview.
+    #[serde(skip, default)]
+    #[ts(skip)]
+    pub last_event_at: Option<String>,
     /// Bumped daemon-side each time this session's broadcast channel is
     /// (re)created. Unlike `turn_gen`, this crosses the RPC boundary.
     #[serde(default)]
@@ -339,6 +345,7 @@ mod tests {
             worker_of: None,
             closing: false,
             turn_gen: 0,
+            last_event_at: None,
             channel_epoch: 0,
             account_id: None,
             rate_limited_resets_at: None,

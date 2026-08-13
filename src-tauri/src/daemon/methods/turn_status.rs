@@ -27,6 +27,8 @@ pub(crate) fn report_status(
         status.to_string(),
         title.map(|s| s.to_string()),
     );
+    // Watchdog signal (todo 525): a self-report is activity too.
+    state.registry.touch_activity(session_id);
     Ok(json!({"ok": true}))
 }
 
