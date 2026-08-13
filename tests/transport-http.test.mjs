@@ -203,6 +203,36 @@ describe("HttpTransport.call mapping", () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
     await expect(new HttpTransport().call("list_instances")).rejects.toThrow("403");
   });
+
+  // Session-statusbar chips + location-picker scan (confirmed root cause of
+  // the phone's forever-loading branch/commits/dirty/servers chips and the
+  // "Open .claude" modal's raw exception string: these commands fell through
+  // to the default branch and rejected with RemoteUnavailableError).
+  it("forwards get_git_info to the rpc with cwd", async () => {
+    await new HttpTransport().call("get_git_info", { cwd: "/repo" });
+    expect(url()).toBe("/api/rpc");
+    expect(body()).toEqual({ method: "get_git_info", params: { cwd: "/repo" } });
+  });
+
+  it("forwards get_git_dirty to the rpc with cwd", async () => {
+    await new HttpTransport().call("get_git_dirty", { cwd: "/repo" });
+    expect(body()).toEqual({ method: "get_git_dirty", params: { cwd: "/repo" } });
+  });
+
+  it("forwards get_commit_sync to the rpc with cwd", async () => {
+    await new HttpTransport().call("get_commit_sync", { cwd: "/repo" });
+    expect(body()).toEqual({ method: "get_commit_sync", params: { cwd: "/repo" } });
+  });
+
+  it("forwards list_project_servers to the rpc with cwd", async () => {
+    await new HttpTransport().call("list_project_servers", { cwd: "/repo" });
+    expect(body()).toEqual({ method: "list_project_servers", params: { cwd: "/repo" } });
+  });
+
+  it("reshapes list_claude_md_scopes worktreePath -> worktree_path", async () => {
+    await new HttpTransport().call("list_claude_md_scopes", { worktreePath: "/repo/wt" });
+    expect(body()).toEqual({ method: "list_claude_md_scopes", params: { worktree_path: "/repo/wt" } });
+  });
 });
 
 describe("HttpTransport.listen", () => {

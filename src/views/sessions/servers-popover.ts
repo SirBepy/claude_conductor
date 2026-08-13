@@ -5,6 +5,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
+import { RemoteUnavailableError } from "../../shared/http-transport";
 import type { ServerInfo } from "../../types/ipc.generated";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -28,7 +29,12 @@ export class ServersPopover {
       this.servers = next;
       this.loaded = true;
       if (changed) rerender();
-    } catch { /* supervisor down / transient - keep last known */ }
+    } catch (e) {
+      // An unwired remote command resolves the skeleton to hidden instead of
+      // spinning forever; a genuine transient (supervisor down) failure keeps
+      // the last known state and retries on the next poll.
+      if (e instanceof RemoteUnavailableError) { this.loaded = true; rerender(); }
+    }
   }
 
   renderChip(cwd: string | null, animClass: (key: string) => string): string {

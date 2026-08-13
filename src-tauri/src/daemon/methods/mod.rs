@@ -24,6 +24,7 @@ mod pr_review;
 mod preview;
 mod registry;
 mod schedule;
+mod statusbar;
 mod worktrees;
 // pub(crate): `hooks_server::turn_status` (the `report_turn_status` MCP
 // tool's HTTP route, todo 435) calls this module's `report_status` directly -
@@ -41,6 +42,7 @@ pub use pr_review::register_pr_review;
 pub use preview::register_preview;
 pub use registry::register_chat_registry;
 pub use schedule::register_schedule;
+pub use statusbar::register_statusbar;
 pub use usage::register_usage;
 pub use worktrees::register_worktrees;
 

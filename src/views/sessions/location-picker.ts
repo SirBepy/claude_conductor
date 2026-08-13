@@ -1,5 +1,6 @@
 import { html, render } from "lit-html";
 import { invoke } from "../../shared/ipc";
+import { RemoteUnavailableError } from "../../shared/http-transport";
 import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { openWorktreePickerModal } from "./worktree-picker";
 import type { ProjectGroup, ClaudeMdScope } from "../../types/ipc.generated";
@@ -54,7 +55,11 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
         const result = await invoke<ClaudeMdScope[]>("list_claude_md_scopes", { worktreePath: currentWt.path });
         applyScopeResult(result);
       } catch (e) {
-        scopesError = String(e);
+        // Never render a raw exception string into the UI (past incident:
+        // an unwired remote command showed its message verbatim here).
+        scopesError = e instanceof RemoteUnavailableError
+          ? "Not available on this device."
+          : "Couldn't scan for CLAUDE.md files.";
         scopes = [];
       }
     };

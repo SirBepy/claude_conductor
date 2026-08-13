@@ -1,5 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
+import { RemoteUnavailableError } from "../../shared/http-transport";
 import { type ToolTally } from "../../shared/chat/tool-meta";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import { ToolTallyRow } from "./session-tally";
@@ -243,7 +244,11 @@ export class SessionStatusbar {
       const info = await fetchGitInfo(cwd);
       if (this.gitCwd !== cwd) return;
       this.updateGitInfo(info);
-    } catch { /* transient */ }
+    } catch (e) {
+      // An unwired remote command resolves the skeleton to hidden instead of
+      // spinning forever; a genuine transient failure keeps retrying.
+      if (e instanceof RemoteUnavailableError) { this.gitInfoLoaded = true; this.render(); }
+    }
   }
 
   private async refreshDirty(): Promise<void> {
@@ -255,7 +260,9 @@ export class SessionStatusbar {
       this.dirtyCount = files.length;
       this.dirtyLoaded = true;
       this.render();
-    } catch { /* transient - keep last known */ }
+    } catch (e) {
+      if (e instanceof RemoteUnavailableError) { this.dirtyLoaded = true; this.render(); }
+    }
   }
 
   private async refreshDrain(): Promise<void> {

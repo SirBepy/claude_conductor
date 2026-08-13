@@ -146,6 +146,22 @@ export class HttpTransport implements Transport {
           to: args.to,
           path: args.path,
         });
+      // Session-statusbar git/servers chips + location-picker scan (mirrors
+      // desktop's `ipc::git` / `ipc::servers` / `ipc::claude_scopes`
+      // commands). Missing here was the confirmed root cause of the phone's
+      // forever-loading chips and the modal's raw exception string.
+      case "get_git_info":
+        return this.rpc<T>("get_git_info", { cwd: args.cwd });
+      case "get_git_dirty":
+        return this.rpc<T>("get_git_dirty", { cwd: args.cwd });
+      case "get_commit_sync":
+        return this.rpc<T>("get_commit_sync", { cwd: args.cwd });
+      case "list_project_servers":
+        return this.rpc<T>("list_project_servers", { cwd: args.cwd });
+      case "list_claude_md_scopes":
+        return this.rpc<T>("list_claude_md_scopes", {
+          worktree_path: args.worktreePath ?? args.worktree_path,
+        });
       case "start_session": {
         // Daemon expects snake_case; tolerate camelCase from callers (matches
         // the set_session_effort normalization pattern above). Params forwarded

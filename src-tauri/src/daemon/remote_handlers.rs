@@ -165,6 +165,15 @@ const SAFE_METHODS: &[&str] = &[
     // `ipc::git_diff` commands; pr_review.rs rejects any unknown `cwd`.
     "get_range_files",
     "get_file_diff",
+    // Read-only statusbar chips + location-picker scan (mirrors desktop's
+    // `ipc::git` / `ipc::servers` / `ipc::claude_scopes` commands). Missing
+    // here was the confirmed root cause of the phone's forever-loading git
+    // chips and the "Open .claude" modal's raw exception string.
+    "get_git_info",
+    "get_git_dirty",
+    "get_commit_sync",
+    "list_project_servers",
+    "list_claude_md_scopes",
 ];
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -374,6 +383,8 @@ mod tests {
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
             "get_range_files", "get_file_diff",
+            "get_git_info", "get_git_dirty", "get_commit_sync", "list_project_servers",
+            "list_claude_md_scopes",
         ] {
             assert!(SAFE_METHODS.contains(&m), "{m} should be remotely callable");
         }
