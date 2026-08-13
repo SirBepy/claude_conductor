@@ -247,12 +247,11 @@ export function reconcileList(
     }
   }
 
-  // Clear FLIP state on soon-to-exit rows: transforms are visual-only
-  // and don't affect offsetTop, but getBoundingClientRect on adjacent survivors
-  // could include their bulk, so clear before snapshotting survivors.
-  for (const [k, li] of existing) {
-    if (!newKeys.has(k)) clearFlipState(li);
-  }
+  // Clear FLIP state on every existing row, not just exiting ones: a surviving
+  // row still mid-transition reads getBoundingClientRect at a half-animated
+  // position, corrupting dy into a bogus jump even when nothing really moved
+  // (interrupting a busy chat fires two reconciles back-to-back into this).
+  for (const [, li] of existing) clearFlipState(li);
 
   // Snapshot positions of rows that will REMAIN before any DOM change.
   const beforeRects = new Map<string, DOMRect>();
