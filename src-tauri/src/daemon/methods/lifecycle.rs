@@ -97,7 +97,7 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
     let map = state.sessions.clone();
     {
         let state = state.clone();
-        router.register("start_session", move |params, _ctx| {
+        router.register("start_session", move |params, ctx| {
             let state = state.clone();
             async move {
                 let params_value = params.unwrap_or(Value::Null);
@@ -110,12 +110,17 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let cwd = p.cwd.clone();
                 let model = p.model.clone();
                 let effort = p.effort.clone();
+                // Point of truth for the "Remote" sidebar segment: this RPC is the
+                // one path the phone cockpit's new-chat/composer flow spawns
+                // through (see remote_handlers.rs), so ctx.remote is set exactly
+                // when the request actually arrived over that surface.
+                let is_remote = ctx.remote;
                 let session = lifecycle::spawn_session(&state, p).await.map_err(err_to_rpc)?;
                 let sid = session.session_id.clone();
                 let account_id = session.account_id.clone();
                 let now = chrono::Utc::now().to_rfc3339();
                 crate::daemon::session_registration::register_new_session(
-                    &state, &sid, &cwd, &model, &effort, &account_id, &now, auto_accept, None,
+                    &state, &sid, &cwd, &model, &effort, &account_id, &now, auto_accept, None, is_remote,
                 );
                 // Deliberately NOT set_busy(true) here: no turn is in flight yet
                 // (claude emits nothing until its first stdin message, so the
@@ -285,7 +290,7 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 let now = chrono::Utc::now().to_rfc3339();
                 crate::daemon::session_registration::register_new_session(
                     &state, &new_id, &cwd, &model, &effort, &p.target_account_id, &now,
-                    auto_accept, character_id.as_deref(),
+                    auto_accept, character_id.as_deref(), false,
                 );
 
                 let session = lifecycle::spawn_session(&state, StartSessionParams {

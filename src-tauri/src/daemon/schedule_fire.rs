@@ -181,7 +181,7 @@ async fn fire_new_chat(
     let now = chrono::Utc::now().to_rfc3339();
     crate::daemon::session_registration::register_new_session(
         state, &sid, &PathBuf::from(cwd), model, effort, &session.account_id, &now,
-        auto_accept, character_id,
+        auto_accept, character_id, false,
     );
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 

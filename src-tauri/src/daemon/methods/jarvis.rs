@@ -154,7 +154,7 @@ async fn spawn_fresh_jarvis(state: &Arc<DaemonState>) -> Result<String, RpcError
     // requiring manual approval on every tool call would stall the
     // whole fleet on a prompt no one is watching for.
     crate::daemon::session_registration::register_new_session(
-        state, &sid, &cwd, JARVIS_MODEL, JARVIS_EFFORT, &account_id, &now, true, None,
+        state, &sid, &cwd, JARVIS_MODEL, JARVIS_EFFORT, &account_id, &now, true, None, false,
     );
     // Atomic coupling lives in `flag_as_jarvis` (session_registration.rs):
     // flagging the registry AND forcing chat_config's auto_accept happen

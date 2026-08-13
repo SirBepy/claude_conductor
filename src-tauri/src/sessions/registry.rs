@@ -245,6 +245,17 @@ impl Registry {
         guard.insert(session_id.to_string(), instance);
     }
 
+    /// Late-set `is_remote` after `upsert_interactive`, when `start_session`
+    /// arrived over the phone/remote surface. The hook's channel pid-match
+    /// tagging never reaches daemon-spawned sessions since `register()`
+    /// no-ops once the entry already exists (inserted here first).
+    pub fn set_is_remote(&self, session_id: &str, is_remote: bool) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.is_remote = is_remote;
+        }
+    }
+
     /// Convert an Interactive session to External so the terminal owns it after
     /// "Open in Terminal". Sets pid=0 (terminal will update it via `set_pid`
     /// when its SessionStart hook fires). Returns true if the entry was found

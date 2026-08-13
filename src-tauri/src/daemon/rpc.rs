@@ -20,6 +20,13 @@ pub fn log_if_slow(started: Instant, label: &str, extra: impl std::fmt::Display)
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 
+tokio::task_local! {
+    /// True only inside requests `remote_server.rs`'s auth middleware lets
+    /// through (phone/tailnet HTTP). Desktop pipe connections never enter
+    /// this scope, so `ConnectionContext::new()` reads the default `false`.
+    pub static REMOTE_TRANSPORT: bool;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Request {
     pub jsonrpc: String,
@@ -170,6 +177,9 @@ pub struct ConnectionContext {
     /// `subscribe_global`; the previous handle (if any) is aborted when a
     /// fresh subscribe is issued.
     pub global_sub: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>,
+    /// True when this connection's request arrived over the remote/phone
+    /// HTTP surface rather than the local desktop pipe - see `REMOTE_TRANSPORT`.
+    pub remote: bool,
 }
 
 impl ConnectionContext {
@@ -180,6 +190,7 @@ impl ConnectionContext {
             conn_id: NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed),
             subscriptions: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             global_sub: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            remote: REMOTE_TRANSPORT.try_with(|v| *v).unwrap_or(false),
         }
     }
 

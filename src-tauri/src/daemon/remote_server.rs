@@ -161,7 +161,10 @@ async fn auth_mw(State(ctx): State<Arc<RemoteCtx>>, req: Request, next: Next) ->
         .map(|t| DeviceRegistry::validate_token(&t, &ctx.app_data))
         .unwrap_or(false);
     if ok {
-        next.run(req).await
+        // Scopes REMOTE_TRANSPORT so any ConnectionContext built while
+        // handling this request (e.g. rpc_dispatch's start_session) tags
+        // is_remote correctly - see `sessions::registry`.
+        crate::daemon::rpc::REMOTE_TRANSPORT.scope(true, next.run(req)).await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
     }

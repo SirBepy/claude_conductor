@@ -125,7 +125,7 @@ pub(crate) async fn spawn_worker(
     // Jarvis itself, so requiring manual approval on every tool call would
     // stall the fleet.
     crate::daemon::session_registration::register_new_session(
-        state, &sid, &cwd_path, &model, WORKER_DEFAULT_EFFORT, &session.account_id, &now, true, None,
+        state, &sid, &cwd_path, &model, WORKER_DEFAULT_EFFORT, &session.account_id, &now, true, None, false,
     );
     state.registry.set_worker_of(&sid, Some(jarvis_session_id.to_string()));
     if let Some(n) = name {

@@ -20,7 +20,9 @@ use std::path::Path;
 /// by `start_session`, `move_session_to_account`, `fire_new_chat`,
 /// `ensure_jarvis_session`, and `spawn_worker`, which all spawn a session via
 /// `lifecycle::spawn_session` and then need this identical sequence to make
-/// it visible session-wide.
+/// it visible session-wide. `is_remote` is true only for `start_session`'s
+/// phone/remote-cockpit callers (`ConnectionContext::remote`); every other
+/// caller is a daemon-internal spawn and always passes `false`.
 pub(crate) fn register_new_session(
     state: &DaemonState,
     session_id: &str,
@@ -31,6 +33,7 @@ pub(crate) fn register_new_session(
     now: &str,
     auto_accept: bool,
     character_id: Option<&str>,
+    is_remote: bool,
 ) {
     let (project_id, created_new) = state.settings.upsert_project_for_cwd(cwd, now);
     if created_new {
@@ -41,6 +44,9 @@ pub(crate) fn register_new_session(
         }));
     }
     state.registry.upsert_interactive(session_id, cwd, &project_id, now);
+    if is_remote {
+        state.registry.set_is_remote(session_id, true);
+    }
     state.registry.set_model_effort(session_id, model, effort);
     state.registry.set_account(session_id, account_id);
     crate::sessions::chat_config::record(session_id, model, effort);
