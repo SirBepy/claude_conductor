@@ -4,12 +4,15 @@
  *   - .prompt-card-host--pane: inside .session-pane (read-only, no composer).
  *   - .prompt-card-host--viewport: fixed at viewport bottom (no pane mounted).
  */
+/* Each mode's bottom offset grows by the safe-area inset (0 on desktop) so
+ * the card never sits under a phone's gesture/nav bar - same pattern as
+ * .session-composer's own padding-bottom in sessions.css. */
 #prompt-card-host.prompt-card-host--composer {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 100%;
-  padding: 0 12px 8px;
+  padding: 0 12px max(8px, env(safe-area-inset-bottom));
   z-index: 20;
   pointer-events: none;
 }
@@ -17,14 +20,14 @@
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  bottom: max(12px, calc(env(safe-area-inset-bottom) + 12px));
   z-index: 20;
   pointer-events: none;
 }
 #prompt-card-host.prompt-card-host--viewport {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 24px));
   transform: translateX(-50%);
   width: min(1000px, calc(100vw - 32px));
   z-index: 1000;
@@ -41,7 +44,9 @@
     0 2px 8px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
+  /* dvh tracks the VISIBLE viewport (see base.css) - vh is the fallback. */
   max-height: min(80vh, 720px);
+  max-height: min(80dvh, 720px);
   /* Same width the viewport-mode host already caps at (below) - the composer/
    * pane hosts stretch full-width with no cap of their own, which on a wide
    * window turned long question text into uncomfortably long lines. */
