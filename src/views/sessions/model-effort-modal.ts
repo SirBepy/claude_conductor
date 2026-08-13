@@ -63,6 +63,14 @@ export async function openModelEffortModal(
   } catch {
     // stay null
   }
+  // Backend-normalized override: resolves worktree/casing cases the raw
+  // find() above misses. On throw (e.g. remote transport, no mirror yet)
+  // keep the raw-match result from above as a best-effort fallback.
+  try {
+    preferredAccountId = await api.resolveProjectAccount(projectPath);
+  } catch {
+    // keep raw-match fallback
+  }
 
   // Account picker (multi-account milestone 04): resolve project binding ->
   // default -> sole-account fallback -> null (ambiguous/empty registry).

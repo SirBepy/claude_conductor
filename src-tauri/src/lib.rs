@@ -246,6 +246,7 @@ pub fn run() {
             ipc::get_update_state,
             ipc::list_projects,
             ipc::get_project,
+            ipc::resolve_project_account,
             ipc::ensure_project,
             ipc::update_project,
             ipc::delete_project,

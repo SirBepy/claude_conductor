@@ -55,7 +55,16 @@ async function renderAccountRow(): Promise<void> {
   }
 
   const proj = projects.find((p) => p.path === cwd);
-  const currentId = proj?.preferred_account_id ?? "";
+  // Backend-normalized override: resolves worktree/casing cases the raw
+  // find() above misses. On throw (e.g. remote transport, no mirror yet)
+  // fall back to the raw match's own field.
+  let resolvedAccountId: string | null | undefined;
+  try {
+    resolvedAccountId = await api.resolveProjectAccount(cwd);
+  } catch {
+    resolvedAccountId = undefined;
+  }
+  const currentId = (resolvedAccountId !== undefined ? resolvedAccountId : proj?.preferred_account_id) ?? "";
   const defaultAccount = accounts.find((a) => a.id === defaultAccountId) ?? null;
   const defaultLabel = defaultAccount ? `Default (${defaultAccount.label})` : "Default";
   const current = accounts.find((a) => a.id === currentId) ?? null;

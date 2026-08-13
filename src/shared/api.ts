@@ -422,6 +422,11 @@ export const api = {
     invoke("get_project_icon", { root }),
   getProject: (id: string): Promise<ProjectConfig | null> =>
     invoke("get_project", { id }),
+  // Backend-normalized account binding for `cwd` (repo-root + worktree-aware,
+  // see settings::identity::resolve_effective_preferred_account_id). No remote
+  // mirror yet - callers must catch and fall back for the remote transport.
+  resolveProjectAccount: (cwd: string): Promise<string | null> =>
+    invoke("resolve_project_account", { cwd }),
   ensureProject: (cwd: string): Promise<ProjectConfig> =>
     invoke("ensure_project", { cwd }),
   updateProject: async (id: string, patch: Partial<ProjectConfig>): Promise<void> => {

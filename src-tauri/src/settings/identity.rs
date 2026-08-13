@@ -84,6 +84,29 @@ pub fn project_key(p: &std::path::Path) -> String {
     normalize_path(&root)
 }
 
+/// Effective account binding for `path`: own `preferred_account_id` if set,
+/// else the PARENT repo's binding for an unbound worktree. Frontend call
+/// sites used to `find()` on raw path strings, missing worktrees (separate
+/// repo root) and any casing/separator drift.
+pub fn resolve_effective_preferred_account_id(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> Option<String> {
+    let own_root = find_repo_root(path).unwrap_or_else(|| path.to_path_buf());
+    let own_key = normalize_path(&own_root);
+    let by_root = |root_key: &str| -> Option<String> {
+        projects
+            .iter()
+            .find(|p| normalize_path(&p.path) == root_key)
+            .and_then(|p| p.preferred_account_id.clone())
+    };
+    if let Some(id) = by_root(&own_key) {
+        return Some(id);
+    }
+    let main_key = normalize_path(&worktree_main_repo(&own_root)?);
+    by_root(&main_key)
+}
+
 /// Canonical key used to decide whether two recorded cwds refer to the
 /// same project. On Windows and macOS (default APFS), paths are
 /// case-insensitive and can arrive with either `\` or `/` separators
@@ -297,6 +320,64 @@ mod tests {
         let repo = dir.path().join("repo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         assert!(worktree_main_repo(&repo).is_none());
+    }
+
+    #[test]
+    fn resolve_effective_preferred_account_id_uses_own_binding_when_present() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let projects = vec![sample_project(repo.clone(), Some("acct-own"))];
+        assert_eq!(
+            resolve_effective_preferred_account_id(&projects, &repo).as_deref(),
+            Some("acct-own")
+        );
+    }
+
+    #[test]
+    fn resolve_effective_preferred_account_id_falls_back_to_parent_for_unbound_worktree() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("fibo");
+        let worktree = repo.join(".claude").join("worktrees").join("v2-frontend-shell");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::create_dir_all(repo.join(".git").join("worktrees").join("v2-frontend-shell")).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join("v2-frontend-shell");
+        std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", gitdir.to_string_lossy())).unwrap();
+
+        let projects = vec![sample_project(repo.clone(), Some("acct-parent"))];
+        assert_eq!(
+            resolve_effective_preferred_account_id(&projects, &worktree).as_deref(),
+            Some("acct-parent"),
+            "worktree with no binding of its own must inherit the main repo's"
+        );
+    }
+
+    #[test]
+    fn resolve_effective_preferred_account_id_prefers_worktrees_own_binding_over_parent() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("fibo");
+        let worktree = repo.join(".claude").join("worktrees").join("v2-frontend-shell");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::create_dir_all(repo.join(".git").join("worktrees").join("v2-frontend-shell")).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join("v2-frontend-shell");
+        std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", gitdir.to_string_lossy())).unwrap();
+
+        let projects = vec![
+            sample_project(repo.clone(), Some("acct-parent")),
+            sample_project(worktree.clone(), Some("acct-worktree")),
+        ];
+        assert_eq!(
+            resolve_effective_preferred_account_id(&projects, &worktree).as_deref(),
+            Some("acct-worktree")
+        );
+    }
+
+    #[test]
+    fn resolve_effective_preferred_account_id_none_when_unregistered() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        assert_eq!(resolve_effective_preferred_account_id(&[], &repo), None);
     }
 
     #[cfg(windows)]

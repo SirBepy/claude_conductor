@@ -93,6 +93,19 @@ pub fn get_project(id: String, state: State<AppState>) -> Option<ProjectConfig> 
     projects_test_helpers::get_from(&state.settings.lock().unwrap(), &id)
 }
 
+/// Resolves the account a new chat under `cwd` should spawn on: the matching
+/// project's own `preferred_account_id`, or its parent repo's binding when
+/// `cwd` is a worktree with no binding of its own. Replaces the frontend's
+/// old raw-path `.find()` (see `settings::identity::resolve_effective_preferred_account_id`).
+#[tauri::command]
+pub fn resolve_project_account(cwd: String, state: State<AppState>) -> Option<String> {
+    let guard = state.settings.lock().unwrap();
+    crate::settings::identity::resolve_effective_preferred_account_id(
+        &guard.projects,
+        std::path::Path::new(&cwd),
+    )
+}
+
 /// Ensures a `ProjectConfig` exists for the given cwd. If one is already
 /// registered (by project key) it is returned as-is; otherwise a fresh
 /// entry is created via `upsert_project_for_cwd` and persisted. Exposed for
