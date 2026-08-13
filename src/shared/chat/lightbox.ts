@@ -25,7 +25,9 @@ export const LIGHTBOX_OVERLAY_CLASS = "lightbox-overlay";
 
 export interface LightboxComposerBridge {
   getDraftText(): string;
-  setDraftText(text: string): void;
+  /** `clearAttachments` false when the lightbox caption round-trips text back
+   *  on close - preview-close must never wipe staged attachments. */
+  setDraftText(text: string, clearAttachments?: boolean): void;
   /** Project cwd for the "/" and "@" suggestion providers - same source as
    *  the main composer's own SlashProvider.start()/FileProvider.start().
    *  Omit or return null to still surface user/builtin skills with no
@@ -142,7 +144,7 @@ export function closeLightbox(): void {
   backDisposer = null;
   closeAllMenus();
   const box = overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer");
-  if (box && composerBridge) composerBridge.setDraftText(box.value);
+  if (box && composerBridge) composerBridge.setDraftText(box.value, false);
   composerCore?.destroy();
   composerCore = null;
   slashProvider?.stop();

@@ -112,7 +112,7 @@ export function mountComposer(
   composer.setSessionId(sessionId, { readOnly });
   setLightboxComposerBridge({
     getDraftText: () => composer.getDraftText(),
-    setDraftText: (text) => composer.setDraftText(text),
+    setDraftText: (text, clearAttachments) => composer.setDraftText(text, clearAttachments),
     getCwd: () => sess.cwd ?? null,
   });
 

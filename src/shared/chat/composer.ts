@@ -575,16 +575,12 @@ export class Composer {
     this.persistDraft();
   }
 
-  /** Replace the current draft (text + attachments + pasted blocks) with plain
-   * text, e.g. re-populating a scheduled message's prompt for editing. Any
-   * `<file:...>`/`<pasted-log>` mentions already embedded in the text render
-   * through the normal composer highlighter - this does not reconstruct
-   * Attachment/PastedBlock objects, since the scheduled item only stored the
-   * flattened prompt string (see blocksToText). Focuses the textarea and
-   * persists the new draft so a navigate-away keeps it (existing draft
-   * persistence), matching the normal typing path. */
-  setDraftText(text: string): void {
-    this.att.clear();
+  /** Replace the draft's text. `clearAttachments` (default true) also wipes
+   * staged attachments/pasted blocks - used by the scheduled-message-edit
+   * caller, which only stores a flattened prompt string. The lightbox caption
+   * round-trip passes false so dismissing a preview never drops attachments. */
+  setDraftText(text: string, clearAttachments = true): void {
+    if (clearAttachments) this.att.clear();
     if (this.textarea) {
       this.textarea.value = text;
       this.textarea.focus();
