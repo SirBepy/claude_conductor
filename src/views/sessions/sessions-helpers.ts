@@ -157,6 +157,10 @@ export function statusPriority(i: Instance, unread: Set<string>, attention: Set<
   // would misreport a session that's actually blocked on the user as "working".
   if (question.has(i.session_id)) return 1;
   if (i.busy && i.awaiting !== "question") return 2;
+  // `question` is built from prompts this window knows about, so an unselected
+  // session's prompt can be missing from it. Without this the line above has
+  // already excluded awaiting==="question", and the row falls through to Done.
+  if (i.awaiting === "question") return 1;
   // Background subagents/tasks of this session still running: still working.
   if (i.awaiting === "working") return 2;
   // Parked on an external process (CI / long command): its own status tier.
