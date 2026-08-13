@@ -204,3 +204,55 @@ body.scanning .shell {
 .scan-cancel[hidden] {
   display: none;
 }
+
+/* Full-screen overlay so the boot-time auto-reconnect reads as "reaching
+   your PC", not the idle setup form with a spinner buried in a button.
+   Equal-specificity trap: [hidden] alone loses to the class's own display,
+   so the override needs the combined selector below. */
+.connecting-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+}
+
+.connecting-screen[hidden] {
+  display: none;
+}
+
+.connecting-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.spinner-lg {
+  width: 48px;
+  height: 48px;
+  border-width: 4px;
+}
+
+#connecting-status {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.connecting-retry {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.connecting-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  margin-top: 8px;
+}

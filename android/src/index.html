@@ -44,6 +44,20 @@
       </button>
     </div>
   </main>
+
+  <section id="connecting-screen" class="connecting-screen" hidden>
+    <div class="connecting-content">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <h1>Conductor</h1>
+      </div>
+      <span class="spinner spinner-lg" aria-hidden="true"></span>
+      <p id="connecting-status" aria-live="polite">Reaching your PC…</p>
+      <p id="connecting-retry" class="connecting-retry" hidden></p>
+      <button type="button" id="connecting-cancel-btn" class="connecting-cancel">Edit connection</button>
+    </div>
+  </section>
+
   <button id="scan-cancel-btn" class="scan-cancel" type="button" hidden>Cancel</button>
   <script src="./app.js"></script>
 </body>
