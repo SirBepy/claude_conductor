@@ -1,6 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { characterIconUrl } from "./session-characters";
-import { scheduledTooltip } from "./sessions-helpers";
+import { scheduledTooltip, heldTooltip } from "./sessions-helpers";
 import { modelFamilyFromId } from "../../shared/effort-presets";
 import { modelLabel } from "../../shared/model-name";
 
@@ -27,6 +27,14 @@ export function scheduledCornerHtml(count: number | undefined): string {
   const title = escapeHtml(scheduledTooltip(count));
   const countHtml = count > 1 ? `<span class="session-sched-count">${count}</span>` : "";
   return `<span class="session-sched-corner" data-tip="${title}"><i class="ph ph-clock-countdown"></i>${countHtml}</span>`;
+}
+
+/** Held-message marker, portrait avatar's corner opposite the scheduled one
+ *  (so the two never overlap); count always shows, unlike scheduledCornerHtml. */
+export function heldCornerHtml(count: number | undefined): string {
+  if (!count) return "";
+  const title = escapeHtml(heldTooltip(count));
+  return `<span class="session-held-corner" data-tip="${title}"><i class="ph ph-paper-plane-tilt"></i><span class="session-held-count">${count}</span></span>`;
 }
 
 /** Inline "X% of 5h" chip shown in a row's subtitle while sorting by drain.
@@ -59,6 +67,14 @@ export function scheduledBadgeHtml(count: number | undefined): string {
   const title = escapeHtml(scheduledTooltip(count));
   const countHtml = count > 1 ? `<span class="session-scheduled-count">${count}</span>` : "";
   return `<span class="session-scheduled-badge" title="${title}"><i class="ph ph-clock-countdown"></i>${countHtml}</span>`;
+}
+
+/** Held-message marker, prefixed before the title like scheduledBadgeHtml
+ *  (never clipped by its ellipsis); see heldCornerHtml for the count rule. */
+export function heldBadgeHtml(count: number | undefined): string {
+  if (!count) return "";
+  const title = escapeHtml(heldTooltip(count));
+  return `<span class="session-held-badge" title="${title}"><i class="ph ph-paper-plane-tilt"></i><span class="session-held-count">${count}</span></span>`;
 }
 
 /** Frozen-chat marker (styled like `.autopilot-badge`) - "Frozen" for a

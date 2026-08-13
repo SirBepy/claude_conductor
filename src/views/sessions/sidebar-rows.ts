@@ -11,6 +11,8 @@ import {
   leadingVisual,
   scheduledBadgeHtml,
   scheduledCornerHtml,
+  heldBadgeHtml,
+  heldCornerHtml,
   modelBatteryHtml,
 } from "./sidebar-row-visuals";
 import type { LeadingExtras } from "./sidebar-row-visuals";
@@ -103,6 +105,7 @@ function buildRowOptions(args: {
   frozen: boolean;
   autoFrozen: boolean;
   scheduledCount: number | undefined;
+  heldCount: number | undefined;
   model: string;
   drainChip: string;
 }): RowOptions {
@@ -118,12 +121,16 @@ function buildRowOptions(args: {
     statusClass: args.avatarStatusClass,
     statusTitle: args.statusTitle ?? "",
     avatarExtras: args.isPortrait
-      ? { badgeClass: "is-centred", extra: scheduledCornerHtml(args.scheduledCount), dotClass: args.dotClass }
+      ? {
+          badgeClass: "is-centred",
+          extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
+          dotClass: args.dotClass,
+        }
       : undefined,
     isPortrait: args.isPortrait,
     title: escapeHtml(args.title),
     projectLabel: escapeHtml(args.projectLabel),
-    titlePrefix: args.isPortrait ? "" : scheduledBadgeHtml(args.scheduledCount),
+    titlePrefix: args.isPortrait ? "" : heldBadgeHtml(args.heldCount) + scheduledBadgeHtml(args.scheduledCount),
     badges,
     drainChip: args.drainChip,
     portraitSecondary: `${modelBatteryHtml(args.model)}${args.drainChip}`,
@@ -186,6 +193,7 @@ export function sessionRowOptions(
     frozen: !!s.frozen,
     autoFrozen: !!s.auto_frozen,
     scheduledCount: ctx.scheduledCountMap.get(s.session_id),
+    heldCount: s.held_count || undefined,
     model: s.model,
     drainChip,
   });
@@ -226,6 +234,7 @@ export function draftRowOptions(
     frozen: false,
     autoFrozen: false,
     scheduledCount: undefined,
+    heldCount: undefined,
     model: pending.config.model,
     drainChip: "",
   });
@@ -255,6 +264,7 @@ export function parkedRowOptions(d: ParkedDraft, isPortrait: boolean, rowClass: 
     frozen: false,
     autoFrozen: false,
     scheduledCount: undefined,
+    heldCount: undefined,
     model: d.config.model,
     drainChip: "",
   });

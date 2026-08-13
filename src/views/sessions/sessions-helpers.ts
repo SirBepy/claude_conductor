@@ -102,6 +102,11 @@ export function scheduledTooltip(count: number): string {
   return `${count} scheduled message${count === 1 ? "" : "s"}`;
 }
 
+/** Hover text for the sidebar row's held-message marker (see heldBadgeHtml). */
+export function heldTooltip(count: number): string {
+  return `${count} message${count === 1 ? "" : "s"} waiting to send`;
+}
+
 /**
  * The set of draft `placeholderId`s that have a pending/firing scheduled
  * NewChat queued (tagged at creation in pending-pane.ts). The sidebar uses this

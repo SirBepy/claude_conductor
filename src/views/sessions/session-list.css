@@ -300,6 +300,29 @@
   line-height: 1.5;
 }
 
+/* Held-message marker, same shape as .session-scheduled-badge but the
+   --st-your-turn hue - it's an action available NOW, not a future one. */
+.session-held-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 5px;
+  color: var(--st-your-turn);
+  font-size: 0.75rem;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.session-held-count {
+  background: var(--st-your-turn);
+  color: #fff;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 0.64rem;
+  line-height: 1.5;
+}
+
 .session-row-subtitle {
   font-size: 0.72rem;
   color: var(--color-text-muted);

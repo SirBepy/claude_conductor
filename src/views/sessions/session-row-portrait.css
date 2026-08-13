@@ -150,3 +150,23 @@
 }
 .session-sched-corner i { font-size: 0.72rem; }
 .session-sched-count { font-weight: 700; }
+
+/* Held-message corner, opposite side from the scheduled one so a row with
+   both markers doesn't overlap them. */
+.session-held-corner {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 11;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 3px;
+  border-radius: 999px;
+  background: rgba(10, 11, 17, 0.78);
+  color: var(--st-your-turn);
+  font-size: 0.62rem;
+  line-height: 1.5;
+}
+.session-held-corner i { font-size: 0.72rem; }
+.session-held-count { font-weight: 700; }
