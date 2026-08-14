@@ -49,7 +49,7 @@ const LOCK_HELD_REASON: &str =
 the commit shortly - do not force through, skip hooks, or use --no-verify to route around this.";
 
 /// Core of the PreToolUse hook, split out for unit testing (mirrors
-/// `permission::ask_question_decision`). `budget`/`interval` are parameters so
+/// `question::ask_question_decision`). `budget`/`interval` are parameters so
 /// tests can exercise the deny-after-timeout path without a real 2-minute
 /// wait; [`on_commit_lock_request`] is the only caller of the public
 /// constants.

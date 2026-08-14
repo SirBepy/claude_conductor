@@ -53,6 +53,10 @@ fn build_cmdline(input: &SpawnInput) -> String {
         "--remote-control".into(),
         "--remote-control-session-name-prefix".into(),
         quote(&input.session_name_prefix),
+        // No --mcp-config/--settings here: both need a turn id known before
+        // spawn, but a channel's real session id is only resolved after the fact.
+        "--disallowedTools".into(),
+        "AskUserQuestion".into(),
     ];
     if input.continue_flag {
         parts.push("--continue".into());
@@ -138,7 +142,9 @@ pub fn spawn_child(input: SpawnInput) -> Result<SpawnOutput, SpawnError> {
     let mut cmd = Command::new("claude");
     cmd.arg("--remote-control")
         .arg("--remote-control-session-name-prefix")
-        .arg(&input.session_name_prefix);
+        .arg(&input.session_name_prefix)
+        .arg("--disallowedTools")
+        .arg("AskUserQuestion");
     if input.continue_flag {
         cmd.arg("--continue");
     }

@@ -60,6 +60,10 @@ pub struct Registry {
     /// the Stop hook (todo 607) so a wake-opened turn's `done` report doesn't
     /// force a chat message the dev never asked for.
     pub(super) turn_opened_by_wake: Mutex<HashMap<String, u64>>,
+    /// `session_id` -> builtin `AskUserQuestion` attempts this turn. Reset by
+    /// `mark_ended` and `DaemonState::expire_prompts_for_session`, so the
+    /// redirect-then-fallback budget never carries over stale.
+    pub(super) builtin_ask_attempts: Mutex<HashMap<String, u32>>,
 }
 
 impl Registry {
@@ -72,6 +76,7 @@ impl Registry {
             reported_status: Mutex::new(HashMap::new()),
             message_sent_gen: Mutex::new(HashMap::new()),
             turn_opened_by_wake: Mutex::new(HashMap::new()),
+            builtin_ask_attempts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -284,6 +289,10 @@ impl Registry {
         if inst.end_reason.is_some() { return false; }
         inst.end_reason = Some(reason);
         inst.ended_at = Some(when.to_string());
+        drop(guard);
+        // Non-interactive kinds never hit `expire_prompts_for_session`'s reset,
+        // so a session-end sweep here is the only cleanup they get.
+        self.builtin_ask_attempts.lock().unwrap().remove(session_id);
         true
     }
 

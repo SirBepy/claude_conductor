@@ -219,6 +219,9 @@ impl DaemonState {
     /// nothing and left the row on "Input Needed" forever. Returns how many
     /// prompts were expired.
     pub async fn expire_prompts_for_session(&self, session_id: &str) -> usize {
+        // Each turn is a fresh `claude -p` child, so this EOF-triggered sweep
+        // is also where the builtin AskUserQuestion redirect budget resets.
+        self.registry.reset_builtin_ask_attempts(session_id);
         let expired: Vec<(String, bool)> = {
             let mut prompts = self.pending_prompts.lock().await;
             let ids: Vec<(String, bool)> = prompts

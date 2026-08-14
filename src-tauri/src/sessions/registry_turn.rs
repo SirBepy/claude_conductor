@@ -104,6 +104,20 @@ impl Registry {
     pub fn is_turn_opened_by_wake(&self, session_id: &str, gen: u64) -> bool {
         self.turn_opened_by_wake.lock().unwrap().get(session_id).copied() == Some(gen)
     }
+
+    /// Record one more builtin `AskUserQuestion` PreToolUse attempt for this
+    /// session and return the new count. See `Registry::builtin_ask_attempts`.
+    pub fn record_builtin_ask_attempt(&self, session_id: &str) -> u32 {
+        let mut guard = self.builtin_ask_attempts.lock().unwrap();
+        let count = guard.entry(session_id.to_string()).or_insert(0);
+        *count += 1;
+        *count
+    }
+
+    /// Clear the builtin-ask attempt budget, e.g. on turn-end expiry.
+    pub fn reset_builtin_ask_attempts(&self, session_id: &str) {
+        self.builtin_ask_attempts.lock().unwrap().remove(session_id);
+    }
 }
 
 #[cfg(test)]
@@ -164,5 +178,22 @@ mod tests {
         registry.set_turn_opened_by_wake("s", 1);
         assert!(registry.is_turn_opened_by_wake("s", 1));
         assert!(!registry.is_turn_opened_by_wake("s", 2), "a later user turn's gen must not match a stale wake stamp");
+    }
+
+    #[test]
+    fn builtin_ask_attempt_counts_up_and_resets() {
+        let registry = Registry::new();
+        assert_eq!(registry.record_builtin_ask_attempt("s"), 1);
+        assert_eq!(registry.record_builtin_ask_attempt("s"), 2);
+        registry.reset_builtin_ask_attempts("s");
+        assert_eq!(registry.record_builtin_ask_attempt("s"), 1, "reset must restart the count");
+    }
+
+    #[test]
+    fn builtin_ask_attempt_counter_is_per_session() {
+        let registry = Registry::new();
+        registry.record_builtin_ask_attempt("s1");
+        registry.record_builtin_ask_attempt("s1");
+        assert_eq!(registry.record_builtin_ask_attempt("s2"), 1, "s2 must not inherit s1's count");
     }
 }

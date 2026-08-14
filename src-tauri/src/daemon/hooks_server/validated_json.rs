@@ -30,7 +30,9 @@ where
 }
 
 fn json_error(rejection: JsonRejection) -> (StatusCode, Json<Value>) {
-    (StatusCode::OK, Json(json!({"ok": false, "error": rejection.to_string()})))
+    // `to_string()` yields only axum's generic summary; `body_text()` carries the
+    // serde detail naming the offending field, which is this module's whole point.
+    (StatusCode::OK, Json(json!({"ok": false, "error": rejection.body_text()})))
 }
 
 #[cfg(test)]
