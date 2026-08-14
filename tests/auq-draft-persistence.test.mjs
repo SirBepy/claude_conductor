@@ -7,7 +7,7 @@
 // localStorage key, this time per prompt id instead of session id.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { loadQuestionDraft, saveQuestionDraft, clearQuestionDraft } from "../src/views/sessions/permission-modal/draft-persistence.ts";
+import { loadQuestionDraftMeta, saveQuestionDraft, clearQuestionDraft } from "../src/views/sessions/permission-modal/draft-persistence.ts";
 
 const PROMPT = "prompt-1";
 
@@ -26,7 +26,7 @@ describe("AUQ draft persistence", () => {
       activeTab: 2,
     };
     saveQuestionDraft(PROMPT, draft);
-    const loaded = loadQuestionDraft(PROMPT);
+    const loaded = loadQuestionDraftMeta(PROMPT)?.draft;
 
     expect(loaded.activeTab).toBe(2);
     expect(loaded.freeText.get(0)).toBe("typed answer");
@@ -43,43 +43,56 @@ describe("AUQ draft persistence", () => {
       activeTab: 0,
     });
     // Nothing in-memory carries over between these two calls except localStorage.
-    const reloaded = loadQuestionDraft(PROMPT);
+    const reloaded = loadQuestionDraftMeta(PROMPT)?.draft;
     expect(reloaded.freeText.get(0)).toBe("in progress");
   });
 
   it("returns null when nothing was ever saved for this prompt id", () => {
-    expect(loadQuestionDraft("never-saved")).toBeNull();
+    expect(loadQuestionDraftMeta("never-saved")).toBeNull();
   });
 
-  it("round-trips the review-step additional message, defaulting attachments to empty (not persisted)", () => {
+  it("round-trips the review-step additional message and attachment metadata (path/mime/filename/size, no base64)", () => {
     saveQuestionDraft(PROMPT, {
       freeText: new Map(),
       selections: new Map(),
       activeTab: 0,
       additionalMessage: "also check the staging env",
-      attachments: [{ mime: "image/png", data: "abc123", path: "/tmp/x.png", filename: "x.png" }],
+      attachments: [{ mime: "image/png", data: "abc123", path: "/tmp/x.png", filename: "x.png", size: 3 }],
     });
-    const loaded = loadQuestionDraft(PROMPT);
+    const loaded = loadQuestionDraftMeta(PROMPT)?.draft;
     expect(loaded.additionalMessage).toBe("also check the staging env");
-    expect(loaded.attachments).toEqual([]);
+    // Base64 bytes never hit localStorage (5MB/origin quota) - only enough
+    // metadata to re-fetch via read_attachment (attachments.ts's hydrate).
+    expect(loaded.attachments).toEqual([{ mime: "image/png", data: "", path: "/tmp/x.png", filename: "x.png", size: 3 }]);
+  });
+
+  it("drops an attachment with no daemon-backed path (can't survive a reload)", () => {
+    saveQuestionDraft(PROMPT, {
+      freeText: new Map(),
+      selections: new Map(),
+      activeTab: 0,
+      additionalMessage: "",
+      attachments: [{ mime: "image/png", data: "abc123", path: null, filename: "x.png", size: 3 }],
+    });
+    expect(loadQuestionDraftMeta(PROMPT)?.draft.attachments).toEqual([]);
   });
 
   it("clearQuestionDraft removes it, and is a no-op for an unknown id", () => {
     saveQuestionDraft(PROMPT, { freeText: new Map(), selections: new Map(), activeTab: 0 });
     clearQuestionDraft(PROMPT);
-    expect(loadQuestionDraft(PROMPT)).toBeNull();
+    expect(loadQuestionDraftMeta(PROMPT)).toBeNull();
     expect(() => clearQuestionDraft("unknown-id")).not.toThrow();
   });
 
   it("drafts for different prompt ids don't collide", () => {
     saveQuestionDraft("a", { freeText: new Map([[0, "draft A"]]), selections: new Map(), activeTab: 0 });
     saveQuestionDraft("b", { freeText: new Map([[0, "draft B"]]), selections: new Map(), activeTab: 0 });
-    expect(loadQuestionDraft("a").freeText.get(0)).toBe("draft A");
-    expect(loadQuestionDraft("b").freeText.get(0)).toBe("draft B");
+    expect(loadQuestionDraftMeta("a")?.draft.freeText.get(0)).toBe("draft A");
+    expect(loadQuestionDraftMeta("b")?.draft.freeText.get(0)).toBe("draft B");
   });
 
   it("gracefully returns null on corrupt JSON instead of throwing", () => {
     localStorage.setItem("auq-draft:v1:" + PROMPT, "{not valid json");
-    expect(loadQuestionDraft(PROMPT)).toBeNull();
+    expect(loadQuestionDraftMeta(PROMPT)).toBeNull();
   });
 });

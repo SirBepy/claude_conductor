@@ -8,6 +8,7 @@
 import { getTransport } from "../../../shared/transport";
 import { findPendingPromptsForSession } from "./remote-prompt-poll";
 import { extractQuestions } from "./question-ui";
+import { fetchFreshestAuqDraft } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
@@ -95,12 +96,19 @@ export async function rehydratePendingPrompts(sessionId: string): Promise<boolea
   // One park per session, so take the longest-waiting if the daemon holds two.
   const [rec] = findPendingPromptsForSession(prompts, sessionId);
   if (!rec) return false;
+  if (rec.kind !== "question") {
+    storePendingPrompt(sessionId, { kind: "permission", payload: rec.payload });
+    rerenderSidebar();
+    return true;
+  }
   // This window may never have seen the live event (fresh reload) - seed the
   // stale-question tracker from the daemon's own record too.
-  if (rec.kind === "question") markLatestQuestion(sessionId, rec.payload.id);
-  storePendingPrompt(sessionId, rec.kind === "question"
-    ? { kind: "question", payload: rec.payload }
-    : { kind: "permission", payload: rec.payload });
+  markLatestQuestion(sessionId, rec.payload.id);
+  // No in-memory snapshot survives a reload - attach whichever of the
+  // daemon/localStorage copies is newer, same reconciliation showQuestionCard
+  // itself falls back to, so a re-parked card doesn't open blank.
+  const draft = await fetchFreshestAuqDraft(sessionId, rec.payload.id);
+  storePendingPrompt(sessionId, { kind: "question", payload: rec.payload, draft: draft ?? undefined });
   rerenderSidebar();
   return true;
 }

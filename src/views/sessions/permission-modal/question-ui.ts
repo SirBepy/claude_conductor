@@ -12,7 +12,11 @@ import {
   setActiveCard,
   clearActiveCardIfCurrent,
 } from "./question-state";
-import { flushAuqPush, cancelAuqPush, fetchRemoteAuqDraft } from "./auq-draft-sync";
+import { flushAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
+
+// Cadence for the live cross-device reconcile poll below - matches the order
+// of magnitude of the phone's 700ms poll and the Rust adaptive poll (500-2000ms).
+const LIVE_DRAFT_POLL_MS = 1000;
 
 // Payload normalization, the active-card draft registry, the pure
 // answer-completeness check, and the pure question-text helpers now live in
@@ -100,27 +104,59 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
   document.addEventListener("keydown", keydownHandler);
 
+  // The answer bar textarea swaps per active tab (one shared node), so at
+  // most one field can ever be focused - "per field" reduces to "skip that
+  // one field and the tab advance", every other field adopts freely.
+  const draftSyncTargets = { sessionId: opts.sessionId, promptId: opts.id };
+
+  /** Merge an already newest-wins-reconciled draft into the live card. A full
+   *  render() rebuilds the DOM (new textarea node, dropped cursor - see
+   *  fb230ef3's scroll-yank incident), so typing and any tab advance are
+   *  skipped while a field is focused; everything else adopts freely. */
+  const mergeFreshDraft = (remote: QuestionDraft): void => {
+    const active = document.activeElement as HTMLElement | null;
+    const typingOther = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-q__other-input");
+    const typingExtra = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-extra-input");
+    const isTyping = typingOther || typingExtra;
+
+    remote.freeText.forEach((v, i) => {
+      if (typingOther && i === state.activeTab) return;
+      freeText.set(i, v);
+    });
+    remote.selections.forEach((v, i) => selections.set(i, v instanceof Set ? new Set(v) : v));
+    questions.forEach((q, i) => { if (q.multiSelect && !selections.has(i)) selections.set(i, new Set<string>()); });
+    if (!typingExtra) state.additionalMessage = remote.additionalMessage;
+    if (!isTyping) state.activeTab = Math.min(Math.max(remote.activeTab, 0), totalPanels - 1);
+
+    if (!isTyping) renderer.render();
+  };
+
   // Flush the debounced daemon push on hidden (last reliable save point - see
-  // debounce.ts's doc); reconcile on regaining visibility, but NEVER clobber a
-  // field the user is actively focused in (the one load-bearing rule here).
+  // debounce.ts's doc); reconcile on regaining visibility.
   const visibilityHandler = () => {
     if (document.visibilityState === "hidden") {
       flushAuqPush();
       return;
     }
-    if (document.visibilityState !== "visible" || !opts.sessionId || !opts.id) return;
-    void fetchRemoteAuqDraft(opts.sessionId, opts.id).then((remote) => {
-      if (!remote || host.contains(document.activeElement)) return;
-      freeText.clear();
-      remote.freeText.forEach((v, k) => freeText.set(k, v));
-      selections.clear();
-      remote.selections.forEach((v, k) => selections.set(k, v instanceof Set ? new Set(v) : v));
-      questions.forEach((q, i) => { if (q.multiSelect && !selections.has(i)) selections.set(i, new Set<string>()); });
-      state.additionalMessage = remote.additionalMessage;
-      renderer.render();
+    if (document.visibilityState !== "visible" || !draftSyncTargets.sessionId || !draftSyncTargets.promptId) return;
+    void fetchFreshestAuqDraft(draftSyncTargets.sessionId, draftSyncTargets.promptId).then((fresh) => {
+      if (fresh) mergeFreshDraft(fresh);
     });
   };
   document.addEventListener("visibilitychange", visibilityHandler);
+
+  // Live cross-device sync: piggybacks get_session_drafts instead of a new
+  // transport, while this card is open only - stopped on teardown below.
+  let livePollTimer: ReturnType<typeof setInterval> | null = null;
+  if (draftSyncTargets.sessionId && draftSyncTargets.promptId) {
+    const sid = draftSyncTargets.sessionId;
+    const pid = draftSyncTargets.promptId;
+    livePollTimer = setInterval(() => {
+      void fetchFreshestAuqDraft(sid, pid).then((fresh) => {
+        if (fresh) mergeFreshDraft(fresh);
+      });
+    }, LIVE_DRAFT_POLL_MS);
+  }
 
   const teardown = () => {
     backDisposer?.();
@@ -130,6 +166,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     clearHost();
     document.removeEventListener("keydown", keydownHandler);
     document.removeEventListener("visibilitychange", visibilityHandler);
+    if (livePollTimer !== null) clearInterval(livePollTimer);
     cancelAuqPush();
     if (state.resizeObs) { try { state.resizeObs.disconnect(); } catch { /* ignore */ } state.resizeObs = null; }
     if (messagesEl) {

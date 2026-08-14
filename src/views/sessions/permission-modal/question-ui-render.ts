@@ -52,6 +52,19 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   let minimized = false;
   let firstRender = true;
+  let hintTimer: number | undefined;
+
+  // Brief feedback for a paste that couldn't attach (see attachments.ts's
+  // handleAttachmentPaste) - one reused node per card, auto-clears itself.
+  function showPasteHint(bar: HTMLElement, message: string): void {
+    bar.querySelector(".prompt-paste-hint")?.remove();
+    window.clearTimeout(hintTimer);
+    const hint = document.createElement("div");
+    hint.className = "prompt-paste-hint";
+    hint.textContent = message;
+    bar.appendChild(hint);
+    hintTimer = window.setTimeout(() => hint.remove(), 2500);
+  }
 
   const syncMessagesPadding = (): void => {
     if (!messagesEl) return;
@@ -145,9 +158,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         notifyDraftChange();
       });
     }
-    if (opts.supportsExtras) {
-      otherEl.addEventListener("paste", (e) => void auqAttachments.handleAttachmentPaste(e));
-    }
+    // Always wired - handleAttachmentPaste itself decides and reports back.
+    otherEl.addEventListener("paste", (e) => {
+      void auqAttachments.handleAttachmentPaste(e).then((msg) => {
+        if (msg) showPasteHint(bar, msg);
+      });
+    });
   }
 
   // Step-only nav: patches the track/dots/arrows/footer in place instead of
@@ -201,7 +217,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels);
       host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
     } else {
-      const headerHtml = `${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span><button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      // Reuses tool-views.ts's own class/icon/title so the live and historical
+      // transcript cards show the identical diagnostic marker.
+      const degradedBadge = opts.degradedBuiltin
+        ? `<i class="ph-fill ph-flask-round question-card-degraded-badge" title="Answered via the disabled legacy AskUserQuestion path"></i>`
+        : "";
+      const headerHtml = `${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${degradedBadge}<button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, auqAttachments)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
       const footerHtml = `

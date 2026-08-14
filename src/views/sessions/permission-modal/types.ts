@@ -51,6 +51,10 @@ export interface QuestionRequestedPayload {
   id: string;
   questions: Question | Question[];
   session_id?: string;
+  /** Set by the daemon's builtin-AskUserQuestion hard-block fallback
+   *  (hooks_server/question.rs) when the model ignored the redirect to the
+   *  MCP tool - never present on the normal path. */
+  degraded_builtin?: boolean;
 }
 
 export type Answers = Record<string, string | string[]>;
@@ -63,9 +67,13 @@ export type Selection = string | Set<string>;
  *  session id) would collide with the main composer's own draft. */
 export interface AuqAttachment {
   mime: string;
-  data: string; // base64 (no data: prefix)
+  /** base64, empty until hydrated (a restored draft only carries path+size -
+   *  see draft-persistence.ts and attachments.ts's hydrateMissingData). */
+  data: string;
   path: string | null;
   filename: string;
+  /** Raw decoded byte size, known at attach time regardless of hydration. */
+  size: number;
 }
 
 export interface QuestionDraft {
@@ -75,9 +83,8 @@ export interface QuestionDraft {
   /** Free-form text added on the review step. Only meaningful when the card
    *  was built with `supportsExtras`; empty string otherwise. */
   additionalMessage: string;
-  /** Pasted-image attachments, shared across every step of the card. Not
-   *  persisted to localStorage (base64 bytes are too heavy for a draft) - only
-   *  carried across an in-app switch-away/back via the in-memory snapshot. */
+  /** Pasted-image attachments. Persisted as path+mime+filename+size only (no
+   *  base64) - see draft-persistence.ts's StoredDraft. */
   attachments: AuqAttachment[];
 }
 
@@ -101,6 +108,10 @@ export interface QuestionUIOpts {
    *  (permission-card.ts's built-in-tool flow settles via a plain
    *  deny.message string with no attachment channel, so it leaves this unset). */
   supportsExtras?: boolean;
+  /** Mirrors QuestionRequestedPayload.degraded_builtin - shows the same
+   *  diagnostic marker on the LIVE card that tool-views.ts shows on the
+   *  historical transcript card. */
+  degradedBuiltin?: boolean;
   onSubmit: (
     answers: Answers,
     extras: { additionalMessage: string; attachments: AuqAttachment[] },

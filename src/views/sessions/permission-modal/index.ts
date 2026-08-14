@@ -21,11 +21,12 @@ import { getTransport } from "../../../shared/transport";
 import { state } from "../state";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
+import { getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
 import { AUQ_ANSWER_SENTINEL } from "../../../shared/chat/chat-transforms";
 import type { ContentBlock } from "../../../types/ipc.generated";
-import { clearQuestionDraft, loadQuestionDraft, saveQuestionDraft } from "./draft-persistence";
-import { scheduleAuqPush, clearAuqPush, cancelAuqPush, fetchRemoteAuqDraft } from "./auq-draft-sync";
+import { clearQuestionDraft, saveQuestionDraft } from "./draft-persistence";
+import { scheduleAuqPush, clearAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
@@ -38,6 +39,8 @@ import {
   resolveCwdForSession,
   storePendingPrompt,
   clearPendingPromptById,
+  peekPendingPrompt,
+  pendingPromptSessionIds,
 } from "./gating";
 import type { PermissionRequestedPayload, Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 
@@ -99,13 +102,11 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
     ? payload.questions
     : [payload.questions];
 
-  // Priority: in-memory snapshot (same-device switch-away/back), then the
-  // daemon's cross-surface draft, then localStorage. Nothing is focused yet
-  // at card-open time, so the focused-input rule doesn't apply here.
+  // Priority: in-memory snapshot (switch-away/back, always freshest), then
+  // whichever of daemon/localStorage is NEWER by timestamp (fetchFreshestAuqDraft).
   const initialDraft = restoredDraft
     ?? (payload.session_id ? snapshotActiveCardDraft(payload.session_id) : undefined)
-    ?? (await fetchRemoteAuqDraft(payload.session_id, payload.id))
-    ?? loadQuestionDraft(payload.id)
+    ?? (await fetchFreshestAuqDraft(payload.session_id, payload.id))
     ?? undefined;
 
   renderQuestionUI({
@@ -123,6 +124,9 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
     // (see QuestionUIOpts.supportsExtras doc) - the built-in-tool flow in
     // permission-card.ts settles via a plain deny.message string instead.
     supportsExtras: true,
+    // Lives on the PROMPT PAYLOAD (question.rs), never the model's tool_use
+    // input - the one place this is actually readable.
+    degradedBuiltin: payload.degraded_builtin === true,
     onDraftChange: (draft) => {
       saveQuestionDraft(payload.id, draft);
       scheduleAuqPush(payload.session_id, payload.id, draft);
@@ -273,24 +277,51 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
   void showQuestionCard(payload);
 }
 
-/** A prompt closed on the daemon (answered elsewhere or timed out). Clear its
- *  park so it doesn't re-surface on session switch. Durable prompts (built-in
- *  AskUserQuestion) can ONLY resolve via an explicit answer/skip, never a
- *  timeout, so it's safe to tear down their card here too - this is what lets
- *  answering on one screen dismiss the card on every other connected screen.
- *  MCP ask_user_question is durable too since 861b4a06; while it was not, the
- *  asking turn's EOF expired it here and took the half-filled draft with it. */
-function handlePromptResolved(id: string, durable = false): void {
+/** A durable resolve is always genuine; a non-durable one for the id ON
+ *  SCREEN can be a `claude -p` EOF poll-tick race mid-edit, so it's left alone. */
+export function handlePromptResolved(id: string, durable = false): void {
   clearPendingPromptById(id);
-  // No-op if this id never had a draft (permission-shaped prompt, or a
-  // question already answered/skipped through the normal submit/cancel path).
-  clearQuestionDraft(id);
-  // Resolved elsewhere (another device answered it): drop our own pending push
-  // rather than re-clearing the daemon's copy - the resolving device's own
-  // submit/cancel already did that.
-  cancelAuqPush();
+  const isActive = isActiveCardId(id);
+  if (durable || !isActive) clearQuestionDraft(id);
+  // Only cancel the (module-global) push for the card actually on screen.
+  if (isActive && durable) cancelAuqPush();
   if (durable) dismissQuestionCard(id);
   rerenderSidebar();
+}
+
+/** On regaining visibility/focus, reconcile against the daemon's CURRENT
+ *  pending set - a diff-based poll only detects a removal it was awake for. */
+let reconcileInFlight = false;
+async function reconcileKnownPromptsOnRegainedVisibility(): Promise<void> {
+  if (reconcileInFlight) return;
+  const known = new Set<string>();
+  const activeId = getActiveCardId();
+  if (activeId) known.add(activeId);
+  for (const sid of pendingPromptSessionIds()) {
+    const id = peekPendingPrompt(sid)?.payload.id;
+    if (id) known.add(id);
+  }
+  if (known.size === 0) return;
+  reconcileInFlight = true;
+  try {
+    let prompts: unknown;
+    try {
+      prompts = await getTransport().call("list_pending_prompts");
+    } catch {
+      return; // network blip - don't wrongly resolve everything
+    }
+    const present = new Set<string>();
+    if (Array.isArray(prompts)) {
+      for (const p of prompts as Array<{ id?: unknown }>) {
+        if (typeof p?.id === "string") present.add(p.id);
+      }
+    }
+    for (const id of known) {
+      if (!present.has(id)) handlePromptResolved(id, true);
+    }
+  } finally {
+    reconcileInFlight = false;
+  }
 }
 
 /**
@@ -330,6 +361,13 @@ export function installPermissionModalListener(): void {
   // restart. Done before the transport split below so the phone (which has no
   // Tauri event bus) still hydrates its gate.
   void hydrateAutoAccept();
+
+  // Registered on both transports below - catches a stale card the same way
+  // on desktop, phone, and a detached window (own module realm, own listener).
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void reconcileKnownPromptsOnRegainedVisibility();
+  });
+  window.addEventListener("focus", () => void reconcileKnownPromptsOnRegainedVisibility());
 
   const ev = window.__TAURI__?.event;
   if (!ev?.listen) {

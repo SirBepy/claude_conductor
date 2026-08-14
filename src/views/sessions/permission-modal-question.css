@@ -247,6 +247,13 @@
 .prompt-attachments {
   margin-top: 4px;
 }
+/* Transient feedback for a paste that couldn't attach - see
+ * question-ui-render.ts's showPasteHint. */
+.prompt-paste-hint {
+  font-size: 0.74rem;
+  color: var(--color-text-muted);
+  padding: 2px 0 0;
+}
 
 /* Recap screen shown after the last question, before Send. */
 .prompt-summary {

@@ -5,7 +5,7 @@
 
 import { debounce, type Debounced } from "../../../shared/debounce";
 import { getSessionDrafts, setAuqDraft, clearAuqDraft } from "../../../shared/chat/session-draft-sync";
-import { deserializeQuestionDraft, serializeQuestionDraft } from "./draft-persistence";
+import { deserializeQuestionDraft, loadQuestionDraftMeta, serializeQuestionDraft } from "./draft-persistence";
 import type { QuestionDraft } from "./types";
 
 const PUSH_DEBOUNCE_MS = 500;
@@ -44,17 +44,33 @@ export async function clearAuqPush(sessionId: string | undefined, promptId: stri
   }
 }
 
-/** Fetch the daemon's AUQ draft for this exact prompt, if any. Returns null on
- *  a mismatched/absent prompt id or a failed call (desktop's missing Tauri
- *  wrapper, or offline) - never throws. */
-export async function fetchRemoteAuqDraft(sessionId: string | undefined, promptId: string): Promise<QuestionDraft | null> {
+/** Like fetchRemoteAuqDraft, but also returns the daemon's `updated_at` so
+ *  callers can compare freshness against a local copy. */
+async function fetchRemoteAuqDraftMeta(sessionId: string | undefined, promptId: string): Promise<{ draft: QuestionDraft; updatedAt: string } | null> {
   if (!sessionId) return null;
   try {
     const drafts = await getSessionDrafts(sessionId);
     if (drafts.auq?.prompt_id !== promptId) return null;
-    return deserializeQuestionDraft(drafts.auq.payload);
+    const draft = deserializeQuestionDraft(drafts.auq.payload);
+    if (!draft) return null;
+    return { draft, updatedAt: drafts.auq.updated_at };
   } catch (e) {
     console.warn("[auq-sync] get_session_drafts failed:", e);
     return null;
   }
+}
+
+export async function fetchRemoteAuqDraft(sessionId: string | undefined, promptId: string): Promise<QuestionDraft | null> {
+  return (await fetchRemoteAuqDraftMeta(sessionId, promptId))?.draft ?? null;
+}
+
+/** Reload-time reconciliation: newest-wins by timestamp (mirrors
+ *  ComposerDraftSync.reconcile), not "first non-null" - the daemon's push is
+ *  debounced up to 500ms and could otherwise beat a fresher local draft. */
+export async function fetchFreshestAuqDraft(sessionId: string | undefined, promptId: string): Promise<QuestionDraft | null> {
+  const local = loadQuestionDraftMeta(promptId);
+  const remote = await fetchRemoteAuqDraftMeta(sessionId, promptId);
+  if (!remote) return local?.draft ?? null;
+  if (!local || local.updatedAt === null) return remote.draft;
+  return remote.updatedAt > local.updatedAt ? remote.draft : local.draft;
 }

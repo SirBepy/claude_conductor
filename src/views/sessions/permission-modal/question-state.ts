@@ -174,6 +174,20 @@ export function dismissQuestionCard(id?: string): void {
   activeCard.teardown();
 }
 
+/** True iff `id` is the currently-displayed card. Used by handlePromptResolved
+ *  to scope its side effects to the card actually on screen, rather than any
+ *  backgrounded/stale prompt that happens to share the resolve event's id. */
+export function isActiveCardId(id: string): boolean {
+  return activeCard?.id === id;
+}
+
+/** The currently-displayed card's prompt id, or null if none. Used by the
+ *  regained-visibility reconcile to know which live card to re-check against
+ *  the daemon's pending set (see index.ts). */
+export function getActiveCardId(): string | null {
+  return activeCard?.id ?? null;
+}
+
 /**
  * Return a snapshot of the active card's current answer state if it belongs to
  * the given session, without tearing it down. Returns null if no card is up or

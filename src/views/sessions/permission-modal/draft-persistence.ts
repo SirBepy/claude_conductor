@@ -12,13 +12,24 @@ function draftKey(promptId: string): string {
 
 // JSON has no Map/Set - selections serialize as [index, label[]] (multiSelect)
 // or [index, label] (single-select), freeText as [index, text][]. Attachments
-// aren't stored here (base64 bytes are too heavy for localStorage, with no
-// path-only rehydration path for this card) - a restart loses staged images.
+// carry path+mime+filename+size only, never base64 - keeps both localStorage
+// and the debounced daemon push cheap; attachments.ts re-fetches bytes on demand.
+interface StoredAttachment {
+  mime: string;
+  path: string;
+  filename: string;
+  size: number;
+}
+
 interface StoredDraft {
   freeText: [number, string][];
   selections: [number, string | string[]][];
   activeTab: number;
   additionalMessage?: string;
+  attachments?: StoredAttachment[];
+  /** Stamped by saveQuestionDraft, absent on a pre-migration entry (treated
+   *  as older than any timestamped source - see loadQuestionDraftMeta). */
+  updatedAt?: string;
 }
 
 /** The same shape localStorage stores, reused as-is for the daemon's opaque
@@ -29,6 +40,9 @@ export function serializeQuestionDraft(draft: QuestionDraft): unknown {
     selections: Array.from(draft.selections.entries()).map(([k, v]) => [k, v instanceof Set ? Array.from(v) : v]),
     activeTab: draft.activeTab,
     additionalMessage: draft.additionalMessage || undefined,
+    attachments: (draft.attachments ?? [])
+      .filter((a): a is typeof a & { path: string } => Boolean(a.path))
+      .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename, size: a.size })),
   };
   return stored;
 }
@@ -36,6 +50,11 @@ export function serializeQuestionDraft(draft: QuestionDraft): unknown {
 export function deserializeQuestionDraft(payload: unknown): QuestionDraft | null {
   const parsed = payload as StoredDraft | null | undefined;
   if (!parsed || !Array.isArray(parsed.freeText) || !Array.isArray(parsed.selections)) return null;
+  const attachments = Array.isArray(parsed.attachments)
+    ? parsed.attachments
+        .filter((a) => a && typeof a.path === "string" && typeof a.mime === "string")
+        .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename ?? a.path, size: a.size ?? 0, data: "" }))
+    : [];
   return {
     freeText: new Map(parsed.freeText),
     selections: new Map<number, Selection>(
@@ -43,15 +62,21 @@ export function deserializeQuestionDraft(payload: unknown): QuestionDraft | null
     ),
     activeTab: typeof parsed.activeTab === "number" ? parsed.activeTab : 0,
     additionalMessage: typeof parsed.additionalMessage === "string" ? parsed.additionalMessage : "",
-    attachments: [],
+    attachments,
   };
 }
 
-export function loadQuestionDraft(promptId: string): QuestionDraft | null {
+/** Draft plus its local save time, for reconciling against the daemon's
+ *  `updated_at` (see auq-draft-sync.ts's fetchFreshestAuqDraft) - the
+ *  reload-precedence fix needs to compare timestamps, not just presence. */
+export function loadQuestionDraftMeta(promptId: string): { draft: QuestionDraft; updatedAt: string | null } | null {
   try {
     const raw = localStorage.getItem(draftKey(promptId));
     if (!raw) return null;
-    return deserializeQuestionDraft(JSON.parse(raw));
+    const parsed = JSON.parse(raw) as StoredDraft;
+    const draft = deserializeQuestionDraft(parsed);
+    if (!draft) return null;
+    return { draft, updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : null };
   } catch {
     return null;
   }
@@ -59,7 +84,9 @@ export function loadQuestionDraft(promptId: string): QuestionDraft | null {
 
 export function saveQuestionDraft(promptId: string, draft: QuestionDraft): void {
   try {
-    localStorage.setItem(draftKey(promptId), JSON.stringify(serializeQuestionDraft(draft)));
+    const stored = serializeQuestionDraft(draft) as StoredDraft;
+    stored.updatedAt = new Date().toISOString();
+    localStorage.setItem(draftKey(promptId), JSON.stringify(stored));
   } catch {
     /* quota or storage disabled - lose the draft, don't crash */
   }

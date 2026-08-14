@@ -9,6 +9,11 @@
 use base64::Engine;
 use std::path::{Path, PathBuf};
 
+/// Hard cap on one attachment write. Comfortably clears the frontend's 8MB
+/// per-draft budget and a full-resolution screenshot, while still bounding a
+/// single runaway/malformed request before it reaches disk.
+const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
 /// Validate session_id against a strict charset. Used anywhere we use the
 /// id to construct a filesystem path. Rejects empty / too-long / any char
 /// outside [A-Za-z0-9_-]. Real session_ids upstream are UUIDs which always
@@ -35,11 +40,28 @@ pub(crate) fn write_attachment(
     mime: &str,
 ) -> Result<PathBuf, String> {
     validate_session_id(session_id)?;
-    let dir = root.join("chat-attachments").join(session_id);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Base64 inflates by ~4/3 (padding can add up to 2 bytes of slack to this
+    // estimate); reject an obviously oversized payload before paying for the
+    // decode. The post-decode check below is the authoritative one.
+    if base64_data.len() / 4 * 3 > MAX_ATTACHMENT_BYTES + 2 {
+        return Err(format!(
+            "attachment too large: encoded payload is ~{} bytes, exceeds the {}MB limit",
+            base64_data.len() / 4 * 3,
+            MAX_ATTACHMENT_BYTES / (1024 * 1024)
+        ));
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data.as_bytes())
         .map_err(|e| e.to_string())?;
+    if bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "attachment too large: {} bytes exceeds the {}MB limit",
+            bytes.len(),
+            MAX_ATTACHMENT_BYTES / (1024 * 1024)
+        ));
+    }
+    let dir = root.join("chat-attachments").join(session_id);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let ext = match mime {
         "image/png" => "png",
         "image/jpeg" | "image/jpg" => "jpg",
@@ -151,14 +173,14 @@ pub struct AttachmentData {
 /// rendering in the chat view. Path is validated to live inside
 /// `<app-data>/chat-attachments/` (canonicalized) to block arbitrary
 /// file reads.
-#[tauri::command]
-pub async fn read_attachment(path: String) -> Result<AttachmentData, String> {
-    let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
+/// Pure read helper, factored out of the `read_attachment` command so it can
+/// be unit-tested without a Tauri AppHandle (mirrors `write_attachment`).
+pub(crate) fn read_attachment_impl(root: &Path, path: &str) -> Result<AttachmentData, String> {
     let attachments_root = root.join("chat-attachments");
     let attachments_root = attachments_root
         .canonicalize()
         .map_err(|e| format!("attachments dir missing: {e}"))?;
-    let target = PathBuf::from(&path)
+    let target = PathBuf::from(path)
         .canonicalize()
         .map_err(|e| format!("file not found: {e}"))?;
     if !target.starts_with(&attachments_root) {
@@ -180,6 +202,12 @@ pub async fn read_attachment(path: String) -> Result<AttachmentData, String> {
     .to_string();
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(AttachmentData { mime, base64 })
+}
+
+#[tauri::command]
+pub async fn read_attachment(path: String) -> Result<AttachmentData, String> {
+    let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
+    read_attachment_impl(&root, &path)
 }
 
 #[cfg(test)]
@@ -235,6 +263,46 @@ mod tests {
         assert!(r.is_ok());
         let r = write_attachment(tmp.path(), "sess_123_abc", png_b64, "image/png");
         assert!(r.is_ok());
+    }
+
+    /// Builds a base64 string that decodes to exactly `n` bytes.
+    fn b64_of_len(n: usize) -> String {
+        base64::engine::general_purpose::STANDARD.encode(vec![0u8; n])
+    }
+
+    #[test]
+    fn write_attachment_accepts_payload_at_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b64 = b64_of_len(MAX_ATTACHMENT_BYTES);
+        let r = write_attachment(tmp.path(), "sess", &b64, "application/octet-stream");
+        assert!(r.is_ok(), "at-cap payload should be accepted: {r:?}");
+    }
+
+    #[test]
+    fn write_attachment_rejects_payload_over_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b64 = b64_of_len(MAX_ATTACHMENT_BYTES + 1);
+        let r = write_attachment(tmp.path(), "sess", &b64, "application/octet-stream");
+        let err = r.expect_err("over-cap payload must be rejected");
+        assert!(err.contains("too large"), "error should say too large: {err}");
+        assert!(err.contains("20"), "error should name the 20MB limit: {err}");
+    }
+
+    #[test]
+    fn write_then_read_attachment_round_trips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        let path = write_attachment(tmp.path(), "sess", png_b64, "image/png").unwrap();
+
+        let data = read_attachment_impl(tmp.path(), path.to_str().unwrap()).unwrap();
+        assert_eq!(data.mime, "image/png");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&data.base64)
+            .unwrap();
+        let expected = base64::engine::general_purpose::STANDARD
+            .decode(png_b64)
+            .unwrap();
+        assert_eq!(decoded, expected);
     }
 
     #[test]
