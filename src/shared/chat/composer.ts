@@ -21,6 +21,7 @@ import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
 import { ComposerDraftSync } from "./composer-draft-sync";
+import { openFrozenChoice } from "./composer-frozen-choice";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -36,7 +37,10 @@ export interface ComposerOptions {
    * sending immediately. `placeholder`, if given, replaces the textarea's
    * idle placeholder text (e.g. naming the account and raw reset time). */
   isBlocked?: () => { resetsAtIso: string; resetsAtLabel: string; placeholder?: string } | null;
-  /** Stage the built blocks as a held message (only called while busy). */
+  /** True while the active session is frozen (`Instance.frozen`). A send
+   * opens a hold-vs-send-now popover instead of sending directly. */
+  isFrozen?: () => boolean;
+  /** Stage the built blocks as a held message (while busy, or frozen-hold). */
   onStage?: (blocks: ContentBlock[]) => void;
   /** True when a held set exists for the active session. When not busy but
    * held items exist, a normal send bundles them via flushHeldWithDraft. */
@@ -517,6 +521,34 @@ export class Composer {
       } catch (err) {
         console.error("[Composer] blocked-schedule failed", err);
         this.restoreDraft(text, savedBlockedAttachments, savedBlockedPastedBlocks);
+      } finally {
+        this.sending = false;
+      }
+      return;
+    }
+
+    // Frozen: ask hold-vs-send-now instead of silently staging like busy does
+    // - freezes can persist indefinitely, so ask every time, not just once.
+    if (this.opts.isFrozen?.()) {
+      if (empty) return;
+      const anchor = this.sendBtn ?? this.textarea;
+      if (!anchor) return;
+      const choice = await openFrozenChoice(anchor);
+      if (choice === null) return; // dismissed - draft stays put
+      this.sending = true;
+      const blocks = this.buildBlocks(text);
+      const savedAttachments = this.att.attachments;
+      const savedPastedBlocks = this.att.pastedBlocks;
+      this.clearComposer();
+      try {
+        if (choice === "hold") {
+          this.opts.onStage?.(blocks);
+        } else {
+          await this.opts.onSend(blocks);
+        }
+      } catch (err) {
+        console.error("[Composer] frozen-choice send failed", err);
+        this.restoreDraft(text, savedAttachments, savedPastedBlocks);
       } finally {
         this.sending = false;
       }

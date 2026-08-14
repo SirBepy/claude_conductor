@@ -28,9 +28,22 @@ export function mountComposer(
   const composerEl = pane.querySelector<HTMLElement>(".session-composer");
   if (!composerEl) return;
 
-  // The real send-to-daemon path. Shared by the composer (normal send) and
-  // by the held-messages controller (flushing a bundled set as one message).
+  // The real send-to-daemon path. Shared by the composer and the held-messages
+  // controller. Unfreezes first if still frozen at call time - background
+  // auto-flush (sidebar.ts) only reaches here once already unfrozen, so this
+  // only fires for an explicit "send now" click.
   const sendBundle = async (blocks: ContentBlock[]): Promise<void> => {
+    const inst = state.sessions.find((s) => s.session_id === sessionId);
+    if (inst?.frozen) {
+      try {
+        await invoke<void>("unfreeze_session", { sessionId });
+      } catch (err) {
+        console.error("[sessions] unfreeze_session failed", err);
+        showToast(`Failed to unfreeze: ${err}`);
+        throw err;
+      }
+    }
+
     // Optimistically push the user's message via the store; claude -p
     // doesn't echo it back via stream-json. Cache stays consistent.
     const optimisticEvent = {
@@ -82,6 +95,10 @@ export function mountComposer(
         resetsAtLabel: formatClockLabel(delayedMs),
         placeholder: `${accLabel} is out of usage until ${formatClockLabel(resetsAtMs)}. Your message will be sent when it resets.`,
       };
+    },
+    isFrozen: () => {
+      const inst = state.sessions.find((s) => s.session_id === sessionId);
+      return !!inst?.frozen;
     },
     onStage: (blocks) => state.heldMessages?.stage(blocks),
     hasHeld: () => !!state.heldMessages?.hasItemsForActive(),

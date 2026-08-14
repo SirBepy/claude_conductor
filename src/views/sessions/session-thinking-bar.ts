@@ -83,7 +83,9 @@ export function updateThinkingBar(): void {
   }
   bar.removeAttribute("hidden");
   if (textEl) {
-    if (_todoActivity !== null) textEl.textContent = _todoActivity;
+    const frozen = !!state.sessions.find((s) => s.session_id === state.selectedId)?.frozen;
+    if (!busy && hasHeld && frozen) textEl.textContent = "Frozen - will send once unfrozen";
+    else if (_todoActivity !== null) textEl.textContent = _todoActivity;
     else if (_progressN !== null) textEl.textContent = `Step ${_progressN} of ${_progressM}`;
     else if (_activity) textEl.textContent = _activity;
     else textEl.textContent = "Thinking…";

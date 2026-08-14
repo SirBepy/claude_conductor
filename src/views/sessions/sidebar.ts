@@ -209,8 +209,12 @@ export async function refreshSessions(): Promise<boolean> {
     // idempotent (no-ops once the held set is empty), so re-checking on every
     // tick — including right after switching back to a chat that finished
     // while it wasn't selected — is safe.
+    // `!frozen` matters for a "hold until unfrozen" set: frozen sessions are
+    // never busy (the process is torn down), so without this gate the idle
+    // check above would fire the moment items are staged instead of waiting
+    // for an actual unfreeze.
     const active = next.find(s => s.session_id === state.selectedId);
-    if (active && !active.busy && state.heldMessages?.hasItemsForActive()) {
+    if (active && !active.busy && !active.frozen && state.heldMessages?.hasItemsForActive()) {
       const isQuestion = active.awaiting === "question";
       state.heldMessages.onCompletion(active.session_id, isQuestion);
     }
@@ -223,7 +227,7 @@ export async function refreshSessions(): Promise<boolean> {
     // async send, so it can't double-fire against the reselect flush in
     // active-session.ts (which no-ops on an empty set).
     for (const s of next) {
-      if (s.session_id === state.selectedId || s.busy) continue;
+      if (s.session_id === state.selectedId || s.busy || s.frozen) continue;
       if (!state.heldMessages?.hasItemsFor(s.session_id)) continue;
       const isQuestion = s.awaiting === "question";
       if (isQuestion) continue;
