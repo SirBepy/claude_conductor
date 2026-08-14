@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
+      android_changed: ${{ steps.android.outputs.android_changed }}
       tag: ${{ steps.check.outputs.tag }}
       version: ${{ steps.check.outputs.version }}
       product_name: ${{ steps.check.outputs.product_name }}
@@ -41,6 +42,26 @@ jobs:
           else
             echo "Tag $TAG not found. Will release."
             echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The APK is a thin shell (pairing screens + iroh dialer) that loads the real
+      # frontend live off the daemon, so ordinary src/ work never changes it. Only
+      # rebuild it when android/ itself moved since the previous release tag. Runs
+      # before the tag job, so the newest tag here is still the PREVIOUS release.
+      - name: Check whether android/ changed since the last release
+        id: android
+        shell: bash
+        run: |
+          LAST_TAG=$(git tag -l 'tauri-v*' --sort=-version:refname | head -n 1)
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release tag; building Android."
+            echo "android_changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$LAST_TAG" HEAD -- android/; then
+            echo "android/ unchanged since $LAST_TAG; skipping the Android build."
+            echo "android_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "android/ changed since $LAST_TAG; building Android."
+            echo "android_changed=true" >> "$GITHUB_OUTPUT"
           fi
 
   tag:
@@ -228,9 +249,138 @@ jobs:
           name: release-${{ matrix.updater_key }}
           path: release-staging/
 
+  android:
+    needs: [check, tag]
+    if: needs.check.outputs.should_release == 'true' && needs.check.outputs.android_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: android/src-tauri
+          key: aarch64-linux-android
+          cache-on-failure: true
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli
+
+      # android/ is its own workspace with its own version; keep the APK's
+      # versionName in step with the release the same way the desktop job does.
+      - name: Sync version into the android crate
+        shell: bash
+        run: |
+          VERSION="${{ needs.check.outputs.version }}"
+          jq --arg v "$VERSION" '.version = $v' android/src-tauri/tauri.conf.json > android/src-tauri/tauri.conf.json.tmp
+          mv android/src-tauri/tauri.conf.json.tmp android/src-tauri/tauri.conf.json
+          sed -i.bak -E "s/^version = \".*\"/version = \"$VERSION\"/" android/src-tauri/Cargo.toml
+          rm android/src-tauri/Cargo.toml.bak
+
+      # gen/android/tauri.settings.gradle and generated/TauriActivity.kt are
+      # gitignored and machine-specific, so a raw checkout can never build (gradle
+      # fails with "Unresolved reference: TauriActivity"). init also rewrites the
+      # tracked gradle/res files, so restore those immediately after.
+      - name: Regenerate the gitignored Android codegen
+        shell: bash
+        working-directory: android
+        run: |
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo-tauri android init
+          git checkout -- src-tauri/gen/android
+
+      - name: Configure release signing
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is unset, so this run builds a DEBUG apk and attaches nothing to the release. Set the four ANDROID_KEYSTORE_*/ANDROID_KEY_* secrets to ship a signed one."
+          else
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/conductor-release.jks"
+            {
+              echo "storeFile=$RUNNER_TEMP/conductor-release.jks"
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > android/src-tauri/gen/android/keystore.properties
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK
+        shell: bash
+        working-directory: android
+        run: |
+          BIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          # ring's build script cannot find the NDK clang without these four, and
+          # the failure reads like a broken dependency. 28 matches minSdkVersion in
+          # android/src-tauri/tauri.conf.json.
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android28-clang"
+          export CXX_aarch64_linux_android="$BIN/aarch64-linux-android28-clang++"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android28-clang"
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            cargo-tauri android build --target aarch64 --apk
+          else
+            cargo-tauri android build --target aarch64 --apk --debug
+          fi
+
+      - name: Stage APK
+        if: steps.signing.outputs.signed == 'true'
+        shell: bash
+        run: |
+          VERSION="${{ needs.check.outputs.version }}"
+          SLUG="${{ needs.check.outputs.product_slug }}"
+          mkdir -p release-staging
+          APK=$(find android/src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "No release APK found under app/build/outputs/apk" >&2
+            exit 1
+          fi
+          cp "$APK" "release-staging/${SLUG}_${VERSION}_android_arm64.apk"
+
+      # Named release-* so the publish job's download pattern picks it up. Staging
+      # holds only the .apk: publish treats every *.json there as an updater
+      # platform entry, and the APK has no updater channel.
+      - name: Upload artifacts
+        if: steps.signing.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-arm64
+          path: release-staging/
+
+      # Deliberately NOT release-*: an unsigned debug build must never reach the
+      # release page, but it is still worth keeping for inspection.
+      - name: Upload unsigned debug APK
+        if: steps.signing.outputs.signed != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: android/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+
   publish:
-    needs: [check, tag, build]
-    if: needs.check.outputs.should_release == 'true'
+    needs: [check, tag, build, android]
+    # !cancelled() rather than success(): the android job is skipped on releases
+    # that did not touch android/, and a skipped need would otherwise skip publish
+    # too. The desktop build still has to have passed.
+    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -273,6 +423,7 @@ jobs:
             artifacts/*.deb
             artifacts/*.AppImage
             artifacts/*.AppImage.sig
+            artifacts/*.apk
             artifacts/latest.json
           tag_name: ${{ needs.check.outputs.tag }}
           name: ${{ needs.check.outputs.product_name }} v${{ needs.check.outputs.version }}
