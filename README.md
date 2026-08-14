@@ -102,24 +102,29 @@ A thin native shell (`android/`) that connects to a running desktop Conductor in
 network - it does not run Claude Code itself, it just renders the same remote-control web UI the
 desktop serves.
 
-**Get the APK.** No prebuilt release exists yet - the GitHub Releases pipeline only builds desktop
-installers. Building the Android app today requires a local checkout of this repo; see
-`CLAUDE.md`'s Android section for the build invocation.
+**Get the APK.** A GitHub Release carries a signed `*_android_arm64.apk` whenever that release
+changed the Android shell. Releases that only touched the desktop app do not rebuild it, so if the
+newest release has no APK, the most recent one that does is still current. To build it yourself
+instead, see `CLAUDE.md`'s Android section.
 
-**Prerequisite:** both devices need to be on the same Tailscale network. On the desktop, open
-Settings > Remote access and turn it on - Conductor serves itself over your private Tailscale
-network only.
+**Prerequisite.** For the Android app, none beyond the desktop: scanning the pairing QR connects the
+phone directly to your desktop, peer-to-peer, whether or not Tailscale is installed and on WiFi or
+mobile data alike. Anything else - a laptop browser, say - still needs Tailscale, because only the
+Android app can make that direct connection. Either way, open Settings > Remote access on the
+desktop and turn it on first.
 
 **Pair the app:**
 
 1. On the desktop, Settings > Remote access shows a QR code and a copyable pairing link once
    remote access is enabled.
-2. On the phone's first launch, tap **Scan QR code** and scan it (camera permission required), or
-   tap **Save & Connect** after entering the server's `https://` URL manually.
-3. Once connected the phone drops straight into the desktop's remote-control UI; the server URL is
-   remembered for future launches.
+2. On the phone's first launch, tap **Scan QR code** and scan it (camera permission required). This
+   is the direct path, and needs no Tailscale on either device.
+3. To go over Tailscale instead, type the server's `https://` URL into the field and tap the check
+   button. Both devices have to be on your Tailscale network for that address to resolve.
+4. Once connected the phone drops straight into the desktop's remote-control UI, and remembers how
+   it connected for future launches.
 
-If the phone can't reach the server, it shows a "Can't reach your PC" screen with **Retry** and
-**Change server** - check that Conductor is running and the Tailscale tunnel is up.
+While it connects, the phone shows "Reaching your PC…" and keeps retrying on its own with a visible
+countdown - tap **Edit connection** to go back and change the address.
 
 Paired devices can be revoked any time from Settings > Remote access on the desktop.
