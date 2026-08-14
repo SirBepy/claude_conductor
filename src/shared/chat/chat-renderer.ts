@@ -191,10 +191,10 @@ export class ChatRenderer {
     }
   }
 
-  setActivity(a: string | null): void {
-    // Activity cleared (turn boundary / new assistant text) -> the working-chip
-    // highlight has nothing to track anymore.
-    if (a === null) this.activityToolCanon = null;
+  setActivity(a: string | null, opts: { keepChip?: boolean } = {}): void {
+    // keepChip skips the highlight clear for the "turn's tools resolved" case
+    // (thinking-bar text goes idle, chip keeps pulsing till the turn closes).
+    if (a === null && !opts.keepChip) this.activityToolCanon = null;
     if (this.lastActivity === a) return;
     this.lastActivity = a;
     // Suppressed during history replay; the final activity is fired once when
