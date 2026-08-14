@@ -1,7 +1,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.conductor_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Shell is dark-only (style.css --bg): same value as the day theme,
+        <!-- Shell is dark-only (style.css bg var): same value as the day theme,
              the app never switches to a light window regardless of system mode. -->
         <item name="android:windowBackground">#16161a</item>
     </style>
