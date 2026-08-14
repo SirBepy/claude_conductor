@@ -1,7 +1,30 @@
 import "../permission-modal-shell.css";
 import "../permission-modal-question.css";
+import { attachDragHandle } from "./drag-handle";
 
 export const HOST_ID = "prompt-card-host";
+
+// Mirrors the two `@media (max-width: 768px)` blocks in permission-modal-shell.css - keep in sync.
+const MOBILE_BREAKPOINT = 768;
+const HEADER_GAP = 8; // px of breathing room below the header's bottom edge
+
+let _detachDrag: (() => void) | null = null;
+let _resizeHandler: (() => void) | null = null;
+
+// Caps the card's mobile max-height below .session-header's bottom edge (the
+// project name must stay visible). sessions.css owns that dynamic box model,
+// so the live header is measured instead of guessed here in CSS.
+function applyMobileHeightCap(host: HTMLElement, mode: "composer" | "pane" | "viewport"): void {
+  if (window.innerWidth > MOBILE_BREAKPOINT) { host.style.removeProperty("--prompt-card-max-h"); return; }
+  const header = document.querySelector<HTMLElement>(".session-header");
+  if (!header) { host.style.removeProperty("--prompt-card-max-h"); return; }
+  const headerBottom = header.getBoundingClientRect().bottom;
+  // Composer mode grows the card upward from the composer's own top edge;
+  // pane/viewport modes anchor from the bottom of the viewport instead.
+  const topAnchor = mode === "composer" ? host.parentElement!.getBoundingClientRect().top : window.innerHeight;
+  const available = topAnchor - headerBottom - HEADER_GAP;
+  host.style.setProperty("--prompt-card-max-h", `${Math.max(160, available)}px`);
+}
 
 /**
  * Pick the best mount point for the floating card:
@@ -11,28 +34,41 @@ export const HOST_ID = "prompt-card-host";
  */
 export function ensureHost(): { host: HTMLElement; mode: "composer" | "pane" | "viewport" } {
   document.getElementById(HOST_ID)?.remove();
+  _detachDrag?.();
+  if (_resizeHandler) window.removeEventListener("resize", _resizeHandler);
 
   const host = document.createElement("div");
   host.id = HOST_ID;
 
+  let mode: "composer" | "pane" | "viewport";
   const composer = document.querySelector<HTMLElement>(".session-composer");
+  const pane = document.querySelector<HTMLElement>(".session-pane");
   if (composer) {
     host.classList.add("prompt-card-host--composer");
     composer.appendChild(host);
-    return { host, mode: "composer" };
-  }
-  const pane = document.querySelector<HTMLElement>(".session-pane");
-  if (pane) {
+    mode = "composer";
+  } else if (pane) {
     host.classList.add("prompt-card-host--pane");
     pane.appendChild(host);
-    return { host, mode: "pane" };
+    mode = "pane";
+  } else {
+    host.classList.add("prompt-card-host--viewport");
+    document.body.appendChild(host);
+    mode = "viewport";
   }
-  host.classList.add("prompt-card-host--viewport");
-  document.body.appendChild(host);
-  return { host, mode: "viewport" };
+
+  applyMobileHeightCap(host, mode);
+  _resizeHandler = () => applyMobileHeightCap(host, mode);
+  window.addEventListener("resize", _resizeHandler);
+  _detachDrag = attachDragHandle(host);
+
+  return { host, mode };
 }
 
 export function clearHost(): void {
+  _detachDrag?.();
+  _detachDrag = null;
+  if (_resizeHandler) { window.removeEventListener("resize", _resizeHandler); _resizeHandler = null; }
   document.getElementById(HOST_ID)?.remove();
 }
 
@@ -43,6 +79,7 @@ export function clearHost(): void {
 export function renderCardShell(titleHtml: string, bodyHtml: string, footerHtml: string): string {
   return `
     <div class="prompt-card" role="dialog" aria-modal="false">
+      <div class="prompt-card__handle" aria-hidden="true"></div>
       <div class="prompt-card__header">${titleHtml}</div>
       <div class="prompt-card__body">${bodyHtml}</div>
       <div class="prompt-card__answer-bar"></div>
