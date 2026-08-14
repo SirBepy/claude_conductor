@@ -573,7 +573,12 @@
   overflow-x: hidden;
   /* Keep scroll momentum inside the transcript; don't chain to the page. */
   overscroll-behavior: contain;
-  padding: 18px 20px;
+  /* Padding-based centering (not a wrapper + margin:auto) so the scrollbar
+     stays pinned to the pane's true edge instead of floating mid-window.
+     Caps the reading column at 900px, matching skill-detail.css's existing
+     centered-column width; .msg's percentage max-widths then resolve
+     against this narrowed content box automatically. */
+  padding: 18px max(20px, calc((100% - 900px) / 2));
   display: flex;
   flex-direction: column;
   user-select: text;
@@ -647,7 +652,9 @@
 
 .session-composer {
   border-top: 1px solid var(--color-border);
-  padding: 10px 12px 12px;
+  /* Same padding-based centering as .session-messages, so the input column
+     lines up under the capped transcript instead of spanning the full pane. */
+  padding: 10px max(12px, calc((100% - 900px) / 2)) 12px;
   /* Lift the input above the home indicator on mobile (env() is 0 on desktop). */
   padding-bottom: max(12px, env(safe-area-inset-bottom));
   display: flex;
