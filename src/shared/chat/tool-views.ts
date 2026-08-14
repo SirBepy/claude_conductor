@@ -12,7 +12,7 @@
 
 import type { RenderedMessage } from "./chat-transforms";
 import { renderMarkdown, truncateForSummary } from "./chat-transforms";
-import { canonicalTool } from "./tool-meta";
+import { canonicalTool, isAskQuestionTool } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
 import { basename } from "../path-utils";
 import { asObj, strField } from "../obj-utils";
@@ -135,11 +135,8 @@ function extractAskQuestions(input: unknown): AskQuestion[] {
   return out;
 }
 
-/**
- * For each AskUserQuestion call in range, show every question (with its short
- * header) paired with the answer the user gave. Answers come from the matching
- * tool_result; while one is still pending the answer reads "awaiting answer".
- */
+/** Pairs each question with its answer. Top-level asks are kind:"question"
+ *  (answer in `m.text`); nested ones stay kind:"tool_use" with a tool_result. */
 export function renderQuestionsView(messages: RenderedMessage[], start: number, end: number): string {
   // tool_use id -> parsed answers, harvested from each call's tool_result.
   const answersById = new Map<string, Map<string, string>>();
@@ -153,9 +150,14 @@ export function renderQuestionsView(messages: RenderedMessage[], start: number, 
   const cards: string[] = [];
   for (let i = start; i < end; i++) {
     const m = messages[i];
-    if (!m || m.kind !== "tool_use" || m.parentToolUseId || m.tool !== "AskUserQuestion") continue;
+    if (!m) continue;
+    const isTopLevel = m.kind === "question";
+    const isNestedToolUse = m.kind === "tool_use" && !m.parentToolUseId && isAskQuestionTool(m.tool ?? "");
+    if (!isTopLevel && !isNestedToolUse) continue;
     const questions = extractAskQuestions(m.input);
-    const answers = (m.id && answersById.get(m.id)) || null;
+    const answers = isTopLevel
+      ? (m.text !== undefined ? parseAnswers(m.text) : null)
+      : (m.id && answersById.get(m.id)) || null;
     for (const q of questions) {
       const header = q.header ? `<div class="tool-qa-header">${escapeHtml(q.header)}</div>` : "";
       const ans = answers?.get(q.question);
@@ -166,6 +168,24 @@ export function renderQuestionsView(messages: RenderedMessage[], start: number, 
     }
   }
   return cards.join("");
+}
+
+/** Answer chips (answered) or a status pill (skipped/timed-out) inside the
+ *  collapsed `<summary>` - visible at a glance, no click needed. */
+function summaryResolutionHtml(
+  resolution: "pending" | "answered" | "skipped" | "timed-out",
+  answers: Map<string, string> | null,
+  questions: AskQuestion[],
+): string {
+  if (resolution === "answered" && answers) {
+    return questions.map((q) => {
+      const ans = answers.get(q.question);
+      return ans ? `<span class="question-card-answer-chip">${escapeHtml(truncateForSummary(ans, 40))}</span>` : "";
+    }).join("");
+  }
+  if (resolution === "skipped") return `<span class="question-card-status-pill question-card-status-pill--skipped">Skipped</span>`;
+  if (resolution === "timed-out") return `<span class="question-card-status-pill question-card-status-pill--timed-out">Timed out</span>`;
+  return "";
 }
 
 /**
@@ -221,8 +241,16 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
   const firstLabel = questions[0]?.header || questions[0]?.question || "";
   const truncated = truncateForSummary(firstLabel, 55);
   const badge = questions.length > 1 ? `<span class="question-card-badge">${questions.length}</span>` : "";
-  const summary = `<summary class="question-card-summary"><i class="ph ph-chat-circle-dots"></i><span class="question-card-label">${escapeHtml(truncated)}</span>${badge}<i class="ph ph-caret-down question-card-chevron"></i></summary>`;
-  return `<details class="question-card-collapsible" open>${summary}${cards}</details>`;
+  // Only a still-actionable question stays expanded.
+  const isOpen = resolution === "pending" ? " open" : "";
+  const resolutionInner = summaryResolutionHtml(resolution, answers, questions);
+  // Omitted entirely (not just empty) so a pending card's summary keeps its
+  // single-line layout instead of an empty wrapper row underneath it.
+  const resolutionHtml = resolutionInner ? `<span class="question-card-summary-resolution">${resolutionInner}</span>` : "";
+  // No degraded-builtin badge here: the daemon stamps it on the prompt payload,
+  // not the tool_use input this renders from. The live card carries it instead.
+  const summary = `<summary class="question-card-summary"><i class="ph ph-chat-circle-dots"></i><span class="question-card-label">${escapeHtml(truncated)}</span>${badge}<i class="ph ph-caret-down question-card-chevron"></i>${resolutionHtml}</summary>`;
+  return `<details class="question-card-collapsible" data-resolution="${resolution}"${isOpen}>${summary}${cards}</details>`;
 }
 
 /**

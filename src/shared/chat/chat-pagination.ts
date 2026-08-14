@@ -3,6 +3,7 @@ import type { RenderedMessage } from "./chat-transforms";
 import { eventToRenderedMessage, isBoundaryMessage } from "./chat-transforms";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
+import { isAskQuestionTool } from "./tool-meta";
 import type { TurnUsageTotals } from "./turn-chips";
 
 export interface PaginatorCallbacks {
@@ -185,8 +186,22 @@ export class ChatPaginator {
         updateMsgIds.add(ev.id);
       }
     }
+    // A question's tool_result never renders its own row - it resolves the
+    // card instead, mirroring chat-event-handler.ts's live absorb. is_error
+    // (the fire-and-forget deny handshake) absorbs silently, no answer text.
+    const questionAnswerById = new Map<string, string>();
+    const questionToolIds = new Set<string>();
+    for (const ev of events) {
+      if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
+        questionToolIds.add(ev.id);
+      }
+    }
+    for (const ev of events) {
+      if (ev.type !== "tool_result" || !questionToolIds.has(ev.tool_use_id)) continue;
+      if (!ev.is_error) questionAnswerById.set(ev.tool_use_id, ev.output?.type === "text" ? ev.output.text : "");
+    }
     const filtered = events.filter((ev) =>
-      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id))));
+      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id) || questionToolIds.has(ev.tool_use_id))));
 
     const messages = this.cb.getMessages();
     const messageEls = this.cb.getMessageEls();
@@ -241,6 +256,9 @@ export class ChatPaginator {
       if (!msg) continue;
       if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
         msg.failed = true;
+      }
+      if (ev.type === "tool_use" && msg.kind === "question" && questionAnswerById.has(ev.id)) {
+        msg.text = questionAnswerById.get(ev.id);
       }
       if (isBoundaryMessage(msg)) {
         boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });

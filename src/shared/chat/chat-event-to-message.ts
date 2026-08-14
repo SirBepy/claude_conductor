@@ -8,6 +8,7 @@ import {
   classifyMetaTurn,
   noiseAssistantLabel,
 } from "./chat-classifiers";
+import { isAskQuestionTool } from "./tool-meta";
 export type { RenderedMessage } from "./chat-classifiers";
 
 // Matches <file:PATH> or <file:PATH::DISPLAYNAME> tokens in user message text.
@@ -103,6 +104,13 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
         const text = typeof (ev.input as { text?: unknown })?.text === "string"
           ? (ev.input as { text: string }).text : "";
         return { kind: "message", text, id: ev.id, ts, parentToolUseId: null };
+      }
+      // Mirrors chat-event-handler.ts's AUQ special-case (builtin or MCP ask
+      // channel, see isAskQuestionTool) so a question renders the same card on
+      // the older-page (scrollback) path - its answer, if any, is folded in by
+      // chat-pagination.ts's prependEvents (mirrors the tool_result absorb).
+      if (isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
+        return { kind: "question", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: null };
       }
       return { kind: "tool_use", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: ev.parent_tool_use_id ?? null };
     case "tool_result":

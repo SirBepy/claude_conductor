@@ -22,7 +22,7 @@ import {
 } from "./chat-transforms";
 import { isRawViewEnabled } from "./message-filter-pref";
 import { parseFileEdit } from "./file-edits";
-import { canonicalTool } from "./tool-meta";
+import { canonicalTool, isAskQuestionTool } from "./tool-meta";
 import {
   describeActivity,
   scrollToBottom,
@@ -345,8 +345,9 @@ function handleToolUseEvent(
 ): EventOutcome {
   // AUQ becomes a visual turn-splitter (question card) instead of a chip.
   // Only top-level AUQ calls get the card treatment; nested subagent calls
-  // fall through to the normal chip path.
-  if (ev.tool_name === "AskUserQuestion" && !ev.parent_tool_use_id) {
+  // fall through to the normal chip path. Recognises both the builtin and
+  // the app's real MCP ask channel (see isAskQuestionTool).
+  if (isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
     r.auqPendingResult = true;
     // Save the streaming slot's current text before enqueueTurnClose zeros
     // it. The suppression branch uses this to tell apart the protocol
@@ -361,7 +362,7 @@ function handleToolUseEvent(
     enqueueTurnClose(r);
     r.messages.push({
       kind: "question",
-      tool: "AskUserQuestion",
+      tool: ev.tool_name,
       input: ev.input,
       id: ev.id,
       ts,
@@ -548,8 +549,12 @@ function handleToolResultEvent(
   // Only clear the label once no tool from this turn is still outstanding -
   // otherwise a parallel call's result would blank the bar while a sibling
   // tool is still running (see chat-renderer.ts's outstandingActivityToolIds).
+  // keepChip: true clears only the thinking-bar text, not the chip-pulse
+  // tracker - the just-finished tool's chip keeps pulsing until the NEXT
+  // tool_use replaces it or the turn closes (clearRunningHighlight), same
+  // invariant as before this label-clear existed.
   if (r.outstandingActivityToolIds.delete(ev.tool_use_id) && r.outstandingActivityToolIds.size === 0) {
-    r.setActivity(null);
+    r.setActivity(null, { keepChip: true });
   }
   // The tally counts didn't change, but a result can complete a custom
   // view (e.g. an AskUserQuestion answer): nudge the statusline so an open

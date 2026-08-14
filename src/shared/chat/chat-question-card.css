@@ -23,6 +23,7 @@
 
 .question-card-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
@@ -32,6 +33,44 @@
   color: var(--color-text);
   user-select: none;
   border-bottom: 1px solid transparent;
+}
+/* Collapsed-answered/skipped/timed-out row: the answer chips or status pill
+   sit on their own line under the label so a glance while scrolling shows
+   whether it was answered, without expanding the card (Task 2). */
+.question-card-summary-resolution {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-left: 20px;
+  cursor: default;
+}
+.question-card-answer-chip {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-primary);
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.question-card-status-pill {
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-surface-3, rgba(255, 255, 255, 0.06));
+}
+/* Diagnostic marker for the Rust-side hard-block hang-safety fallback -
+   subtle, not an error state. */
+.question-card-degraded-badge {
+  flex-shrink: 0;
+  opacity: 0.45;
+  font-size: 0.8rem;
 }
 .question-card-collapsible[open] > .question-card-summary {
   border-bottom-color: color-mix(in srgb, var(--color-border) 50%, transparent);

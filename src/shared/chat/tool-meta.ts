@@ -3,6 +3,17 @@ import { asObj, strField } from "../obj-utils";
 
 export const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
 
+// The app's real ask channel is the MCP tool (see CLAUDE.md "One ask channel");
+// the builtin name is kept recognized too since history/tests may still carry
+// it. One predicate so live/scrollback/pagination never drift on which wire
+// name means "this is a question".
+export const BUILTIN_ASK_QUESTION_TOOL = "AskUserQuestion";
+export const MCP_ASK_QUESTION_TOOL = "mcp__cc_conductor__ask_user_question";
+
+export function isAskQuestionTool(tool: string): boolean {
+  return tool === BUILTIN_ASK_QUESTION_TOOL || tool === MCP_ASK_QUESTION_TOOL;
+}
+
 /** Lowercased file extension (including the dot), or "" if none. */
 function extOf(path: string): string {
   const base = basename(path).toLowerCase();
