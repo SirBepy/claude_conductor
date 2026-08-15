@@ -65,7 +65,9 @@ if (-not $apk) {
 }
 Write-Host "Built: $($apk.FullName)"
 
-$deviceLines = adb devices -l | Select-Object -Skip 1 | Where-Object { $_.Trim() -ne "" }
+# @() is load-bearing: with exactly one device the pipeline yields a bare string,
+# and $deviceLines[0] then indexes a CHARACTER ("e" of "emulator-5554"), not a line.
+$deviceLines = @(adb devices -l | Select-Object -Skip 1 | Where-Object { $_.Trim() -ne "" })
 if ($deviceLines.Count -eq 0) {
     throw "No adb device attached. Connect exactly one device and re-run."
 }
