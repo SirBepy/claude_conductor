@@ -83,6 +83,9 @@ const SAFE_METHODS: &[&str] = &[
     "ensure_session_character",
     "list_projects",
     "project_last_activity_at",
+    // Read-only account-pin resolution, gated by reject_unknown(cwd) in the
+    // handler (registry.rs) since cwd is client-supplied.
+    "resolve_project_account",
     "get_project_tech",
     "get_project_icon",
     // Read-only usage/token history for the remote homescreen + statistics.

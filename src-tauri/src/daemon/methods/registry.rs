@@ -2,6 +2,7 @@
 //! set-model, register-historical, manual takeover, and the list-instances
 //! snapshot fetch.
 
+use super::pr_review::reject_unknown;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::types::EndReason;
@@ -603,6 +604,26 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!(secs))
         }
     });
+    {
+        let state = state.clone();
+        // Mirrors `resolve_project_account` (params: cwd) -> Option<String>.
+        // `cwd` is client-supplied, so reject_unknown must run before any resolution.
+        router.register("resolve_project_account", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                let projects = state.settings.snapshot().projects;
+                Ok(json!(crate::settings::identity::resolve_effective_preferred_account_id(
+                    &projects,
+                    std::path::Path::new(&p.cwd),
+                )))
+            }
+        });
+    }
     // Mirrors `get_project_tech` (params: root) -> Option<String>. PURE
     // file-existence checks for stack marker files.
     router.register("get_project_tech", move |params, _ctx| {

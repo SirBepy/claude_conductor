@@ -351,6 +351,10 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("project_last_activity_at", {
           cwd: args.cwd,
         });
+      case "resolve_project_account":
+        return this.rpc<T>("resolve_project_account", {
+          cwd: args.cwd,
+        });
       case "get_project_tech":
         return this.rpc<T>("get_project_tech", {
           root: args.root,
