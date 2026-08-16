@@ -62,7 +62,7 @@ function regainVisibility() {
 describe("Composer draft sync - debounce coalescing", () => {
   it("coalesces rapid keystrokes into a single set_composer_draft call", async () => {
     const { textarea } = await mountComposer();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
 
     typeInto(textarea, "h");
     typeInto(textarea, "he");
@@ -79,7 +79,7 @@ describe("Composer draft sync - debounce coalescing", () => {
 describe("Composer draft sync - flush on blur", () => {
   it("fires the pending write immediately on blur, bypassing the 500ms wait", async () => {
     const { textarea } = await mountComposer();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
 
     typeInto(textarea, "typed then blurred");
     expect(draftPushCalls().length).toBe(0);
