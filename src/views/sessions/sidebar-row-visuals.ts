@@ -19,22 +19,38 @@ export function modelBatteryHtml(model: string): string {
   return `<span class="session-model-battery" data-tip="${escapeHtml(modelLabel(model))}"><i class="ph-bold ${RANK_ICON[rank]}"></i></span>`;
 }
 
+/** Shared shape for scheduled/held markers: an icon + optional count span,
+ *  wrapped in a tooltip-bearing span. `alwaysShowCount` is the one
+ *  intentional behavioral fork - scheduled hides the count at 1, held
+ *  always shows it - so it stays an explicit option, never a branch here. */
+function markerHtml(
+  count: number | undefined,
+  opts: { icon: string; cssClass: string; countClass: string; tipAttr: "title" | "data-tip"; tooltip: string; alwaysShowCount: boolean },
+): string {
+  if (!count) return "";
+  const title = escapeHtml(opts.tooltip);
+  const showCount = opts.alwaysShowCount || count > 1;
+  const countHtml = showCount ? `<span class="${opts.countClass}">${count}</span>` : "";
+  return `<span class="${opts.cssClass}" ${opts.tipAttr}="${title}"><i class="ph ${opts.icon}"></i>${countHtml}</span>`;
+}
+
 /** Scheduled marker for the portrait row: a corner badge on the character
  *  rather than a chip in the text line, so the battery stays the only
  *  right-hand element and sits at a fixed x on every row. */
 export function scheduledCornerHtml(count: number | undefined): string {
-  if (!count) return "";
-  const title = escapeHtml(scheduledTooltip(count));
-  const countHtml = count > 1 ? `<span class="session-sched-count">${count}</span>` : "";
-  return `<span class="session-sched-corner" data-tip="${title}"><i class="ph ph-clock-countdown"></i>${countHtml}</span>`;
+  return markerHtml(count, {
+    icon: "ph-clock-countdown", cssClass: "session-sched-corner", countClass: "session-sched-count",
+    tipAttr: "data-tip", tooltip: scheduledTooltip(count ?? 0), alwaysShowCount: false,
+  });
 }
 
 /** Held-message marker, portrait avatar's corner opposite the scheduled one
  *  (so the two never overlap); count always shows, unlike scheduledCornerHtml. */
 export function heldCornerHtml(count: number | undefined): string {
-  if (!count) return "";
-  const title = escapeHtml(heldTooltip(count));
-  return `<span class="session-held-corner" data-tip="${title}"><i class="ph ph-paper-plane-tilt"></i><span class="session-held-count">${count}</span></span>`;
+  return markerHtml(count, {
+    icon: "ph-paper-plane-tilt", cssClass: "session-held-corner", countClass: "session-held-count",
+    tipAttr: "data-tip", tooltip: heldTooltip(count ?? 0), alwaysShowCount: true,
+  });
 }
 
 /** Inline "X% of 5h" chip shown in a row's subtitle while sorting by drain.
@@ -63,18 +79,19 @@ export function projBadgeHtml(cwd: string | null, cls: string): string {
  *  unchanged while an item is "firing" (no distinct in-flight look for v1 -
  *  counts already include firing, same as scheduled-chip's filter). */
 export function scheduledBadgeHtml(count: number | undefined): string {
-  if (!count) return "";
-  const title = escapeHtml(scheduledTooltip(count));
-  const countHtml = count > 1 ? `<span class="session-scheduled-count">${count}</span>` : "";
-  return `<span class="session-scheduled-badge" title="${title}"><i class="ph ph-clock-countdown"></i>${countHtml}</span>`;
+  return markerHtml(count, {
+    icon: "ph-clock-countdown", cssClass: "session-scheduled-badge", countClass: "session-scheduled-count",
+    tipAttr: "title", tooltip: scheduledTooltip(count ?? 0), alwaysShowCount: false,
+  });
 }
 
 /** Held-message marker, prefixed before the title like scheduledBadgeHtml
  *  (never clipped by its ellipsis); see heldCornerHtml for the count rule. */
 export function heldBadgeHtml(count: number | undefined): string {
-  if (!count) return "";
-  const title = escapeHtml(heldTooltip(count));
-  return `<span class="session-held-badge" title="${title}"><i class="ph ph-paper-plane-tilt"></i><span class="session-held-count">${count}</span></span>`;
+  return markerHtml(count, {
+    icon: "ph-paper-plane-tilt", cssClass: "session-held-badge", countClass: "session-held-count",
+    tipAttr: "title", tooltip: heldTooltip(count ?? 0), alwaysShowCount: true,
+  });
 }
 
 /** Frozen-chat marker (styled like `.autopilot-badge`) - "Frozen" for a
