@@ -11,7 +11,7 @@ Tauri 2.x companion app for Claude Code. Combines:
 - **Manual session takeover** - reach into a Claude process running in your terminal and resume it inside this app.
 - **Voice dictation** in the composer, transcribed locally by a Python `faster-whisper` sidecar. Not bundled into the installer today - it only works if this repo's `stt-sidecar/` folder (with its `.venv` set up per `stt-sidecar/requirements.txt`) is reachable from the running app, which in practice means building/running from a source checkout. An installer-only install with no repo nearby has no working dictation.
 
-Windows, macOS, and Linux (x86_64) supported.
+Windows is the currently released platform. macOS and Linux builds are paused (see below); build from source to run there.
 
 ## Install
 
@@ -22,6 +22,10 @@ All assets follow `Claude-Conductor_<version>_<os>_<arch>.<ext>`. Pick the row m
 ### Windows
 
 Download `Claude-Conductor_<version>_windows_x64.exe` and run it. The NSIS installer handles autostart and desktop shortcuts.
+
+### Paused (build from source)
+
+macOS and Linux CI builds are paused as of 2026-08-12. The instructions below still describe how each platform installs and runs; until builds resume, use them as a guide for a from-source build rather than downloading a release asset.
 
 ### macOS
 
@@ -57,7 +61,7 @@ chmod +x Claude-Conductor_<version>_linux_x64.AppImage
 
 The app needs a Chromium-based browser (Google Chrome, Chromium, or Brave) installed for the one-time login flow.
 
-Note: channel automation (running Claude Code remote-control instances from the dashboard) is Windows + macOS only on v1.
+Note: channel automation (running Claude Code remote-control instances from the dashboard) is Windows + macOS only on v1; macOS is currently build-from-source only, see the "Paused" note above.
 
 ## Dev
 
