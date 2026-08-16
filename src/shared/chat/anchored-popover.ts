@@ -27,6 +27,52 @@ export interface AnchoredPopoverHandle {
   close: () => void;
 }
 
+export interface ActionPopoverOptions {
+  /** Element the popover is positioned relative to. */
+  anchor: HTMLElement;
+  /** Class name(s) applied to the popover's root div. */
+  className: string;
+  /** innerHTML for the popover body. */
+  bodyHtml: string;
+  /** Selector matching the buttons inside bodyHtml that trigger onPick. */
+  buttonSelector: string;
+  onPick: (btn: HTMLButtonElement) => void;
+  /** Extra teardown run after the popover element is removed (outside
+   *  click, Escape, or an explicit `close()`) - not called on a pick. */
+  onClose?: () => void;
+}
+
+export interface ActionPopoverHandle {
+  close: () => void;
+}
+
+/** Shared create/append/reposition/dismiss scaffolding for a body-appended
+ *  popover with a flat list of clickable rows (ai_todo 644). Callers own the
+ *  result protocol (a per-item callback vs a resolved Promise); this only
+ *  owns the DOM plumbing. */
+export function openActionPopover(opts: ActionPopoverOptions): ActionPopoverHandle {
+  const pop = document.createElement("div");
+  pop.className = opts.className;
+  pop.innerHTML = opts.bodyHtml;
+  document.body.appendChild(pop);
+
+  const popover = openAnchoredPopover({
+    anchor: opts.anchor,
+    el: pop,
+    onClose: () => {
+      pop.remove();
+      opts.onClose?.();
+    },
+  });
+
+  pop.querySelectorAll<HTMLButtonElement>(opts.buttonSelector).forEach((btn) => {
+    btn.addEventListener("click", () => opts.onPick(btn));
+  });
+
+  popover.reposition();
+  return { close: popover.close };
+}
+
 export function openAnchoredPopover(opts: AnchoredPopoverOptions): AnchoredPopoverHandle {
   const { anchor, el } = opts;
   let closed = false;

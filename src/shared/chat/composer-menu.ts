@@ -1,7 +1,7 @@
 // Small action menu popped from the composer's split-send chevron. Body-appended,
 // position:fixed, anchored off the chevron - mirrors the openSchedulePicker
 // popover idiom and reuses its popover/row styles so there's no new chrome.
-import { openAnchoredPopover } from "./anchored-popover";
+import { openActionPopover } from "./anchored-popover";
 import "./schedule-picker.css";
 
 export interface ComposerMenuItem {
@@ -14,9 +14,7 @@ export interface ComposerMenuItem {
 export function openComposerMenu(anchor: HTMLElement, items: ComposerMenuItem[]): void {
   if (items.length === 0) return;
 
-  const pop = document.createElement("div");
-  pop.className = "schedule-picker-popover composer-menu-popover";
-  pop.innerHTML = `
+  const bodyHtml = `
     <div class="schedule-picker-rows">
       ${items
         .map(
@@ -28,21 +26,16 @@ export function openComposerMenu(anchor: HTMLElement, items: ComposerMenuItem[])
         .join("")}
     </div>
   `;
-  document.body.appendChild(pop);
 
-  const popover = openAnchoredPopover({
+  const popover = openActionPopover({
     anchor,
-    el: pop,
-    onClose: () => pop.remove(),
-  });
-
-  pop.querySelectorAll<HTMLButtonElement>("[data-idx]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    className: "schedule-picker-popover composer-menu-popover",
+    bodyHtml,
+    buttonSelector: "[data-idx]",
+    onPick: (btn) => {
       const item = items[Number(btn.dataset.idx)];
       popover.close();
       item?.run();
-    });
+    },
   });
-
-  popover.reposition();
 }

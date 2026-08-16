@@ -2,7 +2,7 @@
 // (Instance.frozen - the underlying process was torn down and won't
 // respawn on its own). Mirrors the openComposerMenu/openSchedulePicker
 // popover idiom and reuses its chrome so there's no new visual language.
-import { openAnchoredPopover } from "./anchored-popover";
+import { openActionPopover } from "./anchored-popover";
 import "./schedule-picker.css";
 
 export type FrozenChoice = "hold" | "now";
@@ -12,9 +12,7 @@ export type FrozenChoice = "hold" | "now";
 export function openFrozenChoice(anchor: HTMLElement): Promise<FrozenChoice | null> {
   return new Promise((resolve) => {
     let resolved = false;
-    const pop = document.createElement("div");
-    pop.className = "schedule-picker-popover composer-frozen-choice-popover";
-    pop.innerHTML = `
+    const bodyHtml = `
       <div class="schedule-picker-title">This chat is frozen</div>
       <div class="schedule-picker-rows">
         <button type="button" class="schedule-picker-row" data-choice="hold">
@@ -25,25 +23,20 @@ export function openFrozenChoice(anchor: HTMLElement): Promise<FrozenChoice | nu
         </button>
       </div>
     `;
-    document.body.appendChild(pop);
 
-    const popover = openAnchoredPopover({
+    const popover = openActionPopover({
       anchor,
-      el: pop,
-      onClose: () => {
-        pop.remove();
-        if (!resolved) resolve(null);
-      },
-    });
-
-    pop.querySelectorAll<HTMLButtonElement>("[data-choice]").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      className: "schedule-picker-popover composer-frozen-choice-popover",
+      bodyHtml,
+      buttonSelector: "[data-choice]",
+      onPick: (btn) => {
         resolved = true;
         popover.close();
         resolve(btn.dataset.choice as FrozenChoice);
-      });
+      },
+      onClose: () => {
+        if (!resolved) resolve(null);
+      },
     });
-
-    popover.reposition();
   });
 }
