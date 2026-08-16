@@ -209,6 +209,20 @@ describe("sessionSegment", () => {
     const i = makeInstance({ session_id: "fr", frozen: true, auto_frozen: true });
     expect(seg(i, { rateLimited: new Set(["fr"]) })).toBe(4);
   });
+  // 2026-08-16 correction: Remote is driven by `kind` (a process this app
+  // didn't spawn - terminal `claude` or a channel bridge), not `is_remote`
+  // (which only means "reached over remote transport", e.g. phone/tailnet).
+  it("kind 'external' (terminal-started) is Remote, wins over other state", () => {
+    const i = makeInstance({ session_id: "ext", kind: "external", busy: true });
+    expect(seg(i)).toBe(7);
+  });
+  it("kind 'automated' (channel bridge) is Remote", () => {
+    expect(seg(makeInstance({ kind: "automated" }))).toBe(7);
+  });
+  it("is_remote alone (phone/tailnet transport) does NOT trigger Remote", () => {
+    const i = makeInstance({ session_id: "phone", is_remote: true, busy: false });
+    expect(seg(i)).toBe(1); // Done, same as any other idle interactive session
+  });
 });
 
 describe("statusDotClass", () => {

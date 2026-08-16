@@ -186,8 +186,10 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
 /** Maps a session to its display segment index.
  *  0=Input Needed, 1=Done, 2=In Progress, 3=Closing, 4=Waiting for Reset,
  *  5=Waiting (external process), 6=Scheduled (pending scheduled msg, not
- *  Input Needed/Done), 7=Remote (is_remote, wins over every other state -
- *  the row's own status dot still conveys the real state).
+ *  Input Needed/Done), 7=Remote (kind "external"/"automated" - a `claude`
+ *  process this app didn't spawn, terminal or channel bridge - wins over
+ *  every other state; the row's own dot still shows the real state. NOT
+ *  `is_remote`, which only means "reached over remote transport").
  *  Closing and rate-limited both still win over Scheduled. `frozen` is a row
  *  chip now (`frozenBadgeHtml`), not a segment - see sidebar-row-visuals.ts. */
 export function sessionSegment(
@@ -199,7 +201,7 @@ export function sessionSegment(
   rateLimited: ReadonlySet<string> = new Set(),
   scheduled: ReadonlySet<string> = new Set(),
 ): number {
-  if (s.is_remote) return 7;
+  if (s.kind === "external" || s.kind === "automated") return 7;
   if (closing.has(s.session_id)) return 3;
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);
