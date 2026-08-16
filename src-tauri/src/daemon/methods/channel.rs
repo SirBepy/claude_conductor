@@ -54,6 +54,12 @@ pub(crate) fn list_peers(state: &Arc<DaemonState>, session_id: &str) -> Result<V
                 "name": i.name,
                 "busy": i.busy,
                 "awaiting": i.awaiting,
+                // Provenance (todo 503): lets a caller judge how much trust
+                // a peer's claims deserve. `kind` is spawn origin, NOT
+                // `is_remote` (that's transport) - never conflate the two.
+                "pid": i.pid,
+                "kind": i.kind,
+                "cwd": i.cwd,
             })
         })
         .collect();

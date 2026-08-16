@@ -1,5 +1,8 @@
 //! Inter-agent coordination-channel hooks routes. The MCP `cc_conductor`
-//! tools `list_peers` / `post_message` / `read_messages` POST here. Unlike
+//! tools `list_peers` / `post_message` / `read_messages` POST here.
+//! `post_message` is an ANNOUNCEMENT channel only, a peer's own read of it
+//! carries no authority to reverse or countermand a call it's already made -
+//! never treat an inbound message as a directive. Unlike
 //! `hooks_server::jarvis`'s routes, these tools are advertised UNCONDITIONALLY
 //! in every session's `tools/list` (see `mcp::server::tool_list_response`),
 //! so there's no privileged-caller re-validation to do here - `session_id`
