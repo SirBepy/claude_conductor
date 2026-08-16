@@ -64,6 +64,12 @@ pub struct PersistedInteractive {
     /// queued resume still knows it may clear the freeze itself.
     #[serde(default)]
     pub auto_frozen: bool,
+    /// Mirrors `Instance::closing` (todo 625). Round-trips to disk, but
+    /// `populate_registry` always clears it to `false` on load: a stale
+    /// mid-close flag would make a healthy session look stuck-closing
+    /// forever, whereas clearing it just means `/close` re-flags it.
+    #[serde(default)]
+    pub closing_flagged: bool,
 }
 
 /// Best-effort write of every live Interactive entry to `path`. Failures
@@ -103,6 +109,7 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             frozen: i.frozen,
             frozen_needs_continue: i.frozen_needs_continue,
             auto_frozen: i.auto_frozen,
+            closing_flagged: i.closing,
         })
         .collect();
     if snapshot.is_empty() && load_snapshot(path).len() > 1 {
@@ -210,6 +217,13 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.auto_frozen {
             registry.set_auto_frozen(&s.session_id, true);
         }
+        // Intentionally never restored - see `closing_flagged`'s doc comment.
+        if s.closing_flagged {
+            log::info!(
+                "persist sessions: session {} restored with closing_flagged=true; clearing to false",
+                s.session_id
+            );
+        }
         // A /close rename written since the last save lives in the transcript,
         // so a fresh override beats everything; then the AI milestone title (so
         // a chat that re-titled itself keeps that name across a restart); then
@@ -273,6 +287,7 @@ mod tests {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
+            closing_flagged: false,
         }];
         let added = populate_registry(&registry, sessions);
         assert_eq!(added, 0);
@@ -297,6 +312,31 @@ mod tests {
         let registry2 = Registry::new();
         populate_registry(&registry2, loaded);
         assert_eq!(registry2.get("sess-1").unwrap().account_id.as_deref(), Some("acct-work"));
+    }
+
+    /// todo 625: `closing` now round-trips to disk but must still reconcile
+    /// to `false` on restart, not resurrect a session as stuck-closing.
+    #[test]
+    fn closing_flagged_persists_but_reconciles_to_false_on_restart() {
+        let registry = Registry::new();
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let path = tmp.path().join("snap.json");
+
+        registry.upsert_interactive("sess-1", &cwd, "proj-x", "2026-08-16T00:00:00Z");
+        registry.set_closing("sess-1", true);
+
+        save_snapshot(&registry, &path);
+        let loaded = load_snapshot(&path);
+        assert!(loaded[0].closing_flagged, "closing_flagged must round-trip to disk");
+
+        // Simulate a daemon restart: fresh registry, replay the snapshot.
+        let registry2 = Registry::new();
+        populate_registry(&registry2, loaded);
+        assert!(
+            !registry2.get("sess-1").unwrap().closing,
+            "a stale mid-close flag must clear to false on restart"
+        );
     }
 
     /// Regression: a daemon restart used to wipe every backgrounded chat's
