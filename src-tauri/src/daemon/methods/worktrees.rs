@@ -6,19 +6,11 @@
 //! Every path param is gated by `is_known_cwd`: these are in SAFE_METHODS, so
 //! without it a paired remote client could `remove_worktree` any repo on disk.
 
-use super::pr_review::is_known_cwd;
+use super::pr_review::reject_unknown;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde_json::json;
 use std::sync::Arc;
-
-fn reject_unknown(state: &DaemonState, path: &str) -> Result<(), RpcError> {
-    if is_known_cwd(state, path) {
-        Ok(())
-    } else {
-        Err(RpcError::invalid_params("unknown cwd".to_string()))
-    }
-}
 
 pub fn register_worktrees(router: &mut Router, state: Arc<DaemonState>) {
     {

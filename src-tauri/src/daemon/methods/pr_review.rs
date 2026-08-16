@@ -17,6 +17,16 @@ pub(super) fn is_known_cwd(state: &DaemonState, cwd: &str) -> bool {
         || state.settings.snapshot().projects.iter().any(|p| project_key(&p.path) == key)
 }
 
+// Canonical wrapper: was independently re-copied into `statusbar.rs` and
+// `worktrees.rs` (ai_todo 636). Call BEFORE any filesystem access on `cwd`.
+pub(super) fn reject_unknown(state: &DaemonState, cwd: &str) -> Result<(), RpcError> {
+    if is_known_cwd(state, cwd) {
+        Ok(())
+    } else {
+        Err(RpcError::invalid_params("unknown cwd".to_string()))
+    }
+}
+
 pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
