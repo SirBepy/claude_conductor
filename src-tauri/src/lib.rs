@@ -177,7 +177,7 @@ pub fn run() {
             // both would just be redundant tracked-window churn. Exclude the
             // whole `session-` prefix EXCEPT `session-chats`, the persistent
             // Chats window, which relies on window-state to restore its size
-            // before first paint (see `ipc::window::build_chats_window`).
+            // before first paint (see `ipc::window::chats::build_chats_window`).
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::SIZE
@@ -204,18 +204,18 @@ pub fn run() {
             ipc::get_settings,
             ipc::save_settings,
             ipc::auth_status,
-            ipc::open_dashboard,
-            ipc::open_dashboard_project,
-            ipc::open_dashboard_settings_accounts,
+            ipc::window::open_dashboard,
+            ipc::window::open_dashboard_project,
+            ipc::window::open_dashboard_settings_accounts,
             ipc::save_overlay_position,
-            ipc::open_dashboard_account,
-            ipc::open_chats_window,
-            ipc::open_schedule_window,
-            ipc::open_jarvis_window,
-            ipc::open_chats_for_session,
-            ipc::take_pending_chat_open,
-            ipc::open_chats_new_chat,
-            ipc::take_pending_new_chat,
+            ipc::window::open_dashboard_account,
+            ipc::window::chats::open_chats_window,
+            ipc::window::schedule::open_schedule_window,
+            ipc::window::jarvis::open_jarvis_window,
+            ipc::window::chats::open_chats_for_session,
+            ipc::window::chats::take_pending_chat_open,
+            ipc::window::chats::open_chats_new_chat,
+            ipc::window::chats::take_pending_new_chat,
             ipc::get_session_config,
             ipc::list_auto_accept,
             ipc::get_chat_state,
@@ -403,8 +403,8 @@ pub fn run() {
             ipc::list_previews,
             ipc::get_preview,
             ipc::render_preview_doc,
-            ipc::open_preview_window,
-            ipc::close_preview_window,
+            ipc::window::preview::open_preview_window,
+            ipc::window::preview::close_preview_window,
             ipc::get_session_drafts,
             ipc::set_composer_draft,
             ipc::clear_composer_draft,
