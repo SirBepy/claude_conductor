@@ -15,6 +15,8 @@ export interface HeldRenderHost {
   /** Bypass the edit's debounced daemon push (row blur). */
   flushEditPush(id: number): void;
   sendNow(): Promise<void>;
+  /** A held row just lost focus - retry a deferred completion auto-flush. */
+  onRowBlur(): void;
 }
 
 export class HeldMessagesRender {
@@ -31,6 +33,14 @@ export class HeldMessagesRender {
     this.closeDropdown();
     this.expanded = false;
     this.renderedIds = null;
+  }
+
+  /** True while the caret is in one of the dropdown's editable rows - blocks
+   *  the completion auto-flush the same way composer isComposing() does. */
+  isEditingRow(): boolean {
+    const a = this.host.getAttached();
+    const el = document.activeElement;
+    return !!a?.anchor && !!el && a.anchor.contains(el) && el.classList.contains("held-row");
   }
 
   renderChip(): void {
@@ -97,6 +107,7 @@ export class HeldMessagesRender {
       row.addEventListener("blur", () => {
         if (!(row.textContent ?? "").trim()) this.removeItem(item.id);
         else this.host.flushEditPush(item.id);
+        this.host.onRowBlur();
       });
       rows.appendChild(row);
     }
