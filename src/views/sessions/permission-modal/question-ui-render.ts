@@ -222,7 +222,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       const degradedBadge = opts.degradedBuiltin
         ? `<i class="ph-fill ph-flask-round question-card-degraded-badge" title="Answered via the disabled legacy AskUserQuestion path"></i>`
         : "";
-      const headerHtml = `${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${degradedBadge}<button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      // Previously-dead QuestionUIOpts fields (ai_todo 646); rightChipHtml is
+      // only set by permission-card.ts's flow, distinguishing it from MCP questions.
+      const titleIcon = opts.titleIcon || "ph-chat-circle-dots";
+      const titleText = opts.titleText || "Claude is asking";
+      const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i>${escapeHtml(titleText)}</span>`;
+      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${degradedBadge}<button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, auqAttachments)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
       const footerHtml = `
