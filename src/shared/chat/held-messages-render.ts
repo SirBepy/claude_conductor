@@ -20,6 +20,9 @@ export interface HeldRenderHost {
 export class HeldMessagesRender {
   private expanded = false;
   private closeDropdownOutside: ((e: MouseEvent) => void) | null = null;
+  // Ids the dropdown currently reflects. Lets renderDropdown() skip a full
+  // rebuild when nothing about the held set changed (see there for why).
+  private renderedIds: number[] | null = null;
 
   constructor(private host: HeldRenderHost) {}
 
@@ -27,6 +30,7 @@ export class HeldMessagesRender {
   reset(): void {
     this.closeDropdown();
     this.expanded = false;
+    this.renderedIds = null;
   }
 
   renderChip(): void {
@@ -62,8 +66,16 @@ export class HeldMessagesRender {
   private renderDropdown(): void {
     const a = this.host.getAttached();
     if (!a || !a.anchor) return;
-    this.closeDropdown();
     const items = this.host.itemsForActive();
+    const ids = items.map((i) => i.id);
+    // renderChip() re-fires on every mid-turn activity tick, not just held-set
+    // changes - skip the rebuild so it can't blur a row mid-edit (editItem()
+    // already keeps text in sync live).
+    if (this.renderedIds && a.anchor.querySelector(".held-dropdown") &&
+        ids.length === this.renderedIds.length && ids.every((id, i) => id === this.renderedIds![i])) {
+      return;
+    }
+    this.closeDropdown();
     const dd = document.createElement("div");
     dd.className = "held-dropdown";
     const title = document.createElement("div");
@@ -90,6 +102,7 @@ export class HeldMessagesRender {
     }
     dd.appendChild(rows);
     a.anchor.appendChild(dd);
+    this.renderedIds = ids;
     // Outside-click closes (mirrors the statusbar popover pattern). Deferred
     // bind so the opening click isn't immediately caught.
     this.closeDropdownOutside = (e: MouseEvent) => {
