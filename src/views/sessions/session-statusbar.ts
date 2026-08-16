@@ -560,6 +560,9 @@ export class SessionStatusbar {
 
   private render(): void {
     this.refreshImages();
+    // .sb-row is overflow-x: auto; innerHTML rebuild below destroys the nodes
+    // and resets scrollLeft, so snapshot by row index and restore after.
+    const scrollLefts = Array.from(this.container.querySelectorAll<HTMLElement>(".sb-row"), (r) => r.scrollLeft);
     const rowsHtml = this.rows.map((row) => {
       const chips = row.map((t) => this.renderChip(t)).filter(Boolean).join("");
       return chips ? `<div class="sb-row">${chips}</div>` : "";
@@ -568,6 +571,10 @@ export class SessionStatusbar {
     this.container.innerHTML = `
       <div class="sb-rows">${rowsHtml || '<span class="sb-empty">No chips</span>'}</div>
     `;
+
+    this.container.querySelectorAll<HTMLElement>(".sb-row").forEach((row, i) => {
+      if (scrollLefts[i]) row.scrollLeft = scrollLefts[i];
+    });
 
     this.container.querySelector<HTMLElement>(".sb-folder-btn")?.addEventListener("click", () => {
       if (this.gitCwd) void invoke<void>("open_in_explorer", { path: this.gitCwd });

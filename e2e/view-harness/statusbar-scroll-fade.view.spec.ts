@@ -26,6 +26,7 @@ const BASE_INVOKE = {
   get_session_drain: null,
   list_pending_prompts: [],
   get_chat_config: null,
+  set_session_effort: null,
 };
 
 function instance(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -111,5 +112,34 @@ test.describe("view-harness / statusbar scroll fade", () => {
     }));
     expect(gradients.before).toBe("none");
     expect(gradients.after).toBe("none");
+  });
+
+  // render() rebuilds .sb-row via innerHTML, which resets scrollLeft to 0 -
+  // any live re-render (chip commit, meta update, popover) used to snap a
+  // scrolled row back to the start.
+  test("re-render preserves the row's horizontal scroll position", async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await mountSessionRow(page, LONG_ROW);
+
+    const row = page.locator("#session-pane .sb-row").first();
+    await expect(row).toHaveClass(/sb-row-scroll/);
+    const target = await row.evaluate((el) => {
+      el.scrollLeft = 40;
+      return el.scrollLeft;
+    });
+    expect(target).toBeGreaterThan(0);
+
+    // Drive a real re-render through the effort popover's commit path (statusbar
+    // owns this end-to-end, no chat renderer needed).
+    await page.locator("#session-pane .sb-effort-btn").click();
+    await page.locator(".sb-effort-slider").waitFor();
+    await page.locator(".sb-effort-slider").evaluate((el: HTMLInputElement) => {
+      el.value = "0";
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await expect(page.locator("#session-pane .sb-effort-btn")).toHaveText(/low/i);
+    await expect(row).toHaveClass(/sb-row-scroll/);
+    await expect.poll(() => row.evaluate((el) => el.scrollLeft)).toBe(target);
   });
 });
