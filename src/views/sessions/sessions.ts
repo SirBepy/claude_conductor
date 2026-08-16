@@ -127,10 +127,12 @@ async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLElement, myM
   refreshPaneEmptyState(pane);
   armSetupStallTimer(listEl, pane, myMount);
 
-  // Initial load - fetch sessions and daemon status in parallel
+  // Initial load - fetch sessions and daemon status in parallel. On remote,
+  // is_daemon_connected has no HttpTransport mapping (always throws) - the
+  // remote client IS the daemon connection, so getting here means it's up.
   const [, connected] = await Promise.all([
     refreshSessions(),
-    invoke<boolean>("is_daemon_connected").catch(() => null),
+    isRemote() ? Promise.resolve(true) : invoke<boolean>("is_daemon_connected").catch(() => null),
     loadSessionCharacters(),
   ]);
   if (state.mountId === myMount) {
