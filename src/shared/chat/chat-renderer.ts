@@ -320,9 +320,7 @@ export class ChatRenderer {
     this.animMutationObserver = new MutationObserver((records) => {
       for (const rec of records) {
         for (const node of rec.addedNodes) {
-          if (node instanceof HTMLElement && node.classList.contains("msg") && node.querySelector(".rainbow-keyword")) {
-            anim.observe(node);
-          }
+          if (node instanceof HTMLElement && node.classList.contains("msg")) anim.observe(node);
         }
         for (const node of rec.removedNodes) {
           if (node instanceof HTMLElement && node.classList.contains("msg")) anim.unobserve(node);
