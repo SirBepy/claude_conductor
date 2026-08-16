@@ -3,6 +3,7 @@
 // inline closure. Pure move, no behavior change.
 
 import { invoke } from "../../shared/ipc";
+import { RemoteUnavailableError } from "../../shared/http-transport";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { askConfirm } from "../../shared/confirm";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
@@ -78,7 +79,10 @@ export async function handleTakeoverClick(
     if (listEl) renderSidebar(listEl);
   } catch (err) {
     console.error("[sessions] takeover_manual failed", err);
-    alert(`Takeover failed: ${err}`);
+    // takeover_manual is desktop-only (kills an external process by pid on
+    // the host machine); the button itself lives in active-session.ts
+    // (out of this file's scope) so it isn't hidden on remote yet.
+    alert(err instanceof RemoteUnavailableError ? "Not available on this device." : `Takeover failed: ${err}`);
   } finally {
     state.takeoverInFlightIds.delete(originalId);
     takeoverBtn.disabled = false;

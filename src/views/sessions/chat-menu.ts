@@ -5,6 +5,8 @@
 // Returns a built DOM fragment; caller appends it into the parent container.
 
 import { invoke } from "../../shared/ipc";
+import { RemoteUnavailableError } from "../../shared/http-transport";
+import { isRemote } from "../../shared/transport";
 import {
   isAutoAccept,
   setAutoAccept,
@@ -150,11 +152,15 @@ export function buildChatMenuBlock(
     {
       icon: "folder-notch-open",
       label: "File Explorer",
-      run: cwd ? async () => {
+      // Desktop-only (opens the host machine's file manager) - meaningless
+      // from a phone, so disable rather than let it throw RemoteUnavailableError.
+      run: cwd && !isRemote() ? async () => {
         try { await invoke<void>("open_in_explorer", { path: cwd }); }
-        catch (err) { alert(`Failed to open file explorer: ${err}`); }
+        catch (err) {
+          alert(err instanceof RemoteUnavailableError ? "Not available on this device." : `Failed to open file explorer: ${err}`);
+        }
       } : undefined,
-      disabledReason: cwd ? undefined : "No project directory",
+      disabledReason: !cwd ? "No project directory" : (isRemote() ? "Not available on the phone" : undefined),
     },
     {
       icon: "squares-four",

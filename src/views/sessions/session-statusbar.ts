@@ -656,8 +656,12 @@ export class SessionStatusbar {
       const wasOpen = this.branchPopover.isOpen;
       this.closeChipPopovers();
       if (wasOpen || !this.gitCwd) return;
-      const branches = await invoke<BranchEntry[]>("get_recent_branches", { cwd: this.gitCwd });
-      this.branchPopover.open(anchor, branches);
+      try {
+        const branches = await invoke<BranchEntry[]>("get_recent_branches", { cwd: this.gitCwd });
+        this.branchPopover.open(anchor, branches);
+      } catch (err) {
+        console.error("[session-statusbar] get_recent_branches failed", err);
+      }
     });
 
     this.container.querySelector<HTMLElement>(".sb-commits-btn")?.addEventListener("click", async (e) => {
@@ -666,8 +670,12 @@ export class SessionStatusbar {
       const wasOpen = this.commitsPopover.isOpen;
       this.closeChipPopovers();
       if (wasOpen || !this.gitCwd) return;
-      const sync = await invoke<CommitSync>("get_commit_sync", { cwd: this.gitCwd });
-      this.commitsPopover.open(anchor, sync);
+      try {
+        const sync = await invoke<CommitSync>("get_commit_sync", { cwd: this.gitCwd });
+        this.commitsPopover.open(anchor, sync);
+      } catch (err) {
+        console.error("[session-statusbar] get_commit_sync failed", err);
+      }
     });
 
     // All popovers are body-appended and survive re-renders, but their anchor
