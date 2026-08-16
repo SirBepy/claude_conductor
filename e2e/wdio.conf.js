@@ -17,7 +17,19 @@ import { spawn, execSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const debugDir = path.resolve(repoRoot, "src-tauri", "target", "debug");
+// Cargo's target dir is not repo-local here: the global ~/.cargo/config.toml
+// points it at D:/cargo-target, so a hardcoded src-tauri/target/debug spawns
+// ENOENT. Ask cargo where it actually put things.
+const cargoTargetDir = (() => {
+  if (process.env.CARGO_TARGET_DIR) return process.env.CARGO_TARGET_DIR;
+  const meta = execSync("cargo metadata --no-deps --format-version 1", {
+    cwd: path.join(repoRoot, "src-tauri"),
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  return JSON.parse(meta).target_directory;
+})();
+const debugDir = path.resolve(cargoTargetDir, "debug");
 const application = path.join(debugDir, "claude-conductor.exe");
 const daemonBin = path.join(debugDir, "cc-conductor-daemon.exe");
 const tauriDriverBin = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver.exe");
