@@ -17,7 +17,10 @@ function Fail($msg) {
 }
 
 # --- Step 1: device check, prefer real device over emulator ---
-$deviceLines = & adb devices -l 2>$null | Select-Object -Skip 1 | Where-Object { $_ -match '\S' -and $_ -notmatch 'unauthorized' }
+# Cold adb prints the "daemon not running/started" banner to stdout, not stderr,
+# so start-server first to absorb it before -Skip 1 counts the header row.
+& adb start-server *> $null
+$deviceLines = & adb devices -l 2>$null | Select-Object -Skip 1 | Where-Object { $_ -match '\S' -and $_ -notmatch 'unauthorized' -and $_ -notmatch '^\*\s*daemon' }
 if (-not $deviceLines) {
     Fail "no adb device attached. Connect the real device (or start the emulator) and retry."
 }
