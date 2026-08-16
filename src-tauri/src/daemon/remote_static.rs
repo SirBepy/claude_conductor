@@ -13,9 +13,44 @@ use rust_embed::RustEmbed;
 /// The SPA HTML/JS/CSS are served UNAUTHENTICATED: they contain no secrets and
 /// the SPA JS authenticates every `/api` call with the bearer token the user
 /// pastes in once. `/api/*` routes stay token-gated by `auth_mw` as before.
+///
+/// Debug builds read `../dist` from disk instead (see `read_asset`), so this
+/// struct goes unused there - hence `#[allow(dead_code)]`.
+#[allow(dead_code)]
 #[derive(RustEmbed)]
 #[folder = "../dist"]
 struct Assets;
+
+/// Reads one SPA asset by relative path. Debug: disk read of `../dist`, so
+/// `vite build` alone updates it. Release: the compile-time embed, unreachable
+/// disk code since this cfg is resolved at compile time.
+#[cfg(debug_assertions)]
+async fn read_asset(asset_path: &str) -> Option<(Vec<u8>, String)> {
+    let dist_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("dist");
+    let candidate = dist_root.join(asset_path);
+    let root = tokio::fs::canonicalize(&dist_root).await.ok()?;
+    let resolved = tokio::fs::canonicalize(&candidate).await.ok()?;
+    // Reject anything canonicalizing outside dist_root (symlinks, traversal).
+    if !resolved.starts_with(&root) {
+        return None;
+    }
+    let bytes = tokio::fs::read(&resolved).await.ok()?;
+    let mime = mime_guess::from_path(&resolved)
+        .first_or_octet_stream()
+        .to_string();
+    Some((bytes, mime))
+}
+
+#[cfg(not(debug_assertions))]
+async fn read_asset(asset_path: &str) -> Option<(Vec<u8>, String)> {
+    let content = Assets::get(asset_path)?;
+    let mime = mime_guess::from_path(asset_path)
+        .first_or_octet_stream()
+        .to_string();
+    Some((content.data.into_owned(), mime))
+}
 
 /// SPA fallback: serves the embedded frontend bundle for any path that does not
 /// match a named API route. Handles two cases:
@@ -38,30 +73,21 @@ pub(super) async fn spa_fallback(req: axum::extract::Request) -> Response {
 
     // Serve the real asset if it exists, otherwise fall back to index.html for
     // SPA client-side routing.
-    let (asset_path, is_fallback) = if path.is_empty() {
-        ("index.html", true)
+    let found = if path.is_empty() {
+        None
     } else {
-        match Assets::get(path) {
-            Some(_) => (path, false),
-            None => ("index.html", true),
-        }
+        read_asset(path).await
     };
-    let _ = is_fallback; // used implicitly via asset_path selection
 
-    match Assets::get(asset_path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(asset_path)
-                .first_or_octet_stream()
-                .to_string();
-            (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, mime)],
-                content.data,
-            )
-                .into_response()
-        }
-        None => StatusCode::NOT_FOUND.into_response(),
-    }
+    let (bytes, mime) = match found {
+        Some(found) => found,
+        None => match read_asset("index.html").await {
+            Some(found) => found,
+            None => return StatusCode::NOT_FOUND.into_response(),
+        },
+    };
+
+    (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response()
 }
 
 #[cfg(test)]

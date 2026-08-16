@@ -5,12 +5,10 @@ fn main() {
     tauri_build::build();
 }
 
-/// The remote-access server embeds `../dist` at compile time via rust_embed.
-/// The `prebuild` npm step (`cargo test --test export_types`) compiles this
-/// crate BEFORE `vite build` creates `dist/`, so on a clean checkout the embed
-/// derive fails (`E0599: no associated function 'get' for Assets`). Guarantee
-/// the folder + a placeholder index.html exist so the derive always expands;
-/// the real `vite build` overwrites dist/ before the final binary is compiled.
+/// Release builds embed `../dist` via rust_embed; debug builds read it from
+/// disk at runtime instead (`remote_static.rs`), but both need the folder to
+/// exist before this crate compiles, since `prebuild` runs before `vite build`.
+/// Seed a placeholder here; the real `vite build` overwrites it either way.
 fn ensure_dist_dir() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
     let dist = std::path::Path::new(&manifest).join("..").join("dist");
