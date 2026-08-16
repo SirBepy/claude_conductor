@@ -15,13 +15,8 @@ import { blocksToText } from "./content-blocks";
 import { AUQ_ANSWER_SENTINEL } from "./chat-transforms";
 import { loadAllHeld, saveAllHeld } from "./held-messages-persistence";
 import { HeldMessagesRender } from "./held-messages-render";
-import { debounce, type Debounced } from "../debounce";
-import {
-  addHeldMessage, updateHeldMessage, removeHeldMessage, clearHeldMessages, getSessionDrafts,
-} from "./session-draft-sync";
+import { HeldDraftSync } from "./held-draft-sync";
 import "./held-messages.css";
-
-const EDIT_PUSH_DEBOUNCE_MS = 500;
 
 export interface HeldItem {
   id: number;
@@ -93,17 +88,11 @@ export class HeldMessages {
   private deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
   private render = new HeldMessagesRender(this);
-  // Per-item debounced `update_held_message` push, keyed by the item's
-  // CURRENT id (local until add_held_message resolves, then server-assigned).
-  private editPushDebounced = new Map<number, Debounced<[sessionId: string, id: number, blocks: ContentBlock[]]>>();
-  // Tracks an in-flight add_held_message round trip so a remove that races it
-  // chains onto the resolved server id instead of racing to delete an id the
-  // daemon has never heard of (would silently orphan the item server-side).
-  private pendingServerIds = new Map<number, Promise<number | null>>();
+  private sync = new HeldDraftSync();
 
   private _visibilityHandler = (): void => {
     if (document.visibilityState === "hidden") {
-      for (const d of this.editPushDebounced.values()) d.flush();
+      this.sync.flushAllEdits();
     } else if (document.visibilityState === "visible" && this.sid) {
       void this.reconcile(this.sid);
     }
@@ -142,13 +131,11 @@ export class HeldMessages {
    *  items can be added from any surface. Merges in anything still awaiting
    *  its own add_held_message round trip, so a stale snapshot can't drop a
    *  message the user staged while the reconcile was in flight. */
-  private async reconcile(sessionId: string): Promise<void> {
-    try {
-      const drafts = await getSessionDrafts(sessionId);
-      const serverItems = drafts.held.map((h) => ({ id: h.id, blocks: h.blocks }));
+  private reconcile(sessionId: string): Promise<void> {
+    return this.sync.reconcile(sessionId, (serverItems) => {
       const serverIds = new Set(serverItems.map((i) => i.id));
       const pendingLocal = (this.map.get(sessionId) ?? []).filter(
-        (i) => this.pendingServerIds.has(i.id) && !serverIds.has(i.id),
+        (i) => this.sync.isPending(i.id) && !serverIds.has(i.id),
       );
       this.map.set(sessionId, [...serverItems, ...pendingLocal]);
       this.persist();
@@ -156,9 +143,7 @@ export class HeldMessages {
         this.render.renderChip();
         this.attached.onChange();
       }
-    } catch (e) {
-      console.warn("[held] reconcile (get_session_drafts) failed:", e);
-    }
+    });
   }
 
   /** Migrate a held set when a pending placeholder id becomes the real session
@@ -217,25 +202,16 @@ export class HeldMessages {
     this.map.set(sid, list);
     this.persist();
     this.attached?.onChange();
-    // Never rejects: a failed add resolves to null so a racing removeItem
-    // below has a well-defined "no server id, fall back to the local one"
-    // outcome instead of an unhandled rejection.
-    const pending: Promise<number | null> = addHeldMessage(sid, blocks)
-      .then((res) => {
-        const item = this.map.get(sid)?.find((i) => i.id === localId);
-        if (item) {
-          item.id = res.id;
-          this.persist();
-          if (this.attached?.sessionId === sid) this.render.renderChip();
-        }
-        return res.id;
-      })
-      .catch((e) => {
-        console.warn("[held] add_held_message failed (offline?):", e);
-        return null;
-      })
-      .finally(() => this.pendingServerIds.delete(localId));
-    this.pendingServerIds.set(localId, pending);
+    // Swap only fires on success; a failed add leaves localId as the
+    // permanent fallback (see HeldDraftSync.add).
+    this.sync.add(sid, localId, blocks, (serverId) => {
+      const item = this.map.get(sid)?.find((i) => i.id === localId);
+      if (item) {
+        item.id = serverId;
+        this.persist();
+        if (this.attached?.sessionId === sid) this.render.renderChip();
+      }
+    });
   }
 
   // ---- flush paths -------------------------------------------------------
@@ -265,7 +241,7 @@ export class HeldMessages {
    *  flushed/cleared locally). Never awaited - the local state already reflects
    *  the clear regardless of whether this reaches the daemon. */
   private clearServerHeld(sid: string): void {
-    void clearHeldMessages(sid).catch((e) => console.warn("[held] clear_held_messages failed:", e));
+    this.sync.clear(sid);
   }
 
   /** Explicit "Send now": interrupt the turn, then send held + draft as one. */
@@ -341,7 +317,7 @@ export class HeldMessages {
     if (sid !== this.sid) return;
     if (this.itemsForActive().length === 0) return;
     if (isQuestion) return;
-    if (this.attached?.isComposing()) {
+    if (this.attached?.isComposing() || this.render.isEditingRow()) {
       this.deferredSid = sid;
       this.scheduleDeferRetry();
       return;
@@ -354,11 +330,16 @@ export class HeldMessages {
   notifyDraftActivity(): void {
     const a = this.attached;
     if (!a) return;
-    if (this.deferredSid && this.deferredSid === this.sid && !a.isComposing() && !a.getIsBusy()) {
+    if (this.deferredSid && this.deferredSid === this.sid && !a.isComposing() && !a.getIsBusy() && !this.render.isEditingRow()) {
       this.deferredSid = null;
       this.clearDeferRetry();
       void this.flush(false);
     }
+  }
+
+  /** HeldRenderHost: a held row lost focus - same retry as notifyDraftActivity. */
+  onRowBlur(): void {
+    this.notifyDraftActivity();
   }
 
   /** Poll until a deferred flush can fire on its own: once the user stops
@@ -373,7 +354,7 @@ export class HeldMessages {
       const a = this.attached;
       if (!this.deferredSid || this.deferredSid !== this.sid) return;
       if (!a || this.itemsForActive().length === 0) { this.deferredSid = null; return; }
-      if (a.isComposing() || a.getIsBusy()) {
+      if (a.isComposing() || a.getIsBusy() || this.render.isEditingRow()) {
         this.scheduleDeferRetry(); // still typing / busy — check again shortly
         return;
       }
@@ -401,16 +382,7 @@ export class HeldMessages {
     if (!sid) return;
     this.map.set(sid, (this.map.get(sid) ?? []).filter((i) => i.id !== id));
     this.persist();
-    this.editPushDebounced.get(id)?.cancel();
-    this.editPushDebounced.delete(id);
-    const doRemove = (serverId: number): void => {
-      void removeHeldMessage(sid, serverId).catch((e) => console.warn("[held] remove_held_message failed:", e));
-    };
-    // If the add for this id is still in flight, chain onto its resolved
-    // server id instead of racing to delete an id the daemon never assigned.
-    const pending = this.pendingServerIds.get(id);
-    if (pending) void pending.then((serverId) => doRemove(serverId ?? id));
-    else doRemove(id);
+    this.sync.remove(sid, id);
   }
 
   /** HeldRenderHost: live text edit of a staged row (caret-preserving, no re-render). */
@@ -420,22 +392,11 @@ export class HeldMessages {
     if (!item) return;
     item.blocks = [{ type: "text", text }];
     this.persist();
-    if (sid) this.getEditPush(id)(sid, id, item.blocks);
+    if (sid) this.sync.edit(sid, id, item.blocks);
   }
 
   /** HeldRenderHost: flush a row's pending edit push immediately (row blur). */
   flushEditPush(id: number): void {
-    this.editPushDebounced.get(id)?.flush();
-  }
-
-  private getEditPush(id: number): Debounced<[sessionId: string, id: number, blocks: ContentBlock[]]> {
-    let d = this.editPushDebounced.get(id);
-    if (!d) {
-      d = debounce((sessionId, itemId, blocks) => {
-        void updateHeldMessage(sessionId, itemId, blocks).catch((e) => console.warn("[held] update_held_message failed:", e));
-      }, EDIT_PUSH_DEBOUNCE_MS);
-      this.editPushDebounced.set(id, d);
-    }
-    return d;
+    this.sync.flushEdit(id);
   }
 }
