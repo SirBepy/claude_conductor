@@ -10,7 +10,7 @@ use iroh::endpoint::presets;
 use iroh::{Endpoint, EndpointId, SecretKey};
 
 use crate::daemon::device_registry::DeviceRegistry;
-use crate::daemon::remote_server::REMOTE_PORT;
+use crate::daemon::remote_server::resolve_port;
 use crate::util::to_hex;
 
 /// ALPN for the forwarded remote-access stream. Bump the suffix on any wire
@@ -88,8 +88,16 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
         log::info!("iroh tunnel: remote access is disabled; not binding an endpoint");
         return tunnel;
     }
+    // Two daemons must never both advertise a tunnel for the same user, so a
+    // non-default instance (dev daemon serving a phone directly) skips this
+    // entirely; only the default instance's remote server gets tunneled.
+    if !crate::daemon::instance::instance_suffix().is_empty() {
+        log::info!("iroh tunnel: non-default daemon instance; not advertising a tunnel");
+        return tunnel;
+    }
     let handle = tunnel.clone();
     tokio::spawn(async move {
+        let target_port = resolve_port();
         let secret = load_or_create_secret(&app_data);
         let endpoint = match Endpoint::builder(presets::N0)
             .secret_key(secret)
@@ -107,10 +115,10 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
             *slot = Some(endpoint.clone());
         }
         match handle.ticket() {
-            Some(t) => log::info!("iroh tunnel: listening as {t} -> 127.0.0.1:{REMOTE_PORT}"),
+            Some(t) => log::info!("iroh tunnel: listening as {t} -> 127.0.0.1:{target_port}"),
             None => log::warn!("iroh tunnel: bound but the endpoint id is unreadable"),
         }
-        accept_loop(endpoint, REMOTE_PORT).await;
+        accept_loop(endpoint, target_port).await;
     });
     tunnel
 }

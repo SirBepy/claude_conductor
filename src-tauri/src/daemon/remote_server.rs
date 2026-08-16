@@ -44,9 +44,19 @@ use super::remote_push::{push_subscribe, push_unsubscribe, push_vapid_key};
 use super::remote_static::spa_fallback;
 use super::remote_voice::transcribe_ws;
 
-/// Fixed localhost port for the remote API. Stable so the user's
-/// `tailscale serve` config can target it. Distinct from the hook port (27182).
+/// Default localhost port for the remote API; a non-default instance uses `resolve_port`.
 pub const REMOTE_PORT: u16 = 27183;
+
+/// Resolves the bind port: `CC_REMOTE_PORT` pins one explicitly, else a
+/// non-default instance binds ephemeral (0) so it never fights `REMOTE_PORT`.
+pub(super) fn resolve_port() -> u16 {
+    if let Ok(v) = std::env::var("CC_REMOTE_PORT") {
+        if let Ok(port) = v.parse::<u16>() {
+            return port;
+        }
+    }
+    if crate::daemon::instance::instance_suffix().is_empty() { REMOTE_PORT } else { 0 }
+}
 
 /// Body-size cap for `/api/rpc` (raises axum's 2 MiB default). Phone photos
 /// arrive as base64 JSON (~1.33x raw size) and routinely exceed 2 MiB raw on
@@ -74,25 +84,27 @@ pub fn spawn(
     let stt = crate::daemon::stt::SttSupervisor::new(app_data.clone());
     let stt_for_task = stt.clone();
     tokio::spawn(async move {
-        let listener = match TcpListener::bind(("127.0.0.1", REMOTE_PORT)).await {
+        let port = resolve_port();
+        let listener = match TcpListener::bind(("127.0.0.1", port)).await {
             Ok(l) => l,
             Err(e) => {
                 log::warn!(
-                    "remote-access server: bind 127.0.0.1:{REMOTE_PORT} failed: {e}; remote access disabled this run"
+                    "remote-access server: bind 127.0.0.1:{port} failed: {e}; remote access disabled this run"
                 );
                 return;
             }
         };
         // Strip the inherit flag so this socket never leaks into daemon-spawned
         // children (piped stdio forces handle inheritance on Windows). Without
-        // this, an orphaned child holds 27183 after the daemon dies and every
+        // this, an orphaned child holds the port after the daemon dies and every
         // request hangs with no response - the port-hostage incident, here for
         // the remote port. Mirrors the hook listener's protection.
         crate::util::process::mark_listener_non_inheritable(&listener);
+        let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
         let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task });
         let app = build_router(ctx);
         log::info!(
-            "remote-access server listening on 127.0.0.1:{REMOTE_PORT} (expose with `tailscale serve --bg --https=443 http://127.0.0.1:{REMOTE_PORT}`)"
+            "remote-access server listening on 127.0.0.1:{bound_port} (expose with `tailscale serve --bg --https=443 http://127.0.0.1:{bound_port}`)"
         );
         if let Err(e) = axum::serve(listener, app).await {
             log::error!("remote-access server exited: {e}");
