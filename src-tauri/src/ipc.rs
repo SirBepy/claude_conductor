@@ -2,6 +2,7 @@ pub mod usage;
 pub mod accounts;
 pub mod settings;
 pub mod projects;
+pub mod token_source;
 pub mod project_groups;
 pub mod project_icons;
 pub mod channels;
