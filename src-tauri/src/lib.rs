@@ -72,8 +72,10 @@ fn init_daemon_file_logger() {
             .open(path)
             .ok()
     });
-    let mut builder =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    let mut builder = env_logger::Builder::from_env(
+        env_logger::Env::default()
+            .default_filter_or("info,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn"),
+    );
     if let Some(file) = file {
         builder.target(env_logger::Target::Pipe(Box::new(file)));
     }
