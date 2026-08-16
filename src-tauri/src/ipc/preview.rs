@@ -5,6 +5,7 @@
 
 use crate::daemon::preview::{PreviewMeta, PreviewSnapshot};
 use crate::state::AppState;
+use std::time::Duration;
 use tauri::State;
 
 /// Push (or, for a repeated `slug`, replace-in-place) an HTML preview
@@ -55,12 +56,22 @@ pub async fn get_preview(id: String, state: State<'_, AppState>) -> Result<Previ
 pub async fn render_preview_doc(html: String) -> Result<String, String> {
     let port = crate::daemon::claude_config::daemon_hook_port();
     let base = format!("http://127.0.0.1:{port}/hooks/preview-render");
-    let res = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("preview-render client build failed: {e}"))?;
+    let res = client
         .post(&base)
         .json(&serde_json::json!({ "html": html }))
         .send()
         .await
-        .map_err(|e| format!("preview-render POST failed: {e}"))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                "preview daemon did not respond".to_string()
+            } else {
+                format!("preview-render POST failed: {e}")
+            }
+        })?;
     if !res.status().is_success() {
         return Err(format!("preview-render returned {}", res.status()));
     }
