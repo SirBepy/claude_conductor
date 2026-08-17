@@ -67,16 +67,55 @@ fn install_panic_hook(file_name: &str, tag: &'static str) {
     }));
 }
 
+fn open_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().create(true).append(true).open(path)
+}
+
+/// Reopens `daemon.log` by path when a write fails, so a stale, deleted, or
+/// externally rotated handle recovers instead of dropping every line for the
+/// rest of the process's life (todo 665). If the reopen also fails, prints to
+/// stderr once so the outage is visible rather than silent.
+struct ReopeningFileWriter {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+    warned: bool,
+}
+
+impl std::io::Write for ReopeningFileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Ok(n) = self.file.write(buf) {
+            self.warned = false;
+            return Ok(n);
+        }
+        match open_append(&self.path) {
+            Ok(reopened) => {
+                self.file = reopened;
+                self.file.write(buf)
+            }
+            Err(e) => {
+                if !self.warned {
+                    eprintln!("daemon.log: write failed and reopen failed, logging is silent: {e}");
+                    self.warned = true;
+                }
+                Err(e)
+            }
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
 fn init_daemon_file_logger() {
     let log_path = paths::data_dir().ok().map(|dir| dir.join("daemon.log"));
     install_panic_hook("daemon.log", "daemon");
 
-    let file = log_path.and_then(|path| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .ok()
+    let file = log_path.and_then(|path| match open_append(&path) {
+        Ok(file) => Some(ReopeningFileWriter { path, file, warned: false }),
+        Err(e) => {
+            eprintln!("daemon.log: could not open, logging to stderr only: {e}");
+            None
+        }
     });
     let mut builder = env_logger::Builder::from_env(
         env_logger::Env::default()
@@ -85,7 +124,42 @@ fn init_daemon_file_logger() {
     if let Some(file) = file {
         builder.target(env_logger::Target::Pipe(Box::new(file)));
     }
-    let _ = builder.try_init();
+    if builder.try_init().is_err() {
+        eprintln!("daemon.log: env_logger try_init failed, daemon logging is not active");
+    }
+}
+
+#[cfg(test)]
+mod daemon_file_logger_tests {
+    use super::*;
+
+    /// Swap in a read-only handle to simulate an invalidated write handle,
+    /// then confirm the next write reopens by path and both lines land.
+    #[test]
+    fn reopen_recovers_after_stale_handle() {
+        let dir = std::env::temp_dir().join(format!("cc-log-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.log");
+        let file = open_append(&path).unwrap();
+        let mut w = ReopeningFileWriter { path: path.clone(), file, warned: false };
+        std::io::Write::write_all(&mut w, b"line1\n").unwrap();
+
+        w.file = std::fs::OpenOptions::new().read(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut w, b"line2\n").unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("line1"));
+        assert!(contents.contains("line2"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_append_fails_on_directory_path() {
+        let dir = std::env::temp_dir().join(format!("cc-log-test-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(open_append(&dir).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
