@@ -37,6 +37,7 @@ import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer } from "./active-session-mount";
 import { mountComposer } from "./active-session-composer";
 import { handleTakeoverClick } from "./active-session-takeover";
+import { isRemote } from "../../shared/transport";
 import { openJarvisKebabMenu } from "./jarvis-kebab-menu";
 import {
   backgroundRetainedChat,
@@ -321,7 +322,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
 
   pane.innerHTML = [
     `<div class="session-statusbar-host"></div>`,
-    readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button><button type="button" class="takeover-btn">Take Over</button></div>` : "",
+    readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${isRemote() ? "" : `<button type="button" class="takeover-btn">Take Over</button>`}</div>` : "",
     `<div class="session-messages"></div>`,
     `<div class="session-thinking" hidden><span class="thinking-text"></span><span class="held-chip-slot"></span><button class="thinking-pause-btn icon-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i></button></div>`,
     `<div class="scheduled-chip-slot"></div>`,
