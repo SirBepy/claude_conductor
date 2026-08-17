@@ -3,6 +3,7 @@
 use crate::types::UsageSnapshot;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
+use std::time::Duration;
 
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -108,6 +109,7 @@ pub enum ScrapeError {
 fn http_client() -> Result<reqwest::Client, ScrapeError> {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(10))
         .build()
         .context("building http client")
         .map_err(ScrapeError::Other)
