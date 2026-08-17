@@ -1,7 +1,6 @@
 //! Pure math + formatting helpers. No Tauri deps. `now` is always injected
 //! so tests stay deterministic.
 
-use crate::tray::ColorStop;
 use crate::types::UsageSnapshot;
 use chrono::{DateTime, Utc};
 
@@ -18,18 +17,9 @@ pub fn calc_safe_pct(resets_at: &str, window_ms: i64, now: DateTime<Utc>) -> Opt
     Some((elapsed as f32 / window_ms as f32) * 100.0)
 }
 
-pub fn threshold_crossed(prev: Option<f32>, new: Option<f32>, stops: &[ColorStop]) -> bool {
-    let (Some(p), Some(n)) = (prev, new) else { return false; };
-    stops.iter().any(|s| {
-        let m = s.min as f32;
-        p < m && n >= m
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tray::ColorStop;
     use chrono::TimeZone;
 
     #[test]
@@ -53,24 +43,5 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 4, 20, 16, 0, 0).unwrap();
         let resets = "2026-04-20T15:00:00Z";
         assert!(calc_safe_pct(resets, FIVE_HOUR_MS, now).is_none());
-    }
-
-    #[test]
-    fn threshold_crossed_detects_upward_crossing() {
-        let stops = vec![
-            ColorStop { min: 0, color: "#0".into() },
-            ColorStop { min: 50, color: "#0".into() },
-            ColorStop { min: 80, color: "#0".into() },
-        ];
-        assert!(threshold_crossed(Some(30.0), Some(55.0), &stops));
-        assert!(threshold_crossed(Some(60.0), Some(85.0), &stops));
-    }
-
-    #[test]
-    fn threshold_crossed_ignores_steady_state() {
-        let stops = vec![ColorStop { min: 50, color: "#0".into() }];
-        assert!(!threshold_crossed(Some(60.0), Some(75.0), &stops));
-        assert!(!threshold_crossed(Some(40.0), Some(45.0), &stops));
-        assert!(!threshold_crossed(None, Some(75.0), &stops));
     }
 }

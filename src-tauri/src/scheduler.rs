@@ -201,14 +201,9 @@ pub async fn poll_once_scoped(
 /// per-account, then applies the effects shared by both paths exactly once:
 /// mirror the "representative" snapshot into the legacy state fields (tray,
 /// dashboard, and every other consumer not yet migrated to per-account reads
-/// - see `AppState::current_usage`'s doc comment) and prune retention. The
-/// threshold notification is fired INSIDE each branch instead (milestone 08):
-/// the legacy branch fires once with no account context (`{account}` renders
-/// empty); the per-account branch fires once per account against that
-/// account's own previous snapshot, so a non-default account crossing a
-/// threshold is never silently missed by comparing against the wrong
-/// account's prior reading. Each branch owns its own SQLite insert(s) since
-/// the per-account branch may write more than one row.
+/// - see `AppState::current_usage`'s doc comment) and prune retention. Each
+/// branch owns its own SQLite insert(s) since the per-account branch may
+/// write more than one row.
 async fn do_poll(app: &AppHandle, account_filter: Option<&str>) -> Result<UsageSnapshot, PollErr> {
     let accounts = crate::accounts::load_registry();
     let mut with_cookies: Vec<Account> = accounts.into_iter().filter(account_has_cookie).collect();
@@ -223,10 +218,7 @@ async fn do_poll(app: &AppHandle, account_filter: Option<&str>) -> Result<UsageS
     }
 
     let snap = if with_cookies.is_empty() {
-        let prev_snap = app.state::<AppState>().current_usage.lock().unwrap().clone();
-        let snap = do_poll_legacy(app).await?;
-        maybe_notify_threshold_crossed(app, prev_snap.as_ref(), &snap, None);
-        snap
+        do_poll_legacy(app).await?
     } else {
         do_poll_accounts(app, &with_cookies).await?
     };
@@ -313,19 +305,14 @@ impl AccountPollErr {
 /// (`is_auth_failure`) is recorded as that account's `AuthState::NeedsLogin`;
 /// any other failure leaves the account's prior auth state untouched, since
 /// a network blip is not proof of an expired login. Persists a tagged
-/// snapshot per successful account, fires that account's OWN threshold
-/// notification (milestone 08 - compared against ITS previous snapshot, not
-/// some other account's), then returns the "default" account's snapshot
-/// (`Settings.default_account_id`, falling back to the first success) as the
-/// tick's representative result for the shared legacy-state mirror in
-/// `do_poll`.
+/// snapshot per successful account, then returns the "default" account's
+/// snapshot (`Settings.default_account_id`, falling back to the first
+/// success) as the tick's representative result for the shared legacy-state
+/// mirror in `do_poll`.
 async fn do_poll_accounts(
     app: &AppHandle,
     accounts: &[Account],
 ) -> Result<UsageSnapshot, PollErr> {
-    let label_by_id: std::collections::HashMap<&str, &str> =
-        accounts.iter().map(|a| (a.id.as_str(), a.label.as_str())).collect();
-
     let outcomes = poll_accounts_isolated(accounts, |account| async move {
         let session_path = paths::account_session_file(&account.id)
             .map_err(|e| AccountPollErr::Other(format!("{e:#}")))?;
@@ -345,10 +332,6 @@ async fn do_poll_accounts(
 
     let state = app.state::<AppState>();
     let default_account_id = state.settings.lock().unwrap().default_account_id.clone();
-    // Snapshot each account's PREVIOUS reading before this tick overwrites the
-    // map below - threshold crossing must compare against that account's own
-    // prior state, not whatever `current_usage_by_account` holds mid-loop.
-    let prev_by_account = state.current_usage_by_account.lock().unwrap().clone();
 
     let mut default_snap: Option<UsageSnapshot> = None;
     let mut any_ok = false;
@@ -364,12 +347,6 @@ async fn do_poll_accounts(
                         log::warn!("storage: insert per-account snapshot failed for {account_id}: {e:#}");
                     }
                 }
-                maybe_notify_threshold_crossed(
-                    app,
-                    prev_by_account.get(account_id.as_str()),
-                    snap,
-                    label_by_id.get(account_id.as_str()).copied(),
-                );
                 let is_default = default_account_id.as_deref() == Some(account_id.as_str())
                     || (default_account_id.is_none() && default_snap.is_none());
                 if is_default {
@@ -416,64 +393,11 @@ where
     out
 }
 
-/// Pure crossing check: `Some(pct)` when either window's percent crosses a
-/// configured color threshold between `prev` and `new` (`pct` is the larger
-/// of the two new percentages, matching the notification's `{percent}`);
-/// `None` otherwise. Extracted from `maybe_notify_threshold_crossed` so the
-/// per-account evaluation (milestone 08 acceptance: "a threshold alert names
-/// its account") is unit-testable without an `AppHandle`/`AppState`.
-fn threshold_crossing(
-    prev: &UsageSnapshot,
-    new: &UsageSnapshot,
-    thresholds: &[crate::tray::ColorStop],
-) -> Option<u32> {
-    let prev_sess = Some(crate::scraping::session_pct(prev));
-    let new_sess = Some(crate::scraping::session_pct(new));
-    let prev_wk = Some(crate::scraping::weekly_pct(prev));
-    let new_wk = Some(crate::scraping::weekly_pct(new));
-    let crossed =
-        crate::scraping::threshold_crossed(prev_sess, new_sess, thresholds) ||
-        crate::scraping::threshold_crossed(prev_wk, new_wk, thresholds);
-    if !crossed { return None; }
-    Some(new_sess.unwrap_or(0.0).max(new_wk.unwrap_or(0.0)).round() as u32)
-}
-
-/// Fires the `ThresholdCrossed` notification when `threshold_crossing`
-/// reports a crossing between `prev` and `new`. Shared by the legacy path
-/// (`account_label: None` - the `{account}` token renders empty) and the
-/// per-account path (`account_label: Some(&account.label)`, evaluated against
-/// THAT account's own previous snapshot - see `do_poll_accounts`).
-fn maybe_notify_threshold_crossed(
-    app: &AppHandle,
-    prev: Option<&UsageSnapshot>,
-    new: &UsageSnapshot,
-    account_label: Option<&str>,
-) {
-    let Some(prev) = prev else { return };
-    let icon_s = crate::tray::IconSettings::try_from(
-        &*app.state::<AppState>().settings.lock().unwrap()
-    ).unwrap_or_default();
-    if let Some(pct) = threshold_crossing(prev, new, &icon_s.color_thresholds) {
-        crate::notifications::fire(
-            app,
-            crate::notifications::NotifKind::ThresholdCrossed,
-            crate::notifications::NotifContext {
-                percent: Some(pct),
-                name: None,
-                account: account_label.map(String::from),
-            },
-            None,
-            None,
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{is_auth_failure, next_target_ts, poll_accounts_isolated, threshold_crossing};
+    use super::{is_auth_failure, next_target_ts, poll_accounts_isolated};
     use crate::accounts::Account;
     use crate::scraping::ScrapeError;
-    use crate::tray::ColorStop;
     use crate::types::{UsageSnapshot, WindowUsage};
 
     fn acct(id: &str) -> Account {
@@ -500,59 +424,6 @@ mod tests {
             extra_usage: None,
             account_id: Some(account_id.to_string()),
         }
-    }
-
-    fn snap_pct(five_hour: f64, seven_day: f64) -> UsageSnapshot {
-        UsageSnapshot {
-            captured_at: "2026-07-07T10:00:00Z".into(),
-            five_hour: WindowUsage { utilization: five_hour, resets_at: "x".into() },
-            seven_day: WindowUsage { utilization: seven_day, resets_at: "y".into() },
-            extra_usage: None,
-            account_id: None,
-        }
-    }
-
-    fn default_thresholds() -> Vec<ColorStop> {
-        vec![
-            ColorStop { min: 0, color: "#27ae60".into() },
-            ColorStop { min: 50, color: "#e67e22".into() },
-            ColorStop { min: 80, color: "#e74c3c".into() },
-        ]
-    }
-
-    /// Milestone 08 acceptance: crossing a threshold reports the crossing so
-    /// the caller can fire a per-account notification.
-    #[test]
-    fn threshold_crossing_detects_upward_crossing_and_reports_the_larger_pct() {
-        let prev = snap_pct(40.0, 10.0);
-        let new = snap_pct(55.0, 20.0);
-        let pct = threshold_crossing(&prev, &new, &default_thresholds());
-        assert_eq!(pct, Some(55));
-    }
-
-    #[test]
-    fn threshold_crossing_none_when_steady_state() {
-        let prev = snap_pct(40.0, 10.0);
-        let new = snap_pct(45.0, 15.0);
-        assert_eq!(threshold_crossing(&prev, &new, &default_thresholds()), None);
-    }
-
-    /// Two accounts polled in the same tick must each be evaluated against
-    /// THEIR OWN previous snapshot: account A crossing 80% must not be masked
-    /// or falsely triggered by account B's numbers.
-    #[test]
-    fn threshold_crossing_is_independent_per_account_snapshot_pair() {
-        let thresholds = default_thresholds();
-        // Account "work": crosses 80%.
-        let work_prev = snap_pct(70.0, 10.0);
-        let work_new = snap_pct(85.0, 12.0);
-        // Account "personal": stays flat, must NOT report a crossing even
-        // though it shares the same tick as "work".
-        let personal_prev = snap_pct(20.0, 5.0);
-        let personal_new = snap_pct(22.0, 6.0);
-
-        assert_eq!(threshold_crossing(&work_prev, &work_new, &thresholds), Some(85));
-        assert_eq!(threshold_crossing(&personal_prev, &personal_new, &thresholds), None);
     }
 
     /// Only 401/403 counts as an auth failure - a network error, timeout, or

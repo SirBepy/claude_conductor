@@ -1,4 +1,4 @@
-//! Typed views over `Settings.extra` for icon color/notifications.
+//! Typed views over `Settings.extra` for notification rules.
 //! `TryFrom<&Settings>` never fails — malformed fields fall back to defaults.
 
 use crate::types::Settings;
@@ -9,26 +9,6 @@ use serde_json::Value;
 #[serde(rename_all = "lowercase")]
 pub enum NotifMode { Sound, Voice }
 impl Default for NotifMode { fn default() -> Self { Self::Sound } }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ColorStop { pub min: u32, pub color: String }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct IconSettings {
-    pub color_thresholds: Vec<ColorStop>,
-}
-
-impl Default for IconSettings {
-    fn default() -> Self {
-        Self {
-            color_thresholds: vec![
-                ColorStop { min: 0,  color: "#27ae60".into() },
-                ColorStop { min: 50, color: "#e67e22".into() },
-                ColorStop { min: 80, color: "#e74c3c".into() },
-            ],
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotificationRule {
@@ -83,30 +63,6 @@ fn parse_enum<T: Default>(raw: Option<&Value>, map: &[(&str, T)]) -> T where T: 
     T::default()
 }
 
-fn parse_color_stops(raw: Option<&Value>) -> Vec<ColorStop> {
-    let Some(arr) = raw.and_then(|x| x.as_array()) else { return IconSettings::default().color_thresholds; };
-    let mut out: Vec<ColorStop> = arr.iter().filter_map(|item| {
-        let m = item.as_object()?;
-        Some(ColorStop {
-            min: m.get("min").and_then(|v| v.as_u64())? as u32,
-            color: m.get("color").and_then(|v| v.as_str())?.to_string(),
-        })
-    }).collect();
-    if out.is_empty() { return IconSettings::default().color_thresholds; }
-    out.sort_by_key(|c| c.min);
-    out
-}
-
-impl TryFrom<&Settings> for IconSettings {
-    type Error = std::convert::Infallible;
-    fn try_from(s: &Settings) -> Result<Self, Self::Error> {
-        let e = &s.extra;
-        Ok(IconSettings {
-            color_thresholds: parse_color_stops(e.get("colorThresholds")),
-        })
-    }
-}
-
 pub fn rule_from_public(m: &serde_json::Map<String, Value>, defaults: NotificationRule) -> NotificationRule {
     rule_from(m, defaults)
 }
@@ -154,37 +110,6 @@ mod tests {
         let mut s = Settings::default();
         s.extra = obj;
         s
-    }
-
-    #[test]
-    fn icon_settings_defaults_when_extra_empty() {
-        let s = Settings::default();
-        let icon = IconSettings::try_from(&s).unwrap();
-        assert_eq!(icon.color_thresholds, IconSettings::default().color_thresholds);
-    }
-
-    #[test]
-    fn icon_settings_parses_and_sorts_color_thresholds() {
-        let s = settings_with(json!({
-            "colorThresholds": [
-                {"min": 0, "color": "#27ae60"},
-                {"min": 80, "color": "#e74c3c"},
-                {"min": 50, "color": "#e67e22"}
-            ]
-        }));
-        let icon = IconSettings::try_from(&s).unwrap();
-        // thresholds sorted asc by min
-        let mins: Vec<u32> = icon.color_thresholds.iter().map(|t| t.min).collect();
-        assert_eq!(mins, vec![0, 50, 80]);
-    }
-
-    #[test]
-    fn icon_settings_malformed_extra_falls_back_to_defaults() {
-        let s = settings_with(json!({
-            "colorThresholds": "not an array"
-        }));
-        let icon = IconSettings::try_from(&s).unwrap();
-        assert_eq!(icon.color_thresholds, IconSettings::default().color_thresholds);
     }
 
     #[test]
