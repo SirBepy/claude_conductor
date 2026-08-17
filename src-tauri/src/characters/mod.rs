@@ -69,6 +69,15 @@ impl Character {
     pub fn asset_path(&self, relative: &str) -> PathBuf {
         self.dir.join(relative)
     }
+
+    /// Same as `asset_path`, but canonicalizes both the character's own dir
+    /// and the joined target and rejects escape via `..`/symlinks - `relative`
+    /// is client-supplied over the `character_asset_url` remote RPC.
+    pub fn asset_path_checked(&self, relative: &str) -> Option<PathBuf> {
+        let root = self.dir.canonicalize().ok()?;
+        let target = self.dir.join(relative).canonicalize().ok()?;
+        target.starts_with(&root).then_some(target)
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +138,24 @@ mod char_tests {
         let mut c = sample();
         c.dir = std::path::PathBuf::from("/tmp/chars/warcraft/peon");
         assert_eq!(c.asset_path("icon.png"), std::path::PathBuf::from("/tmp/chars/warcraft/peon/icon.png"));
+    }
+
+    // Todo 656: `file` in `character_asset_url` is client-supplied over RPC;
+    // a traversing `relative` must not escape the character's own dir.
+    #[test]
+    fn asset_path_checked_rejects_traversal_outside_character_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let char_dir = tmp.path().join("peon");
+        std::fs::create_dir_all(&char_dir).unwrap();
+        std::fs::write(char_dir.join("icon.png"), b"x").unwrap();
+        let secret = tmp.path().join("secret.txt");
+        std::fs::write(&secret, b"leak").unwrap();
+
+        let mut c = sample();
+        c.dir = char_dir.clone();
+        assert_eq!(c.asset_path_checked("icon.png"), Some(char_dir.canonicalize().unwrap().join("icon.png")));
+        assert!(c.asset_path_checked("../secret.txt").is_none());
+        assert!(c.asset_path_checked("missing.png").is_none());
     }
 }
 

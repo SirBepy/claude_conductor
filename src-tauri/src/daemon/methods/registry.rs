@@ -391,7 +391,8 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     // the settings snapshot, ~/.claude/projects mtimes). No Tauri AppState used.
 
     // Mirrors `character_asset_url` (params: character_id, file) -> Option<String>
-    // data URL. Pure: characters::get + assets::file_data_url_at on shared files.
+    // data URL. `file` is client-supplied, so `asset_path_checked` canonicalizes
+    // and rejects any escape from the character's own dir before the fs read.
     router.register("character_asset_url", move |params, _ctx| {
         async move {
             #[derive(serde::Deserialize)]
@@ -399,7 +400,8 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             let url = crate::characters::get(&p.character_id)
-                .and_then(|c| crate::characters::assets::file_data_url_at(&c.asset_path(&p.file)));
+                .and_then(|c| c.asset_path_checked(&p.file))
+                .and_then(|path| crate::characters::assets::file_data_url_at(&path));
             Ok(json!(url))
         }
     });
@@ -586,24 +588,29 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    // Mirrors `project_last_activity_at` (params: cwd) -> i64. PURE fs read of
-    // the max *.jsonl mtime under ~/.claude/projects/<encoded-cwd>/.
-    router.register("project_last_activity_at", move |params, _ctx| {
-        async move {
-            #[derive(serde::Deserialize)]
-            struct P { cwd: String }
-            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            let secs = tokio::task::spawn_blocking(move || {
-                crate::ipc::project_groups::latest_jsonl_mtime_in_projects_dir(
-                    std::path::Path::new(&p.cwd),
-                )
-            })
-            .await
-            .map_err(|e| RpcError::internal(format!("join: {e}")))?;
-            Ok(json!(secs))
-        }
-    });
+    // Mirrors `project_last_activity_at` (params: cwd) -> i64. `cwd` is
+    // client-supplied, so reject_unknown must run before any fs access.
+    {
+        let state = state.clone();
+        router.register("project_last_activity_at", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                let secs = tokio::task::spawn_blocking(move || {
+                    crate::ipc::project_groups::latest_jsonl_mtime_in_projects_dir(
+                        std::path::Path::new(&p.cwd),
+                    )
+                })
+                .await
+                .map_err(|e| RpcError::internal(format!("join: {e}")))?;
+                Ok(json!(secs))
+            }
+        });
+    }
     {
         let state = state.clone();
         // Mirrors `resolve_project_account` (params: cwd) -> Option<String>.
@@ -624,28 +631,39 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    // Mirrors `get_project_tech` (params: root) -> Option<String>. PURE
-    // file-existence checks for stack marker files.
-    router.register("get_project_tech", move |params, _ctx| {
-        async move {
-            #[derive(serde::Deserialize)]
-            struct P { root: String }
-            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            Ok(json!(crate::ipc::project_icons::get_project_tech(p.root)))
-        }
-    });
-    // Mirrors `get_project_icon` (params: root) -> Option<AttachmentData>. PURE
-    // fs read of the first matching icon candidate, inlined as {mime, base64}.
-    router.register("get_project_icon", move |params, _ctx| {
-        async move {
-            #[derive(serde::Deserialize)]
-            struct P { root: String }
-            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            Ok(json!(crate::ipc::project_icons::get_project_icon(p.root).await))
-        }
-    });
+    // Mirrors `get_project_tech` (params: root) -> Option<String>. `root` is
+    // client-supplied, so reject_unknown must run before any fs access.
+    {
+        let state = state.clone();
+        router.register("get_project_tech", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { root: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.root)?;
+                Ok(json!(crate::ipc::project_icons::get_project_tech(p.root)))
+            }
+        });
+    }
+    // Mirrors `get_project_icon` (params: root) -> Option<AttachmentData>.
+    // `root` is client-supplied; reaches find_icon_in_dir -> std::fs::read and
+    // returns file bytes, so reject_unknown must run before any fs access.
+    {
+        let state = state.clone();
+        router.register("get_project_icon", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { root: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.root)?;
+                Ok(json!(crate::ipc::project_icons::get_project_icon(p.root).await))
+            }
+        });
+    }
     // Mirrors the `list_slash_commands` Tauri command (params: project_dir) ->
     // Vec<SlashEntry>. Read-only filesystem scan of ~/.claude/{commands,skills,
     // plugins} + the project's .claude dir - the daemon runs on the same PC and
@@ -666,4 +684,52 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!(entries))
         }
     });
+}
+
+#[cfg(test)]
+mod reject_unknown_tests {
+    use super::*;
+    use crate::daemon::rpc::{ConnectionContext, Request};
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+
+    fn dummy_ctx() -> ConnectionContext {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        ConnectionContext::new(tx)
+    }
+
+    fn dummy_state() -> Arc<DaemonState> {
+        DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    async fn call(state: Arc<DaemonState>, method: &str, params: Value) -> crate::daemon::rpc::Response {
+        let mut r = Router::new();
+        register_chat_registry(&mut r, state);
+        r.dispatch(
+            Request { jsonrpc: "2.0".into(), id: json!(1), method: method.into(), params: Some(params) },
+            dummy_ctx(),
+        )
+        .await
+    }
+
+    // Todo 656: these three take a client-supplied path over remote RPC and
+    // must reject an unrecognized one before touching the filesystem.
+    #[tokio::test]
+    async fn get_project_tech_rejects_unknown_root() {
+        let resp = call(dummy_state(), "get_project_tech", json!({"root": "C:\\nope\\not\\registered"})).await;
+        assert!(resp.error.is_some(), "unknown root must be rejected");
+    }
+
+    #[tokio::test]
+    async fn get_project_icon_rejects_unknown_root() {
+        let resp = call(dummy_state(), "get_project_icon", json!({"root": "C:\\nope\\not\\registered"})).await;
+        assert!(resp.error.is_some(), "unknown root must be rejected");
+    }
+
+    #[tokio::test]
+    async fn project_last_activity_at_rejects_unknown_cwd() {
+        let resp = call(dummy_state(), "project_last_activity_at", json!({"cwd": "C:\\nope\\not\\registered"})).await;
+        assert!(resp.error.is_some(), "unknown cwd must be rejected");
+    }
 }
