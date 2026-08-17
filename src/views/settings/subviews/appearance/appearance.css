@@ -1,26 +1,3 @@
 /* Appearance subview - merges themes.ts + visuals.ts. Most widget rules
  * (.kit-section, .kit-row, .kit-toggle, .kit-palette-*, .mode-toggle-row,
- * .info-wrap/.info-icon/.info-tooltip) live in the kit / widgets.css already.
- * These are the few rules specific to the color-threshold row editor, moved
- * out of createColorRow's inline styles (previously in visuals.ts). */
-
-.color-row-fields {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-}
-
-.color-min {
-  width: 50px;
-}
-
-.color-pct-label {
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-
-.remove-color-btn {
-  padding: 2px 8px;
-  font-size: 0.7rem;
-}
+ * .info-wrap/.info-icon/.info-tooltip) live in the kit / widgets.css already. */

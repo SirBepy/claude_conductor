@@ -143,11 +143,6 @@ export function pctColor(v: number | null | undefined): string {
   return "#27ae60";
 }
 
-export interface ColorThreshold {
-  min: number;
-  color: string;
-}
-
 export interface PaceColorSettings {
   paceBand?: number;
   paceColors?: { under?: string; nearSafe?: string; nearOver?: string; over?: string };
@@ -164,7 +159,6 @@ export function getPaceColor(pct: number, safePace: number, settings: PaceColorS
 
 export interface ValueColorSettings extends PaceColorSettings {
   colorApplyTo?: Record<string, boolean | undefined>;
-  colorThresholds?: ColorThreshold[];
 }
 
 /**

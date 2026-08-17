@@ -23,9 +23,8 @@ export interface NotifCardRef {
 export const NOTIF_TYPES: Array<{
   key: string; title: string; hint: string; defaultSound: string; defaultTemplate: string;
 }> = [
-  { key: "workFinished",     title: "Done (Work Finished)",     hint: "Supports {name}",    defaultSound: "sound1.mp3", defaultTemplate: "{name} is done" },
-  { key: "questionAsked",    title: "Waiting (Question Asked)", hint: "Supports {name}",    defaultSound: "sound3.mp3", defaultTemplate: "{name} is waiting" },
-  { key: "thresholdCrossed", title: "Threshold Reached",        hint: "Supports {percent}, {account}", defaultSound: "sound6.mp3", defaultTemplate: "{percent} threshold reached" },
+  { key: "workFinished",  title: "Done (Work Finished)",     hint: "Supports {name}", defaultSound: "sound1.mp3", defaultTemplate: "{name} is done" },
+  { key: "questionAsked", title: "Waiting (Question Asked)", hint: "Supports {name}", defaultSound: "sound3.mp3", defaultTemplate: "{name} is waiting" },
 ];
 
 // Shared registry used by the notifications subview to publish card refs.
@@ -69,14 +68,6 @@ export function saveSettings(): void {
     const el = byId<HTMLInputElement>(id);
     return el ? el.checked : fallback;
   };
-
-  const colorContainer = byId("colorContainer");
-  const thresholds = colorContainer
-    ? Array.from(colorContainer.querySelectorAll<HTMLElement>(".color-row")).map((row) => ({
-        min: parseInt((row.querySelector(".color-min") as HTMLInputElement).value, 10),
-        color: (row.querySelector(".color-val") as HTMLInputElement).value,
-      })).sort((a, b) => a.min - b.min)
-    : (prev.colorThresholds || []);
 
   const prevColorApply = (prev.colorApplyTo as Record<string, boolean | undefined>) || {};
   const prevPace = (prev.paceColors as Record<string, string | undefined>) || {};
@@ -156,7 +147,6 @@ export function saveSettings(): void {
       nearOver: valOr("paceColorNearOver", prevPace.nearOver || "#e67e22"),
       over: valOr("paceColorOver", prevPace.over || "#e74c3c"),
     },
-    colorThresholds: thresholds,
     audioOutputDevice: (() => {
       const el = byId<HTMLSelectElement>("audioOutputDevice");
       if (!el) return prev.audioOutputDevice ?? null;

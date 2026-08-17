@@ -23,7 +23,6 @@ export interface SettingsShape {
   projectAliases?: AliasMap;
   projectBlacklist?: string[];
   colorApplyTo?: Record<string, boolean | undefined>;
-  colorThresholds?: Array<{ min: number; color: string }>;
   paceBand?: number;
   paceColors?: { under?: string; nearSafe?: string; nearOver?: string; over?: string };
   audioOutputDevice?: string | null;
