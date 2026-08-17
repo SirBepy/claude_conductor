@@ -24,7 +24,6 @@ pub struct NotificationRule {
 pub struct NotificationsConfig {
     pub work_finished: NotificationRule,
     pub question_asked: NotificationRule,
-    pub threshold_crossed: NotificationRule,
 }
 
 impl Default for NotificationsConfig {
@@ -41,12 +40,6 @@ impl Default for NotificationsConfig {
                 sound_pack: "default".into(),
                 sound_file: "sound3.mp3".into(), voice_name: None,
                 template: "{name} is waiting".into(),
-            },
-            threshold_crossed: NotificationRule {
-                enabled: true, mode: NotifMode::Sound,
-                sound_pack: "default".into(),
-                sound_file: "sound6.mp3".into(), voice_name: None,
-                template: "{percent} threshold reached".into(),
             },
         }
     }
@@ -93,8 +86,6 @@ impl TryFrom<&Settings> for NotificationsConfig {
                 .map(|m| rule_from(m, defaults.work_finished.clone())).unwrap_or(defaults.work_finished),
             question_asked: n.get("questionAsked").and_then(|v| v.as_object())
                 .map(|m| rule_from(m, defaults.question_asked.clone())).unwrap_or(defaults.question_asked),
-            threshold_crossed: n.get("thresholdCrossed").and_then(|v| v.as_object())
-                .map(|m| rule_from(m, defaults.threshold_crossed.clone())).unwrap_or(defaults.threshold_crossed),
         })
     }
 }

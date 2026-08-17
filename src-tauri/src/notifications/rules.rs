@@ -1,4 +1,4 @@
-//! Notification firing: workFinished / questionAsked / thresholdCrossed.
+//! Notification firing: workFinished / questionAsked.
 
 use crate::notifications::audio;
 use crate::tray::{NotifMode, NotificationRule};
@@ -7,7 +7,7 @@ use crate::types::{Avatar, Settings};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NotifKind { WorkFinished, QuestionAsked, ThresholdCrossed }
+pub enum NotifKind { WorkFinished, QuestionAsked }
 
 #[derive(Default, Debug)]
 pub struct NotifContext {
@@ -31,7 +31,6 @@ pub const CHARACTER_PACK_SENTINEL: &str = "__character__";
 ///    be `Avatar::None` for most projects, yielding the default sound).
 /// Returns a synthetic rule whose `sound_file` is an absolute path when a
 /// character is resolved and its slot has a file; otherwise the global default.
-/// `ThresholdCrossed` always returns the global default.
 pub fn resolve_with_character(
     cfg: &crate::tray::NotificationsConfig,
     settings: &Settings,
@@ -40,11 +39,9 @@ pub fn resolve_with_character(
     cwd_key: Option<&str>,
 ) -> NotificationRule {
     let default_rule = match kind {
-        NotifKind::WorkFinished     => cfg.work_finished.clone(),
-        NotifKind::QuestionAsked    => cfg.question_asked.clone(),
-        NotifKind::ThresholdCrossed => cfg.threshold_crossed.clone(),
+        NotifKind::WorkFinished  => cfg.work_finished.clone(),
+        NotifKind::QuestionAsked => cfg.question_asked.clone(),
     };
-    if matches!(kind, NotifKind::ThresholdCrossed) { return default_rule; }
 
     // 1. Prefer the session's character.
     let char_id: Option<String> = session_id
@@ -68,7 +65,6 @@ pub fn resolve_with_character(
     let slot = match kind {
         NotifKind::WorkFinished  => crate::characters::slots::Slot::WorkFinished,
         NotifKind::QuestionAsked => crate::characters::slots::Slot::QuestionAsked,
-        NotifKind::ThresholdCrossed => unreachable!(),
     };
     let files = character.slot_files(slot);
     let Some(pick) = crate::characters::slots::random_pick(files) else { return default_rule; };
@@ -115,16 +111,12 @@ pub fn fire(
         return;
     }
     // Per-slot character-sound toggle (Settings > Sound). work_finished /
-    // question_asked fire ONLY through this daemon-link path, so gate them here;
-    // threshold_crossed is not a character slot.
+    // question_asked fire ONLY through this daemon-link path, so gate them here.
     let slot_camel = match kind {
-        NotifKind::WorkFinished => Some("workFinished"),
-        NotifKind::QuestionAsked => Some("questionAsked"),
-        NotifKind::ThresholdCrossed => None,
+        NotifKind::WorkFinished => "workFinished",
+        NotifKind::QuestionAsked => "questionAsked",
     };
-    if let Some(camel) = slot_camel {
-        if !settings_snapshot.character_slot_enabled(camel) { return; }
-    }
+    if !settings_snapshot.character_slot_enabled(slot_camel) { return; }
     let cfg: crate::tray::NotificationsConfig = (&settings_snapshot).try_into().unwrap_or_default();
     let rule = resolve_with_character(&cfg, &settings_snapshot, kind, session_id, cwd_key);
     if !rule.enabled { return; }
@@ -318,15 +310,6 @@ mod tests {
         let s = settings_with_project("C:/proj", None);
         let key = crate::settings::store::project_key(std::path::Path::new("C:/proj"));
         let rule = resolve_with_character(&cfg, &s, NotifKind::WorkFinished, None, Some(&key));
-        assert_eq!(rule.sound_pack, "default");
-    }
-
-    #[test]
-    fn character_resolver_returns_global_for_threshold_crossed_even_with_character() {
-        let cfg = NotificationsConfig::default();
-        let s = settings_with_project("C:/proj", Some("peon"));
-        let key = crate::settings::store::project_key(std::path::Path::new("C:/proj"));
-        let rule = resolve_with_character(&cfg, &s, NotifKind::ThresholdCrossed, None, Some(&key));
         assert_eq!(rule.sound_pack, "default");
     }
 

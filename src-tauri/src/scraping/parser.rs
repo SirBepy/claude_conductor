@@ -1,14 +1,10 @@
 //! Pure math + formatting helpers. No Tauri deps. `now` is always injected
 //! so tests stay deterministic.
 
-use crate::types::UsageSnapshot;
 use chrono::{DateTime, Utc};
 
 pub const FIVE_HOUR_MS: i64 = 5 * 3_600_000;
 pub const SEVEN_DAY_MS: i64 = 7 * 24 * 3_600_000;
-
-pub fn session_pct(snap: &UsageSnapshot) -> f32 { snap.five_hour.utilization as f32 }
-pub fn weekly_pct(snap: &UsageSnapshot) -> f32 { snap.seven_day.utilization as f32 }
 
 pub fn calc_safe_pct(resets_at: &str, window_ms: i64, now: DateTime<Utc>) -> Option<f32> {
     let resets = DateTime::parse_from_rfc3339(resets_at).ok()?.with_timezone(&Utc);
