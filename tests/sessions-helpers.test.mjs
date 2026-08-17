@@ -284,8 +284,9 @@ describe("stateTooltip", () => {
   it("your turn", () => {
     expect(stateTooltip(makeInstance({ busy: false }), noUnread, noAttention, noQuestion)).toBe("Done - your turn");
   });
-  // Todo 663: stateTooltip now agrees with statusPriority/statusDotClass -
-  // question outranks busy, matching the dot it's attached to.
+  // Todo 663 flipped this deliberately. It previously asserted the OPPOSITE
+  // (busy wins), pinning the divergence on purpose while the decision was open.
+  // A reversed expectation here is the agreed fix, not a papered-over regression.
   it("busy + question set overlap: question wins, matching statusPriority/statusDotClass", () => {
     expect(stateTooltip(makeInstance({ session_id: "q", busy: true }), noUnread, noAttention, new Set(["q"]))).toBe("Claude asked a question - click to answer");
   });
