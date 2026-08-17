@@ -56,7 +56,7 @@ fn install_panic_hook(file_name: &str, tag: &'static str) {
     let orig = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if let Ok(mut f) = open_append(&path) {
             let ts = chrono::Utc::now().to_rfc3339();
             let thread = std::thread::current();
             let who = thread.name().unwrap_or("<unnamed>");
