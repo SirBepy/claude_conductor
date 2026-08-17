@@ -40,7 +40,9 @@ Resolved via: direct judgment toward stated consistency goal. Picked: cc-conduct
 Decision needed: bundle identifier value.
 Picked: com.sirbepy.claudeconductor (reverse-DNS, no hyphens for macOS cleanliness, matches publisher SirBepy). Revisit: no.
 
-Parked (manual/external): GitHub repo + project folder stay `claude_usage_in_taskbar` (repo rename is a remote action; folder slug is a path fixture in walker.rs). Optional follow-up only; GitHub 301-redirects keep the updater URL working if renamed later.
+Done 2026-08-17: GitHub repo renamed to `SirBepy/claude_conductor` on Joe's go-ahead, and every in-code GitHub URL now points at the new slug. GitHub's 301 redirect keeps the old updater URL working for already-installed builds.
+
+Still parked (manual/external): the on-disk project folder stays `claude_usage_in_taskbar`. It cannot be renamed from a session whose own working directory sits inside it, and `walker.rs` keeps it as a path fixture regardless.
 
 RUN_LEDGER:
 - inventory sweep (Explore) -> complete, drove the map above

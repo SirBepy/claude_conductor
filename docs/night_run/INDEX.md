@@ -1,7 +1,7 @@
 # Night Run - 2026-05-09
 
 Branch: master
-Repo: https://github.com/SirBepy/claude_usage_in_taskbar
+Repo: https://github.com/SirBepy/claude_conductor
 Interval: 1h
 Scheduled: 3 (1 task + 2 buffer)
 Started: 03:38

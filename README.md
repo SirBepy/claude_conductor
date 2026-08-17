@@ -15,7 +15,7 @@ Windows is the currently released platform. macOS and Linux builds are paused (s
 
 ## Install
 
-Grab the latest build from the [Releases](https://github.com/SirBepy/claude_usage_in_taskbar/releases) page.
+Grab the latest build from the [Releases](https://github.com/SirBepy/claude_conductor/releases) page.
 
 All assets follow `Claude-Conductor_<version>_<os>_<arch>.<ext>`. Pick the row matching your machine.
 

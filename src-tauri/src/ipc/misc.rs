@@ -146,7 +146,7 @@ async fn fetch_build_datetime(version: &str, base_date: &str, data_dir: &std::pa
 
     // Fetch from GitHub releases API.
     let url = format!(
-        "https://api.github.com/repos/SirBepy/claude_usage_in_taskbar/releases/tags/v{version}"
+        "https://api.github.com/repos/SirBepy/claude_conductor/releases/tags/v{version}"
     );
     let result: Option<String> = async {
         #[derive(serde::Deserialize)]
