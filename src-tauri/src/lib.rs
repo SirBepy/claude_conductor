@@ -73,8 +73,8 @@ fn open_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
 
 /// Reopens `daemon.log` by path when a write fails, so a stale, deleted, or
 /// externally rotated handle recovers instead of dropping every line for the
-/// rest of the process's life (todo 665). If the reopen also fails, prints to
-/// stderr once so the outage is visible rather than silent.
+/// rest of the process's life (todo 665). If recovery fails for any reason,
+/// prints to stderr once so the outage is visible rather than silent.
 struct ReopeningFileWriter {
     path: std::path::PathBuf,
     file: std::fs::File,
@@ -87,14 +87,20 @@ impl std::io::Write for ReopeningFileWriter {
             self.warned = false;
             return Ok(n);
         }
-        match open_append(&self.path) {
-            Ok(reopened) => {
-                self.file = reopened;
-                self.file.write(buf)
+        // A reopen that succeeds but whose retry write still fails must warn too,
+        // otherwise a full disk resumes the exact silent-dark mode todo 665 closed.
+        let retried = open_append(&self.path).and_then(|reopened| {
+            self.file = reopened;
+            self.file.write(buf)
+        });
+        match retried {
+            Ok(n) => {
+                self.warned = false;
+                Ok(n)
             }
             Err(e) => {
                 if !self.warned {
-                    eprintln!("daemon.log: write failed and reopen failed, logging is silent: {e}");
+                    eprintln!("daemon.log: write failed and recovery failed, logging is silent: {e}");
                     self.warned = true;
                 }
                 Err(e)
