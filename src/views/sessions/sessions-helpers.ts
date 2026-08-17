@@ -144,22 +144,19 @@ export type SessionState =
   | "working" | "workingBg" | "waiting" | "unread" | "idle";
 
 /** Shared precedence cascade for statusPriority/stateTooltip/statusDotClass.
- * Question outranks busy (a permission prompt never sets awaiting="question");
- * `busyFirst` replicates stateTooltip's one pinned exception to that rule. */
+ * Question outranks busy: a permission prompt never sets awaiting="question",
+ * so a busy session with a pending permission prompt still needs input first. */
 export function classifySessionState(
   i: Instance,
   unread: Set<string>,
   attention: Set<string>,
   question: Set<string>,
-  busyFirst = false,
 ): SessionState {
   if (attention.has(i.session_id)) return "attention";
   if (i.kind === "external") return "external";
   if (i.kind === "automated") return "automated";
-  const isQuestion = question.has(i.session_id);
-  const isBusy = i.busy && i.awaiting !== "question";
-  if (busyFirst ? isBusy : isQuestion) return busyFirst ? "working" : "question";
-  if (busyFirst ? isQuestion : isBusy) return busyFirst ? "question" : "working";
+  if (question.has(i.session_id)) return "question";
+  if (i.busy && i.awaiting !== "question") return "working";
   if (i.awaiting === "working") return "workingBg";
   if (i.awaiting === "waiting") return "waiting";
   if (unread.has(i.session_id)) return "unread";
@@ -186,7 +183,7 @@ export function statusPriority(i: Instance, unread: Set<string>, attention: Set<
 }
 
 export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<string>, question: Set<string>, rateLimited: ReadonlySet<string> = new Set()): string {
-  const state = classifySessionState(i, unread, attention, question, true);
+  const state = classifySessionState(i, unread, attention, question);
   switch (state) {
     case "attention": return "Needs your permission - click to answer";
     case "external": return "External session (read-only)";

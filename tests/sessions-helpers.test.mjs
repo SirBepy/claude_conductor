@@ -284,11 +284,10 @@ describe("stateTooltip", () => {
   it("your turn", () => {
     expect(stateTooltip(makeInstance({ busy: false }), noUnread, noAttention, noQuestion)).toBe("Done - your turn");
   });
-  // Pins todo 283's discovery: unlike statusPriority/statusDotClass,
-  // stateTooltip checks busy BEFORE the question set, so a permission-shaped
-  // prompt on a still-busy session reads "Claude is running", not asked.
-  it("busy + question set overlap: busy wins here (unlike statusPriority/statusDotClass)", () => {
-    expect(stateTooltip(makeInstance({ session_id: "q", busy: true }), noUnread, noAttention, new Set(["q"]))).toBe("Claude is running");
+  // Todo 663: stateTooltip now agrees with statusPriority/statusDotClass -
+  // question outranks busy, matching the dot it's attached to.
+  it("busy + question set overlap: question wins, matching statusPriority/statusDotClass", () => {
+    expect(stateTooltip(makeInstance({ session_id: "q", busy: true }), noUnread, noAttention, new Set(["q"]))).toBe("Claude asked a question - click to answer");
   });
 });
 
