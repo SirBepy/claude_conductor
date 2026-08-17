@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
+// Shared, gitignored, session-agnostic - never a live session's <pid>-<ticks> folder.
+const SHOTS = ".for_bepy/screenshots/_specs";
+
 // Todo 602: visual capture only, no assertions beyond "it rendered" - the
 // screenshots are the deliverable (commit 6a04d431 pinned the answer bar
 // below the scrolling body via .prompt-card__answer-bar; see host.ts).
@@ -38,12 +41,12 @@ test("answer bar stays visible below scrolled option content", async ({ page }) 
   await freeText.fill("My own typed answer to prove the field stays reachable");
 
   await card.screenshot({
-    path: ".for_bepy/screenshots/41656-134313877792675983/auq-answer-bar-unscrolled.png",
+    path: `${SHOTS}/auq-answer-bar-unscrolled.png`,
   });
 
   await card.locator(".prompt-card__body").evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await card.screenshot({
-    path: ".for_bepy/screenshots/41656-134313877792675983/auq-answer-bar-scrolled.png",
+    path: `${SHOTS}/auq-answer-bar-scrolled.png`,
   });
 
   const barBox = (await card.locator(".prompt-card__answer-bar").boundingBox())!;
