@@ -7,7 +7,7 @@
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::Builder::from_env(
         env_logger::Env::default()
-            .default_filter_or("info,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn"),
+            .default_filter_or(claude_conductor_lib::default_log_filter()),
     )
     .init();
     claude_conductor_lib::daemon::run_daemon_main().await

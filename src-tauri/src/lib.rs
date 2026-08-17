@@ -37,6 +37,12 @@ use crate::state::AppState;
 use crate::types::AuthState;
 use crate::auth::session;
 
+/// Shared env_logger default filter for both the app binary's daemon mode
+/// and the standalone `cc_conductor_daemon` bin, so the two never drift.
+pub fn default_log_filter() -> &'static str {
+    "info,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn"
+}
+
 /// Initialize logging for the detached daemon process. The daemon is spawned
 /// detached with no console, so without an explicit file target its log output
 /// goes nowhere - which is why an unexpected daemon exit leaves no trail. Writes
@@ -74,7 +80,7 @@ fn init_daemon_file_logger() {
     });
     let mut builder = env_logger::Builder::from_env(
         env_logger::Env::default()
-            .default_filter_or("info,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn"),
+            .default_filter_or(default_log_filter()),
     );
     if let Some(file) = file {
         builder.target(env_logger::Target::Pipe(Box::new(file)));
