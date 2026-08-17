@@ -39,7 +39,7 @@ async function renderUsageDials(host: HTMLElement): Promise<void> {
 
   const settings = getSettings();
   const rows = buildOverlayRows(accounts, usageMap);
-  host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE)).join("");
+  host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE, true)).join("");
   host.hidden = false;
 }
 

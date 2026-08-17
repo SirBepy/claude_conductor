@@ -171,14 +171,19 @@ function resetPopupHtml(row: OverlayRow): string {
   return `<div class="oc-reset-pop">${rows}</div>`;
 }
 
+/** `compact` suppresses the reset popup entirely - the remote/phone Chats
+ * header (usage-dials.ts) sits flush against the top of the viewport with no
+ * headroom above the dial row (unlike the overlay window's `.oc-dial-row`
+ * 78px top padding), so the popup would render clipped off-screen there. */
 export function cellHtml(
   row: OverlayRow,
   settings: ValueColorSettings,
   showDisc: boolean,
   scale = 1.2,
+  compact = false,
 ): string {
   return `<div class="oc-cell" data-acc-id="${escapeHtml(row.id)}">
-    ${resetPopupHtml(row)}
+    ${compact ? "" : resetPopupHtml(row)}
     ${dialHtml(row, settings, showDisc, scale)}
     ${infoHtml(row, settings)}
   </div>`;
