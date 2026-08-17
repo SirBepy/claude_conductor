@@ -35,7 +35,10 @@ use super::remote_ws_pump::{pump_events, pump_global_events};
 const SAFE_METHODS: &[&str] = &[
     "list_instances",
     "list_pending_prompts",
+    // Write: spawns a claude process rooted at any client-supplied cwd. The
+    // baseline capability every "strictly weaker" rationale below is measured against.
     "start_session",
+    // Write: session_id is looked up in the live session map, not a path.
     "send_message",
     "cancel_turn",
     "respond_permission",
@@ -60,6 +63,8 @@ const SAFE_METHODS: &[&str] = &[
     // (already remote-callable). Without this the button silently no-op'd on
     // remote (403, swallowed by the caller).
     "register_historical",
+    // Read-only: path is canonicalized and prefix-checked against
+    // <app-data>/chat-attachments/ in read_attachment_impl.
     "read_attachment",
     // Write: phone composer paperclip upload. Bytes land in the path-validated
     // chat-attachments dir (write_attachment rejects path-traversal session ids),
@@ -67,6 +72,8 @@ const SAFE_METHODS: &[&str] = &[
     "paste_attachment",
     "list_characters",
     "list_project_groups",
+    // Read-only: `file` is canonicalized and prefix-checked against the
+    // character's own dir via Character::asset_path_checked (todo 656).
     "character_asset_url",
     // Read-only: resolves the same character/slot voiceline rule
     // `notifications::fire` uses natively (mute/whitelist/character gating
@@ -82,11 +89,15 @@ const SAFE_METHODS: &[&str] = &[
     // whitelist pick_random; cannot touch any other settings field.
     "ensure_session_character",
     "list_projects",
+    // Read-only, gated by reject_unknown(cwd) in registry.rs (todo 656).
     "project_last_activity_at",
     // Read-only account-pin resolution, gated by reject_unknown(cwd) in the
     // handler (registry.rs) since cwd is client-supplied.
     "resolve_project_account",
+    // Read-only, gated by reject_unknown(root) in registry.rs (todo 656).
     "get_project_tech",
+    // Read-only fs read + base64 return; gated by reject_unknown(root) in
+    // registry.rs - was the worst of the four todo-656 findings (unguarded).
     "get_project_icon",
     // Read-only usage/token history for the remote homescreen + statistics.
     "get_history",
@@ -119,6 +130,8 @@ const SAFE_METHODS: &[&str] = &[
     "get_settings",
     // Read-only filesystem scan of the slash-command/skill dirs so the phone's
     // `/` autocomplete popup populates like desktop's (was always empty otherwise).
+    // NOT reject_unknown-gated: project_dir is client-supplied and scan_all reads
+    // <project_dir>/.claude/{commands,skills}/*.md content (todo 656 out-of-scope finding).
     "list_slash_commands",
     // Scheduled-items list + mutators (ai_todo 257 shipped the read; ai_todo 259
     // added the writes). Rationale for exposing the mutators remotely: a paired
@@ -160,6 +173,7 @@ const SAFE_METHODS: &[&str] = &[
     // Read/write worktree picker data (ai_todo 434): phone had no daemon RPC
     // for any of these, so the picker silently showed nothing. Same git
     // subprocess calls the desktop Tauri commands already run locally.
+    // All path params reject_unknown-gated in worktrees.rs (verified todo 656).
     "list_worktree_details",
     "create_worktree",
     "remove_worktree",
@@ -169,9 +183,9 @@ const SAFE_METHODS: &[&str] = &[
     "get_range_files",
     "get_file_diff",
     // Read-only statusbar chips + location-picker scan (mirrors desktop's
-    // `ipc::git` / `ipc::servers` / `ipc::claude_scopes` commands). Missing
-    // here was the confirmed root cause of the phone's forever-loading git
-    // chips and the "Open .claude" modal's raw exception string.
+    // `ipc::git` / `ipc::servers` / `ipc::claude_scopes` commands), path
+    // params reject_unknown-gated in statusbar.rs. Missing here was the
+    // confirmed root cause of the phone's forever-loading git chips.
     "get_git_info",
     "get_git_dirty",
     "get_commit_sync",
