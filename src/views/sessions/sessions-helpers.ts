@@ -139,48 +139,67 @@ export function ownedScheduledNewChatIds(items: ScheduledItem[], placeholderId: 
     .map((it) => it.id);
 }
 
+export type SessionState =
+  | "attention" | "external" | "automated" | "question"
+  | "working" | "workingBg" | "waiting" | "unread" | "idle";
+
+/** Shared precedence cascade for statusPriority/stateTooltip/statusDotClass.
+ * Question outranks busy (a permission prompt never sets awaiting="question");
+ * `busyFirst` replicates stateTooltip's one pinned exception to that rule. */
+export function classifySessionState(
+  i: Instance,
+  unread: Set<string>,
+  attention: Set<string>,
+  question: Set<string>,
+  busyFirst = false,
+): SessionState {
+  if (attention.has(i.session_id)) return "attention";
+  if (i.kind === "external") return "external";
+  if (i.kind === "automated") return "automated";
+  const isQuestion = question.has(i.session_id);
+  const isBusy = i.busy && i.awaiting !== "question";
+  if (busyFirst ? isBusy : isQuestion) return busyFirst ? "working" : "question";
+  if (busyFirst ? isQuestion : isBusy) return busyFirst ? "question" : "working";
+  if (i.awaiting === "working") return "workingBg";
+  if (i.awaiting === "waiting") return "waiting";
+  if (unread.has(i.session_id)) return "unread";
+  return "idle";
+}
+
 /** 0=NeedsPermission, 1=Question, 2=Working, 3=Waiting(external process),
- * 4=Done(unread), 5=YourTurn, 6=External/Automated.
- * Question (Claude is waiting on the user) sorts above Working so idle-blocked
- * agents surface first for triage. Waiting (parked on a CI run / long command)
- * sorts just below Working and is its OWN tier - it used to share Working's
- * bucket, which hid the distinction between "actively running" and "blocked on
- * a script". `awaiting === "working"` (own background subagents/tasks still
- * running, will self-resume) is Working, NOT Waiting: from the user's
- * perspective the chat is still in progress. */
+ * 4=Done(unread), 5=YourTurn, 6=External/Automated. */
 export function statusPriority(i: Instance, unread: Set<string>, attention: Set<string>, question: Set<string>): number {
-  if (attention.has(i.session_id)) return 0;
-  if (i.kind === "external" || i.kind === "automated") return 6;
-  // Pending-prompt check (question OR permission-shaped, see `question`'s
-  // construction in sidebar-entries.ts) must outrank the busy check - a
-  // permission prompt never sets awaiting="question", so checking busy first
-  // would misreport a session that's actually blocked on the user as "working".
-  if (question.has(i.session_id)) return 1;
-  if (i.busy && i.awaiting !== "question") return 2;
-  // `question` is built from prompts this window knows about, so an unselected
-  // session's prompt can be missing from it. Without this the line above has
-  // already excluded awaiting==="question", and the row falls through to Done.
-  if (i.awaiting === "question") return 1;
-  // Background subagents/tasks of this session still running: still working.
-  if (i.awaiting === "working") return 2;
-  // Parked on an external process (CI / long command): its own status tier.
-  if (i.awaiting === "waiting") return 3;
-  if (unread.has(i.session_id)) return 4;
-  return 5;
+  const state = classifySessionState(i, unread, attention, question);
+  switch (state) {
+    case "attention": return 0;
+    case "external": case "automated": return 6;
+    case "question": return 1;
+    case "working": case "workingBg": return 2;
+    case "waiting": return 3;
+    case "unread": case "idle":
+      // `question` is built from prompts this window knows about, so an
+      // unselected session's prompt can be missing from it - fall back to
+      // the instance's own field rather than misreporting it as Done.
+      if (i.awaiting === "question") return 1;
+      return state === "unread" ? 4 : 5;
+  }
 }
 
 export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<string>, question: Set<string>, rateLimited: ReadonlySet<string> = new Set()): string {
-  if (attention.has(i.session_id)) return "Needs your permission - click to answer";
-  if (i.kind === "external") return "External session (read-only)";
-  if (i.kind === "automated") return "Automated session (remote-controlled)";
-  if (i.busy && i.awaiting !== "question") return "Claude is running";
-  if (question.has(i.session_id)) return "Claude asked a question - click to answer";
-  if (i.awaiting === "working") return "Working in the background (subagents / tasks running)";
-  if (i.awaiting === "waiting") return "Waiting on an external process (CI / a long command)";
-  if (i.awaiting === "close_failed") return "Close did not confirm - the chat may still be open";
-  if (rateLimited.has(i.session_id)) return "Usage limit reached - will auto-resume on reset";
-  if (unread.has(i.session_id)) return "Claude responded - click to read";
-  return "Done - your turn";
+  const state = classifySessionState(i, unread, attention, question, true);
+  switch (state) {
+    case "attention": return "Needs your permission - click to answer";
+    case "external": return "External session (read-only)";
+    case "automated": return "Automated session (remote-controlled)";
+    case "working": return "Claude is running";
+    case "question": return "Claude asked a question - click to answer";
+    case "workingBg": return "Working in the background (subagents / tasks running)";
+    case "waiting": return "Waiting on an external process (CI / a long command)";
+    case "unread": case "idle":
+      if (i.awaiting === "close_failed") return "Close did not confirm - the chat may still be open";
+      if (rateLimited.has(i.session_id)) return "Usage limit reached - will auto-resume on reset";
+      return state === "unread" ? "Claude responded - click to read" : "Done - your turn";
+  }
 }
 
 /** Maps a session to its display segment index.
@@ -359,15 +378,16 @@ export function statusDotClass(
   question: Set<string>,
   rateLimited: ReadonlySet<string> = new Set(),
 ): string {
-  if (attention.has(i.session_id)) return "st-attention";
-  if (i.kind === "external" || i.kind === "automated") return "st-external";
-  // Same ordering fix as statusPriority: pending-prompt outranks busy.
-  if (question.has(i.session_id)) return markerToStatusClass("question");
-  if (i.busy && i.awaiting !== "question") return markerToStatusClass("working");
-  if (i.awaiting === "working") return markerToStatusClass("working");
-  if (i.awaiting === "waiting") return markerToStatusClass("waiting");
-  if (i.awaiting === "close_failed") return markerToStatusClass("close_failed");
-  if (rateLimited.has(i.session_id)) return "st-rate-limited";
-  if (unread.has(i.session_id)) return "st-done";
-  return markerToStatusClass("done");
+  const state = classifySessionState(i, unread, attention, question);
+  switch (state) {
+    case "attention": return "st-attention";
+    case "external": case "automated": return "st-external";
+    case "question": return markerToStatusClass("question");
+    case "working": case "workingBg": return markerToStatusClass("working");
+    case "waiting": return markerToStatusClass("waiting");
+    case "unread": case "idle":
+      if (i.awaiting === "close_failed") return markerToStatusClass("close_failed");
+      if (rateLimited.has(i.session_id)) return "st-rate-limited";
+      return state === "unread" ? "st-done" : markerToStatusClass("done");
+  }
 }

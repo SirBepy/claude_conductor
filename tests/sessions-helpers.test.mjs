@@ -284,6 +284,36 @@ describe("stateTooltip", () => {
   it("your turn", () => {
     expect(stateTooltip(makeInstance({ busy: false }), noUnread, noAttention, noQuestion)).toBe("Done - your turn");
   });
+  // Pins todo 283's discovery: unlike statusPriority/statusDotClass,
+  // stateTooltip checks busy BEFORE the question set, so a permission-shaped
+  // prompt on a still-busy session reads "Claude is running", not asked.
+  it("busy + question set overlap: busy wins here (unlike statusPriority/statusDotClass)", () => {
+    expect(stateTooltip(makeInstance({ session_id: "q", busy: true }), noUnread, noAttention, new Set(["q"]))).toBe("Claude is running");
+  });
+});
+
+// Full precedence-table pin for todo 283's classifier extraction: locks in
+// every per-function quirk found reading the pre-refactor cascades so the
+// unified classifier can't silently normalize one function into another.
+describe("precedence table quirks (pre-refactor pin, todo 283)", () => {
+  it("statusPriority: awaiting==='question' fallback fires even when the question set omits the id", () => {
+    const i = makeInstance({ session_id: "missing-from-set", busy: false, awaiting: "question" });
+    expect(statusPriority(i, new Set(), new Set(), new Set())).toBe(1);
+  });
+  it("statusDotClass: has no such fallback - falls through to idle when the question set omits the id", () => {
+    const i = makeInstance({ session_id: "missing-from-set", busy: false, awaiting: "question" });
+    expect(statusDotClass(i, new Set(), new Set(), new Set())).toBe("st-your-turn");
+  });
+  it("stateTooltip: has no such fallback either - falls through to 'Done - your turn'", () => {
+    const i = makeInstance({ session_id: "missing-from-set", busy: false, awaiting: "question" });
+    expect(stateTooltip(i, new Set(), new Set(), new Set())).toBe("Done - your turn");
+  });
+  it("stateTooltip: 'automated' kind gets its own text, distinct from 'external'", () => {
+    expect(stateTooltip(makeInstance({ kind: "automated" }), new Set(), new Set(), new Set())).toBe("Automated session (remote-controlled)");
+  });
+  it("statusDotClass: 'automated' kind shares 'external's class", () => {
+    expect(statusDotClass(makeInstance({ kind: "automated" }), new Set(), new Set(), new Set())).toBe("st-external");
+  });
 });
 
 describe("sortSessions", () => {
