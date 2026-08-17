@@ -125,7 +125,7 @@ mod live_cwd_tests {
 
     fn write_tmp(name: &str, body: &str) -> std::path::PathBuf {
         let mut path = std::env::temp_dir();
-        path.push(format!("cc_livecwd_{name}.jsonl"));
+        path.push(format!("cc_livecwd_{name}_{}.jsonl", std::process::id()));
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(body.as_bytes()).unwrap();
         path
