@@ -130,8 +130,7 @@ const SAFE_METHODS: &[&str] = &[
     "get_settings",
     // Read-only filesystem scan of the slash-command/skill dirs so the phone's
     // `/` autocomplete popup populates like desktop's (was always empty otherwise).
-    // NOT reject_unknown-gated: project_dir is client-supplied and scan_all reads
-    // <project_dir>/.claude/{commands,skills}/*.md content (todo 656 out-of-scope finding).
+    // Guarded by reject_unknown(project_dir) in registry.rs when project_dir is set.
     "list_slash_commands",
     // Scheduled-items list + mutators (ai_todo 257 shipped the read; ai_todo 259
     // added the writes). Rationale for exposing the mutators remotely: a paired
