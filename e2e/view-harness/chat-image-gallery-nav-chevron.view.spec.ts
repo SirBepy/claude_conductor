@@ -2,10 +2,9 @@ import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
 // Regression: the gallery's stage <img> used to sit above the prev/next nav
-// buttons in stacking order (both position:absolute, img with no z-index
-// appended after the nav in some paths), so a full-bleed image ate the click
-// meant for the left chevron. chat-image-gallery.css now pins the nav to
-// z-index:1 above the stage. Drives the real openChatImageGallery entry point.
+// buttons in stacking order, so a full-bleed image ate the click meant for
+// the left chevron. chat-image-gallery.css now pins the nav to z-index:1
+// above the stage.
 
 // 1x1 PNG, tiny but enough to force the <img> to actually paint and cover
 // the stage the nav buttons are absolutely positioned over.

@@ -3,9 +3,7 @@ import { mountView } from "./harness";
 
 // Regression (commit 7c355cf9): the phone hardware back button used to skip
 // straight past an open lightbox/gallery to the view stack (or exit), instead
-// of closing the topmost overlay first. Drives the real registerOverlayBack
-// wiring in lightbox.ts / chat-image-gallery.ts through back-button.ts's
-// handleBack(), same entry points production's popstate listener calls.
+// of closing the topmost overlay first.
 
 declare global {
   interface Window {

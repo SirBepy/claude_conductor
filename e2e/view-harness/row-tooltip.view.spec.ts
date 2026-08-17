@@ -4,8 +4,7 @@ import { mountView } from "./harness";
 // Regression (commit ecc058fb): a sidebar row tooltip shown by a mobile tap
 // (mouseover compat event, no mouseout ever fires) used to stay stuck open
 // forever. row-tooltip.ts now dismisses it on the next outside pointerdown
-// and via a 3s auto-hide backstop. Drives the real attachTooltips entry point
-// against a plain anchor, same direct-import pattern as the lightbox specs.
+// and via a 3s auto-hide backstop.
 
 async function setupRow(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(async () => {
