@@ -16,6 +16,7 @@ export interface QuestionRenderState {
   activeTab: number;
   additionalMessage: string;
   resizeObs: ResizeObserver | null;
+  panelResizeObs: ResizeObserver | null;
 }
 
 export function domainVar(domain?: QuestionDomain): string {

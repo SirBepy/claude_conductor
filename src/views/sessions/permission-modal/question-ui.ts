@@ -63,6 +63,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     activeTab: Math.min(Math.max(opts.initialDraft?.activeTab ?? 0, 0), totalPanels - 1),
     additionalMessage: opts.initialDraft?.additionalMessage ?? "",
     resizeObs: null,
+    panelResizeObs: null,
   };
 
   // Review-step extra message + pasted-image attachments. Only ever populated
@@ -169,6 +170,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (livePollTimer !== null) clearInterval(livePollTimer);
     cancelAuqPush();
     if (state.resizeObs) { try { state.resizeObs.disconnect(); } catch { /* ignore */ } state.resizeObs = null; }
+    if (state.panelResizeObs) { try { state.panelResizeObs.disconnect(); } catch { /* ignore */ } state.panelResizeObs = null; }
     if (messagesEl) {
       messagesEl.style.paddingBottom = savedPaddingBottom;
       messagesEl.scrollTop = savedScrollTop;

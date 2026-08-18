@@ -98,6 +98,18 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     }
     const activePanel = track.querySelector<HTMLElement>(`.prompt-panel[data-panel="${state.activeTab}"]`);
     if (activePanel) track.style.height = `${activePanel.offsetHeight}px`;
+
+    // .prompt-track-viewport clips rather than scrolls vertically (see its CSS
+    // doc comment), so a height snapshot going stale after this tick (webfont
+    // swap-in, markdown reflow) cuts the last option's text off mid-line.
+    // Keep it live while this panel stays active.
+    state.panelResizeObs?.disconnect();
+    if (activePanel && typeof ResizeObserver !== "undefined") {
+      state.panelResizeObs = new ResizeObserver(() => {
+        track.style.height = `${activePanel.offsetHeight}px`;
+      });
+      state.panelResizeObs.observe(activePanel);
+    }
   }
 
   // Single source for the footer's primary button: Next on any question
