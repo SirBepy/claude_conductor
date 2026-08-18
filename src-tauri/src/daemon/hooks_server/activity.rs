@@ -47,8 +47,9 @@ fn is_running(task: &Value) -> bool {
     }
 }
 
-/// `Working` wins over `Waiting`: a local build running alongside a CI poll is
-/// still work. A non-`shell` task is a subagent, which is always local work.
+/// `Working` wins over waiting: a local build alongside a CI poll is still
+/// work. A non-`shell` task is a subagent, always local work. The two waiting
+/// kinds differ only in whether a process would die if the machine slept.
 pub(crate) fn classify(background_tasks: &[Value], session_crons: &[Value]) -> TurnActivity {
     let running: Vec<&Value> = background_tasks.iter().filter(|t| is_running(t)).collect();
     for task in &running {
@@ -58,8 +59,11 @@ pub(crate) fn classify(background_tasks: &[Value], session_crons: &[Value]) -> T
             return TurnActivity::Working;
         }
     }
-    if !running.is_empty() || !session_crons.is_empty() {
-        return TurnActivity::Waiting;
+    if !running.is_empty() {
+        return TurnActivity::WaitingOnProcess;
+    }
+    if !session_crons.is_empty() {
+        return TurnActivity::WaitingOnSchedule;
     }
     TurnActivity::Idle
 }
@@ -86,19 +90,19 @@ mod tests {
 
     #[test]
     fn a_ci_poll_is_waiting() {
-        assert_eq!(classify(&[shell("gh run watch 123 --exit-status")], &[]), TurnActivity::Waiting);
-        assert_eq!(classify(&[shell("gh pr checks 45 --watch")], &[]), TurnActivity::Waiting);
+        assert_eq!(classify(&[shell("gh run watch 123 --exit-status")], &[]), TurnActivity::WaitingOnProcess);
+        assert_eq!(classify(&[shell("gh pr checks 45 --watch")], &[]), TurnActivity::WaitingOnProcess);
     }
 
     #[test]
     fn a_bare_sleep_loop_is_waiting() {
-        assert_eq!(classify(&[shell("sleep 40")], &[]), TurnActivity::Waiting);
+        assert_eq!(classify(&[shell("sleep 40")], &[]), TurnActivity::WaitingOnProcess);
     }
 
     #[test]
     fn wait_subcommands_are_waiting_without_naming_each_vendor() {
         for cmd in ["kubectl wait --for=condition=ready pod/x", "docker wait c1", "aws cloudformation wait stack-create-complete"] {
-            assert_eq!(classify(&[shell(cmd)], &[]), TurnActivity::Waiting, "{cmd}");
+            assert_eq!(classify(&[shell(cmd)], &[]), TurnActivity::WaitingOnProcess, "{cmd}");
         }
     }
 
@@ -136,7 +140,7 @@ mod tests {
     /// session is parked by construction.
     #[test]
     fn a_pending_cron_alone_is_waiting() {
-        assert_eq!(classify(&[], &[json!({"id": "c1"})]), TurnActivity::Waiting);
+        assert_eq!(classify(&[], &[json!({"id": "c1"})]), TurnActivity::WaitingOnSchedule);
     }
 
     #[test]

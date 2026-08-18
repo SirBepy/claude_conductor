@@ -50,7 +50,35 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         frozen_needs_continue: false,
         auto_frozen: false,
         held_count: 0,
+        local_task_running: false,
     }
+}
+
+fn instance_with_local_task(session_id: &str, awaiting: Option<&str>) -> Instance {
+    let mut i = instance_awaiting(session_id, false, false, awaiting);
+    i.local_task_running = true;
+    i
+}
+
+// --- instance_is_idle: sleep safety -------------------------------------
+
+/// A chat parked on `gh run watch` reports `waiting`, not `working`, so the
+/// awaiting check alone would let the machine sleep and kill the poll.
+#[test]
+fn a_waiting_session_with_a_live_poller_is_not_idle() {
+    assert!(!instance_is_idle(&instance_with_local_task("a", Some("waiting"))));
+}
+
+/// The other kind of waiting: a scheduled wake is daemon-owned, nothing local
+/// dies, so it must NOT hold the machine awake.
+#[test]
+fn a_waiting_session_with_only_a_scheduled_wake_is_idle() {
+    assert!(instance_is_idle(&instance_awaiting("a", false, false, Some("waiting"))));
+}
+
+#[test]
+fn a_done_session_with_a_live_task_is_still_not_idle() {
+    assert!(!instance_is_idle(&instance_with_local_task("a", Some("done"))));
 }
 
 // --- all_sessions_idle --------------------------------------------------

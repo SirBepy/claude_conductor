@@ -9,11 +9,21 @@ pub enum TurnActivity {
     Idle,
     /// Local compute still running - a build, a subagent fan-out.
     Working,
-    /// Parked on something off this machine: a CI poll, a scheduled wake.
-    Waiting,
+    /// Parked on a poller alive on THIS machine. Sleeping kills the poll, so
+    /// it reads as `waiting` in the UI but still holds the machine awake.
+    WaitingOnProcess,
+    /// Parked on a daemon-owned scheduled wake. Nothing local to lose.
+    WaitingOnSchedule,
 }
 
 impl TurnActivity {
+    /// True when a process on this machine dies if the machine sleeps - the
+    /// question `/sleep-when-done` actually needs answered, which the
+    /// `awaiting` string alone cannot ("waiting" covers both kinds).
+    pub fn holds_local_process(self) -> bool {
+        matches!(self, TurnActivity::Working | TurnActivity::WaitingOnProcess)
+    }
+
     /// Correct a self-report against what the CLI actually still has live.
     /// Only `done` or a missing report is corrected - a deliberate
     /// `question`/`waiting`/`working` is the model's call and stands.
@@ -23,7 +33,9 @@ impl TurnActivity {
         }
         match self {
             TurnActivity::Working => Some("working".to_string()),
-            TurnActivity::Waiting => Some("waiting".to_string()),
+            TurnActivity::WaitingOnProcess | TurnActivity::WaitingOnSchedule => {
+                Some("waiting".to_string())
+            }
             TurnActivity::Idle => reported,
         }
     }
@@ -96,13 +108,21 @@ impl Registry {
     }
 
     /// Record what the Stop hook says this session is still doing. `Idle`
-    /// removes the entry so a stale verdict can't outlive the turn.
+    /// removes the entry so a stale verdict can't outlive the turn. Also
+    /// mirrors the sleep-safety half onto `Instance` - `when_done` only ever
+    /// sees `Instance`, never this side map.
     pub fn set_turn_activity(&self, session_id: &str, activity: TurnActivity) {
-        let mut guard = self.turn_activity.lock().unwrap();
-        if activity == TurnActivity::Idle {
-            guard.remove(session_id);
-        } else {
-            guard.insert(session_id.to_string(), activity);
+        {
+            let mut guard = self.turn_activity.lock().unwrap();
+            if activity == TurnActivity::Idle {
+                guard.remove(session_id);
+            } else {
+                guard.insert(session_id.to_string(), activity);
+            }
+        }
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(i) = inner.get_mut(session_id) {
+            i.local_task_running = activity.holds_local_process();
         }
     }
 
@@ -160,14 +180,14 @@ mod tests {
     #[test]
     fn a_done_report_is_corrected_to_what_the_cli_still_has_live() {
         assert_eq!(corrected(TurnActivity::Working, Some("done")).as_deref(), Some("working"));
-        assert_eq!(corrected(TurnActivity::Waiting, Some("done")).as_deref(), Some("waiting"));
+        assert_eq!(corrected(TurnActivity::WaitingOnProcess, Some("done")).as_deref(), Some("waiting"));
     }
 
     /// The defect this fixes: a chat parked on `gh run watch` used to be forced
     /// to "working" by the old count-only override.
     #[test]
     fn a_missing_report_is_corrected_too() {
-        assert_eq!(corrected(TurnActivity::Waiting, None).as_deref(), Some("waiting"));
+        assert_eq!(corrected(TurnActivity::WaitingOnSchedule, None).as_deref(), Some("waiting"));
         assert_eq!(corrected(TurnActivity::Working, None).as_deref(), Some("working"));
     }
 
@@ -188,14 +208,46 @@ mod tests {
         assert_eq!(corrected(TurnActivity::Idle, None), None);
     }
 
+    /// Only the two kinds that leave a process alive on this machine hold it
+    /// awake - a scheduled wake does not.
+    #[test]
+    fn holds_local_process_separates_the_two_waiting_kinds() {
+        assert!(TurnActivity::Working.holds_local_process());
+        assert!(TurnActivity::WaitingOnProcess.holds_local_process());
+        assert!(!TurnActivity::WaitingOnSchedule.holds_local_process());
+        assert!(!TurnActivity::Idle.holds_local_process());
+    }
+
+    #[test]
+    fn both_waiting_kinds_still_read_as_waiting_in_the_ui() {
+        assert_eq!(corrected(TurnActivity::WaitingOnSchedule, Some("done")).as_deref(), Some("waiting"));
+        assert_eq!(corrected(TurnActivity::WaitingOnProcess, Some("done")).as_deref(), Some("waiting"));
+    }
+
+    #[test]
+    fn set_turn_activity_mirrors_sleep_safety_onto_the_instance() {
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(crate::types::Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z");
+
+        registry.set_turn_activity("s", TurnActivity::WaitingOnProcess);
+        assert!(registry.get("s").unwrap().local_task_running, "a live poller holds the machine awake");
+
+        registry.set_turn_activity("s", TurnActivity::WaitingOnSchedule);
+        assert!(!registry.get("s").unwrap().local_task_running, "a scheduled wake does not");
+
+        registry.set_turn_activity("s", TurnActivity::Idle);
+        assert!(!registry.get("s").unwrap().local_task_running);
+    }
+
     #[test]
     fn turn_activity_roundtrip_and_idle_clears() {
         let registry = Registry::new();
         assert_eq!(registry.turn_activity("s"), TurnActivity::Idle);
         registry.set_turn_activity("s", TurnActivity::Working);
         assert_eq!(registry.turn_activity("s"), TurnActivity::Working);
-        registry.set_turn_activity("s", TurnActivity::Waiting);
-        assert_eq!(registry.turn_activity("s"), TurnActivity::Waiting);
+        registry.set_turn_activity("s", TurnActivity::WaitingOnProcess);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::WaitingOnProcess);
         registry.set_turn_activity("s", TurnActivity::Idle);
         assert_eq!(registry.turn_activity("s"), TurnActivity::Idle);
     }

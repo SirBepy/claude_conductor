@@ -53,8 +53,11 @@ fn log_comment(line: &str) {
 /// NO_PROGRESS_LIMIT) disarms the protocol, same as a hung busy turn. A session
 /// left `awaiting == "question"` is handled separately by the prompt poll; if
 /// it has no pending prompt entry we still treat it as idle.
+/// `local_task_running` covers what `awaiting` cannot: it collapses a live CI
+/// poller and a pending scheduled wake into the same `"waiting"`, and only the
+/// poller dies when the machine sleeps.
 fn instance_is_idle(i: &crate::types::Instance) -> bool {
-    !i.busy && i.awaiting.as_deref() != Some("working")
+    !i.busy && i.awaiting.as_deref() != Some("working") && !i.local_task_running
 }
 
 /// True when every live (not-ended) session is idle. An empty list (after

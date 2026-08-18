@@ -201,6 +201,11 @@ pub struct Instance {
     /// from `DaemonState::draft_store` (never broadcast).
     #[serde(default)]
     pub held_count: u32,
+    /// A background process from the last turn is still alive on THIS machine.
+    /// `awaiting` cannot answer that: it calls a live poller and a pending
+    /// scheduled wake both "waiting", and only the first dies on sleep.
+    #[serde(default)]
+    pub local_task_running: bool,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -360,6 +365,7 @@ mod tests {
             frozen_needs_continue: false,
             auto_frozen: false,
             held_count: 0,
+            local_task_running: false,
         };
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();
