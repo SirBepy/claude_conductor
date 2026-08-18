@@ -18,7 +18,11 @@ use std::sync::Arc;
 /// the sidebar NOW - the question set/clear paths used to skip the publish
 /// (uniquely among all awaiting writers), leaving rows on a stale status until
 /// the 15s poll or an unrelated event happened by.
-fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option<&str>, asking: bool) {
+/// Shared with `permission.rs`: a blocking tool-permission prompt is just as
+/// much "waiting on the user" as a question card, and used to write nothing
+/// here at all - leaving the phone and every non-receiving window showing
+/// In Progress while claude sat blocked.
+pub(super) fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option<&str>, asking: bool) {
     let Some(sid) = session_id else { return };
     let changed = if asking {
         // Publish only for sessions the registry actually tracks - hook tests

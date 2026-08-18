@@ -86,6 +86,10 @@ pub(super) async fn on_permission_request(
     crate::daemon::jarvis_wake::wake_on_worker_blocked(
         &ctx.state, body.session_id.as_deref(), &body.id, Some(body.tool_name.as_str()),
     ).await;
+    // Daemon-authoritative "needs input", same as the question path: without
+    // it the only record of this prompt is a window-local JS Map, so any
+    // surface that didn't receive the broadcast keeps rendering In Progress.
+    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), true);
     let subs = ctx.state.notifier.publish("permission_request", payload);
     log::info!(
         "[perm-relay] published permission_request id={} tool={} session={:?} -> {} subscriber(s)",
@@ -101,14 +105,22 @@ pub(super) async fn on_permission_request(
             )
         }
     };
+    // Answered or timed out - claude resumes the same turn, so the row goes
+    // back to In Progress. `clear_awaiting_if_question` inside makes this safe
+    // against a newer turn that already wrote a real end-of-turn status.
+    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), false);
     ctx.state.remove_prompt(&body.id).await;
     result
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_auto_accept_eligible};
-    use serde_json::json;
+    use super::*;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::state::DaemonState;
+    use crate::types::Settings;
+    use std::path::Path;
 
     #[test]
     fn is_auto_accept_eligible_requires_the_flag_and_a_non_question_payload() {
@@ -117,5 +129,103 @@ mod tests {
         assert!(is_auto_accept_eligible(true, &ordinary));
         assert!(!is_auto_accept_eligible(false, &ordinary), "flag off never auto-accepts");
         assert!(!is_auto_accept_eligible(true, &question), "question-shaped always needs a human");
+    }
+
+    fn state_with_busy_session(sid: &str) -> Arc<DaemonState> {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session(sid, Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z");
+        state.registry.set_busy(sid, true);
+        state
+    }
+
+    fn perm_body(sid: &str) -> PermRequestBody {
+        PermRequestBody {
+            id: "p1".to_string(),
+            tool_name: "Bash".to_string(),
+            input: json!({ "command": "rm -rf build" }),
+            session_id: Some(sid.to_string()),
+        }
+    }
+
+    /// Waits for the blocked handler to register its oneshot, so the assert
+    /// below can't race the spawn.
+    async fn await_pending(state: &Arc<DaemonState>, id: &str) {
+        for _ in 0..200 {
+            if state.pending.lock().await.contains_key(id) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("permission handler never registered its pending oneshot");
+    }
+
+    /// A blocking tool-permission prompt must be visible in the REGISTRY, not
+    /// just in the window that received the broadcast - otherwise the phone
+    /// and every other surface keep saying In Progress while claude is blocked.
+    #[tokio::test]
+    async fn permission_prompt_marks_input_needed_and_clears_on_answer() {
+        let state = state_with_busy_session("s1");
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let handle = tokio::spawn(async move {
+            on_permission_request(AxState(ctx), ValidatedJson(perm_body("s1"))).await;
+        });
+        await_pending(&state, "p1").await;
+
+        assert_eq!(
+            state.registry.get("s1").unwrap().awaiting.as_deref(),
+            Some("question"),
+            "a blocked permission prompt is 'needs input', busy or not"
+        );
+
+        let tx = state.pending.lock().await.remove("p1").unwrap();
+        tx.send(json!({"behavior": "allow"})).unwrap();
+        handle.await.unwrap();
+
+        assert!(
+            state.registry.get("s1").unwrap().awaiting.is_none(),
+            "answering hands the turn back to claude - the row returns to In Progress"
+        );
+        assert!(state.registry.get("s1").unwrap().busy, "the turn itself never stopped");
+    }
+
+    /// The clear must not stomp a real end-of-turn status: a late-resuming
+    /// handler landing after the next turn already reported would otherwise
+    /// wipe it. `clear_awaiting_if_question` is what makes this safe.
+    #[tokio::test]
+    async fn answering_does_not_stomp_a_newer_turns_status() {
+        let state = state_with_busy_session("s1");
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let handle = tokio::spawn(async move {
+            on_permission_request(AxState(ctx), ValidatedJson(perm_body("s1"))).await;
+        });
+        await_pending(&state, "p1").await;
+
+        state.registry.set_awaiting("s1", Some("working".into()));
+        let tx = state.pending.lock().await.remove("p1").unwrap();
+        tx.send(json!({"behavior": "allow"})).unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(state.registry.get("s1").unwrap().awaiting.as_deref(), Some("working"));
+    }
+
+    /// An id the registry has never seen (hook tests, terminal-side sessions)
+    /// must not create phantom state.
+    #[tokio::test]
+    async fn untracked_session_id_is_left_alone() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let handle = tokio::spawn(async move {
+            on_permission_request(AxState(ctx), ValidatedJson(perm_body("ghost"))).await;
+        });
+        await_pending(&state, "p1").await;
+
+        assert!(state.registry.get("ghost").is_none());
+        let tx = state.pending.lock().await.remove("p1").unwrap();
+        tx.send(json!({"behavior": "allow"})).unwrap();
+        handle.await.unwrap();
     }
 }
