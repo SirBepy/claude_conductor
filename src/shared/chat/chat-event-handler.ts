@@ -11,13 +11,13 @@ import {
   isCompactUserMessage,
   detectStatusToken,
   detectProgressToken,
-  detectHandoffToken,
   isSilentSystemUserMessage,
   isResumeContinuationUserMessage,
   classifyMetaTurn,
   noiseAssistantLabel,
   extractAuqAnswerText,
   stripAuqAnswerBlock,
+  AUQ_SKIPPED_TEXT,
   RenderedMessage,
 } from "./chat-transforms";
 import { isRawViewEnabled } from "./message-filter-pref";
@@ -317,7 +317,6 @@ function handleAssistantMessageEvent(
       r.messages.push(msg);
       r.setTurnStatus(detectStatusToken(joined));
     }
-    if (!r.hydrating && detectHandoffToken(joined)) r.onHandoffReady?.();
   }
   // Update live token estimate and check for a progress marker.
   if (r.activeTurnChipKey !== null) {
@@ -564,6 +563,14 @@ function handleToolResultEvent(
 }
 
 function handleNotificationEvent(r: ChatRenderer, ev: Extract<ChatEvent, { type: "notification" }>): EventOutcome {
+  if (ev.kind === "question_skipped") {
+    // Fire-and-forget Skip: no real tool_use_id to key off, so resolve the
+    // same heuristic way a real answer does - the last still-open card.
+    // Live-only; history still shows "awaiting answer" until durable
+    // storage exists (todo 661).
+    resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT);
+    return { touched: true, coalesce: false };
+  }
   r.messages.push({ kind: "notification", text: ev.body, ts: Date.now() });
   return { touched: true, coalesce: false };
 }

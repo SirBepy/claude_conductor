@@ -14,11 +14,11 @@ import {
   META_KIND_ICONS,
 } from "./chat-classifiers";
 export type { RenderedMessage } from "./chat-classifiers";
-export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, detectHandoffToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
+export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
 // Barrel: eventToRenderedMessage + its extraction helpers moved to
 // chat-event-to-message.ts (see todo 589); re-exported so existing
 // importers keep working unchanged.
-export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL } from "./chat-event-to-message";
+export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, AUQ_SKIPPED_TEXT } from "./chat-event-to-message";
 
 const md = new MarkdownIt({
   html: false,

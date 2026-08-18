@@ -126,6 +126,74 @@ describe("pagination (older-page load): MCP ask_user_question", () => {
   });
 });
 
+describe("live: Skip flips the open card to Skipped", () => {
+  it("resolves the last still-open card on a question_skipped notification", () => {
+    const { r, container } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(mcpAskEvent([{ question: "Pick one?" }], "q1"));
+    r.handleEvent({ type: "notification", kind: "question_skipped", body: "" });
+
+    const q = r.messages.find((m) => m.kind === "question");
+    expect(q.text).toContain("dismissed");
+    const details = container.querySelector(".question-card-collapsible");
+    expect(details.querySelector(".question-card-summary").textContent).toContain("Skipped");
+    r.detach();
+  });
+
+  it("an unrelated notification still renders as a normal notification row", () => {
+    const { r, container } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent({ type: "notification", kind: "info", body: "heads up" });
+
+    expect(container.textContent).toContain("heads up");
+    r.detach();
+  });
+});
+
+describe("pagination (older-page load): fire-and-forget answer via <auq-answer/> follow-up", () => {
+  let _seq = 0;
+  async function makeAttachedRenderer() {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const renderer = new ChatRenderer(container);
+    await renderer.attach(`sess-mcp-auq-sentinel-${++_seq}`);
+    await renderer.loadFromStore();
+    return { renderer, container };
+  }
+
+  it("resolves the card from the later sentinel-tagged message, not just a direct tool_result", async () => {
+    invokeMock
+      .mockResolvedValueOnce({
+        events: [userEvent("later question", 2_000_000)],
+        oldest_seq: 10,
+        newest_seq: 10,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        events: [
+          userEvent("old question", 1_000_000),
+          mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
+          // Fire-and-forget deny handshake: is_error, no real answer text.
+          toolResultEvent("q1", "", { isError: true }, 1_001_200),
+          userEvent("<auq-answer/>User answered the question(s):\nQ: Pick one?\nA: Real answer", 1_001_500),
+        ],
+        oldest_seq: 0,
+        newest_seq: 9,
+        has_more: false,
+      });
+
+    const { renderer, container } = await makeAttachedRenderer();
+    await renderer.fetchOlder();
+
+    const card = container.querySelector(".msg.question-card");
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain("Real answer");
+    // The sentinel-tagged follow-up must not ALSO render as its own user bubble.
+    expect(container.textContent).not.toContain("User answered the question(s)");
+    renderer.detach();
+  });
+});
+
 describe("degraded_builtin badge is live-card-only, never in the transcript", () => {
   // The daemon stamps `degraded_builtin` on the prompt payload, whose id is
   // unrelated to the model's tool_use id this transcript renders from, so the
