@@ -52,6 +52,23 @@ let vite;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The INSTALLED app runs its daemon as `claude-conductor.exe --daemon` too, so
+// matching that command line alone cannot tell prod from a harness respawn.
+// Snapshot the PIDs that already exist before the harness starts; everything
+// else in that set is ours. Without this, onComplete killed the user's daemon.
+function daemonPidsNow() {
+  try {
+    const out = execSync(
+      "powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'claude-conductor.exe' " +
+      "-and $_.CommandLine -like '*--daemon*' } | ForEach-Object { $_.ProcessId }\"",
+      { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
+    );
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 async function waitForServer(url, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastBody = null;
@@ -111,6 +128,8 @@ export const config = {
     // it, passes it to the app, and the app's reconnect loop + respawn both
     // resolve to the same isolated pipe/lockfile (ai_todo 74).
     process.env.CC_DAEMON_INSTANCE = DAEMON_INSTANCE;
+    // Specs run in a worker process, so the snapshot travels via env.
+    process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS = daemonPidsNow().join(",");
 
     // 1. Vite dev server (the debug app loads it via devUrl).
     vite = spawn(process.execPath, [viteBin, "--port", "1420", "--strictPort"], {
@@ -129,6 +148,7 @@ export const config = {
       stdio: "ignore",
       env: { ...process.env, CC_DAEMON_NO_AUTOSTART: "1", CC_DAEMON_INSTANCE: DAEMON_INSTANCE },
     });
+    process.env.CC_WDIO_DAEMON_PID = String(daemon.pid);
     // Give the daemon a moment to bind its named pipe before the app connects.
     await sleep(1200);
   },
@@ -136,13 +156,14 @@ export const config = {
     if (daemon) daemon.kill();
     if (vite) vite.kill();
     // Clean up any claude-conductor.exe --daemon orphan the app may have
-    // spawned during the kill/respawn test (ai_todo 74).
-    try {
-      execSync(
-        "powershell -Command \"Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'claude-conductor.exe' -and $_.CommandLine -like '*--daemon*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"",
-        { stdio: "ignore" }
-      );
-    } catch {}
+    // spawned during the kill/respawn test (ai_todo 74) - but ONLY ours.
+    const preexisting = new Set((process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS || "").split(",").filter(Boolean));
+    for (const pid of daemonPidsNow()) {
+      if (preexisting.has(pid)) continue;
+      try {
+        execSync(`powershell -Command "Stop-Process -Id ${pid} -Force"`, { stdio: "ignore" });
+      } catch {}
+    }
   },
 
   // tauri-driver is the WebDriver intermediary; it launches the app and proxies

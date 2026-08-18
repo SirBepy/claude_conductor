@@ -19,14 +19,19 @@ function companionDaemonRunning() {
 }
 
 // Checks for a claude-conductor.exe process launched with --daemon (the app's
-// reconnect-loop respawn target after the harness daemon is killed).
+// reconnect-loop respawn target after the harness daemon is killed). The
+// installed app's own daemon has the SAME command line, so PIDs that existed
+// before the harness started are excluded or this asserts nothing.
+const PREEXISTING = new Set((process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS || "").split(",").filter(Boolean));
+
 function respawnedDaemonRunning() {
   try {
-    const count = execSync(
-      "powershell -Command \"(Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'claude-conductor.exe' -and $_.CommandLine -like '*--daemon*' }).Count\"",
+    const out = execSync(
+      "powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'claude-conductor.exe' " +
+      "-and $_.CommandLine -like '*--daemon*' } | ForEach-Object { $_.ProcessId }\"",
       { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
-    ).trim();
-    return parseInt(count, 10) > 0;
+    );
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).some((pid) => !PREEXISTING.has(pid));
   } catch {
     return false;
   }
@@ -76,8 +81,10 @@ describe("Daemon lifecycle: close/reopen and kill/respawn (ai_todo 74)", () => {
     // run_app_subscription loop detects the pipe drop and calls ensure_daemon()
     // which spawns `claude-conductor.exe --daemon` with CC_DAEMON_INSTANCE
     // inherited from the app env (so it uses the wdio pipe, not production).
+    // By PID, not by name: a kill-by-name would also take out any real
+    // cc-conductor-daemon the user happens to be running.
     try {
-      execSync("powershell -Command \"Get-Process -Name cc-conductor-daemon -ErrorAction SilentlyContinue | Stop-Process -Force\"");
+      execSync(`powershell -Command "Stop-Process -Id ${process.env.CC_WDIO_DAEMON_PID} -Force"`);
     } catch {}
 
     // Wait up to 20s for the respawned daemon to appear.
