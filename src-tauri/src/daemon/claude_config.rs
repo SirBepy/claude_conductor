@@ -249,6 +249,11 @@ pub(crate) fn base_claude_args(resume_id: Option<&str>, session_id: &str, model:
     // tools got picked was pure whim. The PreToolUse hook stays as a safety net.
     args.push("--disallowedTools".to_string());
     args.push("AskUserQuestion".to_string());
+    // Pre-trust our own ask tool so its first call skips
+    // `--permission-prompt-tool` entirely, landing on index.ts's real
+    // fire-and-forget flow instead of permission-card.ts's fallback.
+    args.push("--allowedTools".to_string());
+    args.push("mcp__cc_conductor__ask_user_question".to_string());
     if remote {
         // Spawn the chat under claude's remote-control bridge. NOTE: pairing
         // `--remote-control` with `--input-format=stream-json` is an untested

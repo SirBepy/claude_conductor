@@ -77,7 +77,7 @@ function surfacePending(pending: PendingPrompt): void {
   }
   void (async () => {
     if (await autoAllowIfRemembered(payload)) return;
-    showPermissionCard(payload);
+    showPermissionCard(payload, pending.draft);
   })();
 }
 

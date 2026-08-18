@@ -112,7 +112,7 @@ export function isForSelectedSession(eventSessionId: string | undefined): boolea
 // treatment (see `isForSelectedSession`).
 
 export type PendingPrompt =
-  | { kind: "permission"; payload: PermissionRequestedPayload }
+  | { kind: "permission"; payload: PermissionRequestedPayload; draft?: QuestionDraft }
   | { kind: "question"; payload: QuestionRequestedPayload; draft?: QuestionDraft };
 
 const _pendingPrompts = new Map<string, PendingPrompt>();
@@ -121,11 +121,13 @@ export function storePendingPrompt(sessionId: string, prompt: PendingPrompt): vo
   _pendingPrompts.set(sessionId, prompt);
 }
 
-/** Attach a draft snapshot to an already-parked question prompt. No-op if
- *  nothing is parked or the parked entry is not a question. */
+/** Attach a draft snapshot to an already-parked prompt. No-op if nothing is
+ *  parked. A "permission" entry only ever gets one from the question-shaped
+ *  fallback card (permission-card.ts), the sole permission-gate flow that
+ *  registers as the active card. */
 export function savePendingPromptDraft(sessionId: string, draft: QuestionDraft): void {
   const p = _pendingPrompts.get(sessionId);
-  if (p?.kind === "question") _pendingPrompts.set(sessionId, { ...p, draft });
+  if (p) _pendingPrompts.set(sessionId, { ...p, draft });
 }
 
 /** Returns and removes the parked prompt for a session, if any. */

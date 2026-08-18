@@ -4,38 +4,45 @@ import { buildRule, describeRule, isDestructive, withAddedRule } from "../permis
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { extractQuestions, formatAnswersAsMessage, renderQuestionUI } from "./question-ui";
 import { resolveCwdForSession, storePendingPrompt } from "./gating";
-import type { PermissionRequestedPayload } from "./types";
+import { isAskQuestionTool } from "../../../shared/chat/tool-meta";
+import type { PermissionRequestedPayload, QuestionDraft } from "./types";
 
-export function showPermissionCard(payload: PermissionRequestedPayload): void {
+// Deliberately not "User skipped the question." - that exact string once
+// reached claude even after a real submit (2026-08-18 incident).
+const FALLBACK_DISMISS_MESSAGE = "User dismissed the question without answering.";
+
+export function showPermissionCard(payload: PermissionRequestedPayload, restoredDraft?: QuestionDraft): void {
   // Park the prompt while it's on screen so a chat switch-and-back re-surfaces
   // it instead of leaving the daemon turn hung (see showQuestionCard). Cleared
   // when the prompt resolves via the `prompt-resolved` poll.
   if (payload.session_id) {
     storePendingPrompt(payload.session_id, { kind: "permission", payload });
   }
-  // Question-shaped permission? Render the question UI directly. On submit,
-  // route answers back as a deny.message so headless claude reads them as
-  // user feedback (this is the only channel claude -p has for built-in
-  // AskUserQuestion answers; see lifecycle.rs respond_permission doc).
+  // Question-shaped fallback (pre-trust keeps our own MCP tool off this path).
+  // Only `{behavior, message}` can settle this oneshot - never respond_question.
   const questions = extractQuestions(payload.input);
   if (questions) {
     renderQuestionUI({
+      id: payload.id,
+      sessionId: payload.session_id,
       questions,
+      initialDraft: restoredDraft,
       cwd: resolveCwdForSession(payload.session_id),
       titleIcon: "ph-chat-circle-dots",
       titleText: "Claude is asking",
-      rightChipHtml: `<span class="prompt-card__tool"><code>${escapeHtml(payload.tool_name)}</code></span>`,
+      // Fallback-path tell for every OTHER tool; hidden for our own.
+      rightChipHtml: isAskQuestionTool(payload.tool_name)
+        ? undefined
+        : `<span class="prompt-card__tool"><code>${escapeHtml(payload.tool_name)}</code></span>`,
       submitLabel: "Answer",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",
-      onSubmit: async (answers) => {
+      supportsExtras: true,
+      onSubmit: async (answers, extras) => {
+        let message = formatAnswersAsMessage(questions, answers);
+        if (extras.additionalMessage) message += `\n\n${extras.additionalMessage}`;
         try {
-          await invoke("respond_permission", {
-            id: payload.id,
-            behavior: "deny",
-            updatedInput: null,
-            message: formatAnswersAsMessage(questions, answers),
-          });
+          await invoke("respond_permission", { id: payload.id, behavior: "deny", updatedInput: null, message });
         } catch (e) { console.warn("respond_permission failed:", e); }
       },
       onCancel: async () => {
@@ -44,7 +51,7 @@ export function showPermissionCard(payload: PermissionRequestedPayload): void {
             id: payload.id,
             behavior: "deny",
             updatedInput: null,
-            message: "User skipped the question.",
+            message: FALLBACK_DISMISS_MESSAGE,
           });
         } catch (e) { console.warn("respond_permission failed:", e); }
       },
