@@ -17,7 +17,6 @@ import {
   loadHiddenSessions,
   saveHiddenSessions,
 } from "./sessions-helpers";
-import { triggerHandoff } from "./handoff";
 import { isRawViewEnabled, setRawViewEnabled } from "../../shared/chat/message-filter-pref";
 import { state } from "./state";
 
@@ -292,16 +291,6 @@ export function buildChatMenuBlock(
 
   // ── Agent ▸ ────────────────────────────────────────────────────────────────
   const agentItems: ItemDesc[] = [
-    {
-      icon: "handshake",
-      label: "Handoff to next AI",
-      run: isDraft || !sessionId || !cwd
-        ? undefined
-        : async () => {
-            await triggerHandoff(sessionId, cwd);
-          },
-      disabledReason: isDraft ? "No active agent" : (!sessionId ? "No session" : (!cwd ? "No project directory" : undefined)),
-    },
     {
       icon: "copy",
       label: "Copy PID",

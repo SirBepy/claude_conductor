@@ -405,12 +405,12 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
   const renderer = state.renderer;
   if (messagesEl && renderer && sess) {
     state.changesPanel?.unmount();
-    // Full shared wiring (tool-view provider, activity/progress/todo/CTA/handoff
+    // Full shared wiring (tool-view provider, activity/progress/todo/CTA
     // callbacks, activeChatActions) - not just the changes-panel subset this used
     // to hand-roll, which is exactly why a promoted draft looked like a chat but
     // wasn't wired like one (ai_todo: draft-promotion lookalike bug).
     const panel = new ChangesPanel();
-    wireRenderer(pane, sess, h, sessionId, renderer, panel);
+    wireRenderer(pane, sess, h, renderer, panel);
     // onFileEditsChanged above is a fresh listener; edits from before promotion
     // (nothing was listening yet) need seeding, same as a retained-pane remount.
     const seeded = renderer.getFileEdits();

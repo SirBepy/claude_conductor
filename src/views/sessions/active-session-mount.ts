@@ -18,7 +18,6 @@ import { renderSidebar } from "./sidebar";
 import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import type { SessionHeader } from "./session-header";
 import { setThinkingActivity, setThinkingProgress, setThinkingTodoActivity } from "./session-thinking-bar";
-import { completeHandoff } from "./handoff";
 import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
 import { flushRenderNow } from "../../shared/chat/flush-scheduler";
 import { isRawViewEnabled } from "../../shared/chat/message-filter-pref";
@@ -78,7 +77,6 @@ export function wireRenderer(
   pane: HTMLElement,
   sess: Instance,
   header: SessionHeader,
-  sessionId: string,
   renderer: ChatRenderer,
   panel: ChangesPanel,
 ): void {
@@ -134,11 +132,6 @@ export function wireRenderer(
     if (state.renderer !== renderer) return;
     renderer.injectCta("pickup");
   };
-  renderer.onHandoffReady = () => {
-    if (state.renderer !== renderer) return;
-    if (state.selectedId !== sessionId) return;
-    void completeHandoff(sessionId);
-  };
   // NOTE: the sidebar/header question flag is NOT derived here anymore. The
   // renderer's marker detection only ever ran for the OPEN chat, so it went
   // stale the moment a session was backgrounded (a later turn's "done" never
@@ -170,7 +163,7 @@ function remountRetained(
   // future path that severs it). No-op when already correctly subscribed.
   renderer.ensureSubscribed(sessionId);
   const panel = new ChangesPanel();
-  wireRenderer(pane, sess, header, sessionId, renderer, panel);
+  wireRenderer(pane, sess, header, renderer, panel);
   renderer.resumeLiveRender();
   // Force any trailing coalesced flush from the drained events above so the
   // scroll below measures the FULL restored transcript, not a partial one
@@ -252,7 +245,7 @@ export async function mountRenderer(
   // Retained across pane-cache remounts since messagesEl itself is reused.
   messagesEl.classList.toggle("show-raw-chat", isRawViewEnabled(sessionId));
   // Panel listens for file mutations; activity feed routes to the thinking bar.
-  wireRenderer(pane, sess, header, sessionId, renderer, new ChangesPanel());
+  wireRenderer(pane, sess, header, renderer, new ChangesPanel());
   await renderer.attach(sessionId);
   // Bail if a newer mount or selectSession superseded us during await.
   if (state.mountId !== myMount || state.selectedId !== sessionId) {
