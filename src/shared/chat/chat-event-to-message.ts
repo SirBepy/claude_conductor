@@ -26,6 +26,11 @@ const FILE_TOKEN_RE = /<file:(.+?)(?:::(.+?))?>/g;
 export const AUQ_ANSWER_SENTINEL = "<auq-answer/>";
 const AUQ_ANSWER_RE = /<auq-answer\s*\/>/g;
 
+/** Carries the "dismissed" substring tool-views.ts's resolution detection already
+ *  matches on. Live-only: set from a `question_skipped` notification, never
+ *  replayed from history (todo 661). */
+export const AUQ_SKIPPED_TEXT = "User dismissed the question(s).";
+
 /** Every `<file:PATH...>` path the user attached in a message's text blocks,
  *  normalized (lowercased, backslashes to slashes) so Read tool_use inputs
  *  can be matched against it despite slash/case differences. Used to keep

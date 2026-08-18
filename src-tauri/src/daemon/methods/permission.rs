@@ -76,11 +76,17 @@ pub(crate) async fn respond_permission_inner(
 
 /// Core of `respond_question`, factored out for the same reason as
 /// `respond_permission_inner` above.
+///
+/// `skipped` distinguishes a real Skip from an empty-but-real answer. Nothing
+/// reaches the model, so this is LIVE-only: scrollback still shows "awaiting
+/// answer" until durable storage exists (todo 661).
 pub(crate) async fn respond_question_inner(
     state: &Arc<DaemonState>,
     request_id: &str,
     answers: serde_json::Value,
+    skipped: bool,
 ) -> bool {
+    let session_id = state.prompt_session_id(request_id).await;
     let tx = state.pending.lock().await.remove(request_id);
     let delivered = match tx {
         Some(tx) => {
@@ -90,6 +96,14 @@ pub(crate) async fn respond_question_inner(
         None => false,
     };
     settle_prompt(state, request_id, true).await;
+    if skipped {
+        if let Some(session) = session_id.as_deref().and_then(|sid| state.sessions.get(sid).map(|s| s.clone())) {
+            crate::daemon::broadcast::publish(&session, crate::types::chat::ChatEvent::Notification {
+                kind: "question_skipped".into(),
+                body: String::new(),
+            });
+        }
+    }
     delivered
 }
 
@@ -127,10 +141,15 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
-            struct Body { request_id: String, answers: serde_json::Value }
+            struct Body {
+                request_id: String,
+                answers: serde_json::Value,
+                #[serde(default)]
+                skipped: bool,
+            }
             let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            let delivered = respond_question_inner(&state, &b.request_id, b.answers).await;
+            let delivered = respond_question_inner(&state, &b.request_id, b.answers, b.skipped).await;
             Ok(serde_json::json!({"ok": true, "delivered": delivered}))
         }
     });

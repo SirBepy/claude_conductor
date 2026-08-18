@@ -142,7 +142,7 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
       // below, which used to send it again unconditionally and race that.
       let delivered = false;
       try {
-        delivered = await invoke<boolean>("respond_question", { id: payload.id, answers });
+        delivered = await invoke<boolean>("respond_question", { id: payload.id, answers, skipped: false });
       } catch (e) {
         console.warn("respond_question (settle) failed:", e);
         clearPendingPromptById(payload.id);
@@ -195,7 +195,7 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
       clearQuestionDraft(payload.id);
       void clearAuqPush(payload.session_id, payload.id);
       try {
-        await invoke("respond_question", { id: payload.id, answers: {} });
+        await invoke("respond_question", { id: payload.id, answers: {}, skipped: true });
       } catch (e) {
         console.warn("respond_question (skip settle) failed:", e);
         clearPendingPromptById(payload.id);

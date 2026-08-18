@@ -288,6 +288,7 @@ pub async fn respond_permission(
 pub async fn respond_question(
     id: String,
     answers: Value,
+    skipped: bool,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let client_guard = state.daemon_client.lock().await;
@@ -295,7 +296,7 @@ pub async fn respond_question(
         .as_ref()
         .ok_or_else(|| "daemon client not connected".to_string())?;
     client
-        .respond_question(&id, answers)
+        .respond_question(&id, answers, skipped)
         .await
         .map_err(|e| e.to_string())
 }

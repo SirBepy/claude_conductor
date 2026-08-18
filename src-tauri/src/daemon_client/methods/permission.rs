@@ -23,14 +23,17 @@ impl PersistentClient {
     /// went back in-band, as the tool's own result) vs. a durable/ghost prompt
     /// with no waiter (the answer must travel separately as a chat message) -
     /// see `respond_question_inner`'s `delivered` in methods/permission.rs.
+    /// `skipped` marks a real Skip - see that fn's doc comment.
     pub async fn respond_question(
         &self,
         request_id: &str,
         answers: serde_json::Value,
+        skipped: bool,
     ) -> Result<bool, ClientError> {
         let params = serde_json::json!({
             "request_id": request_id,
             "answers": answers,
+            "skipped": skipped,
         });
         let result = self.call("respond_question", params).await?;
         Ok(result.get("delivered").and_then(|v| v.as_bool()).unwrap_or(false))

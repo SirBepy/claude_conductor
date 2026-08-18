@@ -115,7 +115,19 @@ describe("HttpTransport.call mapping", () => {
     });
     expect(body()).toEqual({
       method: "respond_question",
-      params: { request_id: "q-1", answers: { color: "blue" } },
+      params: { request_id: "q-1", answers: { color: "blue" }, skipped: false },
+    });
+  });
+
+  it("threads a real Skip through to the skipped flag", async () => {
+    await new HttpTransport().call("respond_question", {
+      id: "q-1",
+      answers: {},
+      skipped: true,
+    });
+    expect(body()).toEqual({
+      method: "respond_question",
+      params: { request_id: "q-1", answers: {}, skipped: true },
     });
   });
 

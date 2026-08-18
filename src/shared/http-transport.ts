@@ -225,6 +225,7 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("respond_question", {
           request_id: args.id,
           answers: args.answers,
+          skipped: args.skipped ?? false,
         });
       case "send_message":
         return this.sendMessage<T>(args);

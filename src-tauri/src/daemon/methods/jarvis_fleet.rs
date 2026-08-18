@@ -253,7 +253,7 @@ pub(crate) async fn respond_worker_prompt(
         }
         "question-requested" => {
             let answers = message.map(Value::String).unwrap_or_else(|| json!({}));
-            crate::daemon::methods::permission::respond_question_inner(state, request_id, answers).await
+            crate::daemon::methods::permission::respond_question_inner(state, request_id, answers, false).await
         }
         _ => false,
     };

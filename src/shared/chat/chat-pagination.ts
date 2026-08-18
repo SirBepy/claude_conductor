@@ -1,6 +1,6 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import type { RenderedMessage } from "./chat-transforms";
-import { eventToRenderedMessage, isBoundaryMessage } from "./chat-transforms";
+import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, stripAuqAnswerBlock } from "./chat-transforms";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
@@ -200,6 +200,29 @@ export class ChatPaginator {
       if (ev.type !== "tool_result" || !questionToolIds.has(ev.tool_use_id)) continue;
       if (!ev.is_error) questionAnswerById.set(ev.tool_use_id, ev.output?.type === "text" ? ev.output.text : "");
     }
+    // The real ask channel is fire-and-forget: tool_result above is always the
+    // deny handshake, the real answer arrives later as a user_message tagged
+    // AUQ_ANSWER_SENTINEL. Pair each with its nearest preceding open question,
+    // mirroring chat-event-handler.ts's resolvePendingQuestionCard fold.
+    const sentinelAnswerById = new Map<string, string>();
+    const foldedUserMsgs = new Set<ChatEvent>();
+    {
+      let openId: string | null = null;
+      for (const ev of events) {
+        if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
+          openId = ev.id;
+        } else if (ev.type === "tool_result" && ev.tool_use_id === openId && !ev.is_error) {
+          openId = null; // delivered in-band - questionAnswerById already covers it
+        } else if (ev.type === "user_message" && openId) {
+          const answer = extractAuqAnswerText(cleanUserBlocks(ev.content));
+          if (answer !== null) {
+            sentinelAnswerById.set(openId, answer);
+            foldedUserMsgs.add(ev);
+            openId = null;
+          }
+        }
+      }
+    }
     const filtered = events.filter((ev) =>
       !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id) || questionToolIds.has(ev.tool_use_id))));
 
@@ -252,13 +275,31 @@ export class ChatPaginator {
         }
         continue;
       }
+      if (ev.type === "user_message" && foldedUserMsgs.has(ev)) {
+        // Folded into the question card's text (set via sentinelAnswerById
+        // below) - only held prose riding the same bundle (held-messages.ts's
+        // bundleHeld) still renders, mirroring handleUserMessageEvent's
+        // resolvedQuestionCard branch.
+        const remainder = stripAuqAnswerBlock(cleanUserBlocks(ev.content));
+        if (remainder.length === 0) continue;
+        const rMsg: RenderedMessage = { kind: "user", content: remainder, ts: Number(ev.timestamp) };
+        boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });
+        acc = null;
+        accFirstTs = rMsg.ts > 0 ? rMsg.ts : 0;
+        accLastTs = accFirstTs;
+        newMessages.push(rMsg);
+        const rEl = this.cb.buildMessageEl(rMsg);
+        newEls.push(rEl);
+        frag.appendChild(rEl);
+        continue;
+      }
       const msg = eventToRenderedMessage(ev);
       if (!msg) continue;
       if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
         msg.failed = true;
       }
-      if (ev.type === "tool_use" && msg.kind === "question" && questionAnswerById.has(ev.id)) {
-        msg.text = questionAnswerById.get(ev.id);
+      if (ev.type === "tool_use" && msg.kind === "question" && (questionAnswerById.has(ev.id) || sentinelAnswerById.has(ev.id))) {
+        msg.text = questionAnswerById.get(ev.id) ?? sentinelAnswerById.get(ev.id);
       }
       if (isBoundaryMessage(msg)) {
         boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });

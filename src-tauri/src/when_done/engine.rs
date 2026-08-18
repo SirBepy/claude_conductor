@@ -191,7 +191,7 @@ async fn auto_resolve_prompts(app: &AppHandle) {
             "question-requested" => {
                 let questions = payload.get("questions");
                 let answers = default_question_answers(questions);
-                if let Err(e) = client.respond_question(&request_id, answers.clone()).await {
+                if let Err(e) = client.respond_question(&request_id, answers.clone(), false).await {
                     log::warn!("when_done: auto-answer question failed: {e}");
                 } else {
                     log_comment(&format!(
