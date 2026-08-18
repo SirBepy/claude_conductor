@@ -95,7 +95,10 @@ export async function renderPendingPane(
     });
     state.statusbar = sb;
     fetchGitInfo(project.path)
-      .then((info) => { if (state.statusbar === sb) sb.updateGitInfo(info); })
+      // Object identity alone isn't enough: sb.gitCwd may have moved (worktree
+      // resolution) since this fetch started, and updateGitInfo caches under
+      // the LIVE gitCwd - a stale write would poison the new cwd's entry.
+      .then((info) => { if (state.statusbar === sb && sb.isCurrentCwd(project.path)) sb.updateGitInfo(info); })
       .catch(() => {});
   }
 

@@ -312,6 +312,12 @@ export class SessionStatusbar {
     this.tally.setCustomViewProvider(fn);
   }
 
+  /** True when `cwd` still matches the live git cwd (may have moved via
+   *  resolveGitCwd since a caller's own fetch for `cwd` started). */
+  isCurrentCwd(cwd: string): boolean {
+    return this.gitCwd === cwd;
+  }
+
   setSessionId(id: string): void {
     this.sessionId = id;
     this.counts = null;
@@ -670,8 +676,13 @@ export class SessionStatusbar {
       const wasOpen = this.commitsPopover.isOpen;
       this.closeChipPopovers();
       if (wasOpen || !this.gitCwd) return;
+      const cwd = this.gitCwd;
       try {
-        const sync = await invoke<CommitSync>("get_commit_sync", { cwd: this.gitCwd });
+        const sync = await invoke<CommitSync>("get_commit_sync", { cwd });
+        // A session switch mid-flight rewrites the pane (anchor detaches) and
+        // may leave this.gitCwd unchanged, so both checks are needed - mirrors
+        // refreshGitInfo's cwd guard plus a liveness check on the DOM node.
+        if (this.gitCwd !== cwd || !anchor.isConnected) return;
         this.commitsPopover.open(anchor, sync);
       } catch (err) {
         console.error("[session-statusbar] get_commit_sync failed", err);
