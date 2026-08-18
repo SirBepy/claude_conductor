@@ -165,8 +165,6 @@ export class ChatRenderer {
   public onSendText: ((text: string) => void) | null = null;
   /** Fired when a next-ai-prompt skill turn completes. Active-session wires this to show the pickup CTA. */
   public onNextAiPromptDone: (() => void) | null = null;
-  /** Fired when a live (non-history) assistant turn contains `<HANDOFF_READY/>`. */
-  public onHandoffReady: (() => void) | null = null;
   /** Set by chat-event-handler when a Skill tool_use for "next-ai-prompt" is seen in a live turn. */
   _nextAiPromptPending = false;
   turnStatus: "done" | "question" | "waiting" | "working" | null = null;
