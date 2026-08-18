@@ -110,6 +110,17 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // one field and the tab advance", every other field adopts freely.
   const draftSyncTargets = { sessionId: opts.sessionId, promptId: opts.id };
 
+  /** Snapshot for the no-op check below - livePollTimer fires every second
+   *  regardless of whether the draft actually moved, and an unconditional
+   *  render() was recreating the primary button's DOM node each tick,
+   *  flashing its hover state under the cursor once a second. */
+  const draftSignature = (): string => JSON.stringify({
+    freeText: Array.from(freeText.entries()),
+    selections: Array.from(selections.entries(), ([k, v]) => [k, v instanceof Set ? Array.from(v) : v]),
+    activeTab: state.activeTab,
+    additionalMessage: state.additionalMessage,
+  });
+
   /** Merge an already newest-wins-reconciled draft into the live card. A full
    *  render() rebuilds the DOM (new textarea node, dropped cursor - see
    *  fb230ef3's scroll-yank incident), so typing and any tab advance are
@@ -119,6 +130,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     const typingOther = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-q__other-input");
     const typingExtra = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-extra-input");
     const isTyping = typingOther || typingExtra;
+    const before = draftSignature();
 
     remote.freeText.forEach((v, i) => {
       if (typingOther && i === state.activeTab) return;
@@ -129,7 +141,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (!typingExtra) state.additionalMessage = remote.additionalMessage;
     if (!isTyping) state.activeTab = Math.min(Math.max(remote.activeTab, 0), totalPanels - 1);
 
-    if (!isTyping) renderer.render();
+    if (!isTyping && draftSignature() !== before) renderer.render();
   };
 
   // Flush the debounced daemon push on hidden (last reliable save point - see
