@@ -70,11 +70,12 @@ export async function wireOverflowMenu(
   previewController: PreviewController | null,
 ): Promise<() => void> {
   const viewMoreBtn = root.querySelector<HTMLButtonElement>("#viewMoreBtn");
+  const onViewMoreClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    toggleViewMoreMenu(viewMoreBtn!);
+  };
   if (viewMoreBtn) {
-    viewMoreBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleViewMoreMenu(viewMoreBtn);
-    });
+    viewMoreBtn.addEventListener("click", onViewMoreClick);
   }
 
   const previewToggleBtn = root.querySelector<HTMLButtonElement>("#previewToggleBtn");
@@ -96,6 +97,7 @@ export async function wireOverflowMenu(
   refreshViewMoreIndicator();
 
   return () => {
+    viewMoreBtn?.removeEventListener("click", onViewMoreClick);
     unsubWhenDone();
     unlistenWhenDone();
   };
