@@ -9,6 +9,7 @@ use crate::chat::parser::ParserContext;
 use crate::daemon::broadcast;
 use crate::daemon::session::{Session, SessionMap};
 use crate::daemon::state::DaemonState;
+use crate::sessions::registry_turn::TurnActivity;
 use crate::types::chat::ChatEvent;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -297,20 +298,13 @@ pub(crate) async fn run_stdout_pump(
                                 // "question"/"waiting" over the current turn's state -
                                 // the "Input needed while busy" bug.
                                 if live_turn {
-                                    // Ground truth beats self-report: the Stop hook that fired
-                                    // just before this result line recorded how many background
-                                    // tasks the CLI still had live. A marker claiming "done" (or
-                                    // a missing one) while tasks run is the misjudgment class -
-                                    // show "working". Self-correcting: the finishing task
-                                    // re-invokes the session, and that turn's Stop refreshes the
-                                    // count to zero.
-                                    let awaiting = if matches!(awaiting.as_deref(), None | Some("done"))
-                                        && state_for_pump.registry.background_tasks(&pump_session.session_id) > 0
-                                    {
-                                        Some("working".to_string())
-                                    } else {
-                                        awaiting
-                                    };
+                                    // The Stop hook fired just before this line, so the verdict
+                                    // is fresh. Self-correcting: the finishing task re-invokes
+                                    // the session and its own Stop refreshes it.
+                                    let awaiting = state_for_pump
+                                        .registry
+                                        .turn_activity(&pump_session.session_id)
+                                        .correct(awaiting);
                                     state_for_pump.registry.set_awaiting_if_gen(
                                         &pump_session.session_id,
                                         awaiting.clone(),

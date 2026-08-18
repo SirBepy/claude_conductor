@@ -1,5 +1,34 @@
 use super::registry::Registry;
 
+/// What the CLI's own Stop payload says the session is still doing, used to
+/// correct a turn that self-reported `done`. Derived in
+/// `daemon::hooks_server::activity` from `background_tasks` + `session_crons`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TurnActivity {
+    #[default]
+    Idle,
+    /// Local compute still running - a build, a subagent fan-out.
+    Working,
+    /// Parked on something off this machine: a CI poll, a scheduled wake.
+    Waiting,
+}
+
+impl TurnActivity {
+    /// Correct a self-report against what the CLI actually still has live.
+    /// Only `done` or a missing report is corrected - a deliberate
+    /// `question`/`waiting`/`working` is the model's call and stands.
+    pub fn correct(self, reported: Option<String>) -> Option<String> {
+        if !matches!(reported.as_deref(), None | Some("done")) {
+            return reported;
+        }
+        match self {
+            TurnActivity::Working => Some("working".to_string()),
+            TurnActivity::Waiting => Some("waiting".to_string()),
+            TurnActivity::Idle => reported,
+        }
+    }
+}
+
 /// See `Registry::reported_status`.
 #[derive(Clone, Debug)]
 pub struct ReportedStatus {
@@ -66,21 +95,21 @@ impl Registry {
         self.message_sent_gen.lock().unwrap().get(session_id).copied()
     }
 
-    /// Record the live background-task count the Stop hook reported for this
-    /// session's just-ended turn. Zero removes the entry.
-    pub fn set_background_tasks(&self, session_id: &str, count: usize) {
-        let mut guard = self.background_tasks.lock().unwrap();
-        if count == 0 {
+    /// Record what the Stop hook says this session is still doing. `Idle`
+    /// removes the entry so a stale verdict can't outlive the turn.
+    pub fn set_turn_activity(&self, session_id: &str, activity: TurnActivity) {
+        let mut guard = self.turn_activity.lock().unwrap();
+        if activity == TurnActivity::Idle {
             guard.remove(session_id);
         } else {
-            guard.insert(session_id.to_string(), count);
+            guard.insert(session_id.to_string(), activity);
         }
     }
 
-    /// Background-task count from the session's most recent Stop hook.
-    /// Zero when the session never reported (or reported none).
-    pub fn background_tasks(&self, session_id: &str) -> usize {
-        self.background_tasks.lock().unwrap().get(session_id).copied().unwrap_or(0)
+    /// Activity from the session's most recent Stop hook; `Idle` if it never
+    /// reported.
+    pub fn turn_activity(&self, session_id: &str) -> TurnActivity {
+        self.turn_activity.lock().unwrap().get(session_id).copied().unwrap_or_default()
     }
 
     /// Record that `turn_gen` was opened by a daemon wake, not a user message.
@@ -124,14 +153,51 @@ impl Registry {
 mod tests {
     use super::*;
 
+    fn corrected(activity: TurnActivity, reported: Option<&str>) -> Option<String> {
+        activity.correct(reported.map(str::to_string))
+    }
+
     #[test]
-    fn background_tasks_roundtrip_and_zero_clears() {
+    fn a_done_report_is_corrected_to_what_the_cli_still_has_live() {
+        assert_eq!(corrected(TurnActivity::Working, Some("done")).as_deref(), Some("working"));
+        assert_eq!(corrected(TurnActivity::Waiting, Some("done")).as_deref(), Some("waiting"));
+    }
+
+    /// The defect this fixes: a chat parked on `gh run watch` used to be forced
+    /// to "working" by the old count-only override.
+    #[test]
+    fn a_missing_report_is_corrected_too() {
+        assert_eq!(corrected(TurnActivity::Waiting, None).as_deref(), Some("waiting"));
+        assert_eq!(corrected(TurnActivity::Working, None).as_deref(), Some("working"));
+    }
+
+    #[test]
+    fn a_deliberate_report_is_never_overridden() {
+        for reported in ["question", "waiting", "working", "close_failed"] {
+            assert_eq!(
+                corrected(TurnActivity::Working, Some(reported)).as_deref(),
+                Some(reported),
+                "{reported} is the model's call"
+            );
+        }
+    }
+
+    #[test]
+    fn idle_activity_leaves_the_report_alone() {
+        assert_eq!(corrected(TurnActivity::Idle, Some("done")).as_deref(), Some("done"));
+        assert_eq!(corrected(TurnActivity::Idle, None), None);
+    }
+
+    #[test]
+    fn turn_activity_roundtrip_and_idle_clears() {
         let registry = Registry::new();
-        assert_eq!(registry.background_tasks("s"), 0);
-        registry.set_background_tasks("s", 3);
-        assert_eq!(registry.background_tasks("s"), 3);
-        registry.set_background_tasks("s", 0);
-        assert_eq!(registry.background_tasks("s"), 0);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Idle);
+        registry.set_turn_activity("s", TurnActivity::Working);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Working);
+        registry.set_turn_activity("s", TurnActivity::Waiting);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Waiting);
+        registry.set_turn_activity("s", TurnActivity::Idle);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Idle);
     }
 
     #[test]

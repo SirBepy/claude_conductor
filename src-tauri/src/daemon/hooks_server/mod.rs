@@ -9,6 +9,7 @@
 //! boot scaffolding (HookCtx, HOOK_PORT, health, spawn) and the route table,
 //! the only place that "sees" every category at once.
 
+mod activity;
 mod channel;
 mod commit_lock;
 mod context;
@@ -21,6 +22,7 @@ mod preview;
 mod preview_render;
 mod question;
 mod relay;
+mod spawn_chat;
 mod stop;
 mod turn_status;
 mod validated_json;
@@ -157,6 +159,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/jarvis/send-to-session", post(jarvis::on_send_to_session))
         .route("/jarvis/fleet-status", post(jarvis::on_fleet_status))
         .route("/jarvis/respond-worker-prompt", post(jarvis::on_respond_worker_prompt))
+        .route("/chat/spawn", post(spawn_chat::on_spawn_chat))
         .route("/channel/list-peers", post(channel::on_list_peers))
         .route("/channel/read-messages", post(channel::on_read_messages))
         .route("/channel/post-message", post(channel::on_post_message))

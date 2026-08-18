@@ -57,6 +57,10 @@ pub(super) struct StopPayload {
     /// "working" status, unlike the self-reported marker.
     #[serde(default)]
     pub background_tasks: Option<Vec<serde_json::Value>>,
+    /// Scheduled wakes still pending for this session. Non-empty means the
+    /// session is parked on a future trigger, i.e. `waiting`, no guessing.
+    #[serde(default)]
+    pub session_crons: Option<Vec<serde_json::Value>>,
 }
 
 pub(super) async fn on_stop(
@@ -80,12 +84,14 @@ pub(super) async fn on_stop(
     // Daemon-hosted chats only: this global hook also fires for the dev's own
     // terminal sessions, which must never be status-tracked or blocked.
     if ctx.state.sessions.contains_key(&session_id) {
-        // Record the CLI's live background-task count BEFORE returning: the
-        // CLI holds the `result` line until this hook responds, so the pump's
-        // result-line handler always reads a fresh count (see
-        // `daemon::lifecycle`'s awaiting override).
-        let bg_count = payload.background_tasks.as_ref().map(Vec::len).unwrap_or(0);
-        ctx.state.registry.set_background_tasks(&session_id, bg_count);
+        // Record BEFORE returning: the CLI holds the `result` line until this
+        // hook responds, so the pump's result-line handler always reads a
+        // fresh verdict (see `daemon::lifecycle`'s awaiting override).
+        let activity = super::activity::classify(
+            payload.background_tasks.as_deref().unwrap_or(&[]),
+            payload.session_crons.as_deref().unwrap_or(&[]),
+        );
+        ctx.state.registry.set_turn_activity(&session_id, activity);
 
         // Enforcement (todo 435 + quiet-mode fix): block once (stop_hook_active
         // caps the retry) if report_turn_status and/or send_message weren't

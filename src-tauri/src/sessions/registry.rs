@@ -34,13 +34,10 @@ pub struct Registry {
     /// turn and gets rejected itself. Entries are never swept on a timer:
     /// a past `resets_at` reads as "not blocked" everywhere.
     pub(super) rate_limits: Mutex<HashMap<String, (i64, String)>>,
-    /// `session_id` -> live background-task count from the session's most
-    /// recent Stop hook (`background_tasks` in the payload - ground truth from
-    /// the CLI, unlike the self-reported `<cc-status:..>` marker). A side map,
-    /// not a field on `Instance`: internal to the daemon, never serialized to
-    /// the frontend. Consumed by the pump's result-line handler to override a
-    /// marker that claims "done" while the CLI says tasks are still running.
-    pub(super) background_tasks: Mutex<HashMap<String, usize>>,
+    /// `session_id` -> what the CLI's Stop payload says the session is still
+    /// doing, per `daemon::hooks_server::activity`. A side map, not a field on
+    /// `Instance`: internal to the daemon, never serialized to the frontend.
+    pub(super) turn_activity: Mutex<HashMap<String, super::registry_turn::TurnActivity>>,
     /// `session_id`s whose `/close` run has explicitly confirmed teardown via
     /// the `cc_conductor` `close_session` MCP tool (POSTed to
     /// `/sessions/close-confirm`). Set mid-turn by the tool call; consumed by
@@ -71,7 +68,7 @@ impl Registry {
         Self {
             inner: Mutex::new(HashMap::new()),
             rate_limits: Mutex::new(HashMap::new()),
-            background_tasks: Mutex::new(HashMap::new()),
+            turn_activity: Mutex::new(HashMap::new()),
             close_requested: Mutex::new(std::collections::HashSet::new()),
             reported_status: Mutex::new(HashMap::new()),
             message_sent_gen: Mutex::new(HashMap::new()),
