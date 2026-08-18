@@ -14,7 +14,9 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 mod close;
+mod turn_boundary;
 use close::{close_stand_down_is_failure, close_stand_down_is_failure_at_eof, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
+use turn_boundary::{TurnAction, TurnBoundary};
 
 /// Flush the pump's held delta buffer (ai_todo 186): fold it into the
 /// session's shared `StreamingText` accumulator (which assigns the emit
@@ -50,22 +52,21 @@ fn flush_pending_delta(
 /// the two handles `spawn_session` pulled off the spawned process before
 /// handing this task ownership of the rest of the session's natural
 /// lifetime.
+/// `resumed` = spawned with `--resume`, so claude replays transcript lines
+/// before the live turn starts. See `turn_boundary::TurnBoundary::new`.
 pub(crate) async fn run_stdout_pump(
     mut child: tokio::process::Child,
     stdout: tokio::process::ChildStdout,
     pump_session: Arc<Session>,
     map_for_pump: SessionMap,
     state_for_pump: Arc<DaemonState>,
+    resumed: bool,
 ) {
     let mut ctx = ParserContext::new_live();
     let mut buf_reader = BufReader::new(stdout);
     let mut line_buf = Vec::new();
-    // True once the current turn has emitted at least one `stream_event` line,
-    // meaning it is a live turn (not a replayed history result line from
-    // `--resume`, which never carries that envelope). Reset to false after
-    // each TurnUsage so each turn is evaluated independently. Without this
-    // guard, resumed sessions fire one sound per prior completed turn.
-    let mut saw_stream_turn = false;
+    // Owns the turn-sound gate and, since chat 20176, the `busy` flag.
+    let mut turn = TurnBoundary::new(resumed);
     // Generation counter captured on the turn's first stdout line of ANY
     // kind (todo 525 root cause 2: not gated on the first `stream_event`,
     // so an eventless turn still captures the CURRENT gen instead of a
@@ -134,18 +135,22 @@ pub(crate) async fn run_stdout_pump(
                         let feed_events = ctx.feed(&line_buf);
                         // `--resume` history replay never emits `stream_event` lines, so this
                         // is the earliest live-exclusive signal, firing even for tool-only turns.
-                        if !saw_stream_turn && ctx.take_stream_event_seen() {
-                            saw_stream_turn = true;
+                        if !turn.is_live() && ctx.take_stream_event_seen()
+                            && turn.on_stream_event() == TurnAction::TurnStarted
+                        {
+                            let mut dirty = state_for_pump.registry.mark_turn_live(&pump_session.session_id);
+                            crate::sessions::chat_state::set_busy(&pump_session.session_id, true);
                             // Mark the row "Closing" now (daemon-authoritative, no text marker)
                             // so every window's sidebar shows it; close_requested drives teardown.
                             if turn_is_close(&pump_session) {
                                 closing_flagged = true;
-                                if state_for_pump.registry.set_closing(&pump_session.session_id, true) {
-                                    state_for_pump.notifier.publish(
-                                        "instances_changed",
-                                        serde_json::json!({"instances": state_for_pump.registry.list()}),
-                                    );
-                                }
+                                dirty |= state_for_pump.registry.set_closing(&pump_session.session_id, true);
+                            }
+                            if dirty {
+                                state_for_pump.notifier.publish(
+                                    "instances_changed",
+                                    serde_json::json!({"instances": state_for_pump.registry.list()}),
+                                );
                             }
                         }
                         for ev in feed_events {
@@ -202,7 +207,7 @@ pub(crate) async fn run_stdout_pump(
                                         &state_for_pump,
                                         &pump_session,
                                         body,
-                                        saw_stream_turn,
+                                        turn.is_live(),
                                     );
                                 }
                             }
@@ -238,8 +243,7 @@ pub(crate) async fn run_stdout_pump(
                                     }
                                 }
                                 turn_text.clear();
-                                let live_turn = saw_stream_turn;
-                                saw_stream_turn = false;
+                                let live_turn = turn.on_result_line() == TurnAction::TurnEnded;
                                 pump_turn_gen_captured = false;
                                 // report_turn_status (todo 435) is authoritative for a live
                                 // turn; a replayed history line keeps the legacy marker scan.
@@ -342,7 +346,12 @@ pub(crate) async fn run_stdout_pump(
                                     pump_session.session_id,
                                     state_for_pump.registry.current_turn_gen(&pump_session.session_id)
                                 );
-                                if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) {
+                                // A replay's result line shares the live turn's gen, so the gen
+                                // guard alone cannot reject it. Latches for the watchdog if a
+                                // turn ever dies without a result line.
+                                if live_turn
+                                    && state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen)
+                                {
                                     crate::sessions::chat_state::set_busy(&pump_session.session_id, false);
                                 }
                                 // Drain-on-jarvis-idle (todo 272 chunk 3): this session IS

@@ -156,6 +156,19 @@ impl Registry {
         }
     }
 
+    /// A real turn is running, whoever started it. Must NOT bump `turn_gen` -
+    /// the pump captured that gen already and guards its turn-end clear with
+    /// it. Returns true if anything changed. See `pump::turn_boundary`.
+    pub fn mark_turn_live(&self, session_id: &str) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        let changed = !i.busy || i.awaiting.is_some();
+        i.busy = true;
+        i.awaiting = None;
+        i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
+        changed
+    }
+
     /// Stamp `last_event_at` to now - the busy-watchdog's only liveness
     /// signal. Called from every event-flow site, not just turn start.
     pub fn touch_activity(&self, session_id: &str) {
@@ -424,6 +437,39 @@ mod tests {
         let i = registry.get("s").unwrap();
         assert!(i.awaiting.is_none(), "new turn's cleared awaiting must survive");
         assert!(i.busy);
+    }
+
+    #[test]
+    fn mark_turn_live_sets_busy_clears_awaiting_and_keeps_the_gen() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z");
+        registry.set_awaiting("s", Some("question".into()));
+        let gen_before = registry.current_turn_gen("s");
+
+        assert!(registry.mark_turn_live("s"));
+        let i = registry.get("s").unwrap();
+        assert!(i.busy);
+        assert!(i.awaiting.is_none(), "the previous turn's status must not survive a new turn");
+        assert_eq!(i.turn_gen, gen_before, "bumping here would invalidate the pump's captured gen");
+        assert!(i.last_event_at.is_some(), "the watchdog needs a fresh liveness stamp");
+    }
+
+    #[test]
+    fn mark_turn_live_reports_no_change_when_already_busy_and_clear() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z");
+        registry.set_busy("s", true);
+        registry.set_awaiting("s", None);
+        assert!(!registry.mark_turn_live("s"), "no state change means no instances_changed publish");
+    }
+
+    #[test]
+    fn mark_turn_live_unknown_session_is_noop() {
+        let registry = Registry::new();
+        assert!(!registry.mark_turn_live("ghost"));
+        assert!(registry.get("ghost").is_none());
     }
 
     #[test]

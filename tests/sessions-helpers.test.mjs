@@ -161,6 +161,41 @@ describe("statusPriority - awaiting/busy interaction matrix", () => {
   });
 });
 
+/** Every set here is empty on purpose: these pin what a surface that never
+ *  received the prompt broadcast (the phone, a second window, a fresh reload)
+ *  renders from `Instance` alone. The daemon-side writers are
+ *  `Registry::mark_turn_live` and `hooks_server::permission`. */
+describe("daemon-authoritative status with no window-local state", () => {
+  const none = new Set();
+  const seg = (i) => sessionSegment(i, none, none, deriveQuestionSet([i]), none);
+
+  it("a live turn is In Progress (chat 20176: this rendered as Done)", () => {
+    const i = makeInstance({ session_id: "live", busy: true, awaiting: null });
+    expect(seg(i)).toBe(2);
+    expect(statusDotClass(i, none, none, deriveQuestionSet([i]))).toBe("st-working");
+  });
+
+  it("a self-resumed turn does not inherit the previous turn's 'done'", () => {
+    // mark_turn_live clears awaiting, so the row cannot sit in Done while the
+    // session works. The pre-fix shape is the second assertion.
+    const after = makeInstance({ session_id: "bg", busy: true, awaiting: null });
+    const before = makeInstance({ session_id: "bg", busy: false, awaiting: "done" });
+    expect(seg(after)).toBe(2);
+    expect(seg(before)).toBe(1);
+  });
+
+  it("a blocking permission prompt is Input Needed on every surface", () => {
+    const i = makeInstance({ session_id: "perm", busy: true, awaiting: "question" });
+    expect(seg(i)).toBe(0);
+    expect(stateTooltip(i, none, none, deriveQuestionSet([i]))).toMatch(/asked a question/);
+  });
+
+  it("answering the prompt hands the row straight back to In Progress", () => {
+    const i = makeInstance({ session_id: "perm", busy: true, awaiting: null });
+    expect(seg(i)).toBe(2);
+  });
+});
+
 describe("sessionSegment", () => {
   const none = new Set();
   const seg = (i, opts = {}) =>

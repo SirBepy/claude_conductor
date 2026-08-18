@@ -177,7 +177,7 @@ pub async fn spawn_session(
     let pump_session = Arc::clone(&session);
     let map_for_pump = Arc::clone(map);
     let state_for_pump = Arc::clone(state);
-    tokio::spawn(run_stdout_pump(child, stdout, pump_session, map_for_pump, state_for_pump));
+    tokio::spawn(run_stdout_pump(child, stdout, pump_session, map_for_pump, state_for_pump, params.resume_id.is_some()));
 
     // NOTE: jsonl_tail is intentionally NOT spawned in Phase 5a. It republishes
     // every transcript line to the same broadcast the stdout pump already feeds,
@@ -312,6 +312,23 @@ mod tests {
         assert_eq!(args.get(m + 1).map(String::as_str), Some("sonnet"));
         let e = args.iter().position(|a| a == "--effort").expect("--effort");
         assert_eq!(args.get(e + 1).map(String::as_str), Some("medium"));
+    }
+
+    #[test]
+    fn base_args_pretrust_our_own_mcp_ask_tool() {
+        // Pre-trust (todo: AUQ dual-path incident, 2026-08-18): the first call
+        // to mcp__cc_conductor__ask_user_question must never reach the
+        // ordinary approval gate, so it always renders through index.ts's
+        // fire-and-forget path, never permission-card.ts's fallback.
+        let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
+        let p = args
+            .iter()
+            .position(|a| a == "--allowedTools")
+            .expect("--allowedTools must be present");
+        assert_eq!(
+            args.get(p + 1).map(String::as_str),
+            Some("mcp__cc_conductor__ask_user_question"),
+        );
     }
 
     #[test]
