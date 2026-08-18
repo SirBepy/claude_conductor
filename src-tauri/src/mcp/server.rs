@@ -21,8 +21,8 @@ use std::io::{BufRead, Write};
 use super::tool_schemas::{
     tool_list_response, TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS,
     TOOL_POST_MESSAGE, TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS,
-    TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_WORKER,
-    TOOL_UPDATE_MESSAGE,
+    TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT,
+    TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
 };
 
 /// Read the hooks port from <app-data>/hooks_port.txt.
@@ -297,6 +297,18 @@ pub fn run_stdio() {
                             });
                             relay(&rt, &id, &url, body, Some("invalid update"), None)
                         }
+                        TOOL_SPAWN_CHAT => {
+                            let url = format!("http://127.0.0.1:{port}/chat/spawn");
+                            let body = json!({
+                                "session_id": session_id,
+                                "cwd": arguments["cwd"],
+                                "prompt": arguments["prompt"],
+                                "model": arguments.get("model"),
+                                "effort": arguments.get("effort"),
+                                "name": arguments.get("name"),
+                            });
+                            relay(&rt, &id, &url, body, None, None)
+                        }
                         // The four arms below are only ever advertised to a
                         // Jarvis child's `tools/list` (see `is_jarvis` above),
                         // but a `tools/call` for a tool the model was never
@@ -419,18 +431,19 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_nine_base_tools() {
+    fn tools_list_returns_ten_base_tools() {
         // Non-jarvis (the default for every normal session): base set is the
         // original 3 permission/question/close tools plus the 3 unconditional
         // coordination-channel tools (list_peers/post_message/read_messages)
-        // plus report_turn_status (todo 435) plus send_message/update_message.
+        // plus report_turn_status (todo 435) plus send_message/update_message
+        // plus spawn_chat (the /respawn skill's sibling-session spawn).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 10);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -443,6 +456,7 @@ mod tests {
         assert!(names.contains(&"report_turn_status"));
         assert!(names.contains(&"send_message"));
         assert!(names.contains(&"update_message"));
+        assert!(names.contains(&"spawn_chat"));
     }
 
     #[test]
@@ -454,7 +468,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 13, "9 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 14, "10 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();

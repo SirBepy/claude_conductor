@@ -25,6 +25,7 @@ mod pr_review;
 mod preview;
 mod registry;
 mod schedule;
+pub(crate) mod spawn_chat;
 mod statusbar;
 mod worktrees;
 // pub(crate): `hooks_server::turn_status` (the `report_turn_status` MCP

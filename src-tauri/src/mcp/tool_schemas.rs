@@ -24,6 +24,9 @@ pub const TOOL_SEND_MESSAGE: &str = "send_message";
 // Revise/retract an already-sent message rather than stacking a reworded
 // near-duplicate underneath it. Unconditional, same as send_message.
 pub const TOOL_UPDATE_MESSAGE: &str = "update_message";
+// Sibling-session spawn behind `/respawn`. Unconditional despite the name
+// similarity with `spawn_worker`: no fleet, caller's own project only.
+pub const TOOL_SPAWN_CHAT: &str = "spawn_chat";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -32,8 +35,8 @@ pub const TOOL_SEND_TO_SESSION: &str = "send_to_session";
 pub const TOOL_FLEET_STATUS: &str = "fleet_status";
 pub const TOOL_RESPOND_WORKER_PROMPT: &str = "respond_worker_prompt";
 
-/// `is_jarvis` gates the four fleet-orchestration tools below - they're only
-/// meaningful (and only wired server-side) for the Jarvis singleton, and
+/// `is_jarvis` gates the four fleet-orchestration tools at the bottom - they're
+/// only meaningful (and only wired server-side) for the Jarvis singleton, and
 /// listing them for every session would be pure token cost for nothing. A
 /// normal session's tool list must stay byte-identical to before these
 /// existed (acceptance criterion, todo 272 chunk 2b).
@@ -163,6 +166,21 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     "retract": {"type": "boolean", "description": "Strike the message out instead of replacing its text."}
                 },
                 "required": ["message"]
+            }
+        }),
+        json!({
+            "name": TOOL_SPAWN_CHAT,
+            "description": "Spawn a NEW chat in this same project and send it `prompt` as its first message, returning {ok, session_id}. The prompt lands as a real, visible user message in the new chat, so put the whole handoff context in it. Used by the `/respawn` skill to hand this session's work to a fresh context window right before close_session tears this one down - call spawn_chat FIRST, since close_session kills the process that would make this call. The new chat inherits this one's model, effort, account, character and auto-accept unless overridden. Only spawns into this session's own working directory, and only once per turn.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": "string", "description": "Absolute working directory. Must be this session's own cwd."},
+                    "prompt": {"type": "string", "description": "The new chat's first message. Carry the full handoff context here - it is what the user reads."},
+                    "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
+                    "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
+                    "name": {"type": "string", "description": "Optional short label for the new chat."}
+                },
+                "required": ["cwd", "prompt"]
             }
         }),
     ];
