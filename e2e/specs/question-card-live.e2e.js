@@ -1,11 +1,7 @@
-// BILLED end-to-end proof for the AskUserQuestion card relay (ai_todo 16).
-// Starts a real haiku chat, sends a prompt that makes claude call the builtin
-// AskUserQuestion tool, and asserts the FULL real path: claude -> PreToolUse
-// curl hook -> daemon /hooks/ask-question -> question_request -> the chat card
-// renders -> answering -> respond_question -> deny reason -> claude continues.
-//
-// Subscription-billed (one tiny haiku turn). Run:
-//   npm run test:e2e -- --spec e2e/specs/question-card-live.e2e.js
+// BILLED e2e proof (ai_todo 16, 681), two real haiku turns each on a fresh
+// session: 1) builtin AskUserQuestion -> PreToolUse hook fallback card.
+// 2) our pre-trusted MCP tool (c306a4b4) -> the real fire-and-forget path
+// CLAUDE.md calls "the one ask channel". npm run test:e2e -- --spec e2e/specs/question-card-live.e2e.js
 
 import assert from "node:assert";
 
@@ -50,6 +46,24 @@ async function sendMessage(text) {
   await (await $(".composer-send")).click();
 }
 
+// Selects the option matching `optionPattern`, then submits. supportsExtras
+// on both card flows (c306a4b4) makes even a lone question a two-step
+// Next -> review-panel Submit. Asserts the review button's label
+// ("Answer" vs "Submit"), the button-text half of the gate distinction.
+async function answerSingleQuestion(optionPattern, expectedLabel) {
+  await browser.execute((p) => {
+    const re = new RegExp(p, "i");
+    const opt = Array.from(document.querySelectorAll(".prompt-opt")).find((el) => re.test(el.textContent));
+    opt?.querySelector("input")?.click();
+  }, optionPattern);
+  const nextLabel = await browser.execute(() => {
+    document.querySelector('.prompt-card [data-act="primary"]')?.click();
+    return document.querySelector('.prompt-card [data-act="primary"]')?.textContent?.trim();
+  });
+  assert.strictEqual(nextLabel, expectedLabel, `primary button after Next should read "${expectedLabel}", got "${nextLabel}"`);
+  await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.click());
+}
+
 describe("AskUserQuestion full real-path (BILLED)", () => {
   before(async () => {
     await browser.waitUntil(
@@ -81,19 +95,83 @@ describe("AskUserQuestion full real-path (BILLED)", () => {
     const cardText = await card.getText();
     assert.ok(/tabs/i.test(cardText) && /spaces/i.test(cardText), `card missing options: ${cardText}`);
 
-    await browser.execute(() => {
-      const opt = Array.from(document.querySelectorAll(".prompt-opt")).find((el) => /tabs/i.test(el.textContent));
-      opt?.querySelector("input")?.click();
-    });
-    // This built-in-tool flow (showPermissionCard) never sets supportsExtras, and
-    // it's a single question, so there's no review panel - the footer's one
-    // primary button is Submit directly on this question.
-    await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.click());
+    await answerSingleQuestion("tabs", "Answer");
 
     await card.waitForExist({ reverse: true, timeout: 15000, timeoutMsg: "card did not clear after answering" });
     await browser.waitUntil(
       async () => browser.execute(() => document.querySelectorAll(".msg.assistant:not(.streaming)").length >= 1),
       { timeout: 60000, interval: 1000, timeoutMsg: "turn never resolved after answering (still hung?)" }
     );
+  });
+
+  // Closes todo 681: the only other real-process spec exercises the builtin
+  // fallback, never the pre-trusted MCP tool this app actually ships.
+  it("real claude turn calls the MCP ask_user_question tool directly, resolves via question-requested (not the permission gate) (todo 681)", async () => {
+    // Fresh session = fresh `claude -p` process, so this IS the first-ever
+    // call to our MCP tool in it - the exact path pre-trust must get right.
+    await startHaikuChat();
+    await installConsoleHook();
+    // A no-op past its first call (module-global window.__qHook) - drain so
+    // the OTHER test's leftover logs don't corrupt this test's absence check.
+    await drainLogs();
+    const activeBefore = await browser.execute(() => document.querySelector("#sessions-list li.active")?.getAttribute("data-session-id"));
+    await sendMessage("Call the mcp__cc_conductor__ask_user_question tool (not the built-in AskUserQuestion) to ask me whether I prefer tabs or spaces. Do nothing else but call that tool.");
+
+    const card = await $(".prompt-card");
+    let logs;
+    try {
+      await card.waitForExist({ timeout: 60000 });
+    } catch (e) {
+      logs = await drainLogs();
+      const diag = await browser.execute(() => ({
+        active: document.querySelector("#sessions-list li.active")?.getAttribute("data-session-id"),
+        cards: document.querySelectorAll(".prompt-card").length,
+      }));
+      const relevant = logs.filter((l) => /perm-relay|perm-gate/.test(l));
+      throw new Error(`CARD NEVER APPEARED.\nactiveBefore=${activeBefore}\ndiag=${JSON.stringify(diag)}\nperm logs:\n${relevant.join("\n") || "<none>"}\nall logs tail:\n${logs.slice(-15).join("\n")}`);
+    }
+
+    const cardText = await card.getText();
+    assert.ok(/tabs/i.test(cardText) && /spaces/i.test(cardText), `card missing options: ${cardText}`);
+
+    // Gate-vs-fire-and-forget: handleQuestionRequested logs "...question-
+    // requested"; handlePermissionRequested logs "...permission-requested".
+    // A pre-trust failure trips the second assertion below and fails loudly.
+    logs = await browser.execute(() => window.__qLogs || []);
+    assert.ok(
+      logs.some((l) => /frontend received question-requested/.test(l)),
+      `expected a question-requested (fire-and-forget) log; got:\n${logs.join("\n")}`
+    );
+    assert.ok(
+      !logs.some((l) => /frontend received permission-requested/.test(l) && /mcp__cc_conductor__ask_user_question/.test(l)),
+      `card came through the permission GATE, not the fire-and-forget path:\n${logs.join("\n")}`
+    );
+
+    await answerSingleQuestion("spaces", "Submit");
+
+    await card.waitForExist({ reverse: true, timeout: 15000, timeoutMsg: "card did not clear after answering" });
+
+    // Real tool result: the answer lands as an <auq-answer/>-sentinel message
+    // that flips the transcript's inline question-card from "pending" to
+    // "answered". The gate path's deny+message never sends that sentinel, so
+    // a gate-routed card times out here instead of passing.
+    await browser.waitUntil(
+      async () => browser.execute(() => {
+        const nodes = document.querySelectorAll(".msg.question-card details.question-card-collapsible");
+        return nodes[nodes.length - 1]?.getAttribute("data-resolution") === "answered";
+      }),
+      { timeout: 60000, interval: 1000, timeoutMsg: "inline transcript question-card never resolved to answered (stuck pending, or resolved skipped/timed-out)" }
+    );
+    const resolved = await browser.execute(() => {
+      const nodes = document.querySelectorAll(".msg.question-card details.question-card-collapsible");
+      const details = nodes[nodes.length - 1];
+      return {
+        resolution: details?.getAttribute("data-resolution"),
+        answerText: details?.querySelector(".tool-qa-a")?.textContent?.trim(),
+      };
+    });
+    assert.strictEqual(resolved.resolution, "answered");
+    assert.ok(/spaces/i.test(resolved.answerText || ""), `resolved answer text missing "Spaces": ${resolved.answerText}`);
+    assert.notStrictEqual(resolved.answerText, "User skipped the question.");
   });
 });
