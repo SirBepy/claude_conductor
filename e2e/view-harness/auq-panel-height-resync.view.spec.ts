@@ -57,6 +57,6 @@ test("a post-render reflow re-syncs the track height so the last option stays vi
   expect(optBottom).toBeLessThanOrEqual(viewportBottom + 1);
 
   await card.screenshot({
-    path: ".for_bepy/screenshots/19592-134315215212210884/auq-panel-height-resync.png",
+    path: ".for_bepy/screenshots/_specs/auq-panel-height-resync.png",
   });
 });

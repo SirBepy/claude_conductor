@@ -30,7 +30,7 @@ test("fallback card review step shows and submits the append box", async ({ page
   await expect(extraInput).toHaveValue("please also check staging");
 
   await card.screenshot({
-    path: ".for_bepy/screenshots/19592-134315215212210884/auq-fallback-append-box.png",
+    path: ".for_bepy/screenshots/_specs/auq-fallback-append-box.png",
   });
 
   // Submit - the primary button is now "Answer" (submit mode on review).

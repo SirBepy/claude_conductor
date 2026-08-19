@@ -26,7 +26,7 @@ test.describe("fallback question card - tool chip gating", () => {
     await expect(card.locator(".prompt-card__tool")).toHaveCount(0);
 
     await card.screenshot({
-      path: ".for_bepy/screenshots/19592-134315215212210884/auq-fallback-chip-own-tool.png",
+      path: ".for_bepy/screenshots/_specs/auq-fallback-chip-own-tool.png",
     });
   });
 
@@ -38,7 +38,7 @@ test.describe("fallback question card - tool chip gating", () => {
     await expect(chip).toHaveText("Bash");
 
     await card.screenshot({
-      path: ".for_bepy/screenshots/19592-134315215212210884/auq-fallback-chip-other-tool.png",
+      path: ".for_bepy/screenshots/_specs/auq-fallback-chip-other-tool.png",
     });
   });
 });

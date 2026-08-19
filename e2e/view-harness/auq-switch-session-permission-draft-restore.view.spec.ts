@@ -96,7 +96,7 @@ test.describe("view-harness / fallback (permission-kind) AUQ draft survives a re
     await expect(restoredInput).toHaveValue("Prod, but confirm with the team first");
 
     await restoredCard.screenshot({
-      path: ".for_bepy/screenshots/19592-134315215212210884/auq-permission-draft-restore.png",
+      path: ".for_bepy/screenshots/_specs/auq-permission-draft-restore.png",
     });
   });
 });
