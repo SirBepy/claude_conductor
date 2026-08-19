@@ -12,6 +12,20 @@ use crate::sessions::scheduled_items::{ScheduledItem, ScheduledKind};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Marks a fired `/schedule` item in the transcript, same convention
+/// `[repo-channel]`/`[fleet]` already use for `chat-classifiers.ts`'s buckets.
+pub(crate) const SCHEDULE_PREFIX: &str = "[schedule]";
+
+/// Idempotent: a rate-limited turn is requeued from `Session::last_prompt`,
+/// which already carries the tag, so re-firing must not stack a second one.
+fn tag_schedule(prompt: &str) -> String {
+    if prompt.starts_with(SCHEDULE_PREFIX) {
+        prompt.to_string()
+    } else {
+        format!("{SCHEDULE_PREFIX} {prompt}")
+    }
+}
+
 /// `Ok(Some(session_id))` on success: the session id the fire sent into
 /// (spawned fresh for `NewChat`, or the existing target for `Message`).
 pub(crate) async fn fire_kind(state: &Arc<DaemonState>, item: &ScheduledItem) -> Result<Option<String>, String> {
@@ -57,7 +71,7 @@ async fn fire_jarvis_hygiene(state: &Arc<DaemonState>, prompt: &str) -> Result<O
     let Some(jarvis_id) = jarvis_id.filter(|_| live) else {
         return Err("no live jarvis session configured; hygiene pass skipped".to_string());
     };
-    jarvis_wake::enqueue(state, &jarvis_id, prompt.to_string());
+    jarvis_wake::enqueue(state, &jarvis_id, jarvis_wake::tag_hygiene(prompt));
     jarvis_wake::drain(state, &jarvis_id).await;
     Ok(Some(jarvis_id))
 }
@@ -103,7 +117,7 @@ async fn fire_message(
         Some(s) => s,
         None => respawn_for_message(state, session_id, cwd).await?,
     };
-    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
+    lifecycle::send_message(&session, &tag_schedule(prompt), true).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(session_id, None);
     state.registry.set_busy_from_wake(session_id);
     crate::sessions::chat_state::set_busy(session_id, true);
@@ -185,7 +199,7 @@ async fn fire_new_chat(
     );
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
+    lifecycle::send_message(&session, &tag_schedule(prompt), true).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy_from_wake(&sid);
     crate::sessions::chat_state::set_busy(&sid, true);
@@ -301,6 +315,12 @@ mod tests {
         assert_eq!(result, Ok(Some("jv-1".to_string())));
         let queues = state.jarvis_wakes.lock().unwrap();
         let pending = queues.get("jv-1").expect("hygiene prompt queued for the busy jarvis");
-        assert_eq!(pending.iter().cloned().collect::<Vec<_>>(), vec!["hi".to_string()]);
+        assert_eq!(pending.iter().cloned().collect::<Vec<_>>(), vec!["[hygiene] hi".to_string()]);
+    }
+
+    #[test]
+    fn tag_schedule_marks_a_fire_once_even_across_a_rate_limited_replay() {
+        assert_eq!(tag_schedule("run the report"), "[schedule] run the report");
+        assert_eq!(tag_schedule("[schedule] run the report"), "[schedule] run the report");
     }
 }

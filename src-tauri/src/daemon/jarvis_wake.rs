@@ -20,6 +20,20 @@ use std::sync::{Arc, Mutex};
 
 pub type WakeQueue = Mutex<HashMap<String, VecDeque<String>>>;
 
+/// Marks a `ScheduledKind::JarvisHygiene` wake so it buckets separately from
+/// an ordinary scheduled wake in chat, same `[fleet]` convention
+/// `worker_terminal_wake` uses below. Idempotent: a recurring item re-fires
+/// the same stored prompt on every occurrence.
+pub const HYGIENE_PREFIX: &str = "[hygiene]";
+
+pub fn tag_hygiene(prompt: &str) -> String {
+    if prompt.starts_with(HYGIENE_PREFIX) {
+        prompt.to_string()
+    } else {
+        format!("{HYGIENE_PREFIX} {prompt}")
+    }
+}
+
 pub fn new_queue() -> WakeQueue {
     Mutex::new(HashMap::new())
 }
@@ -166,6 +180,12 @@ mod tests {
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    #[test]
+    fn tag_hygiene_marks_a_pass_once_even_when_the_item_recurs() {
+        assert_eq!(tag_hygiene("sweep the backlog"), "[hygiene] sweep the backlog");
+        assert_eq!(tag_hygiene("[hygiene] sweep the backlog"), "[hygiene] sweep the backlog");
     }
 
     #[test]

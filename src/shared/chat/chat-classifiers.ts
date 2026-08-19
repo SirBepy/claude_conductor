@@ -298,12 +298,13 @@ export function isResumeContinuationUserMessage(cleaned: ContentBlock[]): boolea
     || /^\[request interrupted( by user)?\]$/i.test(t);
 }
 
-export type MetaTurnKind = "peer" | "fleet" | "retry" | "wake";
+export type MetaTurnKind = "peer" | "fleet" | "retry" | "hygiene" | "wake";
 
 const META_KIND_LABELS: Record<MetaTurnKind, string> = {
   peer: "Peer message",
   fleet: "Fleet update",
   retry: "Retrying",
+  hygiene: "Hygiene pass",
   wake: "Scheduled wake",
 };
 
@@ -313,6 +314,7 @@ export const META_KIND_ICONS: Record<MetaTurnKind, string> = {
   peer: "ph-users-three",
   fleet: "ph-broadcast",
   retry: "ph-arrow-clockwise",
+  hygiene: "ph-broom",
   wake: "ph-alarm",
 };
 
@@ -320,12 +322,16 @@ export const META_KIND_ICONS: Record<MetaTurnKind, string> = {
 // match tolerates the raw text's wrapping brackets.
 const RETRY_NUDGE_TEXT = "Your previous response had no visible output. Please continue and produce a user-visible response.";
 
-/** `[repo-channel]`/`[fleet]` are daemon-tagged; RETRY_NUDGE_TEXT is the CLI's
- *  own nudge; anything else untagged is a real ScheduleWakeup/cron tick. */
+/** `[repo-channel]`/`[fleet]`/`[hygiene]`/`[schedule]` are daemon-tagged and
+ *  win over RETRY_NUDGE_TEXT (the CLI's own nudge), which a tagged prompt's
+ *  body could otherwise quote; anything else untagged is a bare
+ *  ScheduleWakeup/cron tick. */
 export function classifyMetaTurn(cleaned: ContentBlock[]): { kind: MetaTurnKind; label: string; detail: string } {
   const text = blocksToText(cleaned).trim();
   const kind: MetaTurnKind = text.startsWith("[repo-channel]") ? "peer"
     : text.startsWith("[fleet]") ? "fleet"
+    : text.startsWith("[hygiene]") ? "hygiene"
+    : text.startsWith("[schedule]") ? "wake"
     : text.includes(RETRY_NUDGE_TEXT) ? "retry"
     : "wake";
   return { kind, label: META_KIND_LABELS[kind], detail: text };
