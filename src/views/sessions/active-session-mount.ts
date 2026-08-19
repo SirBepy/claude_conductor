@@ -119,8 +119,8 @@ export function wireRenderer(
   // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
   // resolve this session's working directory.
   setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));
-  renderer.onActivityUpdate = (activity) => {
-    if (state.renderer === renderer) setThinkingActivity(activity);
+  renderer.onActivityUpdate = (activity, idle) => {
+    if (state.renderer === renderer) setThinkingActivity(activity, idle);
   };
   renderer.onProgressUpdate = (n, m) => {
     if (state.renderer === renderer) setThinkingProgress(n, m);
@@ -172,7 +172,7 @@ function remountRetained(
   const edits = renderer.getFileEdits();
   panel.onUpdate(edits);
   header.setChangesBadge(dedupeByPath(edits).length);
-  setThinkingActivity(renderer.lastActivity);
+  setThinkingActivity(renderer.lastActivity, renderer.activityIdle);
   // Reselecting a chat always lands on the newest message, same as a cold
   // load - it doesn't restore wherever the user had scrolled to before
   // leaving (ai_todo scroll regression: clicking a chat used to always land

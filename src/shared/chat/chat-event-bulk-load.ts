@@ -35,6 +35,7 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.auqPreContent = null;
   r.fileEdits = [];
   r.lastActivity = null;
+  r.activityIdle = false;
   r.activityToolCanon = null;
   r.activeToolGroups.clear();
   r.activeTurnStart = null;
@@ -86,7 +87,7 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   // last activity, and buffered live events below take over from there.
   r.hydrating = false;
   r.onFileEditsChanged?.(r.getFileEdits());
-  r.onActivityUpdate?.(r.lastActivity);
+  r.onActivityUpdate?.(r.lastActivity, r.activityIdle);
   // The final turn never gets a closing user_message: a live session resumes
   // ticking; History settles frozen (nothing left to stream in, ever).
   if (r.activeTurnChipKey !== null && r.activeTurnUsage) {

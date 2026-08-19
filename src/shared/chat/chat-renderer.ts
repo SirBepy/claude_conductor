@@ -132,6 +132,11 @@ export class ChatRenderer {
   }[] = [];
   fileEdits: FileEditView[] = [];
   lastActivity: string | null = null;
+  // True once the tool `lastActivity` describes has RETURNED - the label
+  // stays on screen (no blank-to-generic-"Thinking" flash) but the bar
+  // suffixes it to show the model is past that step. False while the tool
+  // is still in flight, or once a new activity/turn boundary overwrites it.
+  activityIdle = false;
   // Canonical tool of the CURRENT activity (the most recent tool_use, the one
   // `lastActivity` describes, e.g. "Editing api.ts" -> "Edit"). Drives the
   // single working-chip highlight so only the chip for what the AI is doing
@@ -159,7 +164,7 @@ export class ChatRenderer {
   public onMetaUpdate: ((meta: SessionMeta) => void) | null = null;
   public onFileEditsChanged: ((edits: FileEditView[]) => void) | null = null;
   public onToolTally: ((t: ToolTally) => void) | null = null;
-  public onActivityUpdate: ((activity: string | null) => void) | null = null;
+  public onActivityUpdate: ((activity: string | null, idle?: boolean) => void) | null = null;
   public onProgressUpdate: ((n: number, m: number) => void) | null = null;
   public onTodoActivityUpdate: ((activeForm: string | null) => void) | null = null;
   public onSendText: ((text: string) => void) | null = null;
@@ -189,15 +194,17 @@ export class ChatRenderer {
     }
   }
 
-  setActivity(a: string | null, opts: { keepChip?: boolean } = {}): void {
+  setActivity(a: string | null, opts: { keepChip?: boolean; idle?: boolean } = {}): void {
     // keepChip skips the highlight clear for the "turn's tools resolved" case
     // (thinking-bar text goes idle, chip keeps pulsing till the turn closes).
     if (a === null && !opts.keepChip) this.activityToolCanon = null;
-    if (this.lastActivity === a) return;
+    const idle = !!opts.idle;
+    if (this.lastActivity === a && this.activityIdle === idle) return;
     this.lastActivity = a;
+    this.activityIdle = idle;
     // Suppressed during history replay; the final activity is fired once when
     // bulkLoadEvents finishes (see `hydrating`).
-    if (!this.hydrating) this.onActivityUpdate?.(a);
+    if (!this.hydrating) this.onActivityUpdate?.(a, idle);
   }
 
   /** Clear all per-turn meta tracking (key, usage, timestamps, streamed text). */
@@ -276,6 +283,7 @@ export class ChatRenderer {
     this._cumulative = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
     this.fileEdits = [];
     this.lastActivity = null;
+    this.activityIdle = false;
     this.activityToolCanon = null;
     this.outstandingActivityToolIds.clear();
     this.activeToolGroups.clear();

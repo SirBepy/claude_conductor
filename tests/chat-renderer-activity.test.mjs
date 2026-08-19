@@ -87,24 +87,27 @@ describe("ChatRenderer — activity pinning", () => {
   });
 });
 
-describe("ChatRenderer - activity clears once a turn's tools all resolve", () => {
-  it("clears to null once the sole outstanding tool's result lands", () => {
+describe("ChatRenderer - activity idles (not blanks) once a turn's tools all resolve", () => {
+  it("keeps the label but marks it idle once the sole outstanding tool's result lands", () => {
     const r = new ChatRenderer(document.createElement("div"));
     const seen = [];
-    r.onActivityUpdate = (a) => seen.push(a);
+    r.onActivityUpdate = (a, idle) => seen.push([a, !!idle]);
 
     r.handleEvent(userEvent("go"), { silent: true });
     r.handleEvent(toolUse("Read", { file_path: "/foo/bar.ts" }, "t1"), { silent: true });
-    expect(seen[seen.length - 1]).toBe("Reading bar.ts");
+    expect(seen[seen.length - 1]).toEqual(["Reading bar.ts", false]);
     r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "hi", is_error: false }, { silent: true });
 
-    expect(seen[seen.length - 1]).toBeNull();
+    // Result lands: text is NOT blanked to null (would flash the thinking bar
+    // to generic "Thinking..." for a fast tool) - it's kept and flagged idle
+    // so the UI can suffix it instead.
+    expect(seen[seen.length - 1]).toEqual(["Reading bar.ts", true]);
   });
 
   it("does not blank the label while a sibling tool is still outstanding", () => {
     const r = new ChatRenderer(document.createElement("div"));
     const seen = [];
-    r.onActivityUpdate = (a) => seen.push(a);
+    r.onActivityUpdate = (a, idle) => seen.push([a, !!idle]);
 
     r.handleEvent(userEvent("go"), { silent: true });
     r.handleEvent(toolUse("Read", { file_path: "/a.ts" }, "t1"), { silent: true });
@@ -113,11 +116,11 @@ describe("ChatRenderer - activity clears once a turn's tools all resolve", () =>
 
     // t2 (Edit) is still outstanding - the label must still read its activity,
     // never null, and never flip back to t1's.
-    expect(seen).not.toContain(null);
-    expect(seen[seen.length - 1]).toBe("Editing b.ts");
+    expect(seen.map((s) => s[0])).not.toContain(null);
+    expect(seen[seen.length - 1]).toEqual(["Editing b.ts", false]);
 
     r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "hi", is_error: false }, { silent: true });
-    expect(seen[seen.length - 1]).toBeNull();
+    expect(seen[seen.length - 1]).toEqual(["Editing b.ts", true]);
   });
 });
 

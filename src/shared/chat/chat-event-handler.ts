@@ -545,15 +545,12 @@ function handleToolResultEvent(
     is_error: ev.is_error,
     ts,
   });
-  // Only clear the label once no tool from this turn is still outstanding -
-  // otherwise a parallel call's result would blank the bar while a sibling
-  // tool is still running (see chat-renderer.ts's outstandingActivityToolIds).
-  // keepChip: true clears only the thinking-bar text, not the chip-pulse
-  // tracker - the just-finished tool's chip keeps pulsing until the NEXT
-  // tool_use replaces it or the turn closes (clearRunningHighlight), same
-  // invariant as before this label-clear existed.
+  // Only idle the label once no tool from this turn is outstanding (see
+  // outstandingActivityToolIds) - text stays, idle:true just flags it so a
+  // fast result doesn't flash "Thinking...". keepChip only clears the
+  // highlight; the chip keeps pulsing till the next tool_use or close.
   if (r.outstandingActivityToolIds.delete(ev.tool_use_id) && r.outstandingActivityToolIds.size === 0) {
-    r.setActivity(null, { keepChip: true });
+    r.setActivity(r.lastActivity, { keepChip: true, idle: true });
   }
   // The tally counts didn't change, but a result can complete a custom
   // view (e.g. an AskUserQuestion answer): nudge the statusline so an open

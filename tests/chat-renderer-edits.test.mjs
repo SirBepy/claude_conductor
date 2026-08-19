@@ -80,9 +80,9 @@ describe("ChatRenderer — fileEdits index + callbacks", () => {
     const cb = vi.fn();
     r.onActivityUpdate = cb;
     r.handleEvent({ type: "tool_use", tool_name: "Edit", input: { file_path: "/x.ts", old_string: "", new_string: "" }, id: "1" }, { silent: true });
-    expect(cb).toHaveBeenCalledWith("Editing x.ts");
+    expect(cb).toHaveBeenCalledWith("Editing x.ts", false);
     r.handleEvent({ type: "tool_use", tool_name: "Read", input: { file_path: "/y.ts" }, id: "2" }, { silent: true });
-    expect(cb).toHaveBeenLastCalledWith("Reading y.ts");
+    expect(cb).toHaveBeenLastCalledWith("Reading y.ts", false);
     r.handleEvent({ type: "tool_use", tool_name: "Bash", input: { command: "echo hello world from the shell please" }, id: "3" }, { silent: true });
     const last = cb.mock.lastCall[0];
     expect(last.startsWith("Running:")).toBe(true);

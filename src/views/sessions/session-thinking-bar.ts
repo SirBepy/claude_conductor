@@ -3,6 +3,10 @@ import { state } from "./state";
 let _progressN: number | null = null;
 let _progressM: number = 0;
 let _activity: string | null = null;
+// True once the tool `_activity` describes has returned - see chat-renderer's
+// activityIdle. Suffixes the label instead of blanking it back to generic
+// "Thinking..." between a fast tool's result and the next tool/turn boundary.
+let _activityIdle = false;
 let _todoActivity: string | null = null;
 let _pane: HTMLElement | null = null;
 
@@ -10,8 +14,9 @@ export function initThinkingBar(pane: HTMLElement | null): void {
   _pane = pane;
 }
 
-export function setThinkingActivity(s: string | null): void {
+export function setThinkingActivity(s: string | null, idle = false): void {
   _activity = s;
+  _activityIdle = idle;
   if (s === null) {
     _progressN = null;
     _progressM = 0;
@@ -87,7 +92,7 @@ export function updateThinkingBar(): void {
     if (!busy && hasHeld && frozen) textEl.textContent = "Frozen - will send once unfrozen";
     else if (_todoActivity !== null) textEl.textContent = _todoActivity;
     else if (_progressN !== null) textEl.textContent = `Step ${_progressN} of ${_progressM}`;
-    else if (_activity) textEl.textContent = _activity;
+    else if (_activity) textEl.textContent = _activityIdle ? `${_activity} - thinking…` : _activity;
     else textEl.textContent = "Thinking…";
   }
   state.heldMessages?.renderChip();
