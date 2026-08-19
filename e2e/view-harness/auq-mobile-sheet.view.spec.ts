@@ -116,6 +116,9 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(page.locator(".session-header .meta")).toBeVisible();
   });
 
+  // b167f0e7 wrapped the composer in .composer-shell, whose 12px margin + 1px
+  // border sit outside the sheet's anchor and reintroduced a 13px gutter here
+  // (todo 700). sessions.css's mobile block zeroes both; full-bleed stands.
   test("full-bleed: card spans the full viewport width with no side gutter", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, SHORT_QUESTIONS);

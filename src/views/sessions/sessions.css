@@ -1015,4 +1015,22 @@
   .composer-highlight {
     font-size: 16px;
   }
+
+  /* Full-bleed composer: the shell's 12px margin + 1px border sit OUTSIDE
+     .session-composer, which the AUQ sheet anchors off, so they read as the
+     sheet's side gutter. Nothing to centre at phone width anyway. */
+  .composer-shell {
+    margin-left: 0;
+    margin-right: 0;
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+  /* Corners follow the removed side borders; the fused thinking-bar/input
+     boundary is the shared border, not the radius, so the merge survives. */
+  .composer-shell .session-thinking,
+  .composer-shell .session-composer,
+  .composer-shell:has(.session-thinking[hidden]) .session-composer {
+    border-radius: 0;
+  }
 }
