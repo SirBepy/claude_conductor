@@ -40,9 +40,11 @@
 
 /* ── Column ─────────────────────────────────────────────────────────────── */
 
+/* Every column is the SAME width, always. They share spare space equally and
+   never shrink below the basis, so a third column scrolls the board instead of
+   squeezing This chat into a one-word-per-line ribbon. */
 .td-col {
-  flex: 1 1 240px;
-  min-width: 208px;
+  flex: 1 0 260px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -57,9 +59,8 @@
   to { opacity: 1; transform: none; }
 }
 
-/* Optional columns read as secondary to the always-present This chat one. */
+/* Tint only - never a width difference, see .td-col above. */
 .td-col-secondary {
-  flex: 0 1 248px;
   background: color-mix(in srgb, var(--color-surface) 66%, var(--color-background));
 }
 

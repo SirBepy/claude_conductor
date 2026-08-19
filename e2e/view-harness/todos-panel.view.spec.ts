@@ -158,6 +158,34 @@ test("the Columns menu puts Project wide on the board and derives the sibling ca
   expect(columns).toEqual(["project"]);
 });
 
+test("every column is the same width, and a third one scrolls instead of squeezing", async ({ page }) => {
+  // Regression: This chat used to collapse to ~150px next to the optional
+  // columns, wrapping card text one word per line.
+  const panel = await mountPanel(page, SEED, ["project", "done"]);
+  await expect(panel.locator(".td-col")).toHaveCount(3);
+
+  const widths = await panel.locator(".td-col").evaluateAll((els) =>
+    els.map((e) => Math.round(e.getBoundingClientRect().width)),
+  );
+  expect(new Set(widths).size).toBe(1);
+  expect(widths[0]).toBeGreaterThanOrEqual(260);
+
+  // Narrow the rail past what three columns fit in: they keep their width and
+  // the board gains a scroll range rather than shrinking.
+  await page.evaluate(() => {
+    document.getElementById("todos-spec-host")!.style.width = "560px";
+  });
+  const after = await panel.locator(".td-col").evaluateAll((els) =>
+    els.map((e) => Math.round(e.getBoundingClientRect().width)),
+  );
+  expect(new Set(after).size).toBe(1);
+  expect(after[0]).toBeGreaterThanOrEqual(260);
+  const scrollable = await panel.locator(".td-board").evaluate(
+    (el) => el.scrollWidth > el.clientWidth,
+  );
+  expect(scrollable).toBe(true);
+});
+
 test("ticking raises the notify CTA, and Notify clears it", async ({ page }) => {
   // Done is on the board so the ticked card stays visible; by default a tick
   // simply leaves the This chat list.
