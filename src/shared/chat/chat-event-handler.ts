@@ -23,6 +23,7 @@ import {
 import { isRawViewEnabled } from "./message-filter-pref";
 import { parseFileEdit } from "./file-edits";
 import { canonicalTool, isAskQuestionTool } from "./tool-meta";
+import { isQuestionResolutionText } from "./tool-views";
 import {
   describeActivity,
   scrollToBottom,
@@ -64,10 +65,28 @@ function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolea
     if (m.kind === "question" && m.text === undefined) {
       r.messages[i] = { ...m, text: answerText };
       r.dirtyIndices.add(i);
+      moveMessageToEnd(r, i);
       return true;
     }
   }
   return false;
+}
+
+/** Re-anchor the row at `from` as the LAST row - a card answered long after the
+ *  ask belongs there. Its element is dropped; flushRender's append pass rebuilds it. */
+function moveMessageToEnd(r: ChatRenderer, from: number): void {
+  if (from < 0 || from >= r.messages.length - 1) return;
+  const [msg] = r.messages.splice(from, 1);
+  r.messages.push(msg!);
+  if (from < r.messageEls.length) r.messageEls.splice(from, 1)[0]?.remove();
+  // Both arrays lost the same slot, so every tracked index past it shifts down.
+  const shift = (i: number): number => (i > from ? i - 1 : i);
+  const shiftOrNull = (i: number | null): number | null => (i === null ? null : shift(i));
+  r.streamingIndex = shiftOrNull(r.streamingIndex);
+  r.activeTurnStart = shiftOrNull(r.activeTurnStart);
+  r.silentStreakBoundaryIndex = shiftOrNull(r.silentStreakBoundaryIndex);
+  r.closeTurnQueue = r.closeTurnQueue.map((e) => ({ ...e, start: shift(e.start), end: shift(e.end) }));
+  r.dirtyIndices = new Set([...r.dirtyIndices].filter((i) => i !== from).map(shift));
 }
 
 /** True if the open turn has produced anything the user would see - real
@@ -504,23 +523,18 @@ function handleToolResultEvent(
   // branch below absorbs its own result but simpler: no card to update.
   if (r._todoWriteToolUseIds.delete(ev.tool_use_id)) return { touched: true, coalesce: false };
   if (r._updateMsgToolUseIds.delete(ev.tool_use_id)) return { touched: true, coalesce: false };
-  // If this result is the answer to an AUQ question card, absorb it into
-  // the card (update its text and dirty-flag for re-render) instead of
-  // adding a raw tool_result row. The fire-and-forget PreToolUse deny
-  // (permission.rs's ASK_FIRE_AND_FORGET_REASON) always fires an is_error
-  // tool_result right after the tool_use - a handshake, never the real
-  // answer. Absorb it silently but leave `.text` undefined so the card
-  // still reads "awaiting answer" and resolvePendingQuestionCard can find
-  // it later when the real answer lands as a follow-up <auq-answer/>
-  // message; setting `.text` here would poison both.
+  // An AUQ result never renders a row. Only one that CARRIES the resolution may
+  // set `.text`: the fire-and-forget channel answers with a receipt (deny
+  // handshake, `{"acknowledged":true}`), which strands the card and blocks the fold.
   const qIdx = r.messages.findIndex(
     (m) => m.kind === "question" && m.id === ev.tool_use_id,
   );
   if (qIdx >= 0) {
-    if (!ev.is_error) {
-      const ansText = ev.output?.type === "text" ? ev.output.text : "";
+    const ansText = !ev.is_error && ev.output?.type === "text" ? ev.output.text : "";
+    if (isQuestionResolutionText(ansText)) {
       r.messages[qIdx] = { ...r.messages[qIdx]!, text: ansText };
       r.dirtyIndices.add(qIdx);
+      moveMessageToEnd(r, qIdx);
     }
     r.onToolTally?.(r.tallyState.build());
     return { touched: true, coalesce: false };

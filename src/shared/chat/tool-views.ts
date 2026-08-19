@@ -120,6 +120,14 @@ function parseAnswers(text: string): Map<string, string> {
   return map;
 }
 
+/** Whether a question tool_result really resolves the card. The MCP ask channel
+ *  is fire-and-forget: its result is an `{"acknowledged":true}` receipt, not the
+ *  answer (that lands later as an <auq-answer/> message), and absorbing it as
+ *  `.text` stranded the card on "awaiting answer" and blocked the fold. */
+export function isQuestionResolutionText(text: string): boolean {
+  return text.includes("timed out") || text.includes("dismissed") || parseAnswers(text).size > 0;
+}
+
 interface AskQuestion { question: string; header?: string }
 
 function extractAskQuestions(input: unknown): AskQuestion[] {
