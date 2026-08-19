@@ -17,6 +17,7 @@
 
 import { CaretSuggestPopup } from "../caret-popup/popup";
 import { highlightComposerInput } from "../markdown-highlight";
+import { isMobileViewport } from "../../mobile-viewport";
 import type { ComposerCoreOptions } from "./types";
 
 export type { ComposerCoreOptions, ComposerCoreFeatures, ComposerCorePasteAdapter } from "./types";
@@ -31,16 +32,6 @@ const supportsFieldSizing =
   typeof CSS.supports === "function" &&
   CSS.supports("field-sizing", "content");
 
-const MOBILE_MQ = "(max-width: 768px)";
-
-function defaultIsMobile(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia(MOBILE_MQ).matches
-  );
-}
-
 export class ComposerCore {
   private opts: ComposerCoreOptions;
   private popup: CaretSuggestPopup | null = null;
@@ -54,7 +45,7 @@ export class ComposerCore {
     // that omits it - per this option's own documented contract - actually
     // gets the plain-newline default instead of a silently eaten keystroke.
     if (e.key === "Enter" && !e.shiftKey && this.opts.onEnter) {
-      const mobile = (this.opts.isMobileViewport ?? defaultIsMobile)();
+      const mobile = (this.opts.isMobileViewport ?? isMobileViewport)();
       if (mobile) return;
       e.preventDefault();
       this.opts.onEnter();

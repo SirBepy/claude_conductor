@@ -2,11 +2,12 @@ import "../permission-modal-shell.css";
 import "../permission-modal-question.css";
 import { attachDragHandle } from "./drag-handle";
 import { dismissQuestionCard } from "./question-state";
+import { isMobileViewport } from "../../../shared/mobile-viewport";
 
 export const HOST_ID = "prompt-card-host";
 
-// Mirrors the two `@media (max-width: 768px)` blocks in permission-modal-shell.css - keep in sync.
-const MOBILE_BREAKPOINT = 768;
+// permission-modal-shell.css's two `@media (max-width: 768px)` blocks are the
+// CSS twin of isMobileViewport() - keep that breakpoint in sync.
 const HEADER_GAP = 8; // px of breathing room below the header's bottom edge
 
 let _detachDrag: (() => void) | null = null;
@@ -16,7 +17,7 @@ let _resizeHandler: (() => void) | null = null;
 // project name must stay visible). sessions.css owns that dynamic box model,
 // so the live header is measured instead of guessed here in CSS.
 function applyMobileHeightCap(host: HTMLElement, mode: "composer" | "pane" | "viewport"): void {
-  if (window.innerWidth > MOBILE_BREAKPOINT) { host.style.removeProperty("--prompt-card-max-h"); return; }
+  if (!isMobileViewport()) { host.style.removeProperty("--prompt-card-max-h"); return; }
   const header = document.querySelector<HTMLElement>(".session-header");
   if (!header) { host.style.removeProperty("--prompt-card-max-h"); return; }
   const headerBottom = header.getBoundingClientRect().bottom;

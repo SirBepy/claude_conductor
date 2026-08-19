@@ -22,6 +22,7 @@ import { ComposerAttachments, type Attachment, type PastedBlock } from "./compos
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
+import { isMobileViewport } from "../mobile-viewport";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -127,7 +128,7 @@ export class Composer {
       start: (pos) => this.cv.startForPtt(pos),
       stop: () => this.cv.stopForPtt(),
       currentInsertPos: () => this.currentInsertPos(),
-      isMobile: () => this.isMobileViewport(),
+      isMobile: () => isMobileViewport(),
       isDisabled: () => this.disabled,
     });
     this.att = new ComposerAttachments({
@@ -235,7 +236,7 @@ export class Composer {
     if (this.disabled) return "Read-only - click Take over to interact";
     const blocked = this.opts.isBlocked?.();
     if (blocked?.placeholder) return blocked.placeholder;
-    return this.isMobileViewport()
+    return isMobileViewport()
       ? "Type a message. Tap send to send."
       : "Type a message. Shift+Enter for newline. Paste images.";
   }
@@ -320,7 +321,7 @@ export class Composer {
             }
           : undefined,
         onEnter: interactive ? () => void this.send() : undefined,
-        isMobileViewport: () => this.isMobileViewport(),
+        isMobileViewport: () => isMobileViewport(),
         onResize: (scrollHeight) => {
           this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", scrollHeight > 44);
         },
@@ -411,7 +412,7 @@ export class Composer {
    *  appears with content to schedule. */
   private openActionsMenu(anchor: HTMLElement): void {
     const items: ComposerMenuItem[] = [];
-    if (this.isMobileViewport()) {
+    if (isMobileViewport()) {
       items.push({
         icon: "image",
         label: "Attach image",
@@ -448,14 +449,6 @@ export class Composer {
         void this.opts.onSchedule?.(blocks, result.fireAtUtcIso, result.recurrence);
       },
     });
-  }
-
-  private isMobileViewport(): boolean {
-    return (
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(max-width: 768px)").matches
-    );
   }
 
   /** Drop files onto the composer (e.g. a future external drop zone). */
