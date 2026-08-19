@@ -80,13 +80,7 @@ function moveMessageToEnd(r: ChatRenderer, from: number): void {
   r.messages.push(msg!);
   if (from < r.messageEls.length) r.messageEls.splice(from, 1)[0]?.remove();
   // Both arrays lost the same slot, so every tracked index past it shifts down.
-  const shift = (i: number): number => (i > from ? i - 1 : i);
-  const shiftOrNull = (i: number | null): number | null => (i === null ? null : shift(i));
-  r.streamingIndex = shiftOrNull(r.streamingIndex);
-  r.activeTurnStart = shiftOrNull(r.activeTurnStart);
-  r.silentStreakBoundaryIndex = shiftOrNull(r.silentStreakBoundaryIndex);
-  r.closeTurnQueue = r.closeTurnQueue.map((e) => ({ ...e, start: shift(e.start), end: shift(e.end) }));
-  r.dirtyIndices = new Set([...r.dirtyIndices].filter((i) => i !== from).map(shift));
+  r.remapIndices((i) => (i > from ? i - 1 : i), new Set([from]));
 }
 
 /** True if the open turn has produced anything the user would see - real

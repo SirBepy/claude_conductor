@@ -227,6 +227,31 @@ export class ChatRenderer {
     this.silentStreakCount = 0;
   }
 
+  /** The ONE place that enumerates every index-typed field. Callers supply the
+   *  mapping (prepend: `i => i + n`; splice: `i => i > from ? i - 1 : i`) plus,
+   *  optionally, indices to drop from `dirtyIndices` before remapping. A new
+   *  index field belongs here, never in a caller. */
+  remapIndices(fn: (i: number) => number, drop?: Set<number>): void {
+    const mapOrNull = (i: number | null): number | null => (i === null ? null : fn(i));
+    this.streamingIndex = mapOrNull(this.streamingIndex);
+    this.activeTurnStart = mapOrNull(this.activeTurnStart);
+    this.silentStreakBoundaryIndex = mapOrNull(this.silentStreakBoundaryIndex);
+    if (this.dirtyIndices.size > 0) {
+      const remapped = new Set<number>();
+      for (const idx of this.dirtyIndices) {
+        if (!drop?.has(idx)) remapped.add(fn(idx));
+      }
+      this.dirtyIndices = remapped;
+    }
+    if (this.closeTurnQueue.length > 0) {
+      this.closeTurnQueue = this.closeTurnQueue.map((entry) => ({
+        ...entry,
+        start: fn(entry.start),
+        end: fn(entry.end),
+      }));
+    }
+  }
+
   get cumulativeUsage(): CumulativeUsage {
     return { ...this._cumulative };
   }
@@ -259,23 +284,8 @@ export class ChatRenderer {
       buildMessageEl: (m) => buildMessageEl(m),
       clampUserMessages: () => clampUserMessages(this.messages, this.messageEls),
       foldClosedRange: (start, end, usage, tsSpanMs) => foldClosedRange(this, start, end, usage, tsSpanMs),
-      onShift: (n) => {
-        if (this.streamingIndex !== null) this.streamingIndex += n;
-        if (this.dirtyIndices.size > 0) {
-          const reindexed = new Set<number>();
-          for (const idx of this.dirtyIndices) reindexed.add(idx + n);
-          this.dirtyIndices = reindexed;
-        }
-        if (this.activeTurnStart !== null) this.activeTurnStart += n;
-        if (this.silentStreakBoundaryIndex !== null) this.silentStreakBoundaryIndex += n;
-        if (this.closeTurnQueue.length > 0) {
-          this.closeTurnQueue = this.closeTurnQueue.map((entry) => ({
-            ...entry,
-            start: entry.start + n,
-            end: entry.end + n,
-          }));
-        }
-      },
+      // Prepend: every tracked index moves down the transcript by n.
+      onShift: (n) => this.remapIndices((i) => i + n),
     });
   }
 
