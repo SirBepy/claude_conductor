@@ -10,3 +10,4 @@ pub mod chat_state;
 pub mod recurrence;
 pub mod repo_channel;
 pub mod scheduled_items;
+pub mod user_todos;

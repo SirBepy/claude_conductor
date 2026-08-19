@@ -25,6 +25,7 @@ mod relay;
 mod spawn_chat;
 mod stop;
 mod turn_status;
+mod user_todos;
 mod validated_json;
 
 use crate::daemon::state::DaemonState;
@@ -166,6 +167,8 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/turn/report-status", post(turn_status::on_report_status))
         .route("/messages/send", post(messages::on_send_message))
         .route("/messages/update", post(messages::on_update_message))
+        .route("/todos/write", post(user_todos::on_write_user_todo))
+        .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .with_state(ctx);
 
     tokio::spawn(async move {

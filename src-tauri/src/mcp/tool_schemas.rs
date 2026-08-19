@@ -27,6 +27,11 @@ pub const TOOL_UPDATE_MESSAGE: &str = "update_message";
 // Sibling-session spawn behind `/respawn`. Unconditional despite the name
 // similarity with `spawn_worker`: no fleet, caller's own project only.
 pub const TOOL_SPAWN_CHAT: &str = "spawn_chat";
+// "Your Todos" panel (todo 692). Unconditional: any session can hand the user
+// an action item. ONE tool with an `action` enum rather than four, and a
+// deliberately short description - this schema is injected into every turn of
+// every session, so see `project_mcp_tool_def_per_turn_cost`.
+pub const TOOL_WRITE_USER_TODO: &str = "write_user_todo";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -181,6 +186,20 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     "name": {"type": "string", "description": "Optional short label for the new chat."}
                 },
                 "required": ["cwd", "prompt"]
+            }
+        }),
+        json!({
+            "name": TOOL_WRITE_USER_TODO,
+            "description": "Park an action item only the user can do (a login, a cloud console, hardware, an approval) in this project's durable Todos panel, instead of just mentioning it in a reply where it dies with the turn. His open items are injected into every turn already, so never ask him to recite them. `add` needs text; `rewrite` needs id+text; `done` needs id (use it the moment you learn he did it); `drop` needs id+reason when it stopped being needed. Ids are the short ones shown in the injected list.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "rewrite", "done", "drop"]},
+                    "text": {"type": "string", "description": "The action item, one line, imperative. Inline `code` is fine."},
+                    "id": {"type": "string", "description": "Which card, for rewrite/done/drop."},
+                    "reason": {"type": "string", "description": "Why it is no longer needed. Required for drop, shown on the card."}
+                },
+                "required": ["action"]
             }
         }),
     ];

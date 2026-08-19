@@ -33,6 +33,12 @@ pub struct ChatConfig {
     /// milestone 02. Written only via `set_account`.
     #[serde(default)]
     pub account_id: String,
+    /// Which optional Todos-panel columns this chat has switched on
+    /// (`project`/`done`/`archived`; `here` is always shown and never stored).
+    /// Per-CHAT, not per-project, by Joe's call: "if i opened up 2 columns, i
+    /// wanna see them whenever i come back to this specific chat".
+    #[serde(default)]
+    pub todo_columns: Vec<String>,
 }
 
 /// Serialize read-modify-write within a process. Cross-process integrity comes
@@ -130,6 +136,22 @@ pub fn set_account(session_id: &str, account_id: &str) {
     set_account_at(&path, session_id, account_id);
 }
 
+/// Set a chat's visible Todos columns. Preserves everything else on the entry.
+pub fn set_todo_columns(session_id: &str, columns: Vec<String>) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_todo_columns_at(&path, session_id, columns);
+}
+
+fn set_todo_columns_at(path: &Path, session_id: &str, columns: Vec<String>) {
+    if session_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    map.entry(session_id.to_string()).or_default().todo_columns = columns;
+    write_atomic(path, &map);
+}
+
 fn set_account_at(path: &Path, session_id: &str, account_id: &str) {
     if session_id.is_empty() {
         return;
@@ -207,6 +229,22 @@ mod tests {
         let got = get_at(&path, "sess-1").unwrap();
         assert_eq!(got.account_id, "acct-work");
         assert_eq!(got.model, "opus", "model preserved across account write");
+    }
+
+    #[test]
+    fn todo_columns_round_trip_and_preserve_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        record_at(&path, "sess-1", "opus", "high");
+        set_todo_columns_at(&path, "sess-1", vec!["project".into(), "done".into()]);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert_eq!(got.todo_columns, vec!["project".to_string(), "done".to_string()]);
+        assert_eq!(got.model, "opus", "model preserved across a columns write");
+        // Per-chat, not shared: a sibling chat starts with nothing switched on.
+        assert!(get_at(&path, "sess-2").is_none());
+        // Closing every column persists as an empty list, not a missing entry.
+        set_todo_columns_at(&path, "sess-1", Vec::new());
+        assert!(get_at(&path, "sess-1").unwrap().todo_columns.is_empty());
     }
 
     #[test]

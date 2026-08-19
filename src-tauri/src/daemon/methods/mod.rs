@@ -33,6 +33,10 @@ mod worktrees;
 // same non-RPC shape as `channel` above.
 pub(crate) mod turn_status;
 mod usage;
+// pub(crate): `hooks_server::user_todos` (the `write_user_todo` MCP tool route
+// and the per-turn injection hook, todo 692) calls this module's handlers
+// directly - same non-RPC shape as `channel` above.
+pub(crate) mod user_todos;
 
 pub use channels::register_channels;
 pub use context::register_context;
@@ -47,6 +51,7 @@ pub use registry::register_chat_registry;
 pub use schedule::register_schedule;
 pub use statusbar::register_statusbar;
 pub use usage::register_usage;
+pub use user_todos::register_user_todos;
 pub use worktrees::register_worktrees;
 
 #[cfg(test)]

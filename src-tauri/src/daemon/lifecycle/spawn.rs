@@ -97,7 +97,7 @@ pub async fn spawn_session(
         crate::sessions::chat_config::set_auto_accept(&session_id, true);
     }
     let mcp_config_path = write_mcp_config(&session_id, &session_id, is_jarvis);
-    let hook_settings_path = write_hook_settings(&session_id);
+    let hook_settings_path = write_hook_settings(&session_id, &session_id);
 
     let mut cmd = Command::new("claude");
     cmd.args(base_claude_args(

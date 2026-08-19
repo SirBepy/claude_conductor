@@ -23,7 +23,7 @@ use std::sync::Arc;
 /// registry entry created at session start - no separate `cwd` argument is
 /// ever taken from the caller, so a confused/compromised turn can't query or
 /// post into a repo it isn't actually running in.
-fn caller_project(state: &Arc<DaemonState>, session_id: &str) -> Result<String, String> {
+pub(super) fn caller_project(state: &Arc<DaemonState>, session_id: &str) -> Result<String, String> {
     state
         .registry
         .get(session_id)
@@ -31,7 +31,7 @@ fn caller_project(state: &Arc<DaemonState>, session_id: &str) -> Result<String, 
         .ok_or_else(|| format!("unknown session: {session_id}"))
 }
 
-fn display_name(state: &Arc<DaemonState>, session_id: &str) -> String {
+pub(super) fn display_name(state: &Arc<DaemonState>, session_id: &str) -> String {
     state
         .registry
         .get(session_id)

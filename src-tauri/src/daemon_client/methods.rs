@@ -9,5 +9,6 @@ mod channels;
 mod misc;
 mod permission;
 mod preview;
+mod user_todos;
 mod schedule;
 mod sessions;

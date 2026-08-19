@@ -75,7 +75,9 @@ pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool
     Some(path)
 }
 
-/// Write a per-session settings.json that registers: a `PreToolUse` hook for
+/// Write a per-session settings.json that registers: a `UserPromptSubmit` hook
+/// injecting this project's open "Your Todos" cards into every turn (todo 692,
+/// `hooks_server::user_todos`), a `PreToolUse` hook for
 /// the builtin `AskUserQuestion` tool, and a `PreToolUse`/`PostToolUse` pair on
 /// `Bash` enforcing the cross-session commit mutex (`hooks_server::commit_lock`
 /// - two concurrent sessions in the same project must never `git commit` at
@@ -104,7 +106,7 @@ pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool
 /// is the precise "is this actually `commit`" check once inside the daemon,
 /// since `if`'s prefix matching alone can't safely narrow past the `-C <path>`
 /// form. The 2-minute poll budget only ever applies to an actual `git commit`.
-pub(crate) fn write_hook_settings(turn_id: &str) -> Option<PathBuf> {
+pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<PathBuf> {
     let dir = crate::settings::paths::mcp_temp_dir().ok()?;
     // Both --max-time AND the hook's `timeout` field MUST out-wait the daemon's
     // prompt window (hooks_server::permission::PROMPT_TIMEOUT = 3600s). The server
@@ -131,8 +133,21 @@ pub(crate) fn write_hook_settings(turn_id: &str) -> Option<PathBuf> {
         "curl -s --connect-timeout 10 --max-time 10 -X POST -H \"Content-Type: application/json\" --data-binary @- http://127.0.0.1:{}/hooks/commit-lock-release",
         daemon_hook_port()
     );
+    // "Your Todos" per-turn injection (todo 692). `UserPromptSubmit` takes NO
+    // `matcher`, so this element's shape differs from the PreToolUse ones. Small
+    // timeouts: a local read that must never hold up a turn.
+    let todos_inject_command = format!(
+        "curl -s --connect-timeout 5 --max-time 15 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{}/hooks/prompt-submit?session_id={}\"",
+        daemon_hook_port(),
+        tracking_id
+    );
     let config = serde_json::json!({
         "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "hooks": [ { "type": "command", "command": todos_inject_command, "timeout": 20 } ]
+                }
+            ],
             "PreToolUse": [
                 {
                     "matcher": "AskUserQuestion",
