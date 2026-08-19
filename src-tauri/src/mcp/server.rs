@@ -18,101 +18,15 @@
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 
-use super::tool_schemas::{
-    tool_list_response, TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS,
-    TOOL_POST_MESSAGE, TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS,
-    TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_WRITE_USER_TODO,
-    TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
-};
+use super::dispatch::dispatch_tool;
+use super::tool_schemas::tool_list_response;
 
 /// Read the hooks port from <app-data>/hooks_port.txt.
 fn read_port() -> Option<u16> {
     crate::settings::paths::read_hook_port("")
 }
 
-/// HTTP POST helper (blocking via tokio runtime).
-/// Overall cap on a single relay POST. The daemon hooks server holds a
-/// permission/question prompt open for up to `PROMPT_TIMEOUT_SECS` (3600s, see
-/// `daemon::hooks_server::permission`) so an AFK dev can answer later, then
-/// always returns an answer or a graceful deny. This client MUST out-wait that
-/// window, otherwise it aborts mid-prompt with "error sending request" and the
-/// dev's eventual answer is dropped. 3600 + 60s slack so the server's response
-/// always lands first; still bounded so a truly-wedged server can't hang the
-/// MCP process forever.
-const RELAY_TIMEOUT_SECS: u64 = 3660;
-
-/// Retry policy for the relay POST (ai_todo 137, mirrors the curl hook path's
-/// `--retry 2 --retry-delay 1` from todo 116): up to 2 retries with a 1s pause,
-/// but ONLY for connection-level failures (daemon restarting between turns,
-/// port briefly unavailable). Never retried: errors after a response arrived
-/// (incl. 4xx/5xx bodies) and the overall relay timeout - the prompt may
-/// already be registered server-side, and re-POSTing would duplicate it.
-const RELAY_CONNECT_RETRIES: u32 = 2;
-const RELAY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// True only for failures where the request never reached the daemon, so a
-/// re-POST cannot double-register the prompt. `is_connect()` covers refused /
-/// unreachable connections and connect-phase timeouts; the 3660s overall
-/// timeout and body/decode errors report `is_connect() == false`.
-fn is_retryable(e: &reqwest::Error) -> bool {
-    e.is_connect()
-}
-
-fn http_post(rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Value, String> {
-    rt.block_on(async {
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(RELAY_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let mut attempt: u32 = 0;
-        loop {
-            match client.post(url).json(&body).send().await {
-                Ok(resp) => return resp.json::<Value>().await.map_err(|e| e.to_string()),
-                Err(e) if is_retryable(&e) && attempt < RELAY_CONNECT_RETRIES => {
-                    attempt += 1;
-                    eprintln!(
-                        "mcp: relay connect to {url} failed ({e}); \
-                         retry {attempt}/{RELAY_CONNECT_RETRIES} in {}s",
-                        RELAY_RETRY_DELAY.as_secs()
-                    );
-                    tokio::time::sleep(RELAY_RETRY_DELAY).await;
-                }
-                Err(e) => return Err(e.to_string()),
-            }
-        }
-    })
-}
-
-/// Shared shape for every relay POST arm below. `fallback` opts into the
-/// `resp["ok"] == false` error check; `success` overrides the Ok text.
-/// Both `None` for arms that just relay `resp.to_string()` verbatim.
-fn relay(
-    rt: &tokio::runtime::Runtime,
-    id: &Value,
-    url: &str,
-    body: Value,
-    fallback: Option<&str>,
-    success: Option<&str>,
-) -> Value {
-    match http_post(rt, url, body) {
-        Ok(resp) => {
-            if let Some(fb) = fallback {
-                if resp["ok"].as_bool() == Some(false) {
-                    let err = resp["error"].as_str().unwrap_or(fb);
-                    return tool_error_result(id, err);
-                }
-            }
-            match success {
-                Some(text) => tool_result(id, text),
-                None => tool_result(id, &resp.to_string()),
-            }
-        }
-        Err(e) => tool_error_result(id, &format!("relay error: {e}")),
-    }
-}
-
-fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
+pub(super) fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -120,7 +34,7 @@ fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
     })
 }
 
-fn tool_result(id: &Value, text: &str) -> Value {
+pub(super) fn tool_result(id: &Value, text: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -131,7 +45,7 @@ fn tool_result(id: &Value, text: &str) -> Value {
     })
 }
 
-fn tool_error_result(id: &Value, text: &str) -> Value {
+pub(super) fn tool_error_result(id: &Value, text: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -210,163 +124,7 @@ pub fn run_stdio() {
                 if port == 0 {
                     tool_error_result(&id, "hooks server port unavailable")
                 } else {
-                    let request_id = uuid::Uuid::new_v4().to_string();
-                    match name {
-                        TOOL_APPROVAL => {
-                            let tool_name = arguments["tool_name"]
-                                .as_str()
-                                .unwrap_or("unknown")
-                                .to_string();
-                            let input = arguments["input"].clone();
-                            let url = format!("http://127.0.0.1:{port}/permissions/request");
-                            let body = json!({
-                                "id": request_id,
-                                "tool_name": tool_name,
-                                "input": input,
-                                "session_id": session_id,
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_QUESTION => {
-                            let questions = arguments["questions"].clone();
-                            let url = format!("http://127.0.0.1:{port}/questions/request");
-                            let body = json!({
-                                "id": request_id,
-                                "questions": questions,
-                                "session_id": session_id,
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_CLOSE => {
-                            // Fire-and-confirm: the daemon records the close and
-                            // tears down at turn end (session_id comes from the
-                            // per-session CC_SESSION_ID env, not tool args).
-                            let url = format!("http://127.0.0.1:{port}/sessions/close-confirm");
-                            let body = json!({ "session_id": session_id });
-                            relay(
-                                &rt,
-                                &id,
-                                &url,
-                                body,
-                                None,
-                                Some("close confirmed; session will end at turn completion"),
-                            )
-                        }
-                        TOOL_LIST_PEERS => {
-                            let url = format!("http://127.0.0.1:{port}/channel/list-peers");
-                            let body = json!({ "session_id": session_id });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_POST_MESSAGE => {
-                            let url = format!("http://127.0.0.1:{port}/channel/post-message");
-                            let body = json!({
-                                "session_id": session_id,
-                                "text": arguments["text"],
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_READ_MESSAGES => {
-                            let url = format!("http://127.0.0.1:{port}/channel/read-messages");
-                            let body = json!({ "session_id": session_id });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_REPORT_STATUS => {
-                            let url = format!("http://127.0.0.1:{port}/turn/report-status");
-                            let body = json!({
-                                "session_id": session_id,
-                                "status": arguments["status"],
-                                "title": arguments.get("title"),
-                            });
-                            relay(&rt, &id, &url, body, Some("invalid status"), None)
-                        }
-                        TOOL_SEND_MESSAGE => {
-                            let url = format!("http://127.0.0.1:{port}/messages/send");
-                            let body = json!({
-                                "session_id": session_id,
-                                "text": arguments["text"],
-                            });
-                            relay(&rt, &id, &url, body, Some("invalid message"), None)
-                        }
-                        TOOL_UPDATE_MESSAGE => {
-                            let url = format!("http://127.0.0.1:{port}/messages/update");
-                            let body = json!({
-                                "session_id": session_id,
-                                "message": arguments["message"],
-                                "text": arguments.get("text"),
-                                "retract": arguments.get("retract").and_then(|v| v.as_bool()).unwrap_or(false),
-                            });
-                            relay(&rt, &id, &url, body, Some("invalid update"), None)
-                        }
-                        TOOL_SPAWN_CHAT => {
-                            let url = format!("http://127.0.0.1:{port}/chat/spawn");
-                            let body = json!({
-                                "session_id": session_id,
-                                "cwd": arguments["cwd"],
-                                "prompt": arguments["prompt"],
-                                "model": arguments.get("model"),
-                                "effort": arguments.get("effort"),
-                                "name": arguments.get("name"),
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_WRITE_USER_TODO => {
-                            let url = format!("http://127.0.0.1:{port}/todos/write");
-                            let body = json!({
-                                "session_id": session_id,
-                                "action": arguments["action"],
-                                "id": arguments.get("id"),
-                                "text": arguments.get("text"),
-                                "reason": arguments.get("reason"),
-                            });
-                            relay(&rt, &id, &url, body, Some("invalid todo write"), None)
-                        }
-                        // The four arms below are only ever advertised to a
-                        // Jarvis child's `tools/list` (see `is_jarvis` above),
-                        // but a `tools/call` for a tool the model was never
-                        // shown would still reach here - so every route on the
-                        // daemon side independently re-validates that
-                        // `session_id` (this child's own CC_SESSION_ID) really
-                        // is the registry's Jarvis session before doing
-                        // anything (see `daemon::methods::jarvis::is_jarvis_caller`).
-                        TOOL_SPAWN_WORKER => {
-                            let url = format!("http://127.0.0.1:{port}/jarvis/spawn-worker");
-                            let body = json!({
-                                "jarvis_session_id": session_id,
-                                "cwd": arguments["cwd"],
-                                "task": arguments["task"],
-                                "name": arguments.get("name"),
-                                "model": arguments.get("model"),
-                                "account": arguments.get("account"),
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_SEND_TO_SESSION => {
-                            let url = format!("http://127.0.0.1:{port}/jarvis/send-to-session");
-                            let body = json!({
-                                "jarvis_session_id": session_id,
-                                "session_id": arguments["session_id"],
-                                "text": arguments["text"],
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_FLEET_STATUS => {
-                            let url = format!("http://127.0.0.1:{port}/jarvis/fleet-status");
-                            let body = json!({ "jarvis_session_id": session_id });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        TOOL_RESPOND_WORKER_PROMPT => {
-                            let url = format!("http://127.0.0.1:{port}/jarvis/respond-worker-prompt");
-                            let body = json!({
-                                "jarvis_session_id": session_id,
-                                "request_id": arguments["request_id"],
-                                "allow": arguments["allow"],
-                                "message": arguments.get("message"),
-                                "updated_input": arguments.get("updated_input"),
-                            });
-                            relay(&rt, &id, &url, body, None, None)
-                        }
-                        _ => mcp_error(&id, -32601, "unknown tool"),
-                    }
+                    dispatch_tool(&rt, &id, name, &arguments, &session_id, port)
                 }
             }
             _ => {
