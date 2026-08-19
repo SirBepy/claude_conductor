@@ -660,7 +660,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: var(--color-surface-alt);
+  /* Same background as the transcript/thinking bar above it - the textarea
+     itself (.composer-input-wrap) already carries its own surface + border,
+     so this wrapper doesn't need a second panel behind it (box-in-a-box). */
+  background: var(--color-background);
   flex-shrink: 0;
   /* Anchor for the prompt-card floating panel (permission + question relay). */
   position: relative;
