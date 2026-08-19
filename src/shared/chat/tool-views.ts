@@ -125,12 +125,26 @@ function parseAnswers(text: string): Map<string, string> {
   return map;
 }
 
-/** Whether a question tool_result really resolves the card. The MCP ask channel
- *  is fire-and-forget: its result is an `{"acknowledged":true}` receipt, not the
- *  answer (that lands later as an <auq-answer/> message), and absorbing it as
- *  `.text` stranded the card on "awaiting answer" and blocked the fold. */
+export interface QuestionResolution {
+  verdict: "answered" | "skipped" | "timed-out";
+  /** Parsed Q->A pairs, empty for skipped/timed-out. */
+  answers: Map<string, string>;
+}
+
+/** The one place that decides what a question tool_result's text means, so the
+ *  "does this resolve?" gate and the "how did it resolve?" branch can't drift.
+ *  null = unresolved: the MCP ask channel is fire-and-forget, so its
+ *  `{"acknowledged":true}` receipt must not strand the card on "awaiting answer". */
+export function resolveQuestionText(text: string): QuestionResolution | null {
+  if (text.includes("timed out")) return { verdict: "timed-out", answers: new Map() };
+  if (text.includes("dismissed")) return { verdict: "skipped", answers: new Map() };
+  const answers = parseAnswers(text);
+  return answers.size > 0 ? { verdict: "answered", answers } : null;
+}
+
+/** Whether a question tool_result really resolves the card. */
 export function isQuestionResolutionText(text: string): boolean {
-  return text.includes("timed out") || text.includes("dismissed") || parseAnswers(text).size > 0;
+  return resolveQuestionText(text) !== null;
 }
 
 interface AskQuestion { question: string; header?: string }
@@ -156,8 +170,8 @@ export function renderQuestionsView(messages: RenderedMessage[], start: number, 
   for (let i = start; i < end; i++) {
     const m = messages[i];
     if (m?.kind === "tool_result" && m.tool_use_id) {
-      const t = resultText(m);
-      if (t) answersById.set(m.tool_use_id, parseAnswers(t));
+      const resolved = resolveQuestionText(resultText(m));
+      if (resolved) answersById.set(m.tool_use_id, resolved.answers);
     }
   }
   const cards: string[] = [];
@@ -169,7 +183,7 @@ export function renderQuestionsView(messages: RenderedMessage[], start: number, 
     if (!isTopLevel && !isNestedToolUse) continue;
     const questions = extractAskQuestions(m.input);
     const answers = isTopLevel
-      ? (m.text !== undefined ? parseAnswers(m.text) : null)
+      ? resolveQuestionText(m.text ?? "")?.answers ?? null
       : (m.id && answersById.get(m.id)) || null;
     for (const q of questions) {
       const header = q.header ? `<div class="tool-qa-header">${escapeHtml(q.header)}</div>` : "";
@@ -212,20 +226,9 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
   if (questions.length === 0) {
     return `<div class="tool-qa"><div class="tool-qa-a tool-qa-a--pending"><i class="ph ph-clock"></i><span>awaiting answer</span></div></div>`;
   }
-  // Detect resolution from the absorbed tool_result text produced by the Rust
-  // format_answers fn: "dismissed" = skipped, "timed out" = timeout, else parse Q/A.
-  let resolution: "pending" | "answered" | "skipped" | "timed-out" = "pending";
-  let answers: Map<string, string> | null = null;
-  if (m.text !== undefined) {
-    if (m.text.includes("timed out")) {
-      resolution = "timed-out";
-    } else if (m.text.includes("dismissed")) {
-      resolution = "skipped";
-    } else {
-      answers = parseAnswers(m.text);
-      if (answers.size > 0) resolution = "answered";
-    }
-  }
+  const resolved = m.text !== undefined ? resolveQuestionText(m.text) : null;
+  const resolution: "pending" | "answered" | "skipped" | "timed-out" = resolved?.verdict ?? "pending";
+  const answers = resolved?.verdict === "answered" ? resolved.answers : null;
   const cards = questions.map((q, qi) => {
     const header = q.header
       ? `<div class="tool-qa-header">${escapeHtml(q.header)}</div>`
