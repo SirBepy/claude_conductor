@@ -48,6 +48,20 @@ function makeRenderer() {
   return { r, container };
 }
 
+// Counted per prefix so each describe keeps its own session-id sequence.
+const _seqByPrefix = new Map();
+
+async function makeAttachedRenderer(prefix) {
+  const seq = (_seqByPrefix.get(prefix) ?? 0) + 1;
+  _seqByPrefix.set(prefix, seq);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const renderer = new ChatRenderer(container);
+  await renderer.attach(`${prefix}${seq}`);
+  await renderer.loadFromStore();
+  return { renderer, container };
+}
+
 describe("live: MCP ask_user_question renders a question card", () => {
   it("creates a kind:question card for the MCP tool name, same as the builtin", () => {
     const { r, container } = makeRenderer();
@@ -85,16 +99,6 @@ describe("scrollback (eventToRenderedMessage): MCP ask_user_question", () => {
 });
 
 describe("pagination (older-page load): MCP ask_user_question", () => {
-  let _seq = 0;
-  async function makeAttachedRenderer() {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const renderer = new ChatRenderer(container);
-    await renderer.attach(`sess-mcp-auq-${++_seq}`);
-    await renderer.loadFromStore();
-    return { renderer, container };
-  }
-
   it("renders a resolved question card (not a raw tool_result row) after scrolling into history", async () => {
     invokeMock
       .mockResolvedValueOnce({
@@ -114,7 +118,7 @@ describe("pagination (older-page load): MCP ask_user_question", () => {
         has_more: false,
       });
 
-    const { renderer, container } = await makeAttachedRenderer();
+    const { renderer, container } = await makeAttachedRenderer("sess-mcp-auq-");
     await renderer.fetchOlder();
 
     const card = container.querySelector(".msg.question-card");
@@ -151,16 +155,6 @@ describe("live: Skip flips the open card to Skipped", () => {
 });
 
 describe("pagination (older-page load): fire-and-forget answer via <auq-answer/> follow-up", () => {
-  let _seq = 0;
-  async function makeAttachedRenderer() {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const renderer = new ChatRenderer(container);
-    await renderer.attach(`sess-mcp-auq-sentinel-${++_seq}`);
-    await renderer.loadFromStore();
-    return { renderer, container };
-  }
-
   it("resolves the card from the later sentinel-tagged message, not just a direct tool_result", async () => {
     invokeMock
       .mockResolvedValueOnce({
@@ -182,7 +176,7 @@ describe("pagination (older-page load): fire-and-forget answer via <auq-answer/>
         has_more: false,
       });
 
-    const { renderer, container } = await makeAttachedRenderer();
+    const { renderer, container } = await makeAttachedRenderer("sess-mcp-auq-sentinel-");
     await renderer.fetchOlder();
 
     const card = container.querySelector(".msg.question-card");
