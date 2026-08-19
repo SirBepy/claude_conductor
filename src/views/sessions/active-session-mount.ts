@@ -29,14 +29,17 @@ import {
 } from "./chat-pane-cache";
 
 /** Mount the statusbar for the session pane. Returns null if the host slot
- * isn't in the DOM (shouldn't happen given the pane skeleton, but mirrors the
- * original guard). Sets `state.statusbar` itself so renderer wiring (which
- * runs right after) can read it off state, same as before extraction. */
+ * isn't in the DOM, or if a newer mount/selectSession superseded this one
+ * mid-await (same bail-out shape as mountRenderer). Sets `state.statusbar`
+ * itself so renderer wiring (which runs right after) can read it off state,
+ * same as before extraction. */
 export async function mountStatusbar(
   pane: HTMLElement,
   sess: Instance,
   onAccountClick: () => void,
 ): Promise<SessionStatusbar | null> {
+  const myMount = state.mountId;
+  const sessionId = sess.session_id;
   const sbHost = pane.querySelector<HTMLElement>(".session-statusbar-host");
   if (!sbHost) return null;
   // Both read the same in-memory settings blob; awaiting them in series put two
@@ -51,6 +54,10 @@ export async function mountStatusbar(
       effortDisplay = last?.effort ?? normal?.effort ?? "";
     } catch { /* leave blank */ }
   }
+  // Bail if a newer mount or selectSession superseded us during the awaits:
+  // assigning here would leave wireRenderer's `state.statusbar === sb` checks
+  // pointing at an orphan and silently drop the visible session's updates.
+  if (state.mountId !== myMount || state.selectedId !== sessionId) return null;
   const sb = new SessionStatusbar(sbHost, sess.started_at, rows, {
     cwd: sess.cwd ? String(sess.cwd) : null,
     effort: effortDisplay,
