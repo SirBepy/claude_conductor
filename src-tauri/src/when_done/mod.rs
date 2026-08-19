@@ -13,7 +13,9 @@
 //! all windows on the `when-done-state` event.
 
 mod protocol;
+mod actions;
 mod engine;
+mod idle;
 
 pub use protocol::{TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner};
 use engine::run_engine;

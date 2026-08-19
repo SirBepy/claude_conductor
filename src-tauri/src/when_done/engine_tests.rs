@@ -1,4 +1,7 @@
 use super::*;
+// Not re-exported through engine.rs: only the tests reach for these two.
+use super::super::actions::default_question_answers;
+use super::super::idle::instance_is_idle;
 use crate::types::Instance;
 use serde_json::json;
 
