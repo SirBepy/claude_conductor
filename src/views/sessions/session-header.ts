@@ -33,7 +33,11 @@ export class SessionHeader {
 
     const el = document.createElement("header");
     el.className = "session-header";
+    // The two slots stay empty on desktop; mobile-header-merge.ts relocates the
+    // live back / overflow buttons into them so the phone shows one band rather
+    // than a near-empty .view-header stacked above this one.
     el.innerHTML = [
+      `<span class="session-header-lead"></span>`,
       `<span class="session-header-avatar-wrap">`,
       `  <div class="session-header-avatar">?</div>`,
       `</span>`,
@@ -44,6 +48,7 @@ export class SessionHeader {
       `<button class="icon-btn discard-btn" title="Discard draft">`,
       `  <i class="ph ph-x-circle"></i>`,
       `</button>`,
+      `<span class="session-header-trail"></span>`,
     ].join("");
 
     this.el = el;

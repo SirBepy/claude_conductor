@@ -19,7 +19,12 @@ async function mountPager(page: Page): Promise<void> {
     view.setAttribute("data-mobile-pane", "chat");
     view.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;z-index:9999";
     view.innerHTML = `
-      <div class="view-header"><h2>Chats</h2><span id="usage-dial-host"></span></div>
+      <div class="view-header">
+        <button class="icon-btn sessions-back" id="sessionsBackBtn"><i class="ph ph-arrow-left"></i></button>
+        <h2>Chats</h2>
+        <span id="usage-dial-host"></span>
+        <button class="icon-btn more-btn" id="viewMoreBtn"><i class="ph ph-dots-three-vertical"></i></button>
+      </div>
       <div class="view-body sessions-layout" style="flex:1">
         <aside class="sessions-sidebar"></aside>
         <main class="session-pane" id="session-pane"></main>
@@ -284,6 +289,72 @@ test("a tap on a tab still selects it, and snapping is restored after a drag", a
 
   await page.locator('.mtab[data-target="chat"]').click();
   await expect.poll(() => scrollLeft(page)).toBe(0);
+});
+
+// ── Header merge (todo 702) ───────────────────────────────────────────────
+
+/** Adds the pane header the merge relocates into, then runs the merge. */
+async function withPaneHeader(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const { SessionHeader } = await import("/views/sessions/session-header.ts");
+    const merge = await import("/views/sessions/mobile-header-merge.ts");
+    const header = new SessionHeader({ title: "204 tiles swept", meta: "zng-app" });
+    document.querySelector("#session-pane")!.prepend(header.el);
+    merge.applyHeaderMerge();
+  });
+}
+
+test("the phone collapses to ONE header band, with back and the kebab in it", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  await withPaneHeader(page);
+
+  await expect(page.locator(".session-header-lead > #sessionsBackBtn")).toBeVisible();
+  await expect(page.locator(".session-header-trail > #viewMoreBtn")).toBeAttached();
+  // The band it came from is now redundant, so it goes.
+  await expect(page.locator(".view-sessions .view-header")).toBeHidden();
+});
+
+test("the character art and project name survive the merge", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  await withPaneHeader(page);
+
+  // Joe was explicit that these had to stay.
+  await expect(page.locator(".session-header .session-header-avatar-wrap")).toBeVisible();
+  await expect(page.locator(".session-header .meta")).toHaveText("zng-app");
+  await expect(page.locator(".session-header .title")).toContainText("204 tiles swept");
+});
+
+test("the buttons go home when the viewport grows back to desktop", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  await withPaneHeader(page);
+  await expect(page.locator(".session-header-lead > #sessionsBackBtn")).toBeAttached();
+
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.evaluate(async () => {
+    const merge = await import("/views/sessions/mobile-header-merge.ts");
+    merge.applyHeaderMerge();
+  });
+
+  await expect(page.locator(".view-header > #sessionsBackBtn")).toBeAttached();
+  await expect(page.locator(".session-header-lead > #sessionsBackBtn")).toHaveCount(0);
+  await expect(page.locator(".view-sessions .view-header")).toBeVisible();
+});
+
+test("a failed merge degrades to the old layout rather than losing the back button", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  // No pane header mounted, so the merge has nowhere to relocate into. The
+  // :has() gate must therefore leave .view-header on screen.
+  await page.evaluate(async () => {
+    const merge = await import("/views/sessions/mobile-header-merge.ts");
+    merge.applyHeaderMerge();
+  });
+
+  await expect(page.locator(".view-sessions .view-header")).toBeVisible();
+  await expect(page.locator("#sessionsBackBtn")).toBeAttached();
 });
 
 test("desktop keeps the side-by-side split and never shows the bar", async ({ page }) => {

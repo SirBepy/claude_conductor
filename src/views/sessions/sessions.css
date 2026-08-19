@@ -907,6 +907,32 @@
     display: none;
   }
 
+  /* Second band goes only once mobile-header-merge.ts has PROVABLY relocated
+     the back button into the pane header. Gating on :has rather than the
+     breakpoint means a failed merge degrades to the old two-band layout
+     instead of a chat with no back button (todo 702). */
+  .view-sessions[data-mobile-pane="chat"]:has(.session-header-lead > #sessionsBackBtn) .view-header {
+    display: none;
+  }
+
+  /* The relocated buttons sit flush at each end of the one remaining band. */
+  .session-header-lead,
+  .session-header-trail {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .session-header-lead:empty,
+  .session-header-trail:empty {
+    display: none;
+  }
+  .session-header-trail {
+    margin-left: auto;
+  }
+  .view-sessions[data-mobile-pane="chat"] .session-header-lead .icon-btn.sessions-back {
+    display: inline-flex;
+  }
+
   /* ── Bottom tab bar (V3: 30px paint, 44px tap) ────────────────────────── */
   /* Chat mode only - the sessions LIST has nothing to page between. */
   .view-sessions[data-mobile-pane="chat"] .mobile-tabbar {

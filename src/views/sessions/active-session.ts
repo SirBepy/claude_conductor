@@ -30,6 +30,7 @@ import { isAutoAccept, setAutoAccept, replayPendingPrompt, rehydratePendingPromp
 import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { SessionHeader } from "./session-header";
+import { applyHeaderMerge } from "./mobile-header-merge";
 import { setThinkingActivity } from "./session-thinking-bar";
 import { isBlocked, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { openModelEffortModal } from "./model-effort-modal";
@@ -331,6 +332,9 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     `</div>`,
   ].join("");
   pane.insertBefore(header.el, pane.firstChild);
+  // This header is rebuilt per session, so the phone's relocated back / ⋮ have
+  // to be re-homed into the fresh one (todo 702).
+  applyHeaderMerge();
 
   pane.querySelector<HTMLButtonElement>(".thinking-pause-btn")?.addEventListener("click", () => {
     void invoke<void>("cancel_turn", { sessionId: sess.session_id }).catch(err => console.error("[sessions] cancel_turn failed", err));
