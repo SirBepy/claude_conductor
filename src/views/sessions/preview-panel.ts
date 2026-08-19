@@ -1,165 +1,30 @@
-// Docked HTML preview panel (ai_todo 138, frontend chunk).
-//
-// The daemon owns one global preview timeline: terminal Claude (curl to
-// `/hooks/preview`) and the in-app chat AI both push HTML snapshots to it,
-// each snapshot tagged with the pushing session's `session_id`. This module
-// renders that store — live latest + a history rail — as a dockable panel,
-// but only for whichever chat is currently active: `setSessionScope` is
-// called on every session switch (see state.ts's `setActiveSession`) and
-// re-filters the fetched list client-side. A snapshot pushed with no
-// session_id (e.g. an ad-hoc curl outside any chat) simply never matches any
-// scope and won't appear — that's an accepted, unrequested-workaround-free
-// consequence of scoping being per-chat now, not a bug.
-//
-// `renderPreview(root, { mode })`'s `mode` lets the pop-out OS window reuse
-// this exact renderer via `mountPreviewWindow`, called from main.ts's
-// `previewSessionId` boot branch.
+// The rail's Preview tab body (ai_todo 138; rail shell split out to
+// rail-panel.ts by todo 702). Renders the daemon's one global preview
+// timeline, filtered to the active chat, so a snapshot pushed with no
+// session_id matches no scope and never appears (accepted, not a bug).
 //
 // Live updates arrive two ways, per `project_daemon_notifier_broadcast_lossy`:
-// a `preview` daemon-notifier broadcast (fast, but can be dropped under
-// backpressure) AND an explicit `list_previews` refetch on panel open/window
-// focus (authoritative, never skipped).
+// a `preview` broadcast (fast, droppable under backpressure) AND an explicit
+// `list_previews` refetch on open/focus (authoritative, never skipped).
 
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
-import { wireResizeHandle, clampPanelWidth, splittableWidth } from "./preview-panel-resize";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
 import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
 import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./preview-panel-composer";
-import { mountTodosPanel, type TodosPanelHandle } from "./todos-panel";
+import { mountRail, type RailController, type RailMode, type RailTabDeps, type RailTabHandle } from "./rail-panel";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
-export type PreviewMode = "panel" | "window";
+export type { RailTab, RailMode as PreviewMode } from "./rail-panel";
+/** The rail is what callers hold onto; the name predates the tab split. */
+export type PreviewController = RailController;
 
-/** The rail hosts two tabs (todo 692). The class is still called PreviewPanel
- *  because it owns the host element, the width, the resize handle and the
- *  close button; the Todos tab's own board lives in `todos-panel.ts`. */
-export type RailTab = "preview" | "todos";
-
-export interface PreviewController {
-  toggle(): void;
-  open(snapshotId?: string): void;
-  close(): void;
-  isOpen(): boolean;
-  /** Scopes the panel to one chat's previews, INCLUDING its open/closed
-   *  state (each chat remembers its own independently); call on every
-   *  active-session switch (see state.ts). Clears and re-fetches when the
-   *  id changes. */
-  setSessionScope(sessionId: string | null): void;
-  /** Shows one of the rail's two tabs. The phone pager drives this, since its
-   *  bottom bar replaces the rail's own strip below 768px. */
-  setTab(tab: RailTab): void;
-  /** Relocates this chat's preview to its own OS window (todo 290, panel mode
-   *  only). Docked view stays scoped but hidden until dockBack. */
-  popOut(): void;
-  /** Pop-out window's own dock-back path (window mode only) - clears the
-   *  popped flag and closes the OS window. */
-  dockBack(): void;
-  destroy(): void;
-}
-
-// ── Persistence (dock-open + panel width — the real cross-reopen behavior
-// per the spec; device-width and history-rail-open stay in-memory, same as
-// the removed auto-refresh toggle used to). Open state is keyed per session
-// id (Joe, 2026-08-01: opening the panel in one chat must not show it open
-// in another) — same per-session-key shape as composer-persistence.ts's
-// draftKey. Width stays a single global key; a dragged panel width isn't a
-// per-chat preference. ──────────────────────────────────────────────────
-const LS_OPEN_PREFIX = "cc_preview_panel_open:";
-const LS_RATIO_KEY = "cc_preview_panel_ratio";
-/** Superseded by LS_RATIO_KEY, dropped on read: an absolute px width survived
- *  a window shrink and pushed the close button off screen (Joe, 2026-08-19). */
-const LS_LEGACY_WIDTH_KEY = "cc_preview_panel_width";
-const LS_POPPED_PREFIX = "cc_preview_panel_popped:";
-/** Which tab this chat was last on. Per-session like the open flag - the rail
- *  reopening on Todos in one chat must not put a sibling chat on Todos too. */
-const LS_TAB_PREFIX = "cc_rail_tab:";
-
-function loadTab(sessionId: string): RailTab {
-  try {
-    return localStorage.getItem(LS_TAB_PREFIX + sessionId) === "todos" ? "todos" : "preview";
-  } catch {
-    return "preview";
-  }
-}
-
-function saveTab(sessionId: string, tab: RailTab): void {
-  try {
-    localStorage.setItem(LS_TAB_PREFIX + sessionId, tab);
-  } catch {
-    /* quota or storage disabled */
-  }
-}
-
-function openKey(sessionId: string): string {
-  return LS_OPEN_PREFIX + sessionId;
-}
-
-function loadOpen(sessionId: string): boolean {
-  try {
-    return localStorage.getItem(openKey(sessionId)) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function saveOpen(sessionId: string, open: boolean): void {
-  try {
-    localStorage.setItem(openKey(sessionId), open ? "1" : "0");
-  } catch {
-    /* quota or storage disabled */
-  }
-}
-
-function poppedKey(sessionId: string): string {
-  return LS_POPPED_PREFIX + sessionId;
-}
-
-function loadPopped(sessionId: string): boolean {
-  try {
-    return localStorage.getItem(poppedKey(sessionId)) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/** Shared localStorage; the constructor's `storage` listener is what makes
- *  the OTHER window's docked instance react to a flip (separate realms). */
-function savePopped(sessionId: string, popped: boolean): void {
-  try {
-    localStorage.setItem(poppedKey(sessionId), popped ? "1" : "0");
-  } catch {
-    /* quota or storage disabled */
-  }
-}
-
-/** Share (0-1) of the split from a past drag, or null for an even 50/50 (Joe,
- *  2026-07-20). A share, not px, so a dragged panel follows the window. */
-function loadRatio(): number | null {
-  try {
-    localStorage.removeItem(LS_LEGACY_WIDTH_KEY);
-    const n = parseFloat(localStorage.getItem(LS_RATIO_KEY) ?? "");
-    if (Number.isFinite(n) && n > 0 && n < 1) return n;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function saveRatio(ratio: number): void {
-  try {
-    localStorage.setItem(LS_RATIO_KEY, ratio.toFixed(4));
-  } catch {
-    /* ignore */
-  }
-}
-
-class PreviewPanel implements PreviewController {
+class PreviewTab implements RailTabHandle {
   private root: HTMLElement;
-  private mode: PreviewMode;
+  private deps: RailTabDeps;
   private snapshots: PreviewMeta[] = [];
   private selected: PreviewSnapshot | null = null;
   /** Full-html snapshots already fetched this session, keyed by id, so
@@ -169,10 +34,6 @@ class PreviewPanel implements PreviewController {
    *  never outgrow the daemon-side MAX_HISTORY cap. */
   private snapshotCache = new Map<string, PreviewSnapshot>();
   private deviceWidth: DeviceWidth = "desktop";
-  private openState: boolean;
-  private ratio: number | null;
-  /** Without it a dragged width just kept its old px as the window changed. */
-  private layoutObserver: ResizeObserver | null = null;
   /** Only previews pushed with this session_id are shown. Set by
    *  state.ts's setActiveSession on every chat switch; null before any
    *  chat is selected. */
@@ -182,156 +43,62 @@ class PreviewPanel implements PreviewController {
    *  don't-resurface-what-was-already-surfaced shape as main.ts's
    *  `seenMissedIds`. */
   private seenIds = new Set<string>();
-  /** Which of the rail's two tabs is showing. Preview stays the default so an
-   *  existing chat opens exactly where it used to. */
-  private activeTab: RailTab = "preview";
-  private todosPanel: TodosPanelHandle | null = null;
   private unlistenPreview: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
-  private resizeCleanup: (() => void) | null = null;
-  /** Panel-mode only: set once popOut() relocates this session's view to its
-   *  own OS window; docked host stays scoped but hidden until dockBack(). */
-  private popped = false;
-  private storageHandler: ((e: StorageEvent) => void) | null = null;
-  /** Reply composer docked at the panel's bottom (see preview-panel-composer.ts).
-   *  Mounted once in the constructor: unlike the AUQ card, this panel's own
+  /** Reply composer docked at the tab's bottom (see preview-panel-composer.ts).
+   *  Mounted once in the constructor: unlike the AUQ card, this tab's own
    *  DOM is never innerHTML-rebuilt (renderIframe/renderHeader
    *  only touch their own sub-elements), so there's no per-render remount. */
   private composer: PvComposerHandle | null = null;
 
-  constructor(root: HTMLElement, mode: PreviewMode) {
+  constructor(root: HTMLElement, deps: RailTabDeps) {
     this.root = root;
-    this.mode = mode;
-    this.ratio = loadRatio();
-    // Open state is per-session (see LS_OPEN_PREFIX); unknown until
-    // setSessionScope runs, which sessions.ts calls synchronously right
-    // after construction - start closed so there's no flash of the wrong
-    // chat's open state in between.
-    this.openState = false;
+    this.deps = deps;
 
-    this.applyWidth();
     this.renderShell();
-    const todosHost = this.root.querySelector<HTMLElement>('[data-tab-body="todos"]');
-    if (todosHost) this.todosPanel = mountTodosPanel(todosHost);
-    this.applyTab();
     this.composer = mountPvComposer(this.root, this.pvComposerDeps());
-    this.wireEvents();
-    this.resizeCleanup = wireResizeHandle(this.root, (px, splittable) => {
-      if (splittable <= 0) return;
-      this.ratio = px / splittable;
-      saveRatio(this.ratio);
-      this.applyWidth();
-    });
-    if (this.mode === "panel" && typeof ResizeObserver !== "undefined" && this.root.parentElement) {
-      this.layoutObserver = new ResizeObserver(() => this.applyWidth());
-      this.layoutObserver.observe(this.root.parentElement);
-    }
+    this.root.addEventListener("click", (e) => this.onClick(e));
     void this.subscribeLive();
 
     this.focusHandler = () => {
-      if (this.openState) void this.refreshList();
+      if (this.deps.isOpen()) void this.refreshList();
       else void this.checkForUnseen();
     };
     window.addEventListener("focus", this.focusHandler);
 
-    if (this.mode === "panel") {
-      this.storageHandler = (e: StorageEvent) => {
-        if (!this.currentSessionId || e.key !== poppedKey(this.currentSessionId)) return;
-        this.popped = e.newValue === "1";
-        if (this.popped) this.root.hidden = true;
-        else if (this.openState) { this.root.hidden = false; void this.refreshList(); }
-      };
-      window.addEventListener("storage", this.storageHandler);
-    }
-
-    this.root.hidden = true;
     this.renderHeaderEmpty();
     this.renderCanvasEmpty();
   }
 
-  /** Flex sizing on the host: even 50/50 by default, else the dragged share
-   *  resolved to px on every layout change so it follows the window. */
-  private applyWidth(): void {
-    // Window mode has no chat pane to split against, and no host flex to set.
-    if (this.mode !== "panel") return;
-    if (this.ratio === null) {
-      this.root.style.flex = "1 1 0%";
-      return;
-    }
-    const splittable = splittableWidth(this.root);
-    // Pre-paint the whole view is display:none; the observer re-runs us later.
-    if (splittable <= 0) return;
-    const px = clampPanelWidth(this.ratio * splittable, splittable);
-    this.root.style.flex = `0 0 ${Math.round(px)}px`;
-  }
-
-  // ── Public controller API ────────────────────────────────────────────────
-
-  toggle(): void {
-    if (this.openState) this.close();
-    else this.open();
-  }
-
-  open(snapshotId?: string): void {
-    this.openState = true;
-    if (this.currentSessionId) saveOpen(this.currentSessionId, true);
-    // Relocated to its own window (panel mode only) - stay scoped, stay
-    // hidden, until dockBack() clears the flag.
-    if (this.mode === "panel" && this.popped) return;
-    this.root.hidden = false;
-    // Covers the bail above: constructed before the view had a measurable split.
-    this.applyWidth();
-    void this.refreshList(snapshotId ? { selectId: snapshotId } : {});
-  }
-
-  close(): void {
-    this.openState = false;
-    if (this.currentSessionId) saveOpen(this.currentSessionId, false);
-    this.root.hidden = true;
-  }
-
-  isOpen(): boolean {
-    return this.openState;
-  }
+  // ── Rail tab handle ──────────────────────────────────────────────────────
 
   setSessionScope(sessionId: string | null): void {
     if (this.currentSessionId === sessionId) return;
-    // Chat-switch skips DOM clicks, so the outside-click dismiss never
-    // fires for it - close explicitly or the menu stays open across it.
+    this.closeMenus();
+    this.currentSessionId = sessionId;
+    if (this.deps.isVisible()) {
+      void this.refreshList();
+      return;
+    }
+    // Drop the stale cross-chat cache so a later open() never flashes the
+    // previous chat's snapshots before the fresh fetch lands.
+    this.snapshots = [];
+    this.selected = null;
+    this.renderHeaderEmpty();
+    this.renderCanvasEmpty();
+    // Baseline only - the chat just switched into may already have older
+    // previews; those shouldn't force-open the panel, only a push that
+    // arrives *after* this baseline should (see checkForUnseen doc).
+    void this.checkForUnseen({ allowOpen: false });
+  }
+
+  refresh(opts: { selectId?: string } = {}): void {
+    void this.refreshList(opts);
+  }
+
+  closeMenus(): void {
     closePvMoreMenu();
     closePvHistory();
-    this.currentSessionId = sessionId;
-    // Each chat also remembers which tab it was on; re-derive it here for the
-    // same reason as openState, so the previous chat's tab never carries over.
-    this.activeTab = sessionId ? loadTab(sessionId) : "preview";
-    this.applyTab();
-    this.todosPanel?.setSessionScope(sessionId);
-    this.popped = this.mode === "panel" && !!sessionId && loadPopped(sessionId);
-    // Each chat's open/closed state is independent (loadOpen defaults false
-    // for an id with no saved key yet, e.g. one that's never had the panel
-    // opened) - re-derive from THIS chat's key, never carry over the
-    // previous chat's this.openState.
-    if (sessionId && loadOpen(sessionId) && !this.popped) {
-      this.openState = true;
-      this.root.hidden = false;
-      this.applyWidth();
-      void this.refreshList();
-    } else {
-      // Popped: still "open" per the saved flag (dockBack needs to know to
-      // re-show it), just relocated to its own window - see the class doc.
-      this.openState = this.popped && !!sessionId && loadOpen(sessionId);
-      this.root.hidden = true;
-      // Drop the stale cross-chat cache so a later open() never flashes the
-      // previous chat's snapshots before the fresh fetch lands.
-      this.snapshots = [];
-      this.selected = null;
-      this.renderHeaderEmpty();
-      this.renderCanvasEmpty();
-      // Baseline only - the chat just switched into may already have older
-      // previews; those shouldn't force-open the panel, only a push that
-      // arrives *after* this baseline should (see checkForUnseen doc).
-      void this.checkForUnseen({ allowOpen: false });
-    }
   }
 
   destroy(): void {
@@ -343,48 +110,17 @@ class PreviewPanel implements PreviewController {
       window.removeEventListener("focus", this.focusHandler);
       this.focusHandler = null;
     }
-    if (this.resizeCleanup) { this.resizeCleanup(); this.resizeCleanup = null; }
-    if (this.layoutObserver) { this.layoutObserver.disconnect(); this.layoutObserver = null; }
-    if (this.storageHandler) {
-      window.removeEventListener("storage", this.storageHandler);
-      this.storageHandler = null;
-    }
     this.composer?.destroy();
     this.composer = null;
-    this.todosPanel?.destroy();
-    this.todosPanel = null;
     closePvHistory();
-  }
-
-  popOut(): void {
-    if (this.mode !== "panel" || !this.currentSessionId) return;
-    this.popped = true;
-    savePopped(this.currentSessionId, true);
-    this.root.hidden = true;
-    void invoke("open_preview_window", { sessionId: this.currentSessionId }).catch((err) => {
-      console.error("[preview-panel] open_preview_window failed", err);
-    });
-  }
-
-  dockBack(): void {
-    if (this.mode !== "window" || !this.currentSessionId) return;
-    savePopped(this.currentSessionId, false);
-    void invoke("close_preview_window").catch((err) => {
-      console.error("[preview-panel] close_preview_window failed", err);
-    });
   }
 
   // ── Data ─────────────────────────────────────────────────────────────────
 
-  /** Authoritative fallback for the lossy `preview` notifier broadcast (see
-   *  class docs): `onLivePush` is the fast path, but a dropped broadcast
-   *  packet must never silently swallow a preview Claude just pushed for the
-   *  active chat. Called on every window focus while the panel is closed
-   *  (and once at mount / on every session-scope change, with `allowOpen:
-   *  false`, purely to baseline `seenIds` so pre-existing history never
-   *  spuriously pops the panel). Finds any snapshot in the current chat's
-   *  scope not yet in `seenIds` and, if allowed, opens the panel on it -
-   *  exactly what `onLivePush` does for the fast path. */
+  /** Authoritative fallback for the lossy `preview` broadcast (see module
+   *  docs): a dropped packet must never swallow a push for the active chat.
+   *  Runs on window focus while closed, and with `allowOpen: false` on every
+   *  scope change purely to baseline `seenIds` against pre-existing history. */
   private async checkForUnseen(opts: { allowOpen: boolean } = { allowOpen: true }): Promise<void> {
     if (!this.currentSessionId) return;
     let all: PreviewMeta[];
@@ -398,8 +134,8 @@ class PreviewPanel implements PreviewController {
     const unseen = scoped.filter((m) => !this.seenIds.has(m.id));
     scoped.forEach((m) => this.seenIds.add(m.id));
     const mostRecentUnseen = unseen[unseen.length - 1];
-    if (opts.allowOpen && mostRecentUnseen && !this.openState) {
-      this.open(mostRecentUnseen.id);
+    if (opts.allowOpen && mostRecentUnseen && !this.deps.isOpen()) {
+      this.deps.requestOpen(mostRecentUnseen.id);
     }
   }
 
@@ -460,7 +196,7 @@ class PreviewPanel implements PreviewController {
   private onLivePush(meta: PreviewMeta | undefined): void {
     if (!meta) return;
     if (meta.session_id !== this.currentSessionId) {
-      if (meta.session_id) saveOpen(meta.session_id, true);
+      if (meta.session_id) this.deps.markOpenFor(meta.session_id);
       return;
     }
     this.seenIds.add(meta.id);
@@ -469,8 +205,8 @@ class PreviewPanel implements PreviewController {
     if (idx >= 0) this.snapshots[idx] = meta;
     else this.snapshots.unshift(meta);
 
-    if (!this.openState) {
-      this.open(meta.id);
+    if (!this.deps.isOpen()) {
+      this.deps.requestOpen(meta.id);
       return;
     }
     void this.selectSnapshot(meta.id);
@@ -485,10 +221,6 @@ class PreviewPanel implements PreviewController {
     } catch (err) {
       console.warn("[preview-panel] listen(preview) failed", err);
     }
-  }
-
-  private pvComposerDeps(): PvComposerDeps {
-    return { getSelected: () => this.selected };
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -514,30 +246,8 @@ class PreviewPanel implements PreviewController {
     if (frame) frame.dataset.w = w;
   }
 
-  /** Shows one tab body, hides the other, and syncs the strip's own
-   *  contextual buttons: the eye is the Todos Columns menu, the kebab is
-   *  Preview's More menu, so neither is ever shown on the other's tab. */
-  private applyTab(): void {
-    for (const el of this.root.querySelectorAll<HTMLElement>("[data-tab-body]")) {
-      el.hidden = el.dataset.tabBody !== this.activeTab;
-    }
-    for (const el of this.root.querySelectorAll<HTMLElement>(".rail-tab")) {
-      el.classList.toggle("on", el.dataset.tab === this.activeTab);
-    }
-    const columnsBtn = this.root.querySelector<HTMLElement>('[data-act="columns"]');
-    if (columnsBtn) columnsBtn.hidden = this.activeTab !== "todos";
-  }
-
-  setTab(tab: RailTab): void {
-    if (this.activeTab === tab) return;
-    // Both menus belong to the tab being left, and neither dismisses itself on
-    // a tab switch (no outside DOM click happens).
-    closePvMoreMenu();
-    closePvHistory();
-    this.activeTab = tab;
-    if (this.currentSessionId) saveTab(this.currentSessionId, tab);
-    this.applyTab();
-    if (tab === "todos") this.todosPanel?.refresh();
+  private pvComposerDeps(): PvComposerDeps {
+    return { getSelected: () => this.selected };
   }
 
   private pvMoreMenuDeps(): PvMoreMenuDeps {
@@ -549,41 +259,45 @@ class PreviewPanel implements PreviewController {
     };
   }
 
+  private pvHistoryDeps(): PvHistoryDeps {
+    return {
+      getSnapshots: () => this.snapshots,
+      getSelectedId: () => this.selected?.id,
+      onSelect: (id) => void this.selectSnapshot(id),
+    };
+  }
+
+  private onClick(e: MouseEvent): void {
+    const actBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
+    if (!actBtn) return;
+    switch (actBtn.dataset.act) {
+      case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
+      case "history": togglePvHistory(actBtn, this.pvHistoryDeps()); return;
+      default: return;
+    }
+  }
+
   // ── Rendering ────────────────────────────────────────────────────────────
 
   private renderShell(): void {
     this.root.innerHTML = `
-      <div class="preview-panel" data-mode="${this.mode}">
-        <div class="pv-resize-handle" data-resize title="Drag to resize"></div>
-        <div class="rail-strip">
-          <button type="button" class="rail-tab" data-tab="preview"><i class="ph ph-monitor-play"></i>Preview</button>
-          <button type="button" class="rail-tab" data-tab="todos"><i class="ph ph-list-checks"></i>Todos</button>
-          <span class="rail-strip-grow"></span>
-          <button type="button" class="pv-icon-btn" data-act="columns" title="Columns" hidden><i class="ph ph-eye"></i></button>
-          <button type="button" class="pv-icon-btn" data-act="popout" title="Pop out into its own window"${this.mode === "window" ? " hidden" : ""}><i class="ph ph-arrows-out-simple"></i></button>
-          <button type="button" class="pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
+      <header class="pv-head">
+        <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span></span>
+        <button type="button" class="pv-ver" data-act="history" title="Version history"></button>
+        <span class="pv-grow"></span>
+        <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
+      </header>
+      <div class="pv-body">
+        <div class="pv-canvas"></div>
+      </div>
+      <div class="pv-composer">
+        <div class="composer-input-wrap">
+          <div class="composer-highlight" aria-hidden="true"></div>
+          <textarea class="composer-textarea pv-composer-input" rows="1" placeholder="Message the session that pushed this preview..."></textarea>
         </div>
-        <div class="rail-tab-body" data-tab-body="preview">
-          <header class="pv-head">
-            <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span></span>
-            <button type="button" class="pv-ver" data-act="history" title="Version history"></button>
-            <span class="pv-grow"></span>
-            <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
-          </header>
-          <div class="pv-body">
-            <div class="pv-canvas"></div>
-          </div>
-          <div class="pv-composer">
-            <div class="composer-input-wrap">
-              <div class="composer-highlight" aria-hidden="true"></div>
-              <textarea class="composer-textarea pv-composer-input" rows="1" placeholder="Message the session that pushed this preview..."></textarea>
-            </div>
-            <button type="button" class="pv-composer-send icon-btn" title="Send" disabled>
-              <i class="ph ph-paper-plane-right"></i>
-            </button>
-          </div>
-        </div>
-        <div class="rail-tab-body" data-tab-body="todos" hidden></div>
+        <button type="button" class="pv-composer-send icon-btn" title="Send" disabled>
+          <i class="ph ph-paper-plane-right"></i>
+        </button>
       </div>
     `;
     this.renderCanvasEmpty();
@@ -648,50 +362,17 @@ class PreviewPanel implements PreviewController {
       </div>
     `;
   }
-
-  private pvHistoryDeps(): PvHistoryDeps {
-    return {
-      getSnapshots: () => this.snapshots,
-      getSelectedId: () => this.selected?.id,
-      onSelect: (id) => void this.selectSnapshot(id),
-    };
-  }
-
-  // ── Event wiring ─────────────────────────────────────────────────────────
-
-  private wireEvents(): void {
-    this.root.addEventListener("click", (e) => this.onClick(e));
-  }
-
-  private onClick(e: MouseEvent): void {
-    const target = e.target as HTMLElement;
-
-    const tabBtn = target.closest<HTMLElement>(".rail-tab");
-    if (tabBtn?.dataset.tab) {
-      this.setTab(tabBtn.dataset.tab as RailTab);
-      return;
-    }
-
-    const actBtn = target.closest<HTMLElement>("[data-act]");
-    if (actBtn) {
-      switch (actBtn.dataset.act) {
-        case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
-        case "history": togglePvHistory(actBtn, this.pvHistoryDeps()); return;
-        case "columns": this.todosPanel?.toggleColumnsMenu(actBtn); return;
-        case "popout": this.popOut(); return;
-        // The strip's single close acts on the whole rail, both tabs (Joe:
-        // "the x button closes the entire window").
-        case "close": if (this.mode === "window") this.dockBack(); else this.close(); return;
-        default: return;
-      }
-    }
-  }
 }
 
-/** Shared preview renderer; `mode: "window"` is the todo 290 pop-out,
- *  mounted via `mountPreviewWindow` below. */
-export function renderPreview(root: HTMLElement, opts: { mode: PreviewMode }): PreviewController {
-  return new PreviewPanel(root, opts.mode);
+/** The rail's Preview tab, mounted by rail-panel.ts into its own tab body. */
+export function mountPreviewTab(root: HTMLElement, deps: RailTabDeps): RailTabHandle {
+  return new PreviewTab(root, deps);
+}
+
+/** Rail with the Preview tab wired in; `mode: "window"` is the todo 290
+ *  pop-out, mounted via `mountPreviewWindow` below. */
+export function renderPreview(root: HTMLElement, opts: { mode: RailMode }): PreviewController {
+  return mountRail(root, { mode: opts.mode, mountPreview: mountPreviewTab });
 }
 
 /** Pop-out window bootstrap (todo 290), called from main.ts's boot branch.
