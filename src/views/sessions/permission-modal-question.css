@@ -240,9 +240,13 @@
 
 /* Review-step extra message + pasted-image attachments (question-ui.ts,
  * gated on supportsExtras). Attachment chip styles (.attachment/.rm/etc.)
- * come from composer.css's .composer-attachments rules, already global. */
+ * come from composer.css's .composer-attachments rules, already global.
+ * Padding matches .prompt-sect + .prompt-own's combined total (the "own
+ * words" tab sharing this same answer-bar), so both tabs sit flush the
+ * same amount - the bar itself carries no padding of its own. */
 .prompt-extra-message {
-  margin-top: 6px;
+  margin: 0;
+  padding: 14px 16px;
 }
 .prompt-attachments {
   margin-top: 4px;
