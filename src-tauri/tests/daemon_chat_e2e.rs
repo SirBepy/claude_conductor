@@ -86,6 +86,18 @@ fn find_instance<'a>(instances: &'a Value, session_id: &str) -> Option<&'a Value
         .find(|i| i.get("session_id").and_then(Value::as_str) == Some(session_id))
 }
 
+/// Registers an Interactive session without spawning claude. `account_id` is
+/// required by `HistoricalParams`; "test-acct" matches the takeover test.
+async fn register_historical(client: &PersistentClient, session_id: &str, cwd: &str) {
+    client
+        .call(
+            "register_historical",
+            json!({ "session_id": session_id, "cwd": cwd, "account_id": "test-acct" }),
+        )
+        .await
+        .expect("register_historical");
+}
+
 /// Regression test for the per-turn SessionEnd auto-close bug (observed
 /// 2026-05-21): in Path C every user turn spawns a short-lived `claude -p`
 /// process that fires the SessionEnd hook when the turn completes. That hook
@@ -100,14 +112,7 @@ async fn interactive_survives_session_end_hook() {
     let session_id = format!("test-autoclose-{}", std::process::id());
     let cwd = std::env::temp_dir().to_string_lossy().to_string();
 
-    // Register an Interactive session in the registry without spawning claude.
-    client
-        .call(
-            "register_historical",
-            json!({ "session_id": session_id, "cwd": cwd }),
-        )
-        .await
-        .expect("register_historical");
+    register_historical(&client, &session_id, &cwd).await;
 
     // Sanity: it exists and is a live Interactive entry.
     let before = client.call("list_instances", json!({})).await.expect("list");
@@ -213,10 +218,7 @@ async fn mark_session_ended_sets_ended_at() {
     let session_id = format!("test-markended-{}", std::process::id());
     let cwd = std::env::temp_dir().to_string_lossy().to_string();
 
-    client
-        .call("register_historical", json!({ "session_id": session_id, "cwd": cwd }))
-        .await
-        .expect("register_historical");
+    register_historical(&client, &session_id, &cwd).await;
 
     let before = client.call("list_instances", json!({})).await.expect("list");
     let inst = find_instance(&before, &session_id).expect("session registered");
@@ -256,10 +258,7 @@ async fn externalize_session_flips_interactive_to_external() {
     let session_id = format!("test-externalize-{}", std::process::id());
     let cwd = std::env::temp_dir().to_string_lossy().to_string();
 
-    client
-        .call("register_historical", json!({ "session_id": session_id, "cwd": cwd }))
-        .await
-        .expect("register_historical");
+    register_historical(&client, &session_id, &cwd).await;
 
     let before = client.call("list_instances", json!({})).await.expect("list");
     let inst = find_instance(&before, &session_id).expect("session registered");
@@ -297,10 +296,7 @@ async fn set_session_effort_persists() {
     let session_id = format!("test-effort-{}", std::process::id());
     let cwd = std::env::temp_dir().to_string_lossy().to_string();
 
-    client
-        .call("register_historical", json!({ "session_id": session_id, "cwd": cwd }))
-        .await
-        .expect("register_historical");
+    register_historical(&client, &session_id, &cwd).await;
 
     client
         .call("set_session_effort", json!({ "session_id": session_id, "effort": "high" }))
@@ -667,10 +663,7 @@ async fn interactive_session_survives_daemon_restart() {
     // --- First daemon: register an interactive chat + set effort, then kill. ---
     {
         let (mut child, client, _hook_port) = spawn_daemon_and_connect().await;
-        client
-            .call("register_historical", json!({ "session_id": session_id, "cwd": cwd }))
-            .await
-            .expect("register_historical");
+        register_historical(&client, &session_id, &cwd).await;
         client
             .call("set_session_effort", json!({ "session_id": session_id, "effort": "high" }))
             .await
@@ -733,10 +726,7 @@ async fn ended_session_not_restored_after_daemon_restart() {
 
     {
         let (mut child, client, _hook_port) = spawn_daemon_and_connect().await;
-        client
-            .call("register_historical", json!({ "session_id": session_id, "cwd": cwd }))
-            .await
-            .expect("register_historical");
+        register_historical(&client, &session_id, &cwd).await;
         client
             .call("mark_session_ended", json!({ "session_id": session_id }))
             .await
