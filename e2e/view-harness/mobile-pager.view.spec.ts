@@ -1,44 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountSessionsLayout, mountView } from "./harness";
 
 // Joe, 2026-08-19: below 860px the docked rail was hidden outright, so a phone
 // had no preview surface. It is now page 2 of a scroll-snap pager.
-// Layout built by hand for the same reason as preview-panel-resize.view.spec.ts.
 
 const PHONE = { width: 390, height: 780 };
 
 async function mountPager(page: Page): Promise<void> {
   await mountView(page, { invoke: { list_previews: [] } });
-  await page.evaluate(async () => {
-    const pv = await import("/views/sessions/preview-panel.ts");
-    const pager = await import("/views/sessions/mobile-pager.ts");
-    document.querySelector("#preview-panel-host")?.remove();
-
-    const view = document.createElement("div");
-    view.className = "view view-sessions";
-    view.setAttribute("data-mobile-pane", "chat");
-    view.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;z-index:9999";
-    view.innerHTML = `
-      <div class="view-header">
-        <button class="icon-btn sessions-back" id="sessionsBackBtn"><i class="ph ph-arrow-left"></i></button>
-        <h2>Chats</h2>
-        <span id="usage-dial-host"></span>
-        <button class="icon-btn more-btn" id="viewMoreBtn"><i class="ph ph-dots-three-vertical"></i></button>
-      </div>
-      <div class="view-body sessions-layout" style="flex:1">
-        <aside class="sessions-sidebar"></aside>
-        <main class="session-pane" id="session-pane"></main>
-        <div id="preview-panel-host" hidden></div>
-      </div>
-      <div id="mobile-tabbar-host"></div>`;
-    document.body.appendChild(view);
-
-    const host = view.querySelector<HTMLElement>("#preview-panel-host")!;
-    const layout = view.querySelector<HTMLElement>(".sessions-layout")!;
-    const controller = pv.renderPreview(host, { mode: "panel" });
-    controller.setSessionScope("sess-1");
-    pager.mountMobilePager(view.querySelector<HTMLElement>("#mobile-tabbar-host")!, layout, controller);
-  });
+  await mountSessionsLayout(page, { pager: true });
 }
 
 const scrollLeft = (page: Page) =>

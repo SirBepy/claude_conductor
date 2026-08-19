@@ -1,41 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountSessionsLayout, mountView } from "./harness";
 
 // Regression for Joe, 2026-08-19: a dragged panel stored an absolute px width
 // and the host is `flex-shrink: 0`, so narrowing the window collapsed
 // `.session-pane` and pushed the close button past the right edge.
 
-// The sessions view isn't the default route and booting it needs a long tail of
-// mocks, so these rebuild `.sessions-layout`'s children from template.ts. The
-// stylesheet is global, so the real cascade still applies.
-
 const MIN_CHAT_WIDTH = 360;
-
-/** Builds `.sessions-layout` and mounts a docked panel into it. Runs in the
- *  page, so it takes no closure state. */
-async function mountPanel(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const mod = await import("/views/sessions/preview-panel.ts");
-    document.querySelector("#preview-panel-host")?.remove();
-
-    const view = document.createElement("div");
-    view.className = "view view-sessions";
-    view.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;z-index:9999";
-    view.innerHTML = `
-      <div class="view-body sessions-layout" style="flex:1">
-        <aside class="sessions-sidebar"></aside>
-        <main class="session-pane" id="session-pane"></main>
-        <div id="preview-panel-host" hidden></div>
-      </div>`;
-    document.body.appendChild(view);
-
-    const host = view.querySelector<HTMLElement>("#preview-panel-host")!;
-    const controller = mod.renderPreview(host, { mode: "panel" });
-    controller.setSessionScope("sess-1");
-    controller.open();
-  });
-  await expect(page.locator("#preview-panel-host")).toBeVisible();
-}
 
 /** `seed` writes localStorage before any app script runs, so the panel reads it
  *  during construction the way a real reload would. */
@@ -44,7 +14,8 @@ async function boot(page: Page, seed: Record<string, string>): Promise<void> {
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
   }, seed);
   await mountView(page, { invoke: { list_previews: [] } });
-  await mountPanel(page);
+  await mountSessionsLayout(page, { openPanel: true });
+  await expect(page.locator("#preview-panel-host")).toBeVisible();
 }
 
 async function widthOf(page: Page, selector: string): Promise<number> {

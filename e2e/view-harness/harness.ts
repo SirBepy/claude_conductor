@@ -24,7 +24,10 @@
 // crashing; nothing currently drives them (no spec pushes a backend event
 // mid-run yet).
 
-import type { Page } from "@playwright/test";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { test, type Locator, type Page } from "@playwright/test";
 
 export type Entry = "index" | "overlay";
 
@@ -134,4 +137,122 @@ export async function invokeCalls(page: Page): Promise<Array<{ cmd: string; args
   return page.evaluate(
     () => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args?: unknown }> }).__ccInvokeCalls,
   );
+}
+
+export interface SessionsLayoutOptions {
+  /** Add the `.view-header` band (back button, title, dial host, kebab). */
+  header?: boolean;
+  /** Mount the mobile pager over the layout. Implies `header`. */
+  pager?: boolean;
+  /** Open the docked preview panel instead of leaving it closed. */
+  openPanel?: boolean;
+}
+
+/** Rebuilds `.sessions-layout` from template.ts markup and docks a preview panel
+ *  into it: the sessions view is not the default route and booting it needs a
+ *  long tail of mocks. The stylesheet is global, so the real cascade applies.
+ *  Call {@link mountView} (with `list_previews` mocked) first. */
+export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOptions = {}): Promise<void> {
+  const cfg = {
+    header: (opts.header ?? false) || (opts.pager ?? false),
+    pager: opts.pager ?? false,
+    openPanel: opts.openPanel ?? false,
+  };
+  await page.evaluate(async (o) => {
+    const pv = await import("/views/sessions/preview-panel.ts");
+    document.querySelector("#preview-panel-host")?.remove();
+
+    const view = document.createElement("div");
+    view.className = "view view-sessions";
+    if (o.header) view.setAttribute("data-mobile-pane", "chat");
+    view.style.cssText = "position:fixed;inset:0;display:flex;flex-direction:column;z-index:9999";
+    const header = o.header
+      ? `<div class="view-header">
+        <button class="icon-btn sessions-back" id="sessionsBackBtn"><i class="ph ph-arrow-left"></i></button>
+        <h2>Chats</h2>
+        <span id="usage-dial-host"></span>
+        <button class="icon-btn more-btn" id="viewMoreBtn"><i class="ph ph-dots-three-vertical"></i></button>
+      </div>`
+      : "";
+    view.innerHTML = `${header}
+      <div class="view-body sessions-layout" style="flex:1">
+        <aside class="sessions-sidebar"></aside>
+        <main class="session-pane" id="session-pane"></main>
+        <div id="preview-panel-host" hidden></div>
+      </div>
+      ${o.pager ? `<div id="mobile-tabbar-host"></div>` : ""}`;
+    document.body.appendChild(view);
+
+    const host = view.querySelector<HTMLElement>("#preview-panel-host")!;
+    const controller = pv.renderPreview(host, { mode: "panel" });
+    controller.setSessionScope("sess-1");
+    if (o.openPanel) controller.open();
+    if (o.pager) {
+      const pager = await import("/views/sessions/mobile-pager.ts");
+      const layout = view.querySelector<HTMLElement>(".sessions-layout")!;
+      pager.mountMobilePager(view.querySelector<HTMLElement>("#mobile-tabbar-host")!, layout, controller);
+    }
+  }, cfg);
+}
+
+/** `<pid>-<procStart-ticks>`, the id `close/rename-session.ps1 -GetId` prints:
+ *  the ~/.claude/sessions record whose sessionId matches this session. */
+function sessionShotId(): string {
+  const pinned = process.env.CC_SHOT_ID;
+  if (pinned) return pinned;
+  const sid = process.env.CLAUDE_CODE_SESSION_ID;
+  const dir = path.join(homedir(), ".claude", "sessions");
+  if (sid && existsSync(dir)) {
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const rec = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as {
+          sessionId?: string; pid?: number; procStart?: string;
+        };
+        if (rec.sessionId === sid && rec.pid && rec.procStart) return `${rec.pid}-${rec.procStart}`;
+      } catch {
+        /* a session file mid-write - skip it */
+      }
+    }
+  }
+  // Outside a Claude session (or env var unset): one bucket /disk-doctor can still age out.
+  return "no-session";
+}
+
+/** `config.rootDir` is the testDir (e2e/view-harness), so climb to the directory
+ *  holding playwright.config.ts, which is the repo root. */
+function repoRoot(): string {
+  let dir: string;
+  try {
+    dir = test.info().config.rootDir;
+  } catch {
+    dir = process.cwd();
+  }
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(path.join(dir, "playwright.config.ts"))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return process.cwd();
+}
+
+/** Write a PNG of a mounted view (or one element) to
+ *  `.for_bepy/screenshots/<session-id>/<label>.png`, so showing Joe a visual
+ *  change needs no throwaway spec. Returns and logs the path. */
+export async function capture(
+  target: Page | Locator,
+  label: string,
+  opts: { fullPage?: boolean } = {},
+): Promise<string> {
+  const dir = path.join(repoRoot(), ".for_bepy", "screenshots", sessionShotId());
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${label.replace(/[^a-z0-9._-]+/gi, "-")}.png`);
+  if ("setViewportSize" in target) {
+    await target.screenshot({ path: file, fullPage: opts.fullPage ?? false });
+  } else {
+    await target.screenshot({ path: file });
+  }
+  console.log(`[capture] ${file}`);
+  return file;
 }
