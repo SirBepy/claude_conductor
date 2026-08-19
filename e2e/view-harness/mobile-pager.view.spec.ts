@@ -110,6 +110,102 @@ test("the phone header drops the static Chats title and the quota dials", async 
   await expect(page.locator("#usage-dial-host")).toBeHidden();
 });
 
+// ── The swipe itself ──────────────────────────────────────────────────────
+// The bar is one way to page; dragging is the other, and it is the one with no
+// JS behind it. These drive the scroll container directly rather than trusting
+// that `scroll-snap-type` in a stylesheet means the gesture works.
+
+test("the layout is a horizontal snap container, and only horizontally", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  const style = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".sessions-layout")!;
+    const cs = getComputedStyle(el);
+    return {
+      snap: cs.scrollSnapType,
+      overflowX: cs.overflowX,
+      // session-list.css sets `overflow: hidden`; the pager must beat it on x
+      // WITHOUT opening y, or the whole chat column becomes scrollable.
+      overflowY: cs.overflowY,
+      scrollable: el.scrollWidth > el.clientWidth,
+    };
+  });
+
+  expect(style.snap).toContain("x");
+  expect(style.snap).toContain("mandatory");
+  expect(style.overflowX).toBe("auto");
+  expect(style.overflowY).toBe("hidden");
+  expect(style.scrollable).toBe(true);
+});
+
+test("a horizontal swipe pages to the rail and snaps flush to it", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  expect(await scrollLeft(page)).toBe(0);
+
+  // A trackpad/touch horizontal pan over the message list. Deliberately a
+  // PARTIAL drag: mandatory snapping is what carries it the rest of the way.
+  await page.mouse.move(PHONE.width / 2, 400);
+  await page.mouse.wheel(PHONE.width * 0.6, 0);
+
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+  await expect(page.locator('.mtab[data-target="preview"]')).toHaveClass(/\bon\b/);
+});
+
+test("a short swipe falls back to the page it started on", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  await page.mouse.move(PHONE.width / 2, 400);
+  await page.mouse.wheel(PHONE.width * 0.15, 0);
+
+  await expect.poll(() => scrollLeft(page)).toBe(0);
+  await expect(page.locator('.mtab[data-target="chat"]')).toHaveClass(/\bon\b/);
+});
+
+test("swiping back from the rail returns to chat and re-syncs the bar", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  await page.locator('.mtab[data-target="todos"]').click();
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+  await expect(page.locator('.mtab[data-target="todos"]')).toHaveClass(/\bon\b/);
+
+  await page.mouse.move(PHONE.width / 2, 400);
+  await page.mouse.wheel(-PHONE.width * 0.6, 0);
+
+  await expect.poll(() => scrollLeft(page)).toBe(0);
+  // The bar follows the gesture, not just its own clicks.
+  await expect(page.locator('.mtab[data-target="chat"]')).toHaveClass(/\bon\b/);
+  await expect(page.locator('.mtab[data-target="todos"]')).not.toHaveClass(/\bon\b/);
+});
+
+test("the chip row keeps its own horizontal scroll instead of paging", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  // A .sb-row is its own overflow-x container, so a swipe that starts there
+  // must scroll chips and leave the pager where it is.
+  await page.evaluate(() => {
+    const row = document.createElement("div");
+    row.className = "sb-row";
+    row.style.cssText = "overflow-x:auto;width:100%";
+    // flex-basis, not width: .sb-row is a flex container, so a plain wide child
+    // just gets shrunk back to fit and never overflows.
+    row.innerHTML = "<span style='flex:0 0 900px'>chips</span>";
+    document.querySelector("#session-pane")!.appendChild(row);
+  });
+
+  const rowBox = (await page.locator(".sb-row").boundingBox())!;
+  await page.mouse.move(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
+  await page.mouse.wheel(120, 0);
+
+  await expect.poll(() => page.evaluate(() => document.querySelector(".sb-row")!.scrollLeft))
+    .toBeGreaterThan(0);
+  expect(await scrollLeft(page)).toBe(0);
+});
+
 test("desktop keeps the side-by-side split and never shows the bar", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await mountPager(page);
