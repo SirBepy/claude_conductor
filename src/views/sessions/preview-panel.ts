@@ -49,6 +49,9 @@ export interface PreviewController {
    *  active-session switch (see state.ts). Clears and re-fetches when the
    *  id changes. */
   setSessionScope(sessionId: string | null): void;
+  /** Shows one of the rail's two tabs. The phone pager drives this, since its
+   *  bottom bar replaces the rail's own strip below 768px. */
+  setTab(tab: RailTab): void;
   /** Relocates this chat's preview to its own OS window (todo 290, panel mode
    *  only). Docked view stays scoped but hidden until dockBack. */
   popOut(): void;
@@ -525,7 +528,7 @@ class PreviewPanel implements PreviewController {
     if (columnsBtn) columnsBtn.hidden = this.activeTab !== "todos";
   }
 
-  private setTab(tab: RailTab): void {
+  setTab(tab: RailTab): void {
     if (this.activeTab === tab) return;
     // Both menus belong to the tab being left, and neither dismisses itself on
     // a tab switch (no outside DOM click happens).

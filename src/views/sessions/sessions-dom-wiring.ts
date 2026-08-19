@@ -5,6 +5,7 @@
 import { invoke } from "../../shared/ipc";
 import * as shortcuts from "../../shared/shortcuts";
 import { renderPreview, type PreviewController } from "./preview-panel";
+import { mountMobilePager } from "./mobile-pager";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft } from "./pending-flow";
 import { discardComposerDraft, moveComposerDraft } from "../../shared/chat/composer";
 import { selectSession } from "./active-session";
@@ -51,6 +52,13 @@ export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewC
     previewRoot ? renderPreview(previewRoot, { mode: "panel" }) : null;
   state.previewController = previewController;
   previewController?.setSessionScope(state.selectedId);
+  // Phone pager over the same two panes (Joe, 2026-08-19). Mounted alongside
+  // the rail because it drives the rail's tab; CSS keeps it off desktop.
+  const tabbarHost = root.querySelector<HTMLElement>("#mobile-tabbar-host");
+  const layout = root.querySelector<HTMLElement>(".sessions-layout");
+  if (tabbarHost && layout && previewController) {
+    mountMobilePager(tabbarHost, layout, previewController);
+  }
   state.launchNewChatCallback = (project, config) => { void launchNewSession(pane, project, config); };
   // Test seam (ai_todo 402): create a draft directly, skipping pickProject and
   // the model modal, so the view-harness can drive discardDraft's scheduled-

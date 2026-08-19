@@ -823,6 +823,11 @@
   display: none;
 }
 
+/* Same mobile-only pattern as .sessions-back: the query below turns it on. */
+.mobile-tabbar {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .view-sessions .view-body.sessions-layout {
     position: relative;
@@ -853,6 +858,104 @@
   }
   .view-sessions[data-mobile-pane="chat"] .icon-btn.burger {
     display: none;
+  }
+
+  /* ── Chat / rail pager (Joe, 2026-08-19) ──────────────────────────────
+     Two snap pages side by side. Scroll-snap rather than a JS gesture: the
+     preview is an iframe and eats touch before it reaches us, and native
+     scrolling needs no arbitration with the chat scroller or the chip row's
+     own overflow-x. The bottom bar is the guaranteed way off a rail page. */
+  .view-sessions[data-mobile-pane="chat"] .view-body.sessions-layout {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .view-sessions[data-mobile-pane="chat"] .view-body.sessions-layout::-webkit-scrollbar {
+    display: none;
+  }
+  .view-sessions[data-mobile-pane="chat"] .session-pane,
+  .view-sessions[data-mobile-pane="chat"] #preview-panel-host {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    /* Beats PreviewPanel.applyWidth's inline `flex`, which is a desktop
+       split-pane width and meaningless once each page is a full screen. */
+    flex: 0 0 100% !important;
+    min-width: 100%;
+  }
+
+  /* The rail is always a page here, even with nothing pushed yet - the empty
+     state is what tells you previews land there. Overrides both the base
+     [hidden] guard and the >860px hide in preview-panel.css. */
+  .view-sessions[data-mobile-pane="chat"] #preview-panel-host,
+  .view-sessions[data-mobile-pane="chat"] #preview-panel-host[hidden] {
+    display: flex !important;
+  }
+
+  /* The bottom bar replaces the rail's own strip and its close button; on a
+     phone you leave a page by swiping or tapping, never by closing it. */
+  .view-sessions[data-mobile-pane="chat"] .rail-strip,
+  .view-sessions[data-mobile-pane="chat"] .pv-resize-handle {
+    display: none;
+  }
+
+  /* ── Header: one band, not three ──────────────────────────────────────
+     "Chats" is a static title that never becomes the chat name, and the real
+     name already sits in .session-header right below it. The quota dials are
+     personal, not per-chat, so they belong in the side menu (Joe). */
+  .view-sessions[data-mobile-pane="chat"] .view-header h2,
+  .view-sessions[data-mobile-pane="chat"] #usage-dial-host {
+    display: none;
+  }
+
+  /* ── Bottom tab bar (V3: 30px paint, 44px tap) ────────────────────────── */
+  /* Chat mode only - the sessions LIST has nothing to page between. */
+  .view-sessions[data-mobile-pane="chat"] .mobile-tabbar {
+    display: flex;
+    flex-shrink: 0;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .mtab {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    position: relative;
+  }
+  .mtab i {
+    font-size: 15px;
+  }
+  /* Only the active tab spends width on its label, so it doubles as the
+     you-are-here marker and the other two stay pure icon. */
+  .mtab .mtab-lbl {
+    display: none;
+  }
+  .mtab.on .mtab-lbl {
+    display: inline;
+  }
+  .mtab.on {
+    background: var(--color-surface-alt);
+    color: var(--color-primary);
+  }
+  /* Paints 30px but taps 44px, clearing base.css's touch-target floor without
+     spending the height: the extra reaches up over the composer's margin. */
+  .mtab::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 44px;
   }
 
   /* Touch has no hover, so the per-row ⋮ menu (revealed on hover at desktop)

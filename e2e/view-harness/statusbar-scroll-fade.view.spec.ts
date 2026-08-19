@@ -60,7 +60,10 @@ async function mountSessionRow(page: Page, row: string[]): Promise<void> {
       ...BASE_INVOKE,
       list_instances: SESSIONS,
       get_active_sessions: SESSIONS,
-      get_settings: { theme: "void", statuslineRows: [row] },
+      // Both keys: these run at a phone viewport, which reads the mobile
+      // profile, but the specs are about fade mechanics rather than defaults,
+      // so they should pin the row whichever profile is live.
+      get_settings: { theme: "void", statuslineRows: [row], statuslineRowsMobile: [row] },
     },
   });
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
