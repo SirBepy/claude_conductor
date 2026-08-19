@@ -16,10 +16,13 @@ import type { ChatEvent, HistoryPage } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
 import { getTransport } from "../transport";
 import { normalizeUserMessageText } from "./chat-transforms";
+import { visibleEventSigs } from "./chat-transcript-sig";
 import { EvictionPolicy, touchAccess } from "./event-store-eviction";
 
 type Unlisten = () => void;
 type EventListener = (ev: ChatEvent) => void;
+/** Fed the authoritative transcript's visible-message sigs after a reconcile. */
+type TailListener = (sigs: string[]) => void;
 
 // Page size counts AssistantMessage events only — see read_page in
 // src-tauri/src/chat/history.rs. 10 AI replies plus all surrounding
@@ -61,6 +64,8 @@ export interface CacheEntry {
   unlisten: Unlisten | null;
   unlistenWatch: Unlisten | null;
   subscribers: Set<EventListener>;
+  /** Post-reconcile "what should be on screen", for renderer staleness. */
+  tailWatchers: Set<TailListener>;
   /** Recently-delivered live event signatures, for cross-source dedup. */
   recent: RecentSig[];
   /** Wall-clock ms of the last genuine access (load/read/subscribe) or
@@ -228,7 +233,6 @@ class SessionEventStore {
       const s = this.sigOf(ev);
       return s !== null && !have.has(s);
     });
-    if (missing.length === 0) return;
     for (const ev of missing) {
       entry.events.push(ev);
       this.recordSig(entry, ev);
@@ -236,6 +240,23 @@ class SessionEventStore {
         try { fn(ev); } catch { /* ignore */ }
       });
     }
+    // Fires even when nothing was recovered: the diff above only sees what the
+    // CACHE lacks, never what a renderer failed to paint from it.
+    const tailSigs = visibleEventSigs(page.events);
+    entry.tailWatchers.forEach((fn) => {
+      try { fn(tailSigs); } catch { /* ignore */ }
+    });
+  }
+
+  /** Subscribe to the post-reconcile transcript tail (carries no event). */
+  subscribeTranscriptTail(sessionId: string, fn: TailListener): () => void {
+    let entry = this.cache.get(sessionId);
+    if (!entry) {
+      entry = this.makeEntry();
+      this.cache.set(sessionId, entry);
+    }
+    entry.tailWatchers.add(fn);
+    return () => { this.cache.get(sessionId)?.tailWatchers.delete(fn); };
   }
 
   /**
@@ -309,6 +330,7 @@ class SessionEventStore {
       // entry and keeps its unlistenWatch alive.
       for (const ev of fromEntry.events) existing.events.push(ev);
       for (const sub of fromEntry.subscribers) existing.subscribers.add(sub);
+      for (const w of fromEntry.tailWatchers) existing.tailWatchers.add(w);
       for (const r of fromEntry.recent) existing.recent.push(r);
       existing.initialLoaded = existing.initialLoaded || fromEntry.initialLoaded;
       existing.oldestSeq = existing.oldestSeq ?? fromEntry.oldestSeq;
@@ -561,6 +583,7 @@ class SessionEventStore {
       unlisten: null,
       unlistenWatch: null,
       subscribers: new Set(),
+      tailWatchers: new Set(),
       recent: [],
       lastAccess: Date.now(),
       ended: false,

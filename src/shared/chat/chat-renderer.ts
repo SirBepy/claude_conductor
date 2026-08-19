@@ -17,7 +17,8 @@ import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
 import { ChatPaginator } from "./chat-pagination";
 import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
-import { buildMessageEl, foldClosedRange, revealTranscript } from "./chat-dom-renderer";
+import { buildMessageEl, foldClosedRange, revealTranscript, isNearBottom } from "./chat-dom-renderer";
+import { visibleMessageSigs } from "./chat-transcript-sig";
 import { flushRenderNow } from "./flush-scheduler";
 import { handleChatEvent, type HandleEventOpts } from "./chat-event-handler";
 import { bulkLoadEvents, type BulkLoadOpts } from "./chat-event-bulk-load";
@@ -60,6 +61,13 @@ export class ChatRenderer {
   messageEls: HTMLElement[] = [];
   dirtyIndices = new Set<number>();
   unsubscribe: (() => void) | null = null;
+  /** Paired with `unsubscribe` - the post-reconcile staleness check. */
+  private unsubscribeTail: (() => void) | null = null;
+  /** Guards against the 15s heartbeat stacking a second rebuild. */
+  private _resyncing = false;
+  /** Missing-sig set a rebuild already failed to recover; retrying it would
+   *  repaint on every heartbeat forever. */
+  private _resyncFailedFor: string | null = null;
   streamingIndex: number | null = null;
   liveBuffer: ChatEvent[] | null = null;
   // True while the retained pane cache holds this renderer off-screen (see
@@ -408,6 +416,10 @@ export class ChatRenderer {
       try { this.unsubscribe(); } catch { /* ignore */ }
       this.unsubscribe = null;
     }
+    if (this.unsubscribeTail) {
+      try { this.unsubscribeTail(); } catch { /* ignore */ }
+      this.unsubscribeTail = null;
+    }
     this.paginator.remove();
     this.paginator.resetTurnCarry();
     this.removeAnimObserver();
@@ -439,10 +451,72 @@ export class ChatRenderer {
       try { this.unsubscribe(); } catch { /* ignore */ }
       this.unsubscribe = null;
     }
+    if (this.unsubscribeTail) {
+      try { this.unsubscribeTail(); } catch { /* ignore */ }
+      this.unsubscribeTail = null;
+    }
     this.sessionId = sessionId;
+    this._resyncFailedFor = null;
     this.unsubscribe = sessionEvents.subscribe(sessionId, (ev) => {
       this.handleLive(ev);
     });
+    this.unsubscribeTail = sessionEvents.subscribeTranscriptTail(sessionId, (sigs) => {
+      this.onTranscriptTail(sigs);
+    });
+  }
+
+  /** Staleness check against the authoritative transcript (event-store's
+   *  tailWatchers). The store only recovers what the CACHE lacks; a message it
+   *  HAS but this renderer never painted used to need a manual reload. */
+  private onTranscriptTail(sigs: string[]): void {
+    if (!this.sessionId || this._resyncing) return;
+    // liveBuffer owns the event flow mid-load / while parked off-screen, and a
+    // retained pane reconciles again on remount.
+    if (this.liveBuffer !== null) return;
+    // Mid-stream bubble: the next heartbeat catches it 15s later.
+    if (this.streamingIndex !== null) return;
+    const have = visibleMessageSigs(this.messages);
+    const missing = sigs.filter((s) => !have.has(s));
+    if (missing.length === 0) {
+      this._resyncFailedFor = null;
+      return;
+    }
+    const key = missing.join("|");
+    if (this._resyncFailedFor === key) return;
+    const sid = this.sessionId;
+    const cwd = this.paginator.cwdHint;
+    const wasNearBottom = isNearBottom(this);
+    const prevScrollTop = this.container.scrollTop;
+    this._resyncing = true;
+    console.warn(
+      `[chat-resync] ${sid}: transcript has ${missing.length} message(s) this chat never painted - rebuilding`,
+      missing,
+    );
+    void (async () => {
+      try {
+        // force: the cache is the suspect, so don't trust loadInitial's
+        // idempotent cache-hit path.
+        await sessionEvents.loadInitial(sid, cwd, { force: true });
+        if (this.sessionId !== sid) return;
+        await this.loadFromStore(cwd);
+        if (this.sessionId !== sid) return;
+        // A rebuild otherwise lands at the bottom, yanking a user reading back.
+        if (!wasNearBottom) this.container.scrollTop = prevScrollTop;
+        const after = visibleMessageSigs(this.messages);
+        const stillMissing = missing.filter((s) => !after.has(s));
+        this._resyncFailedFor = stillMissing.length > 0 ? key : null;
+        if (stillMissing.length > 0) {
+          console.error(
+            `[chat-resync] ${sid}: still missing after a full rebuild - the drop is on the paint path, not in the cache`,
+            stillMissing,
+          );
+        }
+      } catch (err) {
+        console.warn(`[chat-resync] ${sid}: rebuild failed`, err);
+      } finally {
+        this._resyncing = false;
+      }
+    })();
   }
 
   /** Idempotent (re-)subscribe. `sessionId`/`unsubscribe` are only ever set

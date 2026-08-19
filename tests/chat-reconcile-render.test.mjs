@@ -129,4 +129,106 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     // Still exactly one assistant message - no duplicate.
     expect(assistantTexts(r)).toEqual(["only answer"]);
   });
+
+  it("recovers a message the STORE has but the renderer never painted", async () => {
+    const sid = `sess-recon-paint-${Math.random()}`;
+    const bus = makeBus();
+    globalThis.window.__TAURI__ = bus;
+
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("hi", 0), assistantEvent("first answer", 0)],
+      oldest_seq: 0,
+      newest_seq: 1,
+      has_more: false,
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const r = new ChatRenderer(container);
+    await r.attach(sid);
+    await r.loadFromStore();
+
+    // The store accepts a live turn the renderer never paints. Severing just the
+    // paint subscription reproduces that end state without pinning the test to
+    // one cause (paint-path drop vs content-keyed dedup collision).
+    const paintSub = r.unsubscribe;
+    r.unsubscribe = null;
+    paintSub();
+    bus.emit(`chat:${sid}`, assistantEvent("the unpainted answer", 0));
+    r.ensureSubscribed(sid);
+
+    // Store has it, screen does not - this is the state a reload used to fix.
+    expect(sessionEvents.events(sid).length).toBe(3);
+    expect(assistantTexts(r)).toEqual(["first answer"]);
+
+    // Transcript agrees with the store, so the old content-diff found nothing
+    // missing and left the chat stale.
+    const fullPage = {
+      events: [
+        userEvent("hi", 0),
+        assistantEvent("first answer", 0),
+        assistantEvent("the unpainted answer", 0),
+      ],
+      oldest_seq: 0,
+      newest_seq: 2,
+      has_more: false,
+    };
+    invokeMock.mockResolvedValue(fullPage);
+
+    await sessionEvents.reconcileLatest(sid);
+    // The rebuild is fire-and-forget off the tail callback.
+    await vi.waitFor(() => {
+      expect(assistantTexts(r)).toEqual(["first answer", "the unpainted answer"]);
+    });
+    expect(container.textContent).toContain("the unpainted answer");
+  });
+
+  it("does not repaint forever when the rebuild cannot recover the message", async () => {
+    const sid = `sess-recon-loop-${Math.random()}`;
+    const bus = makeBus();
+    globalThis.window.__TAURI__ = bus;
+
+    invokeMock.mockResolvedValueOnce({
+      events: [userEvent("hi", 0)],
+      oldest_seq: 0,
+      newest_seq: 0,
+      has_more: false,
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const r = new ChatRenderer(container);
+    await r.attach(sid);
+    await r.loadFromStore();
+
+    // A rebuild always reads the transcript, so any message it can't produce is
+    // one the paint path itself drops (the AUQ re-emit suppression is the real
+    // example). Driving the tail check directly is the faithful way to model
+    // that without pinning the test to one suppression rule.
+    invokeMock.mockResolvedValue({
+      events: [userEvent("hi", 0)],
+      oldest_seq: 0,
+      newest_seq: 0,
+      has_more: false,
+    });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    r.onTranscriptTail(["a:a message the paint path drops"]);
+    await vi.waitFor(() => { expect(errSpy).toHaveBeenCalled(); });
+    const callsAfterRebuild = invokeMock.mock.calls.length;
+
+    // Same missing set again: no second rebuild, no second read.
+    r.onTranscriptTail(["a:a message the paint path drops"]);
+    r.onTranscriptTail(["a:a message the paint path drops"]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(invokeMock.mock.calls.length).toBe(callsAfterRebuild);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+
+    // A DIFFERENT missing message is not the known-bad one - it must retry.
+    r.onTranscriptTail(["a:some other missing message"]);
+    await vi.waitFor(() => {
+      expect(invokeMock.mock.calls.length).toBeGreaterThan(callsAfterRebuild);
+    });
+    errSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 });
