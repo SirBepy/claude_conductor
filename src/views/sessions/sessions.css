@@ -915,6 +915,11 @@
     border-top: 1px solid var(--color-border);
     background: var(--color-surface);
     padding-bottom: env(safe-area-inset-bottom);
+    /* The bar is the one swipe surface that always works, so the browser must
+       hand us the horizontal gesture rather than claiming it. There is nothing
+       to scroll on the bar itself, so nothing is given up. */
+    touch-action: none;
+    user-select: none;
   }
   .mtab {
     flex: 1;

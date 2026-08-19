@@ -206,6 +206,86 @@ test("the chip row keeps its own horizontal scroll instead of paging", async ({ 
   expect(await scrollLeft(page)).toBe(0);
 });
 
+// ── Dragging the bar ──────────────────────────────────────────────────────
+// The pages rely on the browser's own scrolling, which the preview iframe
+// swallows. The bar is our DOM on every page, so this is the swipe that has to
+// work everywhere, including while the preview is showing.
+
+/** Drags across the tab bar without ever leaving it. */
+async function dragBar(page: Page, dx: number): Promise<void> {
+  const bar = (await page.locator(".mobile-tabbar").boundingBox())!;
+  const y = bar.y + bar.height / 2;
+  const startX = dx < 0 ? bar.x + bar.width * 0.75 : bar.x + bar.width * 0.25;
+  await page.mouse.move(startX, y);
+  await page.mouse.down();
+  // Several steps: one jump under the slop threshold would read as a tap.
+  for (let i = 1; i <= 6; i++) await page.mouse.move(startX + (dx * i) / 6, y);
+  await page.mouse.up();
+}
+
+test("dragging the tab bar pages forward", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  await dragBar(page, -PHONE.width * 0.5);
+
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+  await expect(page.locator('.mtab[data-target="preview"]')).toHaveClass(/\bon\b/);
+});
+
+test("dragging the tab bar works from the preview page, where the iframe eats touch", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  await page.locator('.mtab[data-target="preview"]').click();
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+
+  await dragBar(page, PHONE.width * 0.5);
+
+  await expect.poll(() => scrollLeft(page)).toBe(0);
+  await expect(page.locator('.mtab[data-target="chat"]')).toHaveClass(/\bon\b/);
+});
+
+test("a drag under a third of a page springs back", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  await dragBar(page, -PHONE.width * 0.2);
+
+  await expect.poll(() => scrollLeft(page)).toBe(0);
+});
+
+test("a drag does not also fire the tab it finished over", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+  await page.locator('.mtab[data-target="todos"]').click();
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+
+  // Ends over Chat, but a drag must page rather than select. The rail tab it
+  // lands back on should still be Todos, not Preview.
+  await dragBar(page, PHONE.width * 0.5);
+  await expect.poll(() => scrollLeft(page)).toBe(0);
+
+  await dragBar(page, -PHONE.width * 0.5);
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+  await expect(page.locator('[data-tab-body="todos"]')).toBeVisible();
+  await expect(page.locator('.mtab[data-target="todos"]')).toHaveClass(/\bon\b/);
+});
+
+test("a tap on a tab still selects it, and snapping is restored after a drag", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPager(page);
+
+  await dragBar(page, -PHONE.width * 0.5);
+  await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
+  // Left disabled, the pages would stop snapping for the rest of the session.
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector<HTMLElement>(".sessions-layout")!.style.scrollSnapType))
+    .toBe("");
+
+  await page.locator('.mtab[data-target="chat"]').click();
+  await expect.poll(() => scrollLeft(page)).toBe(0);
+});
+
 test("desktop keeps the side-by-side split and never shows the bar", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await mountPager(page);
