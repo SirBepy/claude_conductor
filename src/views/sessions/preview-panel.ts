@@ -23,7 +23,7 @@
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
-import { wireResizeHandle, MIN_WIDTH, MAX_WIDTH } from "./preview-panel-resize";
+import { wireResizeHandle, clampPanelWidth, splittableWidth } from "./preview-panel-resize";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
 import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
@@ -66,7 +66,10 @@ export interface PreviewController {
 // draftKey. Width stays a single global key; a dragged panel width isn't a
 // per-chat preference. ──────────────────────────────────────────────────
 const LS_OPEN_PREFIX = "cc_preview_panel_open:";
-const LS_WIDTH_KEY = "cc_preview_panel_width";
+const LS_RATIO_KEY = "cc_preview_panel_ratio";
+/** Superseded by LS_RATIO_KEY, dropped on read: an absolute px width survived
+ *  a window shrink and pushed the close button off screen (Joe, 2026-08-19). */
+const LS_LEGACY_WIDTH_KEY = "cc_preview_panel_width";
 const LS_POPPED_PREFIX = "cc_preview_panel_popped:";
 /** Which tab this chat was last on. Per-session like the open flag - the rail
  *  reopening on Todos in one chat must not put a sibling chat on Todos too. */
@@ -130,25 +133,22 @@ function savePopped(sessionId: string, popped: boolean): void {
   }
 }
 
-/** Explicit px width from a past manual drag, or null if the dev has never
- *  resized it - in which case the panel takes an even 50/50 flex split with
- *  the chat pane (Joe, 2026-07-20: "I want my view to be split into 2"), not
- *  a narrow fixed-px sidebar. Dragging the handle commits a fixed px width
- *  from then on, same as any split-pane. */
-function loadWidth(): number | null {
+/** Share (0-1) of the split from a past drag, or null for an even 50/50 (Joe,
+ *  2026-07-20). A share, not px, so a dragged panel follows the window. */
+function loadRatio(): number | null {
   try {
-    const raw = localStorage.getItem(LS_WIDTH_KEY);
-    const n = raw ? parseInt(raw, 10) : NaN;
-    if (Number.isFinite(n)) return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
+    localStorage.removeItem(LS_LEGACY_WIDTH_KEY);
+    const n = parseFloat(localStorage.getItem(LS_RATIO_KEY) ?? "");
+    if (Number.isFinite(n) && n > 0 && n < 1) return n;
   } catch {
     /* ignore */
   }
   return null;
 }
 
-function saveWidth(px: number): void {
+function saveRatio(ratio: number): void {
   try {
-    localStorage.setItem(LS_WIDTH_KEY, String(Math.round(px)));
+    localStorage.setItem(LS_RATIO_KEY, ratio.toFixed(4));
   } catch {
     /* ignore */
   }
@@ -167,9 +167,9 @@ class PreviewPanel implements PreviewController {
   private snapshotCache = new Map<string, PreviewSnapshot>();
   private deviceWidth: DeviceWidth = "desktop";
   private openState: boolean;
-  /** Explicit manually-dragged px width, or null for the default 50/50 flex
-   *  split with the chat pane - see loadWidth's doc. */
-  private width: number | null;
+  private ratio: number | null;
+  /** Without it a dragged width just kept its old px as the window changed. */
+  private layoutObserver: ResizeObserver | null = null;
   /** Only previews pushed with this session_id are shown. Set by
    *  state.ts's setActiveSession on every chat switch; null before any
    *  chat is selected. */
@@ -199,7 +199,7 @@ class PreviewPanel implements PreviewController {
   constructor(root: HTMLElement, mode: PreviewMode) {
     this.root = root;
     this.mode = mode;
-    this.width = loadWidth();
+    this.ratio = loadRatio();
     // Open state is per-session (see LS_OPEN_PREFIX); unknown until
     // setSessionScope runs, which sessions.ts calls synchronously right
     // after construction - start closed so there's no flash of the wrong
@@ -213,11 +213,16 @@ class PreviewPanel implements PreviewController {
     this.applyTab();
     this.composer = mountPvComposer(this.root, this.pvComposerDeps());
     this.wireEvents();
-    this.resizeCleanup = wireResizeHandle(this.root, (px) => {
-      this.width = px;
-      saveWidth(px);
+    this.resizeCleanup = wireResizeHandle(this.root, (px, splittable) => {
+      if (splittable <= 0) return;
+      this.ratio = px / splittable;
+      saveRatio(this.ratio);
       this.applyWidth();
     });
+    if (this.mode === "panel" && typeof ResizeObserver !== "undefined" && this.root.parentElement) {
+      this.layoutObserver = new ResizeObserver(() => this.applyWidth());
+      this.layoutObserver.observe(this.root.parentElement);
+    }
     void this.subscribeLive();
 
     this.focusHandler = () => {
@@ -241,14 +246,20 @@ class PreviewPanel implements PreviewController {
     this.renderCanvasEmpty();
   }
 
-  /** Sets the flex sizing on the host element (`this.root`, the actual flex
-   *  item inside `.sessions-layout`, sibling to `.session-pane`): an even
-   *  50/50 split by default (`flex: 1 1 0%`, matching `.session-pane`'s own
-   *  `flex: 1`), or a fixed px width once the dev has dragged the resize
-   *  handle (`flex: 0 0 <px>px`). The inner `.preview-panel` div just fills
-   *  whatever width this resolves to (width/height 100%). */
+  /** Flex sizing on the host: even 50/50 by default, else the dragged share
+   *  resolved to px on every layout change so it follows the window. */
   private applyWidth(): void {
-    this.root.style.flex = this.width === null ? "1 1 0%" : `0 0 ${this.width}px`;
+    // Window mode has no chat pane to split against, and no host flex to set.
+    if (this.mode !== "panel") return;
+    if (this.ratio === null) {
+      this.root.style.flex = "1 1 0%";
+      return;
+    }
+    const splittable = splittableWidth(this.root);
+    // Pre-paint the whole view is display:none; the observer re-runs us later.
+    if (splittable <= 0) return;
+    const px = clampPanelWidth(this.ratio * splittable, splittable);
+    this.root.style.flex = `0 0 ${Math.round(px)}px`;
   }
 
   // ── Public controller API ────────────────────────────────────────────────
@@ -265,6 +276,8 @@ class PreviewPanel implements PreviewController {
     // hidden, until dockBack() clears the flag.
     if (this.mode === "panel" && this.popped) return;
     this.root.hidden = false;
+    // Covers the bail above: constructed before the view had a measurable split.
+    this.applyWidth();
     void this.refreshList(snapshotId ? { selectId: snapshotId } : {});
   }
 
@@ -298,6 +311,7 @@ class PreviewPanel implements PreviewController {
     if (sessionId && loadOpen(sessionId) && !this.popped) {
       this.openState = true;
       this.root.hidden = false;
+      this.applyWidth();
       void this.refreshList();
     } else {
       // Popped: still "open" per the saved flag (dockBack needs to know to
@@ -327,6 +341,7 @@ class PreviewPanel implements PreviewController {
       this.focusHandler = null;
     }
     if (this.resizeCleanup) { this.resizeCleanup(); this.resizeCleanup = null; }
+    if (this.layoutObserver) { this.layoutObserver.disconnect(); this.layoutObserver = null; }
     if (this.storageHandler) {
       window.removeEventListener("storage", this.storageHandler);
       this.storageHandler = null;
