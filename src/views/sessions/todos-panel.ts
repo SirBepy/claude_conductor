@@ -13,7 +13,6 @@ import "./todos-panel.css";
 
 /** `here` is always on the board and never stored, hence absent here. */
 export const OPTIONAL_COLUMNS = ["project", "done", "archived"] as const;
-export type OptionalColumn = (typeof OPTIONAL_COLUMNS)[number];
 
 export interface TodosPanelHandle {
   setSessionScope(sessionId: string | null): void;

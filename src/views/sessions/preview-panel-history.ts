@@ -27,10 +27,6 @@ function sourceDotClass(source: string): string {
 
 const shell = new PopoverShell();
 
-export function isPvHistoryOpen(): boolean {
-  return shell.isOpen;
-}
-
 export function closePvHistory(): void {
   shell.close();
 }
