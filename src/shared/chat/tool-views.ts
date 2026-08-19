@@ -97,11 +97,11 @@ function resultText(m: RenderedMessage): string {
 function parseAnswers(text: string): Map<string, string> {
   const map = new Map<string, string>();
   const lines = text.split(/\r?\n/);
-  let pendingQ: string | null = null;
+  let pendingQ: string[] | null = null;
   let pendingA: string[] | null = null;
   const flush = () => {
     if (pendingQ !== null && pendingA !== null) {
-      map.set(pendingQ, pendingA.join("\n").trim());
+      map.set(pendingQ.join("\n").trim(), pendingA.join("\n").trim());
     }
     pendingQ = null;
     pendingA = null;
@@ -109,11 +109,16 @@ function parseAnswers(text: string): Map<string, string> {
   for (const line of lines) {
     if (line.startsWith("Q: ")) {
       flush();
-      pendingQ = line.slice(3).trim();
+      pendingQ = [line.slice(3)];
     } else if (line.startsWith("A: ") && pendingQ !== null) {
       pendingA = [line.slice(3)];
     } else if (pendingA !== null) {
       pendingA.push(line);
+    } else if (pendingQ !== null) {
+      // formatAnswersAsMessage writes `Q: <question>` verbatim, so a multi-line
+      // question keeps going until `A: ` - the key must be rebuilt whole or it
+      // never matches the card's own question text and the answer stays hidden.
+      pendingQ.push(line);
     }
   }
   flush();

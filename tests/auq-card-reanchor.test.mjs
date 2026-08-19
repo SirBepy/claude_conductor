@@ -101,6 +101,25 @@ describe("AUQ question card: ack receipt, fold, and re-anchor", () => {
     expect(precedes(card, extra)).toBe(true);
   });
 
+  it("fills in the answer to a MULTI-LINE question, not just a one-liner", () => {
+    const { r, container } = makeRenderer();
+    const question = "You said pop-out is for both tabs, then said it should move down.\n\nThose point opposite ways.\n\nWhere should the pop-out button sit?";
+    r.handleEvent(toolUseEvent(ASK_TOOL, { questions: [{ question, header: "Pop-out button" }] }, "q1"));
+    r.handleEvent(toolResult("q1", ACK_TEXT));
+    r.handleEvent({
+      type: "user_message",
+      timestamp: 0,
+      content: [{ type: "text", text: `${AUQ_ANSWER_SENTINEL}User answered the question(s):\nQ: ${question}\nA: In the shared strip` }],
+    });
+
+    const card = container.querySelector(".question-card-collapsible");
+    expect(card.dataset.resolution).toBe("answered");
+    expect(card.textContent).toContain("In the shared strip");
+    expect(card.textContent).not.toContain("awaiting answer");
+    // The collapsed summary carries the answer chip, so it reads without opening.
+    expect(card.querySelector(".question-card-answer-chip").textContent).toContain("In the shared strip");
+  });
+
   it("re-anchors a skipped card too, marked Skipped", () => {
     const { r, container } = makeRenderer();
     askAndAck(r);
