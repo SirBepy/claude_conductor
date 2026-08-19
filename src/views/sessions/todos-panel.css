@@ -1,6 +1,6 @@
 /* "Your Todos" tab body (todo 692). Lives inside the rail host owned by
-   preview-panel.css, so this file styles only the board, the cards, the
-   notify CTA and the Columns menu - never the strip or the host width.
+   preview-panel.css, so this file styles only the board, the cards and the
+   notify CTA - never the strip, the host width or the Columns menu.
    Layout follows .for_bepy/mockups/mockup-your-todos.html, translated onto
    the project's own tokens (the mockup's local --color-text-dim is
    mockup-only; --color-text-muted is the real one, see todo #691). */
@@ -369,96 +369,4 @@
   border: 1px solid var(--td-attention);
   color: var(--color-background);
   font-weight: 700;
-}
-
-/* ── Columns menu (a .sb-popover variant, body-appended) ────────────────── */
-
-.td-columns-menu {
-  width: 246px;
-  padding: 5px;
-}
-
-.td-menu-label {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  padding: 8px 9px 6px;
-}
-
-.td-menu-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.14s ease;
-}
-
-.td-menu-row:hover { background: var(--color-surface-alt); }
-
-.td-menu-nm { flex: 1; min-width: 0; }
-
-.td-menu-n {
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-muted);
-  font-weight: 700;
-  font-size: 11.5px;
-}
-
-.td-menu-eye {
-  width: 20px;
-  text-align: center;
-  font-size: 15px;
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-  transition: color 0.14s ease;
-}
-
-.td-menu-row.is-shown .td-menu-eye { color: var(--color-primary); }
-.td-menu-row.is-shown .td-menu-nm { color: var(--color-text); }
-
-/* This chat is always on the board, so its eye is locked and inert. */
-.td-menu-row.is-locked { cursor: default; }
-.td-menu-row.is-locked:hover { background: none; }
-.td-menu-row.is-locked .td-menu-eye { color: var(--color-border); }
-
-.td-menu-sep {
-  height: 1px;
-  background: var(--color-border);
-  margin: 5px 4px;
-}
-
-.td-menu-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  font-size: 12.5px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.td-menu-item:hover { background: var(--color-surface-alt); }
-
-.td-menu-item i {
-  color: var(--color-text-muted);
-  font-size: 15px;
-  width: 20px;
-  text-align: center;
 }

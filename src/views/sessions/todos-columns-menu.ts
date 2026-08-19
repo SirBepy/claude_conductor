@@ -5,6 +5,7 @@
 
 import { PopoverShell } from "./statusbar-popover-shell";
 import { OPTIONAL_COLUMNS } from "./todos-panel";
+import "./todos-columns-menu.css";
 
 export interface TodosColumnsMenuDeps {
   counts: Record<string, number>;
