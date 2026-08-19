@@ -21,6 +21,11 @@ use std::io::{BufRead, Write};
 use super::dispatch::dispatch_tool;
 use super::tool_schemas::tool_list_response;
 
+/// Lives under `server` rather than beside `dispatch` only because `mcp/mod.rs`
+/// keeps `dispatch` private; `pub mod server` is what the daemon-side consumer
+/// of the waiting target will need to reach.
+pub mod waiting_target;
+
 /// Read the hooks port from <app-data>/hooks_port.txt.
 fn read_port() -> Option<u16> {
     crate::settings::paths::read_hook_port("")

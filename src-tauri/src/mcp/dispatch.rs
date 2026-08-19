@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 
-use super::server::{mcp_error, tool_error_result, tool_result};
+use super::server::{mcp_error, tool_error_result, tool_result, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE,
@@ -211,15 +211,30 @@ fn channel_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     }
 }
 
+/// Body for `/turn/report-status` (todo 675). `waitingOn` is null unless the
+/// caller passed the optional waiting-target params AND they survive the
+/// `waiting_target` guard, so an omitting caller is byte-identical to before.
+fn report_status_body(args: &Value, session_id: &str, roots: &[std::path::PathBuf]) -> Value {
+    let waiting_on = waiting_target::sanitize(
+        args.get("waiting_on_label").and_then(Value::as_str),
+        args.get("waiting_on_kind").and_then(Value::as_str),
+        args.get("waiting_on_href").and_then(Value::as_str),
+        roots,
+    );
+    json!({
+        "session_id": session_id,
+        "status": args["status"],
+        "title": args.get("title"),
+        "waitingOn": waiting_on,
+    })
+}
+
 /// Turn status/title, chat messages, and the Your Todos panel.
 fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     match name {
         TOOL_REPORT_STATUS => {
-            let body = json!({
-                "session_id": ctx.session_id,
-                "status": ctx.args["status"],
-                "title": ctx.args.get("title"),
-            });
+            let body =
+                report_status_body(ctx.args, ctx.session_id, &waiting_target::default_roots());
             Some(ctx.relay("/turn/report-status", body, Some("invalid status"), None))
         }
         TOOL_SEND_MESSAGE => {
@@ -292,5 +307,56 @@ fn jarvis_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/jarvis/respond-worker-prompt", body, None, None))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_status_without_the_new_params_still_validates() {
+        let args = json!({"status": "done", "title": "Fix bug"});
+        let body = report_status_body(&args, "sess-1", &[]);
+        assert_eq!(body["status"], json!("done"));
+        assert_eq!(body["title"], json!("Fix bug"));
+        assert_eq!(body["session_id"], json!("sess-1"));
+        assert_eq!(body["waitingOn"], Value::Null);
+    }
+
+    #[test]
+    fn report_status_with_no_title_at_all_still_validates() {
+        let body = report_status_body(&json!({"status": "waiting"}), "s", &[]);
+        assert_eq!(body["status"], json!("waiting"));
+        assert_eq!(body["title"], Value::Null);
+        assert_eq!(body["waitingOn"], Value::Null);
+    }
+
+    #[test]
+    fn report_status_carries_a_guarded_ci_target() {
+        let url = "https://github.com/o/r/actions/runs/32115742584";
+        let args = json!({
+            "status": "waiting",
+            "waiting_on_label": "release CI",
+            "waiting_on_kind": "ci",
+            "waiting_on_href": url,
+        });
+        let body = report_status_body(&args, "s", &[]);
+        assert_eq!(body["waitingOn"]["kind"], json!("ci"));
+        assert_eq!(body["waitingOn"]["label"], json!("release CI"));
+        assert_eq!(body["waitingOn"]["href"], json!(url));
+    }
+
+    #[test]
+    fn report_status_strips_an_out_of_tree_local_path() {
+        let args = json!({
+            "status": "waiting",
+            "waiting_on_label": "build",
+            "waiting_on_kind": "local-process",
+            "waiting_on_href": "/etc/passwd",
+        });
+        let body = report_status_body(&args, "s", &[]);
+        assert_eq!(body["waitingOn"]["label"], json!("build"));
+        assert_eq!(body["waitingOn"]["href"], Value::Null);
     }
 }
