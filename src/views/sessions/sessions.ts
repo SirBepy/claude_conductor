@@ -3,6 +3,7 @@ import { template, detachedTemplate } from "./template";
 import { invoke } from "../../shared/ipc";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
+import "./sessions-mobile.css";
 import "./project-rail.css";
 import "./changes-rail.css";
 import "./session-list.css";
