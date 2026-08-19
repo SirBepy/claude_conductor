@@ -171,7 +171,13 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     }, LIVE_DRAFT_POLL_MS);
   }
 
+  // Idempotent: a swap-triggered teardown races the normal dismiss one, and a
+  // second pass would cancel the NEXT card's debounced push and restore this
+  // card's saved scroll/padding over the live one.
+  let tornDown = false;
   const teardown = () => {
+    if (tornDown) return;
+    tornDown = true;
     backDisposer?.();
     backDisposer = null;
     slashPopup.destroyAll();

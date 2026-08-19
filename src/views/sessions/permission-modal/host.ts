@@ -1,6 +1,7 @@
 import "../permission-modal-shell.css";
 import "../permission-modal-question.css";
 import { attachDragHandle } from "./drag-handle";
+import { dismissQuestionCard } from "./question-state";
 
 export const HOST_ID = "prompt-card-host";
 
@@ -33,6 +34,10 @@ function applyMobileHeightCap(host: HTMLElement, mode: "composer" | "pane" | "vi
  * 3. `document.body` (fallback, fixed bottom).
  */
 export function ensureHost(): { host: HTMLElement; mode: "composer" | "pane" | "viewport" } {
+  // Every swap tears the outgoing question card down first. Yanking only its
+  // DOM left the card's document-level keydown/visibilitychange handlers live,
+  // so a retried tool call or a second prompt could cancel a stale prompt id.
+  dismissQuestionCard();
   document.getElementById(HOST_ID)?.remove();
   _detachDrag?.();
   if (_resizeHandler) window.removeEventListener("resize", _resizeHandler);
