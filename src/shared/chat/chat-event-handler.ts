@@ -17,13 +17,17 @@ import {
   noiseAssistantLabel,
   extractAuqAnswerText,
   stripAuqAnswerBlock,
-  AUQ_SKIPPED_TEXT,
   RenderedMessage,
 } from "./chat-transforms";
 import { isRawViewEnabled } from "./message-filter-pref";
 import { parseFileEdit } from "./file-edits";
-import { canonicalTool, isAskQuestionTool } from "./tool-meta";
-import { isQuestionResolutionText } from "./tool-views";
+import { canonicalTool } from "./tool-meta";
+import {
+  resolvePendingQuestionCard,
+  tryHandleQuestionToolUse,
+  tryHandleQuestionResult,
+  tryHandleQuestionSkipped,
+} from "./chat-question-card";
 import {
   describeActivity,
   scrollToBottom,
@@ -50,37 +54,6 @@ export interface HandleEventOpts {
 interface EventOutcome {
   touched: boolean;
   coalesce: boolean;
-}
-
-/** Fold a fire-and-forget AUQ answer message back into the question card it
- *  answers (see permission-modal/index.ts onSubmit), so the transcript shows
- *  the card resolved with the real answers instead of stuck on "awaiting
- *  answer" plus a separate answer bubble. Only one AUQ can be in flight per
- *  session at a time, so the most recent still-unresolved question card is
- *  always the right match. Returns false if none is found (caller falls back
- *  to rendering a normal bubble, same as before this existed). */
-function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolean {
-  for (let i = r.messages.length - 1; i >= 0; i--) {
-    const m = r.messages[i]!;
-    if (m.kind === "question" && m.text === undefined) {
-      r.messages[i] = { ...m, text: answerText };
-      r.dirtyIndices.add(i);
-      moveMessageToEnd(r, i);
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Re-anchor the row at `from` as the LAST row - a card answered long after the
- *  ask belongs there. Its element is dropped; flushRender's append pass rebuilds it. */
-function moveMessageToEnd(r: ChatRenderer, from: number): void {
-  if (from < 0 || from >= r.messages.length - 1) return;
-  const [msg] = r.messages.splice(from, 1);
-  r.messages.push(msg!);
-  if (from < r.messageEls.length) r.messageEls.splice(from, 1)[0]?.remove();
-  // Both arrays lost the same slot, so every tracked index past it shifts down.
-  r.remapIndices((i) => (i > from ? i - 1 : i), new Set([from]));
 }
 
 /** True if the open turn has produced anything the user would see - real
@@ -355,44 +328,7 @@ function handleToolUseEvent(
   ev: Extract<ChatEvent, { type: "tool_use" }>,
   ts: number,
 ): EventOutcome {
-  // AUQ becomes a visual turn-splitter (question card) instead of a chip.
-  // Only top-level AUQ calls get the card treatment; nested subagent calls
-  // fall through to the normal chip path. Recognises both the builtin and
-  // the app's real MCP ask channel (see isAskQuestionTool).
-  if (isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
-    r.auqPendingResult = true;
-    // Save the streaming slot's current text before enqueueTurnClose zeros
-    // it. The suppression branch uses this to tell apart the protocol
-    // re-emit (same text → suppress) from real post-AUQ content delivered
-    // by the file watcher while auqPendingResult is still true.
-    if (r.streamingIndex !== null) {
-      const existing = r.messages[r.streamingIndex] as RenderedMessage;
-      r.auqPreContent = blocksToText(existing.content ?? []);
-    } else {
-      r.auqPreContent = null;
-    }
-    enqueueTurnClose(r);
-    r.messages.push({
-      kind: "question",
-      tool: ev.tool_name,
-      input: ev.input,
-      id: ev.id,
-      ts,
-      parentToolUseId: null,
-    });
-    // Open a fresh sub-turn for post-question chips.
-    r.activeTurnChipKey = ++r._chipKeySeq;
-    r.activeTurnStart = r.messages.length;
-    r.activeTurnStreamedText = "";
-    r.activeTurnStartedAtMs = ts > 0 ? ts : Date.now();
-    r.activeTurnUsage = null;
-    r.activeTurnFirstTs = ts > 0 ? ts : 0;
-    r.activeTurnLastTs = r.activeTurnFirstTs;
-    r.turnTodosBaseline = null;
-    r.activityToolCanon = null;
-    r.setActivity("Waiting for your answer…");
-    return { touched: true, coalesce: false };
-  }
+  if (tryHandleQuestionToolUse(r, ev, ts)) return { touched: true, coalesce: false };
   // Explicit inbox message: the AI's opt-in way to surface a chat bubble
   // (vs. narration tool calls, hidden by default - see message-filter-pref.ts).
   if (ev.tool_name === "mcp__cc_conductor__send_message" && !ev.parent_tool_use_id) {
@@ -517,22 +453,7 @@ function handleToolResultEvent(
   // branch below absorbs its own result but simpler: no card to update.
   if (r._todoWriteToolUseIds.delete(ev.tool_use_id)) return { touched: true, coalesce: false };
   if (r._updateMsgToolUseIds.delete(ev.tool_use_id)) return { touched: true, coalesce: false };
-  // An AUQ result never renders a row. Only one that CARRIES the resolution may
-  // set `.text`: the fire-and-forget channel answers with a receipt (deny
-  // handshake, `{"acknowledged":true}`), which strands the card and blocks the fold.
-  const qIdx = r.messages.findIndex(
-    (m) => m.kind === "question" && m.id === ev.tool_use_id,
-  );
-  if (qIdx >= 0) {
-    const ansText = !ev.is_error && ev.output?.type === "text" ? ev.output.text : "";
-    if (isQuestionResolutionText(ansText)) {
-      r.messages[qIdx] = { ...r.messages[qIdx]!, text: ansText };
-      r.dirtyIndices.add(qIdx);
-      moveMessageToEnd(r, qIdx);
-    }
-    r.onToolTally?.(r.tallyState.build());
-    return { touched: true, coalesce: false };
-  }
+  if (tryHandleQuestionResult(r, ev)) return { touched: true, coalesce: false };
   // Ack for a send_message call: text already came from the tool_use
   // input, so absorb silently - no visible tool_result row. A REJECTED send
   // must also drop the bubble: the row is built from the tool_use input, so
@@ -568,14 +489,7 @@ function handleToolResultEvent(
 }
 
 function handleNotificationEvent(r: ChatRenderer, ev: Extract<ChatEvent, { type: "notification" }>): EventOutcome {
-  if (ev.kind === "question_skipped") {
-    // Fire-and-forget Skip: no real tool_use_id to key off, so resolve the
-    // same heuristic way a real answer does - the last still-open card.
-    // Live-only; history still shows "awaiting answer" until durable
-    // storage exists (todo 661).
-    resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT);
-    return { touched: true, coalesce: false };
-  }
+  if (tryHandleQuestionSkipped(r, ev)) return { touched: true, coalesce: false };
   r.messages.push({ kind: "notification", text: ev.body, ts: Date.now() });
   return { touched: true, coalesce: false };
 }
