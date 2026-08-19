@@ -6,14 +6,14 @@ import { createMoreMenu } from "./more-menu-base";
 
 export type DeviceWidth = "desktop" | "tablet" | "phone";
 
+// Two items left this menu in todo 692: "Show history" (the version number is
+// the toggle now) and "Pop-out window" (it moved up into the rail strip, since
+// it acts on the whole rail rather than on the Preview tab).
 export interface PvMoreMenuDeps {
   onRefresh: () => void;
   onOpenBrowser: () => void;
-  onToggleHistory: () => void;
-  isHistoryOpen: () => boolean;
   onSetDeviceWidth: (w: DeviceWidth) => void;
   getDeviceWidth: () => DeviceWidth;
-  onPopOut: () => void;
 }
 
 const SIZES: Array<{ w: DeviceWidth; icon: string; label: string }> = [
@@ -38,16 +38,6 @@ const pvMenu = createMoreMenu<[PvMoreMenuDeps]>({
     browserItem.onclick = () => { close(); deps.onOpenBrowser(); };
     menu.appendChild(browserItem);
 
-    const historyOn = deps.isHistoryOpen();
-    const historyItem = document.createElement("button");
-    historyItem.type = "button";
-    historyItem.className = "smore-item" + (historyOn ? " is-on" : "");
-    historyItem.innerHTML =
-      `<i class="ph ph-clock-counter-clockwise"></i><span>Show history</span>` +
-      (historyOn ? `<span class="smore-check-dot"></span>` : "");
-    historyItem.onclick = () => { close(); deps.onToggleHistory(); };
-    menu.appendChild(historyItem);
-
     const sep1 = document.createElement("div");
     sep1.className = "smore-sep";
     menu.appendChild(sep1);
@@ -67,17 +57,6 @@ const pvMenu = createMoreMenu<[PvMoreMenuDeps]>({
       segBtn.onclick = () => { close(); deps.onSetDeviceWidth(s.w); };
       menu.appendChild(segBtn);
     }
-
-    const sep2 = document.createElement("div");
-    sep2.className = "smore-sep";
-    menu.appendChild(sep2);
-
-    const popoutItem = document.createElement("button");
-    popoutItem.type = "button";
-    popoutItem.className = "smore-item";
-    popoutItem.innerHTML = `<i class="ph ph-arrows-out-simple"></i><span>Pop-out window</span>`;
-    popoutItem.onclick = () => { close(); deps.onPopOut(); };
-    menu.appendChild(popoutItem);
   },
 });
 

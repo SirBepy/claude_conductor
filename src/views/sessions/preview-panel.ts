@@ -26,12 +26,18 @@ import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { wireResizeHandle, MIN_WIDTH, MAX_WIDTH } from "./preview-panel-resize";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
-import { renderPvRail, wirePvHistoryClicks, type PvHistoryDeps } from "./preview-panel-history";
+import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
 import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./preview-panel-composer";
+import { mountTodosPanel, type TodosPanelHandle } from "./todos-panel";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
 export type PreviewMode = "panel" | "window";
+
+/** The rail hosts two tabs (todo 692). The class is still called PreviewPanel
+ *  because it owns the host element, the width, the resize handle and the
+ *  close button; the Todos tab's own board lives in `todos-panel.ts`. */
+export type RailTab = "preview" | "todos";
 
 export interface PreviewController {
   toggle(): void;
@@ -62,6 +68,25 @@ export interface PreviewController {
 const LS_OPEN_PREFIX = "cc_preview_panel_open:";
 const LS_WIDTH_KEY = "cc_preview_panel_width";
 const LS_POPPED_PREFIX = "cc_preview_panel_popped:";
+/** Which tab this chat was last on. Per-session like the open flag - the rail
+ *  reopening on Todos in one chat must not put a sibling chat on Todos too. */
+const LS_TAB_PREFIX = "cc_rail_tab:";
+
+function loadTab(sessionId: string): RailTab {
+  try {
+    return localStorage.getItem(LS_TAB_PREFIX + sessionId) === "todos" ? "todos" : "preview";
+  } catch {
+    return "preview";
+  }
+}
+
+function saveTab(sessionId: string, tab: RailTab): void {
+  try {
+    localStorage.setItem(LS_TAB_PREFIX + sessionId, tab);
+  } catch {
+    /* quota or storage disabled */
+  }
+}
 
 function openKey(sessionId: string): string {
   return LS_OPEN_PREFIX + sessionId;
@@ -154,10 +179,10 @@ class PreviewPanel implements PreviewController {
    *  don't-resurface-what-was-already-surfaced shape as main.ts's
    *  `seenMissedIds`. */
   private seenIds = new Set<string>();
-  /** History rail visibility — in-memory only, defaults closed (Joe,
-   *  2026-07-20: "for now let's make it so history tab can also be toggled
-   *  on/off and by default its off"). */
-  private historyOpen = false;
+  /** Which of the rail's two tabs is showing. Preview stays the default so an
+   *  existing chat opens exactly where it used to. */
+  private activeTab: RailTab = "preview";
+  private todosPanel: TodosPanelHandle | null = null;
   private unlistenPreview: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
   private resizeCleanup: (() => void) | null = null;
@@ -167,7 +192,7 @@ class PreviewPanel implements PreviewController {
   private storageHandler: ((e: StorageEvent) => void) | null = null;
   /** Reply composer docked at the panel's bottom (see preview-panel-composer.ts).
    *  Mounted once in the constructor: unlike the AUQ card, this panel's own
-   *  DOM is never innerHTML-rebuilt (renderIframe/renderRail/renderHeader
+   *  DOM is never innerHTML-rebuilt (renderIframe/renderHeader
    *  only touch their own sub-elements), so there's no per-render remount. */
   private composer: PvComposerHandle | null = null;
 
@@ -183,6 +208,9 @@ class PreviewPanel implements PreviewController {
 
     this.applyWidth();
     this.renderShell();
+    const todosHost = this.root.querySelector<HTMLElement>('[data-tab-body="todos"]');
+    if (todosHost) this.todosPanel = mountTodosPanel(todosHost);
+    this.applyTab();
     this.composer = mountPvComposer(this.root, this.pvComposerDeps());
     this.wireEvents();
     this.resizeCleanup = wireResizeHandle(this.root, (px) => {
@@ -255,7 +283,13 @@ class PreviewPanel implements PreviewController {
     // Chat-switch skips DOM clicks, so the outside-click dismiss never
     // fires for it - close explicitly or the menu stays open across it.
     closePvMoreMenu();
+    closePvHistory();
     this.currentSessionId = sessionId;
+    // Each chat also remembers which tab it was on; re-derive it here for the
+    // same reason as openState, so the previous chat's tab never carries over.
+    this.activeTab = sessionId ? loadTab(sessionId) : "preview";
+    this.applyTab();
+    this.todosPanel?.setSessionScope(sessionId);
     this.popped = this.mode === "panel" && !!sessionId && loadPopped(sessionId);
     // Each chat's open/closed state is independent (loadOpen defaults false
     // for an id with no saved key yet, e.g. one that's never had the panel
@@ -299,6 +333,9 @@ class PreviewPanel implements PreviewController {
     }
     this.composer?.destroy();
     this.composer = null;
+    this.todosPanel?.destroy();
+    this.todosPanel = null;
+    closePvHistory();
   }
 
   popOut(): void {
@@ -361,8 +398,6 @@ class PreviewPanel implements PreviewController {
     } catch (err) {
       console.error("[preview-panel] list_previews failed", err);
     }
-    this.renderRail();
-
     const first = this.snapshots[0];
     if (!first) {
       this.selected = null;
@@ -398,7 +433,6 @@ class PreviewPanel implements PreviewController {
     }
     this.renderHeader();
     void this.renderIframe();
-    this.renderRail();
   }
 
   /** `preview` notifier broadcast handler. Always opens the panel for the
@@ -421,7 +455,6 @@ class PreviewPanel implements PreviewController {
       this.open(meta.id);
       return;
     }
-    this.renderRail();
     void this.selectSnapshot(meta.id);
   }
 
@@ -463,21 +496,38 @@ class PreviewPanel implements PreviewController {
     if (frame) frame.dataset.w = w;
   }
 
-  private toggleHistory(): void {
-    this.historyOpen = !this.historyOpen;
-    const rail = this.root.querySelector<HTMLElement>("[data-rail]");
-    if (rail) rail.hidden = !this.historyOpen;
+  /** Shows one tab body, hides the other, and syncs the strip's own
+   *  contextual buttons: the eye is the Todos Columns menu, the kebab is
+   *  Preview's More menu, so neither is ever shown on the other's tab. */
+  private applyTab(): void {
+    for (const el of this.root.querySelectorAll<HTMLElement>("[data-tab-body]")) {
+      el.hidden = el.dataset.tabBody !== this.activeTab;
+    }
+    for (const el of this.root.querySelectorAll<HTMLElement>(".rail-tab")) {
+      el.classList.toggle("on", el.dataset.tab === this.activeTab);
+    }
+    const columnsBtn = this.root.querySelector<HTMLElement>('[data-act="columns"]');
+    if (columnsBtn) columnsBtn.hidden = this.activeTab !== "todos";
+  }
+
+  private setTab(tab: RailTab): void {
+    if (this.activeTab === tab) return;
+    // Both menus belong to the tab being left, and neither dismisses itself on
+    // a tab switch (no outside DOM click happens).
+    closePvMoreMenu();
+    closePvHistory();
+    this.activeTab = tab;
+    if (this.currentSessionId) saveTab(this.currentSessionId, tab);
+    this.applyTab();
+    if (tab === "todos") this.todosPanel?.refresh();
   }
 
   private pvMoreMenuDeps(): PvMoreMenuDeps {
     return {
       onRefresh: () => void this.refreshList(),
       onOpenBrowser: () => this.openInBrowser(),
-      onToggleHistory: () => this.toggleHistory(),
-      isHistoryOpen: () => this.historyOpen,
       onSetDeviceWidth: (w) => this.setDeviceWidth(w),
       getDeviceWidth: () => this.deviceWidth,
-      onPopOut: () => this.popOut(),
     };
   }
 
@@ -487,25 +537,35 @@ class PreviewPanel implements PreviewController {
     this.root.innerHTML = `
       <div class="preview-panel" data-mode="${this.mode}">
         <div class="pv-resize-handle" data-resize title="Drag to resize"></div>
-        <header class="pv-head">
-          <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span><span class="pv-ver"></span></span>
-          <span class="pv-grow"></span>
-          <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
+        <div class="rail-strip">
+          <button type="button" class="rail-tab" data-tab="preview"><i class="ph ph-monitor-play"></i>Preview</button>
+          <button type="button" class="rail-tab" data-tab="todos"><i class="ph ph-list-checks"></i>Todos</button>
+          <span class="rail-strip-grow"></span>
+          <button type="button" class="pv-icon-btn" data-act="columns" title="Columns" hidden><i class="ph ph-eye"></i></button>
+          <button type="button" class="pv-icon-btn" data-act="popout" title="Pop out into its own window"${this.mode === "window" ? " hidden" : ""}><i class="ph ph-arrows-out-simple"></i></button>
           <button type="button" class="pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
-        </header>
-        <div class="pv-body">
-          <div class="pv-rail" data-rail hidden><div class="pv-rail-lbl">History</div></div>
-          <div class="pv-canvas"></div>
         </div>
-        <div class="pv-composer">
-          <div class="composer-input-wrap">
-            <div class="composer-highlight" aria-hidden="true"></div>
-            <textarea class="composer-textarea pv-composer-input" rows="1" placeholder="Message the session that pushed this preview..."></textarea>
+        <div class="rail-tab-body" data-tab-body="preview">
+          <header class="pv-head">
+            <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span></span>
+            <button type="button" class="pv-ver" data-act="history" title="Version history"></button>
+            <span class="pv-grow"></span>
+            <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
+          </header>
+          <div class="pv-body">
+            <div class="pv-canvas"></div>
           </div>
-          <button type="button" class="pv-composer-send icon-btn" title="Send" disabled>
-            <i class="ph ph-paper-plane-right"></i>
-          </button>
+          <div class="pv-composer">
+            <div class="composer-input-wrap">
+              <div class="composer-highlight" aria-hidden="true"></div>
+              <textarea class="composer-textarea pv-composer-input" rows="1" placeholder="Message the session that pushed this preview..."></textarea>
+            </div>
+            <button type="button" class="pv-composer-send icon-btn" title="Send" disabled>
+              <i class="ph ph-paper-plane-right"></i>
+            </button>
+          </div>
         </div>
+        <div class="rail-tab-body" data-tab-body="todos" hidden></div>
       </div>
     `;
     this.renderCanvasEmpty();
@@ -516,14 +576,21 @@ class PreviewPanel implements PreviewController {
     const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
     const verEl = this.root.querySelector<HTMLElement>(".pv-ver");
     if (nameEl) nameEl.textContent = this.selected.slug;
-    if (verEl) verEl.textContent = ` · v${this.selected.version}`;
+    if (verEl) {
+      verEl.textContent = `· v${this.selected.version}`;
+      verEl.hidden = false;
+    }
   }
 
   private renderHeaderEmpty(): void {
     const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
     const verEl = this.root.querySelector<HTMLElement>(".pv-ver");
     if (nameEl) nameEl.textContent = "No previews yet";
-    if (verEl) verEl.textContent = "";
+    if (verEl) {
+      verEl.textContent = "";
+      // Nothing to open a history popover on, so the toggle isn't offered.
+      verEl.hidden = true;
+    }
   }
 
   private async renderIframe(): Promise<void> {
@@ -564,10 +631,6 @@ class PreviewPanel implements PreviewController {
     `;
   }
 
-  private renderRail(): void {
-    renderPvRail(this.root, this.pvHistoryDeps());
-  }
-
   private pvHistoryDeps(): PvHistoryDeps {
     return {
       getSnapshots: () => this.snapshots,
@@ -580,16 +643,26 @@ class PreviewPanel implements PreviewController {
 
   private wireEvents(): void {
     this.root.addEventListener("click", (e) => this.onClick(e));
-    wirePvHistoryClicks(this.root, this.pvHistoryDeps());
   }
 
   private onClick(e: MouseEvent): void {
     const target = e.target as HTMLElement;
 
+    const tabBtn = target.closest<HTMLElement>(".rail-tab");
+    if (tabBtn?.dataset.tab) {
+      this.setTab(tabBtn.dataset.tab as RailTab);
+      return;
+    }
+
     const actBtn = target.closest<HTMLElement>("[data-act]");
     if (actBtn) {
       switch (actBtn.dataset.act) {
         case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
+        case "history": togglePvHistory(actBtn, this.pvHistoryDeps()); return;
+        case "columns": this.todosPanel?.toggleColumnsMenu(actBtn); return;
+        case "popout": this.popOut(); return;
+        // The strip's single close acts on the whole rail, both tabs (Joe:
+        // "the x button closes the entire window").
         case "close": if (this.mode === "window") this.dockBack(); else this.close(); return;
         default: return;
       }

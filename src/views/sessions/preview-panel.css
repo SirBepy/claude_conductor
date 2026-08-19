@@ -41,6 +41,65 @@
   opacity: 0.4;
 }
 
+/* ── Rail tab strip (todo 692) ──────────────────────────────────────────── */
+/* Rail-wide controls only: pop-out and the single close act on the whole rail,
+   so they live here rather than in either tab. Preview's own kebab stays down
+   in .pv-head because it acts on the Preview tab alone. */
+
+.rail-strip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 6px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rail-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.rail-tab:hover { color: var(--color-text); }
+
+.rail-tab.on {
+  color: var(--color-text);
+  background: var(--color-background);
+  border-color: var(--color-border);
+  border-bottom-color: var(--color-background);
+}
+
+.rail-strip-grow {
+  flex: 1;
+  min-width: 4px;
+}
+
+.rail-tab-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Same [hidden]-vs-`display:flex` gotcha as #preview-panel-host below. */
+.rail-tab-body[hidden] {
+  display: none;
+}
+
 /* ── Header ─────────────────────────────────────────────────────────────── */
 
 .pv-head {
@@ -73,10 +132,27 @@
   text-overflow: ellipsis;
 }
 
+/* The version number IS the history toggle now (Joe, 2026-08-19), so it is a
+   real button - but a quiet one, styled as the label it replaced. */
 .pv-ver {
   color: var(--color-text-muted);
+  font: inherit;
   font-weight: 500;
   flex-shrink: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+
+.pv-ver:hover {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.pv-ver[hidden] {
+  display: none;
 }
 
 .pv-grow {
@@ -141,7 +217,7 @@
   color: var(--color-primary);
 }
 
-/* ── Body: history rail + canvas ───────────────────────────────────────── */
+/* ── Body: canvas (the history rail moved into a popover) ──────────────── */
 
 .pv-body {
   flex: 1;
@@ -149,23 +225,17 @@
   min-height: 0;
 }
 
-.pv-rail {
-  flex-shrink: 0;
-  width: 132px;
-  border-right: 1px solid var(--color-border);
-  overflow-y: auto;
-  padding: 8px;
+/* History is a popover off the version number now, not a rail eating 132px of
+   panel width for the whole session (todo 692). */
+.pv-history-popover {
+  width: 210px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
-/* Same [hidden]-vs-`display:flex` gotcha as #preview-panel-host above. */
-.pv-rail[hidden] {
-  display: none;
-}
-
-.pv-rail-lbl {
+.pv-hist-lbl {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -173,7 +243,17 @@
   padding: 2px 4px;
 }
 
+.pv-hist-empty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  padding: 6px 4px 8px;
+}
+
 .pv-snap {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
   border: 1px solid var(--color-border);
   border-radius: 8px;
   overflow: hidden;
