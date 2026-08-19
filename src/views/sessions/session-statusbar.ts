@@ -209,13 +209,33 @@ export class SessionStatusbar {
     if (changed) this.render();
   }
 
+  /** User prompts this chat has actually delivered, or null when the live
+   *  renderer can't answer for this session (a different chat is mounted, or
+   *  older history is still unpaged). */
+  private deliveredPrompts(sid: string): number | null {
+    const snap = getChatRendererSnapshot();
+    if (!snap || snap.sessionId !== sid) return null;
+    if (sessionEvents.hasMore(sid)) return null;
+    return snap.messages.reduce((n, m) => n + (m.kind === "user" ? 1 : 0), 0);
+  }
+
   private async refreshCounts(): Promise<void> {
     const sid = this.sessionId;
     if (!sid) return;
     try {
       const r = await invoke<{ tokens: number; turns: number; prompts?: number }>("instance_token_stats", { sessionId: sid });
       if (this.sessionId !== sid) return;
-      this.counts = { prompts: r.prompts ?? 0, turns: r.turns ?? 0 };
+      const next: SessionCounts = { prompts: r.prompts ?? 0, turns: r.turns ?? 0 };
+      // A chat that has delivered nothing cannot own counts, so these belong to
+      // another transcript. Fall back to the skeleton chip (todo 660).
+      if (next.prompts > 0 && this.deliveredPrompts(sid) === 0) {
+        this.counts = null;
+        this.countsLoaded = false;
+        countsCache.delete(sid);
+        this.render();
+        return;
+      }
+      this.counts = next;
       this.countsLoaded = true;
       countsCache.set(sid, this.counts);
       this.render();

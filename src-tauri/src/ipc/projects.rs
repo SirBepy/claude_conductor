@@ -383,6 +383,22 @@ pub fn phone_link(session_id: String, state: State<AppState>) -> Option<String> 
     Some(format!("https://claude.ai/code/{bridge}"))
 }
 
+/// The only transcript a session-keyed stats call may read: the recorded path,
+/// else the file named after this session id. Never the newest file in the
+/// shared project dir - that belongs to a neighbouring session (todo 660: a
+/// 1-message chat rendered a peer's `14 msgs / 448 turns` until its own existed).
+pub(crate) fn stats_transcript_path(
+    recorded: Option<&std::path::Path>,
+    project_dir: &std::path::Path,
+    session_id: &str,
+) -> Option<std::path::PathBuf> {
+    if let Some(p) = recorded.filter(|p| p.exists()) {
+        return Some(p.to_path_buf());
+    }
+    let own = project_dir.join(format!("{session_id}.jsonl"));
+    if own.exists() { Some(own) } else { None }
+}
+
 #[tauri::command]
 pub fn instance_token_stats(session_id: String, state: State<AppState>) -> serde_json::Value {
     let empty = serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 });
@@ -394,15 +410,13 @@ pub fn instance_token_stats(session_id: String, state: State<AppState>) -> serde
         .find(|i| i.session_id == session_id)
         .cloned()
     else { return empty };
-    let path = match inst.transcript_path.as_ref() {
-        Some(p) if p.exists() => p.clone(),
-        _ => match crate::tokens::transcript_for_session(&inst.cwd, &inst.session_id)
-            .or_else(|| crate::tokens::latest_transcript_for_cwd(&inst.cwd))
-        {
-            Some(p) => p,
-            None => return empty,
-        },
-    };
+    let Some(projects) = crate::tokens::claude_projects_dir() else { return empty };
+    let project_dir = projects.join(crate::tokens::encode_cwd_as_project_dir(&inst.cwd));
+    let Some(path) = stats_transcript_path(
+        inst.transcript_path.as_deref(),
+        &project_dir,
+        &inst.session_id,
+    ) else { return empty };
     let t = crate::tokens::parse_transcript(&path);
     let total = t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens;
     serde_json::json!({
@@ -469,6 +483,56 @@ pub fn register_hooks_globally(
     settings::save(&path, &snapshot).map_err(|e| e.to_string())?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
+}
+
+#[cfg(test)]
+mod stats_transcript_tests {
+    use super::stats_transcript_path;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    fn write_session(dir: &Path, id: &str, prompts: usize, turns: usize) -> PathBuf {
+        let path = dir.join(format!("{id}.jsonl"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        for _ in 0..prompts {
+            writeln!(f, r#"{{"type":"user","message":{{"role":"user","content":"hi"}}}}"#).unwrap();
+        }
+        for _ in 0..turns {
+            writeln!(f, r#"{{"type":"assistant","message":{{"usage":{{"output_tokens":1}}}}}}"#).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn never_serves_a_neighbouring_sessions_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = write_session(dir.path(), "small-session", 1, 2);
+        // Written last, so it is the newest .jsonl in the shared project dir -
+        // exactly what the old latest_transcript_for_cwd fallback returned.
+        let big = write_session(dir.path(), "big-session", 14, 448);
+
+        let b = crate::tokens::parse_transcript(&big);
+        assert_eq!((b.user_prompts, b.turns), (14, 448));
+
+        let resolved = stats_transcript_path(None, dir.path(), "small-session").unwrap();
+        assert_eq!(resolved, small);
+        let s = crate::tokens::parse_transcript(&resolved);
+        assert_eq!((s.user_prompts, s.turns), (1, 2));
+
+        // A brand-new chat has no transcript yet: nothing, never the neighbour.
+        assert_eq!(stats_transcript_path(None, dir.path(), "fresh-session"), None);
+    }
+
+    #[test]
+    fn prefers_the_recorded_path_when_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let recorded = write_session(dir.path(), "recorded", 3, 4);
+        write_session(dir.path(), "sid", 9, 9);
+        let resolved = stats_transcript_path(Some(&recorded), dir.path(), "sid").unwrap();
+        assert_eq!(resolved, recorded);
+        assert_eq!(stats_transcript_path(Some(Path::new("nope.jsonl")), dir.path(), "sid"),
+            Some(dir.path().join("sid.jsonl")));
+    }
 }
 
 #[tauri::command]
