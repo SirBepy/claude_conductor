@@ -30,6 +30,8 @@ import { EffortPopover } from "./effort-popover";
 import { ModelPopover } from "./model-popover";
 import { BranchPopover, type BranchEntry } from "./branch-popover";
 import { CommitsPopover, type CommitSync } from "./commits-popover";
+import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
+import { onMobileViewportChange } from "../../shared/mobile-viewport";
 export {
   loadStatuslineRows,
   saveStatuslineRows,
@@ -103,6 +105,7 @@ export class SessionStatusbar {
   private modelPopover = new ModelPopover();
   private branchPopover = new BranchPopover();
   private commitsPopover = new CommitsPopover();
+  private mobileUnsub: (() => void) | null = null;
 
   constructor(container: HTMLElement, startedAt: string | null, rows: ChipType[][], opts: StatusbarOptions = {}) {
     this.container = container;
@@ -124,6 +127,7 @@ export class SessionStatusbar {
     // Opening a tool-chip popover dismisses the statusbar-owned popovers, so at
     // most one popover is ever open.
     this.tally.setBeforeOpen(() => this.closeChipPopovers());
+    this.mobileUnsub = onMobileViewportChange(() => void this.reloadRowsForViewport());
 
     if (this.gitCwd) {
       const cached = gitInfoCache.get(this.gitCwd);
@@ -364,8 +368,16 @@ export class SessionStatusbar {
   destroy(): void {
     if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null; }
     if (this.serversTimer) { clearInterval(this.serversTimer); this.serversTimer = null; }
+    if (this.mobileUnsub) { this.mobileUnsub(); this.mobileUnsub = null; }
     this.tally.destroy();
     this.closeChipPopovers();
+  }
+
+  /** Desktop and phone hold independent layouts, so crossing the breakpoint
+   *  swaps which one is live - a narrowed desktop window counts as a phone. */
+  private async reloadRowsForViewport(): Promise<void> {
+    this.rows = await loadRowsForActiveProfile();
+    this.render();
   }
 
   private tickTimer(): void {

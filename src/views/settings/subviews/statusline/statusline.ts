@@ -4,10 +4,14 @@ import {
   saveStatuslineRows,
   loadStatuslineHideZero,
   saveStatuslineHideZero,
+  activeProfile,
+  profileMaxRows,
+  profileDefaultRows,
+  type StatuslineProfile,
 } from "../../../sessions/session-statusbar-helpers";
 import {
   type ChipType, STATIC_CHIPS, SECTION_LABELS, type SectionKey,
-  TOOL_CHIP_TOOLS, DEFAULT_ROWS, MAX_ROWS, isToolChip, chipToolName,
+  TOOL_CHIP_TOOLS, isToolChip, chipToolName,
 } from "../../../sessions/statusline-catalog";
 import { toolLabel, toolSummary } from "../../../../shared/chat/tool-meta";
 import { escapeHtml } from "../../../../shared/escape-html";
@@ -51,13 +55,27 @@ function paletteChipsFor(section: SectionKey): ChipType[] {
 // Rendered via lit (not root.innerHTML) so the router's lit part markers on
 // `root` survive. Clobbering them with innerHTML ejects lit's marker nodes and
 // makes the next `render(html``, root)` on navigate-away throw.
-const shell = () => html`
+function rowsHint(profile: StatuslineProfile): string {
+  const n = profileMaxRows(profile);
+  return `Drag chips from the palette into the bar. Reorder by dragging, remove by dragging a chip out of the bar. Up to ${n} row${n === 1 ? "" : "s"}.`;
+}
+
+const shell = (profile: StatuslineProfile) => html`
   <div class="view view-settings-statusline">
     ${settingsHeader("Statusline")}
     <div class="view-body">
       <div class="kit-section sl-section">
+        <div class="kit-section-title">Which screen</div>
+        <div class="kit-section-hint sl-hint">Desktop and phone keep separate layouts. The phone used to inherit this one, which is why it wrapped and clipped.</div>
+        <div class="sl-profiles" id="slProfiles">
+          <button class="sl-profile ${profile === "desktop" ? "on" : ""}" data-profile="desktop"><i class="ph ph-monitor"></i>Desktop</button>
+          <button class="sl-profile ${profile === "mobile" ? "on" : ""}" data-profile="mobile"><i class="ph ph-device-mobile"></i>Mobile</button>
+        </div>
+      </div>
+
+      <div class="kit-section sl-section">
         <div class="kit-section-title">Preview &amp; layout</div>
-        <div class="kit-section-hint sl-hint">Drag chips from the palette into the bar. Reorder by dragging, remove by dragging a chip out of the bar. Up to ${MAX_ROWS} rows.</div>
+        <div class="kit-section-hint sl-hint" id="slRowsHint">${rowsHint(profile)}</div>
         <div class="sl-builder-chrome">
           <div class="sl-builder-titlebar">my-project — active session</div>
           <div class="session-statusbar sl-builder-bar" id="slBar"></div>
@@ -86,10 +104,13 @@ const shell = () => html`
 `;
 
 export async function renderStatuslineView(root: HTMLElement): Promise<() => void> {
-  let rows = await loadStatuslineRows();
+  // Opens on whichever profile this window currently renders, so the bar the
+  // dev is looking at is the one the builder edits.
+  let profile: StatuslineProfile = activeProfile();
+  let rows = await loadStatuslineRows(profile);
   let hideZero = await loadStatuslineHideZero();
 
-  render(shell(), root);
+  render(shell(profile), root);
   const bar = root.querySelector<HTMLElement>("#slBar")!;
   const palette = root.querySelector<HTMLElement>("#slPalette")!;
   const hideZeroBox = root.querySelector<HTMLInputElement>("#slHideZero")!;
@@ -98,8 +119,30 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   const persist = () => {
     if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void saveStatuslineRows(rows), 250);
+    // Snapshot both: a queued save must land against the profile and rows it
+    // was scheduled for, even if the dev switches profiles inside the debounce.
+    const p = profile;
+    const snapshot = rows.map((r) => [...r]);
+    saveTimer = setTimeout(() => void saveStatuslineRows(snapshot, p), 250);
   };
+
+  async function switchProfile(next: StatuslineProfile): Promise<void> {
+    if (next === profile) return;
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await saveStatuslineRows(rows, profile); }
+    profile = next;
+    rows = await loadStatuslineRows(profile);
+    for (const b of root.querySelectorAll<HTMLElement>(".sl-profile")) {
+      b.classList.toggle("on", b.dataset.profile === profile);
+    }
+    const hint = root.querySelector<HTMLElement>("#slRowsHint");
+    if (hint) hint.textContent = rowsHint(profile);
+    paint();
+  }
+
+  root.querySelector<HTMLElement>("#slProfiles")?.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>(".sl-profile");
+    if (btn?.dataset.profile) void switchProfile(btn.dataset.profile as StatuslineProfile);
+  });
 
   // ── drag state ─────────────────────────────────────────────────────────────
   let drag: {
@@ -127,7 +170,7 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
           + `</div>`
           + `</div>`;
       }).join("")
-      + (rows.length < MAX_ROWS ? `<button class="sl-addrow" id="slAddRow">+ row</button>` : "");
+      + (rows.length < profileMaxRows(profile) ? `<button class="sl-addrow" id="slAddRow">+ row</button>` : "");
 
     palette.innerHTML = SECTION_ORDER.map((sec) =>
       `<div class="sl-palette-section">`
@@ -139,7 +182,7 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
 
     wireChips();
     root.querySelector<HTMLButtonElement>("#slAddRow")?.addEventListener("click", () => {
-      rows = addRow(rows);
+      rows = addRow(rows, profileMaxRows(profile));
       paint();
     });
   }
@@ -252,7 +295,7 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   });
 
   root.querySelector<HTMLButtonElement>("#slResetBtn")?.addEventListener("click", () => {
-    rows = DEFAULT_ROWS.map((r) => [...r]);
+    rows = profileDefaultRows(profile);
     hideZero = true;
     hideZeroBox.checked = true;
     void saveStatuslineHideZero(true);

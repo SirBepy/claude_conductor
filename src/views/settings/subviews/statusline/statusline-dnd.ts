@@ -31,8 +31,9 @@ export function moveChip(rows: ChipType[][], from: Pos, to: Pos): ChipType[][] {
   return insertChip(removed, adj, chip);
 }
 
-export function addRow(rows: ChipType[][]): ChipType[][] {
-  if (rows.length >= MAX_ROWS) return clone(rows);
+/** `max` is the active profile's cap, not the global one - mobile allows fewer. */
+export function addRow(rows: ChipType[][], max: number = MAX_ROWS): ChipType[][] {
+  if (rows.length >= max) return clone(rows);
   return [...clone(rows), []];
 }
 

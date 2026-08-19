@@ -3,12 +3,38 @@ import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus, ChatDrain } from "../../types/ipc.generated";
 import { modelLabel } from "../../shared/model-name";
 import {
-  type ChipType, DEFAULT_ROWS, MAX_ROWS, isKnownChip, TOOL_CHIP_TOOLS,
+  type ChipType, DEFAULT_ROWS, DEFAULT_MOBILE_ROWS, MAX_ROWS, MOBILE_MAX_ROWS,
+  isKnownChip, TOOL_CHIP_TOOLS,
 } from "./statusline-catalog";
+import { isMobileViewport } from "../../shared/mobile-viewport";
 
 // ── Rows model (the builder) ────────────────────────────────────────────────
 // statuslineRows supersedes the flat statuslineFields. statuslineHideZero is a
 // single global toggle for count/tool chips. Legacy settings are migrated once.
+
+/** Desktop and phone keep independent layouts (Joe, 2026-08-19: the phone
+ *  inheriting the desktop set is what made it wrap and clip). `mobile` falls
+ *  back to its own default, never to the desktop rows. */
+export type StatuslineProfile = "desktop" | "mobile";
+
+const PROFILE_KEY: Record<StatuslineProfile, string> = {
+  desktop: "statuslineRows",
+  mobile: "statuslineRowsMobile",
+};
+
+export function profileMaxRows(p: StatuslineProfile): number {
+  return p === "mobile" ? MOBILE_MAX_ROWS : MAX_ROWS;
+}
+
+export function profileDefaultRows(p: StatuslineProfile): ChipType[][] {
+  return (p === "mobile" ? DEFAULT_MOBILE_ROWS : DEFAULT_ROWS).map((r) => [...r]);
+}
+
+/** Which profile the CURRENT viewport renders. The builder overrides this to
+ *  edit whichever profile the dev has selected. */
+export function activeProfile(): StatuslineProfile {
+  return isMobileViewport() ? "mobile" : "desktop";
+}
 
 // Legacy statuslineFields used "context"; the catalog splits it into
 // context_pct / context_tokens. Everything else is a 1:1 id.
@@ -31,23 +57,26 @@ export function migrateLegacyFields(fields: string[], hiddenTools: string[]): Ch
   return rows.length ? rows : DEFAULT_ROWS.map((r) => [...r]);
 }
 
-function sanitizeRows(raw: unknown): ChipType[][] | null {
+function sanitizeRows(raw: unknown, maxRows: number): ChipType[][] | null {
   if (!Array.isArray(raw)) return null;
   const rows = raw
     .filter((r): r is unknown[] => Array.isArray(r))
     .map((r) => r.filter((c): c is string => typeof c === "string" && isKnownChip(c)) as ChipType[])
-    .slice(0, MAX_ROWS);
+    .slice(0, maxRows);
   const trimmed = rows.filter((r) => r.length > 0);
   return trimmed.length ? trimmed : null;
 }
 
-export async function loadStatuslineRows(): Promise<ChipType[][]> {
+export async function loadStatuslineRows(profile: StatuslineProfile = activeProfile()): Promise<ChipType[][]> {
   try {
     const s = await invoke<Record<string, unknown>>("get_settings");
-    const fromRows = sanitizeRows(s["statuslineRows"]);
+    const fromRows = sanitizeRows(s[PROFILE_KEY[profile]], profileMaxRows(profile));
     if (fromRows) return fromRows;
-    // One-time migration from the pre-builder settings.
-    const legacyFields = Array.isArray(s["statuslineFields"]) ? (s["statuslineFields"] as string[]) : null;
+    // One-time migration from the pre-builder settings. Desktop only: the
+    // mobile profile postdates it, so there is nothing legacy to carry over.
+    const legacyFields = profile === "desktop" && Array.isArray(s["statuslineFields"])
+      ? (s["statuslineFields"] as string[])
+      : null;
     if (legacyFields) {
       const hidden = Array.isArray(s["tallyHiddenTools"]) ? (s["tallyHiddenTools"] as string[]) : [];
       const migrated = migrateLegacyFields(legacyFields, hidden);
@@ -55,14 +84,18 @@ export async function loadStatuslineRows(): Promise<ChipType[][]> {
       return migrated;
     }
   } catch { /* ignore */ }
-  return DEFAULT_ROWS.map((r) => [...r]);
+  return profileDefaultRows(profile);
 }
 
-export async function saveStatuslineRows(rows: ChipType[][]): Promise<void> {
+export async function saveStatuslineRows(
+  rows: ChipType[][],
+  profile: StatuslineProfile = activeProfile(),
+): Promise<void> {
   try {
     const s = await invoke<Record<string, unknown>>("get_settings");
-    const clean = (sanitizeRows(rows) ?? []).slice(0, MAX_ROWS);
-    await invoke("save_settings", { updated: { ...s, statuslineRows: clean } });
+    const max = profileMaxRows(profile);
+    const clean = (sanitizeRows(rows, max) ?? []).slice(0, max);
+    await invoke("save_settings", { updated: { ...s, [PROFILE_KEY[profile]]: clean } });
   } catch (e) {
     console.error("[statusbar] save rows failed", e);
   }

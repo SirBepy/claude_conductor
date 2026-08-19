@@ -210,3 +210,34 @@
   accent-color: var(--color-primary);
   cursor: pointer;
 }
+
+/* ── Desktop / Mobile profile switch ───────────────────────────────────────── */
+.view-settings-statusline .sl-profiles {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+}
+.view-settings-statusline .sl-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.view-settings-statusline .sl-profile:hover {
+  color: var(--color-text);
+}
+.view-settings-statusline .sl-profile.on {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}

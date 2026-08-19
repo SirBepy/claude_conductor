@@ -86,6 +86,16 @@ export const DEFAULT_ROWS: ChipType[][] = [
 
 export const MAX_ROWS = 5;
 
+/** Phone default (Joe, 2026-08-19: the desktop set wrapped to two rows AND
+ *  still clipped). Drops account/repo/branch, which the chat header already
+ *  shows, and keeps the two tool chips worth glancing at. */
+export const DEFAULT_MOBILE_ROWS: ChipType[][] = [
+  ["model", "context_pct", "effort", "servers", "commits", "tool:Read", "tool:Edit"],
+];
+
+/** One row on a phone, so the bar can never wrap and eat the conversation. */
+export const MOBILE_MAX_ROWS = 1;
+
 /** True if `t` is a known static chip or any tool chip. Unknown ids are dropped
  *  on load so a stale/garbage setting never crashes the bar. Retired chips
  *  (folded into another bucket) are dropped on load. */
