@@ -54,8 +54,10 @@ export async function renderPendingPane(
     `    <p>Type a message below to start a new session in <strong>${escapeHtml(project.name)}</strong>.</p>`,
     `  </div>`,
     `</div>`,
-    `<div class="session-thinking" hidden><span class="thinking-text"></span><span class="held-chip-slot"></span><button class="thinking-pause-btn icon-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i></button></div>`,
-    `<div class="session-composer"></div>`,
+    `<div class="composer-shell">`,
+    `  <div class="session-thinking" hidden><span class="thinking-text"></span><span class="held-chip-slot"></span><button class="thinking-pause-btn icon-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i></button></div>`,
+    `  <div class="session-composer"></div>`,
+    `</div>`,
   ].join("\n");
   pane.insertBefore(_pendingHeader.el, pane.firstChild);
 

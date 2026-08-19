@@ -584,18 +584,20 @@
   user-select: text;
 }
 
+/* Top compartment of .composer-shell, fused to the input box below (no
+ * gap) - rounds only the top corners; see the :has() rule further down. */
 .session-thinking {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 20px 5px;
+  padding: 6px 12px;
   font-size: 0.78rem;
   color: var(--color-text-muted);
   font-style: italic;
   flex-shrink: 0;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-background);
-  width: 100%;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  border-radius: 8px 8px 0 0;
 }
 
 .session-thinking[hidden] {
@@ -650,36 +652,56 @@
   font-size: 1rem;
 }
 
-.session-composer {
-  border-top: 1px solid var(--color-border);
+/* Slack-style bordered container for thinking bar + input. No overflow:hidden -
+ * the floating prompt-card (permission/question relay) anchors off
+ * .session-composer's position:relative below and must not get clipped. */
+.composer-shell {
   /* Same padding-based centering as .session-messages, so the input column
      lines up under the capped transcript instead of spanning the full pane. */
-  padding: 10px max(12px, calc((100% - 900px) / 2)) 12px;
+  margin: 10px max(12px, calc((100% - 900px) / 2)) 12px;
   /* Lift the input above the home indicator on mobile (env() is 0 on desktop). */
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  margin-bottom: max(12px, env(safe-area-inset-bottom));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  flex-shrink: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.session-composer {
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* Same background as the transcript/thinking bar above it - the textarea
-     itself (.composer-input-wrap) already carries its own surface + border,
-     so this wrapper doesn't need a second panel behind it (box-in-a-box). */
-  background: var(--color-background);
-  flex-shrink: 0;
+  background: var(--color-surface);
+  border-radius: 0 0 8px 8px;
   /* Anchor for the prompt-card floating panel (permission + question relay). */
   position: relative;
 }
 
-/* Sharper composer focus state. */
-.session-composer .composer-textarea {
-  transition: border-color 0.15s, box-shadow 0.15s;
+/* Idle (thinking bar hidden): composer is the shell's only visible child. */
+.composer-shell:has(.session-thinking[hidden]) .session-composer {
+  border-radius: 8px;
 }
 
-.session-composer .composer-textarea:focus {
+/* Shell draws the single outer boundary now - textarea's own is redundant. */
+.composer-shell .composer-input-wrap {
+  background: transparent;
+}
+
+.composer-shell .composer-textarea {
+  border: none;
+  border-radius: 0;
+}
+
+/* Focus state moved to the shell - the textarea has no border to recolor. */
+.composer-shell:focus-within {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(157, 125, 252, 0.12);
-  outline: none;
 }
 
+.composer-shell .composer-textarea:focus {
+  outline: none;
+}
 
 /* Detached-window mode: solo session pane, no sidebar/header. */
 .view-sessions.detached .view-body.detached-layout {
