@@ -95,7 +95,6 @@ export interface QuestionUIOpts {
   sessionId?: string;
   questions: Question[];
   titleIcon: string;
-  titleText: string;
   rightChipHtml?: string;
   submitLabel: string;
   submitIcon: string;

@@ -27,7 +27,6 @@ async function openContentHeavyCard(page: import("@playwright/test").Page): Prom
         { question: "Which approach should we take, given the constraints?", header: "Approach", options: manyOptions },
       ],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -20,7 +20,6 @@ test("typing a known /skill in the AUQ free-text field renders a purple cm-slash
     mod.renderQuestionUI({
       questions: [{ question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] }],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

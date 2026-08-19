@@ -27,7 +27,6 @@ async function mount(page, question) {
     mod.renderQuestionUI({
       questions: [q],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

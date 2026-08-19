@@ -46,7 +46,6 @@ async function openCard(page: import("@playwright/test").Page): Promise<void> {
         },
       ],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -23,7 +23,6 @@ test("mounting a 3-question card renders every panel's real content, not just th
         { question: "Anything else?", header: "Notes", options: [{ label: "Nope" }] },
       ],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -29,7 +29,6 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
       initialDraft: restoredDraft,
       cwd: resolveCwdForSession(payload.session_id),
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       // Fallback-path tell for every OTHER tool; hidden for our own.
       rightChipHtml: isAskQuestionTool(payload.tool_name)
         ? undefined

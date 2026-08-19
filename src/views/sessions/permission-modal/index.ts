@@ -116,7 +116,6 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
     initialDraft,
     cwd: resolveCwdForSession(payload.session_id),
     titleIcon: "ph-chat-circle-dots",
-    titleText: "Claude is asking",
     submitLabel: "Submit",
     submitIcon: "ph-paper-plane-right",
     cancelLabel: "Skip",

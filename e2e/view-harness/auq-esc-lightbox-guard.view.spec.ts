@@ -20,7 +20,6 @@ async function openCardThenLightbox(page: import("@playwright/test").Page): Prom
     questionUi.renderQuestionUI({
       questions: [{ question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] }],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",
@@ -64,7 +63,6 @@ test.describe("view-harness / AUQ Escape vs an open lightbox (todo 442)", () => 
       questionUi.renderQuestionUI({
         questions: [{ question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] }],
         titleIcon: "ph-chat-circle-dots",
-        titleText: "Claude is asking",
         submitLabel: "Submit",
         submitIcon: "ph-paper-plane-right",
         cancelLabel: "Skip",

@@ -17,7 +17,6 @@ test("review step's extra-message textarea picks up the card's input styling", a
         { question: "Second?", header: "Two", options: [{ label: "B" }] },
       ],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

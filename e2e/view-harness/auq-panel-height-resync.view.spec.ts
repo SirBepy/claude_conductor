@@ -18,7 +18,6 @@ test("a post-render reflow re-syncs the track height so the last option stays vi
     mod.renderQuestionUI({
       questions: [{ question: "Pick one?", options: opts }],
       titleIcon: "ph-chat-circle-dots",
-      titleText: "Claude is asking",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",
