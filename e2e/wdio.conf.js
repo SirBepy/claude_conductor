@@ -52,6 +52,50 @@ let vite;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The debug binary auto-opens ONLY the Chats window (`bootstrap.rs:29-31`) and
+// builds the dashboard lazily (`:33-37`), so tauri-driver binds to
+// `session-chats` where `main.ts:206` has stripped `#sidemenu`. Root cause of
+// every rotted opt-in spec (ai_todo 649/688).
+async function switchToMainWindow() {
+  await browser.waitUntil(
+    async () => browser.execute(() => !!window.__TAURI__?.core?.invoke).catch(() => false),
+    { timeout: 30000, interval: 300, timeoutMsg: "__TAURI__.core.invoke never appeared" }
+  );
+  await browser.execute(() => window.__TAURI__.core.invoke("open_dashboard"));
+
+  await browser.waitUntil(
+    async () => {
+      for (const handle of await browser.getWindowHandles()) {
+        await browser.switchToWindow(handle);
+        const isMain = await browser
+          .execute(() => !location.search.includes("chatswindow") && typeof window.showView === "function")
+          .catch(() => false);
+        if (isMain) return true;
+      }
+      return false;
+    },
+    { timeout: 30000, interval: 400, timeoutMsg: "main dashboard window never became drivable" }
+  );
+
+  // The dashboard opens at 520x720 and window-state then restores the dev's
+  // saved geometry - both hit the phone layout. Its restore lands after the
+  // webview is drivable, so hold the width instead of setting it once.
+  let stable = 0;
+  await browser.waitUntil(
+    async () => {
+      const width = await browser.execute(() => window.innerWidth).catch(() => 0);
+      if (width >= 1200) {
+        stable += 1;
+        return stable >= 3;
+      }
+      stable = 0;
+      await browser.setWindowSize(1400, 900);
+      return false;
+    },
+    { timeout: 30000, interval: 500, timeoutMsg: "main window never held a desktop-width viewport" }
+  );
+}
+
 // The INSTALLED app runs its daemon as `claude-conductor.exe --daemon` too, so
 // matching that command line alone cannot tell prod from a harness respawn.
 // Snapshot the PIDs that already exist before the harness starts; everything
@@ -117,7 +161,9 @@ export const config = {
   capabilities: [{ "tauri:options": { application } }],
   reporters: ["spec"],
   framework: "mocha",
-  mochaOpts: { ui: "bdd", timeout: 120000 },
+  // 240s: the billed specs wait up to 120s for a reply, so a 120s budget killed
+  // them mid-wait and surfaced a bare "Timeout" instead of the real error.
+  mochaOpts: { ui: "bdd", timeout: 240000 },
   logLevel: "warn",
 
   // Spawn the daemon before the app launches so the Sessions view renders from
@@ -172,6 +218,11 @@ export const config = {
     tauriDriver = spawn(tauriDriverBin, ["--native-driver", edgeDriver], {
       stdio: [null, process.stdout, process.stderr],
     });
+  },
+  // daemon-lifecycle's reloadSession() drops back to the chats window; it only
+  // asserts `#sessions-list`, which exists in both, so it is left alone.
+  before: async () => {
+    await switchToMainWindow();
   },
   afterSession: () => {
     if (tauriDriver) tauriDriver.kill();
