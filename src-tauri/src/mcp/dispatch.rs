@@ -4,110 +4,14 @@
 
 use serde_json::{json, Value};
 
-use super::server::{mcp_error, tool_error_result, tool_result, waiting_target};
+use super::relay::{http_post, Ctx, HttpPost};
+use super::server::{mcp_error, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE,
     TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
     TOOL_WRITE_USER_TODO,
 };
-
-/// Overall cap on a single relay POST. The daemon hooks server holds a
-/// permission/question prompt open for up to `PROMPT_TIMEOUT_SECS` (3600s, see
-/// `daemon::hooks_server::permission`) so an AFK dev can answer later, then
-/// always returns an answer or a graceful deny. This client MUST out-wait that
-/// window, otherwise it aborts mid-prompt with "error sending request" and the
-/// dev's eventual answer is dropped. 3600 + 60s slack so the server's response
-/// always lands first; still bounded so a truly-wedged server can't hang the
-/// MCP process forever.
-const RELAY_TIMEOUT_SECS: u64 = 3660;
-
-/// Retry policy for the relay POST (ai_todo 137, mirrors the curl hook path's
-/// `--retry 2 --retry-delay 1` from todo 116): up to 2 retries with a 1s pause,
-/// but ONLY for connection-level failures (daemon restarting between turns,
-/// port briefly unavailable). Never retried: errors after a response arrived
-/// (incl. 4xx/5xx bodies) and the overall relay timeout - the prompt may
-/// already be registered server-side, and re-POSTing would duplicate it.
-const RELAY_CONNECT_RETRIES: u32 = 2;
-const RELAY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// True only for failures where the request never reached the daemon, so a
-/// re-POST cannot double-register the prompt. `is_connect()` covers refused /
-/// unreachable connections and connect-phase timeouts; the 3660s overall
-/// timeout and body/decode errors report `is_connect() == false`.
-fn is_retryable(e: &reqwest::Error) -> bool {
-    e.is_connect()
-}
-
-/// Transport seam (todo 707): tests pass a stub instead of `http_post` so
-/// routing runs for real and only the network call is faked.
-pub(super) type HttpPost = fn(&tokio::runtime::Runtime, &str, Value) -> Result<Value, String>;
-
-fn http_post(rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Value, String> {
-    rt.block_on(async {
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(RELAY_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| e.to_string())?;
-        let mut attempt: u32 = 0;
-        loop {
-            match client.post(url).json(&body).send().await {
-                Ok(resp) => return resp.json::<Value>().await.map_err(|e| e.to_string()),
-                Err(e) if is_retryable(&e) && attempt < RELAY_CONNECT_RETRIES => {
-                    attempt += 1;
-                    eprintln!(
-                        "mcp: relay connect to {url} failed ({e}); \
-                         retry {attempt}/{RELAY_CONNECT_RETRIES} in {}s",
-                        RELAY_RETRY_DELAY.as_secs()
-                    );
-                    tokio::time::sleep(RELAY_RETRY_DELAY).await;
-                }
-                Err(e) => return Err(e.to_string()),
-            }
-        }
-    })
-}
-
-/// Everything an arm needs beyond the tool name, so each group takes one param.
-struct Ctx<'a> {
-    rt: &'a tokio::runtime::Runtime,
-    id: &'a Value,
-    args: &'a Value,
-    session_id: &'a str,
-    port: u16,
-    post: HttpPost,
-}
-
-impl Ctx<'_> {
-    /// Shared shape for every relay POST arm below. `fallback` opts into the
-    /// `resp["ok"] == false` error check; `success` overrides the Ok text.
-    /// Both `None` for arms that just relay `resp.to_string()` verbatim.
-    fn relay(
-        &self,
-        path: &str,
-        body: Value,
-        fallback: Option<&str>,
-        success: Option<&str>,
-    ) -> Value {
-        let url = format!("http://127.0.0.1:{}{path}", self.port);
-        match (self.post)(self.rt, &url, body) {
-            Ok(resp) => {
-                if let Some(fb) = fallback {
-                    if resp["ok"].as_bool() == Some(false) {
-                        let err = resp["error"].as_str().unwrap_or(fb);
-                        return tool_error_result(self.id, err);
-                    }
-                }
-                match success {
-                    Some(text) => tool_result(self.id, text),
-                    None => tool_result(self.id, &resp.to_string()),
-                }
-            }
-            Err(e) => tool_error_result(self.id, &format!("relay error: {e}")),
-        }
-    }
-}
 
 /// Route one `tools/call` to its hooks-server endpoint.
 pub(super) fn dispatch_tool(
