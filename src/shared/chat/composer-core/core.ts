@@ -41,6 +41,14 @@ export class ComposerCore {
       if (this.opts.stopPropagationOnPopupConsume) e.stopPropagation();
       return;
     }
+    // Ctrl/Cmd+Enter takes onCtrlEnter when the host supplies one (only the
+    // main Composer does, for its queued-message shortcut) - fires even on
+    // mobile, since the modifier implies a physical keyboard is attached.
+    if (e.key === "Enter" && !e.shiftKey && (e.ctrlKey || e.metaKey) && this.opts.onCtrlEnter) {
+      e.preventDefault();
+      this.opts.onCtrlEnter();
+      return;
+    }
     // Gated on onEnter itself (not just !!onEnter above the call) so a host
     // that omits it - per this option's own documented contract - actually
     // gets the plain-newline default instead of a silently eaten keystroke.

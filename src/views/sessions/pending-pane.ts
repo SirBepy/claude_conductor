@@ -200,6 +200,7 @@ export async function renderPendingPane(
       onStage: (blocks) => state.heldMessages?.stage(blocks),
       hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
       flushHeldWithDraft: (draftBlocks) => { void state.heldMessages?.flushHeldWithDraft(draftBlocks); },
+      sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
       onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
       // Phase 3: schedule a follow-up. The KIND is decided at scheduling time,
       // not pane-mount time: once this draft's first message has started a real

@@ -46,6 +46,10 @@ export interface ComposerCoreOptions {
    *  consumed by an open popup). Omit for surfaces where Enter should just
    *  insert a newline (the default textarea behavior). */
   onEnter?: () => void;
+  /** Fired on Ctrl/Cmd+Enter (no Shift), instead of `onEnter`, when supplied.
+   *  Only the main Composer uses this today (queued-message send shortcut);
+   *  other hosts omit it and Ctrl+Enter falls through to `onEnter` as before. */
+  onCtrlEnter?: () => void;
   /** Overrides the default 768px matchMedia check (mirrors Composer's
    *  isMobileViewport: on a soft keyboard there's no easy Shift+Enter, so a
    *  bare Enter must insert a newline instead of submitting). */

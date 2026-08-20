@@ -49,6 +49,9 @@ export interface ComposerOptions {
   /** Flush the held set together with the current draft as one message. The
    * composer clears itself after calling. */
   flushHeldWithDraft?: (draftBlocks: ContentBlock[]) => void;
+  /** Interrupt + flush the held set now (same as the chip's "Send now").
+   * Ctrl+Enter on an empty draft routes here instead of a normal send. */
+  sendQueuedNow?: () => Promise<void> | void;
   /** Fired on draft input/blur so a deferred auto-flush can retry. */
   onDraftActivity?: () => void;
   /** Schedule the current draft to fire later instead of sending it now. When
@@ -321,6 +324,7 @@ export class Composer {
             }
           : undefined,
         onEnter: interactive ? () => void this.send() : undefined,
+        onCtrlEnter: interactive ? () => this.handleCtrlEnter() : undefined,
         isMobileViewport: () => isMobileViewport(),
         onResize: (scrollHeight) => {
           this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", scrollHeight > 44);
@@ -469,6 +473,18 @@ export class Composer {
       getRenderer: this.opts.getRenderer ?? (() => null),
       pane: this.root.closest<HTMLElement>(".session-pane") ?? this.root.parentElement,
     };
+  }
+
+  /** Ctrl/Cmd+Enter with an empty draft and a queued (held) set sends the
+   *  queue immediately, busy or not - the same action as the chip's "Send
+   *  now". Any other case (draft has content, or nothing queued) falls
+   *  through to the normal send() path unchanged. */
+  private handleCtrlEnter(): void {
+    if (this.isDraftEmpty() && this.opts.hasHeld?.()) {
+      void this.opts.sendQueuedNow?.();
+      return;
+    }
+    void this.send();
   }
 
   private async send(): Promise<void> {

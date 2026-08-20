@@ -103,6 +103,7 @@ export function mountComposer(
     onStage: (blocks) => state.heldMessages?.stage(blocks),
     hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
     flushHeldWithDraft: (draftBlocks) => { void state.heldMessages?.flushHeldWithDraft(draftBlocks); },
+    sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
     onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
     getNextTokenReset: async () => {
       if (!sess.account_id) return null;
