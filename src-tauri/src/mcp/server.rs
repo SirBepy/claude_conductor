@@ -154,6 +154,29 @@ pub fn run_stdio() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::dispatch::dispatch_tool_with;
+    use super::super::tool_schemas::{
+        TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
+        TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPOND_WORKER_PROMPT,
+        TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER,
+        TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
+    };
+
+    thread_local! {
+        // Records every URL `fake_http_post` was called with, since some
+        // arms (e.g. TOOL_CLOSE) override the relayed response text and
+        // would otherwise hide which endpoint actually got hit.
+        static POSTED_URLS: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+    }
+
+    /// Stub transport for `dispatch_tool_with` (todo 707): logs the URL and
+    /// echoes `{"ok":true,"url":..,"body":..}` instead of making a real HTTP
+    /// call, so tests can assert which endpoint a tool routed to without a
+    /// live hooks server.
+    fn fake_http_post(_rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Value, String> {
+        POSTED_URLS.with(|u| u.borrow_mut().push(url.to_string()));
+        Ok(json!({"ok": true, "url": url, "body": body}))
+    }
 
     fn dispatch(req: &str, port: u16, session_id: &str) -> Value {
         dispatch_as(req, port, session_id, false)
@@ -181,12 +204,12 @@ mod tests {
             "tools/list" => tool_list_response(&id, is_jarvis),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
-                let _ = req["params"]["arguments"].clone();
+                let arguments = req["params"]["arguments"].clone();
                 if port == 0 {
                     tool_error_result(&id, "hooks server port unavailable")
                 } else {
-                    // In unit tests we don't actually make HTTP calls.
-                    tool_error_result(&id, "test-no-http")
+                    // Real routing through mcp::dispatch, transport stubbed.
+                    dispatch_tool_with(&rt, &id, name, &arguments, session_id, port, fake_http_post)
                 }
             }
             _ => mcp_error(&id, -32601, "method not found"),
@@ -271,6 +294,65 @@ mod tests {
         );
         // port=0 → unavailable error
         assert_eq!(resp["result"]["isError"], true);
+    }
+
+    /// Round-trip every known tool through the REAL `mcp::dispatch` routing
+    /// (todo 707), transport stubbed via `fake_http_post`. Deleting a match
+    /// arm in `dispatch.rs` makes the deleted tool fall through to
+    /// `unknown tool` here, turning this test red.
+    #[test]
+    fn dispatch_tool_routes_every_known_tool_to_its_endpoint() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let id = json!(1);
+        // One shared args blob: every arm just indexes into it, and Value
+        // indexing on a missing key returns Null rather than panicking.
+        let args = json!({
+            "tool_name": "x", "input": {}, "questions": [],
+            "cwd": "c", "prompt": "p", "text": "t", "target": null,
+            "status": "done", "title": "t", "message": "m",
+            "action": "add", "task": "task", "session_id": "s2",
+            "request_id": "r1", "allow": true,
+        });
+        let cases: &[(&str, &str)] = &[
+            (TOOL_APPROVAL, "/permissions/request"),
+            (TOOL_QUESTION, "/questions/request"),
+            (TOOL_CLOSE, "/sessions/close-confirm"),
+            (TOOL_SPAWN_CHAT, "/chat/spawn"),
+            (TOOL_LIST_PEERS, "/channel/list-peers"),
+            (TOOL_POST_MESSAGE, "/channel/post-message"),
+            (TOOL_READ_MESSAGES, "/channel/read-messages"),
+            (TOOL_REPORT_STATUS, "/turn/report-status"),
+            (TOOL_SEND_MESSAGE, "/messages/send"),
+            (TOOL_UPDATE_MESSAGE, "/messages/update"),
+            (TOOL_WRITE_USER_TODO, "/todos/write"),
+            (TOOL_SPAWN_WORKER, "/jarvis/spawn-worker"),
+            (TOOL_SEND_TO_SESSION, "/jarvis/send-to-session"),
+            (TOOL_FLEET_STATUS, "/jarvis/fleet-status"),
+            (TOOL_RESPOND_WORKER_PROMPT, "/jarvis/respond-worker-prompt"),
+        ];
+        for (name, expected_path) in cases {
+            POSTED_URLS.with(|u| u.borrow_mut().clear());
+            dispatch_tool_with(&rt, &id, name, &args, "sess-1", 1234, fake_http_post);
+            let posted = POSTED_URLS.with(|u| u.borrow().clone());
+            assert!(
+                posted.iter().any(|u| u.ends_with(expected_path)),
+                "tool {name} did not route to {expected_path}: posted {posted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_tool_unknown_name_falls_through_to_unknown_tool_error() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let resp =
+            dispatch_tool_with(&rt, &json!(1), "nonexistent", &json!({}), "s", 1234, fake_http_post);
+        assert_eq!(resp["error"]["code"], -32601);
     }
 
     #[test]

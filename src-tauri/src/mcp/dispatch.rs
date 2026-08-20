@@ -39,6 +39,10 @@ fn is_retryable(e: &reqwest::Error) -> bool {
     e.is_connect()
 }
 
+/// Transport seam (todo 707): tests pass a stub instead of `http_post` so
+/// routing runs for real and only the network call is faked.
+pub(super) type HttpPost = fn(&tokio::runtime::Runtime, &str, Value) -> Result<Value, String>;
+
 fn http_post(rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Value, String> {
     rt.block_on(async {
         let client = reqwest::Client::builder()
@@ -72,6 +76,7 @@ struct Ctx<'a> {
     args: &'a Value,
     session_id: &'a str,
     port: u16,
+    post: HttpPost,
 }
 
 impl Ctx<'_> {
@@ -86,7 +91,7 @@ impl Ctx<'_> {
         success: Option<&str>,
     ) -> Value {
         let url = format!("http://127.0.0.1:{}{path}", self.port);
-        match http_post(self.rt, &url, body) {
+        match (self.post)(self.rt, &url, body) {
             Ok(resp) => {
                 if let Some(fb) = fallback {
                     if resp["ok"].as_bool() == Some(false) {
@@ -113,12 +118,27 @@ pub(super) fn dispatch_tool(
     session_id: &str,
     port: u16,
 ) -> Value {
+    dispatch_tool_with(rt, id, name, arguments, session_id, port, http_post)
+}
+
+/// Same routing as `dispatch_tool`, with the HTTP transport swapped for
+/// `post` (todo 707's test seam).
+pub(super) fn dispatch_tool_with(
+    rt: &tokio::runtime::Runtime,
+    id: &Value,
+    name: &str,
+    arguments: &Value,
+    session_id: &str,
+    port: u16,
+    post: HttpPost,
+) -> Value {
     let ctx = Ctx {
         rt,
         id,
         args: arguments,
         session_id,
         port,
+        post,
     };
     prompt_tools(&ctx, name)
         .or_else(|| session_tools(&ctx, name))
