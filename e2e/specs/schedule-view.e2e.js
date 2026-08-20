@@ -33,7 +33,7 @@ describe("Schedule view", () => {
     }
   });
 
-  it("renders the Schedule view with its sections", async () => {
+  it("renders the calendar grid, its status legend, and the day agenda", async () => {
     await browser.execute(() => window.showView("schedule"));
 
     const view = await $(".view-schedule");
@@ -42,25 +42,27 @@ describe("Schedule view", () => {
     const body = await $("#schedule-body");
     await body.waitForExist({ timeout: 15000 });
 
-    // Handle both fresh-store (empty state) and existing-items cases: assert
-    // on whichever actually rendered rather than assuming emptiness.
-    const emptyState = await $(".schedule-empty");
-    const isEmpty = await emptyState.isExisting();
-    if (isEmpty) {
-      expect(await emptyState.getText()).toContain("Nothing scheduled yet.");
-    } else {
-      const sectionTitles = await $$(".schedule-section-title");
-      const titleTexts = await Promise.all(sectionTitles.map((el) => el.getText()));
-      expect(titleTexts.some((t) => t.includes("Upcoming"))).toBe(true);
+    // Grid and legend are unconditional chrome (schedule.ts:305-311), so they
+    // anchor this test whatever the shared store happens to hold.
+    await (await $(".cal-grid")).waitForExist({ timeout: 10000 });
+    const legend = await $(".cal-legend");
+    await legend.waitForExist({ timeout: 10000 });
+    const legendText = await legend.getText();
+    for (const status of ["Upcoming", "Sent", "Missed", "Failed", "Recurring"]) {
+      expect(legendText).toContain(status);
     }
 
-    // Cloud-cron placeholder section always renders regardless of item state.
-    const cloudSection = await $(".schedule-section--cloud");
-    await cloudSection.waitForExist({ timeout: 10000 });
-    expect(await cloudSection.getText()).toContain("No data path to claude.ai cron jobs yet.");
+    // Either a row list or an empty state, never neither (schedule.ts:292-293).
+    await (await $(".agenda-head .agenda-title")).waitForExist({ timeout: 10000 });
+    const hasRows = await (await $(".agenda-list")).isExisting();
+    const hasEmpty = await (await $(".agenda-empty")).isExisting();
+    expect(hasRows || hasEmpty).toBe(true);
+    if (hasEmpty && !hasRows) {
+      expect(await (await $(".agenda-empty")).getText()).toContain("Nothing scheduled");
+    }
   });
 
-  it("creates a scheduled item via IPC, shows it under Upcoming, then deletes it via the row action", async () => {
+  it("creates a scheduled item via IPC, shows it in today's agenda, then deletes it via the row action", async () => {
     await browser.execute(() => window.showView("schedule"));
     await $(".view-schedule").waitForExist({ timeout: 15000 });
 
@@ -71,7 +73,8 @@ describe("Schedule view", () => {
         window.__TAURI__.core.invoke("schedule_create", {
           kind: { type: "new_chat", cwd: "C:\\Users\\tecno\\Desktop\\Projects\\claude_usage_in_taskbar", model: "", effort: "", account_id: null },
           prompt: "wdio smoke item",
-          fire_at: fireAtIso,
+          // Tauri v2 camelCases `fire_at: String` (ipc/schedule.rs:34).
+          fireAt: fireAtIso,
           recurrence: null,
         }),
       fireAtIso
@@ -85,20 +88,21 @@ describe("Schedule view", () => {
     // same mechanism the other specs use and avoids a race on that listener).
     await browser.execute(() => window.showView("schedule"));
 
-    const row = await $(`li.schedule-row[data-id="${item.id}"]`);
+    // The redesign (todo 322) moved rows to `li.agenda-row[data-id]`
+    // (schedule.ts:231). +1h puts it on today, the day selected on mount.
+    const row = await $(`li.agenda-row[data-id="${item.id}"]`);
     await row.waitForExist({ timeout: 15000 });
     await expect(row).toExist();
 
-    const title = await row.$(".schedule-row-title");
-    expect(await title.getText()).toContain("New chat: claude_usage_in_taskbar");
+    const title = await row.$(".agenda-name");
+    expect(await title.getText()).toContain("claude_usage_in_taskbar");
 
-    // Recurrence-free time label: no .schedule-badge--recurrence badge since
-    // this item has no `recurrence`.
-    const recurrenceBadge = await row.$(".schedule-badge--recurrence");
-    await expect(recurrenceBadge).not.toExist();
-    const timeLabel = await row.$(".schedule-time");
+    const timeLabel = await row.$(".agenda-time");
     await expect(timeLabel).toExist();
     expect(await timeLabel.getText()).not.toBe("");
+
+    // Only upcoming rows get Reschedule (schedule.ts:244), so this pins status.
+    await expect(row.$('button[data-action="reschedule-toggle"]')).toExist();
 
     // No stray askConfirm dialog should be up yet.
     expect(await $(".app-confirm-overlay").isExisting()).toBe(false);
@@ -116,7 +120,7 @@ describe("Schedule view", () => {
     await confirmBtn.click();
 
     await row.waitForExist({ timeout: 15000, reverse: true });
-    expect(await $(`li.schedule-row[data-id="${item.id}"]`).isExisting()).toBe(false);
+    expect(await $(`li.agenda-row[data-id="${item.id}"]`).isExisting()).toBe(false);
 
     // No stray dialog left behind after the confirm flow either.
     expect(await $(".app-confirm-overlay").isExisting()).toBe(false);

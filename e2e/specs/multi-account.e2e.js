@@ -74,22 +74,34 @@ describe("Dashboard account selector (multi-account milestone 05)", () => {
 });
 
 describe("New-chat account picker (multi-account milestone 04)", () => {
+  // Tear down even on failure: a modal left up covers `#acc-add-btn`.
+  afterEach(async () => {
+    await browser.execute(() => {
+      document.querySelector(".me-cancel")?.click();
+      document.querySelector(".project-picker-backdrop")?.remove();
+      document.querySelector(".project-picker")?.remove();
+      document.querySelector(".model-effort-modal")?.remove();
+      document.querySelector(".modal-backdrop:not([hidden])")?.setAttribute("hidden", "");
+    });
+    await browser.keys(["Escape"]);
+  });
+
   it("shows account chips with a populated registry, the 'no accounts yet' state with an empty one", async () => {
     await browser.execute(() => window.showView("sessions"));
+    // New chat is only interactable once the view-more menu relocates it out
+    // of the hidden `#view-more-host` (view-more-menu.ts:112-118).
+    const moreBtn = await $("#viewMoreBtn");
+    await moreBtn.waitForClickable({ timeout: 15000 });
+    await moreBtn.click();
+
     const newSessionBtn = await $("#newSessionBtn");
-    await newSessionBtn.waitForExist({ timeout: 15000 });
-    // `#newSessionBtn` starts disabled until the sessions view finishes its
-    // initial data load (template.ts: `disabled` in the static markup).
-    await newSessionBtn.waitForEnabled({ timeout: 15000 });
+    await newSessionBtn.waitForClickable({ timeout: 15000 });
     await newSessionBtn.click();
 
-    // `triggerNewSessionGlobal` opens a project picker before the model/
-    // effort modal when no pane is attached yet (session-controls.ts). Prefer
-    // whichever surfaces first, then drive into the modal if a picker showed.
-    const projectPickerItem = await $("[data-project-path]");
-    if (await projectPickerItem.isExisting()) {
-      await projectPickerItem.click();
-    }
+    // `.project-picker-row` (project-picker.ts:266); `[data-project-path]` never matched.
+    const projectPickerItem = await $(".project-picker-row");
+    await projectPickerItem.waitForExist({ timeout: 15000 });
+    await projectPickerItem.click();
 
     const accField = await $(".me-acc-field");
     await accField.waitForExist({ timeout: 15000 });
@@ -97,7 +109,9 @@ describe("New-chat account picker (multi-account milestone 04)", () => {
     // picker with accounts, warning + "Add one in Settings" link without.
     const accounts = await browser.execute(() => window.__TAURI__.core.invoke("list_accounts"));
     if (accounts.length > 0) {
-      await expect($("[data-acc-id]")).toExist();
+      // Two shapes (account-field.ts:66-85); a resolved pick has no id.
+      await expect($(".me-acc-field .account-chip")).toExist();
+      await expect($(".me-acc-empty")).not.toExist();
     } else {
       await expect($(".me-acc-empty")).toExist();
       await expect($(".me-acc-add-link")).toExist();
@@ -124,8 +138,9 @@ describe("Add-account wizard (browser-first flow, 2026-07-08)", () => {
     const wizard = await $(".aaw-overlay .wizard");
     await wizard.waitForExist({ timeout: 5000 });
 
+    // wdio v9 `$$.map()` resolves to a Promise, not an Array.
     const steps = await $$(".aaw-overlay .wz-steps .st");
-    const labels = await Promise.all(steps.map((s) => s.getText()));
+    const labels = await Promise.all([...steps].map((s) => s.getText()));
     expect(labels.join(" | ")).toContain("Create");
     expect(labels.join(" | ")).toContain("Browser login");
     expect(labels.join(" | ")).toContain("CLI login");

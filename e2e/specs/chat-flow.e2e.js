@@ -124,14 +124,14 @@ async function startHaikuChat() {
   await confirm.waitForClickable({ timeout: 10000 });
   await confirm.click();
 
-  await (await $(".composer-textarea")).waitForExist({ timeout: 20000 });
+  await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
 }
 
 async function sendMessage(text) {
-  const ta = await $(".composer-textarea");
+  const ta = await $(".session-composer .composer-textarea");
   await ta.waitForExist({ timeout: 10000 });
   await ta.setValue(text);
-  await (await $(".composer-send")).click();
+  await (await $(".session-composer .composer-send")).click();
 }
 
 // Wait until the assistant-final count reaches `target`.

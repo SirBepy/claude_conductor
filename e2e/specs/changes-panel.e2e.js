@@ -17,14 +17,20 @@
 
 const SESSION_ID = `e2e-changes-${Date.now()}`;
 
+// executeAsync: `browser.execute` with an async callback returns as soon as the
+// promise is CREATED, so the row could still be unregistered when awaited.
 async function seedSession(cwd) {
-  await browser.execute(async (sessionId, sessionCwd) => {
-    await window.__TAURI__.core.invoke("register_historical_session", {
-      sessionId,
-      cwd: sessionCwd,
-      accountId: "e2e-seeded-account",
-    });
+  const result = await browser.executeAsync((sessionId, sessionCwd, done) => {
+    window.__TAURI__.core
+      .invoke("register_historical_session", {
+        sessionId,
+        cwd: sessionCwd,
+        accountId: "e2e-seeded-account",
+      })
+      .then(() => done("ok"))
+      .catch((e) => done("ERR:" + String(e)));
   }, SESSION_ID, cwd);
+  if (String(result).startsWith("ERR")) throw new Error(`register_historical_session failed: ${result}`);
 }
 
 async function injectEdit(opts) {
@@ -36,6 +42,13 @@ async function injectEdit(opts) {
 describe("Changes panel + inline edit-window (ai_todo 53)", () => {
   before(async () => {
     await browser.execute(() => window.showView("sessions"));
+    await (await $("#sessions-list")).waitForExist({ timeout: 15000 });
+    // Tool-use rows are `chat-narration`, hidden by default (chat-messages.css:97).
+    // `active-session-mount.ts:253` reads this pref on mount, so set it BEFORE
+    // selecting or every `.edit-window` renders 0x0 inside a hidden parent.
+    await browser.execute((sessionId) => {
+      localStorage.setItem("cc-show-raw-chat:" + sessionId, "1");
+    }, SESSION_ID);
     // Seed an Interactive session in the daemon registry so a clickable sidebar
     // row appears. Use this repo's root as cwd so no throwaway project is
     // created (it is already a known project).
@@ -43,12 +56,54 @@ describe("Changes panel + inline edit-window (ai_todo 53)", () => {
 
     const row = await $(`#sessions-list li[data-session-id="${SESSION_ID}"]`);
     await row.waitForExist({ timeout: 15000 });
-    await row.click();
+    // A freshly broadcast row animates in as `row-entering`; a click during
+    // that animation is swallowed and the pane stays on `.session-empty`.
+    await browser.waitUntil(
+      async () => !(await row.getAttribute("class")).includes("row-entering"),
+      { timeout: 10000, interval: 250, timeoutMsg: "sidebar row never settled" }
+    );
+    await row.waitForClickable({ timeout: 10000 });
+    // Re-query and retry: the sidebar re-renders on every daemon tick, so the
+    // handle above can be detached and its click silently goes nowhere.
+    await browser.waitUntil(
+      async () => {
+        await (await $(`#sessions-list li[data-session-id="${SESSION_ID}"]`)).click().catch(() => {});
+        return browser.execute(() => !!document.querySelector(".session-messages"));
+      },
+      { timeout: 20000, interval: 1000, timeoutMsg: "clicking the seeded row never mounted the chat pane" }
+    );
 
-    // Pane mounted: renderer attached + changes-btn present.
+    // Pane mounted: renderer attached and the composer wired.
     await (await $(".session-messages")).waitForExist({ timeout: 15000 });
-    await (await $(".session-header .changes-btn")).waitForExist({ timeout: 15000 });
+    await (await $(".session-composer")).waitForExist({ timeout: 15000 });
   });
+
+  /** wdio's `*=` partial-text syntax cannot combine with a compound class
+   *  selector, so match by text with `$$` plus a JS-side filter. */
+  async function clickMenuItemByText(label) {
+    await browser.waitUntil(
+      async () => {
+        for (const el of await $$(".smore-item")) {
+          const text = (await el.getText().catch(() => "")).trim();
+          if (!text.startsWith(label)) continue;
+          if (!(await el.isClickable().catch(() => false))) continue;
+          await el.click();
+          return true;
+        }
+        return false;
+      },
+      { timeout: 10000, interval: 400, timeoutMsg: `menu item "${label}" never became clickable` }
+    );
+  }
+
+  /** "View changes" moved into the row menu's Chat submenu in 6d6b286b, which
+   *  deleted the old `.session-header .changes-btn` (session-header.ts:85-86). */
+  async function openChangesRail() {
+    const row = await $(`#sessions-list li[data-session-id="${SESSION_ID}"]`);
+    await row.click({ button: "right" });
+    await clickMenuItemByText("Chat");
+    await clickMenuItemByText("View changes");
+  }
 
   after(async () => {
     // Clean up the seeded session so it doesn't linger as live in the registry.
@@ -75,15 +130,24 @@ describe("Changes panel + inline edit-window (ai_todo 53)", () => {
   });
 
   it("expands to show side-by-side before/after columns", async () => {
-    const summary = await $(".edit-window .edit-window-summary");
-    await summary.click();
+    await (await $(".edit-window .edit-window-summary")).click();
 
-    const before = await $('.edit-window .edit-window-side[data-side="before"]');
-    const after = await $('.edit-window .edit-window-side[data-side="after"]');
-    await before.waitForExist({ timeout: 5000 });
-    await after.waitForExist({ timeout: 5000 });
-    expect(await before.getText()).toContain("const a = 1;");
-    expect(await after.getText()).toContain("const a = 2;");
+    // One round-trip: the transcript re-renders on daemon ticks, so a handle
+    // taken for the second side can be detached by the time it is read.
+    await browser.waitUntil(
+      async () => {
+        const sides = await browser.execute(() => {
+          const win = document.querySelector(".edit-window");
+          if (!win || !win.open) return null;
+          return {
+            before: win.querySelector('.edit-window-side[data-side="before"]')?.textContent || "",
+            after: win.querySelector('.edit-window-side[data-side="after"]')?.textContent || "",
+          };
+        });
+        return !!sides && sides.before.includes("const a = 1;") && sides.after.includes("const a = 2;");
+      },
+      { timeout: 10000, interval: 500, timeoutMsg: "expanded edit-window never showed both before/after sides" }
+    );
   });
 
   it("opens the changes rail (dimming the chat) listing every edited file", async () => {
@@ -94,7 +158,7 @@ describe("Changes panel + inline edit-window (ai_todo 53)", () => {
       content: "export const b = true;",
     });
 
-    await (await $(".session-header .changes-btn")).click();
+    await openChangesRail();
 
     const rail = await $(".changes-rail");
     await rail.waitForExist({ timeout: 10000 });

@@ -61,9 +61,11 @@ describe("News redesign: kebab menu + detail view", () => {
   });
 
   it("opens the kebab menu with the three actions, then closes on outside click", async () => {
-    await (await $(".news-header-actions .icon-btn")).click();
+    await (await $(".view-news .news-header-actions .icon-btn")).click();
 
-    const menu = await $(".news-menu");
+    // Scope to this view: news-detail.ts renders its own `.news-menu` too, and
+    // other views stay mounted-but-hidden in the DOM.
+    const menu = await $(".view-news .news-header-actions .news-menu");
     await menu.waitForExist({ timeout: 5000 });
     const menuText = await menu.getText();
     expect(menuText).toContain("Mark all read");
@@ -93,8 +95,8 @@ describe("News redesign: kebab menu + detail view", () => {
     expect(await (await $('.news-detail-metabar .icon-btn[title="Open original article"]')).isExisting()).toBe(true);
 
     // In detail mode the top-bar ⋮ menu holds Regenerate (we do NOT click it: billed).
-    await (await $(".news-header-actions .icon-btn")).click();
-    const menu = await $(".news-header-actions .news-menu");
+    await (await $(".view-news .news-header-actions .icon-btn")).click();
+    const menu = await $(".view-news .news-header-actions .news-menu");
     await menu.waitForExist({ timeout: 5000 });
     expect(await menu.getText()).toContain("Regenerate");
     // Close it again before leaving.
@@ -103,7 +105,10 @@ describe("News redesign: kebab menu + detail view", () => {
   });
 
   it("returns to the list via the header Back button", async () => {
-    await (await $('.view-header .icon-btn[title="Back"]')).click();
+    // Scope to `.view-news`: settings renders its own hidden
+    // `.view-header .icon-btn.back-to-settings[title="Back"]` (settings/ui.ts:42)
+    // which an unscoped selector matches first, and it is not interactable.
+    await (await $('.view-news .view-header .icon-btn[title="Back"]')).click();
     await (await $(".news-detail")).waitForExist({ timeout: 5000, reverse: true });
     await (await $(".news-list")).waitForExist({ timeout: 5000 });
   });

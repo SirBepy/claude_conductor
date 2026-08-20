@@ -29,7 +29,7 @@ async function startNewChatPickingFirstProject() {
   await confirm.waitForClickable({ timeout: 10000 });
   await confirm.click();
   // 3. Pending pane mounts the composer.
-  await (await $(".composer-textarea")).waitForExist({ timeout: 20000 });
+  await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
 }
 
 describe("Chat reload de-duplication (ai_todo 65)", () => {
@@ -38,9 +38,9 @@ describe("Chat reload de-duplication (ai_todo 65)", () => {
 
     // --- Chat A: send one turn ---
     await startNewChatPickingFirstProject();
-    const ta = await $(".composer-textarea");
+    const ta = await $(".session-composer .composer-textarea");
     await ta.setValue("reply with the literal word OK and stop.");
-    await (await $(".composer-send")).click();
+    await (await $(".session-composer .composer-send")).click();
 
     // Wait for the assistant's finalized (non-streaming) reply.
     await browser.waitUntil(

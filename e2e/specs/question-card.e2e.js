@@ -10,8 +10,38 @@
 
 import assert from "node:assert";
 
-const SESS = "e2e-question-session";
+const SESS = `e2e-question-session-${Date.now()}`;
 const QUESTION = "Tabs or spaces for indentation?";
+
+/** `__setSelectedSession` only primes the modal's private `_selectedSessionId`
+ *  (gating.ts:76-78), never `state.selectedId` - so `.session-composer` never
+ *  mounts and `refreshPaneEmptyState()` wipes the injected host on the next
+ *  daemon tick. Select through the real sidebar flow instead. */
+async function seedAndSelect(sessionId) {
+  const seeded = await browser.executeAsync((id, cwd, done) => {
+    window.__TAURI__.core
+      .invoke("register_historical_session", { sessionId: id, cwd, accountId: "e2e-seeded-account" })
+      .then(() => done("ok"))
+      .catch((e) => done("ERR:" + String(e)));
+  }, sessionId, process.cwd());
+  if (String(seeded).startsWith("ERR")) throw new Error(`register_historical_session failed: ${seeded}`);
+
+  await (await $(`#sessions-list li[data-session-id="${sessionId}"]`)).waitForExist({ timeout: 15000 });
+  // Re-query and retry: the sidebar re-renders on every daemon tick.
+  await browser.waitUntil(
+    async () => {
+      await (await $(`#sessions-list li[data-session-id="${sessionId}"]`)).click().catch(() => {});
+      return browser.execute(() => !!document.querySelector(".session-composer"));
+    },
+    { timeout: 20000, interval: 1000, timeoutMsg: "seeded session never mounted its composer" }
+  );
+}
+
+async function clearSession(sessionId) {
+  await browser.execute(async (id) => {
+    try { await window.__TAURI__.core.invoke("clear_session", { sessionId: id }); } catch { /* best effort */ }
+  }, sessionId);
+}
 
 async function installConsoleHook() {
   await browser.execute(() => {
@@ -38,11 +68,16 @@ describe("AskUserQuestion card relay (frontend hop)", () => {
       { timeout: 30000, interval: 500, timeoutMsg: "app never finished loading (window.showView)" }
     );
     await browser.execute(() => window.showView("sessions"));
+    await (await $("#sessions-list")).waitForExist({ timeout: 15000 });
+    await seedAndSelect(SESS);
     await installConsoleHook();
   });
 
+  after(async () => {
+    await clearSession(SESS);
+  });
+
   it("renders an answerable card for a matching selected session", async () => {
-    await browser.execute((sess) => window.__setSelectedSession(sess), SESS);
     await browser.execute((sess, q) => window.__injectQuestion({
       id: "e2e-q1",
       session_id: sess,
@@ -87,23 +122,40 @@ describe("AskUserQuestion card relay (frontend hop)", () => {
     assert.ok(!(await card.isExisting()), "card did not clear after submit");
   });
 
-  // Joe's bug was in the chats window (chatswindow=1 branch of main.ts). Rather
-  // than open a 2nd OS window (tauri-driver can't drive a 2nd Tauri webview),
-  // reload THIS window into chats-window mode so the same code path runs here.
+  // The bug lived in the chats window, a separate module realm with its own
+  // listeners and `state.selectedId`. The debug binary opens it at startup
+  // (bootstrap.rs:29-31), so drive the REAL one by its own handle.
   it("renders a card in chats-window mode too", async () => {
-    await browser.execute(() => { window.location.href = window.location.origin + "/index.html?chatswindow=1#sessions"; });
+    const mainHandle = await browser.getWindowHandle();
+    let chatsHandle = null;
+    for (const handle of await browser.getWindowHandles()) {
+      await browser.switchToWindow(handle);
+      const isChats = await browser
+        .execute(() => location.search.includes("chatswindow"))
+        .catch(() => false);
+      if (isChats) { chatsHandle = handle; break; }
+    }
+    assert.ok(chatsHandle, "no chats window handle found");
+
     await browser.waitUntil(
       async () => browser.execute(() => document.body.classList.contains("chats-window-mode") && typeof window.__injectQuestion === "function"),
-      { timeout: 15000, timeoutMsg: "chats-window-mode never initialized after navigate" }
+      { timeout: 15000, timeoutMsg: "chats window never finished loading" }
     );
     await installConsoleHook();
+    // Same real-selection flow; this window has its own selection state.
+    await browser.waitUntil(
+      async () => {
+        await (await $(`#sessions-list li[data-session-id="${SESS}"]`)).click().catch(() => {});
+        return browser.execute(() => !!document.querySelector(".session-composer"));
+      },
+      { timeout: 20000, interval: 1000, timeoutMsg: "chats window never mounted the seeded session" }
+    );
 
-    await browser.execute((s) => window.__setSelectedSession(s), "chats-sess");
     await browser.execute((s) => window.__injectQuestion({
       id: "cq1", session_id: s,
       questions: [{ question: "Chats window card?", header: "H", multiSelect: false,
         options: [{ label: "Yes", description: "y" }, { label: "No", description: "n" }] }],
-    }), "chats-sess");
+    }), SESS);
     await browser.pause(1500);
 
     const diag = await browser.execute(() => ({
@@ -115,6 +167,7 @@ describe("AskUserQuestion card relay (frontend hop)", () => {
     const logs = await drainLogs();
     // eslint-disable-next-line no-console
     console.log("\n=== CHATS DIAG ===\n" + JSON.stringify(diag, null, 2) + "\n=== CHATS CONSOLE ===\n" + logs.join("\n") + "\n=== END ===\n");
+    await browser.switchToWindow(mainHandle);
     assert.ok(diag.cards >= 1, `NO CARD in chats-window mode. diag=${JSON.stringify(diag)}\nlogs=${logs.join("\n")}`);
   });
 });
