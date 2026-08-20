@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView, openAnswerBar } from "./harness";
+import { mountView } from "./harness";
 
 // AUQ horizontal-track flow: every question is a real, always-rendered panel
 // in a scroll-snap track with a dot pager and caret arrows - no Next/Review/
@@ -76,7 +76,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
 
     const arrow = card.locator('.prompt-pager [data-nav="1"]');
     await expect(arrow).toBeDisabled();
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("Go with plan A, typed not clicked");
     await expect(arrow).toBeEnabled();
     await expect(card.locator('.prompt-dot[data-dot="0"]')).toHaveClass(/is-answered/);
@@ -94,7 +93,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(dot0).toHaveClass(/is-current/);
     await expect(dot0).not.toHaveClass(/is-answered/);
 
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A");
     // Now both classes apply to the same dot at once.
     await expect(dot0).toHaveClass(/is-current/);
@@ -119,12 +117,10 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
 
     // Answer all three questions via dot-jumps (not the arrow) so every
     // forward arrow click below is unlocked, then return to panel 0.
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A");
     await card.locator('.prompt-dot[data-dot="1"]').click();
     await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
     await card.locator('.prompt-dot[data-dot="2"]').click();
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("done");
     await card.locator('.prompt-dot[data-dot="0"]').click();
     await expect(card.locator(".prompt-panel.is-active")).toHaveAttribute("data-panel", "0");
@@ -144,12 +140,10 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await openCard(page);
 
     const card = page.locator(".prompt-card");
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
     await card.locator('.prompt-dot[data-dot="1"]').click();
     await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
     await card.locator('.prompt-dot[data-dot="2"]').click();
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("nothing else");
     await card.locator('.prompt-dot[data-dot="3"]').click();
 
@@ -178,7 +172,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(primaryBtn).toBeDisabled();
 
     await card.locator('.prompt-summary-row').nth(0).click();
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
     await card.locator('.prompt-dot[data-dot="3"]').click();
     await expect(primaryBtn).toBeDisabled();
@@ -189,7 +182,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(primaryBtn).toBeDisabled();
 
     await card.locator('.prompt-summary-row').nth(2).click();
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("nothing else");
     await card.locator('.prompt-dot[data-dot="3"]').click();
     await expect(primaryBtn).toBeEnabled();
@@ -214,7 +206,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(primaryBtn).toBeDisabled();
     await expect(card.locator('[data-act="submit"]')).toHaveCount(0);
 
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
     await expect(primaryBtn).toBeEnabled();
     await primaryBtn.click();
@@ -230,7 +221,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await openCard(page);
 
     const card = page.locator(".prompt-card");
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A");
     await card.locator('.prompt-dot[data-dot="1"]').click();
     await expect(card.locator(".prompt-panel.is-active .prompt-q__text")).toHaveText("Which features?");
@@ -261,7 +251,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     // unlocks it, with nothing checked.
     await xBox.uncheck();
     await expect(arrow).toBeDisabled();
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("actually, something else entirely");
     await expect(arrow).toBeEnabled();
   });
@@ -272,7 +261,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
 
     const card = page.locator(".prompt-card");
     let activePanel = card.locator(".prompt-panel.is-active");
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").press("Control+Enter");
 
@@ -280,15 +268,11 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(activePanel.locator(".prompt-q__text")).toHaveText("Which features?");
 
     await activePanel.locator('.prompt-q__opts input[data-label="X"]').check();
-    // Tab 1 is answered via the checkbox alone, so its own-words zone was
-    // never opened - the shortcut is document-global (question-ui.ts's
-    // keydownHandler), so it fires without a focused free-text field.
-    await page.keyboard.press("Control+Enter");
+    await card.locator(".prompt-card__answer-bar .prompt-q__other-input").press("Control+Enter");
 
     activePanel = card.locator(".prompt-panel.is-active");
     await expect(activePanel.locator(".prompt-q__text")).toHaveText("Anything else?");
 
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("nothing else");
     // Last question now answered - Ctrl+Enter advances to review, it does NOT submit.
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").press("Control+Enter");
@@ -318,7 +302,6 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     expect(changes.length).toBeGreaterThan(0);
     expect(changes.at(-1)).toEqual({ freeText: [], selections: [[1, []]], activeTab: 0 });
 
-    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
     changes = await page.evaluate(() => window.__auqDraftChanges);
     expect(changes.at(-1)).toEqual({ freeText: [[0, "A (typed)"]], selections: [[1, []]], activeTab: 0 });

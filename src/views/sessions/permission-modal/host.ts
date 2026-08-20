@@ -78,18 +78,18 @@ export function clearHost(): void {
   document.getElementById(HOST_ID)?.remove();
 }
 
-// .prompt-card__answer-bar is always present (empty on the permission card,
-// which never calls syncAnswerBar) so the question card's fixed input area
-// - pinned below the scrollable body, filled/wired by question-ui-render.ts's
-// syncAnswerBar() - has a stable mount point without a signature change here.
+// .prompt-card__answer-bar sits inside the footer row (flex:1, next to
+// Skip/Next) - stable mount point for question-ui-render.ts's syncAnswerBar().
 export function renderCardShell(titleHtml: string, bodyHtml: string, footerHtml: string): string {
   return `
     <div class="prompt-card" role="dialog" aria-modal="false">
       <div class="prompt-card__handle" aria-hidden="true"></div>
       <div class="prompt-card__header">${titleHtml}</div>
       <div class="prompt-card__body">${bodyHtml}</div>
-      <div class="prompt-card__answer-bar"></div>
-      <div class="prompt-card__footer">${footerHtml}</div>
+      <div class="prompt-card__footer">
+        <div class="prompt-card__answer-bar"></div>
+        ${footerHtml}
+      </div>
     </div>
   `;
 }

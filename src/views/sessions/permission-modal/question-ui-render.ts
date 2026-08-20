@@ -54,15 +54,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   let firstRender = true;
   let hintTimer: number | undefined;
 
-  // Tabs manually opened via the footer's pencil toggle (question index, or
-  // questions.length for summary). UI-only, not synced to the cross-device draft.
-  const openTabs = new Set<number>();
-  const hasContentForTab = (tab: number): boolean =>
-    tab === questions.length ? state.additionalMessage.trim() !== "" : (freeText.get(tab) ?? "").trim() !== "";
-  // Already-typed content can't be hidden behind a closed toggle (ghost
-  // entries get shown, not hidden) - real content forces the tab open.
-  const isAnswerBarOpen = (tab: number): boolean => openTabs.has(tab) || hasContentForTab(tab);
-
   // Brief feedback for a paste that couldn't attach (see attachments.ts's
   // handleAttachmentPaste) - one reused node per card, auto-clears itself.
   function showPasteHint(bar: HTMLElement, message: string): void {
@@ -135,24 +126,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     btn.onclick = isSubmitMode ? submit : advance;
   }
 
-  // Shows/labels the footer's pencil toggle for the active tab: hidden on a
-  // summary tab with no extras, lit while the zone is open. Called by
-  // syncAnswerBar() so it always matches what just rendered.
-  function updateAnswerToggle(): void {
-    const btn = host.querySelector<HTMLButtonElement>('[data-act="answer-toggle"]');
-    if (!btn) return;
-    const isSummary = hasSummary && state.activeTab === questions.length;
-    const unavailable = isSummary && !opts.supportsExtras;
-    btn.style.display = unavailable ? "none" : "";
-    if (unavailable) return;
-    btn.classList.toggle("is-active", isAnswerBarOpen(state.activeTab));
-    btn.title = isSummary ? "Add a message" : "Answer in your own words";
-  }
-
-  // Fills + wires the fixed answer bar for the active tab: one shared
-  // textarea swapped on every tab change instead of one per panel, so the
-  // input stays pinned below the scrolling content. Called by both render()
-  // and the no-rebuild stepTab() path.
+  // Fills + wires the inline answer bar (footer, next to Skip/Next) for the
+  // active tab: one shared textarea swapped on every tab change instead of
+  // one per panel. Called by both render() and the no-rebuild stepTab() path.
   function syncAnswerBar(): void {
     const bar = host.querySelector<HTMLElement>(".prompt-card__answer-bar");
     if (!bar) return;
@@ -160,12 +136,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     // with the DOM node below - drop its document-level listeners first.
     slashPopup.destroyAll();
     const isSummary = hasSummary && state.activeTab === questions.length;
-    bar.innerHTML = !isAnswerBarOpen(state.activeTab)
-      ? ""
-      : isSummary
-        ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
-        : ownZoneHtml(state.activeTab, freeText);
-    updateAnswerToggle();
+    bar.innerHTML = isSummary
+      ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
+      : ownZoneHtml(state.activeTab, freeText);
 
     const otherEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input, .prompt-extra-input");
     if (!otherEl) return;
@@ -267,11 +240,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${degradedBadge}<button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, auqAttachments)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
-      // answer-toggle replaces the old always-visible own-words section (see
-      // updateAnswerToggle/isAnswerBarOpen); spacer keeps Skip/Next right-aligned.
       const footerHtml = `
-        <button type="button" class="prompt-icon-btn" data-act="answer-toggle"><i class="ph ph-pencil-simple"></i></button>
-        <span class="prompt-footer__spacer"></span>
         <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
         <button type="button" class="btn btn-primary" data-act="primary"></button>
       `;
@@ -349,13 +318,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
       host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
 
-      host.querySelector<HTMLButtonElement>('[data-act="answer-toggle"]')
-        ?.addEventListener("click", () => {
-          const tab = state.activeTab;
-          if (openTabs.has(tab)) openTabs.delete(tab); else openTabs.add(tab);
-          syncAnswerBar();
-          syncMessagesPadding();
-        });
       host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
         ?.addEventListener("click", cancel);
       host.querySelectorAll<HTMLButtonElement>('[data-summary-tab]').forEach((btn) => {

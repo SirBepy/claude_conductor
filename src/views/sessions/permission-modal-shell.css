@@ -220,28 +220,23 @@
   user-select: text;
 }
 
-/* Fixed input area (free-text answer / review's extra message), synced to
- * the active tab by syncAnswerBar(). No overflow cap: textarea self-limits
- * to 160px, and `auto` here would clip the "/" popup which opens upward via
- * `bottom:100%` off the textarea, past this box's own scrollport. */
+/* Free-text answer / review's extra message, inline in the footer row next
+ * to Skip/Next (synced to the active tab by syncAnswerBar()). flex-wrap on
+ * the footer drops it to its own line above the buttons when the row gets
+ * too narrow for both. */
 .prompt-card__answer-bar {
-  flex-shrink: 0;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface-alt);
+  flex: 1 1 200px;
+  min-width: 200px;
   user-select: text;
 }
 .prompt-card__answer-bar:empty {
   display: none;
 }
 
-/* Pushes the answer-toggle button (data-act="answer-toggle") to the left
- * edge while Skip/Next stay right-aligned, in the same flex row. */
-.prompt-footer__spacer {
-  flex: 1;
-}
-
 .prompt-card__footer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px;

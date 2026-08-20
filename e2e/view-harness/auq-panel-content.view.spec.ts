@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView, openAnswerBar } from "./harness";
+import { mountView } from "./harness";
 
 // Regression gate: the horizontal track's whole point is that a drag/swipe
 // between questions must reveal real content, never a blank shell - a prior
@@ -51,8 +51,6 @@ test("mounting a 3-question card renders every panel's real content, not just th
   await expect(panels.nth(1)).not.toHaveClass(/is-active/);
   await expect(panels.nth(2)).not.toHaveClass(/is-active/);
 
-  // The answer bar mirrors panel 0 (the active one) without any panel
-  // navigation - opening the (closed-by-default) toggle isn't a panel move.
-  await openAnswerBar(card);
+  // The answer bar mirrors panel 0 (the active one) without any navigation.
   await expect(card.locator(".prompt-card__answer-bar .prompt-q__other-input")).toBeAttached();
 });

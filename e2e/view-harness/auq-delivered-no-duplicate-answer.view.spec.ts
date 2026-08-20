@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView, openAnswerBar } from "./harness";
+import { mountView } from "./harness";
 
 // Regression: `respond_question` reports `delivered` - whether a live blocking
 // waiter (the MCP `ask_user_question` tool, our only live AUQ path since the
@@ -123,7 +123,6 @@ test.describe("view-harness / delivered answer sends no duplicate message", () =
     await card.locator('.prompt-opt input[data-label="X"]').click();
     await card.locator('.prompt-pager [data-nav="1"]').click();
 
-    await openAnswerBar(card);
     await card.locator(".prompt-extra-input").fill("Also check the CI logs while you're at it.");
     await card.locator('[data-act="primary"]').click();
 
