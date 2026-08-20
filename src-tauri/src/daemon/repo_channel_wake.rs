@@ -23,6 +23,13 @@
 use crate::daemon::lifecycle;
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
+use std::time::Duration;
+
+/// Held between a wake being queued and it being delivered. `drain` already
+/// coalesces whatever is queued at delivery time, but with no window a peer
+/// that replies fast gets one solo wake per post; 3s swallows a burst of
+/// back-to-back coordination notes without stalling an urgent one (todo 698).
+pub const IDLE_COALESCE_WINDOW: Duration = Duration::from_secs(3);
 
 /// Cap on queued-but-undelivered lines per target session. Unlike
 /// `jarvis_wake` (whose queue only ever fills from a bounded set of worker
@@ -58,6 +65,21 @@ pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, line: String) 
 /// queue (in original order) so a transient respawn failure doesn't silently
 /// lose a wake - the next trigger retries the same coalesced batch.
 pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
+    drain_with(state, target_session_id, |text| async move {
+        lifecycle::send_message_with_respawn(state, target_session_id, &text, true).await
+    })
+    .await;
+}
+
+/// [`drain`] with the child-stdin write injected, so the queue/coalescing
+/// logic is exercisable without a live session (a real one would try to
+/// respawn `claude`). `drain` is the only production instantiation.
+async fn drain_with<F, Fut, E>(state: &Arc<DaemonState>, target_session_id: &str, send: F)
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<(), E>>,
+    E: std::fmt::Display,
+{
     let Some(inst) = state.registry.get(target_session_id) else { return };
     if inst.ended_at.is_some() || inst.busy {
         return;
@@ -70,7 +92,7 @@ pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
         }
     };
     let combined = lines.join("\n");
-    match lifecycle::send_message_with_respawn(state, target_session_id, &combined, true).await {
+    match send(combined).await {
         Ok(()) => {
             state.registry.set_awaiting(target_session_id, None);
             state.registry.set_busy_from_wake(target_session_id);
@@ -98,12 +120,65 @@ pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
 /// loop back into `spawn_session` on a respawn). RPC/hook-server callers
 /// (`daemon::methods::channel::post_message`, never inside the pump) also use
 /// this form so posting a message never blocks on delivering it.
+///
+/// Waits out [`IDLE_COALESCE_WINDOW`] first: without it a peer that is already
+/// idle takes one full injected turn per post, which is what todo 698 measured
+/// at ~20k wasted tokens over seven near-identical wakes.
 pub fn spawn_drain(state: &Arc<DaemonState>, target_session_id: &str) {
     let state = state.clone();
     let target_session_id = target_session_id.to_string();
     tokio::spawn(async move {
+        tokio::time::sleep(IDLE_COALESCE_WINDOW).await;
         drain(&state, &target_session_id).await;
     });
+}
+
+/// Resolve `post_message`'s caller-supplied `target` to the ids to wake;
+/// `None`/empty broadcasts to the sender's live project peers as before.
+/// SECURITY: naming an id is a capability to wake it, so an unknown, ended,
+/// self or cross-project id errors out instead of falling back to broadcast.
+pub fn resolve_targets(
+    state: &Arc<DaemonState>,
+    sender_session_id: &str,
+    targets: Option<&[String]>,
+) -> Result<Vec<String>, String> {
+    let sender = state
+        .registry
+        .get(sender_session_id)
+        .ok_or_else(|| format!("unknown session: {sender_session_id}"))?;
+    let named: &[String] = match targets {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            return Ok(state
+                .registry
+                .by_project(&sender.project_id)
+                .into_iter()
+                .filter(|i| i.session_id != sender_session_id && i.ended_at.is_none())
+                .map(|i| i.session_id)
+                .collect())
+        }
+    };
+    let mut resolved: Vec<String> = Vec::with_capacity(named.len());
+    for raw in named {
+        let id = raw.trim();
+        if id == sender_session_id {
+            return Err("cannot target your own session".to_string());
+        }
+        let inst = state
+            .registry
+            .get(id)
+            .ok_or_else(|| format!("unknown target session: {id}"))?;
+        if inst.ended_at.is_some() {
+            return Err(format!("target session has already ended: {id}"));
+        }
+        if inst.project_id != sender.project_id {
+            return Err(format!("target session is in another project: {id}"));
+        }
+        if !resolved.iter().any(|seen| seen == id) {
+            resolved.push(id.to_string());
+        }
+    }
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -170,5 +245,118 @@ mod tests {
         drain(&state, "ghost").await;
         let queues = state.repo_channel_wakes.lock().unwrap();
         assert_eq!(queues.get("ghost").map(|q| q.len()).unwrap_or(0), 1);
+    }
+
+    fn live(state: &Arc<DaemonState>, id: &str, project: &str) {
+        state.registry.upsert_interactive(id, std::path::Path::new("."), project, "2026-07-30T00:00:00Z");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn near_simultaneous_idle_posts_coalesce_into_one_wake() {
+        // The content assertion is the proof, not the count: without the
+        // window the first drain fires immediately and delivers "first" alone.
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        let sent: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        // Mirrors spawn_drain's body with the child-stdin write recorded instead.
+        let wake = |state: Arc<DaemonState>, sent: Arc<std::sync::Mutex<Vec<String>>>| async move {
+            tokio::time::sleep(IDLE_COALESCE_WINDOW).await;
+            drain_with(&state, "s1", |text| async move {
+                sent.lock().unwrap().push(text);
+                Ok::<(), String>(())
+            })
+            .await;
+        };
+
+        enqueue(&state, "s1", "first".into());
+        let h1 = tokio::spawn(wake(state.clone(), sent.clone()));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        enqueue(&state, "s1", "second".into());
+        let h2 = tokio::spawn(wake(state.clone(), sent.clone()));
+        h1.await.unwrap();
+        h2.await.unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1, "two posts inside the window must produce one wake");
+        assert_eq!(sent[0], "first\nsecond");
+    }
+
+    #[test]
+    fn resolve_targets_without_a_target_broadcasts_to_live_project_peers() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        live(&state, "s2", "proj-1");
+        live(&state, "s3", "proj-1");
+        live(&state, "s4", "proj-2");
+        state.registry.mark_ended("s3", crate::types::EndReason::Manual, "2026-07-30T00:00:01Z");
+
+        let mut ids = resolve_targets(&state, "s1", None).unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["s2"], "not self, not ended, not another project");
+        assert_eq!(resolve_targets(&state, "s1", Some(&[])).unwrap(), vec!["s2".to_string()]);
+    }
+
+    #[test]
+    fn resolve_targets_returns_only_the_named_session() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        live(&state, "s2", "proj-1");
+        live(&state, "s3", "proj-1");
+
+        let ids = resolve_targets(&state, "s1", Some(&["s3".to_string()])).unwrap();
+        assert_eq!(ids, vec!["s3".to_string()], "s2 must not be woken");
+    }
+
+    #[test]
+    fn resolve_targets_rejects_an_unknown_id() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        live(&state, "s2", "proj-1");
+        let r = resolve_targets(&state, "s1", Some(&["typo".to_string()]));
+        assert_eq!(r, Err("unknown target session: typo".to_string()));
+    }
+
+    #[test]
+    fn resolve_targets_rejects_an_ended_id() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        live(&state, "s2", "proj-1");
+        state.registry.mark_ended("s2", crate::types::EndReason::Manual, "2026-07-30T00:00:01Z");
+        let r = resolve_targets(&state, "s1", Some(&["s2".to_string()]));
+        assert_eq!(r, Err("target session has already ended: s2".to_string()));
+    }
+
+    #[test]
+    fn resolve_targets_rejects_a_cross_project_id() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        live(&state, "s9", "proj-2");
+        let r = resolve_targets(&state, "s1", Some(&["s9".to_string()]));
+        assert_eq!(r, Err("target session is in another project: s9".to_string()));
+    }
+
+    #[test]
+    fn resolve_targets_rejects_targeting_yourself() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        let r = resolve_targets(&state, "s1", Some(&["s1".to_string()]));
+        assert_eq!(r, Err("cannot target your own session".to_string()));
+    }
+
+    #[test]
+    fn resolve_targets_rejects_an_unknown_sender() {
+        let state = test_state();
+        let r = resolve_targets(&state, "ghost", None);
+        assert_eq!(r, Err("unknown session: ghost".to_string()));
+    }
+
+    #[test]
+    fn resolve_targets_dedupes_a_repeated_id() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        live(&state, "s2", "proj-1");
+        let ids = resolve_targets(&state, "s1", Some(&["s2".to_string(), " s2 ".to_string()])).unwrap();
+        assert_eq!(ids, vec!["s2".to_string()]);
     }
 }

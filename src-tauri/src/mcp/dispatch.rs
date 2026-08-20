@@ -189,6 +189,27 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     }
 }
 
+/// `post_message`'s optional `target` (todo 698): one session id or a list,
+/// normalized to an array so the daemon body shape is stable. Absent, blank or
+/// non-string stays null, which the daemon reads as today's broadcast.
+fn normalize_targets(raw: Option<&Value>) -> Value {
+    let ids: Vec<Value> = match raw {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).collect(),
+        _ => return Value::Null,
+    }
+    .into_iter()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .map(|s| Value::String(s.to_string()))
+    .collect();
+    if ids.is_empty() {
+        Value::Null
+    } else {
+        Value::Array(ids)
+    }
+}
+
 /// Inter-agent coordination channel, scoped per project.
 fn channel_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     match name {
@@ -200,6 +221,7 @@ fn channel_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             let body = json!({
                 "session_id": ctx.session_id,
                 "text": ctx.args["text"],
+                "target": normalize_targets(ctx.args.get("target")),
             });
             Some(ctx.relay("/channel/post-message", body, None, None))
         }
@@ -358,5 +380,23 @@ mod tests {
         let body = report_status_body(&args, "s", &[]);
         assert_eq!(body["waitingOn"]["label"], json!("build"));
         assert_eq!(body["waitingOn"]["href"], Value::Null);
+    }
+
+    #[test]
+    fn post_message_without_a_target_stays_a_broadcast() {
+        assert_eq!(normalize_targets(None), Value::Null);
+        assert_eq!(normalize_targets(Some(&json!([]))), Value::Null);
+        assert_eq!(normalize_targets(Some(&json!("   "))), Value::Null);
+        assert_eq!(normalize_targets(Some(&json!(7))), Value::Null);
+    }
+
+    #[test]
+    fn post_message_target_normalizes_to_an_array() {
+        assert_eq!(normalize_targets(Some(&json!("sess-a"))), json!(["sess-a"]));
+        assert_eq!(
+            normalize_targets(Some(&json!([" sess-a ", "", "sess-b", 3]))),
+            json!(["sess-a", "sess-b"]),
+            "blanks and non-strings dropped, ids trimmed"
+        );
     }
 }
