@@ -44,6 +44,17 @@ export interface CumulativeUsage {
   costUsd: number;
 }
 
+/** Best-effort: a fetch failure just means no skip fold this load, not a
+ *  broken history load (mirrors sessionEvents.loadInitial's own tolerance). */
+async function fetchSkipMarks(sessionId: string): Promise<number[]> {
+  try {
+    const marks = await invoke<number[]>("get_skipped_question_marks", { sessionId });
+    return Array.isArray(marks) ? marks : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Owns the per-session render state and wires the live/history event feeds to
  * the DOM. The heavy lifting lives in two sibling modules that operate on this
@@ -415,9 +426,13 @@ export class ChatRenderer {
     if (!this.sessionId) return;
     const sid = this.sessionId;
     this.paginator.cwdHint = cwd;
-    const events = [...(await sessionEvents.loadInitial(sid, cwd))];
+    // Skip marks (todo 661) fetched once per hydrate, alongside the history
+    // page, and cached on the paginator so both the bulk-load fold and the
+    // older-page fold read the same list.
+    const [events, marks] = await Promise.all([sessionEvents.loadInitial(sid, cwd), fetchSkipMarks(sid)]);
     if (this.sessionId !== sid) return;
-    await bulkLoadEvents(this, events, opts);
+    this.paginator.skipMarks = marks;
+    await bulkLoadEvents(this, [...events], opts);
     if (this.sessionId !== sid) return;
     this.paginator.install();
   }

@@ -12,12 +12,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, assistantEvent, toolUseEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
+let invokeRouter;
+
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -71,27 +75,26 @@ async function makeRenderer() {
 
 describe("pagination folds prepended turns", () => {
   it("folds a complete prepended turn into one footer with settled meta", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        // Initial window: a clean later turn.
-        events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
-        oldest_seq: 10,
-        newest_seq: 12,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        // Older page: one complete turn with tools + usage.
-        events: [
-          userEvent("old question", 1_000_000),
-          assistantEvent("old answer", 1_005_000),
-          toolUseEvent("Bash", { command: "ls" }, "t1", 1_010_000),
-          toolResultEvent("t1", 1_011_000),
-          turnUsageEvent({ outputTokens: 1200, durationMs: 0 }),
-        ],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      // Initial window: a clean later turn.
+      events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      // Older page: one complete turn with tools + usage.
+      events: [
+        userEvent("old question", 1_000_000),
+        assistantEvent("old answer", 1_005_000),
+        toolUseEvent("Bash", { command: "ls" }, "t1", 1_010_000),
+        toolResultEvent("t1", 1_011_000),
+        turnUsageEvent({ outputTokens: 1200, durationMs: 0 }),
+      ],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();
@@ -112,28 +115,27 @@ describe("pagination folds prepended turns", () => {
   });
 
   it("folds the initial window's leading partial turn at load (no scroll needed)", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        // Initial window cut MID-turn: tool rows with no opening user message.
-        events: [
-          toolUseEvent("Bash", { command: "build" }, "t9", 1_020_000),
-          toolResultEvent("t9", 1_021_000),
-          assistantEvent("done building", 1_025_000),
-          turnUsageEvent({ outputTokens: 700, durationMs: 0 }),
-          userEvent("next question", 1_100_000),
-          assistantEvent("next answer", 1_101_000),
-        ],
-        oldest_seq: 5,
-        newest_seq: 12,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        // Older page brings the opening user message of that cut turn.
-        events: [userEvent("the original ask", 1_000_000)],
-        oldest_seq: 0,
-        newest_seq: 4,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      // Initial window cut MID-turn: tool rows with no opening user message.
+      events: [
+        toolUseEvent("Bash", { command: "build" }, "t9", 1_020_000),
+        toolResultEvent("t9", 1_021_000),
+        assistantEvent("done building", 1_025_000),
+        turnUsageEvent({ outputTokens: 700, durationMs: 0 }),
+        userEvent("next question", 1_100_000),
+        assistantEvent("next answer", 1_101_000),
+      ],
+      oldest_seq: 5,
+      newest_seq: 12,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      // Older page brings the opening user message of that cut turn.
+      events: [userEvent("the original ask", 1_000_000)],
+      oldest_seq: 0,
+      newest_seq: 4,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeRenderer();
 
@@ -152,7 +154,7 @@ describe("pagination folds prepended turns", () => {
   });
 
   it("holds the transcript hidden during build, then re-pins and reveals after settle", async () => {
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("q", 1_000_000), assistantEvent("plain answer", 1_001_000)],
       oldest_seq: 0,
       newest_seq: 2,
@@ -197,32 +199,31 @@ describe("pagination folds prepended turns", () => {
   });
 
   it("carries usage across batches for a turn that straddles them", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        // Initial window: only the NEXT turn's user message onward.
-        events: [userEvent("newest question", 2_000_000), assistantEvent("newest answer", 2_001_000)],
-        oldest_seq: 20,
-        newest_seq: 22,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        // Batch A (newer half of the old turn): its trailing usage, NO boundary.
-        events: [
-          toolUseEvent("Read", { file_path: "/x.ts" }, "r1", 1_050_000),
-          toolResultEvent("r1", 1_051_000),
-          turnUsageEvent({ outputTokens: 2000, durationMs: 0 }),
-        ],
-        oldest_seq: 10,
-        newest_seq: 19,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        // Batch B (older half): the opening user message.
-        events: [userEvent("the straddled ask", 1_000_000), assistantEvent("starting...", 1_001_000)],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      // Initial window: only the NEXT turn's user message onward.
+      events: [userEvent("newest question", 2_000_000), assistantEvent("newest answer", 2_001_000)],
+      oldest_seq: 20,
+      newest_seq: 22,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      // Batch A (newer half of the old turn): its trailing usage, NO boundary.
+      events: [
+        toolUseEvent("Read", { file_path: "/x.ts" }, "r1", 1_050_000),
+        toolResultEvent("r1", 1_051_000),
+        turnUsageEvent({ outputTokens: 2000, durationMs: 0 }),
+      ],
+      oldest_seq: 10,
+      newest_seq: 19,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      // Batch B (older half): the opening user message.
+      events: [userEvent("the straddled ask", 1_000_000), assistantEvent("starting...", 1_001_000)],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();

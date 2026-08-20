@@ -7,12 +7,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
+let invokeRouter;
+
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -100,23 +104,22 @@ describe("scrollback (eventToRenderedMessage): MCP ask_user_question", () => {
 
 describe("pagination (older-page load): MCP ask_user_question", () => {
   it("renders a resolved question card (not a raw tool_result row) after scrolling into history", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [userEvent("later question", 2_000_000)],
-        oldest_seq: 10,
-        newest_seq: 10,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        events: [
-          userEvent("old question", 1_000_000),
-          mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
-          toolResultEvent("q1", "User answered the question(s):\nQ: Pick one?\nA: Real answer", {}, 1_001_500),
-        ],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000)],
+      oldest_seq: 10,
+      newest_seq: 10,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [
+        userEvent("old question", 1_000_000),
+        mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
+        toolResultEvent("q1", "User answered the question(s):\nQ: Pick one?\nA: Real answer", {}, 1_001_500),
+      ],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeAttachedRenderer("sess-mcp-auq-");
     await renderer.fetchOlder();
@@ -156,25 +159,24 @@ describe("live: Skip flips the open card to Skipped", () => {
 
 describe("pagination (older-page load): fire-and-forget answer via <auq-answer/> follow-up", () => {
   it("resolves the card from the later sentinel-tagged message, not just a direct tool_result", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [userEvent("later question", 2_000_000)],
-        oldest_seq: 10,
-        newest_seq: 10,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        events: [
-          userEvent("old question", 1_000_000),
-          mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
-          // Fire-and-forget deny handshake: is_error, no real answer text.
-          toolResultEvent("q1", "", { isError: true }, 1_001_200),
-          userEvent("<auq-answer/>User answered the question(s):\nQ: Pick one?\nA: Real answer", 1_001_500),
-        ],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000)],
+      oldest_seq: 10,
+      newest_seq: 10,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [
+        userEvent("old question", 1_000_000),
+        mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
+        // Fire-and-forget deny handshake: is_error, no real answer text.
+        toolResultEvent("q1", "", { isError: true }, 1_001_200),
+        userEvent("<auq-answer/>User answered the question(s):\nQ: Pick one?\nA: Real answer", 1_001_500),
+      ],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeAttachedRenderer("sess-mcp-auq-sentinel-");
     await renderer.fetchOlder();
@@ -193,14 +195,13 @@ describe("pagination (older-page load): fire-and-forget answer via <auq-answer/>
 // marks are folded in client-side instead (non-paginated lookup, option (b)).
 describe("pagination (older-page load): durable skip marks", () => {
   async function paginateWithMarks(prefix, marks, olderEvents) {
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [userEvent("later question", 2_000_000)],
-        oldest_seq: 10,
-        newest_seq: 10,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({ events: olderEvents, oldest_seq: 0, newest_seq: 9, has_more: false });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000)],
+      oldest_seq: 10,
+      newest_seq: 10,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", { events: olderEvents, oldest_seq: 0, newest_seq: 9, has_more: false });
     const { renderer, container } = await makeAttachedRenderer(prefix);
     renderer.paginator.skipMarks = marks;
     await renderer.fetchOlder();

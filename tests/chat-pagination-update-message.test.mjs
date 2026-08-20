@@ -6,12 +6,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, assistantEvent, toolUseEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
+let invokeRouter;
+
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -52,25 +56,24 @@ async function makeRenderer() {
 
 describe("older-page update_message rendering", () => {
   it("applies a same-batch revise to the earlier send_message bubble", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
-        oldest_seq: 10,
-        newest_seq: 12,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        events: [
-          userEvent("old question", 1_000_000),
-          sendMessageEvent("original text", "m1", 1_001_000),
-          toolResultEvent("m1", {}, 1_001_500),
-          updateMessageEvent({ message: 1, text: "revised text" }, "u1", 1_002_000),
-          toolResultEvent("u1", {}, 1_002_500),
-        ],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [
+        userEvent("old question", 1_000_000),
+        sendMessageEvent("original text", "m1", 1_001_000),
+        toolResultEvent("m1", {}, 1_001_500),
+        updateMessageEvent({ message: 1, text: "revised text" }, "u1", 1_002_000),
+        toolResultEvent("u1", {}, 1_002_500),
+      ],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();
@@ -80,25 +83,24 @@ describe("older-page update_message rendering", () => {
   });
 
   it("applies a same-batch retract to the earlier send_message bubble", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
-        oldest_seq: 10,
-        newest_seq: 12,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        events: [
-          userEvent("old question", 1_000_000),
-          sendMessageEvent("oops", "m2", 1_001_000),
-          toolResultEvent("m2", {}, 1_001_500),
-          updateMessageEvent({ message: 1, retract: true }, "u2", 1_002_000),
-          toolResultEvent("u2", {}, 1_002_500),
-        ],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [
+        userEvent("old question", 1_000_000),
+        sendMessageEvent("oops", "m2", 1_001_000),
+        toolResultEvent("m2", {}, 1_001_500),
+        updateMessageEvent({ message: 1, retract: true }, "u2", 1_002_000),
+        toolResultEvent("u2", {}, 1_002_500),
+      ],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();

@@ -134,8 +134,54 @@ export function tryHandleQuestionSkipped(
   if (ev.kind !== "question_skipped") return false;
   // Fire-and-forget Skip: no real tool_use_id to key off, so resolve the
   // same heuristic way a real answer does - the last still-open card.
-  // Live-only; history still shows "awaiting answer" until durable
-  // storage exists (todo 661).
   resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT);
   return true;
+}
+
+/** Pair each durable skip mark (unix ms) with the nearest PRECEDING
+ *  question card - a Skip never reaches the transcript, so there is no
+ *  tool_use_id to key on. Same one-AUQ-in-flight heuristic as the live path's
+ *  resolvePendingQuestionCard; marks for other pages match nothing. */
+export function matchSkipMarks(
+  cards: { id: string; ts: number }[],
+  marks: number[],
+  resolved: Set<string>,
+): Set<string> {
+  const skipped = new Set<string>();
+  for (const mark of marks) {
+    if (!Number.isFinite(mark)) continue;
+    for (let i = cards.length - 1; i >= 0; i--) {
+      const card = cards[i]!;
+      if (card.ts <= 0 || card.ts > mark) continue;
+      // The nearest preceding card being answered means this mark belongs to a
+      // card on another page, not to an older one here.
+      if (!resolved.has(card.id) && !skipped.has(card.id)) skipped.add(card.id);
+      break;
+    }
+  }
+  return skipped;
+}
+
+/** Bulk-load fold (todo 661): after full history replay, resolve any question
+ *  card still open as Skipped if a durable mark matches it - the counterpart
+ *  to prependEvents' older-page fold, which the initial hydrate never runs
+ *  through. No move-to-end: the card's element isn't built yet. */
+export function applySkipMarks(r: ChatRenderer, marks: number[]): void {
+  if (marks.length === 0) return;
+  const cards: { id: string; ts: number }[] = [];
+  const resolved = new Set<string>();
+  for (const m of r.messages) {
+    if (m.kind !== "question" || !m.id) continue;
+    cards.push({ id: m.id, ts: m.ts });
+    if (m.text !== undefined) resolved.add(m.id);
+  }
+  const skipped = matchSkipMarks(cards, marks, resolved);
+  if (skipped.size === 0) return;
+  for (let i = 0; i < r.messages.length; i++) {
+    const m = r.messages[i]!;
+    if (m.kind === "question" && m.id && skipped.has(m.id)) {
+      r.messages[i] = { ...m, text: AUQ_SKIPPED_TEXT };
+      r.dirtyIndices.add(i);
+    }
+  }
 }

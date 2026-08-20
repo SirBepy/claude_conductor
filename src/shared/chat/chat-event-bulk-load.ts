@@ -15,6 +15,7 @@ import {
   scrollToBottomWhenSettled,
 } from "./chat-dom-renderer";
 import { handleChatEvent } from "./chat-event-handler";
+import { applySkipMarks } from "./chat-question-card";
 import { perfPhase } from "../perf";
 import type { ChatRenderer } from "./chat-renderer";
 
@@ -80,6 +81,10 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   }
   donePhase();
   if (r._bulkGen !== myGen) { return; } // see the identical guard above
+  // Fold durable skip marks (todo 661) now that every real event has replayed
+  // - the older-page fold's counterpart for the initial hydrate.
+  applySkipMarks(r, r.paginator.skipMarks);
+  flushRender(r);
   // History replay is done: deliver the FINAL header badge + thinking-bar
   // state in ONE shot (per-event updates were gated above so the badge didn't
   // count up and the bar didn't flip through every past activity). A done turn

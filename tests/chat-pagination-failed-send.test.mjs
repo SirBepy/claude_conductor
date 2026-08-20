@@ -6,12 +6,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, assistantEvent, toolUseEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
+let invokeRouter;
+
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -48,23 +52,22 @@ async function makeRenderer() {
 
 describe("older-page failed send_message rendering", () => {
   it("shows a 'Failed to send' ghost for a rejected send_message instead of dropping it", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
-        oldest_seq: 10,
-        newest_seq: 12,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        events: [
-          userEvent("old question", 1_000_000),
-          sendMessageEvent("too long, rejected", "m2", 1_001_000),
-          toolResultEvent("m2", { isError: true }, 1_001_500),
-        ],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [
+        userEvent("old question", 1_000_000),
+        sendMessageEvent("too long, rejected", "m2", 1_001_000),
+        toolResultEvent("m2", { isError: true }, 1_001_500),
+      ],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();

@@ -6,14 +6,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, assistantEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 // Mock the ipc module before importing anything that touches it (event-store
 // pulls it in at module-eval time).
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
+let invokeRouter;
+
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -43,19 +47,18 @@ describe("ChatRenderer.fetchOlder prepends instead of rebuilding", () => {
   it("preserves existing nodes and grows messageEls by slice length", async () => {
     // Stub the IPC: first call (loadInitial) returns 1 message + has_more,
     // second call (loadOlder) returns 2 older messages.
-    invokeMock
-      .mockResolvedValueOnce({
-        events: [assistantEvent("most-recent", 10)],
-        oldest_seq: 10,
-        newest_seq: 10,
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        events: [userEvent("older-1", 1), assistantEvent("older-2", 2)],
-        oldest_seq: 0,
-        newest_seq: 9,
-        has_more: false,
-      });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [assistantEvent("most-recent", 10)],
+      oldest_seq: 10,
+      newest_seq: 10,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("older-1", 1), assistantEvent("older-2", 2)],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
 
     const container = document.createElement("div");
     document.body.appendChild(container);

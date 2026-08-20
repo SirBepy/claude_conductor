@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, assistantEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
@@ -38,8 +39,11 @@ function makeBus() {
   };
 }
 
+let invokeRouter;
+
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -62,7 +66,7 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     globalThis.window.__TAURI__ = bus;
 
     // First open: the transcript page has only the first turn.
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("hi", 0), assistantEvent("first answer", 0)],
       oldest_seq: 0,
       newest_seq: 1,
@@ -77,7 +81,7 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     // A second turn (hi again -> "the dropped answer") completed while this chat
     // was backgrounded, but its assistant frame was dropped by the lossy notifier
     // and never reached the store. The authoritative transcript HAS it.
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [
         userEvent("hi", 0),
         assistantEvent("first answer", 0),
@@ -105,7 +109,7 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     const bus = makeBus();
     globalThis.window.__TAURI__ = bus;
 
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("hi", 0), assistantEvent("only answer", 0)],
       oldest_seq: 0,
       newest_seq: 1,
@@ -118,7 +122,7 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     await r.loadFromStore();
 
     // Transcript matches the cache exactly.
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("hi", 0), assistantEvent("only answer", 0)],
       oldest_seq: 0,
       newest_seq: 1,
@@ -135,7 +139,7 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     const bus = makeBus();
     globalThis.window.__TAURI__ = bus;
 
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("hi", 0), assistantEvent("first answer", 0)],
       oldest_seq: 0,
       newest_seq: 1,
@@ -187,7 +191,7 @@ describe("reconcile recovers a dropped turn into the rendered chat", () => {
     const bus = makeBus();
     globalThis.window.__TAURI__ = bus;
 
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("hi", 0)],
       oldest_seq: 0,
       newest_seq: 0,

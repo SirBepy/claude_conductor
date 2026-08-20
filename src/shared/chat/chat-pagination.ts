@@ -5,8 +5,12 @@ import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
-import { findNearestOpenQuestionId } from "./chat-question-card";
+import { findNearestOpenQuestionId, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
+
+// Re-exported: tests/chat-mcp-ask-question.test.mjs imports matchSkipMarks
+// from this module (its original home before it moved to chat-question-card.ts).
+export { matchSkipMarks };
 
 export interface PaginatorCallbacks {
   getSessionId(): string | null;
@@ -64,30 +68,6 @@ export function resolveOrdinalIn(messages: RenderedMessage[], n: number): number
     if (m.kind === "message" && !m.retracted && ++seen === n) return i;
   }
   return -1;
-}
-
-/** Pair each durable skip mark (unix ms) with the nearest PRECEDING unresolved
- *  question card - a Skip never reaches the transcript, so there is no
- *  tool_use_id to key on. Same one-AUQ-in-flight heuristic as the live path's
- *  resolvePendingQuestionCard; marks for other pages match nothing. */
-export function matchSkipMarks(
-  cards: { id: string; ts: number }[],
-  marks: number[],
-  resolved: Set<string>,
-): Set<string> {
-  const skipped = new Set<string>();
-  for (const mark of marks) {
-    if (!Number.isFinite(mark)) continue;
-    for (let i = cards.length - 1; i >= 0; i--) {
-      const card = cards[i]!;
-      if (card.ts <= 0 || card.ts > mark) continue;
-      // The nearest preceding card being answered means this mark belongs to a
-      // card on another page, not to an older one here.
-      if (!resolved.has(card.id) && !skipped.has(card.id)) skipped.add(card.id);
-      break;
-    }
-  }
-  return skipped;
 }
 
 /** Walk up to the direct child of container. Used to find insertion point for prepend. */
