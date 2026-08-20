@@ -344,6 +344,7 @@ export class TurnFooterRegistry {
    * No-op if already created or if the turn has already settled.
    */
   ensureProgressBar(key: TurnChipKey): void {
+    this.getOrCreateFooter(key);
     const st = this.turns.get(key);
     if (!st || st.settled || st.progressBar) return;
     const bar = document.createElement("div");
@@ -365,6 +366,7 @@ export class TurnFooterRegistry {
    * it doesn't exist. No-op when the turn has already settled.
    */
   setProgress(key: TurnChipKey, n: number, m: number): void {
+    this.getOrCreateFooter(key);
     const st = this.turns.get(key);
     if (!st || st.settled) return;
     if (!st.progressBar) this.ensureProgressBar(key);
@@ -404,21 +406,25 @@ export class TurnFooterRegistry {
 
   /** Create the TodoWrite-driven step checklist DOM. See turn-todo-checklist.ts. */
   ensureTodoChecklist(key: TurnChipKey): void {
+    this.getOrCreateFooter(key);
     ensureTodoChecklistImpl(this.turns.get(key));
   }
 
   /** Re-render the checklist's steps. See turn-todo-checklist.ts. */
   updateTodoSteps(key: TurnChipKey, steps: { label: string; status: TodoStepStatus }[]): void {
+    this.getOrCreateFooter(key);
     updateTodoStepsImpl(this.turns.get(key), steps);
   }
 
   /** Mark the active checklist row as interrupted. See turn-todo-checklist.ts. */
   interruptTodoChecklist(key: TurnChipKey): void {
+    this.getOrCreateFooter(key);
     interruptTodoChecklistImpl(this.turns.get(key));
   }
 
   /** Settle the checklist into a collapsed summary chip. See turn-todo-checklist.ts. */
   settleTodoChecklist(key: TurnChipKey): void {
+    this.getOrCreateFooter(key);
     settleTodoChecklistImpl(this.turns.get(key));
   }
 

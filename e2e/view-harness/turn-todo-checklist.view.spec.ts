@@ -98,11 +98,9 @@ test("a turn's TodoWrite renders the step checklist in the turn footer", async (
   }
 });
 
-// KNOWN BREAK, turn-todo-checklist.ts:106-110 (outside this change's file set):
-// a freshly created row is initialised `status: "pending"` and only styled
-// `if (entry.status !== step.status)`, so a step that ARRIVES pending is never
-// passed to applyTodoStepStatus - no `todo-step` class, empty icon span.
-test.fail("a pending step renders its empty circle", async ({ page }) => {
+// Fixed (todo 662): a freshly created row now force-applies its status on
+// creation, so a step that ARRIVES pending still gets styled.
+test("a pending step renders its empty circle", async ({ page }) => {
   await mountTodoChat(page);
   const rows = page.locator("#session-pane .session-messages .todo-checklist .todo-checklist-steps > li");
   await expect(rows.nth(2)).toHaveClass(/todo-step--pending/);

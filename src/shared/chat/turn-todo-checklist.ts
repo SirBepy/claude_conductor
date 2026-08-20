@@ -87,6 +87,7 @@ export function updateTodoSteps(
   for (const step of steps) {
     seen.add(step.label);
     let entry = tc.rows.get(step.label);
+    const isNewRow = !entry;
     if (!entry) {
       const row = document.createElement("li");
       const connector = document.createElement("span");
@@ -107,7 +108,7 @@ export function updateTodoSteps(
       tc.rows.set(step.label, entry);
       tc.order.push(step.label);
     }
-    if (entry.status !== step.status) applyTodoStepStatus(entry, step.status);
+    if (isNewRow || entry.status !== step.status) applyTodoStepStatus(entry, step.status);
   }
   // Remove rows for steps no longer present (rare, but don't crash if it happens).
   for (const label of tc.order) {
