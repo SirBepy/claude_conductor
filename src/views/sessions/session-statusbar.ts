@@ -437,7 +437,11 @@ export class SessionStatusbar {
     }
     switch (type) {
       case "model": {
-        const model = this.meta.model ?? this.sessionModel;
+        // sessionModel wins: it's the optimistic value set the instant the
+        // picker commits, while meta.model only catches up once a fresh turn's
+        // system-init event streams in (respawn is silent until the next
+        // message) - meta-first here let the chip snap back to the stale model.
+        const model = this.sessionModel ?? this.meta.model;
         if (model) return `<span class="sb-chip sb-model sb-model-btn${this.animClass("model")}" role="button" tabindex="0"><i class="ph ph-robot"></i>${escapeHtml(shortModelName(model))}</span>`;
         if (!this.metaLoaded) return this.skeletonChip("model", "sb-model", "ph-robot", "70px");
         return "";
@@ -631,7 +635,7 @@ export class SessionStatusbar {
       const wasOpen = this.modelPopover.isOpen;
       this.closeChipPopovers();
       if (!wasOpen) this.modelPopover.open(anchor, {
-        model: this.meta.model ?? this.sessionModel ?? "",
+        model: this.sessionModel ?? this.meta.model ?? "",
         sessionId: this.sessionId,
         onModelChange: this.onModelChange ?? undefined,
         onCommit: (next) => {

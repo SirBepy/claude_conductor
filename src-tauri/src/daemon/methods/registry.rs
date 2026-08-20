@@ -10,6 +10,35 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Kill+respawn `session_id` so a model/effort swap applies now instead of
+/// waiting for a natural restart - both are launch-only CLI flags. Resumes
+/// a busy/blocked session with "continue"; no-ops (returns `false`) if the
+/// session isn't live (e.g. a not-yet-started draft).
+async fn restart_live_session(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
+    if state.sessions.get(session_id).is_none() {
+        return false;
+    }
+    let was_busy = state.registry.get(session_id).map(|i| i.busy).unwrap_or(false);
+    let was_asked = state.list_prompts().await.iter()
+        .any(|v| v["payload"]["session_id"].as_str() == Some(session_id));
+    match crate::daemon::lifecycle::restart_session(state, session_id).await {
+        Ok(_) => {
+            if was_busy || was_asked {
+                if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
+                    state, session_id, "continue", false,
+                ).await {
+                    log::warn!("{caller}: auto-continue failed for {session_id}: {e}");
+                }
+            }
+            true
+        }
+        Err(e) => {
+            log::warn!("{caller}: restart failed for {session_id}: {e}");
+            false
+        }
+    }
+}
+
 pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     #[derive(serde::Deserialize)]
     struct SessionId { session_id: String }
@@ -60,9 +89,14 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 state.registry.set_effort(&p.session_id, &p.effort);
                 crate::sessions::chat_config::record(&p.session_id, "", &p.effort);
+
+                // Effort is launch-only like model - restart so it actually
+                // applies instead of silently no-op'ing on a live session.
+                let restarted = restart_live_session(&state, "set_session_effort", &p.session_id).await;
+
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
-                Ok(json!({"ok": true}))
+                Ok(json!({"ok": true, "restarted": restarted}))
             }
         });
     }
@@ -76,28 +110,7 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
                 state.registry.set_model(&p.session_id, &p.model);
                 crate::sessions::chat_config::record(&p.session_id, &p.model, "");
 
-                // A live process ignores the Registry update above; kill+respawn
-                // now (resuming the transcript) so the switch actually applies.
-                // Snapshot "was blocked" before the kill - EOF teardown clears it.
-                let mut restarted = false;
-                if state.sessions.get(&p.session_id).is_some() {
-                    let was_busy = state.registry.get(&p.session_id).map(|i| i.busy).unwrap_or(false);
-                    let was_asked = state.list_prompts().await.iter()
-                        .any(|v| v["payload"]["session_id"].as_str() == Some(p.session_id.as_str()));
-                    match crate::daemon::lifecycle::restart_session(&state, &p.session_id).await {
-                        Ok(_) => {
-                            restarted = true;
-                            if was_busy || was_asked {
-                                if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(
-                                    &state, &p.session_id, "continue", false,
-                                ).await {
-                                    log::warn!("set_session_model: auto-continue failed for {}: {}", p.session_id, e);
-                                }
-                            }
-                        }
-                        Err(e) => log::warn!("set_session_model: restart failed for {}: {}", p.session_id, e),
-                    }
-                }
+                let restarted = restart_live_session(&state, "set_session_model", &p.session_id).await;
 
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
