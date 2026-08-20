@@ -88,28 +88,55 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(page.locator("#prompt-card-host")).toHaveClass(/prompt-card-host--composer/);
   });
 
-  test("--composer mode: card's bottom edge clears a real safe-area inset", async ({ page }) => {
+  // The footer's own padding-box is flush with the viewport bottom by design
+  // (padding fills the inset) - the button inside it must clear, not the box.
+  test("footer buttons clear a real safe-area inset", async ({ page }) => {
     await mountPhoneSession(page);
     await overrideSafeArea(page, 100);
     await openQuestionCard(page, TALL_QUESTIONS);
+    await page.waitForTimeout(200); // settle the card's entrance animation
 
-    const box = (await page.locator(".prompt-card").boundingBox())!;
-    expect(box.y + box.height).toBeLessThanOrEqual(PHONE.height - 100);
+    const btnBox = (await page.locator('.prompt-card__footer [data-act="primary"]').boundingBox())!;
+    expect(btnBox.y + btnBox.height).toBeLessThanOrEqual(PHONE.height - 100);
   });
 
-  test("--composer mode: clearance stays non-zero when the inset reports 0 (todo 633)", async ({ page }) => {
+  test("footer clearance stays non-zero when the inset reports 0 (todo 633)", async ({ page }) => {
     await mountPhoneSession(page);
     await overrideSafeArea(page, 0);
     await openQuestionCard(page, TALL_QUESTIONS);
+    await page.waitForTimeout(200);
 
-    const box = (await page.locator(".prompt-card").boundingBox())!;
-    expect(PHONE.height - (box.y + box.height)).toBeGreaterThan(0);
+    const btnBox = (await page.locator('.prompt-card__footer [data-act="primary"]').boundingBox())!;
+    expect(PHONE.height - (btnBox.y + btnBox.height)).toBeGreaterThan(0);
   });
 
-  test("card's top edge stays below the header's bottom edge - project name never covered", async ({ page }) => {
+  // Supersedes the 2026-08-14 "project name never covered" call: the old
+  // ~80px-tall sliver above the composer was unreadable, so the sheet now
+  // goes truly fullscreen and the header unmounts with it (Joe, 2026-08-20).
+  test("fullscreen: card covers the whole viewport and the header/statusbar/tab bar unmount", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, TALL_QUESTIONS);
+    await page.waitForTimeout(200); // settle the entrance animation (translateY 6px -> 0)
 
+    const cardBox = (await page.locator(".prompt-card").boundingBox())!;
+    expect(cardBox.y).toBe(0);
+    expect(cardBox.height).toBe(PHONE.height);
+    await expect(page.locator(".session-header")).toBeHidden();
+    await expect(page.locator(".session-statusbar")).toBeHidden();
+    await expect(page.locator(".mobile-tabbar")).toBeHidden();
+  });
+
+  // Permission cards have no `.prompt-pager` and keep the pre-fullscreen,
+  // anchored-above-composer behavior untouched.
+  test("permission card still stays below the header - fullscreen is question-cards-only", async ({ page }) => {
+    await mountPhoneSession(page);
+    await page.evaluate(async () => {
+      const pc = await import("/views/sessions/permission-modal/permission-card.ts");
+      pc.showPermissionCard({
+        id: "p-1", session_id: "s1", tool_name: "Bash",
+        input: { command: "echo hi" },
+      } as never);
+    });
     const cardBox = (await page.locator(".prompt-card").boundingBox())!;
     const headerBox = (await page.locator(".session-header").boundingBox())!;
     expect(cardBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);

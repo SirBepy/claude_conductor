@@ -119,6 +119,40 @@
   .prompt-card__handle {
     display: flex;
   }
+
+  /* Question cards only (`.prompt-pager` in the header) go fullscreen instead
+   * of stopping at --prompt-card-max-h - supersedes 51102560/todo 648's
+   * header-stays-visible call (Joe, 2026-08-20). :has() specificity alone
+   * beats the rules above, no !important needed. */
+  #prompt-card-host:has(.prompt-card__header .prompt-pager) {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: none;
+    padding: 0;
+  }
+  .prompt-card:has(.prompt-card__header .prompt-pager) {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    margin: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+  /* No .composer-shell below it anymore to clear the home indicator - the
+   * footer (always last) grows its own bottom padding instead. */
+  .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
+    padding-bottom: max(10px, env(safe-area-inset-bottom), var(--keyboard-inset, 0px));
+  }
+  /* Short questions no longer float above a blank void: body claims whatever
+   * height the fullscreen card isn't spending on header/footer. */
+  .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__body {
+    flex: 1;
+    min-height: 0;
+  }
 }
 /* 768 mirrors MOBILE_BREAKPOINT in permission-modal/host.ts - keep both in sync. */
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {

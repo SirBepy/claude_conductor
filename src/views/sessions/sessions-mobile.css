@@ -124,6 +124,34 @@
     display: inline-flex;
   }
 
+  /* ── Fullscreen question sheet: replace the chrome, don't sit under it ──
+     A pending AUQ question (permission-modal-shell.css's fullscreen block)
+     covers the whole pane - the header/statusbar/tab bar painting underneath
+     it would be dead weight (and still tab-orderable/screen-reader-reachable
+     behind the sheet), so they unmount instead (Joe, 2026-08-20). Permission
+     cards have no `.prompt-pager` and keep the old anchored-above-composer
+     behavior untouched. */
+  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-header,
+  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-statusbar,
+  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .mobile-tabbar {
+    display: none;
+  }
+
+  /* ── Soft keyboard open: same chrome-unmount, driven by mobile-keyboard.ts ──
+     Reclaims the header/statusbar/tab bar's real estate the moment the
+     keyboard shows, rather than shrinking everything to fit alongside it
+     (Joe, 2026-08-20). --keyboard-inset (set alongside the attribute) is only
+     non-zero when the native layout viewport didn't already resize itself -
+     see mobile-keyboard.ts's doc comment. */
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-header,
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-statusbar,
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .mobile-tabbar {
+    display: none;
+  }
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-pane {
+    padding-bottom: var(--keyboard-inset, 0px);
+  }
+
   /* ── Bottom tab bar (V3: 30px paint, 44px tap) ────────────────────────── */
   /* Chat mode only - the sessions LIST has nothing to page between. */
   .view-sessions[data-mobile-pane="chat"] .mobile-tabbar {

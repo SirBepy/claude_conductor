@@ -28,6 +28,7 @@ import { loadSessionCharacters } from "./session-characters";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
 import { getTransport, isRemote } from "../../shared/transport";
 import { closeViewMoreMenu } from "./view-more-menu";
+import { initMobileKeyboard } from "../../shared/mobile-keyboard";
 import { backgroundRetainedChat, isRetainedRenderer } from "./chat-pane-cache";
 import {
   getSelectedSessionId,
@@ -206,6 +207,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   setPaneRef(pane);
   let previewController = wirePreviewPanel(root, pane);
   initThinkingBar(pane);
+  const teardownMobileKeyboard = initMobileKeyboard(view);
 
   // Click an unanswered AUQ card to put the real (answerable) card back up.
   // Gated on `.tool-qa-a--pending` so a resolved one doesn't reopen.
@@ -274,6 +276,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     closeViewMoreMenu();
     teardownOverflowMenu();
     teardownDaemonStatusListeners();
+    teardownMobileKeyboard();
     previewController?.destroy();
     previewController = null;
     state.previewController = null;
