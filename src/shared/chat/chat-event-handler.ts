@@ -402,6 +402,10 @@ function handleToolUseEvent(
       }
     }
     if (r.activeTurnChipKey !== null) {
+      // Both checklist methods no-op for a key the registry has no footer for,
+      // and a bulk load runs 8 events per flush - so any replayed turn whose
+      // TodoWrite shared a chunk with its opening user_message lost its steps.
+      r.turnFooters.getOrCreateFooter(r.activeTurnChipKey);
       r.turnFooters.ensureTodoChecklist(r.activeTurnChipKey);
       r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
     }
