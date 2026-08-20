@@ -1,8 +1,8 @@
 /* Voice dictation: mic button states + volatile-tail styling. */
 
-/* The mic is a mobile-only side affordance: on desktop, dictation lives in the
-   split-send ▾ menu and push-to-talk. It still surfaces on desktop *while
-   active* so there's a visible recording state and a one-click stop. */
+/* Dictation lives in the split-send ▾ menu on both desktop and mobile (plus
+   push-to-talk on desktop). The button itself only surfaces *while active* -
+   a visible recording state and a one-click stop, not a permanent row icon. */
 .composer-mic {
   display: none;
 }
@@ -10,12 +10,6 @@
 .composer-mic.recording,
 .composer-mic.connecting {
   display: flex;
-}
-
-@media (max-width: 768px) {
-  .composer-mic {
-    display: flex;
-  }
 }
 
 .composer-mic.recording {

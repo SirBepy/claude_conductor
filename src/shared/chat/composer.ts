@@ -407,28 +407,28 @@ export class Composer {
     return this.textarea?.selectionStart ?? this.textarea?.value.length ?? 0;
   }
 
-  /** Build + open the split-send chevron menu. Desktop: Voice + Schedule.
-   *  Mobile: Attach (voice is the on-screen mic there) + Schedule. Schedule only
-   *  appears with content to schedule. */
+  /** Build + open the split-send chevron menu: Voice + (mobile-only) Attach +
+   *  Schedule. Voice lives here on both platforms now - the mic button itself
+   *  only surfaces while actively recording (see composer-mic in voice.css).
+   *  Schedule only appears with content to schedule. */
   private openActionsMenu(anchor: HTMLElement): void {
     const items: ComposerMenuItem[] = [];
+    // Re-warm on menu open so Voice is hot by the time it's clicked, even if
+    // the sidecar idle-shut-down since the chat opened. Throttled inside warm().
+    this.cv.warm();
+    items.push({
+      icon: "microphone",
+      label: "Voice dictation",
+      run: () => {
+        this.textarea?.focus();
+        void this.cv.toggle(this.currentInsertPos());
+      },
+    });
     if (isMobileViewport()) {
       items.push({
         icon: "image",
         label: "Attach image",
         run: () => this.att.openFilePicker(),
-      });
-    } else {
-      // Re-warm on menu open so Voice is hot by the time it's clicked, even if
-      // the sidecar idle-shut-down since the chat opened. Throttled inside warm().
-      this.cv.warm();
-      items.push({
-        icon: "microphone",
-        label: "Voice dictation",
-        run: () => {
-          this.textarea?.focus();
-          void this.cv.toggle(this.currentInsertPos());
-        },
       });
     }
     if (this.opts.onSchedule && !this.isDraftEmpty()) {
