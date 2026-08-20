@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderBlocks, renderMessage, cleanUserBlocks, base64ToUtf8, detectStatusToken, highlightComposerInput, highlightSlashMentions, eventToRenderedMessage } from "../src/shared/chat/chat-transforms.ts";
+import { renderBlocks, renderMessage, cleanUserBlocks, base64ToUtf8, detectStatusToken, highlightComposerInput, highlightSlashMentions, eventToRenderedMessage, normalizeUserMessageText } from "../src/shared/chat/chat-transforms.ts";
 import { setSlashEntries } from "../src/shared/chat/slash-registry.ts";
 
 // Chip conversion is a USER-message-only concern (third arg = fileChips). The
@@ -479,6 +479,31 @@ describe("eventToRenderedMessage — isMeta user turns", () => {
       is_meta: false,
     });
     expect(msg.kind).toBe("user");
+  });
+
+  // Todo 659's two candidate causes, pinned to the reported transcript's bytes
+  // (session 1e5f1bb3, lines 3 and 4). Both are falsified here: the doubled
+  // bubble came from the store's dedup window, not from these transforms - see
+  // tests/chat-cold-boot-echo-dedup.test.mjs.
+  it("drops a hook-injected SKILL.md meta turn entirely, well before classifyMetaTurn", () => {
+    const msg = eventToRenderedMessage({
+      type: "user_message",
+      content: [{
+        type: "text",
+        text: "Base directory for this skill: C:\\Users\\tecno\\.claude-fibo\\skills\\pickup\n\n"
+          + "# /pickup\n\n> Pull the next planned todo off the lane, claim it, and do it.\n",
+      }],
+      timestamp: 1n,
+      remote_echo: false,
+      is_meta: true,
+    });
+    expect(msg).toBeNull();
+  });
+
+  it("normalizes a command-message/command-name pair to the composer echo's exact text", () => {
+    const jsonl = "<command-message>pickup</command-message>\n<command-name>/pickup</command-name>";
+    expect(normalizeUserMessageText(jsonl)).toBe("/pickup");
+    expect(normalizeUserMessageText(jsonl)).toBe(normalizeUserMessageText("/pickup"));
   });
 });
 

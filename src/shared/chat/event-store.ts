@@ -38,6 +38,10 @@ const OLDER_PAGE_SIZE = 10;
 // are minutes apart and fall outside the window. See ai_todo 77.
 const DEDUP_WINDOW_MS = 10_000;
 
+// A cold `claude` took 24.9s to write a submitted prompt into the JSONL, long
+// past DEDUP_WINDOW_MS, so echo sigs get their own consume-on-match set (659).
+const ECHO_MATCH_WINDOW_MS = 5 * 60_000;
+
 // Attachment tokens (<file:path> / <file:path::name>) the composer appends as
 // their own text blocks. Stripped from the dedup signature only — see the
 // user_message case in sigOf for why.
@@ -68,6 +72,8 @@ export interface CacheEntry {
   tailWatchers: Set<TailListener>;
   /** Recently-delivered live event signatures, for cross-source dedup. */
   recent: RecentSig[];
+  /** Composer echoes awaiting their JSONL replay; matched once, then removed. */
+  pendingEchoes: { sig: string; ts: number }[];
   /** Wall-clock ms of the last genuine access (load/read/subscribe) or
    * accepted live event, touched via touchAccess(). Drives the TTL sweep -
    * see event-store-eviction.ts's IDLE_TTL_MS (ai_todo 196). */
@@ -332,6 +338,9 @@ class SessionEventStore {
       for (const sub of fromEntry.subscribers) existing.subscribers.add(sub);
       for (const w of fromEntry.tailWatchers) existing.tailWatchers.add(w);
       for (const r of fromEntry.recent) existing.recent.push(r);
+      // A new chat echoes into the placeholder entry, so unmatched echoes have
+      // to survive the upgrade to the real session id.
+      for (const e of fromEntry.pendingEchoes) existing.pendingEchoes.push(e);
       existing.initialLoaded = existing.initialLoaded || fromEntry.initialLoaded;
       existing.oldestSeq = existing.oldestSeq ?? fromEntry.oldestSeq;
       existing.hasMore = existing.hasMore && fromEntry.hasMore;
@@ -358,6 +367,7 @@ class SessionEventStore {
     entry.hasMore = false;
     entry.initialLoaded = false;
     entry.recent = [];
+    entry.pendingEchoes = [];
     entry.streamAcc = null;
   }
 
@@ -367,7 +377,11 @@ class SessionEventStore {
       entry = this.makeEntry();
       this.cache.set(sessionId, entry);
     }
-    this.deliver(sessionId, ev);
+    if (!this.deliver(sessionId, ev) || ev.type !== "user_message") return;
+    // A tool-result-only user line normalizes to "u:" too; never tokenize it.
+    const sig = this.sigOf(ev);
+    if (sig === null || sig === "u:") return;
+    entry.pendingEchoes.push({ sig, ts: Date.now() });
   }
 
   /** Roll back a previously `pushSynthetic`-ed event (matched by reference
@@ -382,36 +396,39 @@ class SessionEventStore {
     if (!entry) return;
     const idx = entry.events.indexOf(ev);
     if (idx !== -1) entry.events.splice(idx, 1);
+    const sig = this.sigOf(ev);
+    const tok = sig === null ? -1 : entry.pendingEchoes.findIndex((e) => e.sig === sig);
+    if (tok !== -1) entry.pendingEchoes.splice(tok, 1);
   }
 
   /**
    * Common delivery gate for all LIVE event sources (runner stream, file
    * watcher, synthetic echoes). Drops cross-source duplicates of the same
-   * logical event, then pushes to the cache and notifies subscribers.
+   * logical event, then pushes/notifies. True when it was actually appended.
    *
    * Does NOT cover `loadInitial` / `loadOlder`: those install authoritative
    * JSONL pages directly and reconcile against live events by object identity.
    */
-  private deliver(sessionId: string, ev: ChatEvent): void {
+  private deliver(sessionId: string, ev: ChatEvent): boolean {
     // Rate-limit rejections drive the global banner, not a transcript row.
     // Route them out before the entry/dedup path so they surface for ANY
     // session the app is attached to, selected or not.
     if (ev.type === "notification" && (ev as { kind?: string }).kind === "rate_limit") {
       this.rateLimitHandler?.(sessionId, (ev as { body: string }).body);
-      return;
+      return false;
     }
     // Dropped non-delta events: force a transcript read, never render as a bubble.
     if (ev.type === "events_lagged") {
       void this.reconcileLatest(sessionId, undefined, { force: true });
-      return;
+      return false;
     }
     const entry = this.cache.get(sessionId);
-    if (!entry) return;
+    if (!entry) return false;
     // O(delta) stream chunks rebuild the running text here instead of
     // carrying full snapshots on the wire (ai_todo 186).
     if (ev.type === "assistant_delta") {
       this.applyDelta(entry, ev);
-      return;
+      return false;
     }
     // Turn boundary: the accumulator's (block, seq) numbering restarts with
     // the next turn's fresh `claude -p` process, so drop it now - otherwise
@@ -438,7 +455,7 @@ class SessionEventStore {
       }
       entry.streamAcc = null;
     }
-    if (this.isLiveDuplicate(entry, ev)) return;
+    if (this.isLiveDuplicate(entry, ev)) return false;
     this.recordSig(entry, ev);
     entry.events.push(ev);
     // Any accepted live event (tool call, streaming chunk, notification, ...)
@@ -448,6 +465,7 @@ class SessionEventStore {
     entry.subscribers.forEach((fn) => {
       try { fn(ev); } catch { /* ignore */ }
     });
+    return true;
   }
 
   /**
@@ -559,7 +577,14 @@ class SessionEventStore {
     }
     const sig = this.sigOf(ev);
     if (sig === null) return false;
-    return entry.recent.some((r) => r.sig === sig);
+    if (entry.recent.some((r) => r.sig === sig)) return true;
+    if (ev.type !== "user_message") return false;
+    // The watcher's replay of an already-echoed turn, past DEDUP_WINDOW_MS.
+    entry.pendingEchoes = entry.pendingEchoes.filter((e) => now - e.ts < ECHO_MATCH_WINDOW_MS);
+    const idx = entry.pendingEchoes.findIndex((e) => e.sig === sig);
+    if (idx === -1) return false;
+    entry.pendingEchoes.splice(idx, 1);
+    return true;
   }
 
   private recordSig(entry: CacheEntry, ev: ChatEvent): void {
@@ -585,6 +610,7 @@ class SessionEventStore {
       subscribers: new Set(),
       tailWatchers: new Set(),
       recent: [],
+      pendingEchoes: [],
       lastAccess: Date.now(),
       ended: false,
       streamAcc: null,
