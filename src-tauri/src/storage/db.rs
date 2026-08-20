@@ -13,7 +13,7 @@ use std::path::Path;
 /// Current schema version, mirrored into `PRAGMA user_version` by
 /// [`run_migrations`]. Bump alongside any structural change and add the
 /// matching branch to `run_migrations`.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Opens (creating if absent) the SQLite database at `path` and ensures the
 /// schema is present. The parent directory must already exist.
@@ -29,7 +29,7 @@ pub fn open_db(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-/// Creates the three dataset tables and their timestamp indexes. Idempotent:
+/// Creates the dataset tables and their indexes. Idempotent:
 /// safe to call on every open. Does NOT stamp `user_version` - that happens
 /// in [`run_migrations`], which must run AFTER this so it can still see the
 /// pre-migration version and decide what needs to change (stamping it here
@@ -57,6 +57,13 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
           data      TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_skill_ts ON skill_events(timestamp);
+
+        CREATE TABLE IF NOT EXISTS skipped_questions (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          timestamp  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_skipped_q_session ON skipped_questions(session_id);
         "#,
     )?;
     Ok(())
@@ -96,6 +103,9 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
             conn.execute("ALTER TABLE usage_snapshots ADD COLUMN account_id TEXT", [])?;
         }
     }
+
+    // v3 (skipped_questions) needs no branch here: it is a brand-new table, so
+    // init_schema's CREATE TABLE IF NOT EXISTS already covers pre-v3 DBs.
 
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())

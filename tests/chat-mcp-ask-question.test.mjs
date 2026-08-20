@@ -188,6 +188,75 @@ describe("pagination (older-page load): fire-and-forget answer via <auq-answer/>
   });
 });
 
+// Todo #661: a Skip writes nothing to the transcript JSONL, so scrollback used
+// to show "awaiting answer" forever. The daemon's durable skipped_questions
+// marks are folded in client-side instead (non-paginated lookup, option (b)).
+describe("pagination (older-page load): durable skip marks", () => {
+  async function paginateWithMarks(prefix, marks, olderEvents) {
+    invokeMock
+      .mockResolvedValueOnce({
+        events: [userEvent("later question", 2_000_000)],
+        oldest_seq: 10,
+        newest_seq: 10,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({ events: olderEvents, oldest_seq: 0, newest_seq: 9, has_more: false });
+    const { renderer, container } = await makeAttachedRenderer(prefix);
+    renderer.paginator.skipMarks = marks;
+    await renderer.fetchOlder();
+    return { renderer, container };
+  }
+
+  it("renders a card as Skipped when a mark follows it, with no transcript evidence at all", async () => {
+    const { renderer, container } = await paginateWithMarks("sess-skip-mark-", [1_001_400], [
+      userEvent("old question", 1_000_000),
+      mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
+    ]);
+
+    const card = container.querySelector(".msg.question-card");
+    expect(card).not.toBeNull();
+    const details = card.querySelector(".question-card-collapsible");
+    expect(details.hasAttribute("open")).toBe(false);
+    expect(details.querySelector(".question-card-summary").textContent).toContain("Skipped");
+    renderer.detach();
+  });
+
+  it("a question with no skip record still renders as pending", async () => {
+    const { renderer, container } = await paginateWithMarks("sess-skip-none-", [], [
+      userEvent("old question", 1_000_000),
+      mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
+    ]);
+
+    const details = container.querySelector(".msg.question-card .question-card-collapsible");
+    expect(details.hasAttribute("open")).toBe(true);
+    expect(details.querySelector(".question-card-summary").textContent).not.toContain("Skipped");
+    renderer.detach();
+  });
+
+  it("a real answer wins over a stray mark, and an out-of-page mark is a no-op", async () => {
+    const { renderer, container } = await paginateWithMarks("sess-skip-answered-", [1_001_400, 9_999_999], [
+      userEvent("old question", 1_000_000),
+      mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
+      toolResultEvent("q1", "User answered the question(s):\nQ: Pick one?\nA: Real answer", {}, 1_001_200),
+    ]);
+
+    const card = container.querySelector(".msg.question-card");
+    expect(card.textContent).toContain("Real answer");
+    expect(card.textContent).not.toContain("Skipped");
+    renderer.detach();
+  });
+
+  it("matchSkipMarks ignores marks that precede every card and never reuses one card", async () => {
+    const { matchSkipMarks } = await import("../src/shared/chat/chat-pagination.ts");
+    const cards = [{ id: "q1", ts: 1000 }, { id: "q2", ts: 3000 }];
+    expect([...matchSkipMarks(cards, [500], new Set())]).toEqual([]);
+    expect([...matchSkipMarks(cards, [1500, 1600], new Set())]).toEqual(["q1"]);
+    expect([...matchSkipMarks(cards, [1500, 3500], new Set())]).toEqual(["q1", "q2"]);
+    expect([...matchSkipMarks(cards, [3500], new Set(["q2"]))]).toEqual([]);
+    expect([...matchSkipMarks([], [1500], new Set())]).toEqual([]);
+  });
+});
+
 describe("degraded_builtin badge is live-card-only, never in the transcript", () => {
   // The daemon stamps `degraded_builtin` on the prompt payload, whose id is
   // unrelated to the model's tool_use id this transcript renders from, so the

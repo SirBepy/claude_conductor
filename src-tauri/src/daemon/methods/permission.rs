@@ -74,12 +74,28 @@ pub(crate) async fn respond_permission_inner(
     delivered
 }
 
+/// Records a Skip in `companion.db` so scrollback can still show the card as
+/// dismissed after a reopen. Nothing is ever written to Claude's transcript
+/// JSONL for a skip (by design - the model's context stays clean), so this row
+/// is the only durable trace. Warn-and-skip on any failure, never fatal.
+fn record_skip(state: &Arc<DaemonState>, session_id: &str) {
+    let Some(db) = state.db.as_ref() else {
+        log::warn!("daemon: companion.db unavailable; dropping skipped-question mark");
+        return;
+    };
+    let mgr = db.lock().unwrap_or_else(|p| p.into_inner());
+    let ts = chrono::Utc::now().timestamp_millis();
+    if let Err(e) = crate::storage::skipped_question_store::insert_skip(mgr.conn(), session_id, ts) {
+        log::warn!("daemon: insert_skip failed: {e:#}");
+    }
+}
+
 /// Core of `respond_question`, factored out for the same reason as
 /// `respond_permission_inner` above.
 ///
 /// `skipped` distinguishes a real Skip from an empty-but-real answer. Nothing
-/// reaches the model, so this is LIVE-only: scrollback still shows "awaiting
-/// answer" until durable storage exists (todo 661).
+/// reaches the model, so the live notification below is paired with a durable
+/// `skipped_questions` row for scrollback (todo 661).
 pub(crate) async fn respond_question_inner(
     state: &Arc<DaemonState>,
     request_id: &str,
@@ -97,6 +113,9 @@ pub(crate) async fn respond_question_inner(
     };
     settle_prompt(state, request_id, true).await;
     if skipped {
+        if let Some(sid) = session_id.as_deref() {
+            record_skip(state, sid);
+        }
         if let Some(session) = session_id.as_deref().and_then(|sid| state.sessions.get(sid).map(|s| s.clone())) {
             crate::daemon::broadcast::publish(&session, crate::types::chat::ChatEvent::Notification {
                 kind: "question_skipped".into(),
@@ -135,6 +154,35 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             // of relying on the lossy notifier broadcast (which silently dropped
             // question_request frames and hung AskUserQuestion turns).
             async move { Ok(serde_json::Value::Array(state.list_prompts().await)) }
+        });
+    }
+    {
+        let state = state.clone();
+        // Deliberately NOT folded into the paginated history stream (todo 661
+        // decision): a cheap point query the client fetches once per session
+        // attach, so `history_page.rs`'s byte-offset cursor math is untouched.
+        router.register("get_skipped_question_marks", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    session_id: String,
+                }
+                let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let marks = match state.db.as_ref() {
+                    Some(db) => {
+                        let mgr = db.lock().unwrap_or_else(|p| p.into_inner());
+                        crate::storage::skipped_question_store::get_skips(mgr.conn(), &b.session_id)
+                            .unwrap_or_else(|e| {
+                                log::warn!("daemon: get_skips failed: {e:#}");
+                                Vec::new()
+                            })
+                    }
+                    None => Vec::new(),
+                };
+                Ok(serde_json::json!(marks))
+            }
         });
     }
     router.register("respond_question", move |params, _ctx| {

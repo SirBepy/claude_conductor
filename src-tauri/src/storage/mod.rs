@@ -10,6 +10,7 @@ pub mod db;
 pub mod migration;
 pub mod retention;
 pub mod skill_store;
+pub mod skipped_question_store;
 pub mod token_store;
 pub mod usage_store;
 

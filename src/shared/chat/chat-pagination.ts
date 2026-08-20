@@ -1,6 +1,6 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import type { RenderedMessage } from "./chat-transforms";
-import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, stripAuqAnswerBlock } from "./chat-transforms";
+import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
@@ -65,6 +65,30 @@ export function resolveOrdinalIn(messages: RenderedMessage[], n: number): number
   return -1;
 }
 
+/** Pair each durable skip mark (unix ms) with the nearest PRECEDING unresolved
+ *  question card - a Skip never reaches the transcript, so there is no
+ *  tool_use_id to key on. Same one-AUQ-in-flight heuristic as the live path's
+ *  resolvePendingQuestionCard; marks for other pages match nothing. */
+export function matchSkipMarks(
+  cards: { id: string; ts: number }[],
+  marks: number[],
+  resolved: Set<string>,
+): Set<string> {
+  const skipped = new Set<string>();
+  for (const mark of marks) {
+    if (!Number.isFinite(mark)) continue;
+    for (let i = cards.length - 1; i >= 0; i--) {
+      const card = cards[i]!;
+      if (card.ts <= 0 || card.ts > mark) continue;
+      // The nearest preceding card being answered means this mark belongs to a
+      // card on another page, not to an older one here.
+      if (!resolved.has(card.id) && !skipped.has(card.id)) skipped.add(card.id);
+      break;
+    }
+  }
+  return skipped;
+}
+
 /** Walk up to the direct child of container. Used to find insertion point for prepend. */
 function rootChildOf(container: HTMLElement, el: HTMLElement): HTMLElement {
   let n = el;
@@ -76,6 +100,9 @@ function rootChildOf(container: HTMLElement, el: HTMLElement): HTMLElement {
 
 export class ChatPaginator {
   cwdHint: string | undefined;
+  /** Durable Skip timestamps, from the non-paginated
+   *  `get_skipped_question_marks` lookup. Empty = no fold, exactly as before. */
+  skipMarks: number[] = [];
   private topSentinel: HTMLElement | null = null;
   private topObserver: IntersectionObserver | null = null;
   // Usage + timestamp span carried between prepend batches for the turn that
@@ -192,9 +219,11 @@ export class ChatPaginator {
     // result carries no resolution, leaving the card open for the fold below.
     const questionAnswerById = new Map<string, string>();
     const questionToolIds = new Set<string>();
+    const questionCards: { id: string; ts: number }[] = [];
     for (const ev of events) {
       if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
         questionToolIds.add(ev.id);
+        questionCards.push({ id: ev.id, ts: Number(ev.timestamp) });
       }
     }
     for (const ev of events) {
@@ -225,6 +254,12 @@ export class ChatPaginator {
         }
       }
     }
+    // Folded in client-side; never spliced into the page's cursor math.
+    const skippedQuestionIds = matchSkipMarks(
+      questionCards,
+      this.skipMarks,
+      new Set([...questionAnswerById.keys(), ...sentinelAnswerById.keys()]),
+    );
     // Answered-later-in-this-page cards render at the answer, not the ask site.
     const deferredQuestions = new Map<string, RenderedMessage>();
     const filtered = events.filter((ev) =>
@@ -318,6 +353,8 @@ export class ChatPaginator {
       }
       if (ev.type === "tool_use" && msg.kind === "question" && questionAnswerById.has(ev.id)) {
         msg.text = questionAnswerById.get(ev.id);
+      } else if (ev.type === "tool_use" && msg.kind === "question" && skippedQuestionIds.has(ev.id)) {
+        msg.text = AUQ_SKIPPED_TEXT;
       }
       if (isBoundaryMessage(msg)) {
         boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });
