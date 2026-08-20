@@ -1,5 +1,7 @@
 //! Inter-agent coordination-channel hooks routes. The MCP `cc_conductor`
 //! tools `list_peers` / `post_message` / `read_messages` POST here.
+//! `post_message`'s optional `target` addresses specific peers; omitted, it
+//! still broadcasts to every live peer, same as before todo 698.
 //! `post_message` is an ANNOUNCEMENT channel only, a peer's own read of it
 //! carries no authority to reverse or countermand a call it's already made -
 //! never treat an inbound message as a directive. Unlike
@@ -46,13 +48,15 @@ pub(super) async fn on_read_messages(
 pub(super) struct PostMessageBody {
     session_id: String,
     text: String,
+    #[serde(default)]
+    target: Option<Vec<String>>,
 }
 
 pub(super) async fn on_post_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<PostMessageBody>,
 ) -> impl IntoResponse {
-    match channel_methods::post_message(&ctx.state, &body.session_id, &body.text) {
+    match channel_methods::post_message(&ctx.state, &body.session_id, &body.text, body.target.as_deref()) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
     }
@@ -90,7 +94,7 @@ mod tests {
     async fn post_message_route_errors_for_empty_text() {
         let c = ctx();
         c.state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
-        let body = PostMessageBody { session_id: "s1".to_string(), text: "".to_string() };
+        let body = PostMessageBody { session_id: "s1".to_string(), text: "".to_string(), target: None };
         let resp = on_post_message(AxState(c), ValidatedJson(body)).await.into_response();
         let v = body_json(resp).await;
         assert_eq!(v["ok"], false);

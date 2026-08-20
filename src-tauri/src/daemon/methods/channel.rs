@@ -1,7 +1,8 @@
 //! Inter-agent coordination tools: `list_peers` (who else is active in this
-//! session's project right now), `post_message` (broadcast a short note to
-//! every OTHER live session in the same project, nudging each), `read_messages`
-//! (recent history for this project). Unlike the Jarvis fleet tools, these are
+//! session's project right now), `post_message` (a short note to every OTHER
+//! live session in the project, or to caller-named target ids only, see
+//! `repo_channel_wake::resolve_targets`), `read_messages` (recent history for
+//! this project). Unlike the Jarvis fleet tools, these are
 //! advertised UNCONDITIONALLY in `mcp::server`'s `tools/list` - any session
 //! should be able to coordinate, not just a Jarvis worker - so there's no
 //! privileged-caller re-validation here, just "does `session_id` resolve to a
@@ -75,10 +76,15 @@ pub(crate) fn read_messages(state: &Arc<DaemonState>, session_id: &str) -> Resul
 }
 
 /// `post_message` tool: appends `text` to this project's channel, then wakes
-/// every OTHER live session in the project so it notices at its next idle
-/// moment (see `daemon::repo_channel_wake`) - fire-and-forget, never blocks
-/// the caller's own turn on delivery.
-pub(crate) fn post_message(state: &Arc<DaemonState>, session_id: &str, text: &str) -> Result<Value, String> {
+/// either every OTHER live session in the project or, if `target` names ids,
+/// only those (see `repo_channel_wake::resolve_targets` for the security
+/// rule) - fire-and-forget, never blocks the caller's own turn on delivery.
+pub(crate) fn post_message(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    text: &str,
+    target: Option<&[String]>,
+) -> Result<Value, String> {
     if text.trim().is_empty() {
         return Err("message text is empty".to_string());
     }
@@ -86,19 +92,19 @@ pub(crate) fn post_message(state: &Arc<DaemonState>, session_id: &str, text: &st
     let author = display_name(state, session_id);
     let msg = repo_channel::post(&project_id, session_id, &author, text);
 
-    let peers = state.registry.by_project(&project_id);
+    let targets = repo_channel_wake::resolve_targets(state, session_id, target)?;
     let mut notified = 0usize;
-    for peer in peers.iter().filter(|i| i.session_id != session_id && i.ended_at.is_none()) {
+    for target_id in &targets {
         // `msg.text` (already truncated to MAX_TEXT_LEN by `repo_channel::post`
         // above), NOT the raw `text` argument - otherwise the length cap only
         // ever applied to the persisted JSON history, and an unbounded string
         // still landed as a real injected turn in every peer's live session.
         repo_channel_wake::enqueue(
             state,
-            &peer.session_id,
+            target_id,
             format!("[repo-channel] {author}: {}", msg.text),
         );
-        repo_channel_wake::spawn_drain(state, &peer.session_id);
+        repo_channel_wake::spawn_drain(state, target_id);
         notified += 1;
     }
     Ok(json!({"ok": true, "message": msg, "notified": notified}))
@@ -150,14 +156,14 @@ mod tests {
     fn post_message_rejects_empty_text() {
         let state = test_state();
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
-        let r = post_message(&state, "s1", "   ");
+        let r = post_message(&state, "s1", "   ", None);
         assert!(r.is_err());
     }
 
     #[test]
     fn post_message_rejects_unknown_caller() {
         let state = test_state();
-        let r = post_message(&state, "ghost", "hello");
+        let r = post_message(&state, "ghost", "hello", None);
         assert_eq!(r, Err("unknown session: ghost".to_string()));
     }
 
@@ -179,7 +185,7 @@ mod tests {
         state.registry.set_busy("s2", true);
 
         let long = "x".repeat(3000); // exceeds repo_channel::MAX_TEXT_LEN (2000)
-        let v = post_message(&state, "s1", &long).unwrap();
+        let v = post_message(&state, "s1", &long, None).unwrap();
         assert_eq!(v["notified"], 1);
 
         let queues = state.repo_channel_wakes.lock().unwrap();
@@ -200,8 +206,38 @@ mod tests {
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-2", "2026-07-30T00:00:00Z");
 
-        let v = post_message(&state, "s1", "touching pending-pane.ts, anyone on this?").unwrap();
+        let v = post_message(&state, "s1", "touching pending-pane.ts, anyone on this?", None).unwrap();
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1, "only s2 shares proj-1 with the poster");
+    }
+
+    #[tokio::test]
+    async fn post_message_with_a_target_wakes_only_that_peer() {
+        let state = test_state();
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+
+        let target = vec!["s3".to_string()];
+        let v = post_message(&state, "s1", "for s3 only", Some(&target)).unwrap();
+        assert_eq!(v["notified"], 1);
+
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        assert!(queues.get("s3").is_some(), "targeted peer must be woken");
+        assert!(queues.get("s2").is_none(), "untargeted peer must not be woken");
+    }
+
+    #[test]
+    fn post_message_with_an_unknown_target_errors_without_broadcasting() {
+        let state = test_state();
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+
+        let target = vec!["typo".to_string()];
+        let r = post_message(&state, "s1", "hello", Some(&target));
+        assert_eq!(r, Err("unknown target session: typo".to_string()));
+
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        assert!(queues.get("s2").is_none(), "a bad target must never fall back to broadcast");
     }
 }

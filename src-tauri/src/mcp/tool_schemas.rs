@@ -124,7 +124,8 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "The note to post."}
+                    "text": {"type": "string", "description": "The note to post."},
+                    "target": {"type": "string", "description": "Optional session id (from list_peers) to address this to. Omit to broadcast to every live peer in the project, as before."}
                 },
                 "required": ["text"]
             }
