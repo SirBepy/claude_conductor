@@ -197,6 +197,12 @@
   display: none;
 }
 
+/* Pushes the answer-toggle button (data-act="answer-toggle") to the left
+ * edge while Skip/Next stay right-aligned, in the same flex row. */
+.prompt-footer__spacer {
+  flex: 1;
+}
+
 .prompt-card__footer {
   display: flex;
   justify-content: flex-end;

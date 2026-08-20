@@ -104,10 +104,12 @@ export function extraMessageZoneHtml(additionalMessage: string): string {
 // `ta.closest(".prompt-q__other")` and is not this task's file to touch.
 // Only ever rendered into the fixed `.prompt-card__answer-bar` now (via
 // syncAnswerBar), never inline in the scrolling panel - see its doc comment.
+// No `.prompt-sect` header anymore - the footer's pencil toggle
+// (data-act="answer-toggle") now carries that "answer in your own words"
+// meaning, so this zone only shows once the bar is actually open.
 export function ownZoneHtml(qi: number, freeText: Map<number, string>): string {
   const typedValue = freeText.get(qi) ?? "";
   return `
-    <div class="prompt-sect"><i class="ph ph-pencil-simple"></i><span class="prompt-sect__label">Or answer in your own words</span><span class="prompt-sect__rule"></span></div>
     <div class="prompt-own">
       <label class="prompt-q__other">
         <div class="cc-typing-wrap">

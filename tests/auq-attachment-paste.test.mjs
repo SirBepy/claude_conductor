@@ -47,6 +47,8 @@ beforeEach(() => {
 describe("AUQ card paste-to-attach", () => {
   it("attaches a pasted image end-to-end on the MCP path (supportsExtras: true)", async () => {
     renderQuestionUI(baseOpts({ supportsExtras: true }));
+    // Own-words zone is closed by default (icon toggle, question-ui-render.ts).
+    document.querySelector('[data-act="answer-toggle"]').click();
     const ta = document.querySelector(".prompt-q__other-input");
     expect(ta).toBeTruthy();
 
@@ -59,6 +61,7 @@ describe("AUQ card paste-to-attach", () => {
 
   it("gives visible feedback (not silence) when pasting on a card that can't accept attachments", async () => {
     renderQuestionUI(baseOpts()); // supportsExtras omitted - the built-in-tool card's shape
+    document.querySelector('[data-act="answer-toggle"]').click();
     const ta = document.querySelector(".prompt-q__other-input");
     expect(ta).toBeTruthy();
 

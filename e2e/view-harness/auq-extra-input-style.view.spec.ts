@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, openAnswerBar } from "./harness";
 
 // Regression: the review step's "add a message" textarea is emitted with class
 // `prompt-extra-input`, which the stylesheet never listed, so it rendered
@@ -28,11 +28,14 @@ test("review step's extra-message textarea picks up the card's input styling", a
 
   const card = page.locator(".prompt-card");
   const nextArrow = card.locator('.prompt-pager [data-nav="1"]');
+  await openAnswerBar(card);
   await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("a");
   await nextArrow.click();
+  await openAnswerBar(card);
   await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("b");
   await nextArrow.click();
 
+  await openAnswerBar(card);
   const extra = card.locator(".prompt-extra-input");
   await expect(extra).toBeVisible();
 

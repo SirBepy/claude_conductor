@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, openAnswerBar } from "./harness";
 
 // AUQ "/" skill-suggestion popup (Joe's request: "when writing in the AUQ
 // card, I wanna see skills suggestion, the same way we do it in normal
@@ -45,6 +45,7 @@ test.describe("view-harness / AUQ slash-suggestion popup", () => {
     await openCard(page);
 
     const card = page.locator(".prompt-card");
+    await openAnswerBar(card);
     const input = card.locator(".prompt-q__other-input");
     await input.fill("/cl");
 
@@ -63,6 +64,7 @@ test.describe("view-harness / AUQ slash-suggestion popup", () => {
     await openCard(page);
 
     const card = page.locator(".prompt-card");
+    await openAnswerBar(card);
     const input = card.locator(".prompt-q__other-input");
     await input.fill("/c");
     await expect(card.locator(".caret-popup")).toBeVisible();
@@ -79,6 +81,7 @@ test.describe("view-harness / AUQ slash-suggestion popup", () => {
     await openCard(page);
 
     const card = page.locator(".prompt-card");
+    await openAnswerBar(card);
     const input = card.locator(".prompt-q__other-input");
     // "comm" (not "co") - fuzzy subsequence matching means "co" matches both
     // "close" and "commit", which would make this test's "exactly one
@@ -103,11 +106,14 @@ test.describe("view-harness / AUQ slash-suggestion popup", () => {
     const nextArrow = card.locator('.prompt-pager [data-nav="1"]');
     // Answer both questions via free text, no option clicks, then reach the
     // summary/review screen where the extra-message field lives.
+    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A");
     await nextArrow.click();
+    await openAnswerBar(card);
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("done");
     await nextArrow.click();
 
+    await openAnswerBar(card);
     const extraInput = card.locator(".prompt-extra-input");
     await expect(extraInput).toBeVisible();
     await extraInput.fill("remember to /cl");

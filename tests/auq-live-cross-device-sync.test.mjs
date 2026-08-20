@@ -72,6 +72,9 @@ afterEach(() => {
 describe("live poll: never overwrites the field the user is typing in", () => {
   it("leaves the focused textarea's own value untouched, but adopts a remote update to a different question", async () => {
     renderQuestionUI(baseOpts());
+    // Own-words zone is closed by default (icon toggle, question-ui-render.ts) -
+    // open it before touching the textarea it renders.
+    document.querySelector('[data-act="answer-toggle"]').click();
     const textarea = document.querySelector(".prompt-q__other-input");
     textarea.value = "typing this right now";
     textarea.dispatchEvent(new Event("input", { bubbles: true }));

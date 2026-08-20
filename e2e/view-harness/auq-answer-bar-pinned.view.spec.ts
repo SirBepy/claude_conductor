@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, openAnswerBar } from "./harness";
 
 // Shared, gitignored, session-agnostic - never a live session's <pid>-<ticks> folder.
 const SHOTS = ".for_bepy/screenshots/_specs";
@@ -36,6 +36,7 @@ test("answer bar stays visible below scrolled option content", async ({ page }) 
   const card = page.locator(".prompt-card");
   await expect(card).toBeVisible();
 
+  await openAnswerBar(card);
   const freeText = card.locator(".prompt-q__other-input");
   await freeText.fill("My own typed answer to prove the field stays reachable");
 

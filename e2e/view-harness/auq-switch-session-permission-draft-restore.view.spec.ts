@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, openAnswerBar } from "./harness";
 
 // c306a4b4: savePendingPromptDraft (gating.ts) used to only attach a draft to
 // a parked "question"-kind prompt, silently dropping a "permission"-kind
@@ -82,6 +82,7 @@ test.describe("view-harness / fallback (permission-kind) AUQ draft survives a re
     const card = page.locator(".prompt-card");
     await expect(card).toHaveCount(1);
 
+    await openAnswerBar(card);
     const ownInput = card.locator(".prompt-q__other-input");
     await ownInput.fill("Prod, but confirm with the team first");
     await expect(ownInput).toHaveValue("Prod, but confirm with the team first");

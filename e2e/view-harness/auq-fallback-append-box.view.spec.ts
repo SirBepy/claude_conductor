@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView, invokeCalls } from "./harness";
+import { mountView, invokeCalls, openAnswerBar } from "./harness";
 
 // c306a4b4: permission-card.ts's fallback card now passes supportsExtras:
 // true, so its review step shows the free-text "add a message" box
@@ -24,6 +24,7 @@ test("fallback card review step shows and submits the append box", async ({ page
   await card.locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]').click();
   await card.locator('[data-act="primary"]').click();
 
+  await openAnswerBar(card);
   const extraInput = card.locator(".prompt-extra-input");
   await expect(extraInput).toBeVisible();
   await extraInput.fill("please also check staging");

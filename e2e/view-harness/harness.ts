@@ -132,6 +132,16 @@ export async function mountView(page: Page, opts: MountOptions = {}): Promise<vo
   await page.goto(`${HARNESS_ORIGIN}/${entry}.html${hash}`);
 }
 
+/** Opens the AUQ card's free-text zone via the footer's pencil toggle
+ *  (data-act="answer-toggle") - hidden until opened, so any spec driving
+ *  `.prompt-q__other-input`/`.prompt-extra-input` must call this first.
+ *  No-op if already open. */
+export async function openAnswerBar(card: Locator): Promise<void> {
+  const toggle = card.locator('[data-act="answer-toggle"]');
+  const alreadyOpen = await toggle.evaluate((el) => el.classList.contains("is-active"));
+  if (!alreadyOpen) await toggle.click();
+}
+
 /** Read the commands the page has invoked so far (for call-shape asserts). */
 export async function invokeCalls(page: Page): Promise<Array<{ cmd: string; args?: unknown }>> {
   return page.evaluate(

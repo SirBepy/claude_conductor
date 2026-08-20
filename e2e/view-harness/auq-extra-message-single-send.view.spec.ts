@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, openAnswerBar } from "./harness";
 
 // Regression for ai_todo 446: the AUQ review step's "add a message" extra text
 // used to be staged into the held-messages queue AFTER the answer's own send,
@@ -81,6 +81,7 @@ test.describe("view-harness / AUQ review-step extra message rides in the SAME se
 
     // Summary screen: type the extra message, then Submit (the footer's single
     // primary button, which reads Submit only on review).
+    await openAnswerBar(card);
     await card.locator(".prompt-extra-input").fill("Also check the CI logs while you're at it.");
     await card.locator('[data-act="primary"]').click();
 

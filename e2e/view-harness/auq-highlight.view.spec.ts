@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, openAnswerBar } from "./harness";
 
 // AUQ colored /slash-token highlighting (ai_todo composer-unification): the
 // per-question free-text field now gets the same highlight backdrop the main
@@ -29,6 +29,7 @@ test("typing a known /skill in the AUQ free-text field renders a purple cm-slash
   });
 
   const card = page.locator(".prompt-card");
+  await openAnswerBar(card);
   const input = card.locator(".prompt-q__other-input");
   await input.fill("/close");
 
