@@ -43,6 +43,9 @@ const SAFE_METHODS: &[&str] = &[
     "cancel_turn",
     "respond_permission",
     "respond_question",
+    // Read-only: durable Skip marks for one session_id, so a phone reopening
+    // a chat sees "Skipped" instead of "awaiting answer" forever (todo 661).
+    "get_skipped_question_marks",
     "set_session_effort",
     "set_session_model",
     "set_auto_accept",
@@ -399,6 +402,7 @@ mod tests {
     fn allowlist_includes_core_chat_methods() {
         for m in [
             "list_instances", "send_message", "cancel_turn", "respond_question",
+            "get_skipped_question_marks",
             "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",
             "register_historical", "read_attachment",
             "paste_attachment", "list_characters", "list_project_groups",

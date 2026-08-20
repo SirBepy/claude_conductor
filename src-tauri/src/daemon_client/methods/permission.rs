@@ -45,4 +45,13 @@ impl PersistentClient {
     pub async fn list_pending_prompts(&self) -> Result<serde_json::Value, ClientError> {
         self.call("list_pending_prompts", json!({})).await
     }
+
+    /// Durable Skip marks for `session_id` (todo 661) - a non-paginated point
+    /// query, folded in client-side rather than spliced into `history_page.rs`'s
+    /// cursor-based stream. A malformed reply degrades to no marks, never an error.
+    pub async fn get_skipped_question_marks(&self, session_id: &str) -> Result<Vec<i64>, ClientError> {
+        let params = json!({ "session_id": session_id });
+        let result = self.call("get_skipped_question_marks", params).await?;
+        Ok(result.as_array().map(|a| a.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default())
+    }
 }

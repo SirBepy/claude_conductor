@@ -301,6 +301,24 @@ pub async fn respond_question(
         .map_err(|e| e.to_string())
 }
 
+/// Durable Skip marks for `session_id` (unix ms, oldest first, todo 661) -
+/// fetched once per session attach/hydrate and folded into scrollback
+/// client-side, since a Skip never reaches Claude's transcript JSONL.
+#[tauri::command]
+pub async fn get_skipped_question_marks(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<i64>, String> {
+    let client_guard = state.daemon_client.lock().await;
+    let client = client_guard
+        .as_ref()
+        .ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .get_skipped_question_marks(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Every prompt the daemon still has open (`{ id, event, payload }` records).
 /// `spawn_pending_prompt_poll` pushes each id once, so a webview that lost its
 /// in-memory park needs this pull side to rebuild the card.

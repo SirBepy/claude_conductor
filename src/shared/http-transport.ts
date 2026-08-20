@@ -227,6 +227,10 @@ export class HttpTransport implements Transport {
           answers: args.answers,
           skipped: args.skipped ?? false,
         });
+      case "get_skipped_question_marks":
+        return this.rpc<T>("get_skipped_question_marks", {
+          session_id: args.sessionId ?? args.session_id,
+        });
       case "send_message":
         return this.sendMessage<T>(args);
       // Cross-surface draft sync (composer/AUQ/held messages): one round trip
