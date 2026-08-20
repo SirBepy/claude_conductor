@@ -5,6 +5,7 @@ import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
+import { findNearestOpenQuestionId } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
 export interface PaginatorCallbacks {
@@ -232,26 +233,30 @@ export class ChatPaginator {
       if (isQuestionResolutionText(text)) questionAnswerById.set(ev.tool_use_id, text);
     }
     // The real ask channel is fire-and-forget: tool_result above is always a
-    // receipt, the real answer arrives later as a user_message tagged
-    // AUQ_ANSWER_SENTINEL. Pair each with its nearest preceding open question,
-    // mirroring chat-event-handler.ts's resolvePendingQuestionCard fold.
+    // receipt, the real answer arrives later as a sentinel-tagged
+    // user_message. Pair via chat-question-card.ts's findNearestOpenQuestionId
+    // - same "one AUQ in flight" rule as resolvePendingQuestionCard, over ids
+    // instead of RenderedMessage (none built yet at this point).
     const sentinelAnswerById = new Map<string, string>();
     const foldedUserMsgs = new Map<ChatEvent, string>();
     {
-      let openId: string | null = null;
+      const resolvedSoFar = new Set(questionAnswerById.keys());
+      // Batch-local only, same as before this refactor (todo 706): a card
+      // whose ask/answer straddle a page boundary stays "awaiting answer".
+      let opened = 0; // question cards this batch has seen so far
       for (const ev of events) {
         if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
-          openId = ev.id;
-        } else if (ev.type === "tool_result" && ev.tool_use_id === openId && questionAnswerById.has(openId)) {
-          openId = null; // delivered in-band - questionAnswerById already covers it
-        } else if (ev.type === "user_message" && openId) {
-          const answer = extractAuqAnswerText(cleanUserBlocks(ev.content));
-          if (answer !== null) {
-            sentinelAnswerById.set(openId, answer);
-            foldedUserMsgs.set(ev, openId);
-            openId = null;
-          }
+          opened++;
+          continue;
         }
+        if (ev.type !== "user_message") continue;
+        const answer = extractAuqAnswerText(cleanUserBlocks(ev.content));
+        if (answer === null) continue;
+        const qid = findNearestOpenQuestionId(questionCards.slice(0, opened), resolvedSoFar);
+        if (qid === null) continue;
+        sentinelAnswerById.set(qid, answer);
+        foldedUserMsgs.set(ev, qid);
+        resolvedSoFar.add(qid);
       }
     }
     // Folded in client-side; never spliced into the page's cursor math.

@@ -11,6 +11,26 @@ import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-dom-renderer";
 import type { ChatRenderer } from "./chat-renderer";
 
+/** Index of the last unresolved question card - only one AUQ is ever open. */
+export function findOpenQuestionIndex(messages: readonly RenderedMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.kind === "question" && m.text === undefined) return i;
+  }
+  return -1;
+}
+
+/** Batch-replay twin of findOpenQuestionIndex, keyed on id (no
+ *  RenderedMessage array exists yet at fold time in chat-pagination.ts). */
+export function findNearestOpenQuestionId(cards: { id: string }[], resolved: Set<string>): string | null {
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const id = cards[i]!.id;
+    if (resolved.has(id)) break;
+    return id;
+  }
+  return null;
+}
+
 /** Fold a fire-and-forget AUQ answer message back into the question card it
  *  answers (see permission-modal/index.ts onSubmit), so the transcript shows
  *  the card resolved with the real answers instead of stuck on "awaiting
@@ -19,16 +39,12 @@ import type { ChatRenderer } from "./chat-renderer";
  *  always the right match. Returns false if none is found (caller falls back
  *  to rendering a normal bubble, same as before this existed). */
 export function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolean {
-  for (let i = r.messages.length - 1; i >= 0; i--) {
-    const m = r.messages[i]!;
-    if (m.kind === "question" && m.text === undefined) {
-      r.messages[i] = { ...m, text: answerText };
-      r.dirtyIndices.add(i);
-      moveMessageToEnd(r, i);
-      return true;
-    }
-  }
-  return false;
+  const i = findOpenQuestionIndex(r.messages);
+  if (i < 0) return false;
+  r.messages[i] = { ...r.messages[i]!, text: answerText };
+  r.dirtyIndices.add(i);
+  moveMessageToEnd(r, i);
+  return true;
 }
 
 /** Re-anchor the row at `from` as the LAST row - a card answered long after the

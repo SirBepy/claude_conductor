@@ -89,4 +89,43 @@ describe("older-page AUQ card re-anchor", () => {
     expect(Boolean(nudge.compareDocumentPosition(card) & 4)).toBe(true);
     expect(Boolean(card.compareDocumentPosition(extra) & 4)).toBe(true);
   });
+
+  // Regression for todo 706's consolidation: two asks in one page must each
+  // fold their OWN answer via findNearestOpenQuestionId, same "one AUQ in
+  // flight" rule as the live path - not cross-match to the wrong ask.
+  it("folds two sequential asks in one page to their own answers, not swapped", async () => {
+    invokeMock
+      .mockResolvedValueOnce({ events: [userEvent("later", 2_000_000)], oldest_seq: 10, newest_seq: 12, has_more: true })
+      .mockResolvedValueOnce({
+        events: [
+          toolUseEvent(ASK_TOOL, { questions: [{ question: "First?", header: "Choice A" }] }, "q1", 1_000_000),
+          toolResultEvent("q1", ACK_TEXT, 1_000_050),
+          {
+            type: "user_message",
+            timestamp: 1_000_100,
+            content: [{ type: "text", text: `${AUQ_ANSWER_SENTINEL}User answered the question(s):\nQ: First?\nA: First answer` }],
+          },
+          toolUseEvent(ASK_TOOL, { questions: [{ question: "Second?", header: "Choice B" }] }, "q2", 1_000_200),
+          toolResultEvent("q2", ACK_TEXT, 1_000_250),
+          {
+            type: "user_message",
+            timestamp: 1_000_300,
+            content: [{ type: "text", text: `${AUQ_ANSWER_SENTINEL}User answered the question(s):\nQ: Second?\nA: Second answer` }],
+          },
+        ],
+        oldest_seq: 1,
+        newest_seq: 9,
+        has_more: false,
+      });
+
+    const { renderer, container } = await makeRenderer();
+    await renderer.fetchOlder();
+
+    const cards = container.querySelectorAll(".question-card-collapsible");
+    expect(cards.length).toBe(2);
+    expect(cards[0].textContent).toContain("First answer");
+    expect(cards[0].textContent).not.toContain("Second answer");
+    expect(cards[1].textContent).toContain("Second answer");
+    expect(cards[1].textContent).not.toContain("First answer");
+  });
 });
