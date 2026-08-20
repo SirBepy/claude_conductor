@@ -29,12 +29,20 @@ pub struct SpawnEnv {
 
 impl SpawnEnv {
     /// Builds the env mutation for spawning under `account_config_dir`.
+    ///
+    /// Also forces git non-interactive: a headless spawned agent can never
+    /// dismiss a GUI credential prompt, so one popping up on Joe's desktop is
+    /// always wrong here, not gated by a setting.
     pub fn for_account(account_config_dir: &Path) -> Self {
         Self {
-            set: vec![(
-                "CLAUDE_CONFIG_DIR".to_string(),
-                account_config_dir.to_string_lossy().into_owned(),
-            )],
+            set: vec![
+                (
+                    "CLAUDE_CONFIG_DIR".to_string(),
+                    account_config_dir.to_string_lossy().into_owned(),
+                ),
+                ("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()),
+                ("GCM_INTERACTIVE".to_string(), "never".to_string()),
+            ],
             unset: SCRUBBED_ENV_VARS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -111,12 +119,23 @@ mod tests {
     #[test]
     fn for_account_sets_config_dir_and_lists_scrub_vars() {
         let env = SpawnEnv::for_account(&PathBuf::from("C:/home/.claude-work"));
-        assert_eq!(env.set, vec![("CLAUDE_CONFIG_DIR".to_string(), "C:/home/.claude-work".to_string())]);
+        assert_eq!(env.set, vec![
+            ("CLAUDE_CONFIG_DIR".to_string(), "C:/home/.claude-work".to_string()),
+            ("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()),
+            ("GCM_INTERACTIVE".to_string(), "never".to_string()),
+        ]);
         assert_eq!(env.unset, vec![
             "ANTHROPIC_API_KEY".to_string(),
             "ANTHROPIC_AUTH_TOKEN".to_string(),
             "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
         ]);
+    }
+
+    #[test]
+    fn for_account_sets_git_noninteractive_vars() {
+        let env = SpawnEnv::for_account(&PathBuf::from("C:/home/.claude-work"));
+        assert!(env.set.contains(&("GIT_TERMINAL_PROMPT".to_string(), "0".to_string())));
+        assert!(env.set.contains(&("GCM_INTERACTIVE".to_string(), "never".to_string())));
     }
 
     #[test]
