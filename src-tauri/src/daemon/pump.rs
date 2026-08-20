@@ -263,12 +263,23 @@ pub(crate) async fn run_stdout_pump(
                                 }
                                 // report_turn_status (todo 435) is authoritative for a live
                                 // turn; a replayed history line keeps the legacy marker scan.
-                                let awaiting = if live_turn {
+                                let taken_report = if live_turn {
                                     state_for_pump
                                         .registry
                                         .take_reported_status_if_gen(&pump_session.session_id, pump_turn_gen)
-                                        .map(|r| r.status)
-                                        .or(awaiting)
+                                } else {
+                                    None
+                                };
+                                // Carried out of the registry (todo 675 part 1); part 2 gives
+                                // this a wire home for the frontend. Logged meanwhile.
+                                if let Some(target) = taken_report.as_ref().and_then(|r| r.waiting_on.as_ref()) {
+                                    log::info!(
+                                        "daemon: session {} waiting on: {target}",
+                                        pump_session.session_id
+                                    );
+                                }
+                                let awaiting = if live_turn {
+                                    taken_report.map(|r| r.status).or(awaiting)
                                 } else {
                                     awaiting
                                 };

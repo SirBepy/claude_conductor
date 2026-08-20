@@ -14,6 +14,7 @@ pub(crate) fn report_status(
     session_id: &str,
     status: &str,
     title: Option<&str>,
+    waiting_on: Option<Value>,
 ) -> Result<Value, String> {
     if !VALID_STATUSES.contains(&status) {
         return Err(format!(
@@ -26,6 +27,7 @@ pub(crate) fn report_status(
         gen,
         status.to_string(),
         title.map(|s| s.to_string()),
+        waiting_on,
     );
     // Watchdog signal (todo 525): a self-report is activity too.
     state.registry.touch_activity(session_id);
@@ -46,7 +48,7 @@ mod tests {
     #[test]
     fn rejects_invalid_status() {
         let state = test_state();
-        let r = report_status(&state, "s", "bogus", None);
+        let r = report_status(&state, "s", "bogus", None, None);
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("bogus"));
     }
@@ -54,7 +56,7 @@ mod tests {
     #[test]
     fn valid_status_records_reported_status() {
         let state = test_state();
-        let r = report_status(&state, "s", "done", Some("Fix login bug"));
+        let r = report_status(&state, "s", "done", Some("Fix login bug"), None);
         assert_eq!(r, Ok(json!({"ok": true})));
         let peeked = state.registry.peek_reported_status("s").unwrap();
         assert_eq!(peeked.status, "done");
@@ -64,8 +66,28 @@ mod tests {
     #[test]
     fn title_is_optional() {
         let state = test_state();
-        report_status(&state, "s", "working", None).unwrap();
+        report_status(&state, "s", "working", None, None).unwrap();
         let peeked = state.registry.peek_reported_status("s").unwrap();
         assert_eq!(peeked.title, None);
+    }
+
+    /// todo 675: a waiting target passed in round-trips into the registry
+    /// unchanged - `report_status` itself does no sanitizing, that already
+    /// happened at MCP ingest (`waiting_target::sanitize`).
+    #[test]
+    fn waiting_on_round_trips_into_reported_status() {
+        let state = test_state();
+        let target = json!({"label": "release CI", "kind": "ci", "href": "https://x/actions/runs/1"});
+        report_status(&state, "s", "waiting", None, Some(target.clone())).unwrap();
+        let peeked = state.registry.peek_reported_status("s").unwrap();
+        assert_eq!(peeked.waiting_on, Some(target));
+    }
+
+    #[test]
+    fn waiting_on_is_optional() {
+        let state = test_state();
+        report_status(&state, "s", "waiting", None, None).unwrap();
+        let peeked = state.registry.peek_reported_status("s").unwrap();
+        assert_eq!(peeked.waiting_on, None);
     }
 }

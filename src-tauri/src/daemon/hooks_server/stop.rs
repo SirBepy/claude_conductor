@@ -117,6 +117,12 @@ pub(super) async fn on_stop(
                 }
             }
         }
+        // todo 675: same "carried, not yet wired to a client" state as
+        // pump.rs's result-line handler - this is the earliest point a
+        // waiting target is visible, since Stop fires before pump's take.
+        if let Some(target) = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.waiting_on.as_ref()) {
+            log::info!("hook /hooks/stop: session {session_id} waiting on: {target}");
+        }
     }
 
     let state = ctx.state.clone();

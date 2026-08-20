@@ -47,6 +47,11 @@ pub struct ReportedStatus {
     pub turn_gen: u64,
     pub status: String,
     pub title: Option<String>,
+    /// Client-declared waiting target (todo 675): `{label, kind, href}`.
+    /// Already passed through `mcp::server::waiting_target::sanitize` at MCP
+    /// ingest before it ever reaches here, so `href` is either a validated
+    /// http(s) URL / in-tree local path or `null` - never a raw client value.
+    pub waiting_on: Option<serde_json::Value>,
 }
 
 impl Registry {
@@ -64,11 +69,18 @@ impl Registry {
 
     /// Record this turn's self-reported status, stamped with the CURRENT
     /// `turn_gen` so a later consumer can spot a stale report.
-    pub fn set_reported_status(&self, session_id: &str, turn_gen: u64, status: String, title: Option<String>) {
+    pub fn set_reported_status(
+        &self,
+        session_id: &str,
+        turn_gen: u64,
+        status: String,
+        title: Option<String>,
+        waiting_on: Option<serde_json::Value>,
+    ) {
         self.reported_status
             .lock()
             .unwrap()
-            .insert(session_id.to_string(), ReportedStatus { turn_gen, status, title });
+            .insert(session_id.to_string(), ReportedStatus { turn_gen, status, title, waiting_on });
     }
 
     /// Peek without consuming - the Stop hook fires before the pump's
@@ -255,7 +267,7 @@ mod tests {
     #[test]
     fn reported_status_peek_then_take_roundtrip() {
         let registry = Registry::new();
-        registry.set_reported_status("s", 1, "done".into(), Some("Fix login bug".into()));
+        registry.set_reported_status("s", 1, "done".into(), Some("Fix login bug".into()), None);
         let peeked = registry.peek_reported_status("s").unwrap();
         assert_eq!(peeked.status, "done");
         assert_eq!(peeked.title.as_deref(), Some("Fix login bug"));
@@ -267,9 +279,27 @@ mod tests {
     #[test]
     fn reported_status_take_rejects_stale_gen_but_still_consumes() {
         let registry = Registry::new();
-        registry.set_reported_status("s", 1, "done".into(), None);
+        registry.set_reported_status("s", 1, "done".into(), None, None);
         assert!(registry.take_reported_status_if_gen("s", 2).is_none(), "stale gen must not apply");
         assert!(registry.peek_reported_status("s").is_none(), "must consume even on mismatch");
+    }
+
+    /// todo 675: a guard-sanitized waiting target round-trips through the
+    /// same peek/take path as status/title, byte-identical.
+    #[test]
+    fn reported_status_carries_a_waiting_on_target_through_roundtrip() {
+        let registry = Registry::new();
+        let target = serde_json::json!({"label": "release CI", "kind": "ci", "href": "https://x/actions/runs/1"});
+        registry.set_reported_status("s", 1, "waiting".into(), None, Some(target.clone()));
+        assert_eq!(registry.peek_reported_status("s").unwrap().waiting_on, Some(target.clone()));
+        assert_eq!(registry.take_reported_status_if_gen("s", 1).unwrap().waiting_on, Some(target));
+    }
+
+    #[test]
+    fn reported_status_without_a_waiting_on_target_stays_none() {
+        let registry = Registry::new();
+        registry.set_reported_status("s", 1, "done".into(), None, None);
+        assert_eq!(registry.peek_reported_status("s").unwrap().waiting_on, None);
     }
 
     #[test]

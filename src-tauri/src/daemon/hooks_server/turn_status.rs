@@ -36,11 +36,16 @@ pub(super) async fn on_report_status(
             );
         }
     };
+    // Already guard-sanitized by `mcp::server::waiting_target::sanitize` on
+    // the MCP side before this POST was built - `dispatch::report_status_body`
+    // is the only caller. `null` and "absent" both collapse to None here.
+    let waiting_on = body.get("waitingOn").cloned().filter(|v| !v.is_null());
     log::info!(
-        "daemon: /turn/report-status session={session_id} status={status} turn_gen={}",
-        ctx.state.registry.current_turn_gen(session_id)
+        "daemon: /turn/report-status session={session_id} status={status} turn_gen={} waiting_on={}",
+        ctx.state.registry.current_turn_gen(session_id),
+        waiting_on.is_some(),
     );
-    match turn_status::report_status(&ctx.state, session_id, status, title) {
+    match turn_status::report_status(&ctx.state, session_id, status, title, waiting_on) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
     }
@@ -71,6 +76,27 @@ mod tests {
         let resp = on_report_status(AxState(ctx()), Json(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await, json!({"ok": true}));
+    }
+
+    /// todo 675: the HTTP body's `waitingOn` reaches the registry via this
+    /// route, the same as `status`/`title` already do.
+    #[tokio::test]
+    async fn waiting_on_route_reaches_the_registry() {
+        let target = json!({"label": "release CI", "kind": "ci", "href": "https://x/actions/runs/1"});
+        let body = json!({"session_id": "s", "status": "waiting", "waitingOn": target.clone()});
+        let c = ctx();
+        let resp = on_report_status(AxState(c.clone()), Json(body)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await, json!({"ok": true}));
+        assert_eq!(c.state.registry.peek_reported_status("s").unwrap().waiting_on, Some(target));
+    }
+
+    #[tokio::test]
+    async fn null_waiting_on_route_stores_none() {
+        let body = json!({"session_id": "s", "status": "done", "waitingOn": null});
+        let c = ctx();
+        let _ = on_report_status(AxState(c.clone()), Json(body)).await.into_response();
+        assert_eq!(c.state.registry.peek_reported_status("s").unwrap().waiting_on, None);
     }
 
     #[tokio::test]

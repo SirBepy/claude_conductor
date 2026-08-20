@@ -140,12 +140,15 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_REPORT_STATUS,
-            "description": "Report this turn's status and title as the LAST thing you do, every turn (even a tool-only one). status: done=fully finished, not blocked; question=awaiting the user's input; working=your own background subagents/tasks in THIS session are still running and will re-invoke you; waiting=parked on an external process (CI, deploy, scheduled wake) that resumes you later. Never done/waiting while your own tasks are still running - that's working. title: fresh 3-6 word topic summary, sent every turn - the app decides which become the visible chat title.",
+            "description": "Report this turn's status and title as the LAST thing you do, every turn (even a tool-only one). status: done=fully finished, not blocked; question=awaiting the user's input; working=your own background subagents/tasks in THIS session are still running and will re-invoke you; waiting=parked on an external process (CI, deploy, scheduled wake) that resumes you later. Never done/waiting while your own tasks are still running - that's working. title: fresh 3-6 word topic summary, sent every turn - the app decides which become the visible chat title. When status is waiting, also pass waiting_on_label (+ waiting_on_kind, and waiting_on_href if there is one to open) so Joe can see and open what you're blocked on: kind=ci for a CI/Actions run (waiting_on_href = its web URL), kind=local-process for a backgrounded script/build on this machine (waiting_on_href = its log file's absolute path), kind=external for anything else with a link. All three are optional and ignored unless status is waiting.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "status": {"type": "string", "enum": ["done", "question", "waiting", "working"]},
-                    "title": {"type": "string"}
+                    "title": {"type": "string"},
+                    "waiting_on_label": {"type": "string", "description": "Short human label for what you're waiting on, e.g. 'release CI' or 'npm run build'."},
+                    "waiting_on_kind": {"type": "string", "enum": ["ci", "local-process", "external"], "description": "ci = GitHub Actions/similar run opened in a browser tab; local-process = a script/build on this machine, tailed in-app from its log file; external = any other link."},
+                    "waiting_on_href": {"type": "string", "description": "For ci/external: the https:// URL to open. For local-process: the absolute path to the log file to tail. Rejected silently (label still shows) if it fails validation."}
                 },
                 "required": ["status"]
             }

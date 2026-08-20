@@ -306,6 +306,39 @@ mod tests {
         assert_eq!(body["waitingOn"]["href"], Value::Null);
     }
 
+    /// TRUST BOUNDARY (todo 675): a hostile local path and a hostile href are
+    /// BOTH stripped at this MCP ingest point - the label survives (so the
+    /// chip still shows what's being waited on), but nothing unsafe reaches
+    /// storage.
+    #[test]
+    fn report_status_rejects_a_hostile_path_and_a_hostile_href_at_ingest() {
+        let hostile_path = report_status_body(
+            &json!({
+                "status": "waiting",
+                "waiting_on_label": "build",
+                "waiting_on_kind": "local-process",
+                "waiting_on_href": "../../etc/passwd",
+            }),
+            "s",
+            &[],
+        );
+        assert_eq!(hostile_path["waitingOn"]["label"], json!("build"));
+        assert_eq!(hostile_path["waitingOn"]["href"], Value::Null, "relative traversal must not reach storage");
+
+        let hostile_href = report_status_body(
+            &json!({
+                "status": "waiting",
+                "waiting_on_label": "run",
+                "waiting_on_kind": "ci",
+                "waiting_on_href": "javascript:alert(document.cookie)",
+            }),
+            "s",
+            &[],
+        );
+        assert_eq!(hostile_href["waitingOn"]["label"], json!("run"));
+        assert_eq!(hostile_href["waitingOn"]["href"], Value::Null, "non-http(s) scheme must not reach storage");
+    }
+
     #[test]
     fn post_message_without_a_target_stays_a_broadcast() {
         assert_eq!(normalize_targets(None), Value::Null);
