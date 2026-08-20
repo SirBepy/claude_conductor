@@ -53,6 +53,39 @@ test.describe("@shot", () => {
     await capture(page, "sessions-phone-preview");
   });
 
+  test("phone composer, full-bleed at the viewport edge", async ({ page }) => {
+    // Shoots the surface todos 700/704 changed: .composer-shell's mobile margin.
+    // Mounts a real session so the composer geometry comes from the real cascade.
+    const session = {
+      session_id: "s1", pid: 100, cwd: "C:/Projects/alpha", project_id: "p1",
+      kind: "interactive", is_remote: false, started_at: "2026-08-01T10:00:00Z",
+      transcript_path: null, bridge_session_id: null, name: "Alpha chat",
+      ended_at: null, end_reason: null, busy: false, model: "claude-opus-5",
+      effort: "high", awaiting: "done", autopilot: false, jarvis: false,
+      worker_of: null, closing: false, account_id: null,
+      rate_limited_resets_at: null, rate_limited_type: null,
+    };
+    await page.setViewportSize({ width: 393, height: 852 });
+    await mountView(page, {
+      view: "sessions",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        get_usage_map: {}, get_skill_usage_week: { entries: [], total_sessions: 0 },
+        poll_now: null, list_projects: [], resolve_whitelist_characters: [],
+        probe_models_availability: [], list_accounts: [], list_scheduled_messages: [],
+        list_session_characters: {}, watch_session_transcript: null,
+        unwatch_session_transcript: null, session_live_cwd: null, get_git_info: null,
+        get_session_counts: null, get_context_status: null, get_session_drain: null,
+        list_pending_prompts: [], get_chat_config: null,
+        list_instances: [session], get_active_sessions: [session],
+        load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+      },
+    });
+    await page.locator("#sessions-list li[data-session-id='s1']").click();
+    await page.locator("#session-pane .session-composer").waitFor();
+    await capture(page, "phone-composer-full-bleed");
+  });
+
   test("overlay strip", async ({ page }) => {
     const now = Date.now();
     await mountView(page, {
