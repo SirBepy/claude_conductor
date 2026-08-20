@@ -397,9 +397,15 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
     return () => { /* no-op */ };
   }
 
-  await reload(bodyEl, myMount);
-
-  bodyEl.addEventListener("click", (e) => {
+  // Named + removed in teardown: lit-html reuses `#schedule-body` across
+  // re-renders, so an anonymous listener stacked one more copy on every visit
+  // to this view and a single Delete opened two confirm dialogs.
+  const onBodyClick = (e: MouseEvent): void => {
+    // Same mount guard `reload` already uses (:381). The router only captures a
+    // view's teardown after its async render resolves, so navigating back here
+    // before `reload` finishes leaves the previous mount's handler attached and
+    // one Delete fires twice, stacking two confirm dialogs.
+    if (state.mountId !== myMount) return;
     const target = e.target as HTMLElement;
 
     // View-mode toggle (Month / Week).
@@ -467,7 +473,11 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
         );
       }
     }
-  });
+  };
+  // Wired before the first load so clicks during it are never dropped.
+  bodyEl.addEventListener("click", onBodyClick);
+
+  await reload(bodyEl, myMount);
 
   let unlistenScheduled: (() => void) | null = null;
   const ev = window.__TAURI__?.event;
@@ -479,6 +489,7 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
   }
 
   return () => {
+    bodyEl.removeEventListener("click", onBodyClick);
     unlistenScheduled?.();
   };
 }
