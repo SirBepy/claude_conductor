@@ -210,13 +210,30 @@ export async function renderNewsView(root: HTMLElement): Promise<() => void> {
   state.streamBySlug.clear();
   state.phaseBySlug.clear();
   paint(root);
-  await Promise.all([fetchPosts(), loadNotifySetting()]);
-  paint(root);
 
+  // Registered before the fetch and latching: the harness injects as soon as
+  // the view mounts, and a `list_news` resolving after used to clobber it.
+  let injectedPosts: NewsPost[] | null = null;
+  const onInject = (e: Event) => {
+    injectedPosts = ((e as CustomEvent).detail as NewsPost[]) || [];
+    state.posts = injectedPosts;
+    state.loading = false;
+    paint(root);
+  };
+  if (import.meta.env.DEV) window.addEventListener("e2e-inject-news", onInject);
+
+  // Also before the fetch: the header paints above, so the kebab is clickable
+  // while `list_news` is in flight. Registered after the await, the menu could
+  // not be dismissed by an outside click for the whole of a slow fetch.
   const onDocClick = () => {
     if (state.menuOpen) { state.menuOpen = false; paint(root); }
   };
   document.addEventListener("click", onDocClick);
+
+  await Promise.all([fetchPosts(), loadNotifySetting()]);
+  // fetchPosts assigns state.posts unconditionally, so re-apply the injection.
+  if (injectedPosts) state.posts = injectedPosts;
+  paint(root);
 
   // Phone back button: when an article is open, close it back to the list
   // (mirrors the in-header Back button) instead of leaving the news view.
@@ -229,13 +246,6 @@ export async function renderNewsView(root: HTMLElement): Promise<() => void> {
     }
     return false;
   });
-
-  const onInject = (e: Event) => {
-    state.posts = ((e as CustomEvent).detail as NewsPost[]) || [];
-    state.loading = false;
-    paint(root);
-  };
-  if (import.meta.env.DEV) window.addEventListener("e2e-inject-news", onInject);
 
   type Unlisten = () => void;
   const unlisteners: Unlisten[] = [];
