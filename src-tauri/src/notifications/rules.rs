@@ -38,6 +38,20 @@ pub fn resolve_with_character(
     session_id: Option<&str>,
     cwd_key: Option<&str>,
 ) -> NotificationRule {
+    resolve_with_lookup(cfg, settings, kind, session_id, cwd_key, crate::characters::get)
+}
+
+/// Body of [`resolve_with_character`] with the character lookup injected, so
+/// tests can exercise the happy path without mutating the process-wide
+/// `characters::cache` that every other test thread shares.
+fn resolve_with_lookup(
+    cfg: &crate::tray::NotificationsConfig,
+    settings: &Settings,
+    kind: NotifKind,
+    session_id: Option<&str>,
+    cwd_key: Option<&str>,
+    lookup: impl Fn(&str) -> Option<crate::characters::Character>,
+) -> NotificationRule {
     let default_rule = match kind {
         NotifKind::WorkFinished  => cfg.work_finished.clone(),
         NotifKind::QuestionAsked => cfg.question_asked.clone(),
@@ -61,7 +75,7 @@ pub fn resolve_with_character(
     });
 
     let Some(char_id) = char_id else { return default_rule; };
-    let Some(character) = crate::characters::get(&char_id) else { return default_rule; };
+    let Some(character) = lookup(&char_id) else { return default_rule; };
     let slot = match kind {
         NotifKind::WorkFinished  => crate::characters::slots::Slot::WorkFinished,
         NotifKind::QuestionAsked => crate::characters::slots::Slot::QuestionAsked,
@@ -334,9 +348,9 @@ mod tests {
         let cfg = NotificationsConfig::default();
         let s = settings_with_project("C:/proj", Some("happy-peon"));
 
-        // Inject a character directly into the cache so the resolver
-        // doesn't try to read from disk. Slot points at a relative file
-        // under a fake `dir`; the resolver joins them via `asset_path`.
+        // Injected through the lookup arg, never through `characters::cache`:
+        // that cache is one process-wide slot, and seeding it here raced with
+        // the cache's own tests under RUST_TEST_THREADS=4 (todo #669).
         let mut slots = HashMap::new();
         slots.insert("work_finished".into(), vec!["sounds/done.wav".into()]);
         let character = crate::characters::Character {
@@ -350,15 +364,22 @@ mod tests {
             dir: PathBuf::from("/fake/chars/happy-peon"),
             slots,
         };
-        crate::characters::cache::invalidate();
-        crate::characters::cache::set_for_test(vec![character]);
-
         let key = crate::settings::store::project_key(std::path::Path::new("C:/proj"));
-        let rule = resolve_with_character(&cfg, &s, NotifKind::WorkFinished, None, Some(&key));
+        let rule = resolve_with_lookup(
+            &cfg,
+            &s,
+            NotifKind::WorkFinished,
+            None,
+            Some(&key),
+            |id| (id == "happy-peon").then(|| character.clone()),
+        );
 
-        assert_eq!(rule.sound_pack, CHARACTER_PACK_SENTINEL);
-        assert_eq!(rule.mode, NotifMode::Sound);
-        assert!(rule.enabled);
+        assert_eq!(
+            rule.sound_pack, CHARACTER_PACK_SENTINEL,
+            "expected the character sentinel pack, got rule {rule:?}"
+        );
+        assert_eq!(rule.mode, NotifMode::Sound, "got rule {rule:?}");
+        assert!(rule.enabled, "got rule {rule:?}");
         // sound_file should be the asset_path (dir join slot file).
         assert!(
             rule.sound_file.contains("happy-peon"),
@@ -366,7 +387,5 @@ mod tests {
             rule.sound_file
         );
         assert!(rule.sound_file.ends_with("done.wav"), "got {}", rule.sound_file);
-
-        crate::characters::cache::invalidate();
     }
 }
