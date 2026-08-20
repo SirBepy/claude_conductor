@@ -668,7 +668,7 @@
 }
 
 .session-composer {
-  padding: 8px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 8px;

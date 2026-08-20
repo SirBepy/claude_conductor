@@ -6,6 +6,14 @@
   flex-wrap: wrap;
 }
 
+/* Always in the DOM (composer.ts renders it unconditionally) even with no
+ * attachments - :empty removes it from .session-composer's flex flow so its
+ * flex `gap` stops reserving a dead 6-8px strip above the composer-row. That
+ * strip was the "weird top padding" pushing the textarea/icons down. */
+.composer-attachments:empty {
+  display: none;
+}
+
 .composer-attachments .attachment {
   position: relative;
   width: 80px;
@@ -88,7 +96,7 @@
   overflow: hidden;
   box-sizing: border-box;
   /* MUST match .composer-textarea box + type metrics exactly. */
-  padding: 8px;
+  padding: 6px 8px;
   border: 1px solid transparent;
   border-radius: 4px;
   font-family: inherit;
@@ -111,7 +119,7 @@
      avoiding the JS height:"auto"→height:scrollHeight pattern that caused a
      one-frame box-shadow render at the wrong size after line wraps. */
   field-sizing: content;
-  min-height: 36px;
+  min-height: 32px;
   max-height: 200px;
   overflow-y: auto;
   background: transparent;
@@ -119,7 +127,7 @@
   caret-color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  padding: 8px;
+  padding: 6px 8px;
   font-family: inherit;
   font-size: 0.88rem;
   line-height: 1.4;
