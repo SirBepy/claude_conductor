@@ -90,9 +90,12 @@ pub(crate) fn post_message(
     }
     let project_id = caller_project(state, session_id)?;
     let author = display_name(state, session_id);
+
+    // Resolve BEFORE persisting: a rejected target used to still leave the text
+    // in durable channel history, readable by every project member.
+    let targets = repo_channel_wake::resolve_targets(state, session_id, target)?;
     let msg = repo_channel::post(&project_id, session_id, &author, text);
 
-    let targets = repo_channel_wake::resolve_targets(state, session_id, target)?;
     let mut notified = 0usize;
     for target_id in &targets {
         // `msg.text` (already truncated to MAX_TEXT_LEN by `repo_channel::post`
@@ -239,5 +242,27 @@ mod tests {
 
         let queues = state.repo_channel_wakes.lock().unwrap();
         assert!(queues.get("s2").is_none(), "a bad target must never fall back to broadcast");
+    }
+
+    #[test]
+    fn post_message_with_a_bad_target_leaves_no_trace_in_history() {
+        // Its own project id: `repo_channel::list` is process-global and the
+        // other tests here post to proj-1, so sharing one would flake.
+        let state = test_state();
+        let proj = "proj-post-guard";
+        state.registry.upsert_interactive("g1", std::path::Path::new("."), proj, "2026-07-30T00:00:00Z");
+
+        let before = repo_channel::list(proj).len();
+        let target = vec!["typo".to_string()];
+        let r = post_message(&state, "g1", "secret coordination note", Some(&target));
+        assert!(r.is_err(), "an unknown target must fail the call");
+
+        // Persisting before validating leaked the text into durable history that
+        // every project member can read, while still returning Err to the caller.
+        assert_eq!(
+            repo_channel::list(proj).len(),
+            before,
+            "a rejected post must not append to channel history"
+        );
     }
 }
