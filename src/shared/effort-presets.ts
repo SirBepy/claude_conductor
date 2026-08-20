@@ -1,11 +1,5 @@
 import { modelLabel } from "./model-name";
 
-export interface Preset {
-  name: string;
-  model: string;
-  effort: string;
-}
-
 export interface SessionConfig {
   model: string;
   effort: string;
@@ -106,12 +100,6 @@ export function sortByImpressiveness(models: string[]): string[] {
     .map((x) => x.m);
 }
 
-export const DEFAULT_PRESETS: Preset[] = [
-  { name: "Light", model: "sonnet", effort: "low" },
-  { name: "Normal", model: "opus", effort: "high" },
-  { name: "Heavy", model: "opus", effort: "max" },
-];
-
 export function isEffort(v: unknown): v is typeof EFFORTS[number] {
   return typeof v === "string" && (EFFORTS as readonly string[]).includes(v);
 }
@@ -164,36 +152,6 @@ export function readDefaultFlags(
     autoAccept: settings["defaultAutoAllow"] !== false,
     remote: settings["defaultRemoteControl"] !== false,
   };
-}
-
-export function readPresets(
-  settings: Record<string, unknown>,
-  opts?: { padWithDefaults?: boolean },
-): Preset[] {
-  const raw = settings["effortPresets"];
-  if (!Array.isArray(raw)) return opts?.padWithDefaults ? [...DEFAULT_PRESETS] : DEFAULT_PRESETS;
-  const out: Preset[] = [];
-  for (const p of raw) {
-    if (p && typeof p === "object") {
-      const o = p as Record<string, unknown>;
-      const name = typeof o.name === "string" ? o.name : "";
-      // Loosened: accept any non-empty model string so user-defined models in
-      // settings.models survive. Effort stays strict (isEffort). Normalize to a
-      // family so a full id stored during the picker window (e.g.
-      // "claude-opus-4-8") collapses to its canonical family ("opus").
-      const model = typeof o.model === "string" ? modelFamilyFromId(o.model.trim()) : "";
-      const effort = isEffort(o.effort) ? o.effort : "";
-      if (name && model && effort) out.push({ name, model, effort });
-    }
-  }
-  if (opts?.padWithDefaults) {
-    while (out.length < 3) {
-      const d = DEFAULT_PRESETS[out.length]!;
-      out.push({ ...d });
-    }
-    return out.slice(0, 3);
-  }
-  return out.length === 3 ? out : DEFAULT_PRESETS;
 }
 
 export function readLastChoice(

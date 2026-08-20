@@ -202,29 +202,6 @@
   cursor: pointer;
 }
 
-.model-effort-modal-card .me-presets {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.model-effort-modal-card .preset-btn {
-  flex: 1;
-  padding: 8px 10px;
-  background: var(--color-surface-alt, #24242e);
-  color: var(--color-text, #e8e8ee);
-  border: 1px solid var(--color-border, #2a2a36);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.82rem;
-}
-
-.model-effort-modal-card .preset-btn.active {
-  background: var(--color-primary, #6e8fff);
-  color: var(--color-background, #0e0e14);
-  border-color: var(--color-primary, #6e8fff);
-}
-
 .model-effort-modal-card .me-field {
   margin: 14px 0;
 }
@@ -299,6 +276,15 @@
 .model-effort-modal-card .slider-stop-label.active {
   color: var(--color-primary, #6e8fff);
   font-weight: 600;
+}
+
+/* 1-9 keyboard-shortcut hint next to each Model slider stop. */
+.model-effort-modal-card .me-key-hint {
+  display: inline-block;
+  margin-left: 3px;
+  font-size: 0.62rem;
+  color: var(--color-text-muted, #8a8a96);
+  opacity: 0.7;
 }
 
 .model-effort-modal-card .me-actions {

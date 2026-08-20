@@ -14,10 +14,7 @@ import {
 import { createCharacterPane, cancelCharacterPaneSound, type CharacterPane } from "./character-pane";
 import {
   EFFORTS,
-  DEFAULT_PRESETS,
-  type Preset as EffortPreset,
   type SessionConfig,
-  readPresets,
   readLastChoice,
   readModels,
   readDefaultFlags,
@@ -26,7 +23,6 @@ import {
 } from "../../shared/effort-presets";
 
 export type { SessionConfig };
-export type { EffortPreset };
 
 export async function openModelEffortModal(
   projectPath: string,
@@ -35,19 +31,17 @@ export async function openModelEffortModal(
   let settings: Record<string, unknown> = {};
   try {
     // The remote (phone) transport resolves get_settings to null rather than
-    // throwing, so `?? {}` is load-bearing: without it readPresets(null) throws
-    // on `.effortPresets` and the whole new-chat flow dead-ends back to the list.
+    // throwing, so `?? {}` is load-bearing: without it readModels(null) throws
+    // and the whole new-chat flow dead-ends back to the list.
     settings = (await invoke<Record<string, unknown> | null>("get_settings")) ?? {};
   } catch {
     // ignore — fall back to defaults
   }
 
-  const presets = readPresets(settings);
   const models = readModels(settings);
   const defaultFlags = readDefaultFlags(settings);
-  const normalPreset: EffortPreset =
-    presets.find((p) => p.name === "Normal") ?? presets[1] ?? DEFAULT_PRESETS[1]!;
-  const initial = readLastChoice(settings, projectPath) ?? { model: normalPreset.model, effort: normalPreset.effort };
+  // No presets anymore - first-ever session in a project defaults to Opus/high.
+  const initial = readLastChoice(settings, projectPath) ?? { model: "opus", effort: "high" };
 
   // Resolve projectId for whitelist + live-taken dedup, and the project's
   // bound account (if any) for the account picker below.
@@ -97,7 +91,6 @@ export async function openModelEffortModal(
     // NOT lastChoice, which doesn't store them. Both default on.
     let autoAccept = defaultFlags.autoAccept;
     let remote = defaultFlags.remote;
-    let activePresetIndex = -1;
     // Per-model availability from the count_tokens probe. Empty until the probe
     // resolves; absent/true => model is selectable. A disabled model (e.g. Fable
     // 5 when Anthropic has it off) stays clickable but blocks "Start session".
@@ -119,25 +112,14 @@ export async function openModelEffortModal(
       remember: false,
     };
 
-    function syncActivePreset() {
-      activePresetIndex = presets.findIndex((p) => p.model === model && p.effort === effort);
-    }
-    syncActivePreset();
-
     function modelIdx(): number { return Math.max(0, models.indexOf(model)); }
     function effortIdx(): number { return Math.max(0, EFFORTS.indexOf(effort as typeof EFFORTS[number])); }
     function modelDisabled(): boolean { return availability[model] === false; }
     function sessionBlocked(): boolean { return authExpired || modelDisabled(); }
 
     function renderBody() {
-      const presetButtons = presets.map((p, i) => `
-        <button type="button" class="preset-btn${i === activePresetIndex ? " active" : ""}" data-idx="${i}">
-          ${escapeHtml(p.name)}
-        </button>
-      `).join("");
-
       const modelLabels = models.map((m, i) => `
-        <span class="slider-stop-label${i === modelIdx() ? " active" : ""}" data-stop="${i}">${escapeHtml(modelDisplayLabel(m))}</span>
+        <span class="slider-stop-label${i === modelIdx() ? " active" : ""}" data-stop="${i}">${escapeHtml(modelDisplayLabel(m))}${i < 9 ? `<span class="me-key-hint">${i + 1}</span>` : ""}</span>
       `).join("");
       const effortLabels = EFFORTS.map((e, i) => `
         <span class="slider-stop-label${i === effortIdx() ? " active" : ""}" data-stop="${i}">${escapeHtml(e)}</span>
@@ -148,7 +130,6 @@ export async function openModelEffortModal(
             <div class="me-left-col">
               <h3 class="me-title">New session in ${escapeHtml(projectName)}</h3>
               ${renderAccountFieldHtml(accountField, { accounts, preferredAccountId, resolvedAccountId, projectName })}
-              <div class="me-presets">${presetButtons}</div>
 
               <div class="me-field">
                 <label class="me-label">Model</label>
@@ -156,14 +137,13 @@ export async function openModelEffortModal(
                 <div class="me-stop-labels">${modelLabels}</div>
               </div>
 
-              <div class="me-field">
-                <label class="me-label">Effort</label>
-                <input type="range" class="me-slider me-effort-slider" min="0" max="${EFFORTS.length - 1}" step="1" value="${effortIdx()}">
-                <div class="me-stop-labels">${effortLabels}</div>
-              </div>
-
               <details class="me-more">
                 <summary class="me-more-summary"><i class="ph ph-caret-right"></i>More options</summary>
+                <div class="me-field">
+                  <label class="me-label">Effort</label>
+                  <input type="range" class="me-slider me-effort-slider" min="0" max="${EFFORTS.length - 1}" step="1" value="${effortIdx()}">
+                  <div class="me-stop-labels">${effortLabels}</div>
+                </div>
                 <label class="me-check">
                   <input type="checkbox" class="me-auto-accept-input"${autoAccept ? " checked" : ""}>
                   Auto allow permissions
@@ -193,23 +173,10 @@ export async function openModelEffortModal(
     }
 
     function attachHandlers() {
-      card.querySelectorAll<HTMLButtonElement>(".preset-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const idx = Number(btn.dataset.idx);
-          const p = presets[idx];
-          if (!p) return;
-          model = p.model;
-          effort = p.effort;
-          activePresetIndex = idx;
-          renderBody();
-        });
-      });
-
       const modelSlider = card.querySelector<HTMLInputElement>(".me-model-slider");
       modelSlider?.addEventListener("input", () => {
         const i = Number(modelSlider.value);
         model = models[i] ?? model;
-        syncActivePreset();
         renderBody();
       });
 
@@ -217,7 +184,6 @@ export async function openModelEffortModal(
       effortSlider?.addEventListener("input", () => {
         const i = Number(effortSlider.value);
         effort = EFFORTS[i] ?? effort;
-        syncActivePreset();
         renderBody();
       });
 
@@ -293,9 +259,17 @@ export async function openModelEffortModal(
       if (e.key === "Escape") {
         e.preventDefault();
         close(null);
-      } else if (e.key === "Enter") {
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        // Ctrl/Cmd+Enter submits; plain Enter is free for the 1-9 shortcuts below.
         e.preventDefault();
         void startWithCurrentConfig();
+      } else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const idx = Number(e.key) - 1;
+        const next = models[idx];
+        if (!next) return;
+        e.preventDefault();
+        model = next;
+        renderBody();
       }
     }
 

@@ -13,7 +13,7 @@ import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero } from "./session-statusbar";
-import { readLastChoice, readPresets } from "../../shared/effort-presets";
+import { readLastChoice } from "../../shared/effort-presets";
 import { renderSidebar } from "./sidebar";
 import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import type { SessionHeader } from "./session-header";
@@ -50,8 +50,7 @@ export async function mountStatusbar(
     try {
       const settings = await invoke<Record<string, unknown>>("get_settings");
       const last = readLastChoice(settings, String(sess.cwd));
-      const normal = readPresets(settings).find((p) => p.name === "Normal");
-      effortDisplay = last?.effort ?? normal?.effort ?? "";
+      effortDisplay = last?.effort ?? "high";
     } catch { /* leave blank */ }
   }
   // Bail if a newer mount or selectSession superseded us during the awaits:

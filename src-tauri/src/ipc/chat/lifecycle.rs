@@ -190,8 +190,7 @@ pub async fn simulate_rate_limit(
 
 /// Resolve model+effort for takeover from settings.extra:
 /// 1. projectLastChoice[cwd_path] -> {model, effort}
-/// 2. effortPresets[].name == "Normal" -> {model, effort}
-/// 3. fall back to ("opus", "high")
+/// 2. fall back to ("opus", "high")
 fn resolve_takeover_model_effort(manual_pid: u32, state: &AppState) -> (String, String) {
     let entry = state
         .cached_instances
@@ -220,21 +219,7 @@ fn resolve_takeover_model_effort(manual_pid: u32, state: &AppState) -> (String, 
         }
     }
 
-    // 2. Normal preset
-    if let Some(arr) = extra.get("effortPresets").and_then(|v| v.as_array()) {
-        for p in arr {
-            let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if name == "Normal" {
-                let model = p.get("model").and_then(|v| v.as_str()).unwrap_or("");
-                let effort = p.get("effort").and_then(|v| v.as_str()).unwrap_or("");
-                if !model.is_empty() && !effort.is_empty() {
-                    return (model.to_string(), effort.to_string());
-                }
-            }
-        }
-    }
-
-    // 3. fallback
+    // 2. fallback
     ("opus".to_string(), "high".to_string())
 }
 

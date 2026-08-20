@@ -3,7 +3,6 @@ import {
   MODELS,
   readModels,
   readDefaultFlags,
-  readPresets,
   readLastChoice,
   sortByImpressiveness,
   setApiModels,
@@ -117,17 +116,6 @@ describe("modelDisplayLabel without API data", () => {
 });
 
 describe("model identity migration (full id -> family)", () => {
-  it("readPresets normalizes stored full ids to families", () => {
-    const settings = {
-      effortPresets: [
-        { name: "Light", model: "claude-sonnet-4-6", effort: "low" },
-        { name: "Normal", model: "claude-opus-4-8", effort: "high" },
-        { name: "Heavy", model: "opus", effort: "max" },
-      ],
-    };
-    expect(readPresets(settings).map((p) => p.model)).toEqual(["sonnet", "opus", "opus"]);
-  });
-
   it("readLastChoice normalizes a stored full id to its family", () => {
     const settings = {
       projectLastChoice: { "/proj": { model: "claude-opus-4-8", effort: "high" } },
@@ -158,34 +146,6 @@ describe("readDefaultFlags", () => {
       autoAccept: false,
       remote: true,
     });
-  });
-});
-
-describe("readPresets loosened model validation", () => {
-  it("accepts a user-defined model string not in MODELS", () => {
-    const settings = {
-      effortPresets: [
-        { name: "Custom", model: "glm-4.6", effort: "high" },
-        { name: "Normal", model: "opus", effort: "high" },
-        { name: "Heavy", model: "opus", effort: "max" },
-      ],
-    };
-    const out = readPresets(settings);
-    expect(out).toHaveLength(3);
-    expect(out[0]).toEqual({ name: "Custom", model: "glm-4.6", effort: "high" });
-  });
-
-  it("still rejects an invalid effort", () => {
-    const settings = {
-      effortPresets: [
-        { name: "Bad", model: "glm-4.6", effort: "bogus" },
-        { name: "Normal", model: "opus", effort: "high" },
-        { name: "Heavy", model: "opus", effort: "max" },
-      ],
-    };
-    // One invalid preset -> falls back to defaults (length-3 gate).
-    const out = readPresets(settings);
-    expect(out.find((p) => p.name === "Bad")).toBeUndefined();
   });
 });
 
