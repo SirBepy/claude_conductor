@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 // Re-export identity helpers so existing call sites that reach into
 // `settings::store::*` keep resolving without changes.
 pub use super::identity::{
-    find_repo_root, normalize_cwd_key, normalize_path, project_key,
+    find_repo_root, normalize_cwd_key, normalize_path, project_key, project_root,
 };
 use super::identity::dedupe_projects_by_path_key;
 
@@ -88,9 +88,10 @@ pub fn upsert_project_for_cwd(
         p.last_active_at = Some(now.to_string());
         return (p.id.clone(), false);
     }
-    // Store the resolved root (repo root when found, else the cwd as-is)
-    // so subfolder cwds never spawn duplicate entries.
-    let root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    // `project_root`, not `find_repo_root`: it also rolls a worktree up to
+    // its main checkout, so the stored path/name match the key looked up
+    // above instead of naming the worktree folder (todo 717).
+    let root = project_root(cwd);
     let id = uuid::Uuid::new_v4().to_string();
     let name = root
         .file_name()
@@ -130,7 +131,7 @@ pub fn upsert_project_with_id_for_cwd(
     {
         return;
     }
-    let root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let root = project_root(cwd);
     let name = root
         .file_name()
         .and_then(|s| s.to_str())
@@ -315,6 +316,30 @@ mod tests {
         assert!(!created);
         assert_eq!(id1, id2);
         assert_eq!(s.projects.len(), 1);
+    }
+
+    #[test]
+    fn upsert_rolls_a_worktree_up_to_the_main_repo_root() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("myrepo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let worktree = repo.join(".claude").join("worktrees").join("feature-x");
+        std::fs::create_dir_all(&worktree).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join("feature-x");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", gitdir.to_string_lossy())).unwrap();
+
+        let mut s = Settings::default();
+        let (id1, _) = upsert_project_for_cwd(&mut s, &worktree, "t1");
+        let (id2, created) = upsert_project_for_cwd(&mut s, &repo, "t2");
+
+        assert!(!created, "a worktree and its main checkout are one project");
+        assert_eq!(id1, id2);
+        assert_eq!(s.projects.len(), 1);
+        // Created from the worktree cwd, yet named/rooted at the main repo:
+        // rolling up only the dedup key would store "feature-x" here.
+        assert_eq!(s.projects[0].path, repo);
+        assert_eq!(s.projects[0].name, "myrepo");
     }
 
     #[test]

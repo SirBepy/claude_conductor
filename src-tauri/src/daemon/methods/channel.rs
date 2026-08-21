@@ -17,6 +17,7 @@
 use crate::daemon::repo_channel_wake;
 use crate::daemon::state::DaemonState;
 use crate::sessions::repo_channel;
+use crate::settings::identity;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -50,6 +51,10 @@ pub(crate) fn list_peers(state: &Arc<DaemonState>, session_id: &str) -> Result<V
         .into_iter()
         .filter(|i| i.session_id != session_id && i.ended_at.is_none())
         .map(|i| {
+            // Worktrees share a project_id with the main checkout (todo 717),
+            // so a peer's file claims can be about a different tree entirely.
+            let worktree = identity::find_repo_root(&i.cwd).unwrap_or_else(|| i.cwd.clone());
+            let branch = identity::current_branch(&worktree);
             json!({
                 "session_id": i.session_id,
                 "name": i.name,
@@ -61,6 +66,8 @@ pub(crate) fn list_peers(state: &Arc<DaemonState>, session_id: &str) -> Result<V
                 "pid": i.pid,
                 "kind": i.kind,
                 "cwd": i.cwd,
+                "worktree": worktree,
+                "branch": branch,
             })
         })
         .collect();
@@ -110,7 +117,15 @@ pub(crate) fn post_message(
         repo_channel_wake::spawn_drain(state, target_id);
         notified += 1;
     }
-    Ok(json!({"ok": true, "message": msg, "notified": notified}))
+    // `delivered` (todo 717): a bare `notified: 0` read as "no peers exist"
+    // and got reported to the dev as fact. It only ever means the note is a
+    // dead drop for a future reader.
+    Ok(json!({
+        "ok": true,
+        "message": msg,
+        "notified": notified,
+        "delivered": notified > 0,
+    }))
 }
 
 #[cfg(test)]
@@ -153,6 +168,39 @@ mod tests {
 
         let v = list_peers(&state, "s1").unwrap();
         assert_eq!(v["peers"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn list_peers_reports_each_peers_worktree_and_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(repo.join(".git").join("HEAD"), "ref: refs/heads/master\n").unwrap();
+        let worktree = repo.join(".claude").join("worktrees").join("feature-x");
+        std::fs::create_dir_all(worktree.join("src")).unwrap();
+        let gitdir = repo.join(".git").join("worktrees").join("feature-x");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        std::fs::write(worktree.join(".git"), format!("gitdir: {}\n", gitdir.to_string_lossy())).unwrap();
+        std::fs::write(gitdir.join("HEAD"), "ref: refs/heads/feature-x\n").unwrap();
+
+        let state = test_state();
+        state.registry.upsert_interactive("s1", &repo, "proj-1", "2026-07-30T00:00:00Z");
+        // A nested cwd, so the reported worktree must be the tree root.
+        state.registry.upsert_interactive("s2", &worktree.join("src"), "proj-1", "2026-07-30T00:00:00Z");
+
+        let v = list_peers(&state, "s1").unwrap();
+        let peers = v["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0]["branch"], "feature-x", "peer's own tree branch, not the caller's");
+        assert_eq!(
+            std::path::PathBuf::from(peers[0]["worktree"].as_str().unwrap()),
+            worktree
+        );
+        // 503's provenance must survive the addition.
+        assert_eq!(peers[0]["session_id"], "s2");
+        assert!(peers[0].get("pid").is_some());
+        assert!(peers[0].get("kind").is_some());
+        assert!(peers[0].get("cwd").is_some());
     }
 
     #[test]
@@ -212,6 +260,20 @@ mod tests {
         let v = post_message(&state, "s1", "touching pending-pane.ts, anyone on this?", None).unwrap();
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1, "only s2 shares proj-1 with the poster");
+        assert_eq!(v["delivered"], true);
+    }
+
+    #[tokio::test]
+    async fn post_message_to_an_empty_project_reports_not_delivered() {
+        let state = test_state();
+        state.registry.upsert_interactive("lonely", std::path::Path::new("."), "proj-lonely", "2026-07-30T00:00:00Z");
+
+        let v = post_message(&state, "lonely", "anyone here?", None).unwrap();
+        assert_eq!(v["notified"], 0);
+        assert_eq!(
+            v["delivered"], false,
+            "a dead drop must be distinguishable from a real broadcast"
+        );
     }
 
     #[tokio::test]
