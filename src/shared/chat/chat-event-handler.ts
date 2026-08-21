@@ -201,10 +201,10 @@ function handleUserMessageEvent(
     // except any held prose that rode along in the same bundle, which
     // still renders as a normal user message (must not be swallowed).
     if (remainderBlocks.length > 0) {
-      r.messages.push({ kind: "user", content: remainderBlocks, ts });
+      r.messages.push({ kind: "user", content: remainderBlocks, ts, authorSessionId: ev.author_session_id ?? null });
     }
   } else {
-    r.messages.push({ kind: "user", content: cleaned, ts });
+    r.messages.push({ kind: "user", content: cleaned, ts, authorSessionId: ev.author_session_id ?? null });
   }
   r.activeTurnStart = r.messages.length;
   return { touched: true, coalesce: false };

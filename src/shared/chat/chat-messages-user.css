@@ -8,6 +8,31 @@
   margin-left: 32px;
 }
 
+/* Icon-pair tag (todo 682): the sending AI's character + project, on a
+   right-aligned bubble it sent on Joe's behalf. Character icon leads
+   (identity matters most), project icon overlaps it slightly. */
+.author-tag {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.author-tag-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  font-size: 0.65rem;
+  flex-shrink: 0;
+}
+.author-tag-proj {
+  margin-left: -6px;
+}
+
 /* Long user messages (pasted/typed walls) collapse to ~10 lines behind a
    toggle. Content sits in an overflow-hidden body; the toggle is a sibling so
    it stays visible. */

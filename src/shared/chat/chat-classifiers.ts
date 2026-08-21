@@ -182,6 +182,10 @@ export interface RenderedMessage {
    *  content via `load_event_detail`, keyed on `fullSeq` + `tool_use_id`. */
   outputTruncated?: boolean;
   fullSeq?: number;
+  /** Session id of the AI that sent this on Joe's behalf (a Jarvis relay,
+   *  todo 682) - set only on kind:"user" rows, null/undefined when Joe typed
+   *  it himself. Drives the character+project icon-pair tag. */
+  authorSessionId?: string | null;
 }
 
 /**

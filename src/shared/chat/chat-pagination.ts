@@ -326,7 +326,7 @@ export class ChatPaginator {
         }
         const remainder = stripAuqAnswerBlock(cleanUserBlocks(ev.content));
         if (remainder.length === 0) continue;
-        const rMsg: RenderedMessage = { kind: "user", content: remainder, ts: Number(ev.timestamp) };
+        const rMsg: RenderedMessage = { kind: "user", content: remainder, ts: Number(ev.timestamp), authorSessionId: ev.author_session_id ?? null };
         boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });
         acc = null;
         accFirstTs = rMsg.ts > 0 ? rMsg.ts : 0;

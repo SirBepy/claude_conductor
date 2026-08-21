@@ -7,6 +7,8 @@ import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
 import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions } from "./markdown-highlight";
 export { highlightSlashMentions, highlightComposerInput } from "./markdown-highlight";
+import { characterForSessionId } from "../../views/sessions/session-characters";
+import { state as sessionsState } from "../../views/sessions/state";
 import {
   type RenderedMessage,
   stripStatusToken,
@@ -245,6 +247,22 @@ export function truncateForSummary(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen - 2) + "…" : text;
 }
 
+// Icon-pair tag (todo 682): sending session's character + project icon.
+// Synchronous reads of caches other surfaces already warmed - zero RPCs at
+// render time. Unresolvable session falls back to a generic icon per half,
+// never blank.
+function renderAuthorTagHtml(authorSessionId: string): string {
+  const charId = characterForSessionId(authorSessionId);
+  const charHtml = charId
+    ? `<img class="char-avatar" data-character-id="${escapeHtml(charId)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;image-rendering:pixelated">`
+    : `<i class="ph ph-robot"></i>`;
+  const cwd = sessionsState.sessions.find((s) => s.session_id === authorSessionId)?.cwd;
+  const projHtml = cwd
+    ? `<span class="proj-face" data-proj-face="${escapeHtml(cwd)}"><i class="ph ph-folder"></i></span>`
+    : `<i class="ph ph-folder"></i>`;
+  return `<div class="author-tag" title="Sent by an AI on Joe's behalf"><span class="author-tag-icon author-tag-char">${charHtml}</span><span class="author-tag-icon author-tag-proj">${projHtml}</span></div>`;
+}
+
 function renderSystemNote(text: string): string {
   if (text.length <= SYSTEM_NOTE_PREVIEW_LEN) {
     return `<div class="msg system">${escapeHtml(text)}</div>`;
@@ -267,8 +285,10 @@ export function renderMessage(m: RenderedMessage): string {
         return `<div class="msg system meta-marker"><span class="chat-pill meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${META_KIND_ICONS[m.metaKind]}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
       }
       return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
-    case "user":
-      return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;
+    case "user": {
+      const tag = m.authorSessionId ? renderAuthorTagHtml(m.authorSessionId) : "";
+      return `<div class="msg user${tag ? " msg-user--authored" : ""}">${tag}${renderBlocks(m.content ?? [], true, true)}</div>`;
+    }
     case "assistant": {
       const blocks = m.content ?? [];
       const firstBlock = blocks[0];

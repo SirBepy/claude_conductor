@@ -91,7 +91,7 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
         const meta = classifyMetaTurn(cleaned);
         return { kind: "system", text: meta.label, metaKind: meta.kind, metaDetail: meta.detail, ts };
       }
-      return { kind: "user", content: cleaned, ts };
+      return { kind: "user", content: cleaned, ts, authorSessionId: ev.author_session_id ?? null };
     }
     case "assistant_message": {
       if (!ev.streaming) {

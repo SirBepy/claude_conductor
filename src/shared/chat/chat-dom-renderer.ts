@@ -8,6 +8,7 @@
 import { wrapBlockquotes, RenderedMessage, renderMessage, isBoundaryMessage } from "./chat-transforms";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { hydrateAttachments } from "./attachment-hydrator";
+import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../projects";
 import { toolSummary } from "./tool-meta";
 import { applyTurnCollapse, groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
@@ -386,6 +387,13 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
   el.dataset.ts = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (el.querySelector(".attachment-chip[data-attachment-path]")) {
     void hydrateAttachments(el);
+  }
+  // Author-tag icon pair (todo 682): fills the placeholders renderAuthorTagHtml
+  // emitted, from the same lazy per-id/per-path caches every other avatar
+  // surface already shares - never a fresh RPC per bubble.
+  if (el.querySelector(".author-tag")) {
+    void hydrateCharacterAvatars(el);
+    void hydrateProjectTechIcons(el);
   }
   return el;
 }
