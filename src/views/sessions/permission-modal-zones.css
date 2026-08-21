@@ -69,7 +69,6 @@
   );
   border-top: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
-  box-shadow: inset 3px 0 0 var(--dom);
 }
 .prompt-ask__icon {
   font-size: 1.15rem;
