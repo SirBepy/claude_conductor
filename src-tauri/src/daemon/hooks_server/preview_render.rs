@@ -54,7 +54,7 @@ pub(super) async fn on_preview_render(
 
 /// Deliberately wide-open: this doc is sandboxed (`allow-scripts`, no
 /// `allow-same-origin`), so its policy is independent of the app shell's.
-const RENDER_DOC_CSP: &str =
+pub(crate) const RENDER_DOC_CSP: &str =
     "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; img-src * data: blob:; font-src * data:; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval' blob:;";
 
 pub(super) async fn on_preview_render_get(AxPath(id): AxPath<String>) -> Response {

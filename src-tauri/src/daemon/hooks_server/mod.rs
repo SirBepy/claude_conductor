@@ -19,7 +19,7 @@ mod lifecycle;
 mod messages;
 mod permission;
 mod preview;
-mod preview_render;
+pub(crate) mod preview_render;
 mod question;
 mod relay;
 mod spawn_chat;

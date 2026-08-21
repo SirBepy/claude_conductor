@@ -76,10 +76,18 @@ pub(super) async fn on_preview_render_get(
         cache.entries.get(&id).cloned()
     };
     match html {
-        Some(html) => {
-            (StatusCode::OK, [(header::CONTENT_TYPE, "text/html; charset=utf-8".to_string())], html)
-                .into_response()
-        }
+        Some(html) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8".to_string()),
+                (
+                    header::CONTENT_SECURITY_POLICY,
+                    super::hooks_server::preview_render::RENDER_DOC_CSP.to_string(),
+                ),
+            ],
+            html,
+        )
+            .into_response(),
         // Unknown or evicted id - no filesystem read, no reflected input.
         None => StatusCode::NOT_FOUND.into_response(),
     }
