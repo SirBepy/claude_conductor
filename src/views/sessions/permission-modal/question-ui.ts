@@ -72,7 +72,17 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     sessionId: opts.sessionId,
     supportsExtras: opts.supportsExtras,
     initial: opts.initialDraft?.attachments,
-    onChange: () => renderer.render(),
+    // A full render() would recreate the answer-bar textarea and drop focus/
+    // cursor - exactly the class of bug mergeFreshDraft's isTyping guard
+    // avoids below. A paste is typed FROM that same field, so patch just the
+    // attachments strip instead when it still owns focus.
+    onChange: () => {
+      const active = document.activeElement as HTMLElement | null;
+      const isTyping = Boolean(active) && host.contains(active)
+        && (active!.classList.contains("prompt-q__other-input") || active!.classList.contains("prompt-extra-input"));
+      if (isTyping) renderer.refreshAttachments();
+      else renderer.render();
+    },
   });
 
   // "/" skill-suggestion popup + highlight backdrop - the same shared core

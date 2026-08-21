@@ -41,6 +41,10 @@ export interface QuestionRenderDeps {
 export interface QuestionCardRenderer {
   render: () => void;
   goToTab: (target: number) => void;
+  /** Patches just the attachments strip in place - for a paste-driven attach
+   *  while the free-text field is focused, where a full render() would
+   *  recreate that (still-focused) textarea and drop focus/cursor mid-paste. */
+  refreshAttachments: () => void;
 }
 
 export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCardRenderer {
@@ -340,5 +344,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     notifyDraftChange();
   };
 
-  return { render, goToTab };
+  const refreshAttachments = (): void => {
+    host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
+    syncMessagesPadding();
+  };
+
+  return { render, goToTab, refreshAttachments };
 }
