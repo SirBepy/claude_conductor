@@ -18,7 +18,7 @@ async function mountHarness(page: Page): Promise<void> {
     const reg = new TurnFooterRegistry();
     el.appendChild(reg.getOrCreateFooter(1));
     el.appendChild(reg.getOrCreateFooter(2));
-    (window as unknown as { __reg: TurnFooterRegistry }).__reg = reg;
+    (window as unknown as { __reg: InstanceType<typeof TurnFooterRegistry> }).__reg = reg;
   });
 }
 

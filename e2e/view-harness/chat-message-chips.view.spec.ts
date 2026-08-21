@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import type { RenderedMessage } from "../../src/shared/chat/chat-transforms";
 
 // Todo 586 follow-up / commit 205b00d0: the meta-turn chips, the retracted
 // placeholder and the interrupted-turn dim, rendered through the real
@@ -16,9 +17,9 @@ const ROWS = [
   { kind: "message", text: "Pushed 3 commits, tests green.", ts: 0 },
   { kind: "message", text: "Committing now.", dimmed: true, ts: 0 },
   { kind: "message", text: "tests failing", retracted: true, ts: 0 },
-];
+] satisfies RenderedMessage[];
 
-async function mountChat(page) {
+async function mountChat(page: Page) {
   await mountView(page, { invoke: { list_slash_commands: [] } });
   await page.evaluate(async (rows) => {
     await import("/views/sessions/sessions.ts");

@@ -89,7 +89,7 @@ test("a step patches pending -> active -> done in place, then collapses on settl
     document.body.replaceChildren(el);
     const reg = new TurnFooterRegistry();
     el.appendChild(reg.getOrCreateFooter(1));
-    (window as unknown as { __reg: TurnFooterRegistry }).__reg = reg;
+    (window as unknown as { __reg: InstanceType<typeof TurnFooterRegistry> }).__reg = reg;
   });
 
   const host = page.locator("#todo-harness");

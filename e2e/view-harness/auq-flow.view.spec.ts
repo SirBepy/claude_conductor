@@ -298,21 +298,21 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     // Fires once on the initial render too, with an empty draft - except Q2
     // (multiSelect) gets a pre-seeded empty Set so its checkboxes have
     // something to mutate, per the existing multiSelect init in renderQuestionUI.
-    let changes = await page.evaluate(() => window.__auqDraftChanges);
+    let changes = await page.evaluate(() => window.__auqDraftChanges ?? []);
     expect(changes.length).toBeGreaterThan(0);
     expect(changes.at(-1)).toEqual({ freeText: [], selections: [[1, []]], activeTab: 0 });
 
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
-    changes = await page.evaluate(() => window.__auqDraftChanges);
+    changes = await page.evaluate(() => window.__auqDraftChanges ?? []);
     expect(changes.at(-1)).toEqual({ freeText: [[0, "A (typed)"]], selections: [[1, []]], activeTab: 0 });
 
     await card.locator('.prompt-dot[data-dot="1"]').click();
-    changes = await page.evaluate(() => window.__auqDraftChanges);
+    changes = await page.evaluate(() => window.__auqDraftChanges ?? []);
     // Jumping via the dot re-renders, so activeTab moves to 1, freeText kept.
     expect(changes.at(-1)).toEqual({ freeText: [[0, "A (typed)"]], selections: [[1, []]], activeTab: 1 });
 
     await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
-    changes = await page.evaluate(() => window.__auqDraftChanges);
+    changes = await page.evaluate(() => window.__auqDraftChanges ?? []);
     expect(changes.at(-1)).toEqual({ freeText: [[0, "A (typed)"]], selections: [[1, ["X"]]], activeTab: 1 });
   });
 });

@@ -1,5 +1,6 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
+import type { Question } from "../../src/views/sessions/permission-modal/types";
 
 // Todo 565: the domain chip used to live only inside the Context row splitAsk()
 // produces, so a terse one-sentence question rendered no chip at all. It now
@@ -13,14 +14,14 @@ const TERSE = {
     { label: "Rewrite", description: "start clean", badges: ["recommended", "long_term"] },
     { label: "Patch", description: "smallest diff", badges: ["short_term"] },
   ],
-};
+} satisfies Question;
 
 const WITH_CONTEXT = {
   ...TERSE,
   question: "The relay drops frames under load. Which approach?",
 };
 
-async function mount(page, question) {
+async function mount(page: Page, question: typeof TERSE) {
   await mountView(page, { invoke: { list_slash_commands: [] } });
   await page.evaluate(async (q) => {
     const mod = await import("/views/sessions/permission-modal/question-ui.ts");

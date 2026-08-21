@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView, invokeCalls } from "./harness";
+import { mountView, invokeCalls, sessionInstance } from "./harness";
 
 // Preview panel reply composer (ai_todo composer-unification, task 5): a
 // compact composer docked at the bottom of the panel sends a user message to
@@ -27,20 +27,9 @@ test("typing in the preview reply composer and pressing Enter sends a tagged mes
     },
   });
 
-  await page.evaluate(async () => {
+  await page.evaluate(async (session) => {
     const stateMod = await import("/views/sessions/state.ts");
-    stateMod.state.sessions.push({
-      session_id: "sess-1",
-      pid: 1,
-      cwd: "/fake/project",
-      project_id: "proj-1",
-      kind: "interactive",
-      is_remote: false,
-      started_at: new Date().toISOString(),
-      transcript_path: null,
-      bridge_session_id: null,
-      busy: false,
-    });
+    stateMod.state.sessions.push(session);
 
     const mod = await import("/views/sessions/preview-panel.ts");
     const root = document.createElement("div");
@@ -49,7 +38,7 @@ test("typing in the preview reply composer and pressing Enter sends a tagged mes
     const controller = mod.renderPreview(root, { mode: "panel" });
     controller.setSessionScope("sess-1");
     controller.open("snap-1");
-  });
+  }, sessionInstance({ session_id: "sess-1", cwd: "/fake/project" }));
 
   const root = page.locator("#preview-panel-host");
   const input = root.locator(".pv-composer-input");

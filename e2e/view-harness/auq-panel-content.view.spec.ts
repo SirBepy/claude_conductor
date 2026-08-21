@@ -40,9 +40,9 @@ test("mounting a 3-question card renders every panel's real content, not just th
   await expect(panels).toHaveCount(4);
 
   const expectedTexts = ["Which approach?", "Which features?", "Anything else?"];
-  for (let i = 0; i < expectedTexts.length; i++) {
+  for (const [i, expected] of expectedTexts.entries()) {
     const panel = panels.nth(i);
-    await expect(panel.locator(".prompt-q__text")).toHaveText(expectedTexts[i]);
+    await expect(panel.locator(".prompt-q__text")).toHaveText(expected);
   }
 
   // Only panel 0 is active - panels 1 and 2 are real content the user never
