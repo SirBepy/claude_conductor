@@ -620,6 +620,66 @@
   font-size: 0.75rem;
 }
 
+.sb-git-pop-push-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 5px;
+  background: rgba(74, 222, 128, 0.08);
+  color: #4ade80;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.sb-git-pop-push-btn:hover:not(:disabled) { background: rgba(74, 222, 128, 0.18); }
+.sb-git-pop-push-btn:disabled { opacity: 0.7; cursor: default; }
+
+.sb-git-pop-publish {
+  padding: 4px 12px 10px;
+}
+.sb-git-pop-publish-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: 5px;
+  background: rgba(129, 140, 248, 0.1);
+  color: #818cf8;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sb-git-pop-publish-btn:hover:not(:disabled) { background: rgba(129, 140, 248, 0.2); }
+.sb-git-pop-publish-btn:disabled { opacity: 0.7; cursor: default; }
+
+.sb-git-pop-spin { display: inline-block; animation: sb-git-pop-spin 0.7s linear infinite; }
+@keyframes sb-git-pop-spin { to { transform: rotate(360deg); } }
+
+.sb-git-pop-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 12px 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #f87171;
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Images chip rules live in session-statusbar-images.css, imported by each TS
    call site right after this sheet. A mid-file @import is invalid CSS and Vite
    drops it silently, taking every .sb-images rule with it. */

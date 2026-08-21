@@ -219,6 +219,24 @@ pub async fn get_commit_sync(cwd: String) -> CommitSync {
     .unwrap_or(empty)
 }
 
+/// `publish=true` runs `git push -u origin <branch>` (no upstream yet);
+/// otherwise a plain `git push`. Errors return git's raw stderr - the caller
+/// decides how to display a non-fast-forward rejection, not us.
+#[tauri::command]
+pub async fn push_commits(cwd: String, publish: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if publish {
+            let branch = run_git_opt(&cwd, &["branch", "--show-current"])
+                .ok_or_else(|| "no current branch to publish".to_string())?;
+            run_git(&cwd, &["push", "-u", "origin", &branch]).map(|_| ())
+        } else {
+            run_git(&cwd, &["push"]).map(|_| ())
+        }
+    })
+    .await
+    .map_err(|e| format!("push task panicked: {e}"))?
+}
+
 #[cfg(test)]
 mod git_info_tests {
     use super::parse_shortstat;

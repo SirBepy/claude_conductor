@@ -549,13 +549,15 @@ export class SessionStatusbar {
 
   private renderCommits(mode: "ahead" | "behind" | "both"): string {
     const a = this.gitInfo.ahead ?? null, b = this.gitInfo.behind ?? null;
+    const key = `commits_${mode}`;
     if (a === null && b === null) {
       if (!this.gitInfoLoaded) return this.skeletonChip("commits", "sb-commits", "ph-arrows-down-up", "44px");
       // No upstream tracking branch (as opposed to 0 ahead/0 behind, which is
       // Some(0)/Some(0)). Mirrors VS Code's "Publish Branch" cloud icon rather
       // than hiding the chip, so an unpushed branch reads as expected-empty.
+      // Clickable (sb-commits-btn) so the popover's Publish button is reachable.
       if (mode === "both" && this.gitInfo.branch) {
-        return `<span class="sb-chip sb-commits" title="No upstream tracking branch"><i class="ph ph-cloud-arrow-up"></i></span>`;
+        return `<span class="sb-chip sb-commits sb-commits-btn${this.animClass(key)}" role="button" tabindex="0" title="No upstream tracking branch - click to publish"><i class="ph ph-cloud-arrow-up"></i></span>`;
       }
       return "";
     }
@@ -563,7 +565,6 @@ export class SessionStatusbar {
     if (mode === "ahead") { txt = `↑${a ?? 0}`; icon = "ph-arrow-up"; }
     else if (mode === "behind") { txt = `↓${b ?? 0}`; icon = "ph-arrow-down"; }
     else { txt = `↑${a ?? 0} ↓${b ?? 0}`; }
-    const key = `commits_${mode}`;
     return `<span class="sb-chip sb-commits sb-commits-btn${this.animClass(key)}" role="button" tabindex="0" title="${a ?? 0} ahead, ${b ?? 0} behind upstream"><i class="ph ${icon}"></i>${txt}</span>`;
   }
 
@@ -719,7 +720,7 @@ export class SessionStatusbar {
         // may leave this.gitCwd unchanged, so both checks are needed - mirrors
         // refreshGitInfo's cwd guard plus a liveness check on the DOM node.
         if (this.gitCwd !== cwd || !anchor.isConnected) return;
-        this.commitsPopover.open(anchor, sync);
+        this.commitsPopover.open(anchor, cwd, sync, this.gitInfo.branch, () => void this.refreshGitInfo());
       } catch (err) {
         console.error("[session-statusbar] get_commit_sync failed", err);
       }

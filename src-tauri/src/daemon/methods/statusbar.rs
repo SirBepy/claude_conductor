@@ -63,6 +63,27 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
+        router.register("push_commits", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    cwd: String,
+                    publish: bool,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                crate::ipc::git::push_commits(p.cwd, p.publish)
+                    .await
+                    .map_err(RpcError::internal)?;
+                Ok(json!(null))
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
         router.register("list_project_servers", move |params, _ctx| {
             let state = state.clone();
             async move {
@@ -172,14 +193,17 @@ mod tests {
         assert!(resp.result.as_ref().map(serde_json::Value::is_array).unwrap_or(false));
     }
 
-    /// All five are in `remote_handlers.rs`'s SAFE_METHODS, so an unknown
+    /// All six are in `remote_handlers.rs`'s SAFE_METHODS, so an unknown
     /// path must be refused before it reaches git or the filesystem.
+    /// push_commits has no "known cwd" dispatch test alongside the others -
+    /// running it for real would push this repo's own ahead commits to origin.
     #[tokio::test]
     async fn every_statusbar_method_rejects_an_unknown_path() {
         let cases = [
             ("get_git_info", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("get_git_dirty", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("get_commit_sync", json!({"cwd": "C:\\nope\\not\\registered"})),
+            ("push_commits", json!({"cwd": "C:\\nope\\not\\registered", "publish": false})),
             ("list_project_servers", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("list_claude_md_scopes", json!({"worktree_path": "C:\\nope\\not\\registered"})),
         ];

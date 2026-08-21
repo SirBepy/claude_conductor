@@ -191,6 +191,9 @@ const SAFE_METHODS: &[&str] = &[
     "get_git_info",
     "get_git_dirty",
     "get_commit_sync",
+    // Write action off the commits chip's push button (path gated by
+    // reject_unknown in statusbar.rs, same as the worktree writes above).
+    "push_commits",
     "list_project_servers",
     "list_claude_md_scopes",
     // Cross-surface draft sync: composer text, AUQ answers, held messages.
@@ -416,7 +419,7 @@ mod tests {
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
             "get_range_files", "get_file_diff",
-            "get_git_info", "get_git_dirty", "get_commit_sync", "list_project_servers",
+            "get_git_info", "get_git_dirty", "get_commit_sync", "push_commits", "list_project_servers",
             "list_claude_md_scopes",
             "get_session_drafts", "set_composer_draft", "clear_composer_draft",
             "set_auq_draft", "clear_auq_draft", "add_held_message",
