@@ -291,11 +291,16 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
             let sentinel_stripped = strip_daemon_meta_sentinel(&mut content);
             let is_meta = sentinel_stripped
                 || v.get("isMeta").and_then(|b| b.as_bool()).unwrap_or(false);
+            // A Jarvis relay (`send_to_session`/`spawn_worker`) embeds the
+            // sending session's id the same way - see `author_session_id`'s
+            // doc. Independent of is_meta: this is real, visible content.
+            let author_session_id = strip_daemon_author_sentinel(&mut content);
             let mut evs = vec![ChatEvent::UserMessage {
                 content,
                 timestamp: ts,
                 remote_echo: false,
                 is_meta,
+                author_session_id,
             }];
             // AUQ answers arrive as tool_result blocks inside a user message.
             // Emit a ToolResult event for each so the question card re-renders.
@@ -519,6 +524,19 @@ fn strip_daemon_meta_sentinel(content: &mut [ContentBlock]) -> bool {
     let Some(stripped) = text.strip_prefix(crate::types::chat::DAEMON_META_SENTINEL) else { return false };
     *text = stripped.to_string();
     true
+}
+
+/// Strips a leading `DAEMON_AUTHOR_SENTINEL_PREFIX..SUFFIX` marker off the
+/// first text block, returning the extracted sending-session id if present.
+/// Mirrors `strip_daemon_meta_sentinel`'s single-first-block check.
+fn strip_daemon_author_sentinel(content: &mut [ContentBlock]) -> Option<String> {
+    let Some(ContentBlock::Text { text }) = content.first_mut() else { return None };
+    let (author, remainder) = crate::types::chat::strip_daemon_author_sentinel(text);
+    let author = author.map(str::to_string);
+    if author.is_some() {
+        *text = remainder.to_string();
+    }
+    author
 }
 
 fn extract_content_blocks(v: &Value) -> Vec<ContentBlock> {
@@ -920,6 +938,48 @@ mod tests {
                         text, "[repo-channel] other-session: touching pending-pane.ts, anyone on this?",
                         "the sentinel itself must not leak into displayed text"
                     ),
+                    other => panic!("expected text block, got {other:?}"),
+                }
+            }
+            _ => panic!("expected UserMessage"),
+        }
+    }
+
+    #[test]
+    fn strips_daemon_author_sentinel_and_survives_a_reload_round_trip() {
+        // A Jarvis `send_to_session`/`spawn_worker` relay embeds the sending
+        // session's id in the wire text (todo 682) - this is what the CLI's
+        // OWN persisted transcript line looks like on replay: no daemon-only
+        // event field survives, only the sentinel embedded in the content.
+        let mut ctx = ParserContext::new();
+        let text = format!(
+            "{}sid-jarvis-1{}build the login page",
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
+        );
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": text},
+            "timestamp": 1700000000
+        })
+        .to_string();
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::UserMessage { content, is_meta, author_session_id, .. } => {
+                assert_eq!(
+                    author_session_id.as_deref(), Some("sid-jarvis-1"),
+                    "the author tag must survive the reload round trip"
+                );
+                assert!(!is_meta, "an authored relay is real content, not a system note");
+                match &content[0] {
+                    ContentBlock::Text { text } => {
+                        assert_eq!(text, "build the login page");
+                        assert!(
+                            !text.contains("daemon-author") && !text.contains('\u{200B}'),
+                            "the sentinel itself must not leak into the visible body: {text:?}"
+                        );
+                    }
                     other => panic!("expected text block, got {other:?}"),
                 }
             }

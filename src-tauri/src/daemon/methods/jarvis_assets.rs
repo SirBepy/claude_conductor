@@ -48,6 +48,12 @@ pub(crate) const JARVIS_STATE_MD_SEED: &str = r#"# Jarvis state
 (none)
 "#;
 
+/// `jarvis-home`'s project-face icon (todo 682), written to
+/// `<jarvis-home>/icon.svg` on first spawn - without it `get_project_icon`
+/// finds nothing there (no tech markers) and the author tag renders with a
+/// blank project half. Embedded at compile time, same as the tray icon.
+pub(crate) const JARVIS_ICON_SVG: &[u8] = include_bytes!("../../../assets/jarvis-icon.svg");
+
 /// Weekly memory-hygiene prompt sent to Jarvis (todo 272 remainder): lints
 /// `state.md` and every other memory file in `jarvis-home` so months-old
 /// stale facts can't keep steering it. Verbatim per spec - the const is the

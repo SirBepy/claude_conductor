@@ -328,10 +328,14 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
         }
         _ => return None,
     };
+    if text.starts_with(crate::types::chat::DAEMON_META_SENTINEL) { return None }
+    // A Jarvis-relayed message (todo 682) is real, titleable content -
+    // unlike the meta sentinel above, strip rather than exclude, or the raw
+    // marker becomes the chat title.
+    let (_author, text) = crate::types::chat::strip_daemon_author_sentinel(&text);
     let trimmed = text.trim();
     if trimmed.is_empty() { return None }
     if trimmed.starts_with("<local-command-caveat>") { return None }
-    if text.starts_with(crate::types::chat::DAEMON_META_SENTINEL) { return None }
     let label = command_label(trimmed).map(std::borrow::Cow::Owned)
         .unwrap_or(std::borrow::Cow::Borrowed(trimmed));
     normalise_and_truncate(&label, max_chars)
@@ -368,6 +372,31 @@ mod tests {
         let body = [sentinel_line, r#"{"type":"user","message":{"role":"user","content":"build me a thing"}}"#.to_string()].join("\n");
         std::fs::write(&path, body).unwrap();
         assert_eq!(first_user_prompt(&path, 60).as_deref(), Some("build me a thing"));
+    }
+
+    #[test]
+    fn first_user_prompt_strips_daemon_author_sentinel_instead_of_titling_it() {
+        // A Jarvis relay (todo 682) is real, titleable content - unlike the
+        // meta sentinel above, this must become the title with the marker
+        // gone, not be skipped and not leak the raw marker into the title.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let text = format!(
+            "{}sid-jarvis-1{}build the login page",
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
+        );
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": text}
+        }).to_string();
+        std::fs::write(&path, line).unwrap();
+        let title = first_user_prompt(&path, 60);
+        assert_eq!(title.as_deref(), Some("build the login page"));
+        assert!(
+            !title.unwrap().contains("daemon-author"),
+            "the sentinel itself must not leak into the title"
+        );
     }
 
     #[test]

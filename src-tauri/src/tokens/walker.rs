@@ -283,6 +283,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_transcript_counts_a_daemon_author_sentinel_row_as_real() {
+        // A Jarvis relay (todo 682) is real, visible content unlike the meta
+        // sentinel above - `is_real_user_turn` only ever inspects the bool
+        // (never returns the text), so this needs no strip to count right.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let author_row = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": format!(
+                "{}sid-jarvis-1{}build the login page",
+                crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
+                crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
+            )}
+        }).to_string();
+        std::fs::write(&path, author_row).unwrap();
+        let totals = parse_transcript(&path);
+        assert_eq!(totals.user_prompts, 1, "an authored relay is a real counted turn");
+    }
+
+    #[test]
     fn parse_transcript_missing_file_returns_zero() {
         let totals = parse_transcript(Path::new("definitely-not-a-real-file.jsonl"));
         assert_eq!(totals.turns, 0);

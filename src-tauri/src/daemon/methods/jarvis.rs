@@ -10,7 +10,7 @@
 //! keeps the singleton lifecycle and re-exports the fleet fns so external
 //! callers (`hooks_server::jarvis`) see no path change.
 
-use super::jarvis_assets::{JARVIS_CLAUDE_MD, JARVIS_HYGIENE_PROMPT, JARVIS_STATE_MD_SEED};
+use super::jarvis_assets::{JARVIS_CLAUDE_MD, JARVIS_HYGIENE_PROMPT, JARVIS_ICON_SVG, JARVIS_STATE_MD_SEED};
 // is_jarvis_caller/pick_worker_account stay jarvis_fleet-internal (only
 // re-export what hooks_server::jarvis actually dispatches to).
 pub(crate) use super::jarvis_fleet::{fleet_status, respond_worker_prompt, send_to_session, spawn_worker};
@@ -35,10 +35,10 @@ struct RestartJarvisParams {
 const JARVIS_MODEL: &str = "opus";
 const JARVIS_EFFORT: &str = "high";
 
-/// Writes `<jarvis-home>/CLAUDE.md` and `/state.md` iff each is individually
-/// missing - never overwrites either, since Joe may hand-tune them once
-/// Jarvis (or Joe himself) has edited them. Called only on the fresh-spawn
-/// path in `ensure_jarvis_session`, never on reuse of an existing pointer.
+/// Writes `<jarvis-home>/CLAUDE.md`, `/state.md`, and `/icon.svg` iff each is
+/// individually missing - never overwrites, since Joe may hand-tune the
+/// first two. Called only on the fresh-spawn path in `ensure_jarvis_session`,
+/// never on reuse of an existing pointer.
 fn seed_jarvis_home_files(cwd: &std::path::Path) -> Result<(), RpcError> {
     let claude_md = cwd.join("CLAUDE.md");
     if !claude_md.exists() {
@@ -47,6 +47,10 @@ fn seed_jarvis_home_files(cwd: &std::path::Path) -> Result<(), RpcError> {
     let state_md = cwd.join("state.md");
     if !state_md.exists() {
         std::fs::write(&state_md, JARVIS_STATE_MD_SEED).map_err(|e| RpcError::internal(e.to_string()))?;
+    }
+    let icon_svg = cwd.join("icon.svg");
+    if !icon_svg.exists() {
+        std::fs::write(&icon_svg, JARVIS_ICON_SVG).map_err(|e| RpcError::internal(e.to_string()))?;
     }
     Ok(())
 }
@@ -303,6 +307,8 @@ mod tests {
         assert_eq!(claude_md, JARVIS_CLAUDE_MD);
         let state_md = std::fs::read_to_string(dir.path().join("state.md")).unwrap();
         assert_eq!(state_md, JARVIS_STATE_MD_SEED);
+        let icon_svg = std::fs::read(dir.path().join("icon.svg")).unwrap();
+        assert_eq!(icon_svg, JARVIS_ICON_SVG, "jarvis-home must get a real project icon (todo 682)");
     }
 
     #[test]
@@ -310,6 +316,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "Joe's hand-tuned instructions").unwrap();
         std::fs::write(dir.path().join("state.md"), "Joe's hand-tuned state").unwrap();
+        std::fs::write(dir.path().join("icon.svg"), "Joe's hand-tuned icon").unwrap();
 
         seed_jarvis_home_files(dir.path()).unwrap();
 
@@ -321,13 +328,17 @@ mod tests {
             std::fs::read_to_string(dir.path().join("state.md")).unwrap(),
             "Joe's hand-tuned state"
         );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("icon.svg")).unwrap(),
+            "Joe's hand-tuned icon"
+        );
     }
 
     #[test]
     fn seed_jarvis_home_files_fills_in_only_the_missing_one() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "Joe's hand-tuned instructions").unwrap();
-        // state.md left absent.
+        // state.md and icon.svg left absent.
 
         seed_jarvis_home_files(dir.path()).unwrap();
 
@@ -339,6 +350,7 @@ mod tests {
             std::fs::read_to_string(dir.path().join("state.md")).unwrap(),
             JARVIS_STATE_MD_SEED
         );
+        assert_eq!(std::fs::read(dir.path().join("icon.svg")).unwrap(), JARVIS_ICON_SVG);
     }
 
     // `ensure_jarvis_session_reuses_existing_pointer` above doubles as coverage

@@ -16,6 +16,27 @@ use super::LifecycleError;
 /// pre-existing caller passes `false`, keeping their behavior byte-identical;
 /// `daemon::jarvis_wake::drain` is the only caller that passes `true`.
 pub async fn send_message(session: &Arc<Session>, text: &str, is_meta: bool) -> Result<(), LifecycleError> {
+    send_message_inner(session, text, is_meta, None).await
+}
+
+/// Same as `send_message`, but tags the message as relayed by another AI on
+/// Joe's behalf (todo 682: a Jarvis dispatch) rather than typed by Joe.
+/// Never `is_meta` - this IS real content. A dedicated fn, instead of
+/// widening `send_message`'s params, keeps every other call site untouched.
+pub async fn send_message_with_author(
+    session: &Arc<Session>,
+    text: &str,
+    author_session_id: &str,
+) -> Result<(), LifecycleError> {
+    send_message_inner(session, text, false, Some(author_session_id)).await
+}
+
+async fn send_message_inner(
+    session: &Arc<Session>,
+    text: &str,
+    is_meta: bool,
+    author_session_id: Option<&str>,
+) -> Result<(), LifecycleError> {
     // Remember the prompt: if this turn is rejected by a rate limit before
     // producing any output, the scheduled resume replays exactly this text.
     // Deliberately the CLEAN text, not `wire_text` below - every caller that
@@ -25,11 +46,17 @@ pub async fn send_message(session: &Arc<Session>, text: &str, is_meta: bool) -> 
     if let Ok(mut lp) = session.last_prompt.lock() {
         *lp = text.to_string();
     }
-    // `isMeta:true` is a marker only the CLI itself ever writes; embedding the
-    // sentinel in the text is the only way the marking survives into the CLI's
-    // own persisted transcript (see `DAEMON_META_SENTINEL`'s doc).
+    // Neither marker is something the CLI itself persists; embedding one in
+    // the text is the only way it survives into its own transcript (see
+    // `DAEMON_META_SENTINEL`'s doc in `types::chat`).
     let wire_text = if is_meta {
         format!("{}{text}", crate::types::chat::DAEMON_META_SENTINEL)
+    } else if let Some(author) = author_session_id {
+        format!(
+            "{}{author}{}{text}",
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
+        )
     } else {
         text.to_string()
     };
@@ -64,6 +91,7 @@ pub async fn send_message(session: &Arc<Session>, text: &str, is_meta: bool) -> 
             timestamp: now_ms,
             remote_echo: true,
             is_meta,
+            author_session_id: author_session_id.map(|s| s.to_string()),
         },
     );
     Ok(())
@@ -103,6 +131,22 @@ pub async fn send_message_with_respawn(
     }
     let session = respawn_interactive(state, session_id).await?;
     send_message(&session, text, is_meta).await
+}
+
+/// Same as `send_message_with_respawn`, but tags the message with
+/// `author_session_id` - see `send_message_with_author`'s doc. The sole
+/// caller is `jarvis_fleet::send_to_session`.
+pub async fn send_message_with_respawn_and_author(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    text: &str,
+    author_session_id: &str,
+) -> Result<(), LifecycleError> {
+    if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+        return send_message_with_author(&session, text, author_session_id).await;
+    }
+    let session = respawn_interactive(state, session_id).await?;
+    send_message_with_author(&session, text, author_session_id).await
 }
 
 /// Force-kills `session_id`'s live child and waits for pump teardown,

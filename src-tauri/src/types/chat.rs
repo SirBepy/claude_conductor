@@ -14,6 +14,28 @@ pub enum ContentBlock {
 /// `chat::parser` strips it and treats the turn as meta regardless.
 pub const DAEMON_META_SENTINEL: &str = "\u{200B}[daemon-meta]\u{200B}";
 
+/// Wraps a sending session's id in the wire text for a Jarvis-relayed
+/// message (todo 682) - same "event field can't survive reload" constraint
+/// `DAEMON_META_SENTINEL` above already solved. Every text-reading site
+/// (`chat::parser`, `tokens::title/walker`) must strip it first.
+pub const DAEMON_AUTHOR_SENTINEL_PREFIX: &str = "\u{200B}[daemon-author:";
+pub const DAEMON_AUTHOR_SENTINEL_SUFFIX: &str = "]\u{200B}";
+
+/// Splits a leading sentinel off `text`, returning `(Some(session_id),
+/// remainder)`, or `(None, text)` unchanged if absent/malformed. Shared by
+/// both `ContentBlock`- and raw-`&str`-based callers.
+pub fn strip_daemon_author_sentinel(text: &str) -> (Option<&str>, &str) {
+    let Some(after_prefix) = text.strip_prefix(DAEMON_AUTHOR_SENTINEL_PREFIX) else {
+        return (None, text);
+    };
+    let Some(suffix_idx) = after_prefix.find(DAEMON_AUTHOR_SENTINEL_SUFFIX) else {
+        return (None, text);
+    };
+    let session_id = &after_prefix[..suffix_idx];
+    let remainder = &after_prefix[suffix_idx + DAEMON_AUTHOR_SENTINEL_SUFFIX.len()..];
+    (Some(session_id), remainder)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
@@ -41,6 +63,11 @@ pub enum ChatEvent {
         /// this identically to a real user bubble.
         #[serde(default)]
         is_meta: bool,
+        /// Sending session's id when relayed by another AI on Joe's behalf
+        /// (a Jarvis dispatch), None otherwise. Carried via the sentinel
+        /// above so it survives reload; see that const's doc.
+        #[serde(default)]
+        author_session_id: Option<String>,
     },
     AssistantMessage {
         content: Vec<ContentBlock>,
@@ -166,10 +193,29 @@ mod tests {
             timestamp: 1700000000,
             remote_echo: false,
             is_meta: false,
+            author_session_id: None,
         };
         let s = serde_json::to_string(&ev).unwrap();
         let back: ChatEvent = serde_json::from_str(&s).unwrap();
         assert_eq!(ev, back);
+    }
+
+    #[test]
+    fn strip_daemon_author_sentinel_extracts_id_and_leaves_clean_remainder() {
+        let text = format!(
+            "{}sid-jarvis-1{}worker task text",
+            DAEMON_AUTHOR_SENTINEL_PREFIX, DAEMON_AUTHOR_SENTINEL_SUFFIX
+        );
+        let (id, remainder) = strip_daemon_author_sentinel(&text);
+        assert_eq!(id, Some("sid-jarvis-1"));
+        assert_eq!(remainder, "worker task text");
+    }
+
+    #[test]
+    fn strip_daemon_author_sentinel_leaves_plain_text_untouched() {
+        let (id, remainder) = strip_daemon_author_sentinel("just a normal message");
+        assert_eq!(id, None);
+        assert_eq!(remainder, "just a normal message");
     }
 
     #[test]

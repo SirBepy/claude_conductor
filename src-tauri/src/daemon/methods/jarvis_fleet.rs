@@ -133,7 +133,9 @@ pub(crate) async fn spawn_worker(
     }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    lifecycle::send_message(&session, task, false).await.map_err(|e| e.to_string())?;
+    // Tagged with jarvis_session_id (todo 682) so the worker's chat renders
+    // this as an AI-to-AI relay, not a fake message from Joe.
+    lifecycle::send_message_with_author(&session, task, jarvis_session_id).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
     crate::sessions::chat_state::set_busy(&sid, true);
@@ -170,7 +172,8 @@ pub(crate) async fn send_to_session(
                 .to_string(),
         );
     }
-    lifecycle::send_message_with_respawn(state, target_session_id, text, false)
+    // Tagged with jarvis_session_id (todo 682) - see spawn_worker's send above.
+    lifecycle::send_message_with_respawn_and_author(state, target_session_id, text, jarvis_session_id)
         .await
         .map_err(|e| e.to_string())
 }
