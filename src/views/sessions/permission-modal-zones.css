@@ -1,0 +1,92 @@
+/* ── AUQ card redesign: four-zone question layout ──────────────────────────
+ * --dom is set inline per card/panel by question-ui.ts (one of the
+ * --color-domain-* tokens) and drives the chip, ask band, dot ring and
+ * collapsed bar below. */
+.prompt-zone {
+  padding: 12px 16px;
+}
+.prompt-zone--ctx {
+  display: flex;
+  gap: 10px;
+  background: color-mix(in srgb, var(--color-background) 55%, transparent);
+}
+.prompt-ctx__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+}
+.prompt-ctx__rail i {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+}
+.prompt-ctx__rail::after {
+  content: "";
+  flex: 1;
+  width: 1px;
+  background: var(--color-border);
+}
+.prompt-ctx__body {
+  min-width: 0;
+  flex: 1;
+}
+/* Chip is always right-floated on the context row now - no separate
+ * "--right" modifier needed. */
+.prompt-ctx__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  min-height: 20px;
+}
+.prompt-ctx__head .prompt-domain {
+  margin-left: auto;
+}
+.prompt-ctx__label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.prompt-ctx__text {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+/* Ask band always takes the domain colour. */
+.prompt-zone--ask {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 16px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--dom) 18%, transparent),
+    color-mix(in srgb, var(--dom) 5%, transparent)
+  );
+  border-top: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
+  box-shadow: inset 3px 0 0 var(--dom);
+}
+.prompt-ask__icon {
+  font-size: 1.15rem;
+  color: var(--dom);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+.prompt-ask__text {
+  font-size: 1.04rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+}
+/* Fallback slot: only present when there's no context row to carry the chip.
+ * 3px nudges it onto the first line's optical centre (1.04rem/1.35 text). */
+.prompt-zone--ask .prompt-domain {
+  margin-left: auto;
+  margin-top: 3px;
+  flex-shrink: 0;
+}

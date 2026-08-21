@@ -1,0 +1,101 @@
+/* ── Horizontal question track ─────────────────────────────────────────────
+ * .prompt-track-viewport is the fixed, never-transformed window; .prompt-track
+ * is the sliding reel inside it. They used to be the same element, but a
+ * transform on the clipping element itself moves the clip box WITH the
+ * content it's supposed to be framing, so the active panel slides out from
+ * under its own clip rect on every step but 0. Splitting them fixes that: the
+ * viewport clips a fixed rect, the reel is free to translate inside it. See
+ * stepTab()/positionTrack() in question-ui.ts. */
+.prompt-track-viewport {
+  /* clip, not hidden, on BOTH axes: hidden still creates a scroll container,
+   * so native scrollIntoView (focus jump, find-in-page, Playwright's click)
+   * sets scrollLeft and fights the reel's transform. clip has no scroll
+   * container, so scrollLeft can never move - but Chromium only honors clip
+   * when both axes agree, mixing clip with hidden silently reverts to
+   * hidden's scrollable behavior on both. */
+  overflow-x: clip;
+  overflow-y: clip;
+  /* flex-basis:auto (not the old flex:1's 0%) so question-ui.ts's per-render
+   * `track.style.height` - set to just the active panel's own content height -
+   * actually takes effect instead of being overridden by flex-grow filling
+   * whatever space the (now-obsolete) tallest-sibling auto-sizing implied. */
+  flex: none;
+  min-height: 0;
+}
+.prompt-track {
+  display: flex;
+  align-items: flex-start;
+  transition: transform 0.22s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-track {
+    transition: none;
+  }
+}
+.prompt-panel {
+  flex: 0 0 100%;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.prompt-panel + .prompt-panel {
+  border-left: 1px solid var(--color-border);
+}
+
+/* Pager: arrows flanking the dots, left-aligned, lives in the header. */
+.prompt-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.prompt-pager button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+.prompt-head__spacer {
+  flex: 1;
+}
+/* Dots are 22px hit-area buttons around an 8px visual dot. FILL encodes
+ * answered, RING encodes current - kept on separate channels because
+ * --color-domain-data IS green, so a --dom-tinted "current" would be
+ * indistinguishable from "answered" on Data questions. */
+.prompt-dots {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+}
+.prompt-dot {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.prompt-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-text-muted);
+  background: transparent;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.prompt-dot:hover::before {
+  border-color: var(--color-text);
+}
+.prompt-dot.is-answered::before {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+.prompt-dot.is-current::before {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dom) 55%, transparent);
+}
+.prompt-dot.is-current:not(.is-answered)::before {
+  border-color: var(--dom);
+}
