@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Mobile bottom-sheet redesign (Joe's ask, 2026-08-14): full-bleed, taller,
@@ -31,6 +31,24 @@ async function overrideSafeArea(page: Page, bottom: number): Promise<void> {
   await cdp.send("Emulation.setSafeAreaInsetsOverride", {
     insets: { bottom, bottomMax: bottom },
   } as never);
+}
+
+// The card settles through a 0.22s transform transition (permission-modal-shell.css
+// :114), so a box read mid-flight is stale by the time mouse.down lands - measured
+// ~12px of drift against a 22px handle, which is how the press missed the handle
+// outright and left the card peeked (todo 725). Wait for the rect to stop moving.
+async function settledBox(loc: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+  await loc.evaluate((el) => new Promise<void>((resolve) => {
+    let last = Number.NaN;
+    const tick = (): void => {
+      const y = el.getBoundingClientRect().top;
+      if (Math.abs(y - last) < 0.01) { resolve(); return; }
+      last = y;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }));
+  return (await loc.boundingBox())!;
 }
 
 const SHORT_QUESTIONS = [{ question: "Proceed?", options: [{ label: "Yes" }, { label: "No" }] }];
@@ -147,8 +165,8 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await openQuestionCard(page, TALL_QUESTIONS);
 
     const card = page.locator(".prompt-card");
-    const openBox = (await card.boundingBox())!;
-    const handleBox = (await card.locator(".prompt-card__handle").boundingBox())!;
+    const openBox = await settledBox(card);
+    const handleBox = await settledBox(card.locator(".prompt-card__handle"));
     const hx = handleBox.x + handleBox.width / 2;
     const hy = handleBox.y + handleBox.height / 2;
 
@@ -159,7 +177,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await page.mouse.up();
 
     await expect(card).toHaveClass(/prompt-card--peeked/);
-    const peekedBox = (await card.boundingBox())!;
+    const peekedBox = await settledBox(card);
     expect(peekedBox.y).toBeGreaterThan(openBox.y);
   });
 
@@ -168,8 +186,8 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await openQuestionCard(page, TALL_QUESTIONS);
 
     const card = page.locator(".prompt-card");
-    const openBox = (await card.boundingBox())!;
-    const handleBox = (await card.locator(".prompt-card__handle").boundingBox())!;
+    const openBox = await settledBox(card);
+    const handleBox = await settledBox(card.locator(".prompt-card__handle"));
     const hx = handleBox.x + handleBox.width / 2;
     const hy = handleBox.y + handleBox.height / 2;
 
@@ -180,7 +198,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(card).toHaveClass(/prompt-card--peeked/);
 
     // Handle has moved down with the peeked card - re-locate before dragging back.
-    const peekedHandleBox = (await card.locator(".prompt-card__handle").boundingBox())!;
+    const peekedHandleBox = await settledBox(card.locator(".prompt-card__handle"));
     const py = peekedHandleBox.y + peekedHandleBox.height / 2;
     await page.mouse.move(hx, py);
     await page.mouse.down();
@@ -195,8 +213,8 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await openQuestionCard(page, TALL_QUESTIONS);
 
     const card = page.locator(".prompt-card");
-    const openBox = (await card.boundingBox())!;
-    const handleBox = (await card.locator(".prompt-card__handle").boundingBox())!;
+    const openBox = await settledBox(card);
+    const handleBox = await settledBox(card.locator(".prompt-card__handle"));
     const hx = handleBox.x + handleBox.width / 2;
     const hy = handleBox.y + handleBox.height / 2;
 
@@ -206,7 +224,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await page.mouse.up();
     await expect(card).toHaveClass(/prompt-card--peeked/);
 
-    const peekedHandleBox = (await card.locator(".prompt-card__handle").boundingBox())!;
+    const peekedHandleBox = await settledBox(card.locator(".prompt-card__handle"));
     await page.mouse.click(peekedHandleBox.x + peekedHandleBox.width / 2, peekedHandleBox.y + peekedHandleBox.height / 2);
 
     await expect(card).not.toHaveClass(/prompt-card--peeked/);
