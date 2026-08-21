@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Todo 418: .oc-reset-pop opens ABOVE its dial. The overlay window reserves
 // 78px of headroom for it (overlay.css:75); the phone header has none.
@@ -7,22 +7,7 @@ import { mountView } from "./harness";
 const PHONE = { width: 393, height: 852 };
 
 const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-  list_scheduled_messages: [],
-  list_session_characters: {},
-  watch_session_transcript: null,
-  unwatch_session_transcript: null,
-  session_live_cwd: null,
-  get_git_info: null,
-  get_session_counts: null,
-  get_context_status: null,
-  get_session_drain: null,
-  list_pending_prompts: [],
-  get_chat_config: null,
+  ...SESSIONS_BASE_INVOKE,
   list_instances: [],
   get_active_sessions: [],
   load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },

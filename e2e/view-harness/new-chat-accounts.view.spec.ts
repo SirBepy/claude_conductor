@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Frontend half of the mobile account-sharing fix (ai_todo 241). The daemon
 // route + allowlist are covered by Rust tests; THIS proves the consuming
@@ -11,16 +11,7 @@ import { mountView } from "./harness";
 
 // Commands the default view (dashboard) + the new-chat modal fire. list_accounts
 // is overridden per-test below.
-const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  get_usage_map: {},
-  get_skill_usage_week: { entries: [], total_sessions: 0 },
-  list_instances: [],
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-};
+const BASE_INVOKE = { ...SESSIONS_BASE_INVOKE, list_instances: [] };
 
 const FAKE_ACCOUNT = { id: "acc1", label: "Test Account", icon: "user", colour: "#8b5cf6" };
 

@@ -1,29 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, invokeCalls } from "./harness";
+import { mountView, invokeCalls, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Drives the real discard button through __launchDraftForTest, since the full
 // pickProject + model-modal chain is not worth simulating for this behavior.
 
 const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  get_usage_map: {},
-  get_skill_usage_week: { entries: [], total_sessions: 0 },
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-  list_accounts: [],
-  list_scheduled_messages: [],
-  list_session_characters: {},
-  watch_session_transcript: null,
-  unwatch_session_transcript: null,
-  session_live_cwd: null,
-  get_git_info: null,
-  get_session_counts: null,
-  get_context_status: null,
-  get_session_drain: null,
-  list_pending_prompts: [],
-  get_chat_config: null,
+  ...SESSIONS_BASE_INVOKE,
   list_instances: [],
   get_active_sessions: [],
   schedule_delete: null,

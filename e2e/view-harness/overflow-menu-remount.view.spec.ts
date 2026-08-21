@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Regression for todo 687: wireOverflowMenu's #viewMoreBtn click listener was
 // never removed in its own teardown, so a same-view remount (lit-html reuses
@@ -7,16 +7,7 @@ import { mountView } from "./harness";
 // opening then immediately re-closing the menu.
 
 const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  get_usage_map: {},
-  get_skill_usage_week: { entries: [], total_sessions: 0 },
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-  list_accounts: [],
-  list_scheduled_messages: [],
-  list_pending_prompts: [],
+  ...SESSIONS_BASE_INVOKE,
   list_instances: [],
   get_active_sessions: [],
   get_when_done_state: { phase: "disarmed" },
