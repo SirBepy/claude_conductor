@@ -1,8 +1,8 @@
 //! Per-dataset retention policies and the prune routine.
 //!
-//! Each table holds a unix-second `timestamp` column, so pruning is the same
-//! `DELETE FROM <table> WHERE timestamp < ?` for all three. `KeepForever`
-//! datasets are skipped entirely.
+//! `skipped_questions` stores unix-milliseconds, every other table unix-
+//! seconds; [`Dataset::timestamp_unit_ms`] rescales the cutoff per table.
+//! `KeepForever` datasets are skipped entirely.
 
 use anyhow::Result;
 use rusqlite::Connection;
@@ -71,13 +71,14 @@ impl<'de> Deserialize<'de> for RetentionPolicy {
     }
 }
 
-/// The three datasets, keyed by their table name.
+/// The four datasets, keyed by their table name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub enum Dataset {
     UsageSnapshots,
     TokenRecords,
     SkillEvents,
+    SkippedQuestions,
 }
 
 impl Dataset {
@@ -87,15 +88,27 @@ impl Dataset {
             Dataset::UsageSnapshots => "usage_snapshots",
             Dataset::TokenRecords => "token_records",
             Dataset::SkillEvents => "skill_events",
+            Dataset::SkippedQuestions => "skipped_questions",
+        }
+    }
+
+    /// Multiplies a unix-second cutoff to match this dataset's `timestamp`
+    /// column unit. `skipped_questions` stores unix-milliseconds; every other
+    /// table stores unix-seconds.
+    fn timestamp_unit_ms(&self) -> i64 {
+        match self {
+            Dataset::SkippedQuestions => 1000,
+            _ => 1,
         }
     }
 
     /// All datasets, for iteration.
-    pub fn all() -> [Dataset; 3] {
+    pub fn all() -> [Dataset; 4] {
         [
             Dataset::UsageSnapshots,
             Dataset::TokenRecords,
             Dataset::SkillEvents,
+            Dataset::SkippedQuestions,
         ]
     }
 }
@@ -107,27 +120,32 @@ pub struct RetentionPolicies {
     pub usage_snapshots: RetentionPolicy,
     pub token_records: RetentionPolicy,
     pub skill_events: RetentionPolicy,
+    pub skipped_questions: RetentionPolicy,
 }
 
 impl Default for RetentionPolicies {
     /// Mirrors the legacy behavior: usage + token history pruned at 90 days,
-    /// skill events kept forever (small, high analytical value).
+    /// skill events kept forever (small, high analytical value). Skip marks
+    /// get the longest UI preset (365d) since this sweep can't check whether
+    /// a mark's session is still live, so it must outlast any real session.
     fn default() -> Self {
         Self {
             usage_snapshots: RetentionPolicy::KeepDays(90),
             token_records: RetentionPolicy::KeepDays(90),
             skill_events: RetentionPolicy::KeepForever,
+            skipped_questions: RetentionPolicy::KeepDays(365),
         }
     }
 }
 
 impl RetentionPolicies {
     /// `(dataset, policy)` pairs for iteration during pruning.
-    pub fn iter(&self) -> [(Dataset, RetentionPolicy); 3] {
+    pub fn iter(&self) -> [(Dataset, RetentionPolicy); 4] {
         [
             (Dataset::UsageSnapshots, self.usage_snapshots),
             (Dataset::TokenRecords, self.token_records),
             (Dataset::SkillEvents, self.skill_events),
+            (Dataset::SkippedQuestions, self.skipped_questions),
         ]
     }
 
@@ -137,6 +155,7 @@ impl RetentionPolicies {
             Dataset::UsageSnapshots => self.usage_snapshots,
             Dataset::TokenRecords => self.token_records,
             Dataset::SkillEvents => self.skill_events,
+            Dataset::SkippedQuestions => self.skipped_questions,
         }
     }
 }
@@ -152,6 +171,7 @@ pub fn prune_all(conn: &Connection, policies: &RetentionPolicies) -> Result<usiz
     let mut deleted = 0usize;
     for (dataset, policy) in policies.iter() {
         if let Some(cutoff) = policy.cutoff(now) {
+            let cutoff = cutoff * dataset.timestamp_unit_ms();
             let sql = format!("DELETE FROM {} WHERE timestamp < ?1", dataset.table());
             deleted += conn.execute(&sql, [cutoff])?;
         }
@@ -165,6 +185,7 @@ pub fn prune_one(conn: &Connection, dataset: Dataset, policy: RetentionPolicy) -
     let Some(cutoff) = policy.cutoff(now_unix()) else {
         return Ok(0);
     };
+    let cutoff = cutoff * dataset.timestamp_unit_ms();
     let sql = format!("DELETE FROM {} WHERE timestamp < ?1", dataset.table());
     Ok(conn.execute(&sql, [cutoff])?)
 }
@@ -201,4 +222,61 @@ pub fn clear_dataset(conn: &Connection, dataset: Dataset) -> Result<()> {
     conn.execute(&format!("DELETE FROM {}", dataset.table()), [])?;
     conn.execute_batch("VACUUM")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::storage::db::init_schema(&conn).unwrap();
+        conn
+    }
+
+    /// Rows in unix-ms (matches `record_skip`'s `timestamp_millis()`). Under
+    /// the 1000x bug (cutoff left in seconds) neither row below would prune,
+    /// since ms timestamps dwarf a seconds-scale cutoff.
+    #[test]
+    fn skipped_questions_cutoff_is_millisecond_scaled() {
+        let conn = mem_conn();
+        let cutoff_ms = (now_unix() - 365 * 86_400) * 1000;
+        let survives_ts = cutoff_ms + 60_000; // just inside the horizon
+        let pruned_ts = cutoff_ms - 60_000; // just outside the horizon
+
+        conn.execute(
+            "INSERT INTO skipped_questions (session_id, timestamp) VALUES (?1, ?2)",
+            rusqlite::params!["survivor", survives_ts],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO skipped_questions (session_id, timestamp) VALUES (?1, ?2)",
+            rusqlite::params!["victim", pruned_ts],
+        )
+        .unwrap();
+
+        let deleted = prune_one(
+            &conn,
+            Dataset::SkippedQuestions,
+            RetentionPolicy::KeepDays(365),
+        )
+        .unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining_session: String = conn
+            .query_row("SELECT session_id FROM skipped_questions", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(remaining_session, "survivor");
+    }
+
+    #[test]
+    fn skipped_questions_is_included_in_dataset_all_and_default_policies() {
+        assert!(Dataset::all().contains(&Dataset::SkippedQuestions));
+        assert_eq!(
+            RetentionPolicies::default().skipped_questions,
+            RetentionPolicy::KeepDays(365)
+        );
+    }
 }
