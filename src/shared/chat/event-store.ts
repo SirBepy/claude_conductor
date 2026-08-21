@@ -23,6 +23,9 @@ type Unlisten = () => void;
 type EventListener = (ev: ChatEvent) => void;
 /** Fed the authoritative transcript's visible-message sigs after a reconcile. */
 type TailListener = (sigs: string[]) => void;
+/** Delivery channel a live/recovered event came through: runner (chat:<id>),
+ *  watcher (chat-watch:<id>), synthetic (composer echo), or page (reconcile). */
+type EventSource = "runner" | "watcher" | "synthetic" | "page";
 
 // Page size counts AssistantMessage events only — see read_page in
 // src-tauri/src/chat/history.rs. 10 AI replies plus all surrounding
@@ -57,6 +60,9 @@ interface RecentSig {
   /** True when this was a finalized (non-streaming) assistant message. */
   assistantFinal: boolean;
   ts: number;
+  /** Source this recording came from - a matching sig is only a duplicate
+   * across DIFFERENT sources (see isLiveDuplicate); same-source repeats survive. */
+  source: EventSource;
 }
 
 export interface CacheEntry {
@@ -67,6 +73,10 @@ export interface CacheEntry {
   initialLoaded: boolean;
   unlisten: Unlisten | null;
   unlistenWatch: Unlisten | null;
+  /** In-flight runner-channel registration - concurrent callers share it. */
+  listenerInit: Promise<void> | null;
+  /** Same race guard as `listenerInit`, for the watcher channel. */
+  watchListenerInit: Promise<void> | null;
   subscribers: Set<EventListener>;
   /** Post-reconcile "what should be on screen", for renderer staleness. */
   tailWatchers: Set<TailListener>;
@@ -241,7 +251,7 @@ class SessionEventStore {
     });
     for (const ev of missing) {
       entry.events.push(ev);
-      this.recordSig(entry, ev);
+      this.recordSig(entry, ev, "page");
       entry.subscribers.forEach((fn) => {
         try { fn(ev); } catch { /* ignore */ }
       });
@@ -377,7 +387,7 @@ class SessionEventStore {
       entry = this.makeEntry();
       this.cache.set(sessionId, entry);
     }
-    if (!this.deliver(sessionId, ev) || ev.type !== "user_message") return;
+    if (!this.deliver(sessionId, ev, "synthetic") || ev.type !== "user_message") return;
     // A tool-result-only user line normalizes to "u:" too; never tokenize it.
     const sig = this.sigOf(ev);
     if (sig === null || sig === "u:") return;
@@ -409,7 +419,7 @@ class SessionEventStore {
    * Does NOT cover `loadInitial` / `loadOlder`: those install authoritative
    * JSONL pages directly and reconcile against live events by object identity.
    */
-  private deliver(sessionId: string, ev: ChatEvent): boolean {
+  private deliver(sessionId: string, ev: ChatEvent, source: EventSource): boolean {
     // Rate-limit rejections drive the global banner, not a transcript row.
     // Route them out before the entry/dedup path so they surface for ANY
     // session the app is attached to, selected or not.
@@ -451,12 +461,13 @@ class SessionEventStore {
           text: entry.streamAcc.text,
           assistantFinal: true,
           ts: Date.now(),
+          source,
         });
       }
       entry.streamAcc = null;
     }
-    if (this.isLiveDuplicate(entry, ev)) return false;
-    this.recordSig(entry, ev);
+    if (this.isLiveDuplicate(entry, ev, source)) return false;
+    this.recordSig(entry, ev, source);
     entry.events.push(ev);
     // Any accepted live event (tool call, streaming chunk, notification, ...)
     // counts as activity, keeping a background session with a turn in flight
@@ -510,7 +521,8 @@ class SessionEventStore {
     // Same suppression the raw streaming partials got: if a finalized
     // assistant covering this text already landed (watcher won the race),
     // don't render a second, orphaned bubble.
-    if (this.isLiveDuplicate(entry, synth)) return;
+    // Deltas only ever arrive on the runner channel (ai_todo 186 doc above).
+    if (this.isLiveDuplicate(entry, synth, "runner")) return;
     const last = entry.events[entry.events.length - 1];
     if (cur.evRef && last === cur.evRef) {
       entry.events[entry.events.length - 1] = synth;
@@ -564,7 +576,7 @@ class SessionEventStore {
     }
   }
 
-  private isLiveDuplicate(entry: CacheEntry, ev: ChatEvent): boolean {
+  private isLiveDuplicate(entry: CacheEntry, ev: ChatEvent, source: EventSource): boolean {
     const now = Date.now();
     entry.recent = entry.recent.filter((r) => now - r.ts < DEDUP_WINDOW_MS);
     // A runner streaming partial whose text is a prefix of an already-delivered
@@ -577,7 +589,9 @@ class SessionEventStore {
     }
     const sig = this.sigOf(ev);
     if (sig === null) return false;
-    if (entry.recent.some((r) => r.sig === sig)) return true;
+    // Cross-source only: two deliveries of the same content from the SAME
+    // channel are distinct real events (see RecentSig.source), not a race.
+    if (entry.recent.some((r) => r.sig === sig && r.source !== source)) return true;
     if (ev.type !== "user_message") return false;
     // The watcher's replay of an already-echoed turn, past DEDUP_WINDOW_MS.
     entry.pendingEchoes = entry.pendingEchoes.filter((e) => now - e.ts < ECHO_MATCH_WINDOW_MS);
@@ -587,7 +601,7 @@ class SessionEventStore {
     return true;
   }
 
-  private recordSig(entry: CacheEntry, ev: ChatEvent): void {
+  private recordSig(entry: CacheEntry, ev: ChatEvent, source: EventSource): void {
     const sig = this.sigOf(ev);
     if (sig === null) return;
     entry.recent.push({
@@ -595,6 +609,7 @@ class SessionEventStore {
       text: ev.type === "assistant_message" ? this.contentText(ev) : null,
       assistantFinal: ev.type === "assistant_message" && !ev.streaming,
       ts: Date.now(),
+      source,
     });
   }
 
@@ -607,6 +622,8 @@ class SessionEventStore {
       initialLoaded: false,
       unlisten: null,
       unlistenWatch: null,
+      listenerInit: null,
+      watchListenerInit: null,
       subscribers: new Set(),
       tailWatchers: new Set(),
       recent: [],
@@ -651,18 +668,24 @@ class SessionEventStore {
   private async ensureListener(sessionId: string): Promise<void> {
     const entry = this.cache.get(sessionId);
     if (!entry || entry.unlisten) return;
-    entry.unlisten = await getTransport().listen<ChatEvent>(`chat:${sessionId}`, (payload) => {
-      const cur = this.cache.get(sessionId);
-      if (!cur) return;
-      // claude -p --resume replays the full conversation history including past
-      // user messages (remote_echo: false). Drop those to avoid duplicating
-      // transcript history. Daemon-synthesised echoes carry remote_echo: true
-      // and are delivered so phone-originated sends render a user bubble on
-      // every client. The existing sigOf/isLiveDuplicate dedup gate handles
-      // the case where a desktop pushSynthetic already recorded the same sig.
-      if (payload.type === "user_message" && !(payload as { remote_echo?: boolean }).remote_echo) return;
-      this.deliver(sessionId, payload);
-    });
+    // subscribe()'s fire-and-forget call and loadInitial()'s awaited one can
+    // both reach here before either sets entry.unlisten - share one in-flight call.
+    if (entry.listenerInit) { await entry.listenerInit; return; }
+    entry.listenerInit = (async () => {
+      entry.unlisten = await getTransport().listen<ChatEvent>(`chat:${sessionId}`, (payload) => {
+        const cur = this.cache.get(sessionId);
+        if (!cur) return;
+        // claude -p --resume replays history incl. past user messages
+        // (remote_echo: false) - drop those; daemon echoes carry remote_echo: true.
+        if (payload.type === "user_message" && !(payload as { remote_echo?: boolean }).remote_echo) return;
+        this.deliver(sessionId, payload, "runner");
+      });
+    })();
+    try {
+      await entry.listenerInit;
+    } finally {
+      entry.listenerInit = null;
+    }
   }
 
   /** Recovery for a channel that died silently: ensureListener's guard never
@@ -693,9 +716,17 @@ class SessionEventStore {
       this.cache.set(sessionId, entry);
     }
     if (entry.unlistenWatch) return;
-    entry.unlistenWatch = await getTransport().listen<ChatEvent>(`chat-watch:${sessionId}`, (payload) => {
-      this.deliver(sessionId, payload);
-    });
+    if (entry.watchListenerInit) { await entry.watchListenerInit; return; }
+    entry.watchListenerInit = (async () => {
+      entry.unlistenWatch = await getTransport().listen<ChatEvent>(`chat-watch:${sessionId}`, (payload) => {
+        this.deliver(sessionId, payload, "watcher");
+      });
+    })();
+    try {
+      await entry.watchListenerInit;
+    } finally {
+      entry.watchListenerInit = null;
+    }
   }
 
   stopWatchListener(sessionId: string): void {
