@@ -1,44 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Todo 662: the TodoWrite step checklist shipped fully built and was never once
 // seen on screen, because nothing covered the seam between the event and the
 // DOM. These specs drive the REAL pipeline (sessions view + load_history_page)
 // so a silent drop between the two shows up as red.
 
-const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  get_usage_map: {},
-  get_skill_usage_week: { entries: [], total_sessions: 0 },
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-  list_accounts: [],
-  list_scheduled_messages: [],
-  list_session_characters: {},
-  watch_session_transcript: null,
-  unwatch_session_transcript: null,
-  session_live_cwd: null,
-  get_git_info: null,
-  get_session_counts: null,
-  get_context_status: null,
-  get_session_drain: null,
-  list_pending_prompts: [],
-  get_chat_config: null,
-};
-
-function instance(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    session_id: "s1", pid: 100, cwd: "C:/Projects/alpha",
-    project_id: "p1", kind: "interactive", is_remote: false,
-    started_at: "2026-08-01T10:00:00Z", transcript_path: null, bridge_session_id: null,
-    name: "Alpha chat", ended_at: null, end_reason: null,
-    busy: true, model: "claude-opus-5", effort: "high", awaiting: null,
-    autopilot: false, jarvis: false, worker_of: null, closing: false,
-    account_id: null, rate_limited_resets_at: null, rate_limited_type: null,
-    ...over,
-  };
+function instance(over: Parameters<typeof sessionInstance>[0] = {}) {
+  return sessionInstance({ busy: true, awaiting: null, ...over });
 }
 
 const TODOS = [
@@ -62,7 +31,7 @@ async function mountTodoChat(page: Page): Promise<void> {
   await mountView(page, {
     view: "sessions",
     invoke: {
-      ...BASE_INVOKE,
+      ...SESSIONS_BASE_INVOKE,
       list_instances: [instance()],
       get_active_sessions: [instance()],
       load_history_page: todoTranscript(),
