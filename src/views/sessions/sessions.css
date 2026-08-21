@@ -693,8 +693,10 @@
   border-radius: 0;
 }
 
-/* Focus state moved to the shell - the textarea has no border to recolor. */
-.composer-shell:focus-within {
+/* :has(textarea:focus), not :focus-within: the AUQ prompt-card's host mounts
+ * inside .session-composer (a descendant), so :focus-within would also glow
+ * the shell while only the question card's own free-text input is focused. */
+.composer-shell:has(.composer-textarea:focus) {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(157, 125, 252, 0.12);
 }
