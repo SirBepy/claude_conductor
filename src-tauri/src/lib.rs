@@ -268,6 +268,7 @@ pub fn run() {
             ipc::paste_attachment,
             ipc::paste_attachment_from_path,
             ipc::read_attachment,
+            ipc::tail_waiting_log,
             ipc::takeover_manual,
             ipc::move_session_to_account,
             ipc::restart_jarvis_session,

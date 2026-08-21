@@ -35,6 +35,7 @@ pub mod user_todos;
 pub mod worktrees;
 pub mod claude_scopes;
 pub mod drafts;
+pub mod waiting_tail;
 
 pub use usage::*;
 pub use accounts::*;
@@ -71,6 +72,7 @@ pub use user_todos::*;
 pub use worktrees::*;
 pub use claude_scopes::*;
 pub use drafts::*;
+pub use waiting_tail::*;
 
 // Re-export test helper submodules so integration tests can reach them via
 // `claude_conductor_lib::ipc::projects_test_helpers` and

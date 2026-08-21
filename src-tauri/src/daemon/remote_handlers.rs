@@ -209,6 +209,11 @@ const SAFE_METHODS: &[&str] = &[
     "update_held_message",
     "remove_held_message",
     "clear_held_messages",
+    // Read-only local-process log tail for a `waiting_on` chip (todo 675).
+    // NETWORK-REACHABLE FILE READ: `path` is re-validated by `safe_local_path`
+    // against the session's OWN registered cwd at the point the daemon
+    // actually opens the file (methods/registry/waiting_tail.rs).
+    "tail_waiting_log",
 ];
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -424,6 +429,7 @@ mod tests {
             "get_session_drafts", "set_composer_draft", "clear_composer_draft",
             "set_auq_draft", "clear_auq_draft", "add_held_message",
             "update_held_message", "remove_held_message", "clear_held_messages",
+            "tail_waiting_log",
         ] {
             assert!(SAFE_METHODS.contains(&m), "{m} should be remotely callable");
         }

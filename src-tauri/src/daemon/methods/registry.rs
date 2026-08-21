@@ -8,6 +8,7 @@ mod characters;
 mod lifecycle;
 mod listings;
 mod project_meta;
+mod waiting_tail;
 
 use crate::daemon::rpc::Router;
 use crate::daemon::state::DaemonState;
@@ -18,6 +19,7 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     characters::register_characters(router, state.clone());
     attachments::register_attachments(router, state.clone());
     project_meta::register_project_meta(router, state.clone());
+    waiting_tail::register_waiting_tail(router, state.clone());
     listings::register_listings(router, state);
 }
 

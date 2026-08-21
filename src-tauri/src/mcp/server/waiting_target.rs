@@ -54,7 +54,9 @@ pub fn default_roots() -> Vec<PathBuf> {
 /// Canonicalise FIRST, then contain: a symlink pointing out of `roots` is
 /// resolved before the prefix check, so it cannot escape. A relative path or
 /// one that does not resolve at all is rejected outright.
-fn safe_local_path(href: &str, roots: &[PathBuf]) -> Option<String> {
+/// `pub(crate)`: the daemon-side tail RPC re-validates this again before
+/// opening the file, since it is reachable by a remote client directly.
+pub(crate) fn safe_local_path(href: &str, roots: &[PathBuf]) -> Option<String> {
     if !Path::new(href).is_absolute() {
         return None;
     }
