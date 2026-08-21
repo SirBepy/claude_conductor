@@ -270,13 +270,19 @@ pub(crate) async fn run_stdout_pump(
                                 } else {
                                     None
                                 };
-                                // Carried out of the registry (todo 675 part 1); part 2 gives
-                                // this a wire home for the frontend. Logged meanwhile.
+                                // todo 675 part 2: wire the registry-carried target out. A
+                                // generic Notification, not a new ChatEvent variant
+                                // (types/chat.rs is owned elsewhere) - published while
+                                // activeTurnChipKey still points at THIS turn.
                                 if let Some(target) = taken_report.as_ref().and_then(|r| r.waiting_on.as_ref()) {
                                     log::info!(
                                         "daemon: session {} waiting on: {target}",
                                         pump_session.session_id
                                     );
+                                    broadcast::publish(&pump_session, ChatEvent::Notification {
+                                        kind: "waiting_on".to_string(),
+                                        body: target.to_string(),
+                                    });
                                 }
                                 let awaiting = if live_turn {
                                     taken_report.map(|r| r.status).or(awaiting)
