@@ -6,12 +6,19 @@ import {
   type TodoChecklistState,
   type TodoStepStatus,
 } from "./turn-todo-checklist";
-import { STATUS_ICON } from "../status-icons";
 import { ensureMainStrip } from "./tool-strip";
 import { META_KIND_ICONS, type MetaTurnKind } from "./chat-classifiers";
-import { api } from "../api";
-import { isTauri } from "../transport";
-import { openWaitingTailPanel } from "./waiting-tail-panel";
+import {
+  formatTurnDuration,
+  formatTokenCount,
+  estimateTokensFromText,
+} from "./turn-footer-format";
+import { renderStatusChip } from "./turn-status-chip";
+import { renderWaitingChip, type WaitingOnTarget } from "./turn-waiting-chip";
+
+export { formatTurnDuration, formatTokenCount, estimateTokensFromText };
+export { applyWaitingOnNotification, onWaitingChipClick } from "./turn-waiting-chip";
+export type { WaitingOnTarget } from "./turn-waiting-chip";
 
 /**
  * Per-turn footer: a single block at the bottom of every response bundling
@@ -32,40 +39,6 @@ import { openWaitingTailPanel } from "./waiting-tail-panel";
  * turn is active, pinned before the next user message when it closes); this
  * module owns footer CONTENT and the per-turn registry.
  */
-
-// ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-/** Format elapsed milliseconds as "14s", "1m 20s", "1h 5m". */
-export function formatTurnDuration(ms: number): string {
-  const totalSecs = Math.floor(Math.max(0, ms) / 1000);
-  const h = Math.floor(totalSecs / 3600);
-  const m = Math.floor((totalSecs % 3600) / 60);
-  const s = totalSecs % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-/**
- * Compact token count: "980", "2.1k", "12.4k". Pass `{ decimals: 0 }` for the
- * decimal-free form used by the context chip, e.g. "90k" / "200k".
- */
-export function formatTokenCount(n: number, opts?: { decimals?: number }): string {
-  const decimals = opts?.decimals ?? 1;
-  const v = Number(n) || 0;
-  if (v >= 1_000) {
-    const k = v / 1000;
-    return `${decimals <= 0 ? Math.round(k) : k.toFixed(decimals)}k`;
-  }
-  return String(Math.round(v));
-}
-
-/** Estimate output tokens from streamed assistant text length (chars / 4). */
-export function estimateTokensFromText(text: string): number {
-  return Math.max(0, Math.round(text.length / 4));
-}
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -133,72 +106,6 @@ function buildTooltip(totals: TurnUsageTotals): string {
   if (totals.cacheRead > 0) parts.push(`Cache read: ${totals.cacheRead.toLocaleString()} tok`);
   if (totals.costUsd > 0) parts.push(`Cost: $${totals.costUsd.toFixed(4)}`);
   return parts.join(" | ");
-}
-
-/** Title for each `<cc-status:..>` value; icons come from the shared
- *  STATUS_ICON table. "done" is deliberately left uncolored (no
- *  `turn-chip--status-*` modifier) - a settled turn is the calm default,
- *  not something to highlight. */
-const STATUS_CHIP_META: Record<string, { icon: string; title: string }> = {
-  question: { icon: STATUS_ICON.question, title: "Ended with a question" },
-  working: { icon: STATUS_ICON.working, title: "Working in the background" },
-  waiting: { icon: STATUS_ICON.waiting, title: "Waiting on an external process" },
-  done: { icon: STATUS_ICON.done, title: "Turn completed" },
-};
-
-// ---------------------------------------------------------------------------
-// Waiting-on chip (todo 675): what a `waiting` turn is blocked on - separate
-// from STATUS_CHIP_META above, which renders the self-reported status.
-// ---------------------------------------------------------------------------
-
-export interface WaitingOnTarget {
-  label: string;
-  kind: "ci" | "local-process" | "external";
-  /** Already re-validated server-side (`mcp::server::waiting_target::sanitize`).
-   *  Null when the backend rejected the client-supplied href/path - the chip
-   *  still shows `label`, just with nothing to click. */
-  href: string | null;
-}
-
-const WAITING_ON_ICON: Record<WaitingOnTarget["kind"], string> = {
-  ci: "ph-github-logo",
-  external: "ph-arrow-square-out",
-  "local-process": "ph-terminal-window",
-};
-
-/** Parse a `waiting_on` Notification event's JSON body and apply it to the
- *  given turn's footer. Never throws into the event pipeline - a malformed
- *  or unrecognized body is silently dropped (no chip), never a broken one. */
-export function applyWaitingOnNotification(
-  reg: TurnFooterRegistry,
-  key: TurnChipKey | null,
-  body: string,
-): void {
-  if (key === null) return;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return;
-  }
-  if (!parsed || typeof parsed !== "object") return;
-  const { label, kind, href } = parsed as Record<string, unknown>;
-  if (typeof label !== "string" || (kind !== "ci" && kind !== "local-process" && kind !== "external")) return;
-  reg.setWaitingOn(key, { label, kind, href: typeof href === "string" ? href : null });
-}
-
-/** Click delegate for a waiting-on chip (attached in chat-renderer.ts, which
- *  owns `sessionId` - this module stays session-agnostic otherwise). A chip
- *  with no `href` (rejected server-side) carries no data-href and is a no-op. */
-export function onWaitingChipClick(chip: HTMLElement, sessionId: string | null): void {
-  const href = chip.dataset.href;
-  if (!href) return;
-  if (chip.dataset.kind === "local-process") {
-    if (sessionId) openWaitingTailPanel(chip, sessionId, href);
-    return;
-  }
-  if (isTauri()) void api.openExternal(href);
-  else window.open(href, "_blank", "noopener");
 }
 
 /**
@@ -345,37 +252,12 @@ export class TurnFooterRegistry {
     }
     st.tokenTextNode!.nodeValue = `${formatTokenCount(totals.outputTokens)} tok`;
     st.metaRow!.title = buildTooltip(totals);
-    this.renderStatusChip(st, totals.awaiting);
+    renderStatusChip(st, totals.awaiting);
     if (st.progressBar) {
       st.progressBar.remove();
       st.progressBar = null;
       st.progressFill = null;
     }
-  }
-
-  /**
-   * Settle-only status chip for the turn's folded `<cc-status:..>` marker.
-   * Never called from the live/ticking path (ensureLiveMetaRow) - a status
-   * only means something once the turn is done, so it must not flash mid-turn.
-   * No chip at all when no marker was ever parsed (undefined/null/unknown).
-   */
-  private renderStatusChip(st: TurnFooterState, awaiting: string | null | undefined): void {
-    const meta = awaiting ? STATUS_CHIP_META[awaiting] : undefined;
-    if (!meta) {
-      st.statusChip?.remove();
-      st.statusChip = null;
-      return;
-    }
-    if (!st.statusChip) {
-      const chip = document.createElement("span");
-      chip.className = "turn-chip turn-chip--status";
-      chip.appendChild(document.createElement("i"));
-      st.metaRow!.appendChild(chip);
-      st.statusChip = chip;
-    }
-    st.statusChip.title = meta.title;
-    st.statusChip.className = `turn-chip turn-chip--status turn-chip--status-${awaiting}`;
-    st.statusChip.firstElementChild!.className = `ph ${meta.icon}`;
   }
 
   /** Waiting-on chip (todo 675): what a `waiting` turn is blocked on. Creates
@@ -385,22 +267,7 @@ export class TurnFooterRegistry {
     this.getOrCreateFooter(key);
     const st = this.turns.get(key)!;
     this.buildMetaRow(st);
-    if (!st.waitingChip) {
-      const chip = document.createElement("span");
-      chip.className = "turn-chip turn-chip--waiting-on";
-      chip.appendChild(document.createElement("i"));
-      chip.appendChild(document.createElement("span"));
-      st.metaRow!.appendChild(chip);
-      st.waitingChip = chip;
-    }
-    const chip = st.waitingChip;
-    chip.dataset.kind = target.kind;
-    if (target.href) chip.dataset.href = target.href;
-    else delete chip.dataset.href;
-    chip.classList.toggle("turn-chip--clickable", !!target.href);
-    chip.title = target.href ? `${target.label} - click to open` : target.label;
-    (chip.children[0] as HTMLElement).className = `ph ${WAITING_ON_ICON[target.kind]}`;
-    (chip.children[1] as HTMLElement).textContent = target.label;
+    renderWaitingChip(st, target);
   }
 
   /**
