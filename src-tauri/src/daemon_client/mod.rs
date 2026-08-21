@@ -166,6 +166,9 @@ impl PersistentClient {
         })
     }
 
+    // No in-place retry here (unlike relay.rs's is_retryable, todo 714): a
+    // dropped connection rebuilds entirely via ensure_daemon, so a failed call
+    // just errors up rather than retrying mid-request.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, ClientError> {
         // Clone the close-watch BEFORE the borrow so a reader that dies between
         // the borrow and the `select!` below still wakes us via `changed()`

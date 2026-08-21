@@ -33,6 +33,9 @@ fn is_retryable(e: &reqwest::Error) -> bool {
     e.is_connect()
 }
 
+// Diverges from daemon_client's reconnect on purpose (todo 714): this is a
+// stateless per-request retry, not a persistent connection being rebuilt.
+
 /// Transport seam (todo 707): tests pass a stub instead of `http_post` so
 /// routing runs for real and only the network call is faked.
 pub(super) type HttpPost = fn(&tokio::runtime::Runtime, &str, Value) -> Result<Value, String>;
