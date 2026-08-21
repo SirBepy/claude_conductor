@@ -332,10 +332,10 @@ class PreviewTab implements RailTabHandle {
     canvas.innerHTML = `<div class="pv-frame" data-w="${this.deviceWidth}"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div>`;
     const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
     if (!iframe) return;
-    // Served over a real local origin (not data:) so it gets its own CSP
-    // header, independent of the app shell's - see preview_render.rs. Staged
-    // via IPC rather than a webview fetch: that fetch was cross-origin, and its
-    // CORS preflight got a 405, so the panel silently rendered blank (todo 591).
+    // Staged over IPC, not a webview fetch (that was cross-origin and 405'd,
+    // todo 591). `render_preview_doc` resolves per-transport: desktop stages
+    // on the hook server (preview_render.rs), remote stages same-origin on
+    // the remote-access server (remote_preview_render.rs, todo 715).
     const doc = buildPreviewDocumentHtml(this.selected.html);
     try {
       iframe.src = await invoke<string>("render_preview_doc", { html: doc });

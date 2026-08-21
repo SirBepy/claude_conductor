@@ -436,6 +436,10 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_previews", null);
       case "get_preview":
         return this.rpc<T>("get_preview", { id: args.id });
+      // Iframe render (todo 715): same-origin URL, no CSP change needed -
+      // see remote_preview_render.rs.
+      case "render_preview_doc":
+        return this.renderPreviewDoc<T>(args);
       // Close-chat: mirrors desktop's `ipc::clear_session` (builtins.rs).
       // `end_session` kills the underlying `claude` process for daemon-hosted
       // (interactive) sessions and marks the registry entry ended in one RPC;
@@ -535,6 +539,22 @@ export class HttpTransport implements Transport {
         /* ignore */
       }
     };
+  }
+
+  /** Stages `args.html` on the daemon and returns a same-origin iframe-src
+   *  URL. The token rides the query string (an `<iframe src>` navigation
+   *  can't set an Authorization header), same pattern as the WS `?token=`. */
+  private async renderPreviewDoc<T>(args: Record<string, unknown>): Promise<T> {
+    const res = await fetch("/api/preview-render", {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ html: args.html }),
+    });
+    if (res.status === 401) handleAuthFailure();
+    if (!res.ok) throw new Error(`render_preview_doc failed: ${res.status}`);
+    const { id } = (await res.json()) as { id: string };
+    const url = `/api/preview-render/${encodeURIComponent(id)}?token=${encodeURIComponent(remoteToken())}`;
+    return url as unknown as T;
   }
 
   private async sendMessage<T>(args: Record<string, unknown>): Promise<T> {

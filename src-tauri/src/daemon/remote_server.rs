@@ -40,6 +40,7 @@ use crate::daemon::state::DaemonState;
 
 use super::remote_handlers::*;
 use super::remote_pairing::pair_device;
+use super::remote_preview_render::{on_preview_render, on_preview_render_get};
 use super::remote_push::{push_subscribe, push_unsubscribe, push_vapid_key};
 use super::remote_static::spa_fallback;
 use super::remote_voice::transcribe_ws;
@@ -128,6 +129,10 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
         .route("/api/push/vapid-public-key", get(push_vapid_key))
         .route("/api/push/subscribe", post(push_subscribe))
         .route("/api/push/unsubscribe", post(push_unsubscribe))
+        // Preview-panel iframe staging (todo 715): POST is bearer-gated here;
+        // the paired GET below is public because an <iframe src> can't carry
+        // the header, and self-authenticates via `?token=` instead.
+        .route("/api/preview-render", post(on_preview_render))
         .route_layer(middleware::from_fn_with_state(ctx.clone(), auth_mw));
 
     // /api/health is unauthenticated (connectivity probe, reveals nothing).
@@ -140,6 +145,7 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/pair", post(pair_device))
         .route("/api/sessions/:id/stream", get(stream_ws))
+        .route("/api/preview-render/:id", get(on_preview_render_get))
         // Global (not session-scoped) live-state stream: the remote
         // equivalent of the internal daemon<->app `subscribe_global` pipe
         // link, so a second remote window sees instances/schedule changes
