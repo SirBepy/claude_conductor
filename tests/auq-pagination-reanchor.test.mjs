@@ -6,9 +6,24 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, assistantEvent, toolUseEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
+
+// loadFromStore's Promise.all fires get_skipped_question_marks before the
+// initial load_history_page resolves, so a positional queue desyncs. beforeSeq
+// is the only thing separating the initial page from fetchOlder's page.
+function routePages(newestPage, olderPage) {
+  makeInvokeRouter(invokeMock);
+  const fallback = invokeMock.getMockImplementation();
+  invokeMock.mockImplementation((cmd, args) => {
+    if (cmd === "load_history_page") {
+      return Promise.resolve(args && "beforeSeq" in args ? olderPage : newestPage);
+    }
+    return fallback(cmd, args);
+  });
+}
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -48,9 +63,9 @@ async function makeRenderer() {
 
 describe("older-page AUQ card re-anchor", () => {
   it("renders the answered card where the answer landed, not at the ask site", async () => {
-    invokeMock
-      .mockResolvedValueOnce({ events: [userEvent("later question", 2_000_000)], oldest_seq: 10, newest_seq: 12, has_more: true })
-      .mockResolvedValueOnce({
+    routePages(
+      { events: [userEvent("later question", 2_000_000)], oldest_seq: 10, newest_seq: 12, has_more: true },
+      {
         events: [
           userEvent("start", 1_000_000),
           toolUseEvent(ASK_TOOL, { questions: [{ question: "Pick one?", header: "Choice" }] }, "q1", 1_000_100),
@@ -70,7 +85,8 @@ describe("older-page AUQ card re-anchor", () => {
         oldest_seq: 1,
         newest_seq: 9,
         has_more: false,
-      });
+      },
+    );
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();
@@ -94,9 +110,9 @@ describe("older-page AUQ card re-anchor", () => {
   // fold their OWN answer via findNearestOpenQuestionId, same "one AUQ in
   // flight" rule as the live path - not cross-match to the wrong ask.
   it("folds two sequential asks in one page to their own answers, not swapped", async () => {
-    invokeMock
-      .mockResolvedValueOnce({ events: [userEvent("later", 2_000_000)], oldest_seq: 10, newest_seq: 12, has_more: true })
-      .mockResolvedValueOnce({
+    routePages(
+      { events: [userEvent("later", 2_000_000)], oldest_seq: 10, newest_seq: 12, has_more: true },
+      {
         events: [
           toolUseEvent(ASK_TOOL, { questions: [{ question: "First?", header: "Choice A" }] }, "q1", 1_000_000),
           toolResultEvent("q1", ACK_TEXT, 1_000_050),
@@ -116,7 +132,8 @@ describe("older-page AUQ card re-anchor", () => {
         oldest_seq: 1,
         newest_seq: 9,
         has_more: false,
-      });
+      },
+    );
 
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();
