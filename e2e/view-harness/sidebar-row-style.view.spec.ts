@@ -1,39 +1,23 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { SESSIONS_BASE_INVOKE, sessionInstance, mountView } from "./harness";
 
 // Drives the REAL sidebar, not markup strings: a "square" portrait can be
 // 46x59 while every screenshot still looks plausible, so the asserts below
 // measure rendered boxes.
 
-const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  get_usage_map: {},
-  get_skill_usage_week: { entries: [], total_sessions: 0 },
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-  list_accounts: [],
-  list_scheduled_messages: [],
-  // Both rows need an assigned character, or leadingVisual falls back to the
-  // bare status icon and there is no portrait to measure. A 1x1 transparent PNG
-  // is enough - the asserts are about box geometry, not pixels.
+// Both rows need an assigned character, or leadingVisual falls back to the
+// bare status icon and there is no portrait to measure. A 1x1 transparent PNG
+// is enough - the asserts are about box geometry, not pixels.
+const CHARACTER_INVOKE = {
   list_session_characters: { s1: "illidan", s2: "jaina" },
   character_asset_url:
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgDTD2qgAAAAASUVORK5CYII=",
 };
 
-function instance(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    session_id: "s1", pid: 100, cwd: "C:/Projects/claude_usage_in_taskbar",
-    project_id: "p1", kind: "interactive", is_remote: false,
-    started_at: "2026-07-30T10:00:00Z", transcript_path: null, bridge_session_id: null,
-    name: "Session card round six chips", ended_at: null, end_reason: null,
-    busy: false, model: "claude-opus-5", effort: "high", awaiting: "done",
-    autopilot: false, jarvis: false, worker_of: null, closing: false,
-    account_id: null, rate_limited_resets_at: null, rate_limited_type: null,
-    ...over,
-  };
+function instance(over: Parameters<typeof sessionInstance>[0] = {}) {
+  return sessionInstance({
+    cwd: "C:/Projects/claude_usage_in_taskbar", name: "Session card round six chips", ...over,
+  });
 }
 
 const SESSIONS = [
@@ -41,11 +25,11 @@ const SESSIONS = [
   instance({ session_id: "s2", cwd: "C:/Projects/zng-app", name: "TruStage flag scope", model: "claude-sonnet-5" }),
 ];
 
-async function mountSessions(page: import("@playwright/test").Page, rowStyle: string): Promise<void> {
+async function mountSessions(page: import("@playwright/test").Page, rowStyle: "classic" | "portrait"): Promise<void> {
   await page.addInitScript((v) => localStorage.setItem("cc_chat_row_style", v), rowStyle);
   await mountView(page, {
     view: "sessions",
-    invoke: { ...BASE_INVOKE, list_instances: SESSIONS, get_active_sessions: SESSIONS },
+    invoke: { ...SESSIONS_BASE_INVOKE, ...CHARACTER_INVOKE, list_instances: SESSIONS, get_active_sessions: SESSIONS },
   });
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
 }

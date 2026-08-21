@@ -28,6 +28,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { test, type Locator, type Page } from "@playwright/test";
+import type { Instance } from "../../src/types/ipc.generated";
 
 export type Entry = "index" | "overlay";
 
@@ -137,6 +138,75 @@ export async function invokeCalls(page: Page): Promise<Array<{ cmd: string; args
   return page.evaluate(
     () => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args?: unknown }> }).__ccInvokeCalls,
   );
+}
+
+// Shared sidebar-list fixture (todo 720): was pasted into 16 specs as a local
+// `BASE_INVOKE` + `instance()` + `mountSessions()` trio, so one new `Instance`
+// field meant editing every copy or leaving most on a stale shape.
+
+/** Commands the sessions view's boot + a mounted session pane need. A superset
+ *  of what any one spec calls - unused keys in an InvokeMap are inert, never
+ *  invoked, so this is safe to share even for specs that only need a subset. */
+export const SESSIONS_BASE_INVOKE: InvokeMap = {
+  get_accounts_setup_prompt_state: { shouldShow: false },
+  get_usage_map: {},
+  get_skill_usage_week: { entries: [], total_sessions: 0 },
+  poll_now: null,
+  list_projects: [],
+  resolve_whitelist_characters: [],
+  probe_models_availability: [],
+  list_accounts: [],
+  list_scheduled_messages: [],
+  list_session_characters: {},
+  watch_session_transcript: null,
+  unwatch_session_transcript: null,
+  session_live_cwd: null,
+  get_git_info: null,
+  get_session_counts: null,
+  get_context_status: null,
+  get_session_drain: null,
+  list_pending_prompts: [],
+  get_chat_config: null,
+};
+
+const SESSION_DEFAULTS: Instance = {
+  session_id: "s1", pid: 100, cwd: "C:/Projects/alpha",
+  project_id: "p1", kind: "interactive", is_remote: false,
+  started_at: "2026-08-01T10:00:00Z", transcript_path: null, bridge_session_id: null,
+  name: "Alpha chat", ended_at: null, end_reason: null,
+  busy: false, model: "claude-opus-5", effort: "high", awaiting: "done",
+  autopilot: false, jarvis: false, worker_of: null, closing: false,
+  account_id: null, rate_limited_resets_at: null, rate_limited_type: null,
+  frozen: false, auto_frozen: false, held_count: 0, local_task_running: false,
+};
+
+/** Typed against the real `Instance` (src/types/ipc.generated.ts), so a field
+ *  added/renamed there fails typecheck here instead of silently rotting every
+ *  spec's copy-pasted fixture - the main point of todo 720. */
+export function sessionInstance(over: Partial<Instance> = {}): Instance {
+  return { ...SESSION_DEFAULTS, ...over };
+}
+
+/** Mounts the sessions view with a given row set. `rowStyle` is opt-in: pass
+ *  it to pin `classic`/`portrait` via localStorage before nav, or omit it to
+ *  leave localStorage untouched, which resolves to the app's real default
+ *  ("portrait", row-style.ts) - several specs depend on that exact fallback. */
+export async function mountSessionsList(
+  page: Page,
+  sessions: Instance[],
+  rowStyle?: "classic" | "portrait",
+): Promise<void> {
+  if (rowStyle) {
+    await page.addInitScript((v) => localStorage.setItem("cc_chat_row_style", v), rowStyle);
+  }
+  await mountView(page, {
+    view: "sessions",
+    invoke: { ...SESSIONS_BASE_INVOKE, list_instances: sessions, get_active_sessions: sessions },
+  });
+  // Unscoped `li`, not `li[data-session-id]`: a session inside the (default-
+  // collapsed) Closing segment renders no visible session row at all, only
+  // the group-header `li` - see close-teardown's torn-down-session case.
+  await page.locator("#sessions-list li").first().waitFor();
 }
 
 export interface SessionsLayoutOptions {
