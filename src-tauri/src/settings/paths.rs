@@ -71,7 +71,7 @@ pub(crate) fn copy_missing_recursive(src: &std::path::Path, dst: &std::path::Pat
         // Ephemeral / instance-owned files the new process regenerates.
         if name_str.ends_with(".lock")
             || name_str.starts_with("hooks_port")
-            || name_str == "daemon.log"
+            || (name_str.starts_with("daemon") && name_str.ends_with(".log"))
             || name_str == "mcp"
         {
             continue;
@@ -227,6 +227,13 @@ pub fn interactive_sessions_file() -> Result<PathBuf> {
     // user's snapshot. Empty suffix for the default (production) instance.
     let suffix = crate::daemon::instance::instance_suffix();
     Ok(data_dir()?.join(format!("interactive-sessions{suffix}.json")))
+}
+
+/// Instance-scoped daemon log, mirroring `interactive_sessions_file()`: a dev,
+/// wdio or test daemon must not interleave its lines into the production log.
+/// Empty suffix for the default instance, so production stays `daemon.log`.
+pub fn daemon_log_name() -> String {
+    format!("daemon{}.log", crate::daemon::instance::instance_suffix())
 }
 
 pub fn mcp_temp_dir() -> anyhow::Result<std::path::PathBuf> {

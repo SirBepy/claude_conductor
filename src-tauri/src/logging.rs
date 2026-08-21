@@ -9,7 +9,7 @@ pub fn default_log_filter() -> &'static str {
 /// Initialize logging for the detached daemon process. The daemon is spawned
 /// detached with no console, so without an explicit file target its log output
 /// goes nowhere - which is why an unexpected daemon exit leaves no trail. Writes
-/// to `<app-data>/daemon.log` (append). `RUST_LOG` overrides the default `info`
+/// to `<app-data>/daemon[-instance].log` (append). `RUST_LOG` overrides the default `info`
 /// level. Best-effort: falls back to stderr if the file can't be opened, never
 /// panics. Safe to call once at daemon startup.
 /// Write every panic to `<app-data>/<file_name>` before the process dies.
@@ -76,8 +76,9 @@ impl std::io::Write for ReopeningFileWriter {
 }
 
 pub(crate) fn init_daemon_file_logger() {
-    let log_path = paths::data_dir().ok().map(|dir| dir.join("daemon.log"));
-    install_panic_hook("daemon.log", "daemon");
+    let log_name = paths::daemon_log_name();
+    let log_path = paths::data_dir().ok().map(|dir| dir.join(&log_name));
+    install_panic_hook(&log_name, "daemon");
 
     let file = log_path.and_then(|path| match open_append(&path) {
         Ok(file) => Some(ReopeningFileWriter { path, file, warned: false }),
