@@ -1,0 +1,62 @@
+/* Recap screen shown after the last question, before Send. */
+.prompt-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prompt-summary__intro {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+.prompt-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+.prompt-summary-row:hover {
+  background: var(--color-surface);
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  filter: none;
+  transform: none;
+}
+.prompt-summary-row.is-unanswered {
+  border-color: color-mix(in srgb, var(--color-warning, orange) 40%, var(--color-border));
+}
+.prompt-summary-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prompt-summary-row__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.prompt-summary-row__answer {
+  font-size: 0.88rem;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prompt-summary-row.is-unanswered .prompt-summary-row__answer {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.prompt-summary-row i {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}

@@ -1,5 +1,7 @@
 import "../permission-modal-shell.css";
 import "../permission-modal-question.css";
+import "../permission-modal-summary.css";
+import "../permission-modal-badges.css";
 import { attachDragHandle } from "./drag-handle";
 import { dismissQuestionCard } from "./question-state";
 import { isMobileViewport } from "../../../shared/mobile-viewport";

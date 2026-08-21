@@ -213,69 +213,6 @@
   padding: 2px 0 0;
 }
 
-/* Recap screen shown after the last question, before Send. */
-.prompt-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.prompt-summary__intro {
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
-  margin-bottom: 2px;
-}
-.prompt-summary-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.12s, border-color 0.12s;
-}
-.prompt-summary-row:hover {
-  background: var(--color-surface);
-  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
-  filter: none;
-  transform: none;
-}
-.prompt-summary-row.is-unanswered {
-  border-color: color-mix(in srgb, var(--color-warning, orange) 40%, var(--color-border));
-}
-.prompt-summary-row__main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.prompt-summary-row__label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.prompt-summary-row__answer {
-  font-size: 0.88rem;
-  color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.prompt-summary-row.is-unanswered .prompt-summary-row__answer {
-  color: var(--color-text-muted);
-  font-style: italic;
-}
-.prompt-summary-row i {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
 /* ── AUQ card redesign: four-zone question layout ──────────────────────────
  * --dom is set inline per card/panel by question-ui.ts (one of the
  * --color-domain-* tokens) and drives the chip, ask band, dot ring and
@@ -332,25 +269,6 @@
   font-size: 0.86rem;
   line-height: 1.5;
   color: var(--color-text-muted);
-}
-
-.prompt-domain {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  padding: 3px 9px;
-  border-radius: 999px;
-  white-space: nowrap;
-  color: var(--dom);
-  background: color-mix(in srgb, var(--dom) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--dom) 38%, transparent);
-}
-.prompt-domain i {
-  font-size: 0.8rem;
 }
 
 /* Ask band always takes the domain colour. */
@@ -410,53 +328,6 @@
 .prompt-sect i {
   font-size: 0.9rem;
   color: var(--color-text-muted);
-}
-
-/* Badge group on an option row - see the load-bearing comment on
- * .prompt-opt__label above; this and that rule work together. */
-.prompt-opt__top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 5px 8px;
-}
-.prompt-badges {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  flex: 0 0 auto;
-  max-width: 100%;
-}
-.prompt-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.63rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 2px 7px;
-  border-radius: 5px;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-.prompt-badge i {
-  font-size: 0.78rem;
-}
-.prompt-badge--rec {
-  color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
-}
-.prompt-badge--long {
-  color: var(--color-success);
-  background: color-mix(in srgb, var(--color-success) 13%, transparent);
-  border-color: color-mix(in srgb, var(--color-success) 32%, transparent);
-}
-.prompt-badge--short {
-  color: var(--color-info);
-  background: color-mix(in srgb, var(--color-info) 15%, transparent);
-  border-color: color-mix(in srgb, var(--color-info) 35%, transparent);
 }
 
 .prompt-own {

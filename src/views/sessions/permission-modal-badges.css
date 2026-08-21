@@ -1,0 +1,65 @@
+.prompt-domain {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--dom);
+  background: color-mix(in srgb, var(--dom) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dom) 38%, transparent);
+}
+.prompt-domain i {
+  font-size: 0.8rem;
+}
+
+/* Badge group on an option row - see the load-bearing comment on
+ * .prompt-opt__label above; this and that rule work together. */
+.prompt-opt__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 8px;
+}
+.prompt-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+.prompt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.prompt-badge i {
+  font-size: 0.78rem;
+}
+.prompt-badge--rec {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+}
+.prompt-badge--long {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 13%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 32%, transparent);
+}
+.prompt-badge--short {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 15%, transparent);
+  border-color: color-mix(in srgb, var(--color-info) 35%, transparent);
+}
