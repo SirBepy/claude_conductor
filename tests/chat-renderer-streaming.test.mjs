@@ -9,9 +9,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { userEvent, streamingEvent, finalEvent } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
+
+let invokeRouter;
 
 // sidemenu.ts assigns to window at module-eval time before any beforeEach
 // can run. Provide a bare stub so that first import doesn't throw.
@@ -28,6 +31,7 @@ const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
 
 beforeEach(() => {
   invokeMock.mockReset();
+  invokeRouter = makeInvokeRouter(invokeMock);
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -101,7 +105,7 @@ describe("ChatRenderer — streaming dedup (ai_todo 47)", () => {
       streamingEvent("partial...", 8),
     ];
 
-    invokeMock.mockResolvedValueOnce({
+    invokeRouter.queueOnce("load_history_page", {
       events: initialEvents,
       oldest_seq: 0,
       newest_seq: 8,
@@ -118,6 +122,10 @@ describe("ChatRenderer — streaming dedup (ai_todo 47)", () => {
 
     // Drain microtasks so: loadInitial resolves, bulkLoadEvents starts,
     // iteration 1 processes events 0-7 and queues a setTimeout(resolve, 0).
+    // 4 ticks, not 3: the router's queued invoke resolves through one more
+    // microtask hop than a raw mockResolvedValueOnce did (verified via
+    // vi.getTimerCount() polling - routing mechanics only).
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
