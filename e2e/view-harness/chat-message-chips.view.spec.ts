@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Todo 586 follow-up / commit 205b00d0: the meta-turn chips, the retracted
 // placeholder and the interrupted-turn dim, rendered through the real
@@ -37,41 +37,6 @@ async function mountChat(page) {
 // Meta-turn chips: real pipeline (turn footer/tool-strip), not a raw mount.
 // ---------------------------------------------------------------------------
 
-const BASE_INVOKE = {
-  get_accounts_setup_prompt_state: { shouldShow: false },
-  get_usage_map: {},
-  get_skill_usage_week: { entries: [], total_sessions: 0 },
-  poll_now: null,
-  list_projects: [],
-  resolve_whitelist_characters: [],
-  probe_models_availability: [],
-  list_accounts: [],
-  list_scheduled_messages: [],
-  list_session_characters: {},
-  watch_session_transcript: null,
-  unwatch_session_transcript: null,
-  session_live_cwd: null,
-  get_git_info: null,
-  get_session_counts: null,
-  get_context_status: null,
-  get_session_drain: null,
-  list_pending_prompts: [],
-  get_chat_config: null,
-};
-
-function instance(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    session_id: "s1", pid: 100, cwd: "C:/Projects/alpha",
-    project_id: "p1", kind: "interactive", is_remote: false,
-    started_at: "2026-08-01T10:00:00Z", transcript_path: null, bridge_session_id: null,
-    name: "Alpha chat", ended_at: null, end_reason: null,
-    busy: false, model: "claude-opus-5", effort: "high", awaiting: "done",
-    autopilot: false, jarvis: false, worker_of: null, closing: false,
-    account_id: null, rate_limited_resets_at: null, rate_limited_type: null,
-    ...over,
-  };
-}
-
 // Peer/fleet each close with a send_message bubble (the only thing besides
 // raw narration - gated off by default - that counts as "visible", so the
 // next meta turn won't streak-merge). Wake fires 3x with nothing between,
@@ -101,9 +66,9 @@ async function mountMetaChat(page: Page): Promise<void> {
   await mountView(page, {
     view: "sessions",
     invoke: {
-      ...BASE_INVOKE,
-      list_instances: [instance()],
-      get_active_sessions: [instance()],
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [sessionInstance()],
+      get_active_sessions: [sessionInstance()],
       load_history_page: metaTranscript(),
     },
   });
