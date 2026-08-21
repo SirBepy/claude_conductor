@@ -34,6 +34,7 @@ pub mod remote_server;
 mod remote_static;
 mod remote_voice;
 mod remote_ws_pump;
+pub(crate) mod render_cache;
 pub mod repo_channel_wake;
 pub mod rpc;
 pub mod schedule;

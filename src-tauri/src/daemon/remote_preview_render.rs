@@ -11,23 +11,15 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use crate::daemon::render_cache::RenderCache;
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// Rolling window, not a growable history - see `preview_render.rs`'s
-/// identical cache for the rationale (fires on every re-render).
-const MAX_RENDER_CACHE: usize = 10;
-
-struct RenderCache {
-    entries: HashMap<String, String>,
-    order: VecDeque<String>,
-}
-
+/// Own cell, separate from the hooks server's: see `RenderCache::instance`.
 fn cell() -> &'static Mutex<RenderCache> {
     static CELL: OnceLock<Mutex<RenderCache>> = OnceLock::new();
-    CELL.get_or_init(|| Mutex::new(RenderCache { entries: HashMap::new(), order: VecDeque::new() }))
+    RenderCache::instance(&CELL)
 }
 
 #[derive(Deserialize)]
@@ -43,14 +35,7 @@ pub(super) async fn on_preview_render(
     Json(body): Json<PreviewRenderBody>,
 ) -> impl IntoResponse {
     let id = uuid::Uuid::new_v4().to_string();
-    let mut cache = cell().lock().unwrap_or_else(|e| e.into_inner());
-    if cache.order.len() >= MAX_RENDER_CACHE {
-        if let Some(oldest) = cache.order.pop_front() {
-            cache.entries.remove(&oldest);
-        }
-    }
-    cache.entries.insert(id.clone(), body.html);
-    cache.order.push_back(id.clone());
+    cell().lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), body.html);
     (StatusCode::OK, Json(json!({ "id": id })))
 }
 
@@ -73,7 +58,7 @@ pub(super) async fn on_preview_render_get(
     }
     let html = {
         let cache = cell().lock().unwrap_or_else(|e| e.into_inner());
-        cache.entries.get(&id).cloned()
+        cache.get(&id)
     };
     match html {
         Some(html) => (
