@@ -16,7 +16,7 @@ import { clampUserMessages } from "./turn-collapse";
 import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
 import { ChatPaginator } from "./chat-pagination";
-import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
+import { TurnFooterRegistry, onWaitingChipClick, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
 import { buildMessageEl, foldClosedRange, revealTranscript } from "./chat-dom-renderer";
 import { onTranscriptTail } from "./chat-resync";
 import { flushRenderNow } from "./flush-scheduler";
@@ -286,6 +286,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", this.handleToolResultLoadFullClick);
     this.container.addEventListener("click", this.handleRetryClick);
     this.container.addEventListener("click", this.handleCtaClick);
+    this.container.addEventListener("click", this.handleWaitingChipClick);
     this.installAnimObserver();
     this.paginator = new ChatPaginator(container, {
       getSessionId: () => this.sessionId,
@@ -652,6 +653,15 @@ export class ChatRenderer {
     if (!btn || !this.onSendText) return;
     btn.disabled = true;
     this.onSendText("continue");
+  };
+
+  /** Waiting-on chip (todo 675) - delegated here (not turn-chips.ts) because
+   *  opening a local-process tail needs `sessionId`, which that module
+   *  deliberately doesn't carry. */
+  private handleWaitingChipClick = (e: MouseEvent): void => {
+    const chip = (e.target as Element).closest<HTMLElement>(".turn-chip--waiting-on");
+    if (!chip) return;
+    onWaitingChipClick(chip, this.sessionId);
   };
 
   private handleCtaClick = (e: MouseEvent): void => {

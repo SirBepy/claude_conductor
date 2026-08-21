@@ -101,6 +101,49 @@
   cursor: help;
 }
 
+/* Waiting-on chip (todo 675): what a `waiting` turn is blocked on. Only
+   .turn-chip--clickable (a validated href survived) gets pointer + hover -
+   a rejected target still shows its label, just inert. */
+.turn-chip--waiting-on.turn-chip--clickable {
+  cursor: pointer;
+}
+.turn-chip--waiting-on.turn-chip--clickable:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-alt));
+}
+
+/* Live-tail popover opened by a local-process waiting-on chip. */
+.waiting-tail-panel {
+  position: fixed;
+  z-index: 50;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.waiting-tail-header {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.waiting-tail-body {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--color-text);
+}
+
 /* TodoWrite-driven step checklist: replaces the visual role of .turn-progress
    for a turn that emits TodoWrite calls (chat-event-handler.ts suppresses the
    progress bar/callback once turnTodosBaseline is set). Pending circle ->

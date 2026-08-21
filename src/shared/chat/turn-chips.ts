@@ -9,6 +9,9 @@ import {
 import { STATUS_ICON } from "../status-icons";
 import { ensureMainStrip } from "./tool-strip";
 import { META_KIND_ICONS, type MetaTurnKind } from "./chat-classifiers";
+import { api } from "../api";
+import { isTauri } from "../transport";
+import { openWaitingTailPanel } from "./waiting-tail-panel";
 
 /**
  * Per-turn footer: a single block at the bottom of every response bundling
@@ -113,6 +116,11 @@ export interface TurnFooterState {
    *  living in the same .tool-strip row as the Ran/ToolSearch chips. Null
    *  until the turn's meta row (if any) is classified. */
   metaChip: HTMLElement | null;
+  /** What a `waiting` turn is blocked on (todo 675) - a DIFFERENT concept
+   *  from statusChip above (that's the done/question/waiting/working self-
+   *  report; this names the actual thing being waited on). Null until a
+   *  `waiting_on` notification lands for this turn. */
+  waitingChip: HTMLElement | null;
 }
 
 /** Build tooltip text for the settled token breakdown. */
@@ -137,6 +145,61 @@ const STATUS_CHIP_META: Record<string, { icon: string; title: string }> = {
   waiting: { icon: STATUS_ICON.waiting, title: "Waiting on an external process" },
   done: { icon: STATUS_ICON.done, title: "Turn completed" },
 };
+
+// ---------------------------------------------------------------------------
+// Waiting-on chip (todo 675): what a `waiting` turn is blocked on - separate
+// from STATUS_CHIP_META above, which renders the self-reported status.
+// ---------------------------------------------------------------------------
+
+export interface WaitingOnTarget {
+  label: string;
+  kind: "ci" | "local-process" | "external";
+  /** Already re-validated server-side (`mcp::server::waiting_target::sanitize`).
+   *  Null when the backend rejected the client-supplied href/path - the chip
+   *  still shows `label`, just with nothing to click. */
+  href: string | null;
+}
+
+const WAITING_ON_ICON: Record<WaitingOnTarget["kind"], string> = {
+  ci: "ph-github-logo",
+  external: "ph-arrow-square-out",
+  "local-process": "ph-terminal-window",
+};
+
+/** Parse a `waiting_on` Notification event's JSON body and apply it to the
+ *  given turn's footer. Never throws into the event pipeline - a malformed
+ *  or unrecognized body is silently dropped (no chip), never a broken one. */
+export function applyWaitingOnNotification(
+  reg: TurnFooterRegistry,
+  key: TurnChipKey | null,
+  body: string,
+): void {
+  if (key === null) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return;
+  }
+  if (!parsed || typeof parsed !== "object") return;
+  const { label, kind, href } = parsed as Record<string, unknown>;
+  if (typeof label !== "string" || (kind !== "ci" && kind !== "local-process" && kind !== "external")) return;
+  reg.setWaitingOn(key, { label, kind, href: typeof href === "string" ? href : null });
+}
+
+/** Click delegate for a waiting-on chip (attached in chat-renderer.ts, which
+ *  owns `sessionId` - this module stays session-agnostic otherwise). A chip
+ *  with no `href` (rejected server-side) carries no data-href and is a no-op. */
+export function onWaitingChipClick(chip: HTMLElement, sessionId: string | null): void {
+  const href = chip.dataset.href;
+  if (!href) return;
+  if (chip.dataset.kind === "local-process") {
+    if (sessionId) openWaitingTailPanel(chip, sessionId, href);
+    return;
+  }
+  if (isTauri()) void api.openExternal(href);
+  else window.open(href, "_blank", "noopener");
+}
 
 /**
  * Per-renderer registry of turn footers. MUST be instance state, not module
@@ -172,6 +235,7 @@ export class TurnFooterRegistry {
       progressFill: null,
       todoChecklist: null,
       metaChip: null,
+      waitingChip: null,
     });
     return footer;
   }
@@ -312,6 +376,31 @@ export class TurnFooterRegistry {
     st.statusChip.title = meta.title;
     st.statusChip.className = `turn-chip turn-chip--status turn-chip--status-${awaiting}`;
     st.statusChip.firstElementChild!.className = `ph ${meta.icon}`;
+  }
+
+  /** Waiting-on chip (todo 675): what a `waiting` turn is blocked on. Creates
+   *  the meta row too if the turn had none yet (a self-report can settle
+   *  before any usage/status data exists). Re-callable: overwrites in place. */
+  setWaitingOn(key: TurnChipKey, target: WaitingOnTarget): void {
+    this.getOrCreateFooter(key);
+    const st = this.turns.get(key)!;
+    this.buildMetaRow(st);
+    if (!st.waitingChip) {
+      const chip = document.createElement("span");
+      chip.className = "turn-chip turn-chip--waiting-on";
+      chip.appendChild(document.createElement("i"));
+      chip.appendChild(document.createElement("span"));
+      st.metaRow!.appendChild(chip);
+      st.waitingChip = chip;
+    }
+    const chip = st.waitingChip;
+    chip.dataset.kind = target.kind;
+    if (target.href) chip.dataset.href = target.href;
+    else delete chip.dataset.href;
+    chip.classList.toggle("turn-chip--clickable", !!target.href);
+    chip.title = target.href ? `${target.label} - click to open` : target.label;
+    (chip.children[0] as HTMLElement).className = `ph ${WAITING_ON_ICON[target.kind]}`;
+    (chip.children[1] as HTMLElement).textContent = target.label;
   }
 
   /**

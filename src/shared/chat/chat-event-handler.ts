@@ -40,6 +40,7 @@ import {
 } from "./chat-dom-renderer";
 import { scheduleFlush, flushRenderNow } from "./flush-scheduler";
 import { resolveOrdinalIn } from "./chat-pagination";
+import { applyWaitingOnNotification } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";
 
 export interface HandleEventOpts {
@@ -490,6 +491,13 @@ function handleToolResultEvent(
 
 function handleNotificationEvent(r: ChatRenderer, ev: Extract<ChatEvent, { type: "notification" }>): EventOutcome {
   if (tryHandleQuestionSkipped(r, ev)) return { touched: true, coalesce: false };
+  // todo 675: the waiting-on target rides a generic Notification (not its own
+  // ChatEvent variant - types/chat.rs is owned elsewhere right now). It only
+  // updates the current turn's footer chip, never a message row.
+  if (ev.kind === "waiting_on") {
+    applyWaitingOnNotification(r.turnFooters, r.activeTurnChipKey, ev.body);
+    return { touched: true, coalesce: false };
+  }
   r.messages.push({ kind: "notification", text: ev.body, ts: Date.now() });
   return { touched: true, coalesce: false };
 }
