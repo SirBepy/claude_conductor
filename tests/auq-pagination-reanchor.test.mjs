@@ -12,17 +12,12 @@ const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
 // loadFromStore's Promise.all fires get_skipped_question_marks before the
-// initial load_history_page resolves, so a positional queue desyncs. beforeSeq
-// is the only thing separating the initial page from fetchOlder's page.
+// initial load_history_page resolves, so a raw positional queue desyncs. The
+// router's per-command FIFO keeps the two pages in call order regardless.
 function routePages(newestPage, olderPage) {
-  makeInvokeRouter(invokeMock);
-  const fallback = invokeMock.getMockImplementation();
-  invokeMock.mockImplementation((cmd, args) => {
-    if (cmd === "load_history_page") {
-      return Promise.resolve(args && "beforeSeq" in args ? olderPage : newestPage);
-    }
-    return fallback(cmd, args);
-  });
+  const router = makeInvokeRouter(invokeMock);
+  router.queueOnce("load_history_page", newestPage);
+  router.queueOnce("load_history_page", olderPage);
 }
 
 beforeEach(() => {
