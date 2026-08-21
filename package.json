@@ -15,6 +15,7 @@
     "dev:harness": "vite --port 4420 --strictPort",
     "test:view": "playwright test",
     "test:e2e": "wdio run e2e/wdio.conf.js",
+    "test:e2e:probe": "wdio run e2e/wdio.conf.js --spec e2e/specs/probe.e2e.js",
     "test:e2e:chat": "wdio run e2e/wdio.conf.js --spec e2e/specs/reload-dup.e2e.js",
     "test:e2e:changes": "wdio run e2e/wdio.conf.js --spec e2e/specs/changes-panel.e2e.js",
     "test:e2e:flow": "wdio run e2e/wdio.conf.js --spec e2e/specs/chat-flow.e2e.js",

@@ -4,6 +4,9 @@
 // already-built DEBUG binary, so run `cargo build` (or `cargo tauri dev` once)
 // first. Run with: npm run test:e2e
 //
+// Debugging a failing spec: use the reusable probe instead of a throwaway
+// file - PROBE_VIEW=<view> PROBE_SELECTOR="<css>" npm run test:e2e:probe
+//
 // Scope: boot the app shell + render the Sessions view with the daemon
 // connected. The daemon is spawned here with CC_DAEMON_NO_AUTOSTART so it does
 // NOT launch real automation channels (which would pile up duplicate Claude
