@@ -5,7 +5,7 @@ import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
-import { findNearestOpenQuestionId, matchSkipMarks } from "./chat-question-card";
+import { findNearestOpenQuestionId, findStrandedSentinelAnswer, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
 // Re-exported: tests/chat-mcp-ask-question.test.mjs imports matchSkipMarks
@@ -219,10 +219,11 @@ export class ChatPaginator {
     // instead of RenderedMessage (none built yet at this point).
     const sentinelAnswerById = new Map<string, string>();
     const foldedUserMsgs = new Map<ChatEvent, string>();
+    // Cross-page answers render immediately at the ask (no in-batch anchor
+    // to defer to, unlike sentinelAnswerById below).
+    const strandedAnswerById = new Map<string, string>();
     {
       const resolvedSoFar = new Set(questionAnswerById.keys());
-      // Batch-local only, same as before this refactor (todo 706): a card
-      // whose ask/answer straddle a page boundary stays "awaiting answer".
       let opened = 0; // question cards this batch has seen so far
       for (const ev of events) {
         if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
@@ -238,12 +239,22 @@ export class ChatPaginator {
         foldedUserMsgs.set(ev, qid);
         resolvedSoFar.add(qid);
       }
+      // An answer that landed on an adjacent, already-rendered page never
+      // appears in `events` - reach across via cb.getMessages() (replay-only).
+      const strandedQid = findNearestOpenQuestionId(questionCards, resolvedSoFar);
+      if (strandedQid !== null) {
+        const stranded = findStrandedSentinelAnswer(this.cb.getMessages());
+        if (stranded !== null) {
+          strandedAnswerById.set(strandedQid, stranded);
+          resolvedSoFar.add(strandedQid);
+        }
+      }
     }
     // Folded in client-side; never spliced into the page's cursor math.
     const skippedQuestionIds = matchSkipMarks(
       questionCards,
       this.skipMarks,
-      new Set([...questionAnswerById.keys(), ...sentinelAnswerById.keys()]),
+      new Set([...questionAnswerById.keys(), ...sentinelAnswerById.keys(), ...strandedAnswerById.keys()]),
     );
     // Answered-later-in-this-page cards render at the answer, not the ask site.
     const deferredQuestions = new Map<string, RenderedMessage>();
@@ -338,6 +349,8 @@ export class ChatPaginator {
       }
       if (ev.type === "tool_use" && msg.kind === "question" && questionAnswerById.has(ev.id)) {
         msg.text = questionAnswerById.get(ev.id);
+      } else if (ev.type === "tool_use" && msg.kind === "question" && strandedAnswerById.has(ev.id)) {
+        msg.text = strandedAnswerById.get(ev.id);
       } else if (ev.type === "tool_use" && msg.kind === "question" && skippedQuestionIds.has(ev.id)) {
         msg.text = AUQ_SKIPPED_TEXT;
       }

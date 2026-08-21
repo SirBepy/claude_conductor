@@ -5,7 +5,7 @@
 
 import type { ChatEvent } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
-import { AUQ_SKIPPED_TEXT, RenderedMessage } from "./chat-transforms";
+import { AUQ_SKIPPED_TEXT, RenderedMessage, extractAuqAnswerText } from "./chat-transforms";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-dom-renderer";
@@ -27,6 +27,17 @@ export function findNearestOpenQuestionId(cards: { id: string }[], resolved: Set
     const id = cards[i]!.id;
     if (resolved.has(id)) break;
     return id;
+  }
+  return null;
+}
+
+/** An already-rendered plain bubble whose sentinel-tagged ask hadn't loaded
+ *  yet when ITS OWN page folded. `rendered` (cb.getMessages()) is chronologically ascending, so the earliest match is nearest. */
+export function findStrandedSentinelAnswer(rendered: readonly RenderedMessage[]): string | null {
+  for (const m of rendered) {
+    if (m.kind !== "user" || !m.content) continue;
+    const answer = extractAuqAnswerText(m.content);
+    if (answer !== null) return answer;
   }
   return null;
 }
