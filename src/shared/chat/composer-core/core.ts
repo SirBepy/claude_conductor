@@ -64,6 +64,15 @@ export class ComposerCore {
     this.handleInput();
   };
 
+  // Skip keys popup.handleKey() already consumed (it preventDefault()s the
+  // caret move) - resyncing here too would re-query and reset selectedIdx.
+  private static readonly POPUP_NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"]);
+
+  private onCaretMoveEvt = (e: Event): void => {
+    if (e instanceof KeyboardEvent && ComposerCore.POPUP_NAV_KEYS.has(e.key)) return;
+    this.popup?.handleInput();
+  };
+
   private onPasteEvt = (e: ClipboardEvent): void => {
     void this.opts.paste?.handlePaste(e);
   };
@@ -87,6 +96,10 @@ export class ComposerCore {
 
     textarea.addEventListener("keydown", this.onKeydown);
     textarea.addEventListener("input", this.onInputEvt);
+    if (this.popup) {
+      textarea.addEventListener("click", this.onCaretMoveEvt);
+      textarea.addEventListener("keyup", this.onCaretMoveEvt);
+    }
     if (features.paste !== false && opts.paste) {
       textarea.addEventListener("paste", this.onPasteEvt);
     }
@@ -102,6 +115,8 @@ export class ComposerCore {
     const { textarea } = this.opts;
     textarea.removeEventListener("keydown", this.onKeydown);
     textarea.removeEventListener("input", this.onInputEvt);
+    textarea.removeEventListener("click", this.onCaretMoveEvt);
+    textarea.removeEventListener("keyup", this.onCaretMoveEvt);
     textarea.removeEventListener("paste", this.onPasteEvt);
     textarea.removeEventListener("scroll", this.onScrollEvt);
     this.popup?.destroy();

@@ -105,6 +105,27 @@ describe("ComposerCore popup lifecycle", () => {
     const { wrap: wrapWithProvider } = mount(undefined, { providers: [provider] });
     expect(wrapWithProvider.querySelector(".caret-popup")).not.toBeNull();
   });
+
+  it("closes the popup when the caret moves off the token without typing", () => {
+    const provider = {
+      triggerChar: "/",
+      shouldTrigger: ({ textBefore }) => /(^|\s)\/[^\s]*$/.test(textBefore),
+      query: (t) => (t ? ["close"] : []),
+      renderRow: () => document.createElement("div"),
+      onPick: vi.fn(),
+    };
+    const { ta, wrap } = mount(undefined, { providers: [provider] });
+    ta.value = "/close say hi";
+    ta.selectionStart = ta.selectionEnd = 6;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(wrap.querySelector(".caret-popup").hidden).toBe(false);
+
+    // Move the caret past "say" via a click - no "input" event fires, but the
+    // popup must still resync and close since the caret left the /-token.
+    ta.selectionStart = ta.selectionEnd = 13;
+    ta.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(wrap.querySelector(".caret-popup").hidden).toBe(true);
+  });
 });
 
 describe("ComposerCore keyboard", () => {

@@ -69,6 +69,17 @@ describe("CaretSuggestPopup", () => {
     expect(popup.isOpen()).toBe(false);
   });
 
+  it("picks up the rest of an already-typed word when '/' lands at its start", () => {
+    const { popup, ta, provider } = setup();
+    ta.value = "/close";
+    ta.selectionStart = ta.selectionEnd = 1; // caret right after the "/", before "close"
+    popup.handleInput();
+    expect(popup.isOpen()).toBe(true);
+    const e = new KeyboardEvent("keydown", { key: "Enter" });
+    popup.handleKey(e);
+    expect(provider.onPick).toHaveBeenCalledWith("close", ta, [0, 6]);
+  });
+
   it("handleKey returns false when closed", () => {
     const { popup } = setup();
     const e = new KeyboardEvent("keydown", { key: "Enter" });
