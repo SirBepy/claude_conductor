@@ -9,6 +9,7 @@ import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from
 import {
   isQuestionAnswered,
   computeAnswer,
+  isDraftForPrompt,
   setActiveCard,
   clearActiveCardIfCurrent,
 } from "./question-state";
@@ -32,6 +33,10 @@ const NONE_LABEL = "None of the above";
 
 export function renderQuestionUI(opts: QuestionUIOpts): void {
   const { host } = ensureHost();
+  // showQuestionCard seeds a new card from whatever card is still live in the
+  // same chat, so another prompt's draft can land here - and its activeTab
+  // opened this card on the review panel, with no options to answer (todo 718).
+  const initialDraft = isDraftForPrompt(opts.initialDraft, opts.id) ? opts.initialDraft : undefined;
   const questions: Question[] = opts.questions.map((q) => {
     if (!q.multiSelect || !q.options?.length) return q;
     if (q.options.some((o) => o.label === NONE_LABEL)) return q;
@@ -46,9 +51,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
   const selections = new Map<number, Selection>();
   const freeText = new Map<number, string>();
-  if (opts.initialDraft) {
-    opts.initialDraft.freeText.forEach((v, k) => freeText.set(k, v));
-    opts.initialDraft.selections.forEach((v, k) => {
+  if (initialDraft) {
+    initialDraft.freeText.forEach((v, k) => freeText.set(k, v));
+    initialDraft.selections.forEach((v, k) => {
       selections.set(k, v instanceof Set ? new Set(v) : v);
     });
   }
@@ -60,8 +65,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // triggerPrimaryShortcut below also need - one shared box instead of
   // three loose closure variables now that render lives in another module.
   const state: QuestionRenderState = {
-    activeTab: Math.min(Math.max(opts.initialDraft?.activeTab ?? 0, 0), totalPanels - 1),
-    additionalMessage: opts.initialDraft?.additionalMessage ?? "",
+    activeTab: Math.min(Math.max(initialDraft?.activeTab ?? 0, 0), totalPanels - 1),
+    additionalMessage: initialDraft?.additionalMessage ?? "",
     resizeObs: null,
     panelResizeObs: null,
   };
@@ -71,7 +76,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const auqAttachments = createAuqAttachments({
     sessionId: opts.sessionId,
     supportsExtras: opts.supportsExtras,
-    initial: opts.initialDraft?.attachments,
+    initial: initialDraft?.attachments,
     // A full render() would recreate the answer-bar textarea and drop focus/
     // cursor - exactly the class of bug mergeFreshDraft's isTyping guard
     // avoids below. A paste is typed FROM that same field, so patch just the

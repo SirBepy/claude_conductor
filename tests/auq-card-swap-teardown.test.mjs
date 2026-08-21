@@ -20,7 +20,7 @@ vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
 }));
 
 const { renderQuestionUI } = await import("../src/views/sessions/permission-modal/question-ui.ts");
-const { dismissQuestionCard, getActiveCardId } = await import("../src/views/sessions/permission-modal/question-state.ts");
+const { dismissQuestionCard, getActiveCardId, snapshotActiveCardDraft } = await import("../src/views/sessions/permission-modal/question-state.ts");
 
 function baseOpts(overrides = {}) {
   return {
@@ -129,5 +129,69 @@ describe("a second question card tears the first one down", () => {
     pressEscape();
     expect(first.onCancel).not.toHaveBeenCalled();
     expect(live.onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Regression (todo 718): the card rendered its header but no answer options.
+// showQuestionCard seeds a new card from the LIVE card's snapshot, which is
+// keyed by session alone - so a second question in the same chat inherited the
+// outgoing card's answers AND its activeTab, opening on the review panel.
+
+function askOpts(overrides = {}) {
+  return baseOpts({ supportsExtras: true, ...overrides });
+}
+
+/** The options a user can actually see: .prompt-track-viewport clips to the
+ *  active panel, so the off-screen panels' inputs don't count. */
+function visibleOptionInputs() {
+  return [...document.querySelectorAll(".prompt-panel.is-active .prompt-q__opts input")];
+}
+
+function activePanelIndex() {
+  return document.querySelector(".prompt-panel.is-active")?.dataset.panel;
+}
+
+function answerFirstOption() {
+  const radio = document.querySelector('.prompt-panel[data-panel="0"] input[data-label="A"]');
+  radio.checked = true;
+  radio.dispatchEvent(new window.Event("change", { bubbles: true }));
+}
+
+describe("every card in a run renders its answer options", () => {
+  it("keeps options, answer bar and footer painted across three swaps", () => {
+    for (const id of ["p1", "p2", "p3"]) {
+      renderQuestionUI(askOpts({ id, sessionId: "s1" }));
+      expect(visibleOptionInputs().map((i) => i.dataset.label)).toEqual(["A", "B"]);
+      expect(document.querySelector(".prompt-card__answer-bar")).not.toBeNull();
+      expect(document.querySelector('[data-act="primary"]')).not.toBeNull();
+      expect(document.querySelector('[data-act="cancel"]')).not.toBeNull();
+    }
+  });
+
+  it("a re-ask does not open on the previous card's review panel", () => {
+    renderQuestionUI(askOpts({ id: "p1", sessionId: "s1" }));
+    answerFirstOption();
+    document.querySelector('[data-act="primary"]').click();
+    expect(activePanelIndex()).toBe("1"); // review
+
+    // Exactly what showQuestionCard does before rendering the next card.
+    const seeded = snapshotActiveCardDraft("s1") ?? undefined;
+    renderQuestionUI(askOpts({ id: "p2", sessionId: "s1", initialDraft: seeded }));
+
+    expect(visibleOptionInputs().map((i) => i.dataset.label)).toEqual(["A", "B"]);
+    expect(activePanelIndex()).toBe("0");
+    expect(visibleOptionInputs().some((i) => i.checked)).toBe(false);
+  });
+
+  it("still restores the same prompt's own snapshot on re-delivery", () => {
+    renderQuestionUI(askOpts({ id: "p1", sessionId: "s1" }));
+    answerFirstOption();
+    document.querySelector('[data-act="primary"]').click();
+
+    const seeded = snapshotActiveCardDraft("s1") ?? undefined;
+    renderQuestionUI(askOpts({ id: "p1", sessionId: "s1", initialDraft: seeded }));
+
+    expect(activePanelIndex()).toBe("1");
+    expect(document.querySelector('.prompt-panel[data-panel="0"] input[data-label="A"]').checked).toBe(true);
   });
 });

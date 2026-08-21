@@ -188,6 +188,10 @@ export function getActiveCardId(): string | null {
   return activeCard?.id ?? null;
 }
 
+// Which prompt each live-card snapshot came from. The snapshot below is keyed
+// by SESSION only, so it also reaches a DIFFERENT question in the same chat.
+const snapshotSource = new WeakMap<QuestionDraft, string>();
+
 /**
  * Return a snapshot of the active card's current answer state if it belongs to
  * the given session, without tearing it down. Returns null if no card is up or
@@ -195,5 +199,17 @@ export function getActiveCardId(): string | null {
  */
 export function snapshotActiveCardDraft(sessionId: string): QuestionDraft | null {
   if (!activeCard || activeCard.sessionId !== sessionId) return null;
-  return activeCard.getDraft();
+  const draft = activeCard.getDraft();
+  snapshotSource.set(draft, activeCard.id);
+  return draft;
+}
+
+/** False only for a live-card snapshot belonging to another prompt (todo 718:
+ *  a second question inherited the first's answers and its activeTab, opening
+ *  on the review panel, which has no options at all). Daemon/localStorage
+ *  drafts are prompt-keyed already, so they stay untagged and always pass. */
+export function isDraftForPrompt(draft: QuestionDraft | undefined, promptId: string | undefined): boolean {
+  if (!draft) return false;
+  const source = snapshotSource.get(draft);
+  return source === undefined || source === promptId;
 }
