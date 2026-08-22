@@ -74,7 +74,9 @@ describe("cleanUserBlocks - the JSONL-sourced bubble keeps the /name chip text",
   });
 });
 
-const invokeMock = vi.fn();
+// vi.hoisted, not a plain const: vi.mock is hoisted above this line, so a bare
+// `const invokeMock` is still in its TDZ when the factory runs.
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
 beforeEach(() => {

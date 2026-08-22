@@ -36,3 +36,26 @@ export function deltaEvent(text, block, seq, snapshot = false, ts = 0) {
 export function eventsLaggedEvent(ts = 0) {
   return { type: "events_lagged", timestamp: ts };
 }
+
+/** Fake `window.__TAURI__` event bus. Delivering on the real `chat:<id>` and
+ *  `chat-watch:<id>` channels is what gives an event its runner/watcher source,
+ *  which the store's dedup distinguishes (pushSynthetic is always "synthetic"). */
+export function makeBus() {
+  const listeners = new Map();
+  return {
+    event: {
+      async listen(channel, cb) {
+        let arr = listeners.get(channel);
+        if (!arr) { arr = []; listeners.set(channel, arr); }
+        arr.push(cb);
+        return () => {
+          const a = listeners.get(channel);
+          if (a) a.splice(a.indexOf(cb), 1);
+        };
+      },
+    },
+    emit(channel, payload) {
+      for (const cb of [...(listeners.get(channel) || [])]) cb({ payload });
+    },
+  };
+}

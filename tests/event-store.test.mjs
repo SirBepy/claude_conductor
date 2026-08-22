@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { userEvent, assistantEvent, streamingEvent, finalEvent, toolUseEvent, deltaEvent, eventsLaggedEvent } from "./helpers/chat-events.mjs";
+import { userEvent, assistantEvent, streamingEvent, finalEvent, toolUseEvent, deltaEvent, eventsLaggedEvent, makeBus } from "./helpers/chat-events.mjs";
 
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
@@ -8,9 +8,11 @@ beforeEach(() => {
   invokeMock.mockReset();
   globalThis.window = globalThis.window || {};
   globalThis.window.__TAURI__ = undefined;
+  resetTransportForTests();
 });
 
 const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
+const { resetTransportForTests } = await import("../src/shared/transport.ts");
 
 describe("SessionEventStore pagination", () => {
   it("loadInitial caches and is idempotent", async () => {
@@ -398,17 +400,27 @@ describe("assistant_delta accumulation (ai_todo 186)", () => {
     expect(evs[0].streaming).toBe(false);
   });
 
-  it("interrupt: watcher's late delivery of the real streamed text does not double-render (ai_todo doubled-bubble-on-interrupt)", () => {
+  it("interrupt: watcher's late delivery of the real streamed text does not double-render (ai_todo doubled-bubble-on-interrupt)", async () => {
     const sid = "sess-delta-interrupt";
+    // Dedup is cross-source only (todo 693), so this drives the real runner and
+    // watcher channels - pushSynthetic would tag every event "synthetic".
+    globalThis.window.__TAURI__ = makeBus();
+    const bus = globalThis.window.__TAURI__;
+    // getTransport() caches for the process lifetime, and earlier tests in this
+    // file resolved it to HttpTransport while __TAURI__ was undefined.
+    resetTransportForTests();
+    invokeMock.mockResolvedValue({ events: [], oldest_seq: 0, newest_seq: 0, has_more: false });
+    await sessionEvents.loadInitial(sid);
+    await sessionEvents.ensureWatchListener(sid);
     // Runner streams partial text, then the user interrupts: the CLI finalizes
     // with its "[Request interrupted by user]" notice, not the accumulated text.
-    sessionEvents.pushSynthetic(sid, deltaEvent("I'll look into", 1, 1));
-    sessionEvents.pushSynthetic(sid, deltaEvent(" that now", 1, 2));
-    sessionEvents.pushSynthetic(sid, finalEvent("[Request interrupted by user]"));
+    bus.emit(`chat:${sid}`, deltaEvent("I'll look into", 1, 1));
+    bus.emit(`chat:${sid}`, deltaEvent(" that now", 1, 2));
+    bus.emit(`chat:${sid}`, finalEvent("[Request interrupted by user]"));
     // The file watcher later tails the JSONL transcript and delivers a genuine
     // finalized assistant_message with the SAME text that was streamed - this
     // must be deduped, not rendered as a second bubble.
-    sessionEvents.pushSynthetic(sid, finalEvent("I'll look into that now"));
+    bus.emit(`chat-watch:${sid}`, finalEvent("I'll look into that now"));
     const assistants = sessionEvents.events(sid).filter((e) => e.type === "assistant_message");
     expect(assistants.map((e) => e.content[0].text)).toEqual([
       "I'll look into that now",
