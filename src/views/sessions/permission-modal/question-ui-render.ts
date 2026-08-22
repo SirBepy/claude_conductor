@@ -232,14 +232,14 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels);
       host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
     } else {
-      // Reuses tool-views.ts's own class/icon/title so the live and historical
-      // transcript cards show the identical diagnostic marker.
+      // ph-flask-round is not a Phosphor 2.1.1 name, so this painted nothing
+      // until 2026-08-22 (ai_todo 737).
       const degradedBadge = opts.degradedBuiltin
-        ? `<i class="ph-fill ph-flask-round question-card-degraded-badge" title="Answered via the disabled legacy AskUserQuestion path"></i>`
+        ? `<i class="ph-fill ph-flask question-card-degraded-badge" title="Answered via the disabled legacy AskUserQuestion path"></i>`
         : "";
-      // Previously-dead QuestionUIOpts fields (ai_todo 646); rightChipHtml is
-      // only set by permission-card.ts's flow, distinguishing it from MCP questions.
-      const titleIcon = opts.titleIcon || "ph-chat-circle-dots";
+      // Overrides the caller's icon rather than relying on that 0.45-opacity
+      // badge: unplugged glyph = this card did not come from the MCP tool.
+      const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
       const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
       const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${degradedBadge}<button type="button" class="prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, auqAttachments)).join("")

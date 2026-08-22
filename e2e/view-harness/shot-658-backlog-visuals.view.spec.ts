@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, capture, mountView, sessionInstance } from "./harness";
 import type { Instance } from "../../src/types/ipc.generated";
@@ -44,6 +45,8 @@ async function renderCard(page: Page, cfg: CardCfg) {
   return page.locator(".prompt-card");
 }
 
+const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex");
+
 function schedItem(sessionId: string) {
   return {
     id: "sch-1",
@@ -80,38 +83,45 @@ async function mountRows(
   await page.locator("#sessions-list li").first().waitFor();
 }
 
+// Todo 737: these two once rendered SHA256-identical, so 646's "tell an MCP
+// question from a degraded builtin one at a glance" did not exist at all. Hash
+// the rendered cards rather than leaving it to a capture nobody diffs.
+test("646 - MCP and degraded question cards render differently", async ({ page }) => {
+  await page.setViewportSize(DESKTOP);
+  await mountView(page, { invoke: { list_slash_commands: [] } });
+
+  const mcp = await renderCard(page, { question: QUESTION, degraded: false });
+  await expect(mcp).toBeVisible();
+  await expect(mcp).toContainText("Which approach?");
+  await expect(mcp.locator(".prompt-card__title i")).toHaveClass(/ph-chat-circle-dots/);
+  await expect(mcp.locator(".question-card-degraded-badge")).toHaveCount(0);
+  await expect(mcp.locator(".prompt-card__tool")).toHaveCount(0);
+  const mcpPng = await mcp.screenshot();
+  if (process.env.CC_SHOTS) await capture(mcp, "question-card-mcp-header");
+
+  const degraded = await renderCard(page, { question: QUESTION, degraded: true });
+  await expect(degraded).toBeVisible();
+  await expect(degraded).toContainText("Which approach?");
+  await expect(degraded.locator(".question-card-degraded-badge")).toHaveCount(1);
+  const degradedPng = await degraded.screenshot();
+  if (process.env.CC_SHOTS) await capture(degraded, "question-card-degraded-header");
+
+  expect(sha256(degradedPng)).not.toBe(sha256(mcpPng));
+  await expect(degraded.locator(".prompt-card__title i")).not.toHaveClass(/ph-chat-circle-dots/);
+
+  // rightChipHtml's only live caller is permission-card.ts's question-shaped
+  // fallback for a NON-AskUserQuestion tool, never the degraded path.
+  const chip = await renderCard(page, {
+    question: QUESTION,
+    rightChipHtml: `<span class="prompt-card__tool"><code>ExitPlanMode</code></span>`,
+    degraded: false,
+  });
+  await expect(chip.locator(".prompt-card__tool code")).toHaveText("ExitPlanMode");
+  if (process.env.CC_SHOTS) await capture(chip, "question-card-fallback-tool-chip");
+});
+
 test.describe("@shot", () => {
   test.skip(!process.env.CC_SHOTS, "capture-only, run it with CC_SHOTS=1");
-
-  test("646 - MCP vs degraded question-card header", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-    await mountView(page, { invoke: { list_slash_commands: [] } });
-
-    const mcp = await renderCard(page, { question: QUESTION, degraded: false });
-    await expect(mcp).toBeVisible();
-    await expect(mcp).toContainText("Which approach?");
-    await expect(mcp.locator(".prompt-card__title i")).toHaveClass(/ph-chat-circle-dots/);
-    await expect(mcp.locator(".question-card-degraded-badge")).toHaveCount(0);
-    await expect(mcp.locator(".prompt-card__tool")).toHaveCount(0);
-    await capture(mcp, "question-card-mcp-header");
-
-    const degraded = await renderCard(page, { question: QUESTION, degraded: true });
-    await expect(degraded).toBeVisible();
-    await expect(degraded).toContainText("Which approach?");
-    await expect(degraded.locator(".prompt-card__title i")).toHaveClass(/ph-chat-circle-dots/);
-    await expect(degraded.locator(".question-card-degraded-badge")).toHaveCount(1);
-    await capture(degraded, "question-card-degraded-header");
-
-    // rightChipHtml's only live caller is permission-card.ts's question-shaped
-    // fallback for a NON-AskUserQuestion tool, never the degraded path.
-    const chip = await renderCard(page, {
-      question: QUESTION,
-      rightChipHtml: `<span class="prompt-card__tool"><code>ExitPlanMode</code></span>`,
-      degraded: false,
-    });
-    await expect(chip.locator(".prompt-card__tool code")).toHaveText("ExitPlanMode");
-    await capture(chip, "question-card-fallback-tool-chip");
-  });
 
   // A sidebar row is ~50px tall; shot at 1x the badge glyph is unreadable.
   test.describe("638", () => {
