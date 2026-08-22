@@ -3,7 +3,10 @@
 .cc-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  /* Above the model-effort-modal-card / worktree-picker-card host tier
+   * (z-index 2500-2503, shared/modal.css), since this can open from inside
+   * either of those. */
+  z-index: 2600;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -16,9 +19,9 @@
   border: 1px solid var(--color-border, #2a2a36);
   border-radius: 10px;
   padding: 0;
-  width: 480px;
+  width: 620px;
   max-width: 94vw;
-  max-height: 80vh;
+  max-height: min(640px, 82vh);
   display: flex;
   flex-direction: column;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
@@ -37,6 +40,36 @@
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
+}
+
+.cc-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cc-modal-random {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid var(--color-border, #2a2a36);
+  border-radius: 6px;
+  color: var(--color-text-muted, #8a8a96);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  padding: 4px 9px;
+}
+
+.cc-modal-random:hover:not(:disabled) {
+  color: var(--color-text, #e8e8ee);
+  border-color: var(--color-primary, #6e8fff);
+}
+
+.cc-modal-random:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .cc-modal-close {

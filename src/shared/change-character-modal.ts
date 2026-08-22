@@ -7,8 +7,11 @@ import { getCharacterIconUrl, cachedCharacterIconUrl } from "./character-icon";
 export async function openChangeCharacterModal(opts: {
   projectId: string;
   currentId: string | null;
+  /** Ids the "Random" action should skip (e.g. characters already showing on
+   * other live sessions), on top of always skipping `currentId`. */
+  excludeIds?: string[];
 }): Promise<string | null> {
-  const { projectId, currentId } = opts;
+  const { projectId, currentId, excludeIds = [] } = opts;
 
   return new Promise<string | null>((resolve) => {
     // --- state ---
@@ -72,7 +75,10 @@ export async function openChangeCharacterModal(opts: {
         <div class="cc-modal-card" role="dialog" aria-modal="true" aria-label="Change character">
           <div class="cc-modal-header">
             <h3 class="cc-modal-title">Change character</h3>
-            <button type="button" class="cc-modal-close" title="Close"><i class="ph ph-x"></i></button>
+            <div class="cc-modal-header-actions">
+              <button type="button" class="cc-modal-random"${loading ? " disabled" : ""}><i class="ph ph-shuffle"></i> Random</button>
+              <button type="button" class="cc-modal-close" title="Close"><i class="ph ph-x"></i></button>
+            </div>
           </div>
           <div class="cc-modal-search-row">
             <div class="cc-modal-search-wrap">
@@ -121,8 +127,24 @@ export async function openChangeCharacterModal(opts: {
       }
     }
 
+    /** Picks from whatever the active tab has loaded, skipping `currentId` and
+     * `excludeIds`; falls back to just skipping `currentId`, then to the full
+     * list, mirroring the new-session character pane's own reroll cascade. */
+    function pickRandom() {
+      const tabData = cache[activeTab];
+      if (!Array.isArray(tabData) || tabData.length === 0) return;
+      const excluded = new Set(excludeIds);
+      if (currentId) excluded.add(currentId);
+      let candidates = tabData.filter((c) => !excluded.has(c.id));
+      if (candidates.length === 0) candidates = tabData.filter((c) => c.id !== currentId);
+      if (candidates.length === 0) candidates = tabData;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      if (pick) close(pick.id);
+    }
+
     function attachHandlers() {
       overlay.querySelector<HTMLButtonElement>(".cc-modal-close")?.addEventListener("click", () => close(null));
+      overlay.querySelector<HTMLButtonElement>(".cc-modal-random")?.addEventListener("click", pickRandom);
 
       overlay.querySelector<HTMLInputElement>(".cc-modal-search")?.addEventListener("input", (e) => {
         query = (e.target as HTMLInputElement).value;

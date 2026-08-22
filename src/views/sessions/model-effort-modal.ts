@@ -11,6 +11,7 @@ import {
   attachAccountFieldHandlers,
   type AccountFieldState,
 } from "./account-field";
+import { attachChipKeyboardActivation } from "../../shared/account-chip";
 import { createCharacterPane, cancelCharacterPaneSound, type CharacterPane } from "./character-pane";
 import {
   EFFORTS,
@@ -102,6 +103,9 @@ export async function openModelEffortModal(
     // regardless of which model is selected (none of the probe data is
     // trustworthy while auth is expired).
     let authExpired = false;
+    // True while the availability probe below is in flight - the only one of
+    // the modal's two background loads with no prior loading affordance.
+    let modelProbeLoading = false;
 
     // ── Account picker state (multi-account milestone 04) ──────────────────────
     // Rendering/wiring live in account-field.ts; this modal just owns the
@@ -132,7 +136,7 @@ export async function openModelEffortModal(
               ${renderAccountFieldHtml(accountField, { accounts, preferredAccountId, resolvedAccountId, projectName })}
 
               <div class="me-field">
-                <label class="me-label">Model</label>
+                <label class="me-label">Model${modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : ""}</label>
                 <input type="range" class="me-slider me-model-slider" min="0" max="${models.length - 1}" step="1" value="${modelIdx()}">
                 <div class="me-stop-labels">${modelLabels}</div>
               </div>
@@ -146,11 +150,11 @@ export async function openModelEffortModal(
                 </div>
                 <label class="me-check">
                   <input type="checkbox" class="me-auto-accept-input"${autoAccept ? " checked" : ""}>
-                  Auto allow permissions
+                  <span class="me-check-text">Auto allow permissions<span class="me-check-hint">Skips confirmation prompts when Claude wants to run a tool</span></span>
                 </label>
                 <label class="me-check">
                   <input type="checkbox" class="me-remote-input"${remote ? " checked" : ""}>
-                  Remote chat
+                  <span class="me-check-text">Remote chat<span class="me-check-hint">Reachable from the mobile app while this session runs</span></span>
                 </label>
               </details>
 
@@ -287,13 +291,11 @@ export async function openModelEffortModal(
         modalCardSlot(),
       );
       card = modalCardSlot().querySelector<HTMLElement>(".model-effort-modal-card")!;
+      // Attached once here (not in attachHandlers(), which reruns every
+      // renderBody) so it doesn't stack a duplicate listener per re-render.
+      attachChipKeyboardActivation(card);
       charPane = createCharacterPane(card, projectId);
-      renderBody();
 
-      // ── Load character pool in background (see character-pane.ts) ────────
-      charPane.loadPool();
-
-      // ── Probe model availability in background ───────────────────────────
       // Map family -> latest id (count_tokens rejects bare aliases), probe
       // those, key results back by family. Fails open on a transport error;
       // `authExpired: true` never does - see api.ts's ModelAvailability doc.
@@ -302,15 +304,25 @@ export async function openModelEffortModal(
         const id = latestIdForFamily(fam);
         if (id) idByFamily.set(fam, id);
       }
+      modelProbeLoading = idByFamily.size > 0;
+      renderBody();
+
+      // ── Load character pool in background (see character-pane.ts) ────────
+      charPane.loadPool();
+
+      // ── Probe model availability in background ───────────────────────────
       if (idByFamily.size > 0) {
         void api.probeModelsAvailability([...idByFamily.values()])
           .then((results) => {
             authExpired = results.some((r) => r.authExpired);
             const byId = new Map(results.map((r) => [r.id, r.available]));
             for (const [fam, id] of idByFamily) availability[fam] = byId.get(id) ?? true;
-            renderBody();
           })
-          .catch(() => { /* fail open — leave all models enabled */ });
+          .catch(() => { /* fail open - leave all models enabled */ })
+          .finally(() => {
+            modelProbeLoading = false;
+            renderBody();
+          });
       }
     });
   });

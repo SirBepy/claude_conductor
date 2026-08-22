@@ -33,3 +33,8 @@
   background: color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 14%, var(--color-surface, #1c1c24));
   box-shadow: 0 0 0 1px var(--acc, var(--color-primary, #6e8fff));
 }
+
+.account-chip:focus-visible {
+  outline: 2px solid var(--color-primary, #6e8fff);
+  outline-offset: 2px;
+}

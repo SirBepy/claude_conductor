@@ -48,19 +48,24 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
   // icon url cache: charId -> url (null = in-flight)
   const iconCache = new Map<string, string | null>();
 
+  /** Ids held by any live session (global dedup) - shared by the initial
+   * random pick and the "Random" action inside the full character picker. */
+  function liveTakenIds(): Set<string> {
+    return new Set(
+      state.sessions
+        .filter((s) => !s.ended_at && !(s as { end_reason?: unknown }).end_reason)
+        .map((s) => characterForSession(s))
+        .filter((id): id is string => id !== null),
+    );
+  }
+
   /** Pick a random character from the pool, excluding `excludeId` and ids
    * already held by live sessions of this project. Falls back to the whole
    * pool (duplicate allowed) if the filtered set is empty. */
   function pickCharacter(excludeId: string | null): void {
     if (!pool || pool.length === 0) return;
 
-    // Live-taken: ids held by any live session (global dedup)
-    const liveTaken = new Set(
-      state.sessions
-        .filter((s) => !s.ended_at && !(s as { end_reason?: unknown }).end_reason)
-        .map((s) => characterForSession(s))
-        .filter((id): id is string => id !== null),
-    );
+    const liveTaken = liveTakenIds();
 
     // Prefer: pool minus liveTaken minus excludeId
     let candidates = pool.filter((c) => !liveTaken.has(c.id) && c.id !== excludeId);
@@ -96,11 +101,14 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
 
     const charId = character.id;
     const cachedUrl = iconCache.get(charId);
+    // Portrait doubles as the "profile icon" entry point into the picker -
+    // same role="button"/tabindex/title contract as the active-session
+    // header's clickable avatar (session-header.ts).
     let portraitHtml: string;
     if (cachedUrl) {
-      portraitHtml = `<img class="me-char-portrait" src="${escapeHtml(cachedUrl)}" alt="${escapeHtml(character.label)}" data-char-portrait="${escapeHtml(charId)}">`;
+      portraitHtml = `<img class="me-char-portrait me-char-clickable" src="${escapeHtml(cachedUrl)}" alt="${escapeHtml(character.label)}" data-char-portrait="${escapeHtml(charId)}" role="button" tabindex="0" title="Change character">`;
     } else {
-      portraitHtml = `<div class="me-char-portrait me-char-portrait-ph" data-char-portrait-ph="${escapeHtml(charId)}"><i class="ph ph-question"></i></div>`;
+      portraitHtml = `<div class="me-char-portrait me-char-portrait-ph me-char-clickable" data-char-portrait-ph="${escapeHtml(charId)}" role="button" tabindex="0" title="Change character"><i class="ph ph-question"></i></div>`;
     }
 
     const gameLine = character.game_label
@@ -111,10 +119,6 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
       ${portraitHtml}
       <span class="me-char-name">${escapeHtml(character.label)}</span>
       ${gameLine}
-      <div class="me-char-btns">
-        <button type="button" class="me-char-reroll"><i class="ph ph-shuffle"></i> Reroll</button>
-        <button type="button" class="me-char-choose"><i class="ph ph-user"></i> Choose</button>
-      </div>
     `;
 
     attachCharHandlers();
@@ -128,50 +132,64 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
         const ph = overlay.querySelector<HTMLElement>(`[data-char-portrait-ph="${CSS.escape(charId)}"]`);
         if (ph && url) {
           const img = document.createElement("img");
-          img.className = "me-char-portrait";
+          img.className = "me-char-portrait me-char-clickable";
           img.src = url;
           img.alt = character?.label ?? "";
           img.dataset.charPortrait = charId;
+          img.setAttribute("role", "button");
+          img.tabIndex = 0;
+          img.title = "Change character";
           ph.replaceWith(img);
+          wireClickable(img); // ph's own listener doesn't transfer across replaceWith
         }
       }).catch(() => { /* leave placeholder */ });
     }
   }
 
-  function attachCharHandlers(): void {
-    overlay.querySelector<HTMLButtonElement>(".me-char-reroll")?.addEventListener("click", () => {
-      pickCharacter(character?.id ?? null);
+  /** Opens the full character picker directly from the portrait, excluding
+   * ids already held by other live sessions so Random (inside the picker)
+   * doesn't hand out a duplicate. */
+  function openPickerFromPortrait(): void {
+    if (!projectId) return;
+    void openChangeCharacterModal({
+      projectId,
+      currentId: character?.id ?? null,
+      excludeIds: [...liveTakenIds()],
+    }).then(async (picked) => {
+      if (!picked) return;
+      // Look up in pool first; if not there (e.g. pool is "whitelisted" but user
+      // picked from "all"), fetch the full list and find it there.
+      let found = pool?.find((c) => c.id === picked) ?? null;
+      if (!found) {
+        try {
+          const all = await api.listCharacters();
+          found = all.find((c) => c.id === picked) ?? null;
+        } catch {
+          // best-effort; fall back to a stub
+        }
+      }
+      // Stub fallback: only id is known; label/game unavailable but pane still works
+      character = found ?? { id: picked, label: picked, version: 0, icon: "", slots: {} };
+      playSelect(picked);
       renderCharPane();
     });
+  }
 
-    overlay.querySelector<HTMLButtonElement>(".me-char-choose")?.addEventListener("click", () => {
-      if (!projectId) return;
-      void openChangeCharacterModal({
-        projectId,
-        currentId: character?.id ?? null,
-      }).then(async (picked) => {
-        if (!picked) return;
-        // Look up in pool first; if not there (e.g. pool is "whitelisted" but user
-        // picked from "all"), fetch the full list and find it there.
-        let found = pool?.find((c) => c.id === picked) ?? null;
-        if (!found) {
-          try {
-            const all = await api.listCharacters();
-            found = all.find((c) => c.id === picked) ?? null;
-          } catch {
-            // best-effort; fall back to a stub
-          }
-        }
-        if (found) {
-          character = found;
-        } else {
-          // Stub: only id is known; label/game unavailable but pane still works
-          character = { id: picked, label: picked, version: 0, icon: "", slots: {} };
-        }
-        playSelect(picked);
-        renderCharPane();
-      });
+  /** Wires click + Enter/Space-to-click onto one portrait node - never
+   * delegated onto `.me-char-pane`, which (unlike the portrait) survives
+   * partial re-renders, so a delegated listener there would stack. */
+  function wireClickable(el: HTMLElement): void {
+    el.addEventListener("click", () => openPickerFromPortrait());
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      openPickerFromPortrait();
     });
+  }
+
+  function attachCharHandlers(): void {
+    const portrait = overlay.querySelector<HTMLElement>(".me-char-clickable");
+    if (portrait) wireClickable(portrait);
   }
 
   return {

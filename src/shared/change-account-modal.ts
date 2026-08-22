@@ -13,7 +13,7 @@ import "./change-account-modal.css";
 import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
-import { accountChipHtml } from "./account-chip";
+import { accountChipHtml, attachChipKeyboardActivation } from "./account-chip";
 
 export async function openChangeAccountModal(opts: {
   currentId: string | null;
@@ -70,6 +70,7 @@ export async function openChangeAccountModal(opts: {
     });
     document.addEventListener("keydown", onKey);
     document.body.appendChild(overlay);
+    attachChipKeyboardActivation(overlay); // render() only runs once here - safe to attach once
 
     render();
   });

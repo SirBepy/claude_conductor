@@ -71,6 +71,23 @@
   color: var(--color-text-muted, #8a8a96);
 }
 
+/* Portrait doubles as the "change character" entry point - same clickable
+ * affordance as the active-session header's avatar (session-header.css). */
+.model-effort-modal-card .me-char-clickable {
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.model-effort-modal-card .me-char-clickable:hover,
+.model-effort-modal-card .me-char-clickable:focus-visible {
+  border-color: var(--color-primary, #6e8fff);
+}
+
+.model-effort-modal-card .me-char-clickable:focus-visible {
+  outline: 2px solid var(--color-primary, #6e8fff);
+  outline-offset: 2px;
+}
+
 .model-effort-modal-card .me-char-name {
   font-size: 0.9rem;
   font-weight: 600;
@@ -82,36 +99,6 @@
 .model-effort-modal-card .me-char-game {
   font-size: 0.72rem;
   color: var(--color-text-muted, #8a8a96);
-}
-
-.model-effort-modal-card .me-char-btns {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  margin-top: 4px;
-}
-
-.model-effort-modal-card .me-char-reroll,
-.model-effort-modal-card .me-char-choose {
-  width: 100%;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  border: 1px solid var(--color-border, #2a2a36);
-  background: var(--color-surface, #1c1c24);
-  color: var(--color-text, #e8e8ee);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-}
-
-.model-effort-modal-card .me-char-reroll:hover,
-.model-effort-modal-card .me-char-choose:hover {
-  background: color-mix(in srgb, var(--color-primary, #6e8fff) 12%, var(--color-surface, #1c1c24));
-  border-color: var(--color-primary, #6e8fff);
 }
 
 .model-effort-modal-card .me-char-loading,
@@ -248,7 +235,7 @@
 
 .model-effort-modal-card .me-check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 10px 0 0;
   font-size: 0.82rem;
@@ -260,6 +247,20 @@
 .model-effort-modal-card .me-check input[type="checkbox"] {
   accent-color: var(--color-primary, #6e8fff);
   cursor: pointer;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.model-effort-modal-card .me-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-effort-modal-card .me-check-hint {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--color-text-muted, #8a8a96);
 }
 
 .model-effort-modal-card .me-stop-labels {
@@ -278,13 +279,32 @@
   font-weight: 600;
 }
 
-/* 1-9 keyboard-shortcut hint next to each Model slider stop. */
+/* 1-9 keyboard-shortcut hint next to each Model slider stop. Rendered as a
+ * small kbd-style chip - the previous 0.62rem/70%-opacity text was present in
+ * the DOM but unreadable at a glance (impeccable critique, 2026-08-22). */
 .model-effort-modal-card .me-key-hint {
-  display: inline-block;
-  margin-left: 3px;
-  font-size: 0.62rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  margin-left: 4px;
+  padding: 0 3px;
+  font-size: 0.68rem;
+  line-height: 1.4;
   color: var(--color-text-muted, #8a8a96);
-  opacity: 0.7;
+  background: var(--color-surface-alt, #24242e);
+  border: 1px solid var(--color-border, #2a2a36);
+  border-radius: 3px;
+}
+
+/* Spinner next to the Model label while the availability probe is in flight -
+ * reuses base.css's icon-btn-spin keyframes rather than adding another. */
+.model-effort-modal-card .me-label-spinner {
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  animation: icon-btn-spin 0.8s linear infinite;
 }
 
 .model-effort-modal-card .me-actions {
