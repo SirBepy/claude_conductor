@@ -236,7 +236,7 @@
 .prompt-card__footer {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px;
@@ -250,6 +250,10 @@
   transform: none;
 }
 .prompt-card__footer button {
+  /* Matches the answer-bar textarea's rendered height (padding 8px + 1px
+   * border + 1.4 line-height at 0.88rem ≈ 38px) so Skip/Next sit level with
+   * it instead of looking squashed against a taller field. */
+  min-height: 38px;
   padding: 6px 14px;
   display: inline-flex;
   align-items: center;

@@ -24,6 +24,7 @@ import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { isMobileViewport } from "../mobile-viewport";
+import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -113,13 +114,20 @@ export class Composer {
       active instanceof HTMLSelectElement ||
       (active instanceof HTMLElement && active.isContentEditable)
     ) return;
-    this.textarea.focus();
-    const start = this.textarea.selectionStart ?? this.textarea.value.length;
-    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
-    this.textarea.value =
-      this.textarea.value.slice(0, start) + e.key + this.textarea.value.slice(end);
-    this.textarea.selectionStart = this.textarea.selectionEnd = start + 1;
-    this.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    // A question card floats above the composer and owns its own free-text
+    // field - route stray typing there instead of the composer textarea it
+    // may be visually covering. Falls back to the composer when the card is
+    // minimized or on a review panel with no free-text field of its own.
+    const cardInput = document.querySelector<HTMLTextAreaElement>(
+      `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`,
+    );
+    const target = cardInput ?? this.textarea;
+    target.focus();
+    const start = target.selectionStart ?? target.value.length;
+    const end = target.selectionEnd ?? target.value.length;
+    target.value = target.value.slice(0, start) + e.key + target.value.slice(end);
+    target.selectionStart = target.selectionEnd = start + 1;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
     e.preventDefault();
   };
 
