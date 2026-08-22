@@ -25,6 +25,7 @@ import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { isMobileViewport } from "../mobile-viewport";
 import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
+import * as shortcuts from "../shortcuts";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -164,6 +165,7 @@ export class Composer {
     this.render();
     document.addEventListener("keydown", this._globalKeydown);
     document.addEventListener("visibilitychange", this._visibilityHandler);
+    shortcuts.register("blur-composer", () => { this.textarea?.blur(); });
     this.ptt.mount();
     _composerInstanceCount++;
     if (_composerInstanceCount > 1) {
@@ -176,6 +178,7 @@ export class Composer {
   destroy(): void {
     document.removeEventListener("keydown", this._globalKeydown);
     document.removeEventListener("visibilitychange", this._visibilityHandler);
+    shortcuts.unregister("blur-composer");
     this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
     this.ptt.destroy();
     if (this.noticeTimer) {
@@ -340,6 +343,9 @@ export class Composer {
         onEnter: interactive ? () => void this.send() : undefined,
         onCtrlEnter: interactive ? () => this.handleCtrlEnter() : undefined,
         onUndoQueued: interactive ? () => this.handleUndoQueued() : undefined,
+        // An Escape that closed the "/"-suggest popup must not also fall
+        // through to the document-level blur-composer shortcut.
+        stopPropagationOnPopupConsume: true,
         isMobileViewport: () => isMobileViewport(),
         onResize: (scrollHeight) => {
           this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", scrollHeight > 44);

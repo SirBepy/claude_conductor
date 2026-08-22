@@ -27,6 +27,7 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "open-chat-8", defaultKeys: "ctrl+8", label: "Open chat 8", description: "Open the 8th most recent chat", context: "sessions", suppressInInput: false },
   { id: "open-chat-9", defaultKeys: "ctrl+9", label: "Open chat 9", description: "Open the 9th most recent chat", context: "sessions", suppressInInput: false },
   { id: "close-chat",  defaultKeys: "ctrl+w", label: "Cancel active turn",  description: "Cancel the current running turn in the focused chat", context: "sessions", suppressInInput: true },
+  { id: "blur-composer", defaultKeys: "escape", label: "Unfocus message box", description: "Move keyboard focus off the message input", context: "sessions", suppressInInput: false },
 
   // Chats view - manual slot assignment (only active in manual mode)
   { id: "assign-slot-1", defaultKeys: "ctrl+shift+1", label: "Assign to slot 1", description: "Pin the current chat to slot 1 (manual mode)", context: "sessions", suppressInInput: false },
