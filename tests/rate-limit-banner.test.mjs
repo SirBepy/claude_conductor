@@ -161,8 +161,11 @@ describe("RateLimitBanner", () => {
     }
   });
 
-  it("clicking 'Continue on <other>' moves the selected blocked session and selects the result", async () => {
-    moveSessionToAccount.mockResolvedValue("new-session-id");
+  // The daemon switches the account in place now, so it hands back the SAME
+  // session id it was given. onMoved still fires with both ids because the
+  // pane repaint is shared with the fork fallback.
+  it("clicking 'Continue on <other>' switches the selected blocked session's account", async () => {
+    moveSessionToAccount.mockResolvedValue("s2");
     const b = new RateLimitBanner();
     b.mount(host);
     await flush();
@@ -178,8 +181,8 @@ describe("RateLimitBanner", () => {
     await flush();
 
     expect(moveSessionToAccount).toHaveBeenCalledWith("s2", PERSONAL.id);
-    expect(showToast).toHaveBeenCalledWith("Moved to Personal, continuing there.");
-    expect(onMoved).toHaveBeenCalledWith("new-session-id", "s2");
+    expect(showToast).toHaveBeenCalledWith("Now on Personal, continuing.");
+    expect(onMoved).toHaveBeenCalledWith("s2", "s2");
   });
 
   it("falls back to the most-recently-started blocked session when none is selected", async () => {

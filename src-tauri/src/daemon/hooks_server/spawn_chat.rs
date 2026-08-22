@@ -1,4 +1,5 @@
-//! `/chat/spawn`: HTTP half of the unconditional `spawn_chat` MCP tool. The
+//! `/chat/spawn`: HTTP half of the unconditional `spawn_chat` and `respawn`
+//! MCP tools (`respawn` is the same body with `respawn: true`). The
 //! claimed `session_id` is untrusted here - `methods::spawn_chat` re-derives
 //! the caller's real cwd from the registry and refuses anything else. Outcome
 //! rides in the body at `200 OK`, same as `jarvis.rs`'s routes.
@@ -22,6 +23,10 @@ pub(super) struct SpawnChatBody {
     effort: Option<String>,
     #[serde(default)]
     name: Option<String>,
+    /// `respawn` rather than `spawn_chat`: link the new session back to the
+    /// caller and close the caller at its turn end.
+    #[serde(default)]
+    respawn: bool,
 }
 
 pub(super) async fn on_spawn_chat(
@@ -36,6 +41,7 @@ pub(super) async fn on_spawn_chat(
         body.model.as_deref(),
         body.effort.as_deref(),
         body.name.as_deref(),
+        body.respawn,
     )
     .await;
     match result {
@@ -70,6 +76,7 @@ mod tests {
             model: None,
             effort: None,
             name: None,
+            respawn: false,
         };
         let resp = on_spawn_chat(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);

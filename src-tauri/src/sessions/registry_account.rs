@@ -2,8 +2,10 @@ use super::registry::Registry;
 
 impl Registry {
     /// Set the registry account this session was spawned under. Returns true
-    /// if found. Also stamps the account's current rate-limit window onto the
-    /// instance, so a chat started while exhausted is born blocked.
+    /// if found. Also re-derives the instance's rate-limit stamp from the new
+    /// account, so a chat started while exhausted is born blocked - and, on
+    /// the in-place account switch, a chat moved OFF an exhausted account
+    /// stops carrying that account's window.
     pub fn set_account(&self, session_id: &str, account_id: &str) -> bool {
         let limits = self.rate_limits.lock().unwrap();
         let stamp = limits.get(account_id).cloned();
@@ -11,9 +13,15 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         let Some(i) = guard.get_mut(session_id) else { return false };
         i.account_id = Some(account_id.to_string());
-        if let Some((resets_at, kind)) = stamp {
-            i.rate_limited_resets_at = Some(resets_at);
-            i.rate_limited_type = Some(kind);
+        match stamp {
+            Some((resets_at, kind)) => {
+                i.rate_limited_resets_at = Some(resets_at);
+                i.rate_limited_type = Some(kind);
+            }
+            None => {
+                i.rate_limited_resets_at = None;
+                i.rate_limited_type = None;
+            }
         }
         true
     }
@@ -155,6 +163,26 @@ mod tests {
         assert_eq!(registry.get("s1").unwrap().account_id, None);
         assert!(registry.set_account("s1", "acct-work"));
         assert_eq!(registry.get("s1").unwrap().account_id.as_deref(), Some("acct-work"));
+    }
+
+    /// The in-place account switch's whole point is escaping an exhausted
+    /// account, so the stamp must be re-derived from the account being moved
+    /// TO, not left behind from the one being moved off.
+    #[test]
+    fn set_account_drops_the_previous_accounts_rate_limit() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &settings, "2026-07-07T00:00:00Z");
+        registry.set_account("s1", "acct-blocked");
+        registry.set_rate_limited_for_account("acct-blocked", 1_800_000_000, "five_hour");
+        assert_eq!(registry.get("s1").unwrap().rate_limited_resets_at, Some(1_800_000_000));
+
+        registry.set_account("s1", "acct-healthy");
+
+        let i = registry.get("s1").unwrap();
+        assert_eq!(i.account_id.as_deref(), Some("acct-healthy"));
+        assert_eq!(i.rate_limited_resets_at, None, "the old account's window must not follow the chat");
+        assert_eq!(i.rate_limited_type, None);
     }
 
     #[test]

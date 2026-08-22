@@ -1,4 +1,4 @@
-import { selectSession, updateHeaderAvatarStatus, carrySessionSettings } from "./active-session";
+import { selectSession, updateHeaderAvatarStatus, carrySessionSettings, applyAccountMove } from "./active-session";
 import { state, setActiveSession, loadLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle, paneEmptyStateHtml } from "./sessions-helpers";
@@ -10,6 +10,7 @@ import { mountUsageDials } from "./usage-dials";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { dropRetainedChat } from "./chat-pane-cache";
 import { getTransport, isRemote } from "../../shared/transport";
+import { findSuccessorToFollow, markFollowed } from "./successor-follow";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -50,7 +51,6 @@ export function refreshPaneEmptyState(pane: HTMLElement): void {
  * purely a reflection of state.sessions. Returns the usage chip's teardown. */
 export function wireRateLimitBanner(
   root: HTMLElement,
-  pane: HTMLElement,
   listEl: HTMLElement,
   myMount: number,
 ): (() => void) | null {
@@ -61,13 +61,10 @@ export function wireRateLimitBanner(
   const teardownUsageDials = usageDialHost && isRemote() ? mountUsageDials(usageDialHost) : null;
   rateLimitBanner.setSelectedSessionGetter(() => state.selectedId);
   rateLimitBanner.setOnMoved((newId, oldId) => {
-    carrySessionSettings(oldId, newId);
     void (async () => {
-      await refreshSessions();
+      await applyAccountMove(oldId, newId);
       if (state.mountId !== myMount) return;
-      renderSidebar(listEl);
       rateLimitBanner.update(state.sessions);
-      await selectSession(newId, pane);
     })();
   });
   // rate_limit is a live per-session event; the daemon's own instances_changed
@@ -171,6 +168,18 @@ export async function wireInstancesChangedListener(
     const refreshed = await refreshSessions();
     if (state.mountId !== myMount) return;
     reconcileEndedSessions(previousIds, refreshed);
+
+    // A respawn replaces this chat with a fresh-context successor. Move the
+    // open pane across before anything else repaints, so the user never sees
+    // the row they were on go dead.
+    const predecessorId = state.selectedId;
+    const successorId = findSuccessorToFollow(state.sessions, predecessorId);
+    if (predecessorId && successorId) {
+      markFollowed(predecessorId);
+      carrySessionSettings(predecessorId, successorId);
+      await selectSession(successorId, pane);
+      if (state.mountId !== myMount) return;
+    }
 
     // Ensure every newly-appeared live session gets a character assigned.
     // Track ensured ids so we don't re-call on every subsequent event.

@@ -24,9 +24,12 @@ pub const TOOL_SEND_MESSAGE: &str = "send_message";
 // Revise/retract an already-sent message rather than stacking a reworded
 // near-duplicate underneath it. Unconditional, same as send_message.
 pub const TOOL_UPDATE_MESSAGE: &str = "update_message";
-// Sibling-session spawn behind `/respawn`. Unconditional despite the name
-// similarity with `spawn_worker`: no fleet, caller's own project only.
+// Sibling-session spawn. Unconditional despite the name similarity with
+// `spawn_worker`: no fleet, caller's own project only.
 pub const TOOL_SPAWN_CHAT: &str = "spawn_chat";
+// Hand this chat's work to a fresh context window and stand down. Same spawn
+// as above plus the successor link the sidebar follows, so the user stays put.
+pub const TOOL_RESPAWN: &str = "respawn";
 // "Your Todos" panel (todo 692). Unconditional: any session can hand the user
 // an action item. ONE tool with an `action` enum rather than four, and a
 // deliberately short description - this schema is injected into every turn of
@@ -179,7 +182,7 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_SPAWN_CHAT,
-            "description": "Spawn a NEW chat in this same project and send it `prompt` as its first message, returning {ok, session_id}. The prompt lands as a real, visible user message in the new chat, so put the whole handoff context in it. Used by the `/respawn` skill to hand this session's work to a fresh context window right before close_session tears this one down - call spawn_chat FIRST, since close_session kills the process that would make this call. The new chat inherits this one's model, effort, account, character and auto-accept unless overridden. Only spawns into this session's own working directory, and only once per turn.",
+            "description": "Start a SEPARATE chat alongside this one, in this same project, and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's model, effort, account, character and auto-accept unless overridden. Own working directory only, once per turn. To REPLACE this chat instead of running beside it, use `respawn`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -188,6 +191,21 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
                     "name": {"type": "string", "description": "Optional short label for the new chat."}
+                },
+                "required": ["cwd", "prompt"]
+            }
+        }),
+        json!({
+            "name": TOOL_RESPAWN,
+            "description": "Replace THIS chat with a fresh one that has an empty context window, carrying `prompt` across as its first visible message; returns {ok, session_id}. Use it when the context is nearly full or has drifted, and the work should continue. One call does both halves - the successor is spawned and this chat is closed at the end of the current turn - so there is no ordering trap and no separate close_session call. The app keeps the user on the successor automatically: same window, same place in the sidebar, composer draft intact. The visible messages do NOT carry over, which is the point, so `prompt` must restate everything the successor needs. Inherits this chat's model, effort, account, character and auto-accept unless overridden. To start a chat that runs ALONGSIDE this one instead, use `spawn_chat`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "cwd": {"type": "string", "description": "Absolute working directory. Must be this session's own cwd."},
+                    "prompt": {"type": "string", "description": "The successor's first message. Carry the full handoff context here - it is what the user reads."},
+                    "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
+                    "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
+                    "name": {"type": "string", "description": "Optional short label for the successor."}
                 },
                 "required": ["cwd", "prompt"]
             }

@@ -157,9 +157,9 @@ mod tests {
     use super::super::dispatch::dispatch_tool_with;
     use super::super::tool_schemas::{
         TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
-        TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPOND_WORKER_PROMPT,
-        TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER,
-        TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
+        TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN,
+        TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT,
+        TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
     };
 
     thread_local! {
@@ -167,6 +167,8 @@ mod tests {
         // arms (e.g. TOOL_CLOSE) override the relayed response text and
         // would otherwise hide which endpoint actually got hit.
         static POSTED_URLS: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+        // spawn_chat and respawn share an endpoint, differing only in body.
+        static POSTED_BODIES: std::cell::RefCell<Vec<Value>> = std::cell::RefCell::new(Vec::new());
     }
 
     /// Stub transport for `dispatch_tool_with` (todo 707): logs the URL and
@@ -175,6 +177,7 @@ mod tests {
     /// live hooks server.
     fn fake_http_post(_rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Value, String> {
         POSTED_URLS.with(|u| u.borrow_mut().push(url.to_string()));
+        POSTED_BODIES.with(|b| b.borrow_mut().push(body.clone()));
         Ok(json!({"ok": true, "url": url, "body": body}))
     }
 
@@ -228,20 +231,21 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_eleven_base_tools() {
+    fn tools_list_returns_twelve_base_tools() {
         // Non-jarvis (the default for every normal session): base set is the
         // original 3 permission/question/close tools plus the 3 unconditional
         // coordination-channel tools (list_peers/post_message/read_messages)
         // plus report_turn_status (todo 435) plus send_message/update_message
-        // plus spawn_chat (the /respawn skill's sibling-session spawn) plus
-        // write_user_todo (the Your Todos panel, todo 692).
+        // plus the two sibling-spawn tools (spawn_chat runs beside this chat,
+        // respawn replaces it) plus write_user_todo (the Your Todos panel,
+        // todo 692).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 11);
+        assert_eq!(tools.len(), 12);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -255,6 +259,7 @@ mod tests {
         assert!(names.contains(&"send_message"));
         assert!(names.contains(&"update_message"));
         assert!(names.contains(&"spawn_chat"));
+        assert!(names.contains(&"respawn"));
         assert!(names.contains(&"write_user_todo"));
     }
 
@@ -267,7 +272,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 15, "11 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 16, "12 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -321,6 +326,7 @@ mod tests {
             (TOOL_QUESTION, "/questions/request"),
             (TOOL_CLOSE, "/sessions/close-confirm"),
             (TOOL_SPAWN_CHAT, "/chat/spawn"),
+            (TOOL_RESPAWN, "/chat/spawn"),
             (TOOL_LIST_PEERS, "/channel/list-peers"),
             (TOOL_POST_MESSAGE, "/channel/post-message"),
             (TOOL_READ_MESSAGES, "/channel/read-messages"),
@@ -342,6 +348,21 @@ mod tests {
                 "tool {name} did not route to {expected_path}: posted {posted:?}"
             );
         }
+    }
+
+    /// The flag is the entire difference between "run beside this chat" and
+    /// "replace it" - backwards, it would silently close the caller.
+    #[test]
+    fn respawn_sets_the_flag_that_spawn_chat_leaves_false() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let args = json!({"cwd": ".", "prompt": "carry on"});
+        let flag_for = |name: &str| -> Value {
+            POSTED_BODIES.with(|b| b.borrow_mut().clear());
+            dispatch_tool_with(&rt, &json!(1), name, &args, "sess-1", 1234, fake_http_post);
+            POSTED_BODIES.with(|b| b.borrow()[0]["respawn"].clone())
+        };
+        assert_eq!(flag_for(TOOL_RESPAWN), json!(true));
+        assert_eq!(flag_for(TOOL_SPAWN_CHAT), json!(false));
     }
 
     #[test]

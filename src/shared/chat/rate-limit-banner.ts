@@ -342,7 +342,9 @@ export class RateLimitBanner {
     try {
       const newId = await api.moveSessionToAccount(source.session_id, targetAccountId);
       const targetLabel = capitalize(getCachedAccount(targetAccountId)?.label ?? "the other account");
-      showToast(`Moved to ${targetLabel}, continuing there.`);
+      // "Continuing there" was true of the old fork, which landed the user in
+      // a different chat. The switch is in-place now - same chat, new account.
+      showToast(`Now on ${targetLabel}, continuing.`);
       this.onMoved(newId, source.session_id);
     } catch (err) {
       console.error("[rate-limit-banner] moveSessionToAccount failed", err);

@@ -369,6 +369,15 @@ export class SessionStatusbar {
     }
   }
 
+  /** Repaint the account chip after an in-place account switch. That switch
+   *  keeps the session id, so nothing remounts the statusbar for us and the
+   *  chip would otherwise keep naming the account the chat just left. */
+  setAccountId(id: string | null): void {
+    if (this.accountId === id) return;
+    this.accountId = id;
+    this.render();
+  }
+
   setReadOnlyEffort(readOnly: boolean): void {
     if (this.readOnlyEffort === readOnly) return;
     this.readOnlyEffort = readOnly;

@@ -8,11 +8,14 @@ use crate::types::EndReason;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// Kill+respawn `session_id` so a model/effort swap applies now instead of
-/// waiting for a natural restart - both are launch-only CLI flags. Resumes
+/// Kill+respawn `session_id` so a launch-only swap applies now instead of
+/// waiting for a natural restart. Model and effort are both launch-only CLI
+/// flags; so is the account, which is the `CLAUDE_CONFIG_DIR` the child is
+/// spawned under - hence `move_session_to_account` shares this too. Resumes
 /// a busy/blocked session with "continue"; no-ops (returns `false`) if the
-/// session isn't live (e.g. a not-yet-started draft).
-async fn restart_live_session(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
+/// session isn't live (e.g. a not-yet-started draft, or a rate-limited chat
+/// whose child is already gone).
+pub(crate) async fn restart_live_session(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
     if state.sessions.get(session_id).is_none() {
         return false;
     }

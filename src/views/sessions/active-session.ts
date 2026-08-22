@@ -39,6 +39,8 @@ import { mountStatusbar, mountRenderer } from "./active-session-mount";
 import { mountComposer } from "./active-session-composer";
 import { handleTakeoverClick } from "./active-session-takeover";
 import { isRemote } from "../../shared/transport";
+import { loadDraft, moveComposerDraft } from "../../shared/chat/composer-persistence";
+import { setComposerDraft, clearComposerDraft } from "../../shared/chat/session-draft-sync";
 import { openJarvisKebabMenu } from "./jarvis-kebab-menu";
 import {
   backgroundRetainedChat,
@@ -140,32 +142,45 @@ export async function changeCharacterForSession(sessionId: string): Promise<void
 }
 
 /**
- * Carry client-side per-chat state onto the fresh session id a
- * `moveSessionToAccount` fork produces. The daemon already ports
- * model/effort/account_id (and, for auto-accept, the persisted chat-config
- * flag) onto the new id itself - see `move_session_to_account` in
- * `daemon/methods/lifecycle.rs`. What's left is state that only exists in
- * THIS running client and has no daemon-side mirror: the in-memory
- * auto-accept gate (the runtime source of truth for the permission modal,
- * only rehydrated from disk at app launch), any staged-but-unsent held
- * messages, and the character avatar (daemon carries it too, but that's async
- * and would flash the placeholder on the just-rendered header). Shared by
- * both `moveSessionToAccount` callers.
+ * Carry per-chat client state onto a fresh session id - a `respawn` successor,
+ * or a fork from an older daemon. Only what the daemon does not mirror, plus
+ * the half-typed draft, which is the loss the user notices.
  */
 export function carrySessionSettings(oldId: string, newId: string): void {
   if (isAutoAccept(oldId)) setAutoAccept(newId, true);
   state.heldMessages?.renameSession(oldId, newId);
   const charId = characterForSessionId(oldId);
   if (charId) setSessionCharacterLocal(newId, charId);
+  const draft = loadDraft(oldId);
+  moveComposerDraft(oldId, newId);
+  if (draft) {
+    void setComposerDraft(newId, draft).catch((e) => console.warn("[active-session] draft carry failed", e));
+    void clearComposerDraft(oldId).catch(() => {});
+  }
+}
+
+/** Repaint after `moveSessionToAccount`. In-place - same id, re-pointed - so
+ *  only the account chip changes; the id-changed branch is the fork fallback. */
+export async function applyAccountMove(oldId: string, newId: string): Promise<void> {
+  await refreshSessions();
+  const root = document.querySelector<HTMLElement>(".view-sessions");
+  const listEl = root?.querySelector<HTMLElement>("#sessions-list");
+  if (listEl) renderSidebar(listEl);
+  if (oldId === newId) {
+    const moved = state.sessions.find((s) => s.session_id === newId);
+    if (state.selectedId === newId) state.statusbar?.setAccountId(moved?.account_id ?? null);
+    return;
+  }
+  carrySessionSettings(oldId, newId);
+  if (state.selectedId !== oldId) return;
+  const pane = root?.querySelector<HTMLElement>("#session-pane");
+  if (pane) await selectSession(newId, pane);
 }
 
 /**
  * Move a session to a different Claude account: opens the account picker,
- * forks the transcript onto a fresh session id under the picked account
- * (via `moveSessionToAccount`, the same mechanism the rate-limit banner's
- * "Continue on <Other>" button uses), then retires the old session.
- * Shared by the statusline account chip's click handler and the ⋮ "Change
- * account" menu item.
+ * then hands off to `moveSessionToAccount`, the same call the rate-limit
+ * banner's continue-on-the-other-account button makes.
  */
 export async function changeAccountForSession(sessionId: string): Promise<void> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
@@ -174,17 +189,9 @@ export async function changeAccountForSession(sessionId: string): Promise<void> 
   if (!picked || picked === sess.account_id) return;
   try {
     const newId = await api.moveSessionToAccount(sessionId, picked);
-    carrySessionSettings(sessionId, newId);
     const label = capitalize(getCachedAccount(picked)?.label ?? "the other account");
-    showToast(`Moved to ${label}, continuing there.`);
-    await refreshSessions();
-    const root = document.querySelector<HTMLElement>(".view-sessions");
-    const listEl = root?.querySelector<HTMLElement>("#sessions-list");
-    if (listEl) renderSidebar(listEl);
-    if (state.selectedId === sessionId) {
-      const pane = root?.querySelector<HTMLElement>("#session-pane");
-      if (pane) await selectSession(newId, pane);
-    }
+    showToast(`Now on ${label}.`);
+    await applyAccountMove(sessionId, newId);
   } catch (e) {
     console.error("[active-session] change account failed", e);
     showToast("Failed to move chat to that account.");

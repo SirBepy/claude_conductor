@@ -8,9 +8,9 @@ use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
-    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE,
-    TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
-    TOOL_WRITE_USER_TODO,
+    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_RESPOND_WORKER_PROMPT,
+    TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER,
+    TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -83,7 +83,8 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     }
 }
 
-/// Session lifecycle: end this one, or spawn a sibling chat.
+/// Session lifecycle: end this one, spawn a sibling chat, or hand off to a
+/// successor and stand down.
 fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     match name {
         TOOL_CLOSE => {
@@ -98,7 +99,9 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 Some("close confirmed; session will end at turn completion"),
             ))
         }
-        TOOL_SPAWN_CHAT => {
+        TOOL_SPAWN_CHAT | TOOL_RESPAWN => {
+            // One endpoint, one flag: respawn IS spawn_chat plus the successor
+            // link and the caller's close, both of which the daemon applies.
             let body = json!({
                 "session_id": ctx.session_id,
                 "cwd": ctx.args["cwd"],
@@ -106,6 +109,7 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "model": ctx.args.get("model"),
                 "effort": ctx.args.get("effort"),
                 "name": ctx.args.get("name"),
+                "respawn": name == TOOL_RESPAWN,
             });
             Some(ctx.relay("/chat/spawn", body, None, None))
         }

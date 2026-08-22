@@ -141,6 +141,16 @@ impl Registry {
         }
     }
 
+    /// Record that this session took over from `predecessor` (the `respawn`
+    /// MCP tool). Write-once at spawn time; nothing ever clears it, so the
+    /// link survives the predecessor being marked ended a moment later.
+    pub fn set_successor_of(&self, session_id: &str, predecessor: &str) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.successor_of = Some(predecessor.to_string());
+        }
+    }
+
     /// Path C helper: flip the `busy` flag on a session entry. Sidebar uses
     /// this to render running vs idle. No-op if session is unknown.
     /// When `busy=true`, also bumps `turn_gen` (stale-clear guard) and

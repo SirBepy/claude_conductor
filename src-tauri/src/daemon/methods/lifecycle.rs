@@ -239,15 +239,12 @@ fn register_core(router: &mut Router, state: Arc<DaemonState>) {
     }
 }
 
-/// `move_session_to_account` alone - it's the largest single handler (forks a
+/// `move_session_to_account` alone - it's the largest single handler (moves a
 /// session onto a different account) and the most likely to grow further.
 fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
-    let map = state.sessions.clone();
     {
-        let map = map.clone();
         let state = state.clone();
         router.register("move_session_to_account", move |params, _ctx| {
-            let map = map.clone();
             let state = state.clone();
             async move {
                 let p: MoveSessionParams = serde_json::from_value(params.unwrap_or(Value::Null))
@@ -258,7 +255,7 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                 // Jarvis's own id/account bookkeeping (and its worker_of
                 // ownership tracking) assumes a fleet-owned session's id and
                 // account don't change out from under it - block the
-                // human-facing move instead of silently forking it (todo 441).
+                // human-facing move rather than let it through (todo 441).
                 if old.jarvis || old.worker_of.is_some() {
                     return Err(RpcError::invalid_params(format!(
                         "session {} is Jarvis-owned and cannot be moved to another account",
@@ -271,71 +268,45 @@ fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                         p.session_id, p.target_account_id
                     )));
                 }
-                let cwd = old.cwd.clone();
-                let model = if old.model.is_empty() { "opus".to_string() } else { old.model.clone() };
-                let effort = if old.effort.is_empty() { "high".to_string() } else { old.effort.clone() };
-                // Snapshot settings the fresh session id won't otherwise inherit:
-                // the persisted auto-accept flag (chat_config is keyed by
-                // session_id, so a new id starts back at "off") and the assigned
-                // character avatar (session_characters is likewise keyed by id).
-                let auto_accept = crate::sessions::chat_config::get(&p.session_id)
-                    .map(|c| c.auto_accept)
-                    .unwrap_or(false);
-                let character_id = state.settings.snapshot().session_characters.get(&p.session_id).cloned();
 
-                // Reclaim the pending rate-limit resume queued for the old session,
-                // if any - its prompt is what should continue on the new account.
-                // handle_rate_limit_rejection dedupes to at most one such resume per
-                // session, so the first match is the only match.
-                let pending_resume =
-                    crate::sessions::scheduled_items::find_pending_message_for_session(&p.session_id);
-                let prompt = if let Some(item) = pending_resume {
-                    crate::sessions::scheduled_items::delete(&item.id);
-                    item.prompt
-                } else {
-                    "Continue from where you left off.".to_string()
-                };
-
-                // Register (esp. auto-accept) before spawning: a forked resume
-                // can re-drive an outstanding tool call the instant it boots, so
-                // registering after the child is alive races the permission hook.
-                let new_id = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now().to_rfc3339();
-                crate::daemon::session_registration::register_new_session(
-                    &state, &new_id, &cwd, &model, &effort, &p.target_account_id, &now,
-                    auto_accept, character_id.as_deref(), false,
-                );
-
-                let session = lifecycle::spawn_session(&state, StartSessionParams {
-                    cwd: cwd.clone(),
-                    model: model.clone(),
-                    effort: effort.clone(),
-                    resume_id: Some(p.session_id.clone()),
-                    remote: false,
-                    account_id: Some(p.target_account_id.clone()),
-                    fork: true,
-                    new_session_id: Some(new_id.clone()),
-                }).await.map_err(err_to_rpc)?;
-
-                // Same pre-write bump as send_message above (todo 525 root cause 1).
-                state.registry.set_busy(&new_id, true);
-                crate::sessions::chat_state::set_busy(&new_id, true);
-                if let Err(e) = lifecycle::send_message(&session, &prompt, false).await {
-                    state.registry.set_busy(&new_id, false);
-                    crate::sessions::chat_state::set_busy(&new_id, false);
-                    return Err(err_to_rpc(e));
+                // In place: JUNCTION_DIRS pools every account's `projects/`.
+                state.registry.set_account(&p.session_id, &p.target_account_id);
+                crate::sessions::chat_config::set_account(&p.session_id, &p.target_account_id);
+                if old.auto_frozen {
+                    state.registry.set_frozen(&p.session_id, false);
+                    state.registry.set_auto_frozen(&p.session_id, false);
                 }
 
-                // Retire the old session. A rate-limited session's `claude -p` child
-                // has usually already exited, so a NotFound error here is expected
-                // and not surfaced.
-                let _ = lifecycle::end_session(&map, &p.session_id).await;
-                state.registry.mark_ended(&p.session_id, EndReason::Moved, &now);
+                // A blocked chat has no live child, and wants its queued
+                // resume rather than the restart's "continue".
+                let pending_resume =
+                    crate::sessions::scheduled_items::find_pending_message_for_session(&p.session_id);
+                if let Some(item) = pending_resume {
+                    crate::sessions::scheduled_items::delete(&item.id);
+                    // Meta: the user already saw this text as their own bubble.
+                    state.registry.set_busy(&p.session_id, true);
+                    crate::sessions::chat_state::set_busy(&p.session_id, true);
+                    if let Err(e) =
+                        lifecycle::send_message_with_respawn(&state, &p.session_id, &item.prompt, true).await
+                    {
+                        state.registry.set_busy(&p.session_id, false);
+                        crate::sessions::chat_state::set_busy(&p.session_id, false);
+                        return Err(err_to_rpc(e));
+                    }
+                    state.notifier.publish(
+                        "scheduled_items_changed",
+                        json!({"items": crate::sessions::scheduled_items::list()}),
+                    );
+                } else {
+                    // Launch-only like model/effort: same restart+auto-continue.
+                    crate::daemon::methods::registry::lifecycle::restart_live_session(
+                        &state, "move_session_to_account", &p.session_id,
+                    ).await;
+                }
 
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
-                state.notifier.publish("scheduled_items_changed", json!({"items": crate::sessions::scheduled_items::list()}));
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
-                Ok(json!({"session_id": new_id}))
+                Ok(json!({"session_id": p.session_id}))
             }
         });
     }

@@ -224,7 +224,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     })();
   });
 
-  const teardownUsageDials = wireRateLimitBanner(root, pane, listEl, myMount);
+  const teardownUsageDials = wireRateLimitBanner(root, listEl, myMount);
 
   if (consumePendingOpenPicker()) {
     void startNewSession(pane);

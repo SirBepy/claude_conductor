@@ -23,7 +23,10 @@ mod lifecycle;
 mod permission;
 mod pr_review;
 mod preview;
-mod registry;
+// pub(crate): `methods::lifecycle`'s account move reuses
+// `registry::lifecycle::restart_live_session` - account is a launch-only
+// property, same as the model/effort swaps that helper was written for.
+pub(crate) mod registry;
 mod schedule;
 pub(crate) mod spawn_chat;
 mod statusbar;

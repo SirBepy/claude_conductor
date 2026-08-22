@@ -5,7 +5,7 @@
 
 mod attachments;
 mod characters;
-mod lifecycle;
+pub(super) mod lifecycle;
 mod listings;
 mod project_meta;
 mod waiting_tail;

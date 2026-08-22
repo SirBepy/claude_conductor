@@ -206,6 +206,11 @@ pub struct Instance {
     /// scheduled wake both "waiting", and only the first dies on sleep.
     #[serde(default)]
     pub local_task_running: bool,
+    /// Set by the `respawn` MCP tool to the id of the chat being taken over.
+    /// A fresh context window needs a fresh id, so this link is how the
+    /// sidebar moves the user onto the successor instead of stranding them.
+    #[serde(default)]
+    pub successor_of: Option<String>,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -366,6 +371,7 @@ mod tests {
             auto_frozen: false,
             held_count: 0,
             local_task_running: false,
+            successor_of: None,
         };
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();

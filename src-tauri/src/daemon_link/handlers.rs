@@ -169,6 +169,7 @@ mod tests {
             auto_frozen: false,
             held_count: 0,
             local_task_running: false,
+            successor_of: None,
         }
     }
 

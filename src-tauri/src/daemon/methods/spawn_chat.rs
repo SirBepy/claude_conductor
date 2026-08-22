@@ -1,4 +1,5 @@
-//! `spawn_chat`: the unconditional sibling-session spawn behind `/respawn`.
+//! `spawn_chat`: the unconditional sibling-session spawn, shared by the
+//! `spawn_chat` and `respawn` MCP tools.
 //! Not `jarvis_fleet::spawn_worker`, which is `CC_JARVIS`-gated and fleet-
 //! tagged. Guards instead: own-cwd only, one spawn per turn; and it inherits
 //! the caller's own model/effort/account/character/auto-accept.
@@ -11,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 /// Used only when the caller has no recorded `chat_config` at all (a session
 /// that predates the config file, or one whose record was lost). A real
-/// `/respawn` always inherits.
+/// respawn always inherits.
 const FALLBACK_MODEL: &str = "sonnet";
 const FALLBACK_EFFORT: &str = "medium";
 
@@ -45,8 +46,10 @@ fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
 
 /// Spawns a new Interactive session in the caller's own project and sends
 /// `prompt` as its first turn. The prompt lands as a real, visible user
-/// message - the whole point of `/respawn` over the retired handoff button,
-/// which hid its context in a scratch file.
+/// message - the whole point of this over the retired handoff button, which
+/// hid its context in a scratch file. `respawn` makes it a takeover instead:
+/// `successor_of = caller` plus a close flag the caller's pump acts on at
+/// turn end, both here so the old spawn-then-close ordering trap is gone.
 pub(crate) async fn spawn_chat(
     state: &Arc<DaemonState>,
     caller_session_id: &str,
@@ -55,6 +58,7 @@ pub(crate) async fn spawn_chat(
     model: Option<&str>,
     effort: Option<&str>,
     name: Option<&str>,
+    respawn: bool,
 ) -> Result<String, String> {
     let caller = state
         .registry
@@ -121,6 +125,10 @@ pub(crate) async fn spawn_chat(
     if let Some(n) = name {
         state.registry.set_name(&sid, n.to_string());
     }
+    if respawn {
+        state.registry.set_successor_of(&sid, caller_session_id);
+        state.registry.set_close_requested(caller_session_id);
+    }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
@@ -147,7 +155,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_chat_rejects_an_unknown_caller() {
         let state = test_state();
-        let r = spawn_chat(&state, "ghost", ".", "carry on", None, None, None).await;
+        let r = spawn_chat(&state, "ghost", ".", "carry on", None, None, None, false).await;
         let err = r.expect_err("unknown caller must be rejected");
         assert!(err.contains("unknown caller session"), "{err}");
     }
@@ -165,7 +173,7 @@ mod tests {
             "2026-08-18T00:00:00Z",
         );
         let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
-        let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None).await;
+        let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false).await;
         let err = r.expect_err("foreign cwd must be rejected");
         assert!(err.contains("own working directory"), "{err}");
     }
