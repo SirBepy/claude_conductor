@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 // Re-export identity helpers so existing call sites that reach into
 // `settings::store::*` keep resolving without changes.
 pub use super::identity::{
-    find_repo_root, normalize_cwd_key, normalize_path, project_key, project_root,
+    find_repo_root, is_ephemeral_root_path, normalize_cwd_key, normalize_path, project_key, project_root,
 };
 use super::identity::dedupe_projects_by_path_key;
 
@@ -74,6 +74,9 @@ pub fn load(path: &Path) -> Settings {
 /// If the project already exists, updates `last_active_at`. If created,
 /// populates `id` (uuid v4), `name` (basename), `avatar` (None), and
 /// timestamps (`now` comes from the caller so tests can inject).
+///
+/// Skips persisting for `is_ephemeral_root_path` cwds - id stays
+/// deterministic (keyed off `key`) so a repeat call agrees.
 pub fn upsert_project_for_cwd(
     settings: &mut crate::types::Settings,
     cwd: &std::path::Path,
@@ -87,6 +90,9 @@ pub fn upsert_project_for_cwd(
     {
         p.last_active_at = Some(now.to_string());
         return (p.id.clone(), false);
+    }
+    if is_ephemeral_root_path(cwd) {
+        return (format!("ephemeral:{key}"), false);
     }
     // `project_root`, not `find_repo_root`: it also rolls a worktree up to
     // its main checkout, so the stored path/name match the key looked up
@@ -116,7 +122,8 @@ pub fn upsert_project_for_cwd(
 
 /// Companion to `upsert_project_for_cwd` for cases where the project_id was
 /// already generated elsewhere (e.g. daemon-side registry). Idempotent: if a
-/// project for `cwd` already exists with any id, this is a no-op.
+/// project for `cwd` already exists with any id, this is a no-op. Also skips
+/// persisting for `is_ephemeral_root_path` cwds, matching `upsert_project_for_cwd`.
 pub fn upsert_project_with_id_for_cwd(
     settings: &mut crate::types::Settings,
     project_id: &str,
@@ -129,6 +136,9 @@ pub fn upsert_project_with_id_for_cwd(
         .iter()
         .any(|p| project_key(&p.path) == key)
     {
+        return;
+    }
+    if is_ephemeral_root_path(cwd) {
         return;
     }
     let root = project_root(cwd);
@@ -180,6 +190,13 @@ mod tests {
     use super::*;
     use crate::types::Settings;
     use tempfile::tempdir;
+
+    /// Rooted beside the test binary, not `tempfile::tempdir()`'s OS-temp
+    /// default - avoids tripping `is_ephemeral_root_path` or this repo's own `.git`.
+    fn non_ephemeral_tempdir() -> tempfile::TempDir {
+        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        tempfile::Builder::new().prefix("cc-test-").tempdir_in(exe_dir).unwrap()
+    }
 
     #[test]
     fn load_missing_file_returns_defaults() {
@@ -260,6 +277,27 @@ mod tests {
         assert_eq!(s.projects[0].last_active_at.as_deref(), Some("later"));
     }
 
+    #[test]
+    fn upsert_skips_persisting_for_ephemeral_cwd() {
+        let mut s = Settings::default();
+        let temp_cwd = std::env::temp_dir().join("skill-eval-cwd-abc123");
+        let (id, created) = upsert_project_for_cwd(&mut s, &temp_cwd, "now");
+        assert!(!created, "ephemeral cwd must never mint a persisted project");
+        assert!(s.projects.is_empty());
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn upsert_returns_stable_id_for_repeated_ephemeral_cwd() {
+        // Nothing is persisted, so a naive fresh-uuid-per-miss would hand
+        // two callers for the same session two different ids.
+        let mut s = Settings::default();
+        let temp_cwd = std::env::temp_dir().join("skill-eval-cwd-abc123");
+        let (id1, _) = upsert_project_for_cwd(&mut s, &temp_cwd, "t1");
+        let (id2, _) = upsert_project_for_cwd(&mut s, &temp_cwd, "t2");
+        assert_eq!(id1, id2);
+    }
+
     #[cfg(windows)]
     #[test]
     fn upsert_merges_case_variants_on_windows() {
@@ -320,7 +358,7 @@ mod tests {
 
     #[test]
     fn upsert_rolls_a_worktree_up_to_the_main_repo_root() {
-        let dir = tempdir().unwrap();
+        let dir = non_ephemeral_tempdir();
         let repo = dir.path().join("myrepo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
         let worktree = repo.join(".claude").join("worktrees").join("feature-x");
@@ -344,7 +382,7 @@ mod tests {
 
     #[test]
     fn upsert_rolls_subfolder_up_to_repo_root() {
-        let dir = tempdir().unwrap();
+        let dir = non_ephemeral_tempdir();
         let repo = dir.path().join("myrepo");
         let sub = repo.join("packages").join("app");
         std::fs::create_dir_all(&sub).unwrap();
@@ -364,7 +402,7 @@ mod tests {
 
     #[test]
     fn upsert_creates_subfolder_entry_when_not_in_repo() {
-        let dir = tempdir().unwrap();
+        let dir = non_ephemeral_tempdir();
         let p = dir.path().join("plain");
         std::fs::create_dir_all(&p).unwrap();
         let mut s = Settings::default();

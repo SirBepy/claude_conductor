@@ -138,9 +138,11 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                         g.path_exists = std::path::Path::new(&g.path).exists();
                     }
                     // Keep the phone's project picker / Projects view free of
-                    // the "jarvis-home" pseudo-project, mirroring the desktop
-                    // Tauri command - see `filter_out_jarvis_home`'s doc.
-                    crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(groups)
+                    // the "jarvis-home" pseudo-project and temp-dir scratch
+                    // sessions, mirroring the desktop Tauri command - see
+                    // `filter_out_jarvis_home`/`filter_out_ephemeral_projects`.
+                    let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(groups);
+                    crate::ipc::project_groups::groups_test_helpers::filter_out_ephemeral_projects(groups)
                 })
                 .await
                 .map_err(|e| RpcError::internal(format!("join: {e}")))?;

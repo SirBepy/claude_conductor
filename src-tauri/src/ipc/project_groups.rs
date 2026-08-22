@@ -146,6 +146,18 @@ pub mod groups_test_helpers {
             .filter(|g| project_key(Path::new(&g.path)) != jarvis_key)
             .collect()
     }
+
+    /// Drops scratch/temp-dir sessions (skill-eval, rules-probe) from the
+    /// picker. `upsert_project_for_cwd` already refuses to persist these,
+    /// but a group can still be seeded from token-history or a live
+    /// instance alone (`build_groups` steps 1/3) - this is the belt to that braces.
+    pub fn filter_out_ephemeral_projects(groups: Vec<ProjectGroup>) -> Vec<ProjectGroup> {
+        use crate::settings::identity::is_ephemeral_root_path;
+        groups
+            .into_iter()
+            .filter(|g| !is_ephemeral_root_path(Path::new(&g.path)))
+            .collect()
+    }
 }
 
 #[tauri::command]
@@ -162,7 +174,8 @@ pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate
         for g in &mut groups {
             g.path_exists = Path::new(&g.path).exists();
         }
-        groups_test_helpers::filter_out_jarvis_home(fold_worktrees(groups))
+        let groups = groups_test_helpers::filter_out_jarvis_home(fold_worktrees(groups));
+        groups_test_helpers::filter_out_ephemeral_projects(groups)
     })
     .await
     .unwrap_or_default();
@@ -487,6 +500,41 @@ mod build_groups_tests {
         ];
         let filtered = filter_out_jarvis_home(groups);
         assert_eq!(filtered.len(), 1, "only jarvis-home should be dropped");
+        assert_eq!(filtered[0].path, "C:\\some\\real\\project");
+    }
+
+    #[test]
+    fn filter_out_ephemeral_projects_drops_temp_dir_paths() {
+        use super::groups_test_helpers::filter_out_ephemeral_projects;
+        use crate::types::ProjectGroup;
+
+        fn group(path: &str) -> ProjectGroup {
+            ProjectGroup {
+                id: None,
+                path: path.to_string(),
+                name: "x".into(),
+                parent_segment: None,
+                avatar: Avatar::None,
+                automation_enabled: false,
+                tokens_7d: 0,
+                live: 0,
+                any_remote: false,
+                any_automated: false,
+                last_active_at: None,
+                path_exists: true,
+                worktrees: Vec::new(),
+                last_worktree_path: None,
+                last_start_folder_rel: None,
+            }
+        }
+
+        let temp_path = std::env::temp_dir().join("skill-eval-cwd-abc123");
+        let groups = vec![
+            group(&temp_path.to_string_lossy()),
+            group("C:\\some\\real\\project"),
+        ];
+        let filtered = filter_out_ephemeral_projects(groups);
+        assert_eq!(filtered.len(), 1, "only the temp-dir project should be dropped");
         assert_eq!(filtered[0].path, "C:\\some\\real\\project");
     }
 }

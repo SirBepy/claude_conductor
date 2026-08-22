@@ -162,6 +162,19 @@ pub fn normalize_cwd_key(p: &std::path::Path) -> String {
     }
 }
 
+/// True when `path` sits under a scratch root: the OS temp dir, or the
+/// `C:\tmp` convention skill-eval/rules-probe scratch runs use. Shared by
+/// `upsert_project_for_cwd` and `filter_out_ephemeral_projects` so neither
+/// drifts from the other.
+pub fn is_ephemeral_root_path(p: &std::path::Path) -> bool {
+    let key = normalize_cwd_key(p);
+    if key.is_empty() {
+        return false;
+    }
+    let roots = [normalize_cwd_key(&std::env::temp_dir()), normalize_cwd_key(std::path::Path::new(r"C:\tmp"))];
+    roots.iter().any(|root| !root.is_empty() && (key == *root || key.starts_with(&format!("{root}\\"))))
+}
+
 /// One-shot migration run on every load. Collapses duplicate project
 /// entries that point at the same folder under different casing or
 /// separator styles. The surviving entry keeps the first id seen (so
@@ -210,6 +223,13 @@ pub(crate) fn dedupe_projects_by_path_key(projects: &mut Vec<crate::types::Proje
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// Rooted beside the test binary, not `tempfile::tempdir()`'s OS-temp
+    /// default - avoids tripping `is_ephemeral_root_path` or this repo's own `.git`.
+    fn non_ephemeral_tempdir() -> tempfile::TempDir {
+        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        tempfile::Builder::new().prefix("cc-test-").tempdir_in(exe_dir).unwrap()
+    }
 
     fn sample_project(path: std::path::PathBuf, preferred_account_id: Option<&str>) -> crate::types::ProjectConfig {
         crate::types::ProjectConfig {
@@ -503,5 +523,30 @@ mod tests {
         }).collect();
         let upper = project_key(std::path::Path::new(&toggled));
         assert_eq!(lower, upper, "drive-letter casing must not split the key");
+    }
+
+    #[test]
+    fn is_ephemeral_root_path_matches_os_temp_dir() {
+        let inside = std::env::temp_dir().join("skill-eval-cwd-abc123");
+        assert!(is_ephemeral_root_path(&inside));
+        assert!(is_ephemeral_root_path(&std::env::temp_dir()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn is_ephemeral_root_path_matches_c_tmp_case_insensitive() {
+        assert!(is_ephemeral_root_path(std::path::Path::new(r"c:\TMP\rules-probe\work")));
+        assert!(is_ephemeral_root_path(std::path::Path::new(r"C:\tmp")));
+    }
+
+    #[test]
+    fn is_ephemeral_root_path_does_not_match_real_projects() {
+        let dir = non_ephemeral_tempdir();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        assert!(!is_ephemeral_root_path(&repo));
+        // A sibling that merely starts with the same prefix as `C:\tmp`
+        // (e.g. `C:\tmpfoo`) must not false-match.
+        assert!(!is_ephemeral_root_path(std::path::Path::new(r"C:\tmpfoo\work")));
     }
 }
