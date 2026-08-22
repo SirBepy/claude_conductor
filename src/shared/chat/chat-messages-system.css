@@ -16,6 +16,9 @@
 .msg.system.system-long > summary {
   list-style: none;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .msg.system.system-long > summary::-webkit-details-marker {
   display: none;

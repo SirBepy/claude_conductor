@@ -18,19 +18,37 @@ const ROWS = [
   { kind: "system", text: "Continuing session...", ts: 0 },
 ] satisfies RenderedMessage[];
 
-async function mountNotes(page: Page) {
+async function mountNotes(page: Page, width = 720) {
   await mountView(page, { invoke: { list_slash_commands: [] } });
-  await page.evaluate(async (rows) => {
-    await import("/views/sessions/sessions.ts");
-    const { renderMessage } = await import("/shared/chat/chat-transforms.ts");
-    const host = document.createElement("div");
-    host.id = "note-harness";
-    host.className = "chat-messages";
-    host.style.cssText = "padding:16px;max-width:720px";
-    host.innerHTML = rows.map((m) => renderMessage(m)).join("");
-    document.body.replaceChildren(host);
-  }, ROWS);
+  await page.evaluate(
+    async ({ rows, width }) => {
+      await import("/views/sessions/sessions.ts");
+      const { renderMessage } = await import("/shared/chat/chat-transforms.ts");
+      const host = document.createElement("div");
+      host.id = "note-harness";
+      host.className = "chat-messages";
+      host.style.cssText = `padding:16px;width:${width}px;max-width:${width}px`;
+      host.innerHTML = rows.map((m) => renderMessage(m)).join("");
+      document.body.replaceChildren(host);
+    },
+    { rows: ROWS, width },
+  );
   return page.locator("#note-harness");
+}
+
+/** Rendered summary height vs its own line-height - the strict one-line check. */
+async function summaryLineMetrics(page: Page) {
+  return page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(
+      "#note-harness details.msg.system.system-long > summary",
+    )!;
+    const cs = getComputedStyle(el);
+    const lineHeight =
+      cs.lineHeight === "normal"
+        ? parseFloat(cs.fontSize) * 1.2
+        : parseFloat(cs.lineHeight);
+    return { height: el.getBoundingClientRect().height, lineHeight };
+  });
 }
 
 test.describe("@shot", () => {
@@ -67,4 +85,24 @@ test.describe("@shot", () => {
     await expect(short).toHaveCSS("font-style", "italic");
     await capture(short, "system-note-short-unchanged");
   });
+
+  for (const width of [720, 390]) {
+    test(`the collapsed summary is a strict single line at ${width}px`, async ({ page }) => {
+      await mountNotes(page, width);
+      const { height, lineHeight } = await summaryLineMetrics(page);
+      expect(lineHeight).toBeGreaterThan(0);
+      expect(height).toBeLessThanOrEqual(lineHeight + 1);
+
+      // overflow:hidden must not eat the disclosure caret.
+      const caretVisible = await page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>(
+          "#note-harness details.msg.system.system-long > summary",
+        )!;
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + 4, r.top + r.height / 2);
+        return el.contains(hit) && el.scrollWidth > 0;
+      });
+      expect(caretVisible).toBe(true);
+    });
+  }
 });
