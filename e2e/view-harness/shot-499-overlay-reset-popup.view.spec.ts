@@ -72,6 +72,13 @@ test.describe("@shot", () => {
       .toBe("0");
     await capture(row, "overlay-reset-popup-at-rest");
 
+    // Todo 417 round 2: the headroom was 70px of dead space over a 62px dial.
+    const panelAtRest = (await page.locator("#ocPanel").boundingBox())!;
+    const dialAtRest = (await page.locator(".oc-dial").boundingBox())!;
+    const headroom = dialAtRest.y - panelAtRest.y;
+    console.log(`[417] at-rest headroom above the dial: ${headroom}px`);
+    expect(headroom).toBeLessThanOrEqual(45);
+
     await cell.hover();
     const popup = cell.locator(".oc-reset-pop");
     await expect(popup).toBeVisible();
@@ -89,6 +96,11 @@ test.describe("@shot", () => {
     expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(
       panelBox!.x + panelBox!.width + SUBPIXEL_TOLERANCE,
     );
+
+    // Reclaiming the headroom moved the popup down over the info circle's
+    // empty top cap - it must still stop short of the account name.
+    const nameBox = (await cell.locator(".oc-info-nm").boundingBox())!;
+    expect(popupBox!.y + popupBox!.height).toBeLessThanOrEqual(nameBox.y);
 
     await capture(row, "overlay-reset-popup-open");
   });

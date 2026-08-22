@@ -72,7 +72,7 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
  * overlapping a neighbour's icon is fine (a hover tooltip covering
  * something briefly is normal), only the row's own outer edges are a hard
  * window-clipping risk. */
-.oc-dial-row { display: flex; align-items: flex-start; gap: 6px; padding: 13px 78px 13px 78px; padding-top: 70px; }
+.oc-dial-row { --oc-pop-headroom: 40px; display: flex; align-items: flex-start; gap: 6px; padding: var(--oc-pop-headroom) 78px 13px 78px; }
 
 /* Card mode: one shared rounded card behind the dial row (vs circles mode's
  * per-dial disc). Painted on ::before, inset to the row's CONTENT box (not
@@ -82,7 +82,7 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
 .oc-dial-row.oc-card::before {
   content: "";
   position: absolute;
-  inset: 70px 78px 13px 78px;
+  inset: var(--oc-pop-headroom) 78px 13px 78px;
   background: color-mix(in srgb, var(--color-surface, #1f1f2c) var(--overlay-opacity, 72%), transparent);
   border: 1px solid color-mix(in srgb, var(--color-border, #2e2e40) var(--overlay-opacity, 72%), transparent);
   border-radius: 16px;
@@ -225,6 +225,11 @@ body.oc-dragging #ocPanel { cursor: grabbing; }
   opacity: 1;
   transform: translateX(-50%) translateY(0) scale(1);
 }
+/* Overlay only: pinned to the TOP of the row's reserved headroom
+ * (--oc-pop-headroom, trimmed 70px -> 40px on 2026-08-22) rather than offset
+ * from the dial, so a taller popup grows down over the info circle's empty top
+ * cap instead of off the window top, where resizeOverlayToContent clips it. */
+.oc-dial-row .oc-reset-pop { top: calc(2px - var(--oc-pop-headroom)); bottom: auto; }
 .oc-reset-row { display: flex; align-items: baseline; gap: 5px; font-size: 10.5px; white-space: nowrap; }
 .oc-reset-k { color: var(--color-text-muted, #8a8aa0); font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; width: 14px; flex: none; }
 .oc-reset-rel { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text, #e8e8f0); }
