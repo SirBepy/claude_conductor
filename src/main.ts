@@ -19,6 +19,9 @@ import { renderSidebar } from "./views/sessions/sidebar";
 import { installExternalLinkInterceptor } from "./shared/external-links";
 import { invoke } from "./shared/ipc";
 import { sessionEvents } from "./shared/chat/event-store";
+import { setAuthorTagResolver } from "./shared/chat/author-tag-source";
+import { characterForSessionId } from "./views/sessions/session-characters";
+import { state as sessionsState } from "./views/sessions/state";
 import { openModelEffortModal } from "./views/sessions/model-effort-modal";
 import { startNewSession } from "./views/sessions/pending-flow";
 import { setupRemoteVoicelines } from "./shared/remote-voiceline";
@@ -257,6 +260,13 @@ setSidebarRerenderHook(() => {
     ?.querySelector<HTMLElement>("#sessions-list");
   if (listEl) renderSidebar(listEl);
 });
+// Same injection reason as above: chat-transforms renders the AI-authored tag
+// but must not static-import view state. Runs per window realm, so the chats
+// window gets its own registration off this same entry point.
+setAuthorTagResolver((sessionId) => ({
+  charId: characterForSessionId(sessionId),
+  cwd: sessionsState.sessions.find((s) => s.session_id === sessionId)?.cwd ?? null,
+}));
 if (detachedSessionId) {
   document.body.classList.add("detached-mode");
   // Hide all static legacy views from index.html so only #app renders.

@@ -7,8 +7,7 @@ import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
 import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions } from "./markdown-highlight";
 export { highlightSlashMentions, highlightComposerInput } from "./markdown-highlight";
-import { characterForSessionId } from "../../views/sessions/session-characters";
-import { state as sessionsState } from "../../views/sessions/state";
+import { authorTagFor } from "./author-tag-source";
 import {
   type RenderedMessage,
   stripStatusToken,
@@ -252,11 +251,10 @@ export function truncateForSummary(text: string, maxLen: number): string {
 // render time. Unresolvable session falls back to a generic icon per half,
 // never blank.
 function renderAuthorTagHtml(authorSessionId: string): string {
-  const charId = characterForSessionId(authorSessionId);
+  const { charId, cwd } = authorTagFor(authorSessionId);
   const charHtml = charId
     ? `<img class="char-avatar" data-character-id="${escapeHtml(charId)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;image-rendering:pixelated">`
     : `<i class="ph ph-robot"></i>`;
-  const cwd = sessionsState.sessions.find((s) => s.session_id === authorSessionId)?.cwd;
   const projHtml = cwd
     ? `<span class="proj-face" data-proj-face="${escapeHtml(cwd)}"><i class="ph ph-folder"></i></span>`
     : `<i class="ph ph-folder"></i>`;
