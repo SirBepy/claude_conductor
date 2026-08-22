@@ -5,6 +5,10 @@ import { capture, mountView } from "./harness";
 // the caption box should now render for text and PDF previews too.
 const DESKTOP = { width: 1400, height: 900 };
 
+// Full Chromium, not the default headless shell: the shell ships no PDF plugin
+// at all, so the pdf test's paint assertion would fail for the wrong reason.
+test.use({ channel: "chromium" });
+
 const LIGHTBOX_INVOKE = {
   list_slash_commands: [
     { name: "close", args: null, description: "Session retrospective", source: { kind: "user-skill" } },
@@ -14,10 +18,15 @@ const LIGHTBOX_INVOKE = {
 
 type Kind = "text" | "pdf" | "image";
 
+// A one-page PDF with a real xref/startxref: Chrome's plugin renders a black
+// box on a white sheet, so a paint assertion has something unambiguous to see.
+const PDF_BASE64 =
+  "JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAzMjAgMjAwXS9SZXNvdXJjZXM8PC9Gb250PDwvRjEgNSAwIFI+Pj4+L0NvbnRlbnRzIDQgMCBSPj4KZW5kb2JqCjQgMCBvYmoKPDwvTGVuZ3RoIDc5Pj5zdHJlYW0KMCAwIDAgcmcgNDAgNDAgMjQwIDEyMCByZSBmIEJUIC9GMSAxOCBUZiA2MCA5MCBUZCAxIDEgMSByZyAoTGlnaHRib3ggUERGKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwvVHlwZS9Gb250L1N1YnR5cGUvVHlwZTEvQmFzZUZvbnQvSGVsdmV0aWNhPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU0IDAwMDAwIG4gCjAwMDAwMDAxMDUgMDAwMDAgbiAKMDAwMDAwMDIxNyAwMDAwMCBuIAowMDAwMDAwMzQzIDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA2L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKNDA2CiUlRU9GCg==";
+
 /** Installs a stub bridge then opens the lightbox, mirroring
  *  lightbox-composer-typing.view.spec.ts's own helper. */
 async function openLightboxWithComposer(page: Page, kind: Kind): Promise<void> {
-  await page.evaluate(async (k: Kind) => {
+  await page.evaluate(async ({ k, PDF_BASE64 }: { k: Kind; PDF_BASE64: string }) => {
     const lightbox = await import("/shared/chat/lightbox.ts");
     lightbox.setLightboxComposerBridge({
       getDraftText: () => "",
@@ -37,21 +46,7 @@ async function openLightboxWithComposer(page: Page, kind: Kind): Promise<void> {
     }
 
     if (k === "pdf") {
-      const body = "BT /F1 18 Tf 24 110 Td (Lightbox PDF caption test) Tj ET";
-      const pdf = [
-        "%PDF-1.4",
-        "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
-        "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
-        "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 320 200]"
-          + "/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R>>endobj",
-        `4 0 obj<</Length ${body.length}>>stream`,
-        body,
-        "endstream endobj",
-        "5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj",
-        "trailer<</Root 1 0 R/Size 6>>",
-        "%%EOF",
-      ].join("\n");
-      lightbox.openLightbox({ type: "pdf", base64: btoa(pdf), filename: "report.pdf" });
+      lightbox.openLightbox({ type: "pdf", base64: PDF_BASE64, filename: "report.pdf" });
       return;
     }
 
@@ -76,7 +71,7 @@ async function openLightboxWithComposer(page: Page, kind: Kind): Promise<void> {
       base64: canvas.toDataURL("image/png").slice(prefix.length),
       filename: "shot.png",
     });
-  }, kind);
+  }, { k: kind, PDF_BASE64 });
 }
 
 async function expectNoOverlap(composer: Locator, content: Locator): Promise<void> {
@@ -88,6 +83,42 @@ async function expectNoOverlap(composer: Locator, content: Locator): Promise<voi
     a!.y + a!.height <= b!.y || b!.y + b!.height <= a!.y
     || a!.x + a!.width <= b!.x || b!.x + b!.width <= a!.x;
   expect(separated, `composer ${JSON.stringify(a)} overlaps content ${JSON.stringify(b)}`).toBe(true);
+}
+
+/** Records CSP violations for the whole page lifetime. Installed before
+ *  mountView so it is already listening when the page navigates. */
+async function watchCspViolations(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __cspViolations: string[] };
+    w.__cspViolations = [];
+    document.addEventListener("securitypolicyviolation", (e) => {
+      const v = e as SecurityPolicyViolationEvent;
+      w.__cspViolations.push(`${v.effectiveDirective || v.violatedDirective} <- ${v.blockedURI}`);
+    });
+  });
+  return () => page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
+}
+
+/** Share of near-white pixels in a locator's screenshot. A blocked plugin
+ *  leaves the dark overlay showing through (~0); a rendered PDF page is a
+ *  big white sheet. */
+async function whitePixelRatio(page: Page, target: Locator): Promise<number> {
+  const png = (await target.screenshot()).toString("base64");
+  return page.evaluate(async (data) => {
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    let light = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if ((px[i] ?? 0) > 200 && (px[i + 1] ?? 0) > 200 && (px[i + 2] ?? 0) > 200) light++;
+    }
+    return light / (px.length / 4);
+  }, png);
 }
 
 /** Enter must stay a plain newline: the lightbox box mirrors a draft, it has
@@ -121,10 +152,9 @@ test.describe("@shot", () => {
     await capture(overlay, "lightbox-text-composer");
   });
 
-  // The embed paints empty here AND under real Chrome: index.html's CSP sets no
-  // object-src, so default-src 'self' blocks the blob: plugin load.
-  test("pdf lightbox shows the caption box under the <embed>", async ({ page }) => {
+  test("pdf lightbox renders the PDF under the caption box", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
+    const cspViolations = await watchCspViolations(page);
     await mountView(page, { invoke: LIGHTBOX_INVOKE });
     await openLightboxWithComposer(page, "pdf");
 
@@ -134,6 +164,12 @@ test.describe("@shot", () => {
     await expect(embed).toBeVisible();
     await expect(embed).toHaveAttribute("type", "application/pdf");
     await expect(embed).toHaveAttribute("src", /^blob:/);
+
+    // Todo 739: an <embed> that exists but paints nothing IS the bug. A blocked
+    // plugin leaves the dark overlay showing (ratio 0); the page sheet reads ~0.08.
+    await expect.poll(() => whitePixelRatio(page, embed), { timeout: 10_000 }).toBeGreaterThan(0.03);
+    expect(await cspViolations()).toEqual([]);
+
     await expect(input).toBeVisible();
     await expectNoOverlap(input, embed);
 

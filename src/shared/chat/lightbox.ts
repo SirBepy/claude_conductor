@@ -84,6 +84,9 @@ export function openLightbox(content: LightboxContent): void {
     setupImageZoomPan(img, inner);
     overlay.appendChild(buildMoreMenuButton(content));
   } else if (content.type === "pdf") {
+    // This blob: URL is checked twice by CSP - object-src for the <embed>, then
+    // frame-src for the PDF viewer's inner frame. Both index.html and
+    // tauri.conf.json must allow blob: on both, or the embed paints nothing.
     const blob = b64toBlob(content.base64, "application/pdf");
     const url = URL.createObjectURL(blob);
     const embed = document.createElement("embed");
