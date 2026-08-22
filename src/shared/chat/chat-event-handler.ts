@@ -19,6 +19,7 @@ import {
   stripAuqAnswerBlock,
   RenderedMessage,
 } from "./chat-transforms";
+import { eventToRenderedMessage } from "./chat-event-to-message";
 import { isRawViewEnabled } from "./message-filter-pref";
 import { parseFileEdit } from "./file-edits";
 import { canonicalTool } from "./tool-meta";
@@ -447,7 +448,6 @@ function handleToolUseEvent(
 function handleToolResultEvent(
   r: ChatRenderer,
   ev: Extract<ChatEvent, { type: "tool_result" }>,
-  ts: number,
 ): EventOutcome {
   // TodoWrite's tool_result carries no user-facing content - absorb it
   // silently (no message row, no tool tally bump), mirroring how the AUQ
@@ -468,13 +468,11 @@ function handleToolResultEvent(
     }
     return { touched: true, coalesce: false };
   }
-  r.messages.push({
-    kind: "tool_result",
-    tool_use_id: ev.tool_use_id,
-    output: ev.output,
-    is_error: ev.is_error,
-    ts,
-  });
+  // Built by the shared converter, not a literal: this path used to drop
+  // output_truncated/full_seq, so a truncated result on the initial hydrate
+  // rendered a cut-off preview with no "Load full output" button (todo 738).
+  const rendered = eventToRenderedMessage(ev);
+  if (rendered) r.messages.push(rendered);
   // Only idle the label once no tool from this turn is outstanding (see
   // outstandingActivityToolIds) - text stays, idle:true just flags it so a
   // fast result doesn't flash "Thinking...". keepChip only clears the
@@ -600,7 +598,7 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
     case "user_message": outcome = handleUserMessageEvent(r, ev, ts); break;
     case "assistant_message": outcome = handleAssistantMessageEvent(r, ev, ts); break;
     case "tool_use": outcome = handleToolUseEvent(r, ev, ts); break;
-    case "tool_result": outcome = handleToolResultEvent(r, ev, ts); break;
+    case "tool_result": outcome = handleToolResultEvent(r, ev); break;
     case "notification": outcome = handleNotificationEvent(r, ev); break;
     case "session_ended": outcome = handleSessionEndedEvent(r, ev, ts); break;
     case "turn_usage": handleTurnUsageEvent(r, ev, opts); return;

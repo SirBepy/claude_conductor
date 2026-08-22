@@ -28,17 +28,10 @@ function assistantMsg(text: string): unknown {
   return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
 }
 
+// The truncated result rides the INITIAL page on purpose (todo 738): that is
+// the path a user hits just by opening a chat, and the backend truncates the
+// newest page too. Scrollback used to be the only path carrying the flags.
 const NEWEST_PAGE = {
-  events: [userMsg("thanks"), assistantMsg("Done.")] as unknown[],
-  oldest_seq: 900,
-  newest_seq: 1000,
-  has_more: true,
-};
-
-// The truncated result rides an OLDER page on purpose: only chat-pagination's
-// eventToRenderedMessage carries output_truncated through, so scrollback is
-// the one path where the button renders (the bulk-load replay drops it).
-const OLDER_PAGE = {
   events: [
     userMsg("dump the build log"),
     { type: "tool_use", tool_name: "Bash", input: { command: "cat build.log" }, id: "tu1", timestamp: 0, parent_tool_use_id: null },
@@ -53,8 +46,8 @@ const OLDER_PAGE = {
     },
     assistantMsg("Here is the log."),
   ] as unknown[],
-  oldest_seq: 100,
-  newest_seq: 800,
+  oldest_seq: 900,
+  newest_seq: 1000,
   has_more: false,
 };
 
@@ -80,20 +73,8 @@ async function openTruncatedResultRow(page: Page) {
       },
     },
   });
-  // The harness InvokeMap is one canned value per command; the paginator needs
-  // a different second page, so wrap invoke once the boot seed has been used.
-  await page.evaluate((older) => {
-    const core = (window as unknown as { __TAURI__: { core: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__.core;
-    const inner = core.invoke;
-    core.invoke = (cmd, args) =>
-      cmd === "load_history_page" && args?.beforeSeq !== undefined
-        ? Promise.resolve(older)
-        : inner(cmd, args);
-  }, OLDER_PAGE);
-
   await page.locator("#sessions-list li[data-session-id]").first().click();
-  // The top sentinel's IntersectionObserver fires fetchOlder on its own here,
-  // then the Bash chip's panel is what holds the folded result row.
+  // The Bash chip's panel is what holds the folded result row.
   const chip = page.locator("#session-pane .session-messages .tool-strip > .tool-chip[data-tool='Bash']");
   await chip.click();
   const row = page.locator("#session-pane .session-messages details.msg.tool-result");
