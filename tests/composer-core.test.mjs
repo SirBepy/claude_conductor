@@ -151,6 +151,32 @@ describe("ComposerCore keyboard", () => {
   });
 });
 
+describe("ComposerCore Ctrl+Z", () => {
+  it("consumes Ctrl+Z when onUndoQueued returns true", () => {
+    const onUndoQueued = vi.fn(() => true);
+    const { ta } = mount(undefined, { onUndoQueued });
+    const evt = new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+    ta.dispatchEvent(evt);
+    expect(onUndoQueued).toHaveBeenCalledTimes(1);
+    expect(evt.defaultPrevented).toBe(true);
+  });
+
+  it("lets Ctrl+Z fall through to native undo when onUndoQueued declines", () => {
+    const onUndoQueued = vi.fn(() => false);
+    const { ta } = mount(undefined, { onUndoQueued });
+    const evt = new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+    ta.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+  });
+
+  it("ignores Ctrl+Shift+Z (redo) - never calls onUndoQueued", () => {
+    const onUndoQueued = vi.fn(() => true);
+    const { ta } = mount(undefined, { onUndoQueued });
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    expect(onUndoQueued).not.toHaveBeenCalled();
+  });
+});
+
 describe("ComposerCore autoResize", () => {
   it("onResize fires with the textarea's scrollHeight", () => {
     const onResize = vi.fn();

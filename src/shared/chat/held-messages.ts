@@ -376,6 +376,24 @@ export class HeldMessages {
     this.render.renderChip();
   }
 
+  /** Ctrl+Z pop-back: pull the most-recently-staged item off the active
+   *  session's queue and return its blocks, same removal path as removeItem
+   *  (syncs the drop to the daemon, re-renders the chip). Null if nothing's
+   *  queued. Repeated calls walk the queue LIFO, one item per press. */
+  popLastForActive(): ContentBlock[] | null {
+    const sid = this.sid;
+    if (!sid) return null;
+    const list = this.map.get(sid) ?? [];
+    const last = list[list.length - 1];
+    if (!last) return null;
+    this.map.set(sid, list.slice(0, -1));
+    this.persist();
+    this.sync.remove(sid, last.id);
+    this.render.renderChip();
+    this.attached?.onChange();
+    return last.blocks;
+  }
+
   /** HeldRenderHost: drop one staged item (dropdown row emptied/removed). */
   removeItem(id: number): void {
     const sid = this.sid;

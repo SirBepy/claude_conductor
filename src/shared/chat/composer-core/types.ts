@@ -64,4 +64,7 @@ export interface ComposerCoreOptions {
   /** Fired after autoResize with the textarea's current scrollHeight, so a
    *  host can toggle its own chrome (e.g. Composer's `.composer-row--tall`). */
   onResize?: (scrollHeight: number) => void;
+  /** Fired on Ctrl/Cmd+Z before native text-undo runs. Return true to consume
+   *  it (a queued message was popped back); false lets native undo proceed. */
+  onUndoQueued?: () => boolean;
 }

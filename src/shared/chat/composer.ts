@@ -12,6 +12,7 @@ import type { SuggestProvider } from "./caret-popup/types";
 import type { ChatRenderer } from "./chat-renderer";
 import { parseBuiltin, HANDLERS, type BuiltinContext } from "./builtins";
 import { highlightComposerInput } from "./chat-transforms";
+import { blocksToText } from "./content-blocks";
 import { ComposerCore } from "./composer-core/core";
 import { ComposerVoice } from "./voice/composer-voice";
 import { ComposerPtt } from "./voice/composer-ptt";
@@ -46,6 +47,8 @@ export interface ComposerOptions {
   /** True when a held set exists for the active session. When not busy but
    * held items exist, a normal send bundles them via flushHeldWithDraft. */
   hasHeld?: () => boolean;
+  /** Ctrl+Z pop-back: pull the last-staged held message off the queue. */
+  popLastHeld?: () => ContentBlock[] | null;
   /** Flush the held set together with the current draft as one message. The
    * composer clears itself after calling. */
   flushHeldWithDraft?: (draftBlocks: ContentBlock[]) => void;
@@ -84,6 +87,8 @@ export class Composer {
   // Wall-clock of the last keystroke; feeds isComposing() so an auto-flush
   // doesn't fire out from under the user mid-type.
   private lastKeyAt = 0;
+  // True mid Ctrl+Z chain - lets repeated presses keep walking the queue.
+  private undoChainActive = false;
   private cv: ComposerVoice;
   private ptt: ComposerPtt;
   private att: ComposerAttachments;
@@ -318,6 +323,7 @@ export class Composer {
         onInput: interactive
           ? () => {
               this.lastKeyAt = Date.now();
+              this.undoChainActive = false;
               this.persistDraft();
               this.updateScheduleBtnState();
               this.opts.onDraftActivity?.();
@@ -325,6 +331,7 @@ export class Composer {
           : undefined,
         onEnter: interactive ? () => void this.send() : undefined,
         onCtrlEnter: interactive ? () => this.handleCtrlEnter() : undefined,
+        onUndoQueued: interactive ? () => this.handleUndoQueued() : undefined,
         isMobileViewport: () => isMobileViewport(),
         onResize: (scrollHeight) => {
           this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", scrollHeight > 44);
@@ -485,6 +492,20 @@ export class Composer {
       return;
     }
     void this.send();
+  }
+
+  /** Ctrl/Cmd+Z: pop the last queued message back into the draft. Fires when
+   *  empty, or mid-chain to walk the queue LIFO. Declines when nothing's
+   *  queued, handing the keystroke back to native text-undo. */
+  private handleUndoQueued(): boolean {
+    if (!this.isDraftEmpty() && !this.undoChainActive) return false;
+    const blocks = this.opts.popLastHeld?.();
+    if (!blocks) return false;
+    const popped = blocksToText(blocks);
+    const rest = this.undoChainActive ? (this.textarea?.value ?? "") : "";
+    this.setDraftText(rest ? `${popped}\n\n${rest}` : popped);
+    this.undoChainActive = true;
+    return true;
   }
 
   private async send(): Promise<void> {
@@ -664,6 +685,7 @@ export class Composer {
    * caller, which only stores a flattened prompt string. The lightbox caption
    * round-trip passes false so dismissing a preview never drops attachments. */
   setDraftText(text: string, clearAttachments = true): void {
+    this.undoChainActive = false;
     if (clearAttachments) this.att.clear();
     if (this.textarea) {
       this.textarea.value = text;

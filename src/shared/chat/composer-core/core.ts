@@ -41,6 +41,15 @@ export class ComposerCore {
       if (this.opts.stopPropagationOnPopupConsume) e.stopPropagation();
       return;
     }
+    // Ctrl/Cmd+Z: let the host try to pop a queued message back first (only
+    // the main Composer supplies this). If it declines (nothing to pop),
+    // fall through untouched to the browser's native text-undo.
+    if (e.key.toLowerCase() === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && this.opts.onUndoQueued) {
+      if (this.opts.onUndoQueued()) {
+        e.preventDefault();
+        return;
+      }
+    }
     // Ctrl/Cmd+Enter takes onCtrlEnter when the host supplies one (only the
     // main Composer does, for its queued-message shortcut) - fires even on
     // mobile, since the modifier implies a physical keyboard is attached.

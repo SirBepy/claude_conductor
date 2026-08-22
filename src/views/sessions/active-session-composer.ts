@@ -102,6 +102,7 @@ export function mountComposer(
     },
     onStage: (blocks) => state.heldMessages?.stage(blocks),
     hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
+    popLastHeld: () => state.heldMessages?.popLastForActive() ?? null,
     flushHeldWithDraft: (draftBlocks) => { void state.heldMessages?.flushHeldWithDraft(draftBlocks); },
     sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
     onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),

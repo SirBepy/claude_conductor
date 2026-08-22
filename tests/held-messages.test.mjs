@@ -347,3 +347,31 @@ describe("HeldMessages — editable dropdown rows", () => {
     expect(send).toHaveBeenCalledWith([{ type: "text", text: "edited" }]);
   });
 });
+
+describe("HeldMessages - popLastForActive (Ctrl+Z pop-back)", () => {
+  it("pops the most recently staged item, LIFO", () => {
+    const { held } = makeHarness();
+    held.stage(textBlocks("first"));
+    held.stage(textBlocks("second"));
+
+    expect(held.popLastForActive()).toEqual(textBlocks("second"));
+    expect(held.popLastForActive()).toEqual(textBlocks("first"));
+    expect(held.popLastForActive()).toBeNull();
+  });
+
+  it("removes the popped item from the queue and updates the chip count", () => {
+    const { held, chipSlot } = makeHarness();
+    held.stage(textBlocks("keep"));
+    held.stage(textBlocks("pop-me"));
+    held.renderChip();
+
+    held.popLastForActive();
+    expect(held.hasItemsForActive()).toBe(true);
+    expect(chipSlot.querySelector(".held-count").textContent).toBe("1");
+  });
+
+  it("returns null when nothing is queued", () => {
+    const { held } = makeHarness();
+    expect(held.popLastForActive()).toBeNull();
+  });
+});
