@@ -3,8 +3,8 @@ import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./har
 
 // Todo 526: prove every image entry point lands on the unified
 // chat-image-gallery overlay rather than the old single-image lightbox.
-// Distinct 240x150 PNGs per image on purpose - the entry points resolve their
-// start index by matching mime+base64, so shared bytes would false-green it.
+// Distinct 240x150 PNGs per image on purpose, so an entry point that resolved
+// its start index by matching bytes (todo 740) can't false-green it.
 const VIOLET = "iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAABQ0lEQVR42u3SQQ0AQAgDQYTi6PzyBQFngJBpRkGz0WaHFi4wQZsJ2kzQZoI2QZsJ2kzQZoI2E7QJ2kzQZoI2E7SZoE3QZoI2E7SZoM0EbYI2E7SZoM0EbfYH/bLgDEEjaBA0CBoEjaBB0CBoEDQIGkGDoEHQIGgQNIIGQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE0CBoEDYIGQSNoEDQIGgSNoL2AoEHQIGgQNIIGQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE0CBoEDYIGQSNoEDQIGgQNgkbQIGgQNAgaBI2gQdAgaBA0ggZBg6BB0CBoBA2CBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgaBA2CRtAgaBA0CBoEjaBB0CBoEDSC9gKCBkGDoEHQCBoEDYIGQYOgETQIGrYYrlt1AWLq60YAAAAASUVORK5CYII=";
 const GREEN = "iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAABQ0lEQVR42u3SAQ0AQAgDMVxi7MXgDgS8AUK6VMFy0WaHFi4wQZsJ2kzQZoI2QZsJ2kzQZoI2E7QJ2kzQZoI2E7SZoE3QZoI2E7SZoM0EbYI2E7SZoM0EbfYHnfXgDEEjaBA0CBoEjaBB0CBoEDQIGkGDoEHQIGgQNIIGQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE0CBoEDYIGQSNoEDQIGgSNoL2AoEHQIGgQNIIGQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE0CBoEDYIGQSNoEDQIGgQNgkbQIGgQNAgaBI2gQdAgaBA0ggZBg6BB0CBoBA2CBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgaBA2CRtAgaBA0CBoEjaBB0CBoEDSC9gKCBkGDoEHQCBoEDYIGQYOgETQIGrYYQ57mjBlTxfgAAAAASUVORK5CYII=";
 const AMBER = "iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAABQ0lEQVR42u3SQQ0AQAgDQbQh9FzyBgFngJBpRkGz0WaHFi4wQZsJ2kzQZoI2QZsJ2kzQZoI2E7QJ2kzQZoI2E7SZoE3QZoI2E7SZoM0EbYI2E7SZoM0EbfYHXS/hDEEjaBA0CBoEjaBB0CBoEDQIGkGDoEHQIGgQNIIGQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE0CBoEDYIGQSNoEDQIGgSNoL2AoEHQIGgQNIIGQYOgQdAgaAQNggZBg6BB0AgaBA2CBkGDoBE0CBoEDYIGQSNoEDQIGgQNgkbQIGgQNAgaBI2gQdAgaBA0ggZBg6BB0CBoBA2CBkGDoEHQCBoEDYIGQYOgETQIGgQNggZBI2gQNAgaBA2CRtAgaBA0CBoEjaBB0CBoEDSC9gKCBkGDoEHQCBoEDYIGQYOgETQIGrYYDF3LRcBto9MAAAAASUVORK5CYII=";
@@ -31,9 +31,8 @@ function assistantMsg(text: string): unknown {
   return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
 }
 
-// 4 image-bearing turns -> 5 collected images (1 attachment + 4 screenshots).
-// The two inline `image` blocks are NOT collected: GREEN has no counterpart,
-// AMBER deliberately repeats screenshot #1's bytes.
+// 4 image-bearing turns -> 7 images: 1 attachment, 4 screenshots, 2 inline
+// blocks. GREEN's bytes are unique; AMBER's repeat screenshot #1's.
 function transcript() {
   const events: unknown[] = [
     userMsg("Here is the crash screen <file:C:/shots/crash-report.png::crash-report.png>", GREEN),
@@ -123,28 +122,28 @@ test.describe("@shot", () => {
   test("attachment thumb opens the unified gallery", async ({ page }) => {
     await mountChat(page);
     await page.locator("#session-pane .msg.user .sent-attachment-thumb:not(.screenshot-thumb)").first().click();
-    await expectUnifiedGallery(page, "1 of 5", "Here is the crash screen");
-    await expect(page.locator(".gallery-rail-chip-count")).toHaveText("1/1");
+    await expectUnifiedGallery(page, "1 of 7", "Here is the crash screen");
+    await expect(page.locator(".gallery-rail-chip-count")).toHaveText("1/2");
     await capture(gallery(page), "gallery-from-attachment");
   });
 
-  test("inline block image opens the unified gallery when its bytes are a collected screenshot", async ({ page }) => {
+  test("inline block image opens the unified gallery at its own slot", async ({ page }) => {
     await mountChat(page);
     const inline = page.locator("#session-pane .msg.user img.block.image");
     await expect(inline).toHaveCount(2);
 
+    // Repeats screenshot #1's bytes, still lands on its own slot.
     await inline.nth(1).click();
-    await expectUnifiedGallery(page, "2 of 5", "Now capture the app window twice.");
+    await expectUnifiedGallery(page, "7 of 7", "Same shot again for reference.");
     await capture(gallery(page), "gallery-from-inline-image");
     await page.keyboard.press("Escape");
     await expect(gallery(page)).toHaveCount(0);
 
-    // The other inline block has no counterpart in the collection, so
-    // handleBlockImageClick's `else` branch runs: the OLD single-image lightbox.
+    // Regression, todo 740: these bytes appear nowhere else in the transcript,
+    // which used to drop the click through to the old single-image lightbox.
     await inline.nth(0).click();
-    await expect(plainLightbox(page)).toBeVisible();
-    await expect(gallery(page)).toHaveCount(0);
-    await capture(plainLightbox(page), "inline-image-falls-back-to-lightbox");
+    await expectUnifiedGallery(page, "2 of 7", "Here is the crash screen");
+    await capture(gallery(page), "gallery-from-inline-image-unique-bytes");
   });
 
   test("screenshot-row thumb opens the unified gallery at that shot", async ({ page }) => {
@@ -152,7 +151,7 @@ test.describe("@shot", () => {
     const thumbs = page.locator("#session-pane .screenshot-thumb");
     await expect(thumbs).toHaveCount(4);
     await thumbs.nth(1).click();
-    await expectUnifiedGallery(page, "3 of 5", "Now capture the app window twice.");
+    await expectUnifiedGallery(page, "4 of 7", "Now capture the app window twice.");
     await expect(page.locator(".gallery-rail-chip-count")).toHaveText("2/2");
     await capture(gallery(page), "gallery-from-screenshot-row");
   });
@@ -160,12 +159,16 @@ test.describe("@shot", () => {
   test("rail peeks across a turn boundary, pins on chip click, and jumps", async ({ page }) => {
     await mountChat(page);
     await page.locator("#session-pane .msg.user .sent-attachment-thumb:not(.screenshot-thumb)").first().click();
-    await expectUnifiedGallery(page, "1 of 5", "Here is the crash screen");
+    await expectUnifiedGallery(page, "1 of 7", "Here is the crash screen");
 
     const rail = page.locator(".gallery-rail");
     await expect(rail).not.toHaveClass(/\bopen\b/);
+    // Image 2 is turn 1's own inline block, so only step 2 crosses a turn.
     await page.keyboard.press("ArrowRight");
-    await expect(page.locator(".gallery-total-counter")).toHaveText("2 of 5");
+    await expect(page.locator(".gallery-total-counter")).toHaveText("2 of 7");
+    await expect(rail).not.toHaveClass(/\bopen\b/);
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".gallery-total-counter")).toHaveText("3 of 7");
     await expect(rail).toHaveClass(/\bopen\b/);
     await expect(rail).toHaveClass(/\bpeek\b/);
     await expect(page.locator(".gallery-rail-entry.current .gallery-rail-entry-name"))
@@ -191,14 +194,18 @@ test.describe("@shot", () => {
     expect(overlaps(tall.drawer, tall.close)).toBe(false);
 
     await page.locator(".gallery-rail-entry").nth(3).click();
-    await expectUnifiedGallery(page, "5 of 5", "Same shot again for reference.");
+    await expectUnifiedGallery(page, "6 of 7", "Same shot again for reference.");
     await expect(rail).toHaveClass(/\bopen\b/);
 
     // Short window: the drawer is anchored top-left and the chevrons ride the
     // vertical centre, so the gap between them is viewport-height dependent.
     await page.setViewportSize({ width: 1400, height: 560 });
-    const short = await overlayBoxes(page);
-    console.log(`[526] short-viewport drawer.bottom=${short.drawer.bottom} prev.top=${short.prev.y} overlap=${overlaps(short.drawer, short.prev)}`);
+    await railSettled(page);
+    // The drawer's max-height transitions on resize, so poll it to rest.
+    await expect.poll(async () => {
+      const b = await overlayBoxes(page);
+      return [b.prev, b.next, b.counter, b.close].some((box) => overlaps(b.drawer, box));
+    }).toBe(false);
     await capture(gallery(page), "gallery-rail-short-viewport");
   });
 
@@ -206,27 +213,29 @@ test.describe("@shot", () => {
     await mountChat(page);
     const chip = page.locator("#session-pane .sb-images-btn");
     await expect(chip).toBeVisible();
-    await expect(chip).toHaveText("5 imgs");
+    await expect(chip).toHaveText("7 imgs");
     await chip.click();
 
     const popover = page.locator(".sb-images-popover");
     await expect(popover).toBeVisible();
-    await expect(popover).toContainText("Images (5)");
+    await expect(popover).toContainText("Images (7)");
     const rows = popover.locator(".sb-images-row");
-    await expect(rows).toHaveCount(5);
+    await expect(rows).toHaveCount(7);
     await expect(rows.nth(0)).toContainText("crash-report.png");
     await expect(rows.nth(0)).toContainText("Turn 1");
     await expect(rows.nth(0)).toContainText("You");
-    await expect(rows.nth(1)).toContainText("capture app window");
-    await expect(rows.nth(1)).toContainText("Turn 2");
-    await expect(rows.nth(1)).toContainText("Main");
-    await expect(rows.nth(4)).toContainText("final capture");
-    await expect(rows.nth(4)).toContainText("Turn 4");
+    await expect(rows.nth(2)).toContainText("capture app window");
+    await expect(rows.nth(2)).toContainText("Turn 2");
+    await expect(rows.nth(2)).toContainText("Main");
+    await expect(rows.nth(5)).toContainText("final capture");
+    await expect(rows.nth(5)).toContainText("Turn 4");
+    await expect(rows.nth(6)).toContainText("Turn 4");
+    await expect(rows.nth(6)).toContainText("You");
     await expect(popover.locator(".sb-images-loading")).toHaveCount(0);
     await capture(popover, "images-chip-popover");
 
-    await rows.nth(3).click();
-    await expectUnifiedGallery(page, "4 of 5", "Diff it against the baseline.");
+    await rows.nth(4).click();
+    await expectUnifiedGallery(page, "5 of 7", "Diff it against the baseline.");
     await expect(popover).toHaveCount(0);
   });
 });

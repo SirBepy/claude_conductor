@@ -19,13 +19,17 @@
 
 .gallery-rail-drawer {
   margin-top: 8px; width: 250px; max-height: 0; overflow: hidden; opacity: 0;
+  display: flex; flex-direction: column;
   transform: translateY(-4px);
   transition: max-height 0.22s ease, opacity 0.18s ease, transform 0.18s ease;
   background: rgba(20,18,30,0.94); border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
 }
-.gallery-rail.open .gallery-rail-drawer { max-height: 300px; opacity: 1; transform: translateY(0); }
-.gallery-rail-drawer-header { padding: 9px 12px 7px; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.45); border-bottom: 1px solid rgba(255,255,255,0.1); }
-.gallery-rail-list { max-height: 260px; overflow-y: auto; padding: 4px; }
+/* The drawer starts 56px down (16px inset + chip) and the prev chevron rides
+   the vertical centre, 22px tall each way: 50vh - 86px leaves an 8px gap on a
+   short window instead of running under the chevron. */
+.gallery-rail.open .gallery-rail-drawer { max-height: min(300px, calc(50vh - 86px)); opacity: 1; transform: translateY(0); }
+.gallery-rail-drawer-header { flex-shrink: 0; padding: 9px 12px 7px; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255,255,255,0.45); border-bottom: 1px solid rgba(255,255,255,0.1); }
+.gallery-rail-list { min-height: 0; overflow-y: auto; padding: 4px; }
 .gallery-rail-entry { display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border-radius: 7px; cursor: pointer; border-left: 2px solid transparent; }
 .gallery-rail-entry:hover { background: rgba(255,255,255,0.06); }
 .gallery-rail-entry.current { background: rgba(157,125,252,0.18); border-left-color: var(--color-primary); }

@@ -572,19 +572,25 @@ export class ChatRenderer {
   }
 
   /** Tapping an inline rendered image block (screenshots, image tool results)
-   *  opens the chat-wide gallery at that image, matched by content since the
-   *  collection is recomputed fresh each click. */
+   *  opens the chat-wide gallery at that image, resolved by element identity -
+   *  the collector binds every inline render to the slot it collected for it. */
   private handleBlockImageClick = (e: MouseEvent): void => {
     const img = (e.target as Element).closest<HTMLImageElement>("img.block.image");
     if (!img) return;
+    const collection = collectChatImages(this.messages, this.messageEls);
+    const foundIndex = collection.byElement.get(img);
+    if (foundIndex !== undefined) {
+      openChatImageGallery(collection, foundIndex);
+      return;
+    }
     const match = /^data:([^;]+);base64,(.+)$/.exec(img.src);
     const mime = match?.[1];
     const base64 = match?.[2];
     if (!mime || !base64) return;
-    const collection = collectChatImages(this.messages, this.messageEls);
-    const foundIndex = collection.images.findIndex((ci) => ci.kind === "screenshot" && ci.data === base64 && ci.mime === mime);
-    if (foundIndex >= 0) openChatImageGallery(collection, foundIndex);
-    else openLightbox({ type: "image", mime, base64 });
+    // Loud on purpose (todo 740): the silent lightbox fallback is what let a
+    // broken gallery look correct for a whole release.
+    console.error("[chat-renderer] inline image is not in the gallery collection, falling back to the lightbox", img);
+    openLightbox({ type: "image", mime, base64 });
   };
 
   /** Tapping a screenshot-row thumbnail (turn-collapse.ts's screenshot-block)
