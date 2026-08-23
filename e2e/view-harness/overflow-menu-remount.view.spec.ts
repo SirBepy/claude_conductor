@@ -36,4 +36,20 @@ test.describe("view-harness / overflow menu remount", () => {
     expect(box!.width).toBeGreaterThan(0);
     expect(box!.height).toBeGreaterThan(0);
   });
+
+  // Leaving Chats and coming back rebuilds .view-header from scratch, while
+  // mobile-header-merge.ts's remembered "home" still pointed at the old,
+  // detached one - so the fresh ⋮ was filed away into nothing.
+  test("survives a round trip through another view", async ({ page }) => {
+    await mountSessions(page);
+
+    const navigateTo = (n: string) =>
+      page.evaluate((name) => (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo(name), n);
+    await navigateTo("dashboard");
+    await navigateTo("sessions");
+
+    await expect(page.locator("#viewMoreBtn")).toBeVisible();
+    await page.locator("#viewMoreBtn").click();
+    await expect(page.locator(".view-more-menu")).toBeVisible();
+  });
 });
