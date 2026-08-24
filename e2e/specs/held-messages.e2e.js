@@ -30,6 +30,10 @@ async function startHaikuChat() {
   await row.waitForExist({ timeout: 10000 });
   await row.click();
 
+  // openModelEffortModal awaits several IPC calls (get_settings, listProjects,
+  // listAccounts) before its first render, so the field may not exist yet
+  // right after the project-row click - wait for it before checking for a chip.
+  await (await $(".me-acc-field")).waitForExist({ timeout: 10000 });
   // Ambiguous registry (2+ accounts, no project/default binding) opens the
   // modal in chip-picker mode with Start session disabled until a pick is
   // made (account-field.ts accountPickIncomplete). A resolved single/bound
