@@ -18,6 +18,8 @@ playwright-report/
 .superpowers/
 .for_bepy/
 .claude/scheduled_tasks.lock
+.claude/last-session-status.json
+.impeccable/
 docs/superpowers/
 src/types/ipc.generated.ts
 /*.png
