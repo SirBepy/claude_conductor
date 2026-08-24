@@ -22,6 +22,7 @@ import { sessionEvents } from "./shared/chat/event-store";
 import { setAuthorTagResolver } from "./shared/chat/author-tag-source";
 import { characterForSessionId } from "./views/sessions/session-characters";
 import { state as sessionsState } from "./views/sessions/state";
+import { updateThinkingBar } from "./views/sessions/session-thinking-bar";
 import { openModelEffortModal } from "./views/sessions/model-effort-modal";
 import { startNewSession } from "./views/sessions/pending-flow";
 import { setupRemoteVoicelines } from "./shared/remote-voiceline";
@@ -110,6 +111,24 @@ if (import.meta.env.DEV) {
   // mid-chain, never reaching launchNewSession's real pane render).
   (window as unknown as Record<string, unknown>).__startNewSession = (): Promise<void> =>
     startNewSession(document.createElement("div"));
+
+  // Held-messages e2e seam (ai_todo 90): flip a mounted session's busy flag
+  // without a real turn, so held/chip/dropdown/Send-now/auto-flush can be
+  // driven WITHOUT racing a live claude turn into busy (mirrors sidebar.ts's
+  // real busy->idle auto-flush check).
+  (window as unknown as Record<string, unknown>).__setBusy = (sessionId: string, busy: boolean): void => {
+    const inst = sessionsState.sessions.find((s) => s.session_id === sessionId);
+    if (!inst) return;
+    inst.busy = busy;
+    updateThinkingBar();
+    const listEl = document
+      .querySelector<HTMLElement>(".view-sessions")
+      ?.querySelector<HTMLElement>("#sessions-list");
+    if (listEl) renderSidebar(listEl);
+    if (!busy && sessionsState.selectedId === sessionId && sessionsState.heldMessages?.hasItemsForActive()) {
+      sessionsState.heldMessages.onCompletion(sessionId, inst.awaiting === "question");
+    }
+  };
 }
 
 // Route-level dynamic imports (todo 187): each view's chunk loads only when

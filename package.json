@@ -25,6 +25,7 @@
     "test:e2e:accounts": "wdio run e2e/wdio.conf.js --spec e2e/specs/multi-account.e2e.js",
     "test:e2e:question": "wdio run e2e/wdio.conf.js --spec e2e/specs/question-card.e2e.js",
     "test:e2e:schedule": "wdio run e2e/wdio.conf.js --spec e2e/specs/schedule-view.e2e.js",
+    "test:e2e:held": "wdio run e2e/wdio.conf.js --spec e2e/specs/held-messages.e2e.js",
     "kill-orphans": "node scripts/kill-dev-orphans.mjs"
   },
   "devDependencies": {
