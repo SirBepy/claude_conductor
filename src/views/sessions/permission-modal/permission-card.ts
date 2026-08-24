@@ -3,6 +3,7 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { buildRule, describeRule, isDestructive, withAddedRule } from "../permission-rules";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { extractQuestions, formatAnswersAsMessage, renderQuestionUI } from "./question-ui";
+import { clearActivePermissionCardIfCurrent, setActivePermissionCard } from "./question-state";
 import { resolveCwdForSession, storePendingPrompt } from "./gating";
 import { isAskQuestionTool } from "../../../shared/chat/tool-meta";
 import type { PermissionRequestedPayload, QuestionDraft } from "./types";
@@ -66,7 +67,7 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
 
   const respond = async (behavior: "allow" | "deny") => {
     clearHost();
-    document.removeEventListener("keydown", escHandler);
+    teardownEsc();
     try {
       await invoke("respond_permission", {
         id: payload.id,
@@ -95,6 +96,15 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
     if (e.key === "Escape") void respond("deny");
   };
   document.addEventListener("keydown", escHandler);
+  // Registered for teardown (todo 731) so a swap via ensureHost() - not only
+  // this card's own respond() - removes the listener: unremoved, a later
+  // Escape ran a dead card's respond('deny'), which deleted whatever card
+  // was mounted next via clearHost()'s (now-fixed) by-ID lookup.
+  const teardownEsc = () => {
+    document.removeEventListener("keydown", escHandler);
+    clearActivePermissionCardIfCurrent(teardownEsc);
+  };
+  setActivePermissionCard(teardownEsc);
 
   const inputJson = JSON.stringify(payload.input ?? {}, null, 2);
 

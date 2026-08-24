@@ -195,13 +195,32 @@ const snapshotSource = new WeakMap<QuestionDraft, string>();
 /**
  * Return a snapshot of the active card's current answer state if it belongs to
  * the given session, without tearing it down. Returns null if no card is up or
- * the card belongs to a different session.
+ * the card belongs to a different session. `promptId` (todo 731) narrows the
+ * match to that exact prompt; omit it for the session-only check.
  */
-export function snapshotActiveCardDraft(sessionId: string): QuestionDraft | null {
+export function snapshotActiveCardDraft(sessionId: string, promptId?: string): QuestionDraft | null {
   if (!activeCard || activeCard.sessionId !== sessionId) return null;
+  if (promptId !== undefined && activeCard.id !== promptId) return null;
   const draft = activeCard.getDraft();
   snapshotSource.set(draft, activeCard.id);
   return draft;
+}
+
+// ── Permission-card teardown registry ───────────────────────────────────────
+// Same leak class as the registry above (todo 680), for the Allow/Deny
+// card's document-level Escape listener instead of a question card (todo 731).
+let activePermissionCardTeardown: (() => void) | null = null;
+
+export function setActivePermissionCard(teardown: (() => void) | null): void {
+  activePermissionCardTeardown = teardown;
+}
+
+export function clearActivePermissionCardIfCurrent(teardown: () => void): void {
+  if (activePermissionCardTeardown === teardown) activePermissionCardTeardown = null;
+}
+
+export function dismissPermissionCard(): void {
+  activePermissionCardTeardown?.();
 }
 
 /** False only for a live-card snapshot belonging to another prompt (todo 718:

@@ -5,7 +5,7 @@ import "../permission-modal-badges.css";
 import "../permission-modal-zones.css";
 import "../permission-modal-track.css";
 import { attachDragHandle } from "./drag-handle";
-import { dismissQuestionCard } from "./question-state";
+import { dismissPermissionCard, dismissQuestionCard } from "./question-state";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
 
 export const HOST_ID = "prompt-card-host";
@@ -16,6 +16,10 @@ const HEADER_GAP = 8; // px of breathing room below the header's bottom edge
 
 let _detachDrag: (() => void) | null = null;
 let _resizeHandler: (() => void) | null = null;
+// The host element THIS module actually mounted, so clearHost() can remove it
+// by identity - a stale card's teardown must never delete a successor's host
+// it happens to share an id with (todo 731).
+let _currentHost: HTMLElement | null = null;
 
 // Caps the card's mobile max-height below .session-header's bottom edge (the
 // project name must stay visible). sessions.css owns that dynamic box model,
@@ -39,16 +43,18 @@ function applyMobileHeightCap(host: HTMLElement, mode: "composer" | "pane" | "vi
  * 3. `document.body` (fallback, fixed bottom).
  */
 export function ensureHost(): { host: HTMLElement; mode: "composer" | "pane" | "viewport" } {
-  // Every swap tears the outgoing question card down first. Yanking only its
-  // DOM left the card's document-level keydown/visibilitychange handlers live,
-  // so a retried tool call or a second prompt could cancel a stale prompt id.
+  // Every swap tears the outgoing card down first, or its document-level
+  // handlers outlive the DOM: dismissQuestionCard (todo 680), then
+  // dismissPermissionCard for the Allow/Deny card's Escape listener (todo 731).
   dismissQuestionCard();
+  dismissPermissionCard();
   document.getElementById(HOST_ID)?.remove();
   _detachDrag?.();
   if (_resizeHandler) window.removeEventListener("resize", _resizeHandler);
 
   const host = document.createElement("div");
   host.id = HOST_ID;
+  _currentHost = host;
 
   let mode: "composer" | "pane" | "viewport";
   const composer = document.querySelector<HTMLElement>(".session-composer");
@@ -79,7 +85,11 @@ export function clearHost(): void {
   _detachDrag?.();
   _detachDrag = null;
   if (_resizeHandler) { window.removeEventListener("resize", _resizeHandler); _resizeHandler = null; }
-  document.getElementById(HOST_ID)?.remove();
+  // By element identity, not `getElementById(HOST_ID)` - a stale card's own
+  // clearHost() call must never delete a successor host that merely reuses
+  // the same id (todo 731).
+  _currentHost?.remove();
+  _currentHost = null;
 }
 
 // .prompt-card__answer-bar sits inside the footer row (flex:1, next to

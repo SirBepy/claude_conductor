@@ -105,7 +105,7 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
   // Priority: in-memory snapshot (switch-away/back, always freshest), then
   // whichever of daemon/localStorage is NEWER by timestamp (fetchFreshestAuqDraft).
   const initialDraft = restoredDraft
-    ?? (payload.session_id ? snapshotActiveCardDraft(payload.session_id) : undefined)
+    ?? (payload.session_id ? snapshotActiveCardDraft(payload.session_id, payload.id) : undefined)
     ?? (await fetchFreshestAuqDraft(payload.session_id, payload.id))
     ?? undefined;
 
