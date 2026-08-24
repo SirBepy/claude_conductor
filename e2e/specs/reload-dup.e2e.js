@@ -25,6 +25,10 @@ async function startNewChatPickingFirstProject() {
   await row.waitForExist({ timeout: 10000 });
   await row.click();
 
+  // openModelEffortModal awaits several IPC calls (get_settings, listProjects,
+  // listAccounts) before its first render, so the field may not exist yet
+  // right after the project-row click - wait for it before checking for a chip.
+  await (await $(".me-acc-field")).waitForExist({ timeout: 10000 });
   // Ambiguous registry (2+ accounts, no default) leaves Start disabled until a chip is picked.
   const accChip = await $(".me-acc-field .account-chip");
   if (await accChip.isExisting()) {
