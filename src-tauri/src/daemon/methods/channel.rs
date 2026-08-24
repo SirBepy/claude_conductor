@@ -160,6 +160,35 @@ mod tests {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
     }
 
+    /// Test-only mirror of `post_message`'s wiring with `repo_channel::post_at`
+    /// substituted for `repo_channel::post`, so notify/deliver bookkeeping is
+    /// exercised against a tempdir instead of real app data (todo 757), same
+    /// as the retitle test below.
+    fn post_message_at(
+        state: &Arc<DaemonState>,
+        session_id: &str,
+        text: &str,
+        target: Option<&[String]>,
+        path: &std::path::Path,
+    ) -> Result<Value, String> {
+        let author = display_name(state, session_id);
+        let targets = repo_channel_wake::resolve_targets(state, session_id, target)?;
+        let msg = repo_channel::post_at(Some(path), session_id, &author, text);
+
+        let mut notified = 0usize;
+        for target_id in &targets {
+            repo_channel_wake::enqueue(state, target_id, format!("[repo-channel] {author}: {}", msg.text));
+            repo_channel_wake::spawn_drain(state, target_id);
+            notified += 1;
+        }
+        Ok(json!({
+            "ok": true,
+            "message": msg,
+            "notified": notified,
+            "delivered": notified > 0,
+        }))
+    }
+
     #[test]
     fn list_peers_rejects_unknown_caller() {
         let state = test_state();
@@ -320,11 +349,13 @@ mod tests {
         // context, hence `#[tokio::test]` here (plain `#[test]` would panic
         // with "no reactor running").
         let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-1.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-2", "2026-07-30T00:00:00Z");
 
-        let v = post_message(&state, "s1", "touching pending-pane.ts, anyone on this?", None).unwrap();
+        let v = post_message_at(&state, "s1", "touching pending-pane.ts, anyone on this?", None, &path).unwrap();
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1, "only s2 shares proj-1 with the poster");
         assert_eq!(v["delivered"], true);
@@ -333,9 +364,11 @@ mod tests {
     #[tokio::test]
     async fn post_message_to_an_empty_project_reports_not_delivered() {
         let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-lonely.json");
         state.registry.upsert_interactive("lonely", std::path::Path::new("."), "proj-lonely", "2026-07-30T00:00:00Z");
 
-        let v = post_message(&state, "lonely", "anyone here?", None).unwrap();
+        let v = post_message_at(&state, "lonely", "anyone here?", None, &path).unwrap();
         assert_eq!(v["notified"], 0);
         assert_eq!(
             v["delivered"], false,
@@ -375,21 +408,22 @@ mod tests {
 
     #[test]
     fn post_message_with_a_bad_target_leaves_no_trace_in_history() {
-        // Its own project id: `repo_channel::list` is process-global and the
-        // other tests here post to proj-1, so sharing one would flake.
+        // Its own tempdir path: other tests here post to proj-1, so sharing
+        // one would flake.
         let state = test_state();
-        let proj = "proj-post-guard";
-        state.registry.upsert_interactive("g1", std::path::Path::new("."), proj, "2026-07-30T00:00:00Z");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-post-guard.json");
+        state.registry.upsert_interactive("g1", std::path::Path::new("."), "proj-post-guard", "2026-07-30T00:00:00Z");
 
-        let before = repo_channel::list(proj).len();
+        let before = repo_channel::list_at(&path).len();
         let target = vec!["typo".to_string()];
-        let r = post_message(&state, "g1", "secret coordination note", Some(&target));
+        let r = post_message_at(&state, "g1", "secret coordination note", Some(&target), &path);
         assert!(r.is_err(), "an unknown target must fail the call");
 
         // Persisting before validating leaked the text into durable history that
         // every project member can read, while still returning Err to the caller.
         assert_eq!(
-            repo_channel::list(proj).len(),
+            repo_channel::list_at(&path).len(),
             before,
             "a rejected post must not append to channel history"
         );
