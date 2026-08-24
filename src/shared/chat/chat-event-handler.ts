@@ -120,9 +120,10 @@ function handleUserMessageEvent(
   // chip so usage is tracked but render no user bubble.
   const isSilent = !isCompact && isSilentSystemUserMessage(cleaned);
   // isMeta:true marks a turn Claude Code injected into its own transcript
-  // (a fired ScheduleWakeup prompt, an autopilot loop tick, etc.) rather
-  // than something the human typed - must never look like a real message.
-  const isMeta = !isCompact && !isSilent && ev.is_meta;
+  // (a fired ScheduleWakeup prompt, an autopilot loop tick, etc.) - renders as
+  // a system note. A peer channel wake (todo 743) is ALSO is_meta but carries
+  // a known sender, so it renders as an ordinary authored bubble instead.
+  const isMeta = !isCompact && !isSilent && ev.is_meta && !ev.author_session_id;
 
   // Silent auto-continue streak: the harness re-invokes with a synthetic
   // "continue" whenever the prior turn rendered nothing. Fold it into

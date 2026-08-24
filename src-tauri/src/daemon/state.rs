@@ -81,10 +81,11 @@ pub struct DaemonState {
     /// for their own daemon-wide consumers.
     pub jarvis_wakes: crate::daemon::jarvis_wake::WakeQueue,
     /// Per-session wake queue for the inter-agent repo coordination channel -
-    /// see `daemon::repo_channel_wake` for the enqueue/drain contract. Same
-    /// shape as `jarvis_wakes` above (reuses its `WakeQueue` type), but keyed
-    /// by any live session id, not just a Jarvis singleton.
-    pub repo_channel_wakes: crate::daemon::jarvis_wake::WakeQueue,
+    /// see `daemon::repo_channel_wake` for the enqueue/drain contract. Its own
+    /// `WakeQueue` type (todo 743): each queued line carries a sender id
+    /// alongside the text, which `jarvis_wakes`'s plain-`String` queue doesn't
+    /// need.
+    pub repo_channel_wakes: crate::daemon::repo_channel_wake::WakeQueue,
     /// Cross-surface draft sync (composer text, AUQ partial answers, held
     /// messages) - see `draft_store.rs` module doc. In-memory only, never
     /// persisted; `held_count` on `Instance` is the separate broadcast signal.
@@ -120,7 +121,7 @@ impl DaemonState {
             push: OnceLock::new(),
             commit_locks: std::sync::Mutex::new(HashMap::new()),
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
-            repo_channel_wakes: crate::daemon::jarvis_wake::new_queue(),
+            repo_channel_wakes: crate::daemon::repo_channel_wake::new_queue(),
             draft_store: DraftStore::new(),
         })
     }

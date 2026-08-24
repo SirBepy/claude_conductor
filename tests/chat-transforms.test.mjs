@@ -470,6 +470,19 @@ describe("eventToRenderedMessage — isMeta user turns", () => {
     expect(msg.text).toBe("Peer message");
   });
 
+  it("renders a both-sentinel peer wake (todo 743) as an authored user bubble, not a chip", () => {
+    const msg = eventToRenderedMessage({
+      type: "user_message",
+      content: [{ type: "text", text: "touching pump.rs, anyone on this?" }],
+      timestamp: 1n,
+      remote_echo: false,
+      is_meta: true,
+      author_session_id: "sid-peer-1",
+    });
+    expect(msg.kind).toBe("user");
+    expect(msg.authorSessionId).toBe("sid-peer-1");
+  });
+
   it("still renders a plain (isMeta:false) user turn as a user bubble", () => {
     const msg = eventToRenderedMessage({
       type: "user_message",

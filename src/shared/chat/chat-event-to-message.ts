@@ -90,7 +90,9 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       if (cleaned.length === 0) return null;
       if (isResumeContinuationUserMessage(cleaned)) return null;
       if (isSilentSystemUserMessage(cleaned)) return { kind: "system", text: "Continuing session…", ts };
-      if (ev.is_meta) {
+      // A peer channel wake (todo 743) is also is_meta but carries a known
+      // sender - render as an authored bubble, not a generic meta chip.
+      if (ev.is_meta && !ev.author_session_id) {
         const meta = classifyMetaTurn(cleaned);
         return { kind: "system", text: meta.label, metaKind: meta.kind, metaDetail: meta.detail, ts };
       }

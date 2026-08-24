@@ -258,7 +258,7 @@ function renderAuthorTagHtml(authorSessionId: string): string {
   const projHtml = cwd
     ? `<span class="proj-face" data-proj-face="${escapeHtml(cwd)}"><i class="ph ph-folder"></i></span>`
     : `<i class="ph ph-folder"></i>`;
-  return `<div class="author-tag" title="Sent by an AI on Joe's behalf"><span class="author-tag-icon author-tag-char">${charHtml}</span><span class="author-tag-icon author-tag-proj">${projHtml}</span></div>`;
+  return `<div class="author-tag" title="Sent by another AI session"><span class="author-tag-icon author-tag-char">${charHtml}</span><span class="author-tag-icon author-tag-proj">${projHtml}</span></div>`;
 }
 
 function renderSystemNote(text: string): string {

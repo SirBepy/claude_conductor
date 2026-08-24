@@ -22,7 +22,8 @@
 
 use crate::daemon::lifecycle;
 use crate::daemon::state::DaemonState;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Held between a wake being queued and it being delivered. `drain` already
@@ -40,18 +41,35 @@ pub const IDLE_COALESCE_WINDOW: Duration = Duration::from_secs(3);
 /// once several newer ones have queued up behind it.
 const MAX_QUEUED_LINES: usize = 50;
 
+/// One queued wake line paired with the sender's session id (todo 743), so a
+/// drained batch can still attribute the coalesced wire message to a sender
+/// after `drain` joins multiple lines together.
+#[derive(Debug, Clone)]
+pub struct QueuedLine {
+    pub author_session_id: String,
+    pub text: String,
+}
+
+/// Own type rather than reusing `jarvis_wake::WakeQueue` (todo 743): this
+/// queue carries a sender id per line, jarvis's doesn't.
+pub type WakeQueue = Mutex<HashMap<String, VecDeque<QueuedLine>>>;
+
+pub fn new_queue() -> WakeQueue {
+    Mutex::new(HashMap::new())
+}
+
 /// Queue one wake line for `target_session_id`, dropping the oldest queued
 /// line first if this would exceed [`MAX_QUEUED_LINES`]. Delivery-agnostic -
 /// callers pair this with [`spawn_drain`] right after so a wake fires as soon
 /// as possible, but `drain` alone decides when it's actually safe to write
 /// into the target's stdin.
-pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, line: String) {
+pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, author_session_id: &str, text: String) {
     let mut queues = state.repo_channel_wakes.lock().unwrap();
     let pending = queues.entry(target_session_id.to_string()).or_default();
     if pending.len() >= MAX_QUEUED_LINES {
         pending.pop_front();
     }
-    pending.push_back(line);
+    pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text });
 }
 
 /// Deliver everything queued for `target_session_id` as ONE coalesced,
@@ -65,8 +83,8 @@ pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, line: String) 
 /// queue (in original order) so a transient respawn failure doesn't silently
 /// lose a wake - the next trigger retries the same coalesced batch.
 pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
-    drain_with(state, target_session_id, |text| async move {
-        lifecycle::send_message_with_respawn(state, target_session_id, &text, true).await
+    drain_with(state, target_session_id, |text, author| async move {
+        lifecycle::send_message_with_respawn_meta_and_author(state, target_session_id, &text, &author).await
     })
     .await;
 }
@@ -76,7 +94,7 @@ pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
 /// respawn `claude`). `drain` is the only production instantiation.
 async fn drain_with<F, Fut, E>(state: &Arc<DaemonState>, target_session_id: &str, send: F)
 where
-    F: FnOnce(String) -> Fut,
+    F: FnOnce(String, String) -> Fut,
     Fut: std::future::Future<Output = Result<(), E>>,
     E: std::fmt::Display,
 {
@@ -84,15 +102,19 @@ where
     if inst.ended_at.is_some() || inst.busy {
         return;
     }
-    let lines: Vec<String> = {
+    let lines: Vec<QueuedLine> = {
         let mut queues = state.repo_channel_wakes.lock().unwrap();
         match queues.get_mut(target_session_id) {
             Some(pending) if !pending.is_empty() => pending.drain(..).collect(),
             _ => return,
         }
     };
-    let combined = lines.join("\n");
-    match send(combined).await {
+    let combined = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+    // Multiple lines can come from different senders inside one coalescing
+    // window, but the wire format carries only one author sentinel per
+    // message - attribute the batch to its most recent poster.
+    let author = lines.last().map(|l| l.author_session_id.clone()).unwrap_or_default();
+    match send(combined, author).await {
         Ok(()) => {
             state.registry.set_awaiting(target_session_id, None);
             state.registry.set_busy_from_wake(target_session_id);
@@ -195,12 +217,15 @@ mod tests {
     #[test]
     fn enqueue_coalesces_multiple_lines_for_one_drain() {
         let state = test_state();
-        enqueue(&state, "s1", "line one".into());
-        enqueue(&state, "s1", "line two".into());
+        enqueue(&state, "s1", "peer-1", "line one".into());
+        enqueue(&state, "s1", "peer-1", "line two".into());
         let queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.get("s1").expect("queue exists");
         assert_eq!(pending.len(), 2);
-        assert_eq!(pending.iter().cloned().collect::<Vec<_>>(), vec!["line one", "line two"]);
+        assert_eq!(
+            pending.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            vec!["line one", "line two"]
+        );
     }
 
     #[test]
@@ -209,13 +234,13 @@ mod tests {
         // must not grow this queue without bound.
         let state = test_state();
         for i in 0..MAX_QUEUED_LINES + 10 {
-            enqueue(&state, "s1", format!("line {i}"));
+            enqueue(&state, "s1", "peer-1", format!("line {i}"));
         }
         let queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.get("s1").expect("queue exists");
         assert_eq!(pending.len(), MAX_QUEUED_LINES);
-        assert_eq!(pending[0], "line 10", "oldest 10 must have been dropped");
-        assert_eq!(pending[MAX_QUEUED_LINES - 1], format!("line {}", MAX_QUEUED_LINES + 9));
+        assert_eq!(pending[0].text, "line 10", "oldest 10 must have been dropped");
+        assert_eq!(pending[MAX_QUEUED_LINES - 1].text, format!("line {}", MAX_QUEUED_LINES + 9));
     }
 
     #[tokio::test]
@@ -226,7 +251,7 @@ mod tests {
         let state = test_state();
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.set_busy("s1", true);
-        enqueue(&state, "s1", "peer note".into());
+        enqueue(&state, "s1", "peer-1", "peer note".into());
 
         drain(&state, "s1").await;
 
@@ -241,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn drain_no_ops_when_target_session_unknown() {
         let state = test_state();
-        enqueue(&state, "ghost", "peer note".into());
+        enqueue(&state, "ghost", "peer-1", "peer note".into());
         drain(&state, "ghost").await;
         let queues = state.repo_channel_wakes.lock().unwrap();
         assert_eq!(queues.get("ghost").map(|q| q.len()).unwrap_or(0), 1);
@@ -257,29 +282,30 @@ mod tests {
         // window the first drain fires immediately and delivers "first" alone.
         let state = test_state();
         live(&state, "s1", "proj-1");
-        let sent: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sent: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
 
         // Mirrors spawn_drain's body with the child-stdin write recorded instead.
-        let wake = |state: Arc<DaemonState>, sent: Arc<std::sync::Mutex<Vec<String>>>| async move {
+        let wake = |state: Arc<DaemonState>, sent: Arc<std::sync::Mutex<Vec<(String, String)>>>| async move {
             tokio::time::sleep(IDLE_COALESCE_WINDOW).await;
-            drain_with(&state, "s1", |text| async move {
-                sent.lock().unwrap().push(text);
+            drain_with(&state, "s1", |text, author| async move {
+                sent.lock().unwrap().push((text, author));
                 Ok::<(), String>(())
             })
             .await;
         };
 
-        enqueue(&state, "s1", "first".into());
+        enqueue(&state, "s1", "peer-a", "first".into());
         let h1 = tokio::spawn(wake(state.clone(), sent.clone()));
         tokio::time::sleep(Duration::from_millis(500)).await;
-        enqueue(&state, "s1", "second".into());
+        enqueue(&state, "s1", "peer-b", "second".into());
         let h2 = tokio::spawn(wake(state.clone(), sent.clone()));
         h1.await.unwrap();
         h2.await.unwrap();
 
         let sent = sent.lock().unwrap();
         assert_eq!(sent.len(), 1, "two posts inside the window must produce one wake");
-        assert_eq!(sent[0], "first\nsecond");
+        assert_eq!(sent[0].0, "first\nsecond");
+        assert_eq!(sent[0].1, "peer-b", "batch attributes to its most recent poster");
     }
 
     #[test]

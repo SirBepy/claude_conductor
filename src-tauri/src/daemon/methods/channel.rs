@@ -130,11 +130,9 @@ pub(crate) fn post_message(
         // above), NOT the raw `text` argument - otherwise the length cap only
         // ever applied to the persisted JSON history, and an unbounded string
         // still landed as a real injected turn in every peer's live session.
-        repo_channel_wake::enqueue(
-            state,
-            target_id,
-            format!("[repo-channel] {author}: {}", msg.text),
-        );
+        // No `[repo-channel] {author}: ` wrapper (todo 743): the sender's
+        // identity rides as `author_session_id`, not text a hook could parse.
+        repo_channel_wake::enqueue(state, target_id, session_id, msg.text.clone());
         repo_channel_wake::spawn_drain(state, target_id);
         notified += 1;
     }
@@ -177,7 +175,7 @@ mod tests {
 
         let mut notified = 0usize;
         for target_id in &targets {
-            repo_channel_wake::enqueue(state, target_id, format!("[repo-channel] {author}: {}", msg.text));
+            repo_channel_wake::enqueue(state, target_id, session_id, msg.text.clone());
             repo_channel_wake::spawn_drain(state, target_id);
             notified += 1;
         }
@@ -340,8 +338,27 @@ mod tests {
         let queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.get("s2").expect("wake queued for s2");
         assert_eq!(pending.len(), 1);
-        // "[repo-channel] {author}: " prefix + at most 2000 chars of text.
-        assert!(pending[0].len() < 3000, "wake line must be truncated, was {} bytes", pending[0].len());
+        assert_eq!(pending[0].text.chars().count(), 2000, "wake line must be truncated");
+        assert_eq!(pending[0].author_session_id, "s1");
+    }
+
+    #[tokio::test]
+    async fn post_message_wake_line_carries_no_envelope_text() {
+        // Todo 743: identity rides as `author_session_id`, never as
+        // `"[repo-channel] {author}: "` text a receiving hook could misparse.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-743.json");
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-743", "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-743", "2026-07-30T00:00:00Z");
+        state.registry.set_busy("s2", true);
+
+        post_message_at(&state, "s1", "touching pump.rs, anyone on this?", None, &path).unwrap();
+
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.get("s2").expect("wake queued for s2");
+        assert_eq!(pending[0].text, "touching pump.rs, anyone on this?");
+        assert_eq!(pending[0].author_session_id, "s1");
     }
 
     #[tokio::test]
