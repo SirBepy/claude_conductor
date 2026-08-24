@@ -153,8 +153,11 @@ export interface RenderedMessage {
    *  "Request interrupted by user"). Used to position the chips footer BEFORE
    *  these labels rather than after them. */
   noiseLabel?: boolean;
-  /** Ordinal of this compaction event within the session (1-based). Present
-   *  only on system messages that represent a compaction boundary. */
+  /** Explicit turn-boundary signal `isBoundaryMessage` checks - never
+   *  derived from the presentational `compactionN` (ai_todo 742). */
+  isCompaction?: boolean;
+  /** Presentational-only ordinal, derived via `compactionOrdinal` - never
+   *  used to decide turn structure; see `isCompaction`. */
   compactionN?: number;
   /** Set on an `is_meta` "Auto-continued" system note once 2+ consecutive
    *  silent turns merged into it (see turnProducedVisibleContent in
@@ -198,7 +201,17 @@ export interface RenderedMessage {
  * becomes a kind:"user" row), so checking kind here is sufficient.
  */
 export function isBoundaryMessage(m: RenderedMessage): boolean {
-  return m.kind === "user" || (m.kind === "system" && m.compactionN != null);
+  return m.kind === "user" || (m.kind === "system" && m.isCompaction === true);
+}
+
+/** 1-based ordinal of `messages[index]` among compaction rows - pure
+ *  function of the list, not a mutable counter (ai_todo 742). */
+export function compactionOrdinal(messages: RenderedMessage[], index: number): number {
+  let n = 0;
+  for (let i = 0; i <= index; i++) {
+    if (messages[i]?.isCompaction) n++;
+  }
+  return n;
 }
 
 // Claude Code wraps slash-command prompts with internal tags like

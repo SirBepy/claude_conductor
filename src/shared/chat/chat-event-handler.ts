@@ -17,6 +17,7 @@ import {
   noiseAssistantLabel,
   extractAuqAnswerText,
   stripAuqAnswerBlock,
+  compactionOrdinal,
   RenderedMessage,
 } from "./chat-transforms";
 import { eventToRenderedMessage } from "./chat-event-to-message";
@@ -181,7 +182,12 @@ function handleUserMessageEvent(
   r.activeTurnLastTs = r.activeTurnFirstTs;
   r.turnTodosBaseline = null;
   if (isCompact) {
-    r.messages.push({ kind: "system", text: "Conversation compacted", ts, compactionN: ++r.compactionCount });
+    // compactionN is derived from the assembled list (compactionOrdinal),
+    // not a threaded counter, so this agrees with eventToRenderedMessage's
+    // isCompaction-only signal by construction (ai_todo 742).
+    const compactionMsg: RenderedMessage = { kind: "system", text: "Conversation compacted", ts, isCompaction: true };
+    r.messages.push(compactionMsg);
+    compactionMsg.compactionN = compactionOrdinal(r.messages, r.messages.length - 1);
   } else if (isSilent) {
     r.messages.push({ kind: "system", text: "Continuing session…", ts });
   } else if (isMeta) {

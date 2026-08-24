@@ -81,7 +81,10 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       return { kind: "system", text: `Session started${ev.model ? ` (${ev.model})` : ""}`, ts };
     case "user_message": {
       if (isCompactUserMessage(ev.content)) {
-        return { kind: "system", text: "Conversation compacted", ts };
+        // No compactionN: this converter is stateless (single event in, no
+        // list) - the paginated caller has no full message list to derive
+        // an ordinal from. isCompaction alone is enough for isBoundaryMessage.
+        return { kind: "system", text: "Conversation compacted", ts, isCompaction: true };
       }
       const cleaned = cleanUserBlocks(ev.content);
       if (cleaned.length === 0) return null;

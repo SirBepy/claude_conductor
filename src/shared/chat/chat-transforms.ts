@@ -15,7 +15,7 @@ import {
   META_KIND_ICONS,
 } from "./chat-classifiers";
 export type { RenderedMessage } from "./chat-classifiers";
-export { isBoundaryMessage, stripStatusToken, detectStatusToken, detectProgressToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
+export { isBoundaryMessage, compactionOrdinal, stripStatusToken, detectStatusToken, detectProgressToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
 // Barrel: eventToRenderedMessage + its extraction helpers moved to
 // chat-event-to-message.ts (see todo 589); re-exported so existing
 // importers keep working unchanged.
@@ -272,8 +272,12 @@ function renderSystemNote(text: string): string {
 export function renderMessage(m: RenderedMessage): string {
   switch (m.kind) {
     case "system":
-      if (m.compactionN != null) {
-        return `<div class="msg system compact-marker"><span class="chat-pill compact-chip"><i class="ph ph-stack"></i>Context compacted<span class="compact-n">×${m.compactionN}</span></span></div>`;
+      if (m.isCompaction) {
+        // compactionN can be unset here: the paginated (scrollback) path's
+        // stateless converter has no list to derive it from - render the
+        // chip without an ordinal rather than a broken "×undefined".
+        const n = m.compactionN != null ? `<span class="compact-n">×${m.compactionN}</span>` : "";
+        return `<div class="msg system compact-marker"><span class="chat-pill compact-chip"><i class="ph ph-stack"></i>Context compacted${n}</span></div>`;
       }
       if (m.metaKind) {
         // Bookkeeping-only row (silentStreakBoundaryIndex etc, see
