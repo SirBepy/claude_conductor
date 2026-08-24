@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
-import { userEvent } from "./helpers/chat-events.mjs";
+import { userEvent, makeBus } from "./helpers/chat-events.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
@@ -19,26 +19,6 @@ const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
 // writes for the invocation itself).
 const JSONL_PICKUP =
   "<command-message>pickup</command-message>\n<command-name>/pickup</command-name>";
-
-function makeBus() {
-  const listeners = new Map();
-  return {
-    event: {
-      async listen(channel, cb) {
-        let arr = listeners.get(channel);
-        if (!arr) { arr = []; listeners.set(channel, arr); }
-        arr.push(cb);
-        return () => {
-          const a = listeners.get(channel);
-          if (a) a.splice(a.indexOf(cb), 1);
-        };
-      },
-    },
-    emit(channel, payload) {
-      for (const cb of [...(listeners.get(channel) || [])]) cb({ payload });
-    },
-  };
-}
 
 async function mountRenderer(sid, bus) {
   globalThis.window.__TAURI__ = bus;

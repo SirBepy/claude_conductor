@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
-import { assistantEvent, streamingEvent, finalEvent, userEvent } from "./helpers/chat-events.mjs";
+import { assistantEvent, streamingEvent, finalEvent, userEvent, makeBus } from "./helpers/chat-events.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
@@ -14,29 +14,6 @@ if (!globalThis.window) globalThis.window = {};
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
-
-// Minimal Tauri event bus: listen(channel, cb) registers; emit(channel, payload)
-// fires all callbacks for that channel synchronously.
-function makeBus() {
-  const listeners = new Map();
-  return {
-    event: {
-      async listen(channel, cb) {
-        let arr = listeners.get(channel);
-        if (!arr) { arr = []; listeners.set(channel, arr); }
-        arr.push(cb);
-        return () => {
-          const a = listeners.get(channel);
-          if (a) a.splice(a.indexOf(cb), 1);
-        };
-      },
-    },
-    emit(channel, payload) {
-      const arr = listeners.get(channel) || [];
-      for (const cb of [...arr]) cb({ payload });
-    },
-  };
-}
 
 beforeEach(() => {
   invokeMock.mockReset();

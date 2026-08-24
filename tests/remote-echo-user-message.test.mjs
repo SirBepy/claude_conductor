@@ -15,7 +15,7 @@
 // 3. Resume replay (remote_echo absent/false): NOT delivered -> zero bubbles.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { userEvent, remoteEchoUserEvent } from "./helpers/chat-events.mjs";
+import { userEvent, remoteEchoUserEvent, makeBus } from "./helpers/chat-events.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
@@ -28,28 +28,6 @@ if (!globalThis.window) globalThis.window = {};
 
 const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
-
-// Minimal Tauri event bus: listen() registers; emit() fires all callbacks.
-function makeBus() {
-  const listeners = new Map();
-  return {
-    event: {
-      async listen(channel, cb) {
-        let arr = listeners.get(channel);
-        if (!arr) { arr = []; listeners.set(channel, arr); }
-        arr.push(cb);
-        return () => {
-          const a = listeners.get(channel);
-          if (a) a.splice(a.indexOf(cb), 1);
-        };
-      },
-    },
-    emit(channel, payload) {
-      const arr = listeners.get(channel) || [];
-      for (const cb of [...arr]) cb({ payload });
-    },
-  };
-}
 
 beforeEach(() => {
   invokeMock.mockReset();
