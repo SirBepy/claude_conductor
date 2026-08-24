@@ -215,7 +215,9 @@ export async function openModelEffortModal(
                 ? `<div class="me-model-warning" role="alert">Claude login session expired - reconnect (run <code>claude</code> in a terminal to log back in), then reopen this dialog</div>`
                 : modelDisabled()
                   ? `<div class="me-model-warning" role="alert">${escapeHtml(modelDisplayLabel(model))} is disabled, please choose another model</div>`
-                  : ""}
+                  : accountPickIncomplete(accountField, accounts)
+                    ? `<div class="me-model-warning" role="alert">Pick an account to start this session</div>`
+                    : ""}
 
               <div class="me-actions">
                 <button type="button" class="me-more-btn${moreOpen ? " open" : ""}"><i class="ph ph-caret-right"></i>More options</button>
