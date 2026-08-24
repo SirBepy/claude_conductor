@@ -16,10 +16,12 @@ pub const ASK_MODEL: &str = "sonnet";
 /// transcript and inferring intent, which low effort visibly degrades.
 pub const ASK_EFFORT: &str = "medium";
 
-/// The whole read-only guarantee. `claude` may look at anything through these
-/// and cannot Edit, Write, Bash or otherwise act. Never widen this without
-/// re-reading Ask's doc comment.
+/// `--allowedTools` only PRE-APPROVES: it is not an exhaustive allowlist, so
+/// absence from here does not stop a tool running.
 const ALLOWED_TOOLS: &str = "Read Grep Glob WebSearch WebFetch";
+
+/// The actual read-only guarantee. `Task` too: a subagent would not inherit it.
+const DENIED_TOOLS: &str = "Edit Write NotebookEdit Bash BashOutput KillShell Task";
 
 /// What came back from one sidecar run.
 pub struct AskAnswer {
@@ -86,6 +88,8 @@ pub async fn ask(
         .arg(ASK_EFFORT)
         .arg("--allowedTools")
         .arg(ALLOWED_TOOLS)
+        .arg("--disallowedTools")
+        .arg(DENIED_TOOLS)
         .arg("--output-format")
         .arg("stream-json")
         .arg("--verbose");
@@ -182,8 +186,21 @@ mod tests {
                 "{t} is not a read-only tool"
             );
         }
-        assert!(!ALLOWED_TOOLS.contains("Edit"));
-        assert!(!ALLOWED_TOOLS.contains("Write"));
-        assert!(!ALLOWED_TOOLS.contains("Bash"));
+    }
+
+    #[test]
+    fn every_mutating_tool_is_explicitly_denied() {
+        // Absence from ALLOWED_TOOLS is not enough: that flag only pre-approves,
+        // so a mutating tool has to be named in the deny list to be refused.
+        for t in ["Edit", "Write", "NotebookEdit", "Bash", "Task"] {
+            assert!(DENIED_TOOLS.split(' ').any(|d| d == t), "{t} is not denied");
+        }
+    }
+
+    #[test]
+    fn no_tool_is_both_allowed_and_denied() {
+        for a in ALLOWED_TOOLS.split(' ') {
+            assert!(!DENIED_TOOLS.split(' ').any(|d| d == a), "{a} is both allowed and denied");
+        }
     }
 }
