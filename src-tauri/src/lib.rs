@@ -1,5 +1,6 @@
 mod bootstrap;
 pub mod accounts;
+pub mod ask;
 pub mod channels;
 pub mod characters;
 pub mod context_status;
@@ -367,6 +368,9 @@ pub fn run() {
             ipc::render_preview_doc,
             ipc::window::preview::open_preview_window,
             ipc::window::preview::close_preview_window,
+            ipc::ask_list_threads,
+            ipc::ask_send,
+            ipc::ask_delete_thread,
             ipc::list_user_todos,
             ipc::set_user_todo_state,
             ipc::mark_todos_seen,

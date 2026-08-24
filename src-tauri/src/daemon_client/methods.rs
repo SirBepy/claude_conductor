@@ -5,6 +5,7 @@
 //! into `methods/` submodules - ai_todo 601. Pure code motion, no behavior
 //! change.
 
+mod ask;
 mod channels;
 mod misc;
 mod permission;

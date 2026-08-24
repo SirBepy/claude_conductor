@@ -21,6 +21,7 @@ use claude_conductor_lib::ipc::files::TextFileData;
 use claude_conductor_lib::ipc::schedule::ExternalScheduledJob;
 use claude_conductor_lib::notifications::piper::{PiperStatus, VoiceEntry};
 use claude_conductor_lib::sessions::kinds::InstanceKind;
+use claude_conductor_lib::ask::{AskMessage, AskThread};
 use claude_conductor_lib::sessions::user_todos::{TodoState, UserTodo};
 use claude_conductor_lib::sessions::scheduled_items::{
     Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus,
@@ -166,6 +167,10 @@ fn emit_ipc_types() {
     // Your Todos panel (todo 692)
     out.push_str(&decl::<TodoState>());
     out.push_str(&decl::<UserTodo>());
+
+    // ask
+    out.push_str(&decl::<AskMessage>());
+    out.push_str(&decl::<AskThread>());
 
     let path = output_path();
     if let Some(parent) = path.parent() {
