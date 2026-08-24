@@ -1,31 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { mountView } from "./harness";
-
-// .oc-reset-pop fades/scales in over a 200ms CSS transition (overlay.css) - a
-// box read mid-transition gives a smaller, timing-dependent width, which is
-// the real cause of the reset-popup containment flake under parallel workers.
-// Poll via rAF until the width holds steady for 3 frames (transition settled).
-async function waitForStableBox(page: Page, selector: string): Promise<void> {
-  await page.evaluate((sel) => {
-    return new Promise<void>((resolve) => {
-      const el = document.querySelector(sel) as HTMLElement;
-      let last = el.getBoundingClientRect().width;
-      let stableFrames = 0;
-      function check() {
-        const cur = el.getBoundingClientRect().width;
-        if (Math.abs(cur - last) < 0.01) {
-          stableFrames++;
-          if (stableFrames >= 3) return resolve();
-        } else {
-          stableFrames = 0;
-        }
-        last = cur;
-        requestAnimationFrame(check);
-      }
-      requestAnimationFrame(check);
-    });
-  }, selector);
-}
+import { test, expect } from "@playwright/test";
+import { mountView, waitForStableBox } from "./harness";
 
 // Proof spec for the browser view-harness: the overlay window boots against a
 // fully mocked backend and shows the reset-countdown popup (2026-07-28) on

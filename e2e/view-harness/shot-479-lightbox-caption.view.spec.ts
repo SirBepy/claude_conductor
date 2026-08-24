@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { capture, mountView } from "./harness";
+import { capture, expectSeparated, mountView } from "./harness";
 
 // Todo 479: 27db7698 moved the composer-wrap out of the image-only branch, so
 // the caption box should now render for text and PDF previews too.
@@ -74,17 +74,6 @@ async function openLightboxWithComposer(page: Page, kind: Kind): Promise<void> {
   }, { k: kind, PDF_BASE64 });
 }
 
-async function expectNoOverlap(composer: Locator, content: Locator): Promise<void> {
-  const a = await composer.boundingBox();
-  const b = await content.boundingBox();
-  expect(a, "composer has no layout box").not.toBeNull();
-  expect(b, "content has no layout box").not.toBeNull();
-  const separated =
-    a!.y + a!.height <= b!.y || b!.y + b!.height <= a!.y
-    || a!.x + a!.width <= b!.x || b!.x + b!.width <= a!.x;
-  expect(separated, `composer ${JSON.stringify(a)} overlaps content ${JSON.stringify(b)}`).toBe(true);
-}
-
 /** Records CSP violations for the whole page lifetime. Installed before
  *  mountView so it is already listening when the page navigates. */
 async function watchCspViolations(page: Page): Promise<() => Promise<string[]>> {
@@ -146,7 +135,7 @@ test.describe("@shot", () => {
     await expect(pre).toBeVisible();
     await expect(pre).toContainText("[daemon] session s1 turn 0 settled in 120ms");
     await expect(input).toBeVisible();
-    await expectNoOverlap(input, pre);
+    await expectSeparated(input, pre);
 
     await expectEnterInsertsNewline(input, overlay);
     await capture(overlay, "lightbox-text-composer");
@@ -171,7 +160,7 @@ test.describe("@shot", () => {
     expect(await cspViolations()).toEqual([]);
 
     await expect(input).toBeVisible();
-    await expectNoOverlap(input, embed);
+    await expectSeparated(input, embed);
 
     await expectEnterInsertsNewline(input, overlay);
     await capture(overlay, "lightbox-pdf-composer");
@@ -188,7 +177,7 @@ test.describe("@shot", () => {
     await expect(img).toBeVisible();
     await expect(overlay.locator(".lightbox-more-btn")).toBeVisible();
     await expect(input).toBeVisible();
-    await expectNoOverlap(input, img);
+    await expectSeparated(input, img);
 
     await expectEnterInsertsNewline(input, overlay);
     await capture(overlay, "lightbox-image-composer-regression");

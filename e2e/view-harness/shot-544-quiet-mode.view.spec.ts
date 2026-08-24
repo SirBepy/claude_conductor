@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { capture, mountView, sessionInstance } from "./harness";
+import { capture, mountView, sessionInstance, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Todo 544: visual confirmation of quiet-mode chat (commit 9f4500b8).
 // Narration rows must be present-but-hidden by default; the chat menu's
@@ -28,14 +28,8 @@ test.describe("@shot", () => {
     await mountView(page, {
       view: "sessions",
       invoke: {
-        get_accounts_setup_prompt_state: { shouldShow: false },
-        get_usage_map: {}, get_skill_usage_week: { entries: [], total_sessions: 0 },
-        poll_now: null, list_projects: [], resolve_whitelist_characters: [],
-        probe_models_availability: [], list_accounts: [], list_scheduled_messages: [],
-        list_session_characters: {}, watch_session_transcript: null,
-        unwatch_session_transcript: null, session_live_cwd: null, get_git_info: null,
-        get_session_counts: null, get_context_status: null, get_session_drain: null,
-        list_pending_prompts: [], get_chat_config: null, list_previews: [],
+        ...SESSIONS_BASE_INVOKE,
+        list_previews: [],
         list_slash_commands: [],
         list_instances: [SESSION], get_active_sessions: [SESSION],
         load_history_page: transcript(),

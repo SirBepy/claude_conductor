@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { capture, mountView } from "./harness";
+import { test, expect } from "@playwright/test";
+import { capture, mountView, waitForStableBox } from "./harness";
 
 // Todo 499: commit 9997c531 widened .oc-dial-row's left/right padding from 65px
 // to 78px so the reset popup stops overhanging. Mount + containment check are
@@ -10,30 +10,6 @@ const ACCOUNT = {
   config_dir: "", chrome_profile_dir: "", email: "", org_uuid: "",
   subscription_tier: "", created_at: "", fleet_eligible: false,
 };
-
-/** Inlined, not added to harness.ts (other agents own that file): the popup
- *  fades/scales over 200ms, so a box read mid-transition is too narrow. */
-async function waitForStableBox(page: Page, selector: string): Promise<void> {
-  await page.evaluate((sel) => {
-    return new Promise<void>((resolve) => {
-      const el = document.querySelector(sel) as HTMLElement;
-      let last = el.getBoundingClientRect().width;
-      let stable = 0;
-      function check() {
-        const cur = el.getBoundingClientRect().width;
-        if (Math.abs(cur - last) < 0.01) {
-          stable++;
-          if (stable >= 3) return resolve();
-        } else {
-          stable = 0;
-        }
-        last = cur;
-        requestAnimationFrame(check);
-      }
-      requestAnimationFrame(check);
-    });
-  }, selector);
-}
 
 test.describe("@shot", () => {
   test.skip(!process.env.CC_SHOTS, "capture-only, run it with CC_SHOTS=1");

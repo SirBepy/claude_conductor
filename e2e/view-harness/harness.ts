@@ -27,7 +27,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { Instance } from "../../src/types/ipc.generated";
 
 export type Entry = "index" | "overlay";
@@ -196,13 +196,14 @@ export async function mountSessionsList(
   page: Page,
   sessions: Instance[],
   rowStyle?: "classic" | "portrait",
+  extra: InvokeMap = {},
 ): Promise<void> {
   if (rowStyle) {
     await page.addInitScript((v) => localStorage.setItem("cc_chat_row_style", v), rowStyle);
   }
   await mountView(page, {
     view: "sessions",
-    invoke: { ...SESSIONS_BASE_INVOKE, list_instances: sessions, get_active_sessions: sessions },
+    invoke: { ...SESSIONS_BASE_INVOKE, list_instances: sessions, get_active_sessions: sessions, ...extra },
   });
   // Unscoped `li`, not `li[data-session-id]`: a session inside the (default-
   // collapsed) Closing segment renders no visible session row at all, only
@@ -326,4 +327,62 @@ export async function capture(
   }
   console.log(`[capture] ${file}`);
   return file;
+}
+
+// .oc-reset-pop fades/scales in over a 200ms CSS transition (overlay.css) - a
+// box read mid-transition gives a smaller, timing-dependent width, which is
+// the real cause of the reset-popup containment flake under parallel workers.
+// Poll via rAF until the width holds steady for 3 frames (transition settled).
+export async function waitForStableBox(page: Page, selector: string): Promise<void> {
+  await page.evaluate((sel) => {
+    return new Promise<void>((resolve) => {
+      const el = document.querySelector(sel) as HTMLElement;
+      let last = el.getBoundingClientRect().width;
+      let stableFrames = 0;
+      function check() {
+        const cur = el.getBoundingClientRect().width;
+        if (Math.abs(cur - last) < 0.01) {
+          stableFrames++;
+          if (stableFrames >= 3) return resolve();
+        } else {
+          stableFrames = 0;
+        }
+        last = cur;
+        requestAnimationFrame(check);
+      }
+      requestAnimationFrame(check);
+    });
+  }, selector);
+}
+
+export interface Box { x: number; y: number; right: number; bottom: number }
+
+export function boxesOverlap(a: Box, b: Box): boolean {
+  return !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y);
+}
+
+/** Asserts two locators' boxes do not overlap, converting Playwright's
+ *  x/y/width/height boundingBox into the right/bottom shape {@link boxesOverlap} takes. */
+export async function expectSeparated(a: Locator, b: Locator): Promise<void> {
+  const boxA = await a.boundingBox();
+  const boxB = await b.boundingBox();
+  expect(boxA, "first locator has no layout box").not.toBeNull();
+  expect(boxB, "second locator has no layout box").not.toBeNull();
+  const toBox = (r: { x: number; y: number; width: number; height: number }): Box =>
+    ({ x: r.x, y: r.y, right: r.x + r.width, bottom: r.y + r.height });
+  expect(
+    boxesOverlap(toBox(boxA!), toBox(boxB!)),
+    `${JSON.stringify(boxA)} overlaps ${JSON.stringify(boxB)}`,
+  ).toBe(false);
+}
+
+/** `image` is optional: omit it for a plain text turn. */
+export function userMsg(text: string, image?: string): unknown {
+  const content: unknown[] = [{ type: "text", text }];
+  if (image) content.push({ type: "image", mime: "image/png", data: image });
+  return { type: "user_message", content, timestamp: 0, remote_echo: false, is_meta: false, author_session_id: null };
+}
+
+export function assistantMsg(text: string): unknown {
+  return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
 }

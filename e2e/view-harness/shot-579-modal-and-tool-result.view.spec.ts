@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { assistantMsg, capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
 // Todo 579: live-verify two visual changes that shipped without a screenshot -
 // the new-chat modal's un-collapsed left column (commit e094080e) and the
@@ -19,14 +19,6 @@ const MODAL_INVOKE = {
 };
 
 const FULL_TEXT = "FULL-OUTPUT-MARKER-4242 restored from load_event_detail";
-
-function userMsg(text: string): unknown {
-  return { type: "user_message", content: [{ type: "text", text }], timestamp: 0, remote_echo: false, is_meta: false, author_session_id: null };
-}
-
-function assistantMsg(text: string): unknown {
-  return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
-}
 
 // The truncated result rides the INITIAL page on purpose (todo 738): that is
 // the path a user hits just by opening a chat, and the backend truncates the

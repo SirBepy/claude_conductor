@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import {
+  assistantMsg, boxesOverlap, capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg,
+  type Box,
+} from "./harness";
 
 // Todo 526: prove every image entry point lands on the unified
 // chat-image-gallery overlay rather than the old single-image lightbox.
@@ -14,21 +17,11 @@ const LIME = "iVBORw0KGgoAAAANSUhEUgAAAPAAAACWCAIAAABvmpKCAAABQ0lEQVR42u3SAQ0AQA
 
 const DESKTOP = { width: 1400, height: 900 };
 
-function userMsg(text: string, image?: string): unknown {
-  const content: unknown[] = [{ type: "text", text }];
-  if (image) content.push({ type: "image", mime: "image/png", data: image });
-  return { type: "user_message", content, timestamp: 0, remote_echo: false, is_meta: false, author_session_id: null };
-}
-
 function shot(id: string, description: string, data: string): unknown[] {
   return [
     { type: "tool_use", tool_name: "Bash", input: { command: "capture.ps1", description }, id, timestamp: 0, parent_tool_use_id: null },
     { type: "tool_result", tool_use_id: id, output: { type: "image", mime: "image/png", data }, is_error: false, timestamp: 0, output_truncated: false },
   ];
-}
-
-function assistantMsg(text: string): unknown {
-  return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
 }
 
 // 4 image-bearing turns -> 7 images: 1 attachment, 4 screenshots, 2 inline
@@ -83,11 +76,6 @@ async function expectUnifiedGallery(page: Page, counter: string, railLabel: stri
   const stage = page.locator(".chat-image-gallery-overlay .screenshot-gallery-stage img");
   await expect(stage).toBeVisible();
   expect(await stage.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
-}
-
-interface Box { x: number; y: number; right: number; bottom: number }
-function overlaps(a: Box, b: Box): boolean {
-  return !(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y);
 }
 
 /** The drawer animates max-height, so shoot it only once nothing is clipped. */
@@ -188,10 +176,10 @@ test.describe("@shot", () => {
     await capture(gallery(page), "gallery-rail-pinned");
 
     const tall = await overlayBoxes(page);
-    expect(overlaps(tall.drawer, tall.prev)).toBe(false);
-    expect(overlaps(tall.drawer, tall.next)).toBe(false);
-    expect(overlaps(tall.drawer, tall.counter)).toBe(false);
-    expect(overlaps(tall.drawer, tall.close)).toBe(false);
+    expect(boxesOverlap(tall.drawer, tall.prev)).toBe(false);
+    expect(boxesOverlap(tall.drawer, tall.next)).toBe(false);
+    expect(boxesOverlap(tall.drawer, tall.counter)).toBe(false);
+    expect(boxesOverlap(tall.drawer, tall.close)).toBe(false);
 
     await page.locator(".gallery-rail-entry").nth(3).click();
     await expectUnifiedGallery(page, "6 of 7", "Same shot again for reference.");
@@ -204,7 +192,7 @@ test.describe("@shot", () => {
     // The drawer's max-height transitions on resize, so poll it to rest.
     await expect.poll(async () => {
       const b = await overlayBoxes(page);
-      return [b.prev, b.next, b.counter, b.close].some((box) => overlaps(b.drawer, box));
+      return [b.prev, b.next, b.counter, b.close].some((box) => boxesOverlap(b.drawer, box));
     }).toBe(false);
     await capture(gallery(page), "gallery-rail-short-viewport");
   });

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { SESSIONS_BASE_INVOKE, capture, mountView, sessionInstance } from "./harness";
-import type { Instance } from "../../src/types/ipc.generated";
+import { capture, mountSessionsList, mountView, sessionInstance } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";
 
 // Todo 658: renders the three reachable changes from the 2026-08-16 backlog
@@ -62,27 +61,6 @@ function schedItem(sessionId: string) {
   };
 }
 
-/** mountSessionsList can't reach this case: the badge's data source is
- *  `schedule_list`, which SESSIONS_BASE_INVOKE does not mock. */
-async function mountRows(
-  page: Page,
-  sessions: Instance[],
-  rowStyle: "classic" | "portrait",
-  extra: Record<string, unknown> = {},
-): Promise<void> {
-  await page.addInitScript((v) => localStorage.setItem("cc_chat_row_style", v), rowStyle);
-  await mountView(page, {
-    view: "sessions",
-    invoke: {
-      ...SESSIONS_BASE_INVOKE,
-      list_instances: sessions,
-      get_active_sessions: sessions,
-      ...extra,
-    },
-  });
-  await page.locator("#sessions-list li").first().waitFor();
-}
-
 // Todo 737: these two once rendered SHA256-identical, so 646's "tell an MCP
 // question from a degraded builtin one at a glance" did not exist at all. Hash
 // the rendered cards rather than leaving it to a capture nobody diffs.
@@ -134,7 +112,7 @@ test.describe("@shot", () => {
           sessionInstance({ session_id: "s1", name: "Scheduled one", cwd: "C:/Projects/alpha" }),
           sessionInstance({ session_id: "s2", name: "Held one", cwd: "C:/Projects/beta", held_count: 1 }),
         ];
-        await mountRows(page, sessions, style, { schedule_list: [schedItem("s1")] });
+        await mountSessionsList(page, sessions, style, { schedule_list: [schedItem("s1")] });
 
         const schedRow = page.locator('li[data-session-id="s1"]');
         const heldRow = page.locator('li[data-session-id="s2"]');
@@ -163,7 +141,7 @@ test.describe("@shot", () => {
   test("632 - takeover on an unreachable command shows the friendly alert", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     const sess = sessionInstance({ session_id: "s1", kind: "external", name: "Manual claude" });
-    await mountRows(page, [sess], "classic", {
+    await mountSessionsList(page, [sess], "classic", {
       load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
       list_slash_commands: [],
       list_accounts: [{ id: "acc-1", label: "Personal", colour: "#8b5cf6", icon: "user" }],
