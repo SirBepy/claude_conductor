@@ -108,9 +108,27 @@
   text-align: center;
 }
 
-.model-effort-modal-card .me-title {
-  margin: 0 0 14px;
-  font-size: 1rem;
+/* Title: "New session" reads as a heading; the project name is a distinct
+ * sub-line, not fused into one sentence with the app's own name (which can
+ * itself be the project name, e.g. this repo - "New session in
+ * claude_usage_in_taskbar" read as if it opened a session inside the app). */
+.model-effort-modal-card .me-header {
+  margin: 0 0 16px;
+}
+
+.model-effort-modal-card .title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.model-effort-modal-card .me-project {
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.76rem;
+  color: var(--color-text-muted, #8a8a96);
 }
 
 /* ── Account picker (multi-account milestone 04) ─────────────────────────── */
@@ -119,29 +137,43 @@
   margin-bottom: 15px;
 }
 
-.model-effort-modal-card .me-label .hint {
-  color: var(--color-primary, #6e8fff);
-  font-weight: 600;
-}
-
-.model-effort-modal-card .me-acc-collapsed {
+/* Backgroundless/borderless dropdown trigger - the whole row opens the
+ * account-edit chip list. No chip pill, no separate "change" link: picked
+ * over both in-context tabbed comparison (impeccable session, 2026-08-23). */
+.model-effort-modal-card .me-acc-ghost {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text, #e8e8ee);
+  font: inherit;
+  cursor: pointer;
 }
 
-.model-effort-modal-card .me-change {
-  background: none;
-  border: 0;
-  color: var(--color-text-muted, #8a8a96);
-  font: inherit;
-  font-size: 0.72rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.model-effort-modal-card .me-acc-ghost:hover {
+  background: var(--color-surface-alt, #24242e);
 }
-.model-effort-modal-card .me-change:hover { color: var(--color-text, #e8e8ee); }
+
+.model-effort-modal-card .me-acc-ghost-name {
+  flex: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.model-effort-modal-card .me-acc-ghost .ph-caret-down {
+  color: var(--color-text-muted, #8a8a96);
+  transition: color 0.12s;
+}
+
+.model-effort-modal-card .me-acc-ghost:hover .ph-caret-down {
+  color: var(--color-primary, #6e8fff);
+}
 
 .model-effort-modal-card .me-acc-edit {
   display: flex;
@@ -200,67 +232,49 @@
   margin-bottom: 4px;
 }
 
-.model-effort-modal-card .me-slider {
+/* ── Custom animated slider (Model / Effort) - see model-effort-modal.ts
+ * for why this isn't a native <input type=range>. ── */
+.model-effort-modal-card .me-slider-wrap {
+  padding: 9px 0;
+  cursor: pointer;
+}
+
+.model-effort-modal-card .me-slider-track {
+  position: relative;
+  height: 4px;
+  background: var(--color-border, #2a2a36);
+  border-radius: 2px;
+}
+
+.model-effort-modal-card .me-slider-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  accent-color: var(--color-primary, #6e8fff);
+  height: 100%;
+  background: var(--color-primary, #6e8fff);
+  border-radius: 2px;
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 0.28s cubic-bezier(.4, 0, .2, 1);
 }
 
-.model-effort-modal-card .me-more {
-  margin: 16px 0 0;
+.model-effort-modal-card .me-slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary, #6e8fff);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #6e8fff) 25%, transparent);
+  transition: left 0.28s cubic-bezier(.4, 0, .2, 1);
 }
 
-.model-effort-modal-card .me-more-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  list-style: none;
-  cursor: pointer;
-  font-size: 0.78rem;
-  color: var(--color-text-muted, #8a8a96);
-  user-select: none;
-}
-
-.model-effort-modal-card .me-more-summary::-webkit-details-marker {
-  display: none;
-}
-
-.model-effort-modal-card .me-more-summary .ph {
-  font-size: 0.85rem;
-  transition: transform 0.15s ease;
-}
-
-.model-effort-modal-card .me-more[open] .me-more-summary .ph {
-  transform: rotate(90deg);
-}
-
-.model-effort-modal-card .me-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 10px 0 0;
-  font-size: 0.82rem;
-  color: var(--color-text, #e8e8ee);
-  cursor: pointer;
-  user-select: none;
-}
-
-.model-effort-modal-card .me-check input[type="checkbox"] {
-  accent-color: var(--color-primary, #6e8fff);
-  cursor: pointer;
-  margin-top: 2px;
-  flex-shrink: 0;
-}
-
-.model-effort-modal-card .me-check-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.model-effort-modal-card .me-check-hint {
-  font-size: 0.72rem;
-  font-weight: 400;
-  color: var(--color-text-muted, #8a8a96);
+.model-effort-modal-card .me-slider-wrap:focus-visible .me-slider-thumb {
+  outline: 2px solid var(--color-primary, #6e8fff);
+  outline-offset: 3px;
 }
 
 .model-effort-modal-card .me-stop-labels {
@@ -269,9 +283,20 @@
   margin-top: 2px;
 }
 
+/* Stops are real buttons - clicking a label jumps the slider straight to it
+ * (impeccable session, 2026-08-23), alongside dragging the track itself. */
 .model-effort-modal-card .slider-stop-label {
+  background: none;
+  border: 0;
+  padding: 2px;
+  font: inherit;
   font-size: 0.72rem;
   color: var(--color-text-muted, #8a8a96);
+  cursor: pointer;
+}
+
+.model-effort-modal-card .slider-stop-label:hover {
+  color: var(--color-text, #e8e8ee);
 }
 
 .model-effort-modal-card .slider-stop-label.active {
@@ -307,11 +332,89 @@
   animation: icon-btn-spin 0.8s linear infinite;
 }
 
-.model-effort-modal-card .me-actions {
-  margin-top: 18px;
+/* Framed advanced-options body (Effort + toggles) - reads as one revealed
+ * section, not a continuation of the always-visible fields above it. */
+.model-effort-modal-card .me-more-body {
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border, #2a2a36);
+}
+
+.model-effort-modal-card .me-more-body .me-field:first-child {
+  margin-top: 0;
+}
+
+.model-effort-modal-card .me-check {
   display: flex;
-  justify-content: flex-end;
+  align-items: flex-start;
   gap: 8px;
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text, #e8e8ee);
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-effort-modal-card .me-check input[type="checkbox"] {
+  accent-color: var(--color-primary, #6e8fff);
+  cursor: pointer;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.model-effort-modal-card .me-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-effort-modal-card .me-check-hint {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--color-text-muted, #8a8a96);
+}
+
+/* Footer row: "More options" joins Cancel/Start instead of floating mid-form
+ * as an orphaned link (impeccable session, 2026-08-22/23) - ghost-styled,
+ * left-aligned flush with the rest of the content, never bordered; the two
+ * real submit actions stay grouped on the right. */
+.model-effort-modal-card .me-actions {
+  margin-top: 26px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-effort-modal-card .me-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.model-effort-modal-card .me-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--color-text-muted, #8a8a96);
+  padding: 7px 0;
+  border: 0;
+  background: none;
+}
+
+.model-effort-modal-card .me-more-btn:hover,
+.model-effort-modal-card .me-more-btn.open {
+  color: var(--color-text, #e8e8ee);
+}
+
+.model-effort-modal-card .me-more-btn .ph {
+  font-size: 0.85rem;
+  transition: transform 0.15s ease;
+}
+
+.model-effort-modal-card .me-more-btn.open .ph {
+  transform: rotate(90deg);
 }
 
 .model-effort-modal-card .me-cancel,

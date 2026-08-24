@@ -108,18 +108,17 @@ async function startHaikuChat() {
   await row.waitForExist({ timeout: 10000 });
   await row.click();
 
-  // Model/effort modal: set sliders to haiku (0) / normal (1).
-  await (await $(".me-model-slider")).waitForExist({ timeout: 10000 });
-  await browser.execute(() => {
-    const setSlider = (sel, val) => {
-      const el = document.querySelector(sel);
-      if (!el) return;
-      el.value = String(val);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    };
-    setSlider(".me-model-slider", 0); // haiku
-    setSlider(".me-effort-slider", 1); // normal
-  });
+  // Model/effort modal: sliders are clickable stop-label buttons now, not
+  // native <input type=range> (model-effort-modal.ts, impeccable session
+  // 2026-08-23). Model to haiku (0); Effort lives behind "More options".
+  const modelHaiku = await $('.slider-stop-label[data-kind="model"][data-idx="0"]');
+  await modelHaiku.waitForExist({ timeout: 10000 });
+  await modelHaiku.click();
+
+  await (await $(".me-more-btn")).click();
+  const effortMedium = await $('.slider-stop-label[data-kind="effort"][data-idx="1"]');
+  await effortMedium.waitForExist({ timeout: 10000 });
+  await effortMedium.click(); // "normal"
   const confirm = await $(".me-confirm");
   await confirm.waitForClickable({ timeout: 10000 });
   await confirm.click();

@@ -29,11 +29,15 @@ async function startHaikuChat() {
   const row = await $(".project-picker-row");
   await row.waitForExist({ timeout: 10000 });
   await row.click();
-  await (await $(".me-model-slider")).waitForExist({ timeout: 10000 });
-  await browser.execute(() => {
-    const set = (sel, v) => { const el = document.querySelector(sel); if (el) { el.value = String(v); el.dispatchEvent(new Event("input", { bubbles: true })); } };
-    set(".me-model-slider", 0); set(".me-effort-slider", 1);
-  });
+  // Sliders are clickable stop-label buttons now, not native <input
+  // type=range> (model-effort-modal.ts, impeccable session 2026-08-23).
+  const modelHaiku = await $('.slider-stop-label[data-kind="model"][data-idx="0"]');
+  await modelHaiku.waitForExist({ timeout: 10000 });
+  await modelHaiku.click();
+  await (await $(".me-more-btn")).click();
+  const effortMedium = await $('.slider-stop-label[data-kind="effort"][data-idx="1"]');
+  await effortMedium.waitForExist({ timeout: 10000 });
+  await effortMedium.click();
   const confirm = await $(".me-confirm");
   await confirm.waitForClickable({ timeout: 10000 });
   await confirm.click();

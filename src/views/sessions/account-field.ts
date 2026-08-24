@@ -7,7 +7,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import type { Account } from "../../shared/api";
-import { accountChipHtml } from "../../shared/account-chip";
+import { accountChipHtml, accountIconBadgeHtml } from "../../shared/account-chip";
 import "../../shared/account-chip.css";
 import { shouldOfferRemember } from "./account-picker-logic";
 
@@ -35,18 +35,6 @@ export interface AccountFieldContext {
  * chip. Gates "Start session" in both cases. */
 export function accountPickIncomplete(state: AccountFieldState, accounts: Account[]): boolean {
   return accounts.length === 0 || state.accountId === null;
-}
-
-/** "&middot; suggested/bound/your pick" suffix next to the "Account" label. */
-function accountHintHtml(state: AccountFieldState, ctx: AccountFieldContext): string {
-  if (state.accountId === null) return "";
-  if (ctx.preferredAccountId !== null && state.accountId === ctx.preferredAccountId) {
-    return ` <span class="hint">&middot; bound to this project</span>`;
-  }
-  if (state.accountId === ctx.resolvedAccountId) {
-    return ` <span class="hint">&middot; suggested for this folder</span>`;
-  }
-  return ` <span class="hint">&middot; your pick</span>`;
 }
 
 export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFieldContext): string {
@@ -78,11 +66,12 @@ export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFie
   const showRemember = shouldOfferRemember(state.accountId, ctx.resolvedAccountId);
   return `
     <div class="me-acc-field">
-      <label class="me-label">Account${accountHintHtml(state, ctx)}</label>
-      <div class="me-acc-collapsed">
-        ${accountChipHtml(chosen, true)}
-        <button type="button" class="me-change"><i class="ph ph-pencil-simple"></i> change</button>
-      </div>
+      <label class="me-label">Account</label>
+      <button type="button" class="me-acc-ghost">
+        ${accountIconBadgeHtml(chosen)}
+        <span class="me-acc-ghost-name">${escapeHtml(chosen.label)}</span>
+        <i class="ph ph-caret-down"></i>
+      </button>
       ${showRemember ? `
         <label class="me-remember">
           <input type="checkbox" class="me-remember-input"${state.remember ? " checked" : ""}>
@@ -106,8 +95,9 @@ export function attachAccountFieldHandlers(
   onAddAccount: () => void,
 ): void {
   const openAccountEdit = () => { state.editingAccount = true; onChange(); };
-  overlay.querySelector<HTMLButtonElement>(".me-change")?.addEventListener("click", openAccountEdit);
-  overlay.querySelector<HTMLElement>(".me-acc-collapsed .account-chip")?.addEventListener("click", openAccountEdit);
+  // Real <button>, unlike the .account-chip options below - no extra
+  // keyboard-activation wiring needed, Enter/Space already work natively.
+  overlay.querySelector<HTMLButtonElement>(".me-acc-ghost")?.addEventListener("click", openAccountEdit);
   overlay.querySelectorAll<HTMLElement>(".me-acc-edit .account-chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       const id = chip.dataset.accId;

@@ -25,6 +25,8 @@ import {
 
 export type { SessionConfig };
 
+type SliderKind = "model" | "effort";
+
 export async function openModelEffortModal(
   projectPath: string,
   projectName: string,
@@ -106,6 +108,9 @@ export async function openModelEffortModal(
     // True while the availability probe below is in flight - the only one of
     // the modal's two background loads with no prior loading affordance.
     let modelProbeLoading = false;
+    // Replaces native <details>'s own open state now that the trigger lives
+    // in the footer row instead of directly above the content it reveals.
+    let moreOpen = false;
 
     // ── Account picker state (multi-account milestone 04) ──────────────────────
     // Rendering/wiring live in account-field.ts; this modal just owns the
@@ -121,42 +126,189 @@ export async function openModelEffortModal(
     function modelDisabled(): boolean { return availability[model] === false; }
     function sessionBlocked(): boolean { return authExpired || modelDisabled(); }
 
+    // ── Custom animated slider ──────────────────────────────────────────────
+    // Native <input type=range> can't animate its thumb on a programmatic
+    // value change (WebKit/Blink snap instantly - thumb position isn't a
+    // transitionable CSS property), so track+fill+thumb are plain divs here.
+
+    function sliderHtml(kind: SliderKind, label: string, idx: number, stops: string[], keyHints: boolean): string {
+      const max = stops.length - 1;
+      const stopsHtml = stops.map((s, i) => `
+        <button type="button" class="slider-stop-label${i === idx ? " active" : ""}" data-kind="${kind}" data-idx="${i}">${escapeHtml(s)}${keyHints && i < 9 ? `<span class="me-key-hint">${i + 1}</span>` : ""}</button>
+      `).join("");
+      return `
+        <div class="me-field">
+          <label class="me-label">${escapeHtml(label)}${kind === "model" && modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : ""}</label>
+          <div class="me-slider-wrap" data-kind="${kind}" data-min="0" data-max="${max}" role="slider" tabindex="0"
+            aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${idx}" aria-valuetext="${escapeHtml(stops[idx] ?? "")}">
+            <div class="me-slider-track"><div class="me-slider-fill"></div><div class="me-slider-thumb"></div></div>
+          </div>
+          <div class="me-stop-labels">${stopsHtml}</div>
+        </div>
+      `;
+    }
+
+    /** Snaps one slider's fill/thumb to `idx`, transition disabled - the
+     * correct-position baseline every render needs before FLIP can animate
+     * away from it, and the live-tracking update while dragging. */
+    function positionSliderInstant(wrap: HTMLElement, idx: number): void {
+      const max = Number(wrap.dataset.max);
+      const pct = max > 0 ? (idx / max) * 100 : 0;
+      const fill = wrap.querySelector<HTMLElement>(".me-slider-fill");
+      const thumb = wrap.querySelector<HTMLElement>(".me-slider-thumb");
+      if (!fill || !thumb) return;
+      fill.style.transition = "none";
+      thumb.style.transition = "none";
+      fill.style.transform = `scaleX(${pct / 100})`;
+      thumb.style.left = `${pct}%`;
+      fill.getBoundingClientRect(); // force reflow before re-enabling transition
+      fill.style.transition = "";
+      thumb.style.transition = "";
+    }
+
+    function setActiveLabel(kind: SliderKind, idx: number): void {
+      card.querySelectorAll<HTMLElement>(`.slider-stop-label[data-kind="${kind}"]`).forEach((el) => {
+        el.classList.toggle("active", Number(el.dataset.idx) === idx);
+      });
+    }
+
+    /** FLIP "first" step - captures each slider's on-screen position right
+     * before renderBody() tears the DOM down and rebuilds it. */
+    function captureSliderFlipState(): Map<SliderKind, { fill: string; thumbLeft: string }> {
+      const out = new Map<SliderKind, { fill: string; thumbLeft: string }>();
+      card.querySelectorAll<HTMLElement>(".me-slider-wrap").forEach((wrap) => {
+        const kind = wrap.dataset.kind as SliderKind;
+        const fill = wrap.querySelector<HTMLElement>(".me-slider-fill");
+        const thumb = wrap.querySelector<HTMLElement>(".me-slider-thumb");
+        if (fill && thumb) out.set(kind, { fill: fill.style.transform, thumbLeft: thumb.style.left });
+      });
+      return out;
+    }
+
+    /** FLIP "last/invert/play" - snaps each still-present slider back to its
+     * pre-render position, forces reflow, then lets the CSS transition carry
+     * it to the position renderBody() already set. A slider with no prior
+     * entry (e.g. Effort on first "More options" open) just appears. */
+    function playSliderFlip(from: Map<SliderKind, { fill: string; thumbLeft: string }>): void {
+      card.querySelectorAll<HTMLElement>(".me-slider-wrap").forEach((wrap) => {
+        const kind = wrap.dataset.kind as SliderKind;
+        const prev = from.get(kind);
+        if (!prev) return;
+        const fill = wrap.querySelector<HTMLElement>(".me-slider-fill");
+        const thumb = wrap.querySelector<HTMLElement>(".me-slider-thumb");
+        if (!fill || !thumb) return;
+        const finalFill = fill.style.transform;
+        const finalLeft = thumb.style.left;
+        if (prev.fill === finalFill) return; // value didn't change - nothing to animate
+        fill.style.transition = "none";
+        thumb.style.transition = "none";
+        fill.style.transform = prev.fill;
+        thumb.style.left = prev.thumbLeft;
+        fill.getBoundingClientRect(); // force reflow
+        fill.style.transition = "";
+        thumb.style.transition = "";
+        fill.style.transform = finalFill;
+        thumb.style.left = finalLeft;
+      });
+    }
+
+    function commitSliderValue(kind: SliderKind, idx: number): void {
+      if (kind === "model") {
+        const next = models[idx];
+        if (!next) return;
+        model = next;
+      } else {
+        const next = EFFORTS[idx];
+        if (!next) return;
+        effort = next;
+      }
+      renderBody();
+    }
+
+    function wireSliders(): void {
+      card.querySelectorAll<HTMLElement>(".me-slider-wrap").forEach((wrap) => {
+        const kind = wrap.dataset.kind as SliderKind;
+        const min = Number(wrap.dataset.min);
+        const max = Number(wrap.dataset.max);
+        const track = wrap.querySelector<HTMLElement>(".me-slider-track")!;
+
+        function idxFromClientX(clientX: number): number {
+          const rect = track.getBoundingClientRect();
+          const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+          return Math.round(min + ratio * (max - min));
+        }
+
+        // Live 1:1 tracking while dragging (no transition - matches a native
+        // slider's feel); the value only commits (and animates, via the FLIP
+        // pass in renderBody) on release.
+        let dragging = false;
+        wrap.addEventListener("pointerdown", (e) => {
+          dragging = true;
+          wrap.setPointerCapture(e.pointerId);
+          const idx = idxFromClientX(e.clientX);
+          positionSliderInstant(wrap, idx);
+          setActiveLabel(kind, idx);
+        });
+        wrap.addEventListener("pointermove", (e) => {
+          if (!dragging) return;
+          const idx = idxFromClientX(e.clientX);
+          positionSliderInstant(wrap, idx);
+          setActiveLabel(kind, idx);
+        });
+        wrap.addEventListener("pointerup", (e) => {
+          if (!dragging) return;
+          dragging = false;
+          commitSliderValue(kind, idxFromClientX(e.clientX));
+        });
+
+        wrap.addEventListener("keydown", (e) => {
+          const cur = kind === "model" ? modelIdx() : effortIdx();
+          let next = cur;
+          if (e.key === "ArrowRight" || e.key === "ArrowUp") next = Math.min(max, cur + 1);
+          else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = Math.max(min, cur - 1);
+          else if (e.key === "Home") next = min;
+          else if (e.key === "End") next = max;
+          else return;
+          e.preventDefault();
+          commitSliderValue(kind, next);
+        });
+      });
+
+      card.querySelectorAll<HTMLButtonElement>(".slider-stop-label").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const kind = btn.dataset.kind as SliderKind;
+          const idx = Number(btn.dataset.idx);
+          commitSliderValue(kind, idx);
+        });
+      });
+    }
+
     function renderBody() {
-      const modelLabels = models.map((m, i) => `
-        <span class="slider-stop-label${i === modelIdx() ? " active" : ""}" data-stop="${i}">${escapeHtml(modelDisplayLabel(m))}${i < 9 ? `<span class="me-key-hint">${i + 1}</span>` : ""}</span>
-      `).join("");
-      const effortLabels = EFFORTS.map((e, i) => `
-        <span class="slider-stop-label${i === effortIdx() ? " active" : ""}" data-stop="${i}">${escapeHtml(e)}</span>
-      `).join("");
+      const flipFrom = card.hasChildNodes() ? captureSliderFlipState() : new Map<SliderKind, { fill: string; thumbLeft: string }>();
+
+      const checkboxesHtml = `
+        <label class="me-check">
+          <input type="checkbox" class="me-auto-accept-input"${autoAccept ? " checked" : ""}>
+          <span class="me-check-text">Auto allow permissions<span class="me-check-hint">Skips confirmation prompts when Claude wants to run a tool</span></span>
+        </label>
+        <label class="me-check">
+          <input type="checkbox" class="me-remote-input"${remote ? " checked" : ""}>
+          <span class="me-check-text">Remote chat<span class="me-check-hint">Reachable from the mobile app while this session runs</span></span>
+        </label>
+      `;
 
       card.innerHTML = `
         <div class="me-columns">
             <div class="me-left-col">
-              <h3 class="me-title">New session in ${escapeHtml(projectName)}</h3>
+              <div class="me-header">
+                <h3 class="title">New session</h3>
+                <div class="me-project"><i class="ph ph-folder"></i> ${escapeHtml(projectName)}</div>
+              </div>
               ${renderAccountFieldHtml(accountField, { accounts, preferredAccountId, resolvedAccountId, projectName })}
 
-              <div class="me-field">
-                <label class="me-label">Model${modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : ""}</label>
-                <input type="range" class="me-slider me-model-slider" min="0" max="${models.length - 1}" step="1" value="${modelIdx()}">
-                <div class="me-stop-labels">${modelLabels}</div>
-              </div>
+              ${sliderHtml("model", "Model", modelIdx(), models.map(modelDisplayLabel), true)}
 
-              <details class="me-more">
-                <summary class="me-more-summary"><i class="ph ph-caret-right"></i>More options</summary>
-                <div class="me-field">
-                  <label class="me-label">Effort</label>
-                  <input type="range" class="me-slider me-effort-slider" min="0" max="${EFFORTS.length - 1}" step="1" value="${effortIdx()}">
-                  <div class="me-stop-labels">${effortLabels}</div>
-                </div>
-                <label class="me-check">
-                  <input type="checkbox" class="me-auto-accept-input"${autoAccept ? " checked" : ""}>
-                  <span class="me-check-text">Auto allow permissions<span class="me-check-hint">Skips confirmation prompts when Claude wants to run a tool</span></span>
-                </label>
-                <label class="me-check">
-                  <input type="checkbox" class="me-remote-input"${remote ? " checked" : ""}>
-                  <span class="me-check-text">Remote chat<span class="me-check-hint">Reachable from the mobile app while this session runs</span></span>
-                </label>
-              </details>
+              ${moreOpen ? `<div class="me-more-body">${sliderHtml("effort", "Effort", effortIdx(), [...EFFORTS], false)}${checkboxesHtml}</div>` : ""}
 
               ${authExpired
                 ? `<div class="me-model-warning" role="alert">Claude login session expired - reconnect (run <code>claude</code> in a terminal to log back in), then reopen this dialog</div>`
@@ -165,8 +317,11 @@ export async function openModelEffortModal(
                   : ""}
 
               <div class="me-actions">
-                <button type="button" class="me-cancel">Cancel</button>
-                <button type="button" class="me-confirm"${(sessionBlocked() || accountPickIncomplete(accountField, accounts)) ? " disabled" : ""}>Start session</button>
+                <button type="button" class="me-more-btn${moreOpen ? " open" : ""}"><i class="ph ph-caret-right"></i>More options</button>
+                <div class="me-actions-right">
+                  <button type="button" class="me-cancel">Cancel</button>
+                  <button type="button" class="me-confirm"${(sessionBlocked() || accountPickIncomplete(accountField, accounts)) ? " disabled" : ""}>Start session</button>
+                </div>
               </div>
             </div>
             <div class="me-char-pane"></div>
@@ -174,22 +329,16 @@ export async function openModelEffortModal(
       `;
       attachHandlers();
       charPane.render();
+
+      card.querySelectorAll<HTMLElement>(".me-slider-wrap").forEach((wrap) => {
+        const kind = wrap.dataset.kind as SliderKind;
+        positionSliderInstant(wrap, kind === "model" ? modelIdx() : effortIdx());
+      });
+      playSliderFlip(flipFrom);
     }
 
     function attachHandlers() {
-      const modelSlider = card.querySelector<HTMLInputElement>(".me-model-slider");
-      modelSlider?.addEventListener("input", () => {
-        const i = Number(modelSlider.value);
-        model = models[i] ?? model;
-        renderBody();
-      });
-
-      const effortSlider = card.querySelector<HTMLInputElement>(".me-effort-slider");
-      effortSlider?.addEventListener("input", () => {
-        const i = Number(effortSlider.value);
-        effort = EFFORTS[i] ?? effort;
-        renderBody();
-      });
+      wireSliders();
 
       card.querySelector<HTMLInputElement>(".me-auto-accept-input")?.addEventListener("change", (e) => {
         autoAccept = (e.target as HTMLInputElement).checked;
@@ -197,6 +346,11 @@ export async function openModelEffortModal(
 
       card.querySelector<HTMLInputElement>(".me-remote-input")?.addEventListener("change", (e) => {
         remote = (e.target as HTMLInputElement).checked;
+      });
+
+      card.querySelector<HTMLButtonElement>(".me-more-btn")?.addEventListener("click", () => {
+        moreOpen = !moreOpen;
+        renderBody();
       });
 
       // ── Account picker (multi-account milestone 04) ──────────────────────────
@@ -269,11 +423,9 @@ export async function openModelEffortModal(
         void startWithCurrentConfig();
       } else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const idx = Number(e.key) - 1;
-        const next = models[idx];
-        if (!next) return;
+        if (!models[idx]) return;
         e.preventDefault();
-        model = next;
-        renderBody();
+        commitSliderValue("model", idx);
       }
     }
 

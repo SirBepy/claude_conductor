@@ -95,7 +95,10 @@ test.describe("@shot", () => {
 
     const card = page.locator(".model-effort-modal-card");
     await expect(card).toBeVisible();
-    await expect(card).toContainText("New session in Test Project");
+    // Title and project name are separate elements now (me-header /
+    // me-project), not one fused sentence - see model-effort-modal.css.
+    await expect(card.locator(".title")).toHaveText("New session");
+    await expect(card.locator(".me-project")).toContainText("Test Project");
     const leftCol = card.locator(".me-left-col");
     const charPane = card.locator(".me-char-pane");
     await expect(leftCol).toBeVisible();
