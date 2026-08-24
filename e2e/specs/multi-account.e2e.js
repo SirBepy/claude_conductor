@@ -109,13 +109,11 @@ describe("New-chat account picker (multi-account milestone 04)", () => {
     // picker with accounts, warning + "Add one in Settings" link without.
     const accounts = await browser.execute(() => window.__TAURI__.core.invoke("list_accounts"));
     if (accounts.length > 0) {
-      // Two shapes (account-field.ts:66-85): an ambiguous/multi-account
-      // registry shows the chip picker list; a resolved single account shows
-      // the borderless ghost-dropdown trigger (.me-acc-ghost) instead.
-      const hasChip = await $(".me-acc-field .account-chip").isExisting();
-      const hasGhost = await $(".me-acc-field .me-acc-ghost").isExisting();
-      await expect(hasChip || hasGhost).toBe(true);
+      // Every account is always on screen - there is no collapsed trigger
+      // and no "remember this account?" checkbox any more.
+      await expect($(".me-acc-field .account-chip")).toExist();
       await expect($(".me-acc-empty")).not.toExist();
+      await expect($(".me-remember")).not.toExist();
     } else {
       await expect($(".me-acc-empty")).toExist();
       await expect($(".me-acc-add-link")).toExist();

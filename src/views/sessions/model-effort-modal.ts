@@ -117,8 +117,6 @@ export async function openModelEffortModal(
     // state and passes it in/out (see account-field.ts's AccountFieldState).
     const accountField: AccountFieldState = {
       accountId: resolvedAccountId,
-      editingAccount: accounts.length > 0 && resolvedAccountId === null,
-      remember: false,
     };
 
     function modelIdx(): number { return Math.max(0, models.indexOf(model)); }
@@ -160,7 +158,7 @@ export async function openModelEffortModal(
                 <h3 class="title">New session</h3>
                 <div class="me-project"><i class="ph ph-folder"></i> ${escapeHtml(projectName)}</div>
               </div>
-              ${renderAccountFieldHtml(accountField, { accounts, preferredAccountId, resolvedAccountId, projectName })}
+              ${renderAccountFieldHtml(accountField, { accounts })}
 
               ${slider.html("model", "Model", modelIdx(), models.map(modelDisplayLabel), true, modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : "")}
 
@@ -234,12 +232,12 @@ export async function openModelEffortModal(
       }
     }
 
-    /** Writes the "remember this account for the project" binding, if the
-     * checkbox is ticked. Registers the project first if it isn't tracked
-     * yet (mirrors the automation "Automate channel" CTA's ensureProject
-     * call). Best-effort: a failure here never blocks starting the chat. */
-    async function persistAccountBindingIfRequested(): Promise<void> {
-      if (!accountField.remember || accountField.accountId === null) return;
+    /** Binds the picked account to the project so the next new session here
+     * preselects it. Registers the project first if it isn't tracked yet
+     * (mirrors the automation "Automate channel" CTA's ensureProject call).
+     * Best-effort: a failure here never blocks starting the chat. */
+    async function persistAccountBinding(): Promise<void> {
+      if (accountField.accountId === null || accountField.accountId === preferredAccountId) return;
       try {
         let id = projectId;
         if (!id) {
@@ -255,7 +253,7 @@ export async function openModelEffortModal(
     async function startWithCurrentConfig(): Promise<void> {
       if (sessionBlocked() || accountPickIncomplete(accountField, accounts)) return;
       await persistChoice();
-      await persistAccountBindingIfRequested();
+      await persistAccountBinding();
       close({ model, effort, autoAccept, remote, characterId: charPane.currentCharacterId(), accountId: accountField.accountId });
     }
 

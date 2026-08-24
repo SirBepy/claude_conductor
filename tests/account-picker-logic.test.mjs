@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  resolveInitialAccountId,
-  shouldOfferRemember,
-} from "../src/views/sessions/account-picker-logic.ts";
+import { resolveInitialAccountId } from "../src/views/sessions/account-picker-logic.ts";
 
 const personal = { id: "acct-personal", label: "Personal", icon: "user", colour: "#9d7dfc" };
 const work = { id: "acct-work", label: "Work", icon: "briefcase", colour: "#f5a623" };
@@ -42,24 +39,5 @@ describe("resolveInitialAccountId", () => {
   it("returns null when nothing resolves and multiple accounts exist", () => {
     expect(resolveInitialAccountId(null, null, [personal, work])).toBeNull();
     expect(resolveInitialAccountId("acct-deleted", "acct-also-deleted", [personal, work])).toBeNull();
-  });
-});
-
-describe("shouldOfferRemember", () => {
-  it("is false when nothing is chosen yet", () => {
-    expect(shouldOfferRemember(null, null)).toBe(false);
-    expect(shouldOfferRemember(null, "acct-personal")).toBe(false);
-  });
-
-  it("is false when the chosen account matches the resolved one", () => {
-    expect(shouldOfferRemember("acct-personal", "acct-personal")).toBe(false);
-  });
-
-  it("is true when the user picks something other than the resolved account", () => {
-    expect(shouldOfferRemember("acct-work", "acct-personal")).toBe(true);
-  });
-
-  it("is true when the user picks anything and nothing had resolved before", () => {
-    expect(shouldOfferRemember("acct-work", null)).toBe(true);
   });
 });

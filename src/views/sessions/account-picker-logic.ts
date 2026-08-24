@@ -1,8 +1,8 @@
 // Pure helpers for the new-chat account picker (multi-account milestone 04).
-// Kept free of DOM/IPC so the binding > default > fallback resolution and the
-// "remember" affordance are cheaply unit-testable (see
-// tests/account-picker-logic.test.mjs). model-effort-modal.ts is the only
-// caller. See docs/multi-account/04-project-binding.md.
+// Kept free of DOM/IPC so the binding > default > fallback resolution is
+// cheaply unit-testable (see tests/account-picker-logic.test.mjs).
+// model-effort-modal.ts is the only caller. See
+// docs/multi-account/04-project-binding.md.
 
 import type { AccountLite } from "../../shared/account-chip";
 
@@ -30,18 +30,4 @@ export function resolveInitialAccountId(
   if (exists(defaultAccountId)) return defaultAccountId;
   if (accounts.length === 1) return accounts[0]!.id;
   return null;
-}
-
-/**
- * True once the user's current pick differs from what auto-resolution
- * originally chose - the point at which the modal offers "remember this for
- * the project". Also true when there was no original resolution at all
- * (`resolvedAccountId === null`, e.g. an empty/ambiguous registry) and the
- * user has now picked something concrete.
- */
-export function shouldOfferRemember(
-  chosenAccountId: string | null,
-  resolvedAccountId: string | null,
-): boolean {
-  return chosenAccountId !== null && chosenAccountId !== resolvedAccountId;
 }

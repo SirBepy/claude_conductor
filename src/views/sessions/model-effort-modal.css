@@ -137,64 +137,13 @@
   margin-bottom: 15px;
 }
 
-/* Backgroundless/borderless dropdown trigger - the whole row opens the
- * account-edit chip list. No chip pill, no separate "change" link: picked
- * over both in-context tabbed comparison (impeccable session, 2026-08-23). */
-.model-effort-modal-card .me-acc-ghost {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 4px 6px;
-  margin: -4px -6px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--color-text, #e8e8ee);
-  font: inherit;
-  cursor: pointer;
-}
-
-.model-effort-modal-card .me-acc-ghost:hover {
-  background: var(--color-surface-alt, #24242e);
-}
-
-.model-effort-modal-card .me-acc-ghost-name {
-  flex: 1;
-  text-align: left;
-  font-weight: 600;
-  font-size: 0.86rem;
-}
-
-.model-effort-modal-card .me-acc-ghost .ph-caret-down {
-  color: var(--color-text-muted, #8a8a96);
-  transition: color 0.12s;
-}
-
-.model-effort-modal-card .me-acc-ghost:hover .ph-caret-down {
-  color: var(--color-primary, #6e8fff);
-}
-
+/* Every account is always on screen - one click switches, and the pick is
+ * bound to the project on Start, so there is no collapsed trigger and no
+ * "remember this?" checkbox to confirm it. */
 .model-effort-modal-card .me-acc-edit {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.model-effort-modal-card .me-remember {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  color: var(--color-text, #e8e8ee);
-}
-.model-effort-modal-card .me-remember input { accent-color: var(--color-primary, #6e8fff); }
-.model-effort-modal-card .me-remember .path {
-  color: var(--color-text-muted, #8a8a96);
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.72rem;
 }
 
 .model-effort-modal-card .me-acc-empty-msg {
