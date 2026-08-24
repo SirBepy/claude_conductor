@@ -25,7 +25,6 @@ import { getChatSlotMode, getSlotAssignment } from "../../shared/shortcuts";
 import { pendingPromptSessionIds } from "./permission-modal";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
-import { loadRowStyle } from "./row-style";
 
 /** Builds the sidebar's flat `entries` array (filter, sort, segment) for
  *  renderSidebar to reconcile into the DOM. Drain/scheduled state and the
@@ -60,8 +59,6 @@ export function buildSidebarEntries(
   // signal and it wrongly falls into the busy check. Union the undeleted
   // pending-prompt set into `question` so it still outranks busy, no pulse.
   for (const id of pendingPromptSessionIds()) question.add(id);
-  const isPortrait = loadRowStyle() === "portrait";
-  const rowClass = isPortrait ? "row-portrait" : "";
   const sort = loadSort();
   const rateLimited = new Set(listSessions.filter(isBlocked).map((s) => s.session_id));
 
@@ -154,14 +151,14 @@ export function buildSidebarEntries(
 
   if (pending && !pendingHidden && !pendingRealVisible) {
     const isPendingActive = state.selectedId === pending.placeholderId;
-    const html = renderSidebarRow(draftRowOptions(pending, isPendingActive, isPortrait, rowClass));
+    const html = renderSidebarRow(draftRowOptions(pending, isPendingActive));
     entries.push({ key: `p:${pending.placeholderId}`, html });
   }
 
   for (const d of visibleParked) {
     entries.push({
       key: `p:${d.placeholderId}`,
-      html: renderSidebarRow(parkedRowOptions(d, isPortrait, rowClass)),
+      html: renderSidebarRow(parkedRowOptions(d)),
     });
   }
 
@@ -209,7 +206,7 @@ export function buildSidebarEntries(
         entries.push({
           key: `s:${s.session_id}`,
           html: renderSidebarRow(sessionRowOptions(s, {
-            isActive, unread, attention, question, rateLimited, closing, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint,
+            isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint,
           })),
         });
       }
@@ -248,7 +245,7 @@ export function buildSidebarEntries(
         entries.push({
           key: `s:${s.session_id}`,
           html: renderSidebarRow(sessionRowOptions(s, {
-            isActive, unread, attention, question, rateLimited, closing, isPortrait, rowClass, sort, drainMap, scheduledCountMap, kbdHint: "",
+            isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint: "",
           })),
         });
       }

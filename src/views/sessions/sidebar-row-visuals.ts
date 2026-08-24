@@ -69,31 +69,6 @@ export function projBadgeHtml(cwd: string | null, cls: string): string {
   return `<span class="${cls}"><span class="proj-face" data-proj-face="${escapeHtml(cwd)}"><i class="ph ph-folder"></i></span></span>`;
 }
 
-/** Sidebar row's "has pending scheduled message(s)" marker: a clock icon
- *  prefixed before the session title (never clipped by the title's own
- *  ellipsis truncation, unlike a trailing badge), with a count badge ONLY
- *  when more than one is pending (a single scheduled item shows just the
- *  marker, per Joe's ask). Purely visual - no effect on statusPriority/sort.
- *  Mirrors the per-chat scheduled-chip's icon + count-span pattern
- *  (scheduled-chip.ts) so the two read as the same affordance. Persists
- *  unchanged while an item is "firing" (no distinct in-flight look for v1 -
- *  counts already include firing, same as scheduled-chip's filter). */
-export function scheduledBadgeHtml(count: number | undefined): string {
-  return markerHtml(count, {
-    icon: "ph-clock-countdown", cssClass: "session-scheduled-badge", countClass: "session-scheduled-count",
-    tipAttr: "title", tooltip: scheduledTooltip(count ?? 0), alwaysShowCount: false,
-  });
-}
-
-/** Held-message marker, prefixed before the title like scheduledBadgeHtml
- *  (never clipped by its ellipsis); see heldCornerHtml for the count rule. */
-export function heldBadgeHtml(count: number | undefined): string {
-  return markerHtml(count, {
-    icon: "ph-paper-plane-tilt", cssClass: "session-held-badge", countClass: "session-held-count",
-    tipAttr: "title", tooltip: heldTooltip(count ?? 0), alwaysShowCount: true,
-  });
-}
-
 /** Frozen-chat marker (styled like `.autopilot-badge`) - "Frozen" for a
  *  manual Chat-menu freeze, "Auto-frozen" for a rate-limit auto-freeze. */
 export function frozenBadgeHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "title" | "data-tip"): string {

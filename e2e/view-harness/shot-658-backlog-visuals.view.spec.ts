@@ -105,43 +105,35 @@ test.describe("@shot", () => {
   test.describe("638", () => {
     test.use({ deviceScaleFactor: 3 });
 
-    for (const style of ["classic", "portrait"] as const) {
-      test(`count-hiding rule, ${style} rows`, async ({ page }) => {
-        await page.setViewportSize(DESKTOP);
-        const sessions = [
-          sessionInstance({ session_id: "s1", name: "Scheduled one", cwd: "C:/Projects/alpha" }),
-          sessionInstance({ session_id: "s2", name: "Held one", cwd: "C:/Projects/beta", held_count: 1 }),
-        ];
-        await mountSessionsList(page, sessions, style, { schedule_list: [schedItem("s1")] });
+    test("count-hiding rule, portrait rows", async ({ page }) => {
+      await page.setViewportSize(DESKTOP);
+      const sessions = [
+        sessionInstance({ session_id: "s1", name: "Scheduled one", cwd: "C:/Projects/alpha" }),
+        sessionInstance({ session_id: "s2", name: "Held one", cwd: "C:/Projects/beta", held_count: 1 }),
+      ];
+      await mountSessionsList(page, sessions, { schedule_list: [schedItem("s1")] });
 
-        const schedRow = page.locator('li[data-session-id="s1"]');
-        const heldRow = page.locator('li[data-session-id="s2"]');
-        const schedMarker = schedRow.locator(
-          style === "portrait" ? ".session-sched-corner" : ".session-scheduled-badge",
-        );
-        const heldMarker = heldRow.locator(
-          style === "portrait" ? ".session-held-corner" : ".session-held-badge",
-        );
+      const schedRow = page.locator('li[data-session-id="s1"]');
+      const heldRow = page.locator('li[data-session-id="s2"]');
+      const schedMarker = schedRow.locator(".session-sched-corner");
+      const heldMarker = heldRow.locator(".session-held-corner");
 
-        await expect(schedMarker).toBeVisible();
-        await expect(schedMarker.locator("i")).toHaveClass(/ph-clock-countdown/);
-        await expect(
-          schedRow.locator(style === "portrait" ? ".session-sched-count" : ".session-scheduled-count"),
-        ).toHaveCount(0);
-        await capture(schedRow, `badge-scheduled-count-1-${style}`);
+      await expect(schedMarker).toBeVisible();
+      await expect(schedMarker.locator("i")).toHaveClass(/ph-clock-countdown/);
+      await expect(schedRow.locator(".session-sched-count")).toHaveCount(0);
+      await capture(schedRow, "badge-scheduled-count-1-portrait");
 
-        await expect(heldMarker).toBeVisible();
-        await expect(heldMarker.locator("i")).toHaveClass(/ph-paper-plane-tilt/);
-        await expect(heldRow.locator(".session-held-count")).toHaveText("1");
-        await capture(heldRow, `badge-held-count-1-${style}`);
-      });
-    }
+      await expect(heldMarker).toBeVisible();
+      await expect(heldMarker.locator("i")).toHaveClass(/ph-paper-plane-tilt/);
+      await expect(heldRow.locator(".session-held-count")).toHaveText("1");
+      await capture(heldRow, "badge-held-count-1-portrait");
+    });
   });
 
   test("632 - takeover on an unreachable command shows the friendly alert", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     const sess = sessionInstance({ session_id: "s1", kind: "external", name: "Manual claude" });
-    await mountSessionsList(page, [sess], "classic", {
+    await mountSessionsList(page, [sess], {
       load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
       list_slash_commands: [],
       list_accounts: [{ id: "acc-1", label: "Personal", colour: "#8b5cf6", icon: "user" }],

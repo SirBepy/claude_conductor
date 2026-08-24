@@ -43,7 +43,6 @@ const ROW = '#sessions-list li[data-session-id="s1"]';
  *  the chip's "Send now" (the real interrupt trigger) is live. */
 async function mountAndStage(page: Page): Promise<void> {
   await page.setViewportSize(DESKTOP);
-  await page.addInitScript(() => localStorage.setItem("cc_chat_row_style", "classic"));
   await mountView(page, { view: "sessions", invoke: INVOKE });
 
   const row = page.locator(ROW);

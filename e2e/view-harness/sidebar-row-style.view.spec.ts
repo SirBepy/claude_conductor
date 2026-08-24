@@ -4,6 +4,9 @@ import { SESSIONS_BASE_INVOKE, sessionInstance, mountView } from "./harness";
 // Drives the REAL sidebar, not markup strings: a "square" portrait can be
 // 46x59 while every screenshot still looks plausible, so the asserts below
 // measure rendered boxes.
+//
+// Todo 604: Classic deleted, Portrait won. This spec now covers Portrait
+// only - the old Classic-vs-Portrait comparison tests are gone.
 
 // Both rows need an assigned character, or leadingVisual falls back to the
 // bare status icon and there is no portrait to measure. A 1x1 transparent PNG
@@ -25,8 +28,7 @@ const SESSIONS = [
   instance({ session_id: "s2", cwd: "C:/Projects/zng-app", name: "TruStage flag scope", model: "claude-sonnet-5" }),
 ];
 
-async function mountSessions(page: import("@playwright/test").Page, rowStyle: "classic" | "portrait"): Promise<void> {
-  await page.addInitScript((v) => localStorage.setItem("cc_chat_row_style", v), rowStyle);
+async function mountSessions(page: import("@playwright/test").Page): Promise<void> {
   await mountView(page, {
     view: "sessions",
     invoke: { ...SESSIONS_BASE_INVOKE, ...CHARACTER_INVOKE, list_instances: SESSIONS, get_active_sessions: SESSIONS },
@@ -36,7 +38,7 @@ async function mountSessions(page: import("@playwright/test").Page, rowStyle: "c
 
 test.describe("view-harness / chat row style", () => {
   test("Portrait row drops the title and the 3-dot button", async ({ page }) => {
-    await mountSessions(page, "portrait");
+    await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
     await expect(row).toHaveClass(/row-portrait/);
@@ -49,14 +51,14 @@ test.describe("view-harness / chat row style", () => {
   });
 
   test("model battery reflects the family's rank, Fable above Opus", async ({ page }) => {
-    await mountSessions(page, "portrait");
+    await mountSessions(page);
     const rows = page.locator("#sessions-list li[data-session-id]");
     await expect(rows.nth(0).locator(".session-model-battery i")).toHaveClass(/ph-battery-high/);
     await expect(rows.nth(1).locator(".session-model-battery i")).toHaveClass(/ph-battery-medium/);
   });
 
   test("portrait avatar is a circle, notched for the badge, and every element shares the art's centre", async ({ page }) => {
-    await mountSessions(page, "portrait");
+    await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
     const box = await row.evaluate((li) => {
@@ -95,7 +97,7 @@ test.describe("view-harness / chat row style", () => {
   });
 
   test("portrait status dot renders bottom-left, replacing the left-edge stripe", async ({ page }) => {
-    await mountSessions(page, "portrait");
+    await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
     await row.evaluate((li) => li.classList.add("needs-attention", "is-rate-limited"));
 
@@ -117,17 +119,8 @@ test.describe("view-harness / chat row style", () => {
     expect(stripes.beforeDisplay).toBe("none");
   });
 
-  test("Classic row keeps the title and the 3-dot button", async ({ page }) => {
-    await mountSessions(page, "classic");
-    const row = page.locator("#sessions-list li[data-session-id]").first();
-
-    await expect(row).not.toHaveClass(/row-portrait/);
-    await expect(row.locator(".session-row-project")).toContainText("Session card round six chips");
-    await expect(row.locator(".session-row-menu-btn")).toHaveCount(1);
-  });
-
-  test("right-click opens the chat menu in both styles", async ({ page }) => {
-    await mountSessions(page, "portrait");
+  test("right-click opens the chat menu", async ({ page }) => {
+    await mountSessions(page);
     await page.locator("#sessions-list li[data-session-id]").first().click({ button: "right" });
     await expect(page.locator(".session-ctx-menu")).toBeVisible();
   });

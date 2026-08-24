@@ -9,9 +9,7 @@ import {
   drainChipHtml,
   frozenBadgeHtml,
   leadingVisual,
-  scheduledBadgeHtml,
   scheduledCornerHtml,
-  heldBadgeHtml,
   heldCornerHtml,
   modelBatteryHtml,
 } from "./sidebar-row-visuals";
@@ -32,36 +30,22 @@ export interface RowOptions {
   /** Hover text on `.session-avatar`. "" for every state but close_failed. */
   statusTitle: string;
   avatarExtras?: LeadingExtras;
-  isPortrait: boolean;
-  /** Chat title, escaped plain text - the landscape project-slot content and
-   *  the portrait tooltip value. "" for draft/parked - no name to show. */
+  /** Chat title, escaped plain text - the portrait tooltip value. "" for draft/parked - no name to show. */
   title: string;
   /** Project folder name, escaped. */
   projectLabel: string;
-  /** Landscape-only prefix before `title` (the scheduled clock badge). */
-  titlePrefix: string;
-  /** Remote/autopilot badges after the title (landscape) or project name
-   *  (portrait). Empty when the row has neither flag set. */
+  /** Remote/autopilot badges after the project name. "" when neither flag is set. */
   badges: string;
-  /** Drain-sort chip appended after `projectLabel` in landscape. */
-  drainChip: string;
   /** Portrait's secondary slot: model battery + drain chip, for every row kind. */
   portraitSecondary: string;
-  /** Prebuilt `<button>` HTML, or "" (portrait hides the menu for every row type). */
+  /** Prebuilt `<button>` HTML - "" always. The menu is right-click only. */
   menuBtn: string;
 }
 
 /** The one `<li>` template for the whole sidebar list. */
 export function renderSidebarRow(o: RowOptions): string {
-  // `title` is "" for draft/parked rows (no chat name to show) - classic falls
-  // back to a single project-name line instead of an empty heading over it.
-  const text = o.isPortrait
-    ? `<span class="session-row-project" data-tip="${o.title}"><span class="proj-name">${o.projectLabel}</span>${o.badges}</span>
-              <span class="session-chips">${o.portraitSecondary}</span>`
-    : o.title
-      ? `<span class="session-row-project">${o.titlePrefix}${o.title}${o.badges}</span>
-              <span class="session-row-subtitle">${o.projectLabel}${o.drainChip}</span>`
-      : `<span class="session-row-project">${o.titlePrefix}${o.projectLabel}${o.badges}</span>`;
+  const text = `<span class="session-row-project" data-tip="${o.title}"><span class="proj-name">${o.projectLabel}</span>${o.badges}</span>
+              <span class="session-chips">${o.portraitSecondary}</span>`;
   return `<li data-${o.idAttr}="${escapeHtml(o.id)}"${o.liExtraAttrs} class="${o.liClasses}">
             ${leadingVisual(o.charId, o.statusClass, o.cwd, o.avatarExtras, o.statusTitle)}
             <div class="session-row-text">
@@ -92,7 +76,6 @@ function buildRowOptions(args: {
   cwd: string | null;
   title: string;
   projectLabel: string;
-  isPortrait: boolean;
   /** Ring class for `.session-avatar` (landscape + portrait). */
   avatarStatusClass: string;
   /** Hover text for `.session-avatar`. "" for every state but close_failed. */
@@ -109,7 +92,7 @@ function buildRowOptions(args: {
   model: string;
   drainChip: string;
 }): RowOptions {
-  const tipAttr = args.isPortrait ? "data-tip" : "title";
+  const tipAttr = "data-tip";
   const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}`;
   return {
     idAttr: args.identity.idAttr,
@@ -120,19 +103,14 @@ function buildRowOptions(args: {
     cwd: args.cwd,
     statusClass: args.avatarStatusClass,
     statusTitle: args.statusTitle ?? "",
-    avatarExtras: args.isPortrait
-      ? {
-          badgeClass: "is-centred",
-          extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
-          dotClass: args.dotClass,
-        }
-      : undefined,
-    isPortrait: args.isPortrait,
+    avatarExtras: {
+      badgeClass: "is-centred",
+      extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
+      dotClass: args.dotClass,
+    },
     title: escapeHtml(args.title),
     projectLabel: escapeHtml(args.projectLabel),
-    titlePrefix: args.isPortrait ? "" : heldBadgeHtml(args.heldCount) + scheduledBadgeHtml(args.scheduledCount),
     badges,
-    drainChip: args.drainChip,
     portraitSecondary: `${modelBatteryHtml(args.model)}${args.drainChip}`,
     menuBtn: args.identity.menuBtn,
   };
@@ -148,8 +126,6 @@ export function sessionRowOptions(
     question: Set<string>;
     rateLimited: ReadonlySet<string>;
     closing: Set<string>;
-    isPortrait: boolean;
-    rowClass: string;
     sort: SessionSort;
     drainMap: Map<string, number>;
     scheduledCountMap: Map<string, number>;
@@ -166,25 +142,20 @@ export function sessionRowOptions(
   const statusTitle = statusClass === "st-close-failed"
     ? stateTooltip(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited)
     : "";
-  // Closing overrides the portrait DOT only, not statusClass/.session-avatar -
-  // statusDotClass has no closing awareness, and classic (which never renders
-  // the dot) must keep reading its pre-closing colour unchanged.
+  // Closing overrides the DOT only, not statusClass/.session-avatar - statusDotClass has no closing awareness.
   const dotClass = isClosing ? "st-closing" : statusClass;
   return buildRowOptions({
     identity: {
       idAttr: "session-id",
       id: s.session_id,
-      liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} ${ctx.rowClass}`,
+      liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} row-portrait`,
       liExtraAttrs: ctx.kbdHint,
-      menuBtn: ctx.isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="More options" data-session-id="${escapeHtml(s.session_id)}">
-              <i class="ph ph-dots-three-vertical"></i>
-            </button>`,
+      menuBtn: "",
     },
     charId: characterForSession(s),
     cwd: s.cwd,
     title: sessionSubtitle(s),
     projectLabel: projectName(s),
-    isPortrait: ctx.isPortrait,
     avatarStatusClass: statusClass,
     statusTitle,
     dotClass,
@@ -206,27 +177,22 @@ export function sessionRowOptions(
 export function draftRowOptions(
   pending: PendingNewSession,
   isActive: boolean,
-  isPortrait: boolean,
-  rowClass: string,
 ): RowOptions {
   const starting = pending.firstMessageSent;
   return buildRowOptions({
     identity: {
       idAttr: "placeholder-id",
       id: pending.placeholderId,
-      liClasses: `${isActive ? "active" : ""} pending ${starting ? "" : "draft"} ${rowClass}`,
+      liClasses: `${isActive ? "active" : ""} pending ${starting ? "" : "draft"} row-portrait`,
       liExtraAttrs: ` data-pending="1"`,
       // 3-dot button hidden in portrait mode, same as live rows - right-click
       // (openMenuForRow in sessions-wiring.ts) is the only way in there.
-      menuBtn: isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="Draft options" data-draft-menu="1">
-              <i class="ph ph-dots-three-vertical"></i>
-            </button>`,
+      menuBtn: "",
     },
     charId: pending.config.characterId,
     cwd: pending.projectPath,
     title: "",
     projectLabel: pending.projectName || "New session",
-    isPortrait,
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
     isRemote: !!pending.config.remote,
@@ -241,22 +207,19 @@ export function draftRowOptions(
 }
 
 /** Maps a parked (paused) draft to `RowOptions`. */
-export function parkedRowOptions(d: ParkedDraft, isPortrait: boolean, rowClass: string): RowOptions {
+export function parkedRowOptions(d: ParkedDraft): RowOptions {
   return buildRowOptions({
     identity: {
       idAttr: "placeholder-id",
       id: d.placeholderId,
-      liClasses: `parked-draft ${rowClass}`,
+      liClasses: "parked-draft row-portrait",
       liExtraAttrs: "",
-      menuBtn: isPortrait ? "" : `<button class="session-row-menu-btn icon-btn" title="Draft options" data-parked-placeholder-id="${escapeHtml(d.placeholderId)}">
-          <i class="ph ph-dots-three-vertical"></i>
-        </button>`,
+      menuBtn: "",
     },
     charId: d.config.characterId,
     cwd: d.projectPath,
     title: "",
     projectLabel: d.projectName || "New session",
-    isPortrait,
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
     isRemote: !!d.config.remote,

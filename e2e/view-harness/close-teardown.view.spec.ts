@@ -23,7 +23,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
-    ], "classic");
+    ]);
 
     // Driven purely by the daemon's broadcast flag, no text marker anywhere.
     const header = page.locator('#sessions-list li[data-seg-toggle="3"]');
@@ -33,7 +33,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
   });
 
   test("no session closing means no Closing group at all", async ({ page }) => {
-    await mountSessionsList(page, [instance({ session_id: "idle", closing: false })], "classic");
+    await mountSessionsList(page, [instance({ session_id: "idle", closing: false })]);
     await expect(page.locator('#sessions-list li[data-seg-toggle="3"]')).toHaveCount(0);
   });
 
@@ -41,7 +41,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
-    ], "classic");
+    ]);
     await expandClosingGroup(page);
 
     await expect(page.locator('li[data-session-id="shutting-down"]')).toHaveClass(/closing/);
@@ -52,7 +52,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
-    ], "portrait");
+    ]);
     await expandClosingGroup(page);
 
     // sidebar-rows.ts:172 - closing overrides the normal status colour, and the
@@ -69,7 +69,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
         session_id: "gone", name: "Torn down", closing: false,
         ended_at: "2026-07-30T11:00:00Z", end_reason: "manual",
       }),
-    ], "classic");
+    ]);
 
     await expect(page.locator('#sessions-list li[data-seg-toggle="3"]')).toBeVisible();
     await expect(page.locator('li[data-session-id="gone"]')).toHaveCount(0);

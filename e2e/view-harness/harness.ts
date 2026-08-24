@@ -188,19 +188,13 @@ export function sessionInstance(over: Partial<Instance> = {}): Instance {
   return { ...SESSION_DEFAULTS, ...over };
 }
 
-/** Mounts the sessions view with a given row set. `rowStyle` is opt-in: pass
- *  it to pin `classic`/`portrait` via localStorage before nav, or omit it to
- *  leave localStorage untouched, which resolves to the app's real default
- *  ("portrait", row-style.ts) - several specs depend on that exact fallback. */
+/** Mounts the sessions view with a given row set (Portrait rows - the only
+ *  style, todo 604). */
 export async function mountSessionsList(
   page: Page,
   sessions: Instance[],
-  rowStyle?: "classic" | "portrait",
   extra: InvokeMap = {},
 ): Promise<void> {
-  if (rowStyle) {
-    await page.addInitScript((v) => localStorage.setItem("cc_chat_row_style", v), rowStyle);
-  }
   await mountView(page, {
     view: "sessions",
     invoke: { ...SESSIONS_BASE_INVOKE, list_instances: sessions, get_active_sessions: sessions, ...extra },
