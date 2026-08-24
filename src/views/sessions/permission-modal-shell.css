@@ -236,7 +236,10 @@
 .prompt-card__footer {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  /* flex-end, not center: the review step's answer-bar stacks a label above
+   * its textarea (two rows), so centering left the textarea's own center
+   * line above the buttons' vertical middle instead of level with them. */
+  align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px;
