@@ -1,27 +1,30 @@
-import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
-import { RemoteUnavailableError } from "../../shared/http-transport";
 import { type ToolTally } from "../../shared/chat/tool-meta";
-import { formatTokenCount } from "../../shared/chat/turn-chips";
 import { ToolTallyRow } from "./session-tally";
 import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
-import { type ChipType, type StaticChipType, isToolChip, chipToolName, STATIC_CHIPS } from "./statusline-catalog";
-import { getCachedAccount, capitalize } from "../../shared/accounts-cache";
+import { type ChipType, type StaticChipType, isToolChip, STATIC_CHIPS } from "./statusline-catalog";
 import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
 import { sessionEvents } from "../../shared/chat/event-store";
 import {
   formatDuration,
-  shortModelName,
   gitInfoCache,
   metaCache,
   countsCache,
   ctxStatusCache,
   drainCache,
-  fetchGitInfo,
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
+import { renderChip as renderChipHtml, type ChipRenderCtx } from "./statusbar-chips";
+import {
+  refreshCounts as fetchCounts,
+  refreshContextStatus as fetchContextStatus,
+  refreshGitInfo as fetchGitInfoData,
+  refreshDirty as fetchDirty,
+  resolveLiveCwd,
+  startServersPoll as startServersPollData,
+} from "./statusbar-data";
 import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
@@ -46,14 +49,9 @@ export {
 
 const EMPTY_META: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
 
-// NOTE: a split of the chip-render concern into a separate `statusline-chip-render.ts`
-// was evaluated and rejected (ai_todo 98). The render methods read ~18 instance
-// fields and depend on a LIVE controller (`this.tally.renderChipFor` for tool chips)
-// plus a MUTABLE `animatedKeys` Set (`animClass` has a side effect), so a "pure
-// function + small snapshot" seam doesn't hold - the snapshot balloons and threading
-// the controller + mutable set out worsens readability. This file uses plain
-// innerHTML strings (not lit) and sits only marginally over the ~400-line guideline,
-// which this codebase tolerates. Leave as-is; don't re-attempt without a new seam.
+// Chip HTML builders live in statusbar-chips.ts (todo 748): a per-render
+// ChipRenderCtx snapshot plus callback params replace the `this` reads that
+// blocked the earlier ai_todo 98 attempt.
 export class SessionStatusbar {
   private container: HTMLElement;
   private rows: ChipType[][];
@@ -163,10 +161,7 @@ export class SessionStatusbar {
   private startServersPoll(): void {
     const cwd = this.cwd;
     if (!cwd) return;
-    void this.serversPopover.refresh(cwd, () => this.render());
-    this.serversTimer = setInterval(() => {
-      void this.serversPopover.refresh(cwd, () => this.render());
-    }, 8000);
+    this.serversTimer = startServersPollData(() => void this.serversPopover.refresh(cwd, () => this.render()));
   }
 
   private hasChip(type: string): boolean {
@@ -190,12 +185,7 @@ export class SessionStatusbar {
   private async resolveGitCwd(): Promise<void> {
     const spawn = this.cwd;
     if (!spawn) return;
-    let effective = spawn;
-    if (this.sessionId) {
-      try {
-        effective = await invoke<string>("session_live_cwd", { sessionId: this.sessionId, fallback: spawn });
-      } catch { /* command may predate this binary - keep spawn cwd */ }
-    }
+    const effective = this.sessionId ? await resolveLiveCwd(this.sessionId, spawn) : spawn;
     const changed = effective !== this.gitCwd;
     this.gitCwd = effective;
     // Seed instantly from cache for the new dir (a revisit paints without flicker).
@@ -209,84 +199,51 @@ export class SessionStatusbar {
     if (changed) this.render();
   }
 
-  /** User prompts this chat has actually delivered, or null when the live
-   *  renderer can't answer for this session (a different chat is mounted, or
-   *  older history is still unpaged). */
-  private deliveredPrompts(sid: string): number | null {
-    const snap = getChatRendererSnapshot();
-    if (!snap || snap.sessionId !== sid) return null;
-    if (sessionEvents.hasMore(sid)) return null;
-    return snap.messages.reduce((n, m) => n + (m.kind === "user" ? 1 : 0), 0);
-  }
-
   private async refreshCounts(): Promise<void> {
     const sid = this.sessionId;
     if (!sid) return;
-    try {
-      const r = await invoke<{ tokens: number; turns: number; prompts?: number }>("instance_token_stats", { sessionId: sid });
-      if (this.sessionId !== sid) return;
-      const next: SessionCounts = { prompts: r.prompts ?? 0, turns: r.turns ?? 0 };
-      // A chat that has delivered nothing cannot own counts, so these belong to
-      // another transcript. Fall back to the skeleton chip (todo 660).
-      if (next.prompts > 0 && this.deliveredPrompts(sid) === 0) {
-        this.counts = null;
-        this.countsLoaded = false;
-        countsCache.delete(sid);
-        this.render();
-        return;
-      }
-      this.counts = next;
-      this.countsLoaded = true;
-      countsCache.set(sid, this.counts);
-      this.render();
-    } catch { /* transient - keep last known counts */ }
+    await fetchCounts({
+      sessionId: sid,
+      isCurrent: () => this.sessionId === sid,
+      onClear: () => { this.counts = null; this.countsLoaded = false; this.render(); },
+      onUpdate: (counts) => { this.counts = counts; this.countsLoaded = true; this.render(); },
+    });
   }
 
   private async refreshContextStatus(allowRetry = true): Promise<void> {
     const sid = this.sessionId;
     if (!sid) return;
-    const hadUsage = this.meta.hasUsage;
-    try {
-      const r = await invoke<ContextStatus | null>("context_status", { sessionId: sid });
-      if (this.sessionId !== sid) return;
-      if (r) {
-        this.ctxStatus = r;
-        ctxStatusCache.set(sid, r);
-        this.render();
-      } else if (allowRetry && hadUsage && !this.ctxStatus) {
-        setTimeout(() => {
-          if (this.sessionId === sid && !this.ctxStatus) void this.refreshContextStatus(false);
-        }, 1500);
-      }
-    } catch { /* command may predate this binary, or transient - keep fallback */ }
+    await fetchContextStatus({
+      sessionId: sid,
+      isCurrent: () => this.sessionId === sid,
+      hadUsage: this.meta.hasUsage,
+      hasCtxStatus: () => !!this.ctxStatus,
+      allowRetry,
+      onResult: (r) => { this.ctxStatus = r; this.render(); },
+      scheduleRetry: (fn) => setTimeout(fn, 1500),
+    });
   }
 
   private async refreshGitInfo(): Promise<void> {
     const cwd = this.gitCwd;
     if (!cwd) return;
-    try {
-      const info = await fetchGitInfo(cwd);
-      if (this.gitCwd !== cwd) return;
-      this.updateGitInfo(info);
-    } catch (e) {
-      // An unwired remote command resolves the skeleton to hidden instead of
-      // spinning forever; a genuine transient failure keeps retrying.
-      if (e instanceof RemoteUnavailableError) { this.gitInfoLoaded = true; this.render(); }
-    }
+    await fetchGitInfoData({
+      cwd,
+      isCurrent: () => this.gitCwd === cwd,
+      onSuccess: (info) => this.updateGitInfo(info),
+      onUnavailable: () => { this.gitInfoLoaded = true; this.render(); },
+    });
   }
 
   private async refreshDirty(): Promise<void> {
     const cwd = this.gitCwd;
     if (!cwd) return;
-    try {
-      const files = await invoke<string[]>("get_git_dirty", { cwd });
-      if (this.gitCwd !== cwd) return;
-      this.dirtyCount = files.length;
-      this.dirtyLoaded = true;
-      this.render();
-    } catch (e) {
-      if (e instanceof RemoteUnavailableError) { this.dirtyLoaded = true; this.render(); }
-    }
+    await fetchDirty({
+      cwd,
+      isCurrent: () => this.gitCwd === cwd,
+      onSuccess: (count) => { this.dirtyCount = count; this.dirtyLoaded = true; this.render(); },
+      onUnavailable: () => { this.dirtyLoaded = true; this.render(); },
+    });
   }
 
   private async refreshDrain(): Promise<void> {
@@ -422,180 +379,45 @@ export class SessionStatusbar {
     this.durationTimer = setInterval(() => this.tickTimer(), 1000);
   }
 
-  private skeletonChip(key: string, extraClass: string, iconClass: string, width: string): string {
-    return `<span class="sb-chip sb-skeleton ${extraClass}" data-skeleton="${key}" style="min-width:${width}"><i class="ph ${iconClass}"></i><span class="sb-skel-bar"></span></span>`;
-  }
-
-  private animClass(key: string): string {
-    if (this.animatedKeys.has(key)) return "";
-    this.animatedKeys.add(key);
-    return " sb-fadein";
-  }
-
   private clockText(): string {
     const d = new Date();
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
-  // ── chip dispatch ──────────────────────────────────────────────────────────
-  private renderChip(type: ChipType): string {
-    if (isToolChip(type)) {
-      const tool = chipToolName(type);
-      const count = this.toolTally.byType.find((b) => b.tool === tool)?.count ?? 0;
-      return this.tally.renderChipFor(tool, count, this.hideZero);
-    }
-    switch (type) {
-      case "model": {
-        // sessionModel wins: it's the optimistic value set the instant the
-        // picker commits, while meta.model only catches up once a fresh turn's
-        // system-init event streams in (respawn is silent until the next
-        // message) - meta-first here let the chip snap back to the stale model.
-        const model = this.sessionModel ?? this.meta.model;
-        if (model) return `<span class="sb-chip sb-model sb-model-btn${this.animClass("model")}" role="button" tabindex="0"><i class="ph ph-robot"></i>${escapeHtml(shortModelName(model))}</span>`;
-        if (!this.metaLoaded) return this.skeletonChip("model", "sb-model", "ph-robot", "70px");
-        return "";
-      }
-      case "account": {
-        const acc = getCachedAccount(this.accountId);
-        if (!acc) return "";
-        const clickable = this.onAccountClick ? " sb-account-btn" : "";
-        return `<span class="sb-chip sb-account${clickable}${this.animClass("account")}" style="--acc:${escapeHtml(acc.colour)}" role="button" tabindex="0" title="Click to move this chat to a different account"><i class="ph ph-${escapeHtml(acc.icon)}"></i>${escapeHtml(capitalize(acc.label))}</span>`;
-      }
-      case "effort": {
-        if (!this.effort) return "";
-        const cls = this.readOnlyEffort ? " readonly" : " sb-effort-btn";
-        return `<span class="sb-chip sb-effort${cls}${this.animClass("effort")}" role="button" tabindex="0"><i class="ph ph-gauge"></i>${escapeHtml(this.effort)}</span>`;
-      }
-      case "context_pct": return this.renderContext(false);
-      case "context_tokens": return this.renderContext(true);
-      case "thinking":
-        return this.meta.hasThinking ? `<span class="sb-chip sb-thinking active${this.animClass("thinking")}"><i class="ph ph-brain"></i>thinking</span>` : "";
-      case "branch": {
-        if (this.gitInfo.branch) return `<span class="sb-chip sb-branch sb-branch-btn${this.animClass("branch")}" role="button" tabindex="0"><i class="ph ph-git-branch"></i>${escapeHtml(this.gitInfo.branch)}</span>`;
-        if (!this.gitInfoLoaded) return this.skeletonChip("branch", "sb-branch", "ph-git-branch", "60px");
-        return "";
-      }
-      case "repo": {
-        if (this.gitInfo.repo) return `<span class="sb-chip sb-repo${this.animClass("repo")}"><i class="ph ph-folder-simple"></i>${escapeHtml(this.gitInfo.repo)}</span>`;
-        if (!this.gitInfoLoaded) return this.skeletonChip("repo", "sb-repo", "ph-folder-simple", "80px");
-        return "";
-      }
-      case "folder": {
-        // Git-section chip: follow the live git cwd so it stays coherent with
-        // the branch/repo chips when the AI is working in a worktree.
-        const dir = this.gitCwd;
-        if (!dir) return "";
-        const folderName = dir.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? dir;
-        const cwdEsc = escapeHtml(dir);
-        return `<span class="sb-chip sb-folder sb-folder-btn${this.animClass("folder")}" role="button" title="${cwdEsc}" data-cwd="${cwdEsc}"><i class="ph ph-folder-open"></i>${escapeHtml(folderName)}</span>`;
-      }
-      case "commits": return this.renderCommits("both");
-      case "commits_ahead": return this.renderCommits("ahead");
-      case "commits_behind": return this.renderCommits("behind");
-      case "dirty": return this.renderDirty();
-      case "sha":
-        if (this.gitInfo.sha) return `<span class="sb-chip sb-sha${this.animClass("sha")}"><i class="ph ph-hash"></i>${escapeHtml(this.gitInfo.sha)}</span>`;
-        return this.gitInfoLoaded ? "" : this.skeletonChip("sha", "sb-sha", "ph-hash", "60px");
-      case "diffstat": return this.renderDiffstat();
-      case "messages": {
-        if (this.counts) {
-          const n = this.counts.prompts;
-          if (n === 0 && this.hideZero) return "";
-          return `<span class="sb-chip sb-messages${this.animClass("messages")}"><i class="ph ph-chat-circle"></i>${n} ${n === 1 ? "msg" : "msgs"}</span>`;
-        }
-        return this.countsLoaded ? "" : this.skeletonChip("messages", "sb-messages", "ph-chat-circle", "52px");
-      }
-      case "turns": {
-        if (this.counts) {
-          const n = this.counts.turns;
-          if (n === 0 && this.hideZero) return "";
-          return `<span class="sb-chip sb-turns${this.animClass("turns")}"><i class="ph ph-arrows-clockwise"></i>${n} ${n === 1 ? "turn" : "turns"}</span>`;
-        }
-        return this.countsLoaded ? "" : this.skeletonChip("turns", "sb-turns", "ph-arrows-clockwise", "55px");
-      }
-      case "duration":
-        if (!this.startedAt) return "";
-        return `<span class="sb-chip sb-duration${this.animClass("duration")}"><i class="ph ph-timer"></i><span class="sb-duration-text">${formatDuration(this.startedAt)}</span></span>`;
-      case "cost": return this.renderCost();
-      case "clock":
-        return `<span class="sb-chip sb-clock${this.animClass("clock")}"><i class="ph ph-clock"></i><span class="sb-clock-text">${this.clockText()}</span></span>`;
-      case "ai_todos": return this.aiTodosPopover.renderChip(this.cwd, (k) => this.animClass(k));
-      case "drain": return this.drainPopover.renderChip((k) => this.animClass(k));
-      case "servers": return this.serversPopover.renderChip(this.cwd, (k) => this.animClass(k));
-      case "images": return this.imagesPopover.renderChip((k) => this.animClass(k));
-      case "separator":
-        return `<span class="sb-separator" aria-hidden="true"></span>`;
-      case "flex_separator":
-        return `<span class="sb-flex-sep" aria-hidden="true"></span>`;
-      default: return "";
-    }
+  /** Assemble the read-only snapshot + callback params statusbar-chips.ts's
+   *  pure renderChip needs, once per render() rather than per chip. */
+  private chipRenderCtx(): ChipRenderCtx {
+    return {
+      meta: this.meta,
+      metaLoaded: this.metaLoaded,
+      sessionModel: this.sessionModel,
+      effort: this.effort,
+      readOnlyEffort: this.readOnlyEffort,
+      accountId: this.accountId,
+      hasAccountClick: !!this.onAccountClick,
+      gitInfo: this.gitInfo,
+      gitInfoLoaded: this.gitInfoLoaded,
+      gitCwd: this.gitCwd,
+      counts: this.counts,
+      countsLoaded: this.countsLoaded,
+      ctxStatus: this.ctxStatus,
+      dirtyCount: this.dirtyCount,
+      dirtyLoaded: this.dirtyLoaded,
+      startedAt: this.startedAt,
+      toolTally: this.toolTally,
+      hideZero: this.hideZero,
+      cwd: this.cwd,
+      animatedKeys: this.animatedKeys,
+      renderToolChip: (tool, count, hideZero) => this.tally.renderChipFor(tool, count, hideZero),
+      renderAiTodosChip: (cwd, animClass) => this.aiTodosPopover.renderChip(cwd, animClass),
+      renderDrainChip: (animClass) => this.drainPopover.renderChip(animClass),
+      renderServersChip: (cwd, animClass) => this.serversPopover.renderChip(cwd, animClass),
+      renderImagesChip: (animClass) => this.imagesPopover.renderChip(animClass),
+    };
   }
 
-  private renderContext(asTokens: boolean): string {
-    const key = asTokens ? "context_tokens" : "context_pct";
-    if (this.ctxStatus) {
-      const c = this.ctxStatus;
-      const raw = c.pct_used;
-      const estimated = c.confidence !== "proven";
-      if (raw >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
-      const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
-      const occ = Number(c.occupancy).toLocaleString();
-      const win = Number(c.window).toLocaleString();
-      const note = estimated ? " (estimated)" : "";
-      const pctStr = raw < 1 && raw > 0 ? "<1" : String(Math.min(100, Math.round(raw)));
-      const body = asTokens ? `${formatTokenCount(Number(c.occupancy), { decimals: 0 })} / ${formatTokenCount(Number(c.window), { decimals: 0 })}` : `${pctStr}%`;
-      return `<span class="sb-chip sb-context${cls}${this.animClass(key)}" title="${occ} / ${win} tokens (conversation + system prompt + tools)${note}"><i class="ph ph-stack"></i>${body}</span>`;
-    } else if (!this.metaLoaded || this.meta.hasUsage) {
-      // No independent window heuristic here anymore (ai_todo 31): the daemon's
-      // context_status is the sole source of truth. While it's still resolving
-      // (or hasn't been fetched yet) show a loading skeleton instead of an
-      // estimate; once meta reports usage with no context_status forthcoming,
-      // this keeps showing the skeleton rather than silently going stale.
-      return this.skeletonChip(key, "sb-context", "ph-stack", asTokens ? "70px" : "40px");
-    }
-    return "";
-  }
-
-  private renderCommits(mode: "ahead" | "behind" | "both"): string {
-    const a = this.gitInfo.ahead ?? null, b = this.gitInfo.behind ?? null;
-    const key = `commits_${mode}`;
-    if (a === null && b === null) {
-      if (!this.gitInfoLoaded) return this.skeletonChip("commits", "sb-commits", "ph-arrows-down-up", "44px");
-      // No upstream tracking branch (as opposed to 0 ahead/0 behind, which is
-      // Some(0)/Some(0)). Mirrors VS Code's "Publish Branch" cloud icon rather
-      // than hiding the chip, so an unpushed branch reads as expected-empty.
-      // Clickable (sb-commits-btn) so the popover's Publish button is reachable.
-      if (mode === "both" && this.gitInfo.branch) {
-        return `<span class="sb-chip sb-commits sb-commits-btn${this.animClass(key)}" role="button" tabindex="0" title="No upstream tracking branch - click to publish"><i class="ph ph-cloud-arrow-up"></i></span>`;
-      }
-      return "";
-    }
-    let txt = "", icon = "ph-arrows-down-up";
-    if (mode === "ahead") { txt = `↑${a ?? 0}`; icon = "ph-arrow-up"; }
-    else if (mode === "behind") { txt = `↓${b ?? 0}`; icon = "ph-arrow-down"; }
-    else { txt = `↑${a ?? 0} ↓${b ?? 0}`; }
-    return `<span class="sb-chip sb-commits sb-commits-btn${this.animClass(key)}" role="button" tabindex="0" title="${a ?? 0} ahead, ${b ?? 0} behind upstream"><i class="ph ${icon}"></i>${txt}</span>`;
-  }
-
-  private renderDirty(): string {
-    const n = this.dirtyCount;
-    if (n === null) return this.dirtyLoaded ? "" : this.skeletonChip("dirty", "sb-dirty", "ph-pencil-simple", "44px");
-    if (n === 0 && this.hideZero) return "";
-    return `<span class="sb-chip sb-dirty${this.animClass("dirty")}" title="${n} uncommitted file${n === 1 ? "" : "s"}"><i class="ph ph-pencil-simple"></i>${n} dirty</span>`;
-  }
-
-  private renderDiffstat(): string {
-    const ins = this.gitInfo.insertions, del = this.gitInfo.deletions;
-    if (ins == null && del == null) return this.gitInfoLoaded ? "" : this.skeletonChip("diffstat", "sb-diffstat", "ph-plus-minus", "50px");
-    if ((ins ?? 0) === 0 && (del ?? 0) === 0 && this.hideZero) return "";
-    return `<span class="sb-chip sb-diffstat${this.animClass("diffstat")}" title="uncommitted: +${ins ?? 0} / -${del ?? 0}"><i class="ph ph-plus-minus"></i><span class="sb-ins">+${ins ?? 0}</span> <span class="sb-del">-${del ?? 0}</span></span>`;
-  }
-
-  private renderCost(): string {
-    const c = this.meta.totalCostUsd;
-    if (!this.metaLoaded) return this.skeletonChip("cost", "sb-cost", "ph-currency-dollar", "44px");
-    if ((!c || c <= 0) && this.hideZero) return "";
-    return `<span class="sb-chip sb-cost${this.animClass("cost")}" title="Estimated session cost (local estimate, not a charge)"><i class="ph ph-currency-dollar"></i>~$${(c ?? 0).toFixed(2)}</span>`;
+  private renderChip(type: ChipType, ctx: ChipRenderCtx): string {
+    return renderChipHtml(type, ctx);
   }
 
   /** Recomputed each render from the live renderer's messages/messageEls (a
@@ -615,8 +437,9 @@ export class SessionStatusbar {
     // .sb-row is overflow-x: auto; innerHTML rebuild below destroys the nodes
     // and resets scrollLeft, so snapshot by row index and restore after.
     const scrollLefts = Array.from(this.container.querySelectorAll<HTMLElement>(".sb-row"), (r) => r.scrollLeft);
+    const ctx = this.chipRenderCtx();
     const rowsHtml = this.rows.map((row) => {
-      const chips = row.map((t) => this.renderChip(t)).filter(Boolean).join("");
+      const chips = row.map((t) => this.renderChip(t, ctx)).filter(Boolean).join("");
       return chips ? `<div class="sb-row">${chips}</div>` : "";
     }).filter(Boolean).join("");
 
