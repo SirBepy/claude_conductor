@@ -5,7 +5,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const invokeMock = vi.fn().mockResolvedValue(undefined);
+// The question card mounts a composer, whose SlashProvider fetches this list
+// and iterates it. A bare undefined rejects unhandled after the test passed.
+const invokeMock = vi.fn().mockImplementation((cmd) =>
+  Promise.resolve(cmd === "list_slash_commands" ? [] : undefined)
+);
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
 vi.mock("tauri-plugin-clipboard-api", () => ({
   hasFiles: vi.fn().mockResolvedValue(false),
