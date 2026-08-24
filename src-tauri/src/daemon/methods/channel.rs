@@ -327,12 +327,14 @@ mod tests {
         // itself a guaranteed no-op - the enqueue this test asserts on
         // happens synchronously, before that task is ever dispatched.
         let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-1.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.set_busy("s2", true);
 
         let long = "x".repeat(3000); // exceeds repo_channel::MAX_TEXT_LEN (2000)
-        let v = post_message(&state, "s1", &long, None).unwrap();
+        let v = post_message_at(&state, "s1", &long, None, &path).unwrap();
         assert_eq!(v["notified"], 1);
 
         let queues = state.repo_channel_wakes.lock().unwrap();
@@ -379,12 +381,14 @@ mod tests {
     #[tokio::test]
     async fn post_message_with_a_target_wakes_only_that_peer() {
         let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-1.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
 
         let target = vec!["s3".to_string()];
-        let v = post_message(&state, "s1", "for s3 only", Some(&target)).unwrap();
+        let v = post_message_at(&state, "s1", "for s3 only", Some(&target), &path).unwrap();
         assert_eq!(v["notified"], 1);
 
         let queues = state.repo_channel_wakes.lock().unwrap();
