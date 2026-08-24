@@ -24,7 +24,23 @@ async function startNewChatPickingFirstProject() {
   const row = await $(".project-picker-row");
   await row.waitForExist({ timeout: 10000 });
   await row.click();
-  // 2. Model/effort modal -> Start session with defaults.
+
+  // Ambiguous registry (2+ accounts, no default) leaves Start disabled until a chip is picked.
+  const accChip = await $(".me-acc-field .account-chip");
+  if (await accChip.isExisting()) {
+    await accChip.click();
+  }
+
+  // .me-remote-input now lives inside .me-more-body (ba44deea); open it, ensure checked (ai_todo 719).
+  const moreOptionsBtn = await $(".me-more-btn");
+  await moreOptionsBtn.waitForClickable({ timeout: 10000 });
+  await moreOptionsBtn.click();
+  const remoteInput = await $(".me-remote-input");
+  await remoteInput.waitForExist({ timeout: 10000 });
+  if (!(await remoteInput.isSelected())) {
+    await remoteInput.click();
+  }
+
   const confirm = await $(".me-confirm");
   await confirm.waitForClickable({ timeout: 10000 });
   await confirm.click();

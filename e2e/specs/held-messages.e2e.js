@@ -30,6 +30,15 @@ async function startHaikuChat() {
   await row.waitForExist({ timeout: 10000 });
   await row.click();
 
+  // Ambiguous registry (2+ accounts, no project/default binding) opens the
+  // modal in chip-picker mode with Start session disabled until a pick is
+  // made (account-field.ts accountPickIncomplete). A resolved single/bound
+  // account renders the ghost trigger instead and needs no click.
+  const accChip = await $(".me-acc-field .account-chip");
+  if (await accChip.isExisting()) {
+    await accChip.click();
+  }
+
   const modelHaiku = await $('.slider-stop-label[data-kind="model"][data-idx="0"]');
   await modelHaiku.waitForExist({ timeout: 10000 });
   await modelHaiku.click();
