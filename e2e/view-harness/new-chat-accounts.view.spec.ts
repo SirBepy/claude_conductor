@@ -31,9 +31,9 @@ test.describe("view-harness / new-chat account picker", () => {
     const overlay = page.locator(".model-effort-modal-card");
     await expect(overlay).toBeVisible();
 
-    // The account resolved (sole account) -> not the empty state, ghost dropdown shown.
+    // The account resolved (sole account) -> not the empty state, chip shown.
     await expect(overlay.locator(".me-acc-empty")).toHaveCount(0);
-    await expect(overlay.locator(".me-acc-ghost").first()).toContainText("Test Account");
+    await expect(overlay.locator(".me-acc-edit .account-chip").first()).toContainText("Test Account");
 
     // Start session is enabled.
     await expect(overlay.locator(".me-confirm")).toBeEnabled();
