@@ -399,6 +399,47 @@ mod tests {
         );
     }
 
+    /// Wire text for a repo-channel peer wake (todo 743): meta sentinel MUST
+    /// lead, so `user_prompt_label`'s plain `starts_with` check still excludes
+    /// it, exactly like a meta-only wake, even though it also carries an
+    /// author sentinel.
+    fn meta_and_authored_wake_text(author: &str, text: &str) -> String {
+        format!(
+            "{}{}{author}{}{text}",
+            crate::types::chat::DAEMON_META_SENTINEL,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
+        )
+    }
+
+    #[test]
+    fn first_user_prompt_excludes_a_meta_and_authored_wake() {
+        // A both-sentinel peer wake must be excluded from titling exactly like
+        // a meta-only one (todo 743) - the author sentinel riding along must
+        // not defeat the leading-meta check.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let sentinel_line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": meta_and_authored_wake_text("sid-peer-1", "touching pump.rs")}
+        }).to_string();
+        let body = [sentinel_line, r#"{"type":"user","message":{"role":"user","content":"build me a thing"}}"#.to_string()].join("\n");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(first_user_prompt(&path, 60).as_deref(), Some("build me a thing"));
+    }
+
+    #[test]
+    fn is_real_user_turn_excludes_a_meta_and_authored_wake() {
+        // Turn counting must skip a both-sentinel peer wake too - the flag
+        // that matters here is `title.rs:183`'s production gate, not the
+        // walker.rs test row that only covers the meta-only case.
+        let v = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": meta_and_authored_wake_text("sid-peer-1", "touching pump.rs")}
+        });
+        assert!(!is_real_user_turn(&v));
+    }
+
     #[test]
     fn first_user_prompt_renders_slash_command_as_name_plus_args() {
         let dir = tempdir().unwrap();

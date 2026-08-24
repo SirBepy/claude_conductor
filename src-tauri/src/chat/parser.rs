@@ -987,6 +987,71 @@ mod tests {
         }
     }
 
+    /// Wire text for a repo-channel peer wake (todo 743): meta sentinel MUST
+    /// lead so the plain `starts_with(DAEMON_META_SENTINEL)` decode still
+    /// finds it with an author sentinel riding along right after.
+    fn meta_and_authored_wake_wire_text(author: &str, text: &str) -> String {
+        format!(
+            "{}{}{author}{}{text}",
+            crate::types::chat::DAEMON_META_SENTINEL,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
+            crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
+        )
+    }
+
+    #[test]
+    fn decodes_a_meta_and_authored_wake_as_meta() {
+        let mut ctx = ParserContext::new();
+        let text = meta_and_authored_wake_wire_text("sid-peer-1", "touching pump.rs, anyone on this?");
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": text},
+            "timestamp": 1700000000
+        })
+        .to_string();
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::UserMessage { is_meta, .. } => {
+                assert!(*is_meta, "a peer wake must still decode as meta, excluded from titling/token counts");
+            }
+            _ => panic!("expected UserMessage"),
+        }
+    }
+
+    #[test]
+    fn decodes_a_meta_and_authored_wake_with_clean_author_roundtrip() {
+        // The one that breaks silently rather than loudly: a lost author id
+        // or a leaked sentinel byte doesn't fail loudly like a lost is_meta
+        // flag would - it just renders wrong.
+        let mut ctx = ParserContext::new();
+        let text = meta_and_authored_wake_wire_text("sid-peer-1", "touching pump.rs, anyone on this?");
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": text},
+            "timestamp": 1700000000
+        })
+        .to_string();
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::UserMessage { content, author_session_id, .. } => {
+                assert_eq!(author_session_id.as_deref(), Some("sid-peer-1"));
+                match &content[0] {
+                    ContentBlock::Text { text } => {
+                        assert_eq!(text, "touching pump.rs, anyone on this?");
+                        assert!(
+                            !text.contains("daemon-author") && !text.contains("daemon-meta") && !text.contains('\u{200B}'),
+                            "neither sentinel may leak into the visible body: {text:?}"
+                        );
+                    }
+                    other => panic!("expected text block, got {other:?}"),
+                }
+            }
+            _ => panic!("expected UserMessage"),
+        }
+    }
+
     #[test]
     fn buffers_across_boundaries() {
         let mut ctx = ParserContext::new();

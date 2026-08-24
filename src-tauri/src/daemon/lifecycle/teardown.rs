@@ -31,6 +31,18 @@ pub async fn send_message_with_author(
     send_message_inner(session, text, false, Some(author_session_id)).await
 }
 
+/// Both flags at once (todo 743): a repo-channel peer wake is daemon-injected
+/// (`is_meta: true`, excluded from titling/token counts) AND carries its
+/// sender's stable id, so a message can be both - see `wire_text`'s compose
+/// order below for why meta must lead.
+pub async fn send_message_meta_with_author(
+    session: &Arc<Session>,
+    text: &str,
+    author_session_id: &str,
+) -> Result<(), LifecycleError> {
+    send_message_inner(session, text, true, Some(author_session_id)).await
+}
+
 async fn send_message_inner(
     session: &Arc<Session>,
     text: &str,
@@ -47,19 +59,19 @@ async fn send_message_inner(
         *lp = text.to_string();
     }
     // Neither marker is something the CLI itself persists; embedding one in
-    // the text is the only way it survives into its own transcript (see
-    // `DAEMON_META_SENTINEL`'s doc in `types::chat`).
-    let wire_text = if is_meta {
-        format!("{}{text}", crate::types::chat::DAEMON_META_SENTINEL)
-    } else if let Some(author) = author_session_id {
-        format!(
-            "{}{author}{}{text}",
-            crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX,
-            crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX
-        )
-    } else {
-        text.to_string()
-    };
+    // the text is the only way it survives into its own transcript. Meta MUST
+    // lead when both are present: `chat::parser`/`tokens::title` do a plain
+    // `starts_with(DAEMON_META_SENTINEL)` on the first block (todo 743).
+    let mut wire_text = String::new();
+    if is_meta {
+        wire_text.push_str(crate::types::chat::DAEMON_META_SENTINEL);
+    }
+    if let Some(author) = author_session_id {
+        wire_text.push_str(crate::types::chat::DAEMON_AUTHOR_SENTINEL_PREFIX);
+        wire_text.push_str(author);
+        wire_text.push_str(crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX);
+    }
+    wire_text.push_str(text);
     let msg = serde_json::json!({
         "type": "user",
         "message": {
@@ -147,6 +159,22 @@ pub async fn send_message_with_respawn_and_author(
     }
     let session = respawn_interactive(state, session_id).await?;
     send_message_with_author(&session, text, author_session_id).await
+}
+
+/// Same as `send_message_with_respawn_and_author`, but also `is_meta: true`
+/// (see `send_message_meta_with_author`'s doc). The sole caller is
+/// `repo_channel_wake::drain`.
+pub async fn send_message_with_respawn_meta_and_author(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    text: &str,
+    author_session_id: &str,
+) -> Result<(), LifecycleError> {
+    if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+        return send_message_meta_with_author(&session, text, author_session_id).await;
+    }
+    let session = respawn_interactive(state, session_id).await?;
+    send_message_meta_with_author(&session, text, author_session_id).await
 }
 
 /// Force-kills `session_id`'s live child and waits for pump teardown,
