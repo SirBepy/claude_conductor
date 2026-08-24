@@ -55,7 +55,19 @@
 .sessions-list li.row-portrait .avatar-status-dot.st-external  { background: var(--st-external);  box-shadow: 0 0 4px var(--st-external-glow); }
 .sessions-list li.row-portrait .avatar-status-dot.st-attention { background: var(--st-attention); box-shadow: 0 0 4px var(--st-attention-glow); animation: attention-pulse 1.4s ease-in-out infinite; }
 .sessions-list li.row-portrait .avatar-status-dot.st-closing   { background: var(--chat-state-closing); box-shadow: 0 0 4px var(--chat-state-closing-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-close-failed { background: var(--st-close-failed); box-shadow: 0 0 4px var(--st-close-failed-glow); }
+/* Square, not round like every other dot - the shape carries the distinction
+   since the orange fill is already st-rate-limited's colour (chat-state-error
+   above). The ph-warning glyph rides inside at dot scale. */
+.sessions-list li.row-portrait .avatar-status-dot.st-close-failed {
+  background: var(--st-close-failed);
+  box-shadow: 0 0 4px var(--st-close-failed-glow);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: var(--color-surface);
+}
 
 /* The dot is now the sole signal for portrait rows - scoped to .row-portrait
    so classic keeps its stripes. 4-class specificity beats .closing.row-entering

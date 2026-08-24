@@ -133,7 +133,10 @@ export function leadingVisual(
   statusTitle = "",
 ): string {
   const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
-  const dot = extras.dotClass ? `<span class="avatar-status-dot ${extras.dotClass}"></span>` : "";
+  // close_failed shares its orange with st-rate-limited (sessions.css), so the
+  // dot alone can't read as distinct - a glyph is the only spare channel left.
+  const dotGlyph = extras.dotClass === "st-close-failed" ? `<i class="ph-bold ph-warning"></i>` : "";
+  const dot = extras.dotClass ? `<span class="avatar-status-dot ${extras.dotClass}">${dotGlyph}</span>` : "";
   const titleAttr = statusTitle ? ` title="${escapeHtml(statusTitle)}"` : "";
   if (!charId) {
     const avatarHtml = `<span class="session-avatar session-avatar--placeholder ${statusClass}"${titleAttr}>
