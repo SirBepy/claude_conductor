@@ -19,7 +19,9 @@ playwright-report/
 .for_bepy/
 .claude/scheduled_tasks.lock
 .claude/last-session-status.json
-.impeccable/
+# Scratch (cache, critiques, private waivers); config.json is the SHARED waiver list and IS tracked
+.impeccable/*
+!.impeccable/config.json
 docs/superpowers/
 src/types/ipc.generated.ts
 /*.png

@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "createdAt": "2026-08-24T12:55:32.686Z",
+        "reason": "Dev confirmed 2026-08-24 (todo 760): the sidebar row slide-in overshoot is a deliberate feel, not a defect"
+      }
+    ]
+  }
+}
