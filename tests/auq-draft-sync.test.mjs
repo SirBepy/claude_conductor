@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const setAuqDraft = vi.fn();
-const clearAuqDraft = vi.fn();
-const getSessionDrafts = vi.fn();
+const { setAuqDraft, clearAuqDraft, getSessionDrafts } = vi.hoisted(() => ({
+  setAuqDraft: vi.fn(),
+  clearAuqDraft: vi.fn(),
+  getSessionDrafts: vi.fn(),
+}));
 
 vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   setAuqDraft: (...a) => setAuqDraft(...a),

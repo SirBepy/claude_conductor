@@ -7,10 +7,10 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const invokeMock = vi.fn().mockResolvedValue([]);
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue([]) }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
 
-const transportCall = vi.fn();
+const { transportCall } = vi.hoisted(() => ({ transportCall: vi.fn() }));
 vi.mock("../src/shared/transport.ts", () => ({
   getTransport: () => ({ call: (...a) => transportCall(...a), listen: vi.fn() }),
 }));

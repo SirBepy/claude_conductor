@@ -10,7 +10,7 @@ import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 // Mock the ipc module before importing anything that touches it (event-store
 // pulls it in at module-eval time).
-const invokeMock = vi.fn();
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
 let invokeRouter;

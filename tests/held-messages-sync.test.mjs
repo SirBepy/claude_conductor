@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 
-const addHeldMessage = vi.fn();
-const updateHeldMessage = vi.fn();
-const removeHeldMessage = vi.fn();
-const clearHeldMessages = vi.fn();
-const getSessionDrafts = vi.fn();
+const { addHeldMessage, updateHeldMessage, removeHeldMessage, clearHeldMessages, getSessionDrafts } = vi.hoisted(() => ({
+  addHeldMessage: vi.fn(),
+  updateHeldMessage: vi.fn(),
+  removeHeldMessage: vi.fn(),
+  clearHeldMessages: vi.fn(),
+  getSessionDrafts: vi.fn(),
+}));
 
 vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   addHeldMessage: (...a) => addHeldMessage(...a),

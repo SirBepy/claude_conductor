@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { assistantEvent } from "./helpers/chat-events.mjs";
 
-const invokeMock = vi.fn();
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
 if (!globalThis.window) globalThis.window = {};

@@ -15,16 +15,18 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const listAccounts = vi.fn();
-const moveSessionToAccount = vi.fn();
+const { listAccounts, moveSessionToAccount } = vi.hoisted(() => ({
+  listAccounts: vi.fn(),
+  moveSessionToAccount: vi.fn(),
+}));
 vi.mock("../src/shared/api.ts", () => ({
   api: { listAccounts: (...a) => listAccounts(...a), moveSessionToAccount: (...a) => moveSessionToAccount(...a) },
 }));
 
-const showToast = vi.fn();
+const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: (...a) => showToast(...a) }));
 
-const showView = vi.fn();
+const { showView } = vi.hoisted(() => ({ showView: vi.fn() }));
 vi.mock("../src/shared/navigation.ts", () => ({ showView: (...a) => showView(...a) }));
 
 const { RateLimitBanner, isBlocked, formatClockLabel, capitalize } = await import(

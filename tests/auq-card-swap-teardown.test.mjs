@@ -5,14 +5,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const invokeMock = vi.fn().mockResolvedValue([]);
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue([]) }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 vi.mock("tauri-plugin-clipboard-api", () => ({
   hasFiles: vi.fn().mockResolvedValue(false),
   readFiles: vi.fn().mockResolvedValue([]),
 }));
 
-const getSessionDrafts = vi.fn();
+const { getSessionDrafts } = vi.hoisted(() => ({ getSessionDrafts: vi.fn() }));
 vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   getSessionDrafts: (...a) => getSessionDrafts(...a),
   setAuqDraft: vi.fn().mockResolvedValue({ updated_at: "t" }),

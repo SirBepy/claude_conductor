@@ -7,8 +7,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { assistantEvent } from "./helpers/chat-events.mjs";
 
-const hasMoreMock = vi.fn();
-const loadOlderMock = vi.fn();
+const { hasMoreMock, loadOlderMock } = vi.hoisted(() => ({
+  hasMoreMock: vi.fn(),
+  loadOlderMock: vi.fn(),
+}));
 vi.mock("../src/shared/chat/event-store.ts", () => ({
   sessionEvents: { hasMore: hasMoreMock, loadOlder: loadOlderMock },
 }));

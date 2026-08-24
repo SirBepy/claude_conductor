@@ -5,13 +5,17 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const getSessionDrafts = vi.fn();
-const setAuqDraft = vi.fn();
-const clearAuqDraft = vi.fn();
-const transportCall = vi.fn();
-const invokeMock = vi.fn();
-const renderCalls = [];
-const renderQuestionUISpy = vi.fn((opts) => { renderCalls.push(opts); });
+const { getSessionDrafts, setAuqDraft, clearAuqDraft, transportCall, invokeMock } = vi.hoisted(() => ({
+  getSessionDrafts: vi.fn(),
+  setAuqDraft: vi.fn(),
+  clearAuqDraft: vi.fn(),
+  transportCall: vi.fn(),
+  invokeMock: vi.fn(),
+}));
+const { renderCalls, renderQuestionUISpy } = vi.hoisted(() => {
+  const renderCalls = [];
+  return { renderCalls, renderQuestionUISpy: vi.fn((opts) => { renderCalls.push(opts); }) };
+});
 
 vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   getSessionDrafts: (...a) => getSessionDrafts(...a),

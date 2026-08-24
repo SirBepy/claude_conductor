@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const setComposerDraft = vi.fn();
-const clearComposerDraft = vi.fn();
-const getSessionDrafts = vi.fn();
+const { setComposerDraft, clearComposerDraft, getSessionDrafts } = vi.hoisted(() => ({
+  setComposerDraft: vi.fn(),
+  clearComposerDraft: vi.fn(),
+  getSessionDrafts: vi.fn(),
+}));
 
 vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   setComposerDraft: (...a) => setComposerDraft(...a),

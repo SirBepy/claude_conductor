@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, assistantEvent, streamingEvent, finalEvent, toolUseEvent, deltaEvent, eventsLaggedEvent, makeBus } from "./helpers/chat-events.mjs";
 
-const invokeMock = vi.fn();
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
 beforeEach(() => {

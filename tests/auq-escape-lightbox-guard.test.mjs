@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const invokeMock = vi.fn().mockResolvedValue([]);
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue([]) }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 vi.mock("tauri-plugin-clipboard-api", () => ({
   hasFiles: vi.fn().mockResolvedValue(false),

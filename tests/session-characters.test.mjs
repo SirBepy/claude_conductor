@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-const listSessionCharacters = vi.fn();
+const { listSessionCharacters } = vi.hoisted(() => ({ listSessionCharacters: vi.fn() }));
 vi.mock("../src/shared/api.ts", () => ({
   api: { listSessionCharacters: (...a) => listSessionCharacters(...a) },
 }));

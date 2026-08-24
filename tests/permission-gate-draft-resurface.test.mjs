@@ -5,11 +5,13 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const invokeMock = vi.fn().mockResolvedValue(undefined);
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
 
-const renderCalls = [];
-const renderQuestionUISpy = vi.fn((opts) => { renderCalls.push(opts); });
+const { renderCalls, renderQuestionUISpy } = vi.hoisted(() => {
+  const renderCalls = [];
+  return { renderCalls, renderQuestionUISpy: vi.fn((opts) => { renderCalls.push(opts); }) };
+});
 import * as qs from "../src/views/sessions/permission-modal/question-state.ts";
 vi.mock("../src/views/sessions/permission-modal/question-ui.ts", () => ({
   extractQuestions: (...a) => qs.extractQuestions(...a),
