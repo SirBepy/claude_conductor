@@ -24,6 +24,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     const finish = (val: { path: string; name: string } | null) => {
       if (resolved) return;
       resolved = true;
+      document.removeEventListener("keydown", keydownHandler);
       resolve(val);
     };
 
@@ -107,6 +108,17 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
       const path = currentScopeRel ? `${currentWt.path}\\${currentScopeRel.replace(/\//g, "\\")}` : currentWt.path;
       finish({ path, name: currentWt.name });
     };
+
+    // Ctrl/Cmd+Enter submits, matching the AUQ question card's shortcut -
+    // guarded by the same busy/scopeExpanded condition that disables the
+    // Open button itself.
+    const keydownHandler = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && scopes !== null && !scopeExpanded) {
+        e.preventDefault();
+        persistAndFinish();
+      }
+    };
+    document.addEventListener("keydown", keydownHandler);
 
     const renderWorktreeField = () => {
       if (project.worktrees.length === 0) return "";
