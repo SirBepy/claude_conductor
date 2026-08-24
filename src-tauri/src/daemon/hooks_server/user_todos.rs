@@ -20,12 +20,14 @@ use std::sync::Arc;
 pub(super) struct WriteTodoBody {
     session_id: String,
     action: String,
+    // Option, not `#[serde(default)] String`: `default` only covers a MISSING
+    // key, an explicit `"id": null` still hits String's visitor and 4xxs.
     #[serde(default)]
-    id: String,
+    id: Option<String>,
     #[serde(default)]
-    text: String,
+    text: Option<String>,
     #[serde(default)]
-    reason: String,
+    reason: Option<String>,
 }
 
 pub(super) async fn on_write_user_todo(
@@ -36,9 +38,9 @@ pub(super) async fn on_write_user_todo(
         &ctx.state,
         &body.session_id,
         &body.action,
-        &body.id,
-        &body.text,
-        &body.reason,
+        &body.id.unwrap_or_default(),
+        &body.text.unwrap_or_default(),
+        &body.reason.unwrap_or_default(),
     ) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
@@ -101,14 +103,45 @@ mod tests {
         let body = WriteTodoBody {
             session_id: "ghost".to_string(),
             action: "add".to_string(),
-            id: String::new(),
-            text: "do a thing".to_string(),
-            reason: String::new(),
+            id: None,
+            text: Some("do a thing".to_string()),
+            reason: None,
         };
         let resp = on_write_user_todo(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v: Value = serde_json::from_str(&body_text(resp).await).unwrap();
         assert_eq!(v["ok"], false);
+    }
+
+    // Todo 741: an add sent with only `action` + `text` must deserialize, not
+    // 4xx on the missing `id`/`reason` keys.
+    #[test]
+    fn write_todo_body_accepts_an_omitted_id() {
+        let body: WriteTodoBody =
+            serde_json::from_str(r#"{"session_id":"s","action":"add","text":"t"}"#).unwrap();
+        assert_eq!(body.id, None);
+        assert_eq!(body.id.unwrap_or_default(), "");
+    }
+
+    // The actual bug: `#[serde(default)]` alone lets a MISSING key through but
+    // not an explicit `null`, which is what real callers were sending.
+    #[test]
+    fn write_todo_body_accepts_an_explicit_null_id() {
+        let body: WriteTodoBody =
+            serde_json::from_str(r#"{"session_id":"s","action":"add","id":null,"text":"t","reason":null}"#)
+                .unwrap();
+        assert_eq!(body.id, None);
+        assert_eq!(body.reason.unwrap_or_default(), "");
+    }
+
+    #[test]
+    fn write_todo_body_keeps_a_present_id() {
+        let body: WriteTodoBody = serde_json::from_str(
+            r#"{"session_id":"s","action":"drop","id":"todo-1","reason":"done"}"#,
+        )
+        .unwrap();
+        assert_eq!(body.id.unwrap_or_default(), "todo-1");
+        assert_eq!(body.reason.unwrap_or_default(), "done");
     }
 
     #[tokio::test]

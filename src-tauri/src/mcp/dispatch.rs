@@ -204,14 +204,17 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/messages/update", body, Some("invalid update"), None))
         }
         TOOL_WRITE_USER_TODO => {
-            let body = json!({
-                "session_id": ctx.session_id,
-                "action": ctx.args["action"],
-                "id": ctx.args.get("id"),
-                "text": ctx.args.get("text"),
-                "reason": ctx.args.get("reason"),
-            });
-            Some(ctx.relay("/todos/write", body, Some("invalid todo write"), None))
+            // Omit absent keys rather than relaying `null`: `#[serde(default)]`
+            // on the receiver only covers a missing key, not an explicit null.
+            let mut body = serde_json::Map::new();
+            body.insert("session_id".to_string(), json!(ctx.session_id));
+            body.insert("action".to_string(), ctx.args["action"].clone());
+            for key in ["id", "text", "reason"] {
+                if let Some(v) = ctx.args.get(key) {
+                    body.insert(key.to_string(), v.clone());
+                }
+            }
+            Some(ctx.relay("/todos/write", Value::Object(body), Some("invalid todo write"), None))
         }
         _ => None,
     }
