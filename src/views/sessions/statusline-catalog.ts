@@ -90,7 +90,7 @@ export const MAX_ROWS = 5;
  *  still clipped). Drops account/repo/branch, which the chat header already
  *  shows, and keeps the two tool chips worth glancing at. */
 export const DEFAULT_MOBILE_ROWS: ChipType[][] = [
-  ["model", "context_pct", "effort", "servers", "commits", "tool:Read", "tool:Edit"],
+  ["model", "context_pct", "effort", "commits", "tool:Read", "tool:Edit"],
 ];
 
 /** One row on a phone, so the bar can never wrap and eat the conversation. */
