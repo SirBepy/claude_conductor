@@ -1,8 +1,26 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, assistantEvent, streamingEvent, finalEvent, toolUseEvent, deltaEvent, eventsLaggedEvent, makeBus } from "./helpers/chat-events.mjs";
+import { makeInvokeRouter } from "./helpers/invoke-router.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
+
+// event-store only ever calls invoke("load_history_page", ...), so the
+// command name alone can't tell two queued pages apart (unlike 724's two
+// distinct commands) - key on sessionId too, so an extra invoke() elsewhere
+// in the exercised path can never steal a slot meant for THIS session's page.
+function routeHistoryPage(sid, ...pages) {
+  const router = makeInvokeRouter(invokeMock);
+  const queue = [...pages];
+  const base = invokeMock.getMockImplementation();
+  invokeMock.mockImplementation((cmd, args) => {
+    if (cmd === "load_history_page" && args?.sessionId === sid && queue.length > 0) {
+      return Promise.resolve(queue.shift());
+    }
+    return base(cmd, args);
+  });
+  return router;
+}
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -16,13 +34,13 @@ const { resetTransportForTests } = await import("../src/shared/transport.ts");
 
 describe("SessionEventStore pagination", () => {
   it("loadInitial caches and is idempotent", async () => {
-    invokeMock.mockResolvedValueOnce({
+    const sid = "sess-cache-1";
+    routeHistoryPage(sid, {
       events: [userEvent("u1", 1), assistantEvent("a1", 2)],
       oldest_seq: 0,
       newest_seq: 1,
       has_more: false,
     });
-    const sid = "sess-cache-1";
     const first = await sessionEvents.loadInitial(sid);
     expect(first).toHaveLength(2);
     const second = await sessionEvents.loadInitial(sid);
@@ -31,20 +49,22 @@ describe("SessionEventStore pagination", () => {
   });
 
   it("loadOlder prepends and updates oldestSeq", async () => {
-    invokeMock
-      .mockResolvedValueOnce({
+    const sid = "sess-prepend-1";
+    routeHistoryPage(
+      sid,
+      {
         events: [userEvent("u3", 3), assistantEvent("a3", 4)],
         oldest_seq: 4,
         newest_seq: 5,
         has_more: true,
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         events: [userEvent("u1", 1), assistantEvent("a1", 2)],
         oldest_seq: 0,
         newest_seq: 3,
         has_more: false,
-      });
-    const sid = "sess-prepend-1";
+      },
+    );
     await sessionEvents.loadInitial(sid);
     const older = await sessionEvents.loadOlder(sid);
     expect(older).not.toBeNull();
@@ -99,7 +119,7 @@ describe("SessionEventStore pagination", () => {
     sessionEvents.pushSynthetic(sid, userEvent("hello", Date.now()));
     sessionEvents.pushSynthetic(sid, assistantEvent("hi there", Date.now()));
     // Authoritative JSONL page contains the same turn (ISO->0 timestamps).
-    invokeMock.mockResolvedValueOnce({
+    routeHistoryPage(sid, {
       events: [userEvent("hello", 0), assistantEvent("hi there", 0)],
       oldest_seq: 0,
       newest_seq: 1,
@@ -150,28 +170,31 @@ describe("SessionEventStore pagination", () => {
 
   it("reconcileLatest recovers a turn the lossy live channel dropped", async () => {
     const sid = "sess-reconcile";
-    // First load: one completed turn (u1 -> a1).
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0), assistantEvent("a1", 0)],
-      oldest_seq: 0,
-      newest_seq: 1,
-      has_more: false,
-    });
+    // First load: one completed turn (u1 -> a1). A later turn (u2 -> a2)
+    // completed while the chat was backgrounded, but the assistant frame was
+    // dropped by the lossy daemon->app notifier and never reached the store.
+    // The authoritative transcript HAS it.
+    routeHistoryPage(
+      sid,
+      {
+        events: [userEvent("u1", 0), assistantEvent("a1", 0)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+      },
+      {
+        events: [
+          userEvent("u1", 0),
+          assistantEvent("a1", 0),
+          userEvent("u2", 0),
+          assistantEvent("a2 recovered", 0),
+        ],
+        oldest_seq: 0,
+        newest_seq: 3,
+        has_more: false,
+      },
+    );
     await sessionEvents.loadInitial(sid);
-    // A later turn (u2 -> a2) completed while the chat was backgrounded, but the
-    // assistant frame was dropped by the lossy daemon->app notifier and never
-    // reached the store. The authoritative transcript HAS it.
-    invokeMock.mockResolvedValueOnce({
-      events: [
-        userEvent("u1", 0),
-        assistantEvent("a1", 0),
-        userEvent("u2", 0),
-        assistantEvent("a2 recovered", 0),
-      ],
-      oldest_seq: 0,
-      newest_seq: 3,
-      has_more: false,
-    });
     const seen = [];
     const unsub = sessionEvents.subscribe(sid, (ev) => seen.push(ev));
     await sessionEvents.reconcileLatest(sid);
@@ -184,20 +207,23 @@ describe("SessionEventStore pagination", () => {
 
   it("reconcileLatest is a no-op when the cache already has the latest turn", async () => {
     const sid = "sess-reconcile-noop";
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0), assistantEvent("a1", 0)],
-      oldest_seq: 0,
-      newest_seq: 1,
-      has_more: false,
-    });
-    await sessionEvents.loadInitial(sid);
     // Transcript matches the cache exactly: nothing to recover.
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0), assistantEvent("a1", 0)],
-      oldest_seq: 0,
-      newest_seq: 1,
-      has_more: false,
-    });
+    routeHistoryPage(
+      sid,
+      {
+        events: [userEvent("u1", 0), assistantEvent("a1", 0)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+      },
+      {
+        events: [userEvent("u1", 0), assistantEvent("a1", 0)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+      },
+    );
+    await sessionEvents.loadInitial(sid);
     const seen = [];
     const unsub = sessionEvents.subscribe(sid, (ev) => seen.push(ev));
     await sessionEvents.reconcileLatest(sid);
@@ -208,23 +234,26 @@ describe("SessionEventStore pagination", () => {
 
   it("reconcileLatest does not double-recover a final that matches a cached streaming partial", async () => {
     const sid = "sess-reconcile-stream";
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0)],
-      oldest_seq: 0,
-      newest_seq: 0,
-      has_more: false,
-    });
+    routeHistoryPage(
+      sid,
+      {
+        events: [userEvent("u1", 0)],
+        oldest_seq: 0,
+        newest_seq: 0,
+        has_more: false,
+      },
+      // The live channel delivered the streaming partials (full text accrued)
+      // but not the finalized line; the transcript stores it as a finalized
+      // assistant with the same text. It must NOT be recovered as a fresh message.
+      {
+        events: [userEvent("u1", 0), assistantEvent("the full answer", 0)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+      },
+    );
     await sessionEvents.loadInitial(sid);
-    // The live channel delivered the streaming partials (full text accrued) but
-    // the finalized line; the transcript stores it as a finalized assistant with
-    // the same text. It must NOT be recovered as a fresh message.
     sessionEvents.pushSynthetic(sid, streamingEvent("the full answer", 0));
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0), assistantEvent("the full answer", 0)],
-      oldest_seq: 0,
-      newest_seq: 1,
-      has_more: false,
-    });
     const seen = [];
     const unsub = sessionEvents.subscribe(sid, (ev) => seen.push(ev));
     await sessionEvents.reconcileLatest(sid);
@@ -241,7 +270,7 @@ describe("SessionEventStore pagination", () => {
 
   it("reconcileLatest with force loads an uncached session via loadInitial", async () => {
     const sid = "sess-reconcile-force-uncached";
-    invokeMock.mockResolvedValueOnce({
+    routeHistoryPage(sid, {
       events: [userEvent("u1", 0)],
       oldest_seq: 0,
       newest_seq: 0,
@@ -254,20 +283,23 @@ describe("SessionEventStore pagination", () => {
 
   it("loadInitial with force bypasses the cache-hit early return and re-fetches", async () => {
     const sid = "sess-loadinitial-force";
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0)],
-      oldest_seq: 0,
-      newest_seq: 0,
-      has_more: false,
-    });
+    routeHistoryPage(
+      sid,
+      {
+        events: [userEvent("u1", 0)],
+        oldest_seq: 0,
+        newest_seq: 0,
+        has_more: false,
+      },
+      {
+        events: [userEvent("u1", 0), assistantEvent("a1", 0)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+      },
+    );
     await sessionEvents.loadInitial(sid);
     expect(invokeMock).toHaveBeenCalledTimes(1);
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0), assistantEvent("a1", 0)],
-      oldest_seq: 0,
-      newest_seq: 1,
-      has_more: false,
-    });
     const events = await sessionEvents.loadInitial(sid, undefined, { force: true });
     expect(invokeMock).toHaveBeenCalledTimes(2);
     expect(events).toHaveLength(2);
@@ -275,19 +307,22 @@ describe("SessionEventStore pagination", () => {
 
   it("an events_lagged live event forces a reconcile instead of rendering as a message", async () => {
     const sid = "sess-events-lagged";
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0)],
-      oldest_seq: 0,
-      newest_seq: 0,
-      has_more: false,
-    });
+    routeHistoryPage(
+      sid,
+      {
+        events: [userEvent("u1", 0)],
+        oldest_seq: 0,
+        newest_seq: 0,
+        has_more: false,
+      },
+      {
+        events: [userEvent("u1", 0), assistantEvent("a1 recovered", 0)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+      },
+    );
     await sessionEvents.loadInitial(sid);
-    invokeMock.mockResolvedValueOnce({
-      events: [userEvent("u1", 0), assistantEvent("a1 recovered", 0)],
-      oldest_seq: 0,
-      newest_seq: 1,
-      has_more: false,
-    });
     const seen = [];
     const unsub = sessionEvents.subscribe(sid, (ev) => seen.push(ev));
     sessionEvents.pushSynthetic(sid, eventsLaggedEvent(0));
@@ -301,13 +336,13 @@ describe("SessionEventStore pagination", () => {
   });
 
   it("loadOlder returns null when hasMore is false", async () => {
-    invokeMock.mockResolvedValueOnce({
+    const sid = "sess-no-more-1";
+    routeHistoryPage(sid, {
       events: [userEvent("u1", 1)],
       oldest_seq: 0,
       newest_seq: 0,
       has_more: false,
     });
-    const sid = "sess-no-more-1";
     await sessionEvents.loadInitial(sid);
     const older = await sessionEvents.loadOlder(sid);
     expect(older).toBeNull();
