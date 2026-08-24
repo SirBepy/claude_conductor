@@ -59,7 +59,7 @@ export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewC
   const tabbarHost = root.querySelector<HTMLElement>("#mobile-tabbar-host");
   const layout = root.querySelector<HTMLElement>(".sessions-layout");
   if (tabbarHost && layout && previewController) {
-    mountMobilePager(tabbarHost, layout, previewController);
+    mountMobilePager(tabbarHost, layout);
   }
 
   // Ask / Todos / Preview, summoned from the chat pane rather than docked

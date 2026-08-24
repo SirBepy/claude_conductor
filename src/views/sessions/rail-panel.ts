@@ -1,14 +1,12 @@
 // The right-hand rail (todo 702, split out of preview-panel.ts). It owns the
-// host element, the dragged width, the tab strip and the two rail-wide buttons
-// (pop-out, close). Each tab body is mounted into its own div and owns nothing
-// outside it: `preview-panel.ts` renders Preview, `todos-panel.ts` the board.
+// host element, the dragged width, and the two rail-wide buttons (pop-out,
+// close). Preview is its only content: Todos moved to the chat pane's FAB
+// (Joe, 2026-08-24), which took the tab strip with it.
 
 import { invoke } from "../../shared/ipc";
 import { wireResizeHandle, clampPanelWidth, splittableWidth } from "./preview-panel-resize";
-import { mountTodosPanel, type TodosPanelHandle } from "./todos-panel";
 
 export type RailMode = "panel" | "window";
-export type RailTab = "preview" | "todos";
 
 /** What a tab body may ask of the rail around it. */
 export interface RailTabDeps {
@@ -22,8 +20,8 @@ export interface RailTabDeps {
   markOpenFor(sessionId: string): void;
 }
 
-/** Same handle shape as `mountTodosPanel`, plus the popover teardown a tab or
- *  chat switch needs (neither fires an outside click). */
+/** Mount contract for the rail's content, plus the popover teardown a chat
+ *  switch needs (it fires no outside click). */
 export interface RailTabHandle {
   setSessionScope(sessionId: string | null): void;
   refresh(opts?: { selectId?: string }): void;
@@ -42,9 +40,6 @@ export interface RailController {
    *  remembers its own independently); call on every active-session switch
    *  (see state.ts). */
   setSessionScope(sessionId: string | null): void;
-  /** Shows one of the rail's two tabs. The phone pager drives this, since its
-   *  bottom bar replaces the rail's own strip below 768px. */
-  setTab(tab: RailTab): void;
   /** Relocates this chat's rail to its own OS window (todo 290, panel mode
    *  only). Docked view stays scoped but hidden until dockBack. */
   popOut(): void;
@@ -64,25 +59,9 @@ const LS_RATIO_KEY = "cc_preview_panel_ratio";
  *  a window shrink and pushed the close button off screen (Joe, 2026-08-19). */
 const LS_LEGACY_WIDTH_KEY = "cc_preview_panel_width";
 const LS_POPPED_PREFIX = "cc_preview_panel_popped:";
-/** Which tab this chat was last on. Per-session like the open flag - the rail
- *  reopening on Todos in one chat must not put a sibling chat on Todos too. */
-const LS_TAB_PREFIX = "cc_rail_tab:";
-
-function loadTab(sessionId: string): RailTab {
-  try {
-    return localStorage.getItem(LS_TAB_PREFIX + sessionId) === "todos" ? "todos" : "preview";
-  } catch {
-    return "preview";
-  }
-}
-
-function saveTab(sessionId: string, tab: RailTab): void {
-  try {
-    localStorage.setItem(LS_TAB_PREFIX + sessionId, tab);
-  } catch {
-    /* quota or storage disabled */
-  }
-}
+// `cc_rail_tab:<id>` used to persist which tab each chat was on. Nothing reads
+// it now that Preview is the rail's only content, so any stored "todos" is
+// inert rather than pointing at a tab that no longer exists.
 
 function openKey(sessionId: string): string {
   return LS_OPEN_PREFIX + sessionId;
@@ -155,11 +134,7 @@ class RailPanel implements RailController {
   /** Without it a dragged width just kept its old px as the window changed. */
   private layoutObserver: ResizeObserver | null = null;
   private currentSessionId: string | null = null;
-  /** Which of the rail's two tabs is showing. Preview stays the default so an
-   *  existing chat opens exactly where it used to. */
-  private activeTab: RailTab = "preview";
   private preview: RailTabHandle | null = null;
-  private todos: TodosPanelHandle | null = null;
   private resizeCleanup: (() => void) | null = null;
   /** Panel-mode only: set once popOut() relocates this session's view to its
    *  own OS window; docked host stays scoped but hidden until dockBack(). */
@@ -180,9 +155,6 @@ class RailPanel implements RailController {
     this.renderShell();
     const previewHost = this.root.querySelector<HTMLElement>('[data-tab-body="preview"]');
     if (previewHost) this.preview = mountPreview(previewHost, this.tabDeps());
-    const todosHost = this.root.querySelector<HTMLElement>('[data-tab-body="todos"]');
-    if (todosHost) this.todos = mountTodosPanel(todosHost);
-    this.applyTab();
     this.wireEvents();
     this.resizeCleanup = wireResizeHandle(this.root, (px, splittable) => {
       if (splittable <= 0) return;
@@ -265,10 +237,6 @@ class RailPanel implements RailController {
   setSessionScope(sessionId: string | null): void {
     if (this.currentSessionId === sessionId) return;
     this.currentSessionId = sessionId;
-    // Each chat also remembers which tab it was on; re-derive it here for the
-    // same reason as openState, so the previous chat's tab never carries over.
-    this.activeTab = sessionId ? loadTab(sessionId) : "preview";
-    this.applyTab();
     this.popped = this.mode === "panel" && !!sessionId && loadPopped(sessionId);
     // Each chat's open/closed state is independent (loadOpen defaults false
     // for an id with no saved key yet, e.g. one that's never had the panel
@@ -287,16 +255,6 @@ class RailPanel implements RailController {
     // After the flags above, so each tab can read isVisible() and decide
     // whether to fetch or just baseline.
     this.preview?.setSessionScope(sessionId);
-    this.todos?.setSessionScope(sessionId);
-  }
-
-  setTab(tab: RailTab): void {
-    if (this.activeTab === tab) return;
-    this.preview?.closeMenus();
-    this.activeTab = tab;
-    if (this.currentSessionId) saveTab(this.currentSessionId, tab);
-    this.applyTab();
-    if (tab === "todos") this.todos?.refresh();
   }
 
   popOut(): void {
@@ -326,40 +284,21 @@ class RailPanel implements RailController {
     }
     this.preview?.destroy();
     this.preview = null;
-    this.todos?.destroy();
-    this.todos = null;
   }
 
   // ── Rendering + events ───────────────────────────────────────────────────
-
-  /** Shows one tab body, hides the other, and syncs the strip's own
-   *  contextual buttons: the eye is the Todos Columns menu, so it is never
-   *  shown on Preview's tab. */
-  private applyTab(): void {
-    for (const el of this.root.querySelectorAll<HTMLElement>("[data-tab-body]")) {
-      el.hidden = el.dataset.tabBody !== this.activeTab;
-    }
-    for (const el of this.root.querySelectorAll<HTMLElement>(".rail-tab")) {
-      el.classList.toggle("on", el.dataset.tab === this.activeTab);
-    }
-    const columnsBtn = this.root.querySelector<HTMLElement>('[data-act="columns"]');
-    if (columnsBtn) columnsBtn.hidden = this.activeTab !== "todos";
-  }
 
   private renderShell(): void {
     this.root.innerHTML = `
       <div class="preview-panel" data-mode="${this.mode}">
         <div class="pv-resize-handle" data-resize title="Drag to resize"></div>
         <div class="rail-strip">
-          <button type="button" class="rail-tab" data-tab="preview"><i class="ph ph-monitor-play"></i>Preview</button>
-          <button type="button" class="rail-tab" data-tab="todos"><i class="ph ph-list-checks"></i>Todos</button>
+          <span class="rail-strip-title">Preview</span>
           <span class="rail-strip-grow"></span>
-          <button type="button" class="pv-icon-btn" data-act="columns" title="Columns" hidden><i class="ph ph-eye"></i></button>
           <button type="button" class="pv-icon-btn" data-act="popout" title="Pop out into its own window"${this.mode === "window" ? " hidden" : ""}><i class="ph ph-arrows-out-simple"></i></button>
           <button type="button" class="pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
         </div>
         <div class="rail-tab-body" data-tab-body="preview"></div>
-        <div class="rail-tab-body" data-tab-body="todos" hidden></div>
       </div>
     `;
   }
@@ -370,19 +309,12 @@ class RailPanel implements RailController {
     this.root.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
 
-      const tabBtn = target.closest<HTMLElement>(".rail-tab");
-      if (tabBtn?.dataset.tab) {
-        this.setTab(tabBtn.dataset.tab as RailTab);
-        return;
-      }
-
       const actBtn = target.closest<HTMLElement>("[data-act]");
       if (!actBtn) return;
       switch (actBtn.dataset.act) {
-        case "columns": this.todos?.toggleColumnsMenu(actBtn); return;
         case "popout": this.popOut(); return;
-        // The strip's single close acts on the whole rail, both tabs (Joe:
-        // "the x button closes the entire window").
+        // The strip's close acts on the whole rail (Joe: "the x button closes
+        // the entire window").
         case "close": if (this.mode === "window") this.dockBack(); else this.close(); return;
         default: return;
       }

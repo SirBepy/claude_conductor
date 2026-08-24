@@ -18,7 +18,7 @@ import { mountRail, type RailController, type RailMode, type RailTabDeps, type R
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
-export type { RailTab, RailMode as PreviewMode } from "./rail-panel";
+export type { RailMode as PreviewMode } from "./rail-panel";
 /** The rail is what callers hold onto; the name predates the tab split. */
 export type PreviewController = RailController;
 

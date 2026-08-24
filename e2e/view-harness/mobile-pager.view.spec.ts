@@ -3,6 +3,9 @@ import { mountSessionsLayout, mountView } from "./harness";
 
 // Joe, 2026-08-19: below 860px the docked rail was hidden outright, so a phone
 // had no preview surface. It is now page 2 of a scroll-snap pager.
+//
+// Todos left this bar on 2026-08-24 (it moved into the chat pane's FAB), so the
+// rail page holds Preview alone and the bar has two targets, not three.
 
 const PHONE = { width: 390, height: 780 };
 
@@ -42,18 +45,18 @@ test("the bottom bar pages between chat and the rail, and back again", async ({ 
   await expect.poll(() => scrollLeft(page)).toBe(0);
 });
 
-test("Todos and Preview are separate bar targets that both land on the rail", async ({ page }) => {
+test("the bar has exactly Chat and Preview, and the rail holds Preview alone", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPager(page);
 
-  await page.locator('.mtab[data-target="todos"]').click();
-  await expect.poll(() => scrollLeft(page)).toBeGreaterThan(PHONE.width / 2);
-  await expect(page.locator('[data-tab-body="todos"]')).toBeVisible();
-  await expect(page.locator('[data-tab-body="preview"]')).toBeHidden();
+  await expect(page.locator(".mtab")).toHaveCount(2);
+  await expect(page.locator('.mtab[data-target="todos"]')).toHaveCount(0);
+  // Todos is reachable from the chat pane's FAB now, never from the rail.
+  await expect(page.locator('[data-tab-body="todos"]')).toHaveCount(0);
 
   await page.locator('.mtab[data-target="preview"]').click();
+  await expect.poll(() => scrollLeft(page)).toBeGreaterThan(PHONE.width / 2);
   await expect(page.locator('[data-tab-body="preview"]')).toBeVisible();
-  await expect(page.locator('[data-tab-body="todos"]')).toBeHidden();
 });
 
 test("only the active tab shows its label, and every tap target clears 44px", async ({ page }) => {
@@ -143,9 +146,9 @@ test("swiping back from the rail returns to chat and re-syncs the bar", async ({
   await page.setViewportSize(PHONE);
   await mountPager(page);
 
-  await page.locator('.mtab[data-target="todos"]').click();
+  await page.locator('.mtab[data-target="preview"]').click();
   await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
-  await expect(page.locator('.mtab[data-target="todos"]')).toHaveClass(/\bon\b/);
+  await expect(page.locator('.mtab[data-target="preview"]')).toHaveClass(/\bon\b/);
 
   await page.mouse.move(PHONE.width / 2, 400);
   await page.mouse.wheel(-PHONE.width * 0.6, 0);
@@ -153,7 +156,7 @@ test("swiping back from the rail returns to chat and re-syncs the bar", async ({
   await expect.poll(() => scrollLeft(page)).toBe(0);
   // The bar follows the gesture, not just its own clicks.
   await expect(page.locator('.mtab[data-target="chat"]')).toHaveClass(/\bon\b/);
-  await expect(page.locator('.mtab[data-target="todos"]')).not.toHaveClass(/\bon\b/);
+  await expect(page.locator('.mtab[data-target="preview"]')).not.toHaveClass(/\bon\b/);
 });
 
 test("the chip row keeps its own horizontal scroll instead of paging", async ({ page }) => {
@@ -232,18 +235,18 @@ test("a drag under a third of a page springs back", async ({ page }) => {
 test("a drag does not also fire the tab it finished over", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPager(page);
-  await page.locator('.mtab[data-target="todos"]').click();
+  await page.locator('.mtab[data-target="preview"]').click();
   await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
 
-  // Ends over Chat, but a drag must page rather than select. The rail tab it
-  // lands back on should still be Todos, not Preview.
+  // Ends over Chat, but a drag must page rather than select: it lands back on
+  // the rail with Preview still active, not on the Chat page.
   await dragBar(page, PHONE.width * 0.5);
   await expect.poll(() => scrollLeft(page)).toBe(0);
 
   await dragBar(page, -PHONE.width * 0.5);
   await expect.poll(() => scrollLeft(page)).toBe(PHONE.width);
-  await expect(page.locator('[data-tab-body="todos"]')).toBeVisible();
-  await expect(page.locator('.mtab[data-target="todos"]')).toHaveClass(/\bon\b/);
+  await expect(page.locator('[data-tab-body="preview"]')).toBeVisible();
+  await expect(page.locator('.mtab[data-target="preview"]')).toHaveClass(/\bon\b/);
 });
 
 test("a tap on a tab still selects it, and snapping is restored after a drag", async ({ page }) => {

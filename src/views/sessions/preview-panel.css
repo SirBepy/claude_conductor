@@ -41,10 +41,9 @@
   opacity: 0.4;
 }
 
-/* ── Rail tab strip (todo 692) ──────────────────────────────────────────── */
-/* Rail-wide controls only: pop-out and the single close act on the whole rail,
-   so they live here rather than in either tab. Preview's own kebab stays down
-   in .pv-head because it acts on the Preview tab alone. */
+/* ── Rail strip (todo 692) ──────────────────────────────────────────────── */
+/* Rail-wide controls only: pop-out and close act on the whole rail. Preview's
+   own kebab stays down in .pv-head because it acts on the content alone. */
 
 .rail-strip {
   flex-shrink: 0;
@@ -55,31 +54,13 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.rail-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+/* Replaces the Preview tab button now that there is nothing to switch to. */
+.rail-strip-title {
   padding: 6px 10px;
-  font: inherit;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 7px 7px 0 0;
-  margin-bottom: -1px;
-  white-space: nowrap;
-}
-
-.rail-tab:hover { color: var(--color-text); }
-
-.rail-tab.on {
   color: var(--color-text);
-  background: var(--color-background);
-  border-color: var(--color-border);
-  border-bottom-color: var(--color-background);
+  white-space: nowrap;
 }
 
 .rail-strip-grow {
@@ -95,10 +76,6 @@
   flex-direction: column;
 }
 
-/* Same [hidden]-vs-`display:flex` gotcha as #preview-panel-host below. */
-.rail-tab-body[hidden] {
-  display: none;
-}
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
 

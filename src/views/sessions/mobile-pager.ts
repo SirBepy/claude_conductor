@@ -1,9 +1,11 @@
-// Phone Chat / Preview / Todos pager (Joe, 2026-08-19); below 768px the rail
-// was hidden outright. Swiping is CSS scroll-snap on `.sessions-layout`, not a
-// JS gesture: an iframe swallows touch before it reaches us (same reason
+// Phone Chat / Preview pager (Joe, 2026-08-19); below 768px the rail was
+// hidden outright. Swiping is CSS scroll-snap on `.sessions-layout`, not a JS
+// gesture: an iframe swallows touch before it reaches us (same reason
 // preview-panel-resize.ts inerts .pv-frame mid-drag), so the bar is the way out.
+//
+// Todos left this bar when it moved into the chat pane's FAB (2026-08-24), so
+// the rail page has exactly one thing on it and needs no tab to select.
 
-import type { PreviewController, RailTab } from "./preview-panel";
 
 const PAGE_CHAT = 0;
 const PAGE_RAIL = 1;
@@ -14,12 +16,11 @@ export interface MobilePagerHandle {
   destroy(): void;
 }
 
-type Target = "chat" | RailTab;
+type Target = "chat" | "preview";
 
 const BUTTONS: Array<{ target: Target; icon: string; label: string }> = [
   { target: "chat", icon: "ph-chat-circle", label: "Chat" },
   { target: "preview", icon: "ph-monitor-play", label: "Preview" },
-  { target: "todos", icon: "ph-list-checks", label: "Todos" },
 ];
 
 function barHtml(): string {
@@ -37,14 +38,10 @@ function barHtml(): string {
 export function mountMobilePager(
   host: HTMLElement,
   layout: HTMLElement,
-  preview: PreviewController,
 ): MobilePagerHandle {
   host.className = "mobile-tabbar";
   host.innerHTML = barHtml();
 
-  // Only decides which of the two rail buttons reads as active; the rail
-  // itself owns the real value.
-  let railTarget: RailTab = "preview";
   let dragStartX = 0;
   let dragStartY = 0;
   let dragFromScroll = 0;
@@ -54,7 +51,7 @@ export function mountMobilePager(
 
   const paint = (): void => {
     const onRail = layout.scrollLeft > layout.clientWidth / 2;
-    const active: Target = onRail ? railTarget : "chat";
+    const active: Target = onRail ? "preview" : "chat";
     for (const btn of host.querySelectorAll<HTMLElement>(".mtab")) {
       btn.classList.toggle("on", btn.dataset.target === active);
     }
@@ -71,15 +68,9 @@ export function mountMobilePager(
     const btn = (e.target as HTMLElement).closest<HTMLElement>(".mtab");
     const target = btn?.dataset.target as Target | undefined;
     if (!target) return;
-    if (target === "chat") {
-      scrollToPage(PAGE_CHAT);
-    } else {
-      railTarget = target;
-      preview.setTab(target);
-      // Unconditional: re-tapping the active tab is how you return from a page
-      // the iframe owns, so it must scroll even when nothing else changed.
-      scrollToPage(PAGE_RAIL);
-    }
+    // Unconditional: re-tapping the active tab is how you return from a page
+    // the iframe owns, so it must scroll even when nothing else changed.
+    scrollToPage(target === "chat" ? PAGE_CHAT : PAGE_RAIL);
     paint();
   };
 
