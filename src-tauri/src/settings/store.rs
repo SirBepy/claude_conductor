@@ -188,15 +188,9 @@ pub fn persist(app: &AppHandle, snapshot: &Settings) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::identity::test_support::non_ephemeral_tempdir;
     use crate::types::Settings;
     use tempfile::tempdir;
-
-    /// Rooted beside the test binary, not `tempfile::tempdir()`'s OS-temp
-    /// default - avoids tripping `is_ephemeral_root_path` or this repo's own `.git`.
-    fn non_ephemeral_tempdir() -> tempfile::TempDir {
-        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-        tempfile::Builder::new().prefix("cc-test-").tempdir_in(exe_dir).unwrap()
-    }
 
     #[test]
     fn load_missing_file_returns_defaults() {

@@ -220,16 +220,20 @@ pub(crate) fn dedupe_projects_by_path_key(projects: &mut Vec<crate::types::Proje
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
+pub(crate) mod test_support {
     /// Rooted beside the test binary, not `tempfile::tempdir()`'s OS-temp
     /// default - avoids tripping `is_ephemeral_root_path` or this repo's own `.git`.
-    fn non_ephemeral_tempdir() -> tempfile::TempDir {
+    pub(crate) fn non_ephemeral_tempdir() -> tempfile::TempDir {
         let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
         tempfile::Builder::new().prefix("cc-test-").tempdir_in(exe_dir).unwrap()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::test_support::non_ephemeral_tempdir;
+    use tempfile::tempdir;
 
     fn sample_project(path: std::path::PathBuf, preferred_account_id: Option<&str>) -> crate::types::ProjectConfig {
         crate::types::ProjectConfig {
