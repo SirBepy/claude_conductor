@@ -18,6 +18,7 @@ Deploy: GitHub Releases; CI currently builds Windows (NSIS) only, macOS/Linux (D
 
 - Dev: `cargo tauri dev` (runs from anywhere in the repo; the Tauri CLI auto-locates `src-tauri/tauri.conf.json`)
 - Verify: `cargo build --manifest-path src-tauri/Cargo.toml`
+- **Frontend unit tests: `pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1`.** Never `--pool=forks --poolOptions.forks.singleFork=true`: cramming every file into one process leaks timers/globals and produces ~15 FALSE failures in files you never touched (`boot-render-gate`, `shortcuts`, `auq-*`, `chat-renderer-edits`), which reproduce on pristine HEAD. The flags above satisfy the concurrency cap without lying.
 - Update `vendor/tauri_kit`: `git submodule update --remote vendor/tauri_kit`, then `pnpm tsc --noEmit` to catch breaking kit changes.
 - Worktree bootstrap: `powershell -File scripts/bootstrap-worktree.ps1` (run once right after `git worktree add`/`EnterWorktree`, before any build/verify - inits the `vendor/tauri_kit` submodule, runs `pnpm install`, seeds the gitignored `src/types/ipc.generated.ts`, and regenerates `android/`'s gitignored codegen output and NDK cross-compile env if `android/` exists; idempotent, cwd-independent). Not `pwsh`: PowerShell 7 is not installed here. Takes ~9s when it can copy `ipc.generated.ts` from an existing worktree, but several minutes on a fresh clone with no sibling to copy from, since it falls back to `cargo test --test export_types`.
 
