@@ -78,7 +78,9 @@ pub fn list(project_id: &str) -> Vec<ChannelMessage> {
     list_at(&path)
 }
 
-fn list_at(path: &Path) -> Vec<ChannelMessage> {
+/// `pub(crate)`: also the seam `daemon::methods::channel`'s own tests use to
+/// read back a `post_at`-written tempdir file without touching real app data.
+pub(crate) fn list_at(path: &Path) -> Vec<ChannelMessage> {
     load(path)
 }
 
@@ -100,7 +102,7 @@ pub fn post(project_id: &str, session_id: &str, author: &str, text: &str) -> Cha
 /// through the actual function instead of duplicated inline (the
 /// `scheduled_items.rs` `_at(path, ...)` pattern this module was already
 /// documented as following, but hadn't actually applied before this pass).
-fn post_at(path: Option<&Path>, session_id: &str, author: &str, text: &str) -> ChannelMessage {
+pub(crate) fn post_at(path: Option<&Path>, session_id: &str, author: &str, text: &str) -> ChannelMessage {
     let msg = ChannelMessage {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),

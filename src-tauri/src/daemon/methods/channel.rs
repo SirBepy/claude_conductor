@@ -246,23 +246,23 @@ mod tests {
         assert!(after.ends_with(&format!("({})", short_id("s1"))));
     }
 
-    #[tokio::test]
-    async fn post_message_correlates_two_posts_across_a_title_change() {
-        // Acceptance test: post, retitle the sender, post again - `session_id`
-        // must match though `author` differs. Own project id, not "proj-1" -
-        // other tests in this file post there too, which would flake
-        // `history.len()`.
+    #[test]
+    fn post_message_correlates_two_posts_across_a_title_change() {
+        // Acceptance test: session_id must match though author differs after
+        // a retitle. Uses `repo_channel::post_at`/`list_at` + a tempdir, not
+        // `post_message`'s real `%APPDATA%` path (not overridable), or
+        // `history.len()` drifts on every repeated run (todo 733).
         let state = test_state();
-        let proj = "proj-733-retitle";
-        state.registry.upsert_interactive("s1", std::path::Path::new("."), proj, "2026-07-30T00:00:00Z");
-        state.registry.upsert_interactive("s2", std::path::Path::new("."), proj, "2026-07-30T00:00:00Z");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("proj-733-retitle.json");
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-733-retitle", "2026-07-30T00:00:00Z");
         state.registry.set_name("s1", "Building 675 waiting chip".to_string());
 
-        post_message(&state, "s1", "about to edit foo.ts", None).unwrap();
+        repo_channel::post_at(Some(&path), "s1", &display_name(&state, "s1"), "about to edit foo.ts");
         state.registry.set_name("s1", "Now doing something else entirely".to_string());
-        post_message(&state, "s1", "done with foo.ts", None).unwrap();
+        repo_channel::post_at(Some(&path), "s1", &display_name(&state, "s1"), "done with foo.ts");
 
-        let history = repo_channel::list(proj);
+        let history = repo_channel::list_at(&path);
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].session_id, history[1].session_id, "same sender, must correlate");
         assert_ne!(history[0].author, history[1].author, "caption changed with the retitle");
