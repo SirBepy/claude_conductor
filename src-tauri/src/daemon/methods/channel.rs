@@ -33,12 +33,33 @@ pub(super) fn caller_project(state: &Arc<DaemonState>, session_id: &str) -> Resu
         .ok_or_else(|| format!("unknown session: {session_id}"))
 }
 
-pub(super) fn display_name(state: &Arc<DaemonState>, session_id: &str) -> String {
+/// Human-readable caption for a posting session: a self-reported turn title
+/// (`registry.set_name`), NOT a stable identity (todo 733) - two sessions can
+/// pick the same title, and it changes mid-run. `short_id` below is what
+/// actually correlates two messages from the same session.
+fn caption(state: &Arc<DaemonState>, session_id: &str) -> String {
     state
         .registry
         .get(session_id)
         .and_then(|i| i.name)
         .unwrap_or_else(|| session_id.to_string())
+}
+
+/// First 4 chars of the session id (a UUIDv4, see `lifecycle::spawn`) - short
+/// enough to sit inline in a caption, still enough entropy that two peers in
+/// one project collide only by chance. NOT unique on its own; the full
+/// `session_id` on `ChannelMessage` remains the actual correlation key.
+fn short_id(session_id: &str) -> &str {
+    let end = session_id.char_indices().nth(4).map(|(i, _)| i).unwrap_or(session_id.len());
+    &session_id[..end]
+}
+
+/// The caption a human reads, suffixed with the sender's `short_id` so two
+/// messages from the same session can be told apart from two sessions that
+/// happened to pick the same turn title (todo 733) - "Title + short stable
+/// id", the interim shown until a real avatar surface exists (todo 756).
+pub(super) fn display_name(state: &Arc<DaemonState>, session_id: &str) -> String {
+    format!("{} ({})", caption(state, session_id), short_id(session_id))
 }
 
 /// `list_peers` tool: every OTHER still-live session sharing this project,
@@ -201,6 +222,52 @@ mod tests {
         assert!(peers[0].get("pid").is_some());
         assert!(peers[0].get("kind").is_some());
         assert!(peers[0].get("cwd").is_some());
+    }
+
+    #[test]
+    fn display_name_survives_a_title_change_via_the_stable_session_id() {
+        // Todo 733: the caption (turn title) is not a stable identity - it
+        // changes as the session works. The short id suffix must not.
+        let state = test_state();
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.set_name("s1", "Building 675 waiting chip".to_string());
+        let before = display_name(&state, "s1");
+
+        state.registry.set_name("s1", "Fixing the retitle bug".to_string());
+        let after = display_name(&state, "s1");
+
+        assert_ne!(before, after, "caption itself must reflect the retitle");
+        assert_eq!(
+            short_id("s1"),
+            short_id("s1"),
+            "short_id is a pure function of session_id, unaffected by set_name"
+        );
+        assert!(before.ends_with(&format!("({})", short_id("s1"))));
+        assert!(after.ends_with(&format!("({})", short_id("s1"))));
+    }
+
+    #[tokio::test]
+    async fn post_message_correlates_two_posts_across_a_title_change() {
+        // Acceptance test: post, retitle the sender, post again - `session_id`
+        // must match though `author` differs. Own project id, not "proj-1" -
+        // other tests in this file post there too, which would flake
+        // `history.len()`.
+        let state = test_state();
+        let proj = "proj-733-retitle";
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), proj, "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), proj, "2026-07-30T00:00:00Z");
+        state.registry.set_name("s1", "Building 675 waiting chip".to_string());
+
+        post_message(&state, "s1", "about to edit foo.ts", None).unwrap();
+        state.registry.set_name("s1", "Now doing something else entirely".to_string());
+        post_message(&state, "s1", "done with foo.ts", None).unwrap();
+
+        let history = repo_channel::list(proj);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].session_id, history[1].session_id, "same sender, must correlate");
+        assert_ne!(history[0].author, history[1].author, "caption changed with the retitle");
+        assert!(history[0].author.contains(short_id("s1")), "short id must survive into the caption");
+        assert!(history[1].author.contains(short_id("s1")));
     }
 
     #[test]
