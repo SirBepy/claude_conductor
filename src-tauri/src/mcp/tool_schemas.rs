@@ -115,7 +115,7 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_LIST_PEERS,
-            "description": "Call this BEFORE editing any file another Conductor session might also be touching, and before running `git commit` - other concurrent sessions in this same project can silently sweep your uncommitted edits into their own commit. Lists other Claude Conductor sessions currently active in this same project (repo), with their busy/awaiting state. If it returns any peers, call post_message before proceeding.",
+            "description": "Call this BEFORE editing any file another Conductor session might also be touching, and before running `git commit` - other concurrent sessions in this same project can silently sweep your uncommitted edits into their own commit. Lists other Claude Conductor sessions currently active in this same project (repo), with their busy/awaiting state. If it returns any peers, call post_message before proceeding. A peer with `busy: false` and `awaiting: null` is genuinely idle right now - trust that instead of broadcasting a \"are you working on this?\" check.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
