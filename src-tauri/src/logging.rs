@@ -75,7 +75,7 @@ impl std::io::Write for ReopeningFileWriter {
     }
 }
 
-pub(crate) fn init_daemon_file_logger() {
+pub fn init_daemon_file_logger() {
     let log_name = paths::daemon_log_name();
     let log_path = paths::data_dir().ok().map(|dir| dir.join(&log_name));
     install_panic_hook(&log_name, "daemon");
