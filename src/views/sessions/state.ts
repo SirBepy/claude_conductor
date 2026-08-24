@@ -8,6 +8,7 @@ import type { SessionStatusbar } from "./session-statusbar";
 import type { SessionConfig } from "./model-effort-modal";
 import type { ChangesPanel } from "./changes-panel";
 import type { PreviewController } from "./preview-panel";
+import type { FabDialHandle } from "./fab-dial";
 
 export interface ParkedDraft {
   placeholderId: string;
@@ -92,6 +93,7 @@ export interface SessionsState {
    *  (below) scope the docked preview panel to whichever chat is active,
    *  without active-session.ts importing preview-panel.ts directly. */
   previewController: PreviewController | null;
+  fabDial: FabDialHandle | null;
   /** Session ids currently mid-takeover (external -> interactive promotion).
    *  The takeover-btn handler owns reconciling its own pane in place; the
    *  global instances-changed listener (sessions-wiring.ts) skips ids in
@@ -123,6 +125,7 @@ export function createInitialState(mountId: number): SessionsState {
     launchNewChatCallback: null,
     activeChatActions: null,
     previewController: null,
+    fabDial: null,
     takeoverInFlightIds: new Set(),
   };
 }
@@ -167,10 +170,18 @@ const LS_LAST_SELECTED = "cc_last_selected_session";
  * Restoring a genuinely-ended session is already prevented by the
  * `state.sessions.find(...)` guard at the restore sites in sessions.ts.
  */
+/** Project dir for a session, so Ask can read the repo and not just the chat. */
+function cwdForSession(id: string | null): string | null {
+  if (!id) return null;
+  const s = state.sessions.find((x) => x.session_id === id);
+  return s?.cwd ? String(s.cwd) : null;
+}
+
 export function setActiveSession(id: string | null): void {
   state.selectedId = id;
   setSelectedSessionId(id);
   state.previewController?.setSessionScope(id);
+  state.fabDial?.setSessionScope(id, cwdForSession(id));
   if (id && !id.startsWith("pending-")) {
     try {
       localStorage.setItem(LS_LAST_SELECTED, id);

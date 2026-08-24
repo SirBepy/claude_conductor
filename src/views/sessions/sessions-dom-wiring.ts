@@ -6,6 +6,7 @@ import { invoke } from "../../shared/ipc";
 import * as shortcuts from "../../shared/shortcuts";
 import { renderPreview, type PreviewController } from "./preview-panel";
 import { mountMobilePager } from "./mobile-pager";
+import { mountFabDial } from "./fab-dial";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft } from "./pending-flow";
 import { discardComposerDraft, moveComposerDraft } from "../../shared/chat/composer";
@@ -60,6 +61,17 @@ export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewC
   if (tabbarHost && layout && previewController) {
     mountMobilePager(tabbarHost, layout, previewController);
   }
+
+  // Ask / Todos / Preview, summoned from the chat pane rather than docked
+  // (Joe, 2026-08-24). Owns its own host element because active-session.ts
+  // rewrites the pane's innerHTML on every switch.
+  state.fabDial = mountFabDial(pane, {
+    onDraft: (text) => {
+      state.composer?.setDraftText(text, false);
+    },
+    preview: previewController,
+  });
+  state.fabDial.setSessionScope(state.selectedId, null);
   initHeaderMerge(root);
   state.launchNewChatCallback = (project, config) => { void launchNewSession(pane, project, config); };
   // Test seam (ai_todo 402): create a draft directly, skipping pickProject and

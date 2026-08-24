@@ -46,8 +46,12 @@ has open. You are not in that chat and cannot act on it.\n\n\
 Answer directly and briefly - a few sentences, or short bullets. No preamble, no restating the \
 question, no offer to help further. Markdown is fine. If you genuinely cannot tell, say so \
 instead of guessing.\n\n\
-You can read, and only read. Never propose that you will change something yourself; if the answer \
-implies work, describe what needs doing and stop.{ctx}\n\nThe question is:\n{question}"
+You can read, and only read. Never propose that you will change something yourself.\n\n\
+If, and only if, the answer implies work the developer would want his chat to do, end your whole \
+reply with one final line of the exact form:\n\
+SUGGESTED: <a single instruction, phrased as he would type it to Claude>\n\
+Omit that line entirely when the question was purely informational. Never write more than one.\
+{ctx}\n\nThe question is:\n{question}"
     )
 }
 
@@ -146,6 +150,15 @@ mod tests {
         assert!(p.contains("/t/x.jsonl"));
         assert!(p.contains("/proj"));
         assert!(p.ends_with("why"));
+    }
+
+    #[test]
+    fn prompt_asks_for_the_suggestion_marker_the_ui_parses() {
+        // ask-suggestion.ts splits on exactly this token; if the prompt stops
+        // asking for it, the hand-off card silently never appears.
+        let p = build_prompt("why", None, None);
+        assert!(p.contains("SUGGESTED: <a single instruction"));
+        assert!(p.contains("Omit that line entirely"));
     }
 
     #[test]

@@ -1,0 +1,220 @@
+/* FAB + dial + floating card. Anchors to .session-pane, which is already
+   position:relative (sessions.css:91), so nothing outside this file moves. */
+
+/* Overlay covers the pane but stays click-through; only the real controls
+   take pointer events, so the transcript underneath keeps working. */
+.fab-dial-host {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.fab-dial-host > * {
+  pointer-events: auto;
+}
+
+/* ── The button ──────────────────────────────────────────────────────────── */
+/* Not `+`: that glyph already means "new chat" on .sessions-fab, and this
+   button opens things that already exist. */
+.fab-dial-fab {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font-size: 1.05rem;
+  opacity: 0.62;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.14s, color 0.14s, border-color 0.14s;
+}
+
+.fab-dial-fab:hover {
+  opacity: 1;
+  color: var(--color-text);
+}
+
+.fab-dial-host[data-surface="dial"] .fab-dial-fab {
+  opacity: 1;
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+
+/* The card carries its own close, and the FAB's resting spot sits under the
+   card's input row - leaving it there would cover the control it overlaps. */
+.fab-dial-host[data-surface="card"] .fab-dial-fab {
+  display: none;
+}
+
+/* ── The dial ────────────────────────────────────────────────────────────── */
+.fab-dial {
+  position: absolute;
+  right: 14px;
+  bottom: 62px;
+  display: none;
+  flex-direction: column-reverse;
+  gap: 9px;
+  align-items: flex-end;
+}
+
+.fab-dial-host[data-surface="dial"] .fab-dial {
+  display: flex;
+}
+
+.fab-dial-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.fab-dial-lb {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 4px 9px;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.fab-dial-side {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.fab-dial-ic {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  flex: none;
+}
+
+.fab-dial-item:hover .fab-dial-ic {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+
+/* Preview toggles the docked rail rather than opening in the card, so its ring
+   is dashed when off and solid+lit when on - a state, not an action. */
+.fab-dial-item.is-toggle .fab-dial-ic {
+  border-style: dashed;
+}
+
+.fab-dial-item.is-on .fab-dial-ic {
+  border-style: solid;
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+
+/* ── The card ────────────────────────────────────────────────────────────── */
+.fab-card {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 400px;
+  max-width: calc(100% - 28px);
+  height: 390px;
+  max-height: calc(100% - 28px);
+  display: flex;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.62);
+}
+
+.fab-spine {
+  flex: none;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 0;
+  background: var(--color-background);
+  border-right: 1px solid var(--color-border);
+}
+
+.fab-spine-btn,
+.fab-spine-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  flex: none;
+}
+
+.fab-spine-btn:hover,
+.fab-spine-close:hover {
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+
+.fab-spine-btn.on {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.fab-spine-grow {
+  flex: 1;
+}
+
+.fab-card-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Phone ───────────────────────────────────────────────────────────────── */
+/* Same breakpoint as sessions-mobile.css. The card spans the pane, and both
+   card and FAB clear the bottom tab bar rather than sitting under it. */
+@media (max-width: 768px) {
+  .fab-dial-fab {
+    bottom: 12px;
+  }
+
+  .fab-dial {
+    bottom: 60px;
+  }
+
+  .fab-card {
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-width: none;
+    height: 62%;
+    min-height: 300px;
+  }
+}
