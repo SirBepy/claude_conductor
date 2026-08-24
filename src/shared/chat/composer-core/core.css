@@ -6,6 +6,10 @@
 
 .cc-typing-wrap {
   position: relative;
+  /* flex, not block: a bare <textarea> is inline-block, so a block wrap
+   * leaves baseline whitespace (~5px) below it - same reason composer.css's
+   * .composer-input-wrap uses flex. */
+  display: flex;
 }
 
 .cc-typing-highlight {
