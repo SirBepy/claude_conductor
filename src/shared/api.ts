@@ -273,8 +273,10 @@ export const api = {
   openDashboardAccount: (accountId: string): Promise<unknown> =>
     invoke("open_dashboard_account", { accountId }),
   fetchAvailableModels: (): Promise<string[]> => invoke("fetch_available_models"),
-  probeModelsAvailability: (models: string[]): Promise<ModelAvailability[]> =>
-    invoke("probe_models_availability", { models }),
+  /** `accountId` picks which registered account to probe under; omit it to
+   * use the default account. */
+  probeModelsAvailability: (models: string[], accountId?: string | null): Promise<ModelAvailability[]> =>
+    invoke("probe_models_availability", { models, accountId: accountId ?? null }),
 
   // --- Audio ---
   listAudioOutputDevices: async (): Promise<AudioOutputDevice[]> => {

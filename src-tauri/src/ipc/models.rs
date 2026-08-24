@@ -39,21 +39,36 @@ pub async fn fetch_available_models() -> Vec<String> {
     }
 }
 
-/// Resolves the default account's config dir to probe: the default
-/// registered account's dir if one is set, else the terminal's `~/.claude`
-/// dir (pre-M02 behavior - kept as the fallback so this read-only probe
-/// still works before anyone completes the add-account wizard). multi-account
-/// audit: this is a display-only probe, not a chat spawn path, so it
-/// degrades gracefully instead of refusing when no account exists yet.
-fn config_dir_for_default_account() -> Option<PathBuf> {
-    if let Ok(account) = crate::accounts::resolve_default_account() {
-        return Some(account.config_dir);
+/// Config dir to probe: `account_id`'s, else the default account's. None
+/// means fail open. `~/.claude` is the fallback for an EMPTY registry only -
+/// it belongs to no registered account, so probing it when one IS registered
+/// let an expired terminal login disable every account at once (todo 758).
+fn config_dir_for_account(account_id: Option<&str>) -> Option<PathBuf> {
+    let settings = crate::settings::paths::settings_file()
+        .map(|p| crate::settings::load(&p))
+        .ok()?;
+    let resolved = crate::accounts::resolve_account(account_id, settings.default_account_id.as_deref());
+    config_dir_from_resolution(resolved, || dirs::home_dir().map(|h| h.join(".claude")))
+}
+
+/// The fallback decision behind `config_dir_for_account`, split out because
+/// the IO half reads the real settings/registry and can't be tested without
+/// writing to the user's own AppData.
+fn config_dir_from_resolution(
+    resolved: Result<crate::accounts::Account, crate::accounts::AccountResolveError>,
+    home_claude_dir: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    use crate::accounts::AccountResolveError;
+    match resolved {
+        Ok(account) => Some(account.config_dir),
+        Err(AccountResolveError::NoAccounts) => home_claude_dir(),
+        Err(_) => None,
     }
-    dirs::home_dir().map(|h| h.join(".claude"))
 }
 
 async fn fetch_available_models_inner() -> anyhow::Result<Vec<String>> {
-    let config_dir = config_dir_for_default_account().ok_or_else(|| anyhow::anyhow!("no home dir"))?;
+    let config_dir = config_dir_for_account(None)
+        .ok_or_else(|| anyhow::anyhow!("no resolvable account to read the model list under"))?;
     if cached_needs_reauth(&config_dir) {
         return Err(anyhow::anyhow!("auth expired - reconnect required (backoff)"));
     }
@@ -127,8 +142,15 @@ async fn fetch_models_list(client: &reqwest::Client, token: &str) -> Result<Vec<
 /// OTHER error on our side (no credentials configured yet, network failure,
 /// 429, 5xx) is still treated as available=true so a transient/offline blip
 /// never wrongly blocks the picker.
+///
+/// `account_id` names which registered account to probe under, so the
+/// new-chat picker can re-probe when the user clicks a different account
+/// chip. None falls back to the default account (see `config_dir_for_account`).
 #[tauri::command]
-pub async fn probe_models_availability(models: Vec<String>) -> serde_json::Value {
+pub async fn probe_models_availability(
+    models: Vec<String>,
+    account_id: Option<String>,
+) -> serde_json::Value {
     let all_available = |models: Vec<String>| {
         serde_json::Value::Array(
             models
@@ -151,7 +173,7 @@ pub async fn probe_models_availability(models: Vec<String>) -> serde_json::Value
         )
     };
 
-    let config_dir = match config_dir_for_default_account() {
+    let config_dir = match config_dir_for_account(account_id.as_deref()) {
         Some(d) => d,
         None => return all_available(models),
     };
@@ -276,5 +298,59 @@ async fn probe_one_model(
             },
             RecoverResult::NeedsReauth => (false, None, true),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::config_dir_from_resolution;
+    use crate::accounts::{Account, AccountResolveError};
+    use std::path::PathBuf;
+
+    fn acct() -> Account {
+        Account {
+            id: "acct-work".into(),
+            label: "Work".into(),
+            colour: "#fff".into(),
+            icon: "user".into(),
+            config_dir: PathBuf::from("C:/home/.claude-work"),
+            chrome_profile_dir: PathBuf::from("C:/appdata/chrome-profiles/work"),
+            email: "work@example.com".into(),
+            org_uuid: "org-work".into(),
+            subscription_tier: "claude_max".into(),
+            created_at: "2026-07-07T00:00:00Z".into(),
+            fleet_eligible: false,
+        }
+    }
+
+    fn home() -> Option<PathBuf> {
+        Some(PathBuf::from("C:/home/.claude"))
+    }
+
+    #[test]
+    fn resolved_account_probes_its_own_dir() {
+        let got = config_dir_from_resolution(Ok(acct()), home);
+        assert_eq!(got, Some(PathBuf::from("C:/home/.claude-work")));
+    }
+
+    #[test]
+    fn empty_registry_still_falls_back_to_home_claude() {
+        let got = config_dir_from_resolution(Err(AccountResolveError::NoAccounts), home);
+        assert_eq!(got, home());
+    }
+
+    // todo 758: ~/.claude belongs to no registered account, so probing it
+    // when the registry IS populated let one expired terminal login disable
+    // "Start session" for every account and model at once.
+    #[test]
+    fn populated_registry_without_a_default_never_probes_home_claude() {
+        let got = config_dir_from_resolution(Err(AccountResolveError::NoDefault), home);
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn unknown_account_never_probes_home_claude() {
+        let got = config_dir_from_resolution(Err(AccountResolveError::NotFound("nope".into())), home);
+        assert_eq!(got, None);
     }
 }

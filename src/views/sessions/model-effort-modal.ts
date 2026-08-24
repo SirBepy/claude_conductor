@@ -124,6 +124,53 @@ export async function openModelEffortModal(
     function modelDisabled(): boolean { return availability[model] === false; }
     function sessionBlocked(): boolean { return authExpired || modelDisabled(); }
 
+    // Map family -> latest id (count_tokens rejects bare aliases), probe
+    // those, key results back by family.
+    const idByFamily = new Map<string, string>();
+    for (const fam of models) {
+      const id = latestIdForFamily(fam);
+      if (id) idByFamily.set(fam, id);
+    }
+    // Which account the in-flight/last probe ran under, so a chip click that
+    // lands back on the already-probed account doesn't re-fire it.
+    let probedAccountId: string | null | undefined;
+    // Stops a slow reply from a previously-picked account overwriting a
+    // newer one's results.
+    let probeSeq = 0;
+
+    /** Probes the picked account, since availability and auth are per-account:
+     * one expired account must not disable "Start session" for the others
+     * (todo 758). Fails open on a transport error; `authExpired: true` never
+     * does - see api.ts's ModelAvailability doc. */
+    function runModelProbe(): void {
+      if (idByFamily.size === 0) return;
+      const acct = accountField.accountId;
+      probedAccountId = acct;
+      const seq = ++probeSeq;
+      modelProbeLoading = true;
+      void api.probeModelsAvailability([...idByFamily.values()], acct)
+        .then((results) => {
+          if (seq !== probeSeq) return;
+          authExpired = results.some((r) => r.authExpired);
+          const byId = new Map(results.map((r) => [r.id, r.available]));
+          for (const [fam, id] of idByFamily) availability[fam] = byId.get(id) ?? true;
+        })
+        .catch(() => { /* fail open - leave all models enabled */ })
+        .finally(() => {
+          if (seq !== probeSeq) return;
+          modelProbeLoading = false;
+          renderBody();
+        });
+    }
+
+    function onAccountPicked(): void {
+      if (accountField.accountId !== probedAccountId) {
+        authExpired = false;
+        runModelProbe();
+      }
+      renderBody();
+    }
+
     function commitSliderValue(kind: SliderKind, idx: number): void {
       if (kind === "model") {
         const next = models[idx];
@@ -205,7 +252,7 @@ export async function openModelEffortModal(
       });
 
       // ── Account picker (multi-account milestone 04) ──────────────────────────
-      attachAccountFieldHandlers(card, accountField, renderBody, () => {
+      attachAccountFieldHandlers(card, accountField, onAccountPicked, () => {
         close(null);
         // Route through the dashboard window rather than this window's own
         // router - navigating this (chats) window to settings-accounts left
@@ -300,34 +347,13 @@ export async function openModelEffortModal(
       charPane = createCharacterPane(card, projectId);
       slider = createSliderController(card, { modelIdx, effortIdx, onCommit: commitSliderValue });
 
-      // Map family -> latest id (count_tokens rejects bare aliases), probe
-      // those, key results back by family. Fails open on a transport error;
-      // `authExpired: true` never does - see api.ts's ModelAvailability doc.
-      const idByFamily = new Map<string, string>();
-      for (const fam of models) {
-        const id = latestIdForFamily(fam);
-        if (id) idByFamily.set(fam, id);
-      }
       modelProbeLoading = idByFamily.size > 0;
       renderBody();
 
       // ── Load character pool in background (see character-pane.ts) ────────
       charPane.loadPool();
 
-      // ── Probe model availability in background ───────────────────────────
-      if (idByFamily.size > 0) {
-        void api.probeModelsAvailability([...idByFamily.values()])
-          .then((results) => {
-            authExpired = results.some((r) => r.authExpired);
-            const byId = new Map(results.map((r) => [r.id, r.available]));
-            for (const [fam, id] of idByFamily) availability[fam] = byId.get(id) ?? true;
-          })
-          .catch(() => { /* fail open - leave all models enabled */ })
-          .finally(() => {
-            modelProbeLoading = false;
-            renderBody();
-          });
-      }
+      runModelProbe();
     });
   });
 }
