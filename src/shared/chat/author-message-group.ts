@@ -37,11 +37,13 @@ function avatarHtml(sessionId: string, color: string): string {
 
 let groupSeq = 0;
 
-function buildGroupHost(host: HTMLElement, run: RenderedMessage[]): void {
+// `groupKey` is passed back in when extending an already-built host, keeping
+// its identity stable across flush passes instead of minting a new one.
+function buildGroupHost(host: HTMLElement, run: RenderedMessage[], groupKey = `peer-${groupSeq++}`): void {
   host.className = "author-group-host";
   host.removeAttribute("style");
   host.innerHTML = "";
-  const groupKey = `peer-${groupSeq++}`;
+  host.dataset.groupKey = groupKey;
 
   const seen: string[] = [];
   for (const m of run) {
@@ -82,6 +84,17 @@ function buildGroupHost(host: HTMLElement, run: RenderedMessage[]): void {
   void hydrateCharacterAvatars(host);
 }
 
+// Follows the shared groupKey rather than array indices - indices shift on
+// pagination prepends, dataset attributes stay on their element.
+function findGroupHostIndex(messageEls: HTMLElement[], fromIndex: number): number {
+  const key = messageEls[fromIndex]?.dataset.groupKey;
+  if (!key) return -1;
+  for (let k = fromIndex; k >= 0 && messageEls[k]?.dataset.groupKey === key; k--) {
+    if (messageEls[k]!.classList.contains("author-group-host")) return k;
+  }
+  return -1;
+}
+
 export function groupAuthoredMessages(messages: RenderedMessage[], messageEls: HTMLElement[]): void {
   for (let i = 0; i < messageEls.length; i++) {
     const m = messages[i];
@@ -95,7 +108,17 @@ export function groupAuthoredMessages(messages: RenderedMessage[], messageEls: H
       if (mj?.kind !== "user" || !mj.authorSessionId || !messageEls[j]) break;
       j++;
     }
+
+    // A prior flush pass may have already grouped the element just before
+    // this run - extend that host instead of minting a second chip.
+    const prevGrouped = i > 0 && messageEls[i - 1]?.dataset.groupChecked;
+    const hostIndex = prevGrouped ? findGroupHostIndex(messageEls, i - 1) : -1;
+    const host = hostIndex >= 0 ? messageEls[hostIndex]! : el;
+    const run = messages.slice(hostIndex >= 0 ? hostIndex : i, j);
+
     for (let k = i; k < j; k++) messageEls[k]!.dataset.groupChecked = "1";
-    buildGroupHost(el, messages.slice(i, j));
+    buildGroupHost(host, run, hostIndex >= 0 ? host.dataset.groupKey : undefined);
+    const finalKey = host.dataset.groupKey!;
+    for (let k = i; k < j; k++) messageEls[k]!.dataset.groupKey = finalKey;
   }
 }
