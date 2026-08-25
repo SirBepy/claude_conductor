@@ -49,6 +49,8 @@ impl<'de> Deserialize<'de> for AutoUpdateMode {
 /// reason to inspect. `extra` catches every field the dashboard sends that
 /// isn't named below, so a save→load round-trip preserves them verbatim.
 /// Without this, each `saveSettings` would silently drop ~25 fields.
+///
+/// Todo 785's reachable-struct audit lives in the commit message.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
 #[serde(default)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
@@ -58,6 +60,7 @@ pub struct Settings {
     #[serde(rename = "autoUpdate")]
     pub auto_update: AutoUpdateMode,
     pub hook_port: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_lenient_projects")]
     pub projects: Vec<ProjectConfig>,
     pub projects_sort_by: ProjectsSortBy,
     pub hooks_registered: bool,
@@ -121,6 +124,27 @@ pub struct Settings {
     #[serde(flatten, default)]
     #[ts(skip)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Parses `projects` leniently: one entry failing to match `ProjectConfig`
+/// drops only that entry, instead of `Vec<ProjectConfig>`'s normal
+/// all-or-nothing deserialize wiping every project via `salvage_fields`'s
+/// whole-`projects`-key granularity.
+fn deserialize_lenient_projects<'de, D>(d: D) -> Result<Vec<ProjectConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Vec::<serde_json::Value>::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|v| match serde_json::from_value::<ProjectConfig>(v) {
+            Ok(p) => Some(p),
+            Err(err) => {
+                log::error!("[settings] dropped unparsable project entry: {err}");
+                None
+            }
+        })
+        .collect())
 }
 
 fn default_character_whitelist() -> CharacterWhitelist {
@@ -388,6 +412,27 @@ mod tests {
         assert_eq!(s.audio_output_device, None);
         let parsed: Settings = serde_json::from_str(r#"{}"#).unwrap();
         assert_eq!(parsed.audio_output_device, None);
+    }
+
+    /// The `ProjectConfig` half of todo 785: a project entry missing a
+    /// required field (here `id`, standing in for any field a future
+    /// version might add without `#[serde(default)]`) must not cost the
+    /// user every OTHER project or any unrelated top-level key.
+    #[test]
+    fn projects_array_drops_only_the_unparsable_entry() {
+        let raw = serde_json::json!({
+            "projects": [
+                { "id": "keep-1", "path": "C:/keep1", "name": "keep1", "created_at": "2026-01-01T00:00:00Z" },
+                { "path": "C:/broken", "name": "broken", "created_at": "2026-01-01T00:00:00Z" },
+                { "id": "keep-2", "path": "C:/keep2", "name": "keep2", "created_at": "2026-01-01T00:00:00Z" }
+            ],
+            "theme": "void"
+        });
+        let s: Settings = serde_json::from_value(raw).expect("one bad project must not fail the document");
+        assert_eq!(s.projects.len(), 2, "only the unparsable entry drops");
+        assert_eq!(s.projects[0].id, "keep-1");
+        assert_eq!(s.projects[1].id, "keep-2");
+        assert_eq!(s.extra.get("theme"), Some(&serde_json::json!("void")));
     }
 
     #[test]

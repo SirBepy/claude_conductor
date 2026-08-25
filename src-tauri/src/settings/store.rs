@@ -619,4 +619,29 @@ mod tests {
         assert_eq!(s.extra.get("defaultAutoAllow"), Some(&serde_json::json!(true)));
         assert!(s.extra.contains_key("statuslineRows"), "statuslineRows must survive");
     }
+
+    /// The `ProjectConfig` half of todo 785, at the `load()` pipeline level:
+    /// one project missing a required field drops only itself, so this is a
+    /// CLEAN load (unlike the retention safety-net test above) - no backup
+    /// file, no notice, every other project and top-level key intact.
+    #[test]
+    fn load_drops_only_the_unparsable_project_and_keeps_the_rest_clean() {
+        let mut v: serde_json::Value = serde_json::from_str(BROKEN_FIXTURE).unwrap();
+        v["projects"] = serde_json::json!([
+            { "id": "keep", "path": "C:/keep", "name": "keep", "created_at": "2026-01-01T00:00:00Z" },
+            { "path": "C:/broken", "name": "broken", "created_at": "2026-01-01T00:00:00Z" }
+        ]);
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+
+        let (s, notice) = load_with_notice(&path);
+
+        assert!(path.exists(), "a project entry alone must not trigger the broken-file path");
+        assert!(notice.is_none(), "one bad project must not nag the user");
+        assert_eq!(s.projects.len(), 1, "the broken entry drops, the good one survives");
+        assert_eq!(s.projects[0].id, "keep");
+        assert_eq!(s.default_account_id.as_deref(), Some("11111111-1111-1111-1111-111111111111"));
+        assert_eq!(s.extra.get("defaultAutoAllow"), Some(&serde_json::json!(true)));
+    }
 }
