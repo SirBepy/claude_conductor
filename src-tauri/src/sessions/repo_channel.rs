@@ -86,6 +86,15 @@ fn cursors() -> &'static Mutex<HashMap<(PathBuf, String), String>> {
     CURSORS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Drops every read cursor belonging to `session_id`, across all projects.
+/// Called from `Registry::mark_ended` (same sweep `builtin_ask_attempts`
+/// gets there): a session id never comes back, so its cursor entry is dead
+/// weight for the rest of the daemon's uptime otherwise.
+pub fn forget_session(session_id: &str) {
+    let mut cursors = cursors().lock().unwrap_or_else(|e| e.into_inner());
+    cursors.retain(|(_, sid), _| sid != session_id);
+}
+
 /// Messages posted since `session_id` last called this for `project_id`,
 /// oldest first; advances that session's cursor to the newest message
 /// returned. First call for a given session returns the full backlog.
@@ -254,5 +263,22 @@ mod tests {
         // A different reader against the same channel has never read anything yet.
         assert_eq!(list_unread_at(&path, "reader-d").len(), 1);
         assert_eq!(list_unread_at(&path, "reader-c").len(), 0);
+    }
+
+    #[test]
+    fn forget_session_drops_its_cursor_so_the_next_read_sees_the_full_backlog_again() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-cursor-4.json");
+        post_at(Some(&path), "s1", "Alice", "one");
+
+        assert_eq!(list_unread_at(&path, "reader-e").len(), 1);
+        assert_eq!(list_unread_at(&path, "reader-e").len(), 0, "cursor now set, nothing new");
+
+        forget_session("reader-e");
+        assert_eq!(
+            list_unread_at(&path, "reader-e").len(),
+            1,
+            "cursor entry gone, so this reads like a first-ever call again"
+        );
     }
 }

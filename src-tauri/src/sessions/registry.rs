@@ -296,6 +296,7 @@ impl Registry {
         // Non-interactive kinds never hit `expire_prompts_for_session`'s reset,
         // so a session-end sweep here is the only cleanup they get.
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
+        crate::sessions::repo_channel::forget_session(session_id);
         true
     }
 
