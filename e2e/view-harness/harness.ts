@@ -20,9 +20,8 @@
 // up as a red test, never a false-green pass. That throw is what surfaces a
 // missing boot-seed command, so keep it.
 //
-// Events: `mockListen` registers callbacks so app code can subscribe without
-// crashing; nothing currently drives them (no spec pushes a backend event
-// mid-run yet).
+// Events: `installMockTauri`'s event.listen registers callbacks; `fireEvent`
+// (below) is the drive side, for specs that push a backend event sequence.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -75,6 +74,7 @@ function installMockTauri(seed: { invokeMap: InvokeMap }): void {
 
   const w = window as unknown as Record<string, unknown>;
   w.__ccInvokeCalls = [];
+  w.__ccListeners = listeners;
 
   (window as { __TAURI__?: unknown }).__TAURI__ = {
     core: {
@@ -379,4 +379,20 @@ export function userMsg(text: string, image?: string): unknown {
 
 export function assistantMsg(text: string): unknown {
   return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
+}
+
+/** Invokes every callback registered via mocked `event.listen(name, cb)` for
+ *  `name` (e.g. `chat:${sessionId}`), once per payload, in order. */
+export async function fireEvent(page: Page, name: string, payloads: unknown[]): Promise<void> {
+  for (const payload of payloads) {
+    await page.evaluate(
+      ({ name, payload }) => {
+        const w = window as unknown as {
+          __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>>;
+        };
+        w.__ccListeners.get(name)?.forEach((cb) => cb({ payload }));
+      },
+      { name, payload },
+    );
+  }
 }
