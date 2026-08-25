@@ -7,6 +7,10 @@ export function clampUserMessages(messages: RenderedMessage[], messageEls: HTMLE
     if (messages[i]?.kind !== "user") continue;
     const el = messageEls[i];
     if (!el || el.dataset.clampChecked) continue;
+    // Authored (inter-session) bubbles already collapse behind their own
+    // <details> - a second clamp toggle nested inside would double up the
+    // disclosure UI for no benefit.
+    if (el.classList.contains("msg-user--authored")) continue;
     el.dataset.clampChecked = "1";
     if (el.scrollHeight <= MAX_PX + 40) continue;
     const body = document.createElement("div");

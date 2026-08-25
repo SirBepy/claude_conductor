@@ -246,6 +246,18 @@ export function truncateForSummary(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen - 2) + "…" : text;
 }
 
+// Shorter than SYSTEM_NOTE_PREVIEW_LEN: this sits in an 85%-width bubble, not a full-width caption.
+const AUTHOR_MSG_PREVIEW_LEN = 90;
+
+/** Plain-text preview for a collapsed summary row; images note their presence rather than rendering. */
+function plainTextPreview(blocks: ContentBlock[]): string {
+  return blocks
+    .map((b) => (b.type === "text" ? b.text : "[image]"))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Icon-pair tag (todo 682): sending session's character + project icon.
 // Synchronous reads of caches other surfaces already warmed - zero RPCs at
 // render time. Unresolvable session falls back to a generic icon per half,
@@ -289,7 +301,13 @@ export function renderMessage(m: RenderedMessage): string {
       return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
     case "user": {
       const tag = m.authorSessionId ? renderAuthorTagHtml(m.authorSessionId) : "";
-      return `<div class="msg user${tag ? " msg-user--authored" : ""}">${tag}${renderBlocks(m.content ?? [], true, true)}</div>`;
+      if (!tag) {
+        return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;
+      }
+      // Same <details> pattern as renderSystemNote, but unconditional; the
+      // avatar sits in the summary so it's visible before expanding.
+      const preview = escapeHtml(truncateForSummary(plainTextPreview(m.content ?? []), AUTHOR_MSG_PREVIEW_LEN));
+      return `<details class="msg user msg-user--authored"><summary><span class="author-summary-text">${preview}</span>${tag}</summary><div class="author-full">${renderBlocks(m.content ?? [], true, true)}</div></details>`;
     }
     case "assistant": {
       const blocks = m.content ?? [];
