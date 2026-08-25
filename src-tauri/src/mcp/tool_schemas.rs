@@ -135,7 +135,7 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
         }),
         json!({
             "name": TOOL_READ_MESSAGES,
-            "description": "Check this before editing or committing, alongside list_peers: recent coordination-channel history for this project (see post_message) - a peer may have already flagged the exact file or area you're about to touch.",
+            "description": "Check this before editing or committing, alongside list_peers: messages posted to this project's channel since you last called this tool (see post_message) - each message is delivered once, so a second call with nothing new returns empty, not a repeat of the backlog.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}

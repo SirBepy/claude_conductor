@@ -1,8 +1,9 @@
 //! Inter-agent coordination tools: `list_peers` (who else is active in this
 //! session's project right now), `post_message` (a short note to every OTHER
 //! live session in the project, or to caller-named target ids only, see
-//! `repo_channel_wake::resolve_targets`), `read_messages` (recent history for
-//! this project). Unlike the Jarvis fleet tools, these are
+//! `repo_channel_wake::resolve_targets`), `read_messages` (messages this
+//! session hasn't read yet, see `sessions::repo_channel::list_unread`).
+//! Unlike the Jarvis fleet tools, these are
 //! advertised UNCONDITIONALLY in `mcp::server`'s `tools/list` - any session
 //! should be able to coordinate, not just a Jarvis worker - so there's no
 //! privileged-caller re-validation here, just "does `session_id` resolve to a

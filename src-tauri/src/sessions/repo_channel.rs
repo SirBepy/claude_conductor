@@ -72,13 +72,6 @@ fn write_atomic(path: &Path, messages: &[ChannelMessage]) {
     }
 }
 
-/// All retained messages for a project, oldest first. Empty (never an error)
-/// for a project with no channel file yet.
-pub fn list(project_id: &str) -> Vec<ChannelMessage> {
-    let Some(path) = store_path_for(project_id) else { return Vec::new() };
-    list_at(&path)
-}
-
 /// `pub(crate)`: also the seam `daemon::methods::channel`'s own tests use to
 /// read back a `post_at`-written tempdir file without touching real app data.
 pub(crate) fn list_at(path: &Path) -> Vec<ChannelMessage> {
@@ -169,7 +162,9 @@ mod tests {
 
     #[test]
     fn list_on_missing_file_returns_empty() {
-        assert_eq!(list("nonexistent-project-id-xyz"), Vec::new());
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nonexistent-project-id-xyz.json");
+        assert_eq!(list_at(&path), Vec::new());
     }
 
     #[test]
