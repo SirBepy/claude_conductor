@@ -186,8 +186,8 @@ export function wireStaticListeners(
   // Sort select moved to Settings. No binding needed here; sessions.ts reads
   // the persisted localStorage value on each renderSidebar call via loadSort().
 
-  // Opens the right context menu for whichever row kind `li` is - shared by
-  // the row's 3-dot click AND right-click (its only path in Portrait mode).
+  // Opens the right context menu for whichever row kind `li` is - right-click
+  // only, there is no 3-dot button.
   const openMenuForRow = (li: HTMLElement, anchor: HTMLElement): void => {
     const sid = li.dataset.sessionId;
     if (sid) {

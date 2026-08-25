@@ -38,8 +38,6 @@ export interface RowOptions {
   badges: string;
   /** Portrait's secondary slot: model battery + drain chip, for every row kind. */
   portraitSecondary: string;
-  /** Prebuilt `<button>` HTML - "" always. The menu is right-click only. */
-  menuBtn: string;
 }
 
 /** The one `<li>` template for the whole sidebar list. */
@@ -51,7 +49,6 @@ export function renderSidebarRow(o: RowOptions): string {
             <div class="session-row-text">
               ${text}
             </div>
-            ${o.menuBtn}
           </li>`;
 }
 
@@ -70,7 +67,6 @@ function buildRowOptions(args: {
     id: string;
     liClasses: string;
     liExtraAttrs: string;
-    menuBtn: string;
   };
   charId: string | null | undefined;
   cwd: string | null;
@@ -112,7 +108,6 @@ function buildRowOptions(args: {
     projectLabel: escapeHtml(args.projectLabel),
     badges,
     portraitSecondary: `${modelBatteryHtml(args.model)}${args.drainChip}`,
-    menuBtn: args.identity.menuBtn,
   };
 }
 
@@ -150,7 +145,6 @@ export function sessionRowOptions(
       id: s.session_id,
       liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} row-portrait`,
       liExtraAttrs: ctx.kbdHint,
-      menuBtn: "",
     },
     charId: characterForSession(s),
     cwd: s.cwd,
@@ -185,9 +179,6 @@ export function draftRowOptions(
       id: pending.placeholderId,
       liClasses: `${isActive ? "active" : ""} pending ${starting ? "" : "draft"} row-portrait`,
       liExtraAttrs: ` data-pending="1"`,
-      // 3-dot button hidden in portrait mode, same as live rows - right-click
-      // (openMenuForRow in sessions-wiring.ts) is the only way in there.
-      menuBtn: "",
     },
     charId: pending.config.characterId,
     cwd: pending.projectPath,
@@ -214,7 +205,6 @@ export function parkedRowOptions(d: ParkedDraft): RowOptions {
       id: d.placeholderId,
       liClasses: "parked-draft row-portrait",
       liExtraAttrs: "",
-      menuBtn: "",
     },
     charId: d.config.characterId,
     cwd: d.projectPath,
