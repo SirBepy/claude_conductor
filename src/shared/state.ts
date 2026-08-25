@@ -38,6 +38,10 @@ export interface SettingsShape {
    * Kept typed here only so `resolveDashboardWidgets` can read it off a
    * `SettingsShape` for the one-time migration. */
   pinnedCards?: unknown;
+  /** Ambient animated background behind the main window and chat windows
+   * (see shared/background-fx.ts). Off by default. */
+  backgroundEnabled?: boolean;
+  backgroundVariant?: "pattern" | "gradient";
   [k: string]: unknown;
 }
 

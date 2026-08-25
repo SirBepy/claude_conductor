@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { attachTooltips } from "../../../../shared/row-tooltip";
 import { saveSettings } from "../../../../shared/settings-save";
 import { getSettings, setSettings } from "../../../../shared/state";
+import { applyBackgroundFx } from "../../../../shared/background-fx";
 import { LS_ANIM } from "../../../sessions/sidebar-anim";
 import { settingsHeader, toggleRow } from "../../ui";
 import "./appearance.css";
@@ -184,6 +185,32 @@ async function hydrateUsageColorsAndInterface(): Promise<void> {
   }
 }
 
+// ── Background animation ─────────────────────────────────────────────────
+
+function hydrateBackgroundFx(): void {
+  const enabledEl = $("backgroundFxEnabled") as HTMLInputElement | null;
+  const variantEl = $("backgroundFxVariant") as HTMLSelectElement | null;
+  if (!enabledEl || !variantEl) return;
+
+  const s = getSettings();
+  enabledEl.checked = !!s.backgroundEnabled;
+  variantEl.value = s.backgroundVariant === "gradient" ? "gradient" : "pattern";
+  variantEl.disabled = !enabledEl.checked;
+
+  const apply = () => {
+    variantEl.disabled = !enabledEl.checked;
+    const variant = variantEl.value === "gradient" ? "gradient" : "pattern";
+    const cur = getSettings();
+    cur.backgroundEnabled = enabledEl.checked;
+    cur.backgroundVariant = variant;
+    setSettings(cur);
+    saveSettings();
+    applyBackgroundFx(enabledEl.checked, variant);
+  };
+  enabledEl.addEventListener("change", apply);
+  variantEl.addEventListener("change", apply);
+}
+
 export async function renderAppearanceView(
   root: HTMLElement,
 ): Promise<() => void> {
@@ -192,6 +219,7 @@ export async function renderAppearanceView(
   try {
     hydrateTheme();
     await hydrateUsageColorsAndInterface();
+    hydrateBackgroundFx();
   } catch (e) { console.error("[appearance] render failed", e); }
 
   return () => { /* no teardown */ };
@@ -274,6 +302,18 @@ function template() {
         <div class="kit-section">
           <div class="kit-section-title">Interface</div>
           ${toggleRow({ label: "Sidebar animations", inputId: "sidebarAnimations", checked: true })}
+        </div>
+
+        <div class="kit-section">
+          <div class="kit-section-title">Background</div>
+          ${toggleRow({ label: "Animated background", inputId: "backgroundFxEnabled", checked: false, tooltip: "A subtle moving background behind the app and your chats. Pure CSS, no extra CPU/GPU cost while idle." })}
+          <div class="kit-row">
+            <span class="kit-row-label">Style</span>
+            <select id="backgroundFxVariant">
+              <option value="pattern">Pattern (stars)</option>
+              <option value="gradient">Gradient (aurora)</option>
+            </select>
+          </div>
         </div>
 
       </div>

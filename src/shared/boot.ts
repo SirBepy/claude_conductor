@@ -33,6 +33,7 @@ import { triggerNewSessionGlobal } from "../views/sessions/sessions";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
+import { applyBackgroundFx } from "./background-fx";
 
 function activeViewName(): string {
   return window.location.hash.replace(/^#/, "") || "dashboard";
@@ -248,6 +249,10 @@ export function initBoot(): void {
         const coerced = coerceSettings(s);
         setSettings(coerced);
         applyThemeFromSettings(coerced);
+        applyBackgroundFx(
+          !!coerced.backgroundEnabled,
+          coerced.backgroundVariant === "gradient" ? "gradient" : "pattern",
+        );
       }
     },
     onReady: () => {
