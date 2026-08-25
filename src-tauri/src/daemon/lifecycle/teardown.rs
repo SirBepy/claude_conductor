@@ -218,6 +218,8 @@ pub async fn end_session(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     let session = map.get(session_id)
         .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?
         .clone();
+    // Intentional close only - crash/restart paths never reach end_session.
+    crate::ask::store::drop_for_chat(session_id);
     // Close stdin to signal EOF for clean shutdown.
     {
         let mut stdin = session.stdin.lock().await;
@@ -283,6 +285,39 @@ mod tests {
         let map = new_session_map();
         let r = end_session(&map, "nope").await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))));
+    }
+
+    // A live ChildStdin is required to reach end_session's happy path, so this
+    // spawns a real throwaway process (same pattern as channels.rs's
+    // refresh_with_cmd_populates_argv, Windows-only for the same reason).
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn end_session_drops_the_closed_chats_ask_threads() {
+        let sid = "teardown-test-ask-drop-9f2c";
+        let thread = crate::ask::store::AskThread::new("t1".into(), 1);
+        crate::ask::store::save(sid, &[thread]).unwrap();
+        assert!(!crate::ask::store::load(sid).is_empty());
+
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "ping", "-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let pid = child.id().expect("pid");
+        let session = Session::new(
+            sid.to_string(), std::env::temp_dir(), "m".into(), "high".into(),
+            pid, stdin, None, None, "acct".into(),
+        );
+        let map = new_session_map();
+        map.insert(sid.to_string(), session);
+
+        end_session(&map, sid).await.expect("end_session");
+
+        assert!(crate::ask::store::load(sid).is_empty(), "ask threads must be dropped on intentional close");
+        let _ = child.kill().await;
     }
 
     // send_message_with_respawn: the remote (phone/browser) send path's

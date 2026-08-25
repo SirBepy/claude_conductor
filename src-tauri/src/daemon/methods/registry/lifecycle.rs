@@ -57,6 +57,9 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 let now = chrono::Utc::now().to_rfc3339();
                 state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);
+                // Fallback close path (External sessions, or end_session already
+                // gone) - drop here too so it isn't the only route that leaks.
+                crate::ask::store::drop_for_chat(&p.session_id);
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))
@@ -185,5 +188,58 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 Ok(json!({"ok": true}))
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::rpc::{ConnectionContext, Request, Router};
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use serde_json::json;
+
+    fn dummy_ctx() -> ConnectionContext {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        ConnectionContext::new(tx)
+    }
+
+    fn dummy_state() -> Arc<DaemonState> {
+        DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()))
+    }
+
+    #[tokio::test]
+    async fn mark_session_ended_drops_the_closed_chats_ask_threads() {
+        let sid = "lifecycle-test-ask-drop-4b7e";
+        let thread = crate::ask::store::AskThread::new("t1".into(), 1);
+        crate::ask::store::save(sid, &[thread]).unwrap();
+        assert!(!crate::ask::store::load(sid).is_empty());
+
+        let mut r = Router::new();
+        register_lifecycle(&mut r, dummy_state());
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(), id: json!(1),
+            method: "mark_session_ended".into(),
+            params: Some(json!({"session_id": sid})),
+        }, dummy_ctx()).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+
+        assert!(crate::ask::store::load(sid).is_empty(), "ask threads must be dropped on intentional close");
+    }
+
+    // Crash/restart paths (pump/exit.rs's ProcessGone, hooks_server's
+    // HookSessionEnd) call registry.mark_ended directly, never through this
+    // RPC handler - so a crashed chat must keep its Ask threads.
+    #[tokio::test]
+    async fn registry_mark_ended_alone_does_not_touch_ask_threads() {
+        let sid = "lifecycle-test-ask-keep-crash-2f9a";
+        let thread = crate::ask::store::AskThread::new("t1".into(), 1);
+        crate::ask::store::save(sid, &[thread]).unwrap();
+
+        let state = dummy_state();
+        state.registry.mark_ended(sid, crate::types::EndReason::ProcessGone, "2026-01-01T00:00:00Z");
+
+        assert!(!crate::ask::store::load(sid).is_empty(), "crash path must not drop ask threads");
+        crate::ask::store::drop_for_chat(sid);
     }
 }
