@@ -1,24 +1,21 @@
 //! The `session-chats` window: build/open, per-session focus, and the
 //! new-chat handoff. Split out of `window.rs` at ai_todo 623.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager};
 
 /// Build the chats window (label `session-chats`). Built hidden so
 /// tauri-plugin-window-state can restore the saved size + position before the
 /// window is ever painted. Without this the window flashes briefly at the
 /// inner_size default in the OS-default spot, then jumps to its remembered
-/// geometry. Shown + focused only after the page finishes loading (via
-/// `on_page_load`) to avoid the white flash while WebView2 initialises.
+/// geometry. Shown + focused only once the frontend reports it's actually
+/// alive (`ipc::ready`) - a finished page load alone can be WebView2's own
+/// error page.
 fn build_chats_window(app: &AppHandle) -> Result<(), String> {
-    use std::sync::atomic::AtomicBool;
-    use tauri::webview::PageLoadEvent;
-    let shown = Arc::new(AtomicBool::new(false));
+    const URL: &str = "index.html?chatswindow=1#sessions";
     let window = tauri::WebviewWindowBuilder::new(
         app,
         "session-chats",
-        tauri::WebviewUrl::App("index.html?chatswindow=1#sessions".into()),
+        tauri::WebviewUrl::App(URL.into()),
     )
     .title(super::test_title("Claude Chats"))
     .inner_size(1280.0, 860.0)
@@ -28,15 +25,10 @@ fn build_chats_window(app: &AppHandle) -> Result<(), String> {
     // Opaque app-dark background so the first composited frame is never the
     // desktop wallpaper (see build_schedule_window). Matches --color-background.
     .background_color(tauri::window::Color(22, 21, 31, 255))
-    .on_page_load(move |w, payload| {
-        if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-    })
     .build()
     .map_err(|e| e.to_string())?;
     super::attach_hide_to_tray(&window);
+    crate::ipc::ready::watch(app, "session-chats", URL);
     Ok(())
 }
 

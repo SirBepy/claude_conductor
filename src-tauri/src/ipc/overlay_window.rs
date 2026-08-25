@@ -6,7 +6,6 @@
 //! covers the chats window, so this window needs no capabilities edit.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -59,13 +58,10 @@ fn rect_physical(rect: &tauri::Rect) -> (f64, f64, f64, f64) {
 }
 
 /// Build the overlay window fresh, positioned near the tray icon. Built
-/// hidden and shown only after the page finishes loading, like
-/// `build_chats_window`, to avoid a white webview-boot flash — visible here
-/// too since the window is otherwise transparent (a flash would paint white,
-/// not "nothing").
+/// hidden and shown only once the frontend reports it's actually alive
+/// (`ipc::ready`), visible here too since the window is otherwise
+/// transparent (a flash would paint white, not "nothing").
 fn build_overlay_window(app: &AppHandle, icon_rect: tauri::Rect) -> Result<(), String> {
-    use std::sync::atomic::AtomicBool;
-    use tauri::webview::PageLoadEvent;
     // Reopen where the user last parked it (persisted in settings by
     // save_overlay_position after a drag/flick). First-ever open, or if the
     // saved spot is gone, falls back to sitting above the tray icon.
@@ -74,7 +70,6 @@ fn build_overlay_window(app: &AppHandle, icon_rect: tauri::Rect) -> Result<(), S
             let (ix, iy, iw, ih) = rect_physical(&icon_rect);
             overlay_position(ix, iy, iw, ih, OVERLAY_WIDTH, OVERLAY_HEIGHT)
         });
-    let shown = Arc::new(AtomicBool::new(false));
     let builder = tauri::WebviewWindowBuilder::new(
         app,
         OVERLAY_LABEL,
@@ -97,12 +92,6 @@ fn build_overlay_window(app: &AppHandle, icon_rect: tauri::Rect) -> Result<(), S
     let builder = builder.transparent(true);
     let window = builder
     .visible(false)
-    .on_page_load(move |w, payload| {
-        if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-    })
     .build()
     .map_err(|e| e.to_string())?;
     // No hide-on-blur: the overlay is a persistent, draggable panel toggled
@@ -110,6 +99,7 @@ fn build_overlay_window(app: &AppHandle, icon_rect: tauri::Rect) -> Result<(), S
     // toggle_overlay_window). Hiding it the instant focus moves elsewhere is
     // exactly the "vanishes when I click anything" behaviour we're removing.
     let _ = window;
+    crate::ipc::ready::watch(app, OVERLAY_LABEL, "overlay.html");
     Ok(())
 }
 

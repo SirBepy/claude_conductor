@@ -34,17 +34,15 @@ pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), Str
         existing.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use tauri::webview::PageLoadEvent;
     let url = format!("index.html#detached?session={}", session_id);
-    let shown = Arc::new(AtomicBool::new(false));
     // Built hidden so it doesn't flash white while WebView2 loads the page.
-    // on_page_load fires once the page finishes loading; we show + focus then.
+    // Shown + focused only once the frontend reports it's actually alive
+    // (`ipc::ready`) - a finished page load alone can be WebView2's own
+    // error page.
     tauri::WebviewWindowBuilder::new(
         &app,
         &label,
-        tauri::WebviewUrl::App(url.into()),
+        tauri::WebviewUrl::App(url.clone().into()),
     )
     .title(crate::ipc::window::test_title(&format!(
         "Session {}",
@@ -52,14 +50,9 @@ pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), Str
     )))
     .inner_size(800.0, 600.0)
     .visible(false)
-    .on_page_load(move |w, payload| {
-        if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-    })
     .build()
     .map_err(|e| e.to_string())?;
+    crate::ipc::ready::watch(&app, &label, &url);
     Ok(())
 }
 

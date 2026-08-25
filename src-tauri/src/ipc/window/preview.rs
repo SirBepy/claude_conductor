@@ -1,8 +1,6 @@
 //! The `session-preview` pop-out window: build/open/close. Split out of
 //! `window.rs` at ai_todo 623.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Open (or focus) the preview pop-out window (todo 290), scoped to
@@ -26,17 +24,14 @@ pub fn open_preview_window(app: AppHandle, session_id: String) -> Result<(), Str
 }
 
 /// Build the preview pop-out window (label `session-preview`). Mirrors
-/// `build_chats_window`: built hidden, shown + focused only after the page
-/// finishes loading, to avoid the white flash while WebView2 initialises.
+/// `build_chats_window`: built hidden, shown + focused only once the
+/// frontend reports it's actually alive (`ipc::ready`).
 fn build_preview_window(app: &AppHandle, session_id: &str) -> Result<(), String> {
-    use std::sync::atomic::AtomicBool;
-    use tauri::webview::PageLoadEvent;
     let url = format!("index.html?previewwindow=1#preview?session={session_id}");
-    let shown = Arc::new(AtomicBool::new(false));
     let window = tauri::WebviewWindowBuilder::new(
         app,
         "session-preview",
-        tauri::WebviewUrl::App(url.into()),
+        tauri::WebviewUrl::App(url.clone().into()),
     )
     .title(super::test_title("Preview"))
     .inner_size(900.0, 700.0)
@@ -44,15 +39,10 @@ fn build_preview_window(app: &AppHandle, session_id: &str) -> Result<(), String>
     .resizable(true)
     .visible(false)
     .background_color(tauri::window::Color(22, 21, 31, 255))
-    .on_page_load(move |w, payload| {
-        if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
-            let _ = w.show();
-            let _ = w.set_focus();
-        }
-    })
     .build()
     .map_err(|e| e.to_string())?;
     super::attach_hide_to_tray(&window);
+    crate::ipc::ready::watch(app, "session-preview", &url);
     Ok(())
 }
 

@@ -46,9 +46,12 @@ pub fn quit_app(app: AppHandle) {
 /// was queued while the webview was still loading (see `pending_main_nav`).
 /// Idempotent; safe to call from every page load.
 #[tauri::command]
-pub fn frontend_ready(app: AppHandle) {
+pub fn frontend_ready(app: AppHandle, window: tauri::Window) {
     use std::sync::atomic::Ordering;
     use tauri::{Emitter, Manager};
+    // Every window sends this, so it doubles as the per-window ready gate in
+    // `ipc::ready`; unregistered labels (`main`) are a no-op there.
+    crate::ipc::ready::mark_ready(&app, window.label());
     if let Some(state) = app.try_state::<crate::state::AppState>() {
         state.frontend_alive.store(true, Ordering::SeqCst);
         let pending = state.pending_main_nav.lock().unwrap().take();

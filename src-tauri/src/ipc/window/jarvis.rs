@@ -1,8 +1,6 @@
 //! The singleton `session-jarvis` window: get-or-spawn plus build. Split out
 //! of `window.rs` at ai_todo 623.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager};
 
 /// Get-or-focus the singleton Jarvis window (todo 272). Fixed label
@@ -68,21 +66,13 @@ pub async fn open_jarvis_window(app: AppHandle) -> Result<(), String> {
         }
     };
 
-    use std::sync::atomic::AtomicBool;
-    use tauri::webview::PageLoadEvent;
     let url = format!("index.html#detached?session={}", session_id);
-    let shown = Arc::new(AtomicBool::new(false));
-    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.clone().into()))
         .title(super::test_title("Jarvis"))
         .inner_size(800.0, 600.0)
         .visible(false)
-        .on_page_load(move |w, payload| {
-            if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst) {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-        })
         .build()
         .map_err(|e| e.to_string())?;
+    crate::ipc::ready::watch(&app, label, &url);
     Ok(())
 }
