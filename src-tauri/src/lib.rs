@@ -78,7 +78,7 @@ pub fn run() {
     }
     let settings_path = paths::settings_file().expect("settings path");
     let session_path = paths::session_file().expect("session path");
-    let loaded_settings = settings::load(&settings_path);
+    let (loaded_settings, settings_load_notice) = settings::load_with_notice(&settings_path);
     let auth = if session::load(&session_path).is_some() {
         AuthState::LoggedIn
     } else {
@@ -89,6 +89,9 @@ pub fn run() {
     // failure to open it is unrecoverable, so surface it loudly and abort.
     let state = AppState::new(loaded_settings, auth)
         .expect("failed to open companion database (companion.db)");
+    if let Some(notice) = settings_load_notice {
+        *state.settings_load_notice.lock().unwrap() = Some(notice);
+    }
 
     #[cfg_attr(debug_assertions, allow(unused_mut))]
     let mut builder = tauri::Builder::default();
@@ -162,6 +165,7 @@ pub fn run() {
             ipc::get_auth_state_map,
             ipc::get_history,
             ipc::get_settings,
+            ipc::get_settings_load_notice,
             ipc::save_settings,
             ipc::auth_status,
             ipc::window::open_dashboard,

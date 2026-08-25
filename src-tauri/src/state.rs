@@ -105,6 +105,10 @@ pub struct AppState {
     /// In-progress add-account wizard runs, keyed by a random session id.
     /// Never persisted (see `accounts::wizard::WizardSession`).
     pub account_wizard_sessions: Mutex<std::collections::HashMap<String, crate::accounts::WizardSession>>,
+    /// One-time notice set by `lib.rs` when `settings::load_with_notice`
+    /// had to salvage or reset the settings file at startup. `take()`n by
+    /// `ipc::get_settings_load_notice` so it surfaces to the user exactly once.
+    pub settings_load_notice: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -144,6 +148,7 @@ impl AppState {
             when_done: Arc::new(Mutex::new(crate::when_done::WhenDoneInner::default())),
             db: Mutex::new(db),
             account_wizard_sessions: Mutex::new(std::collections::HashMap::new()),
+            settings_load_notice: Mutex::new(None),
         })
     }
 }

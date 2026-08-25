@@ -8,6 +8,14 @@ pub fn get_settings(state: State<AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }
 
+/// One-shot: `Some(message)` the first time this is called after a startup
+/// that had to salvage or reset settings.json (see `settings::load_with_notice`),
+/// `None` on every call after (and on every normal startup).
+#[tauri::command]
+pub fn get_settings_load_notice(state: State<AppState>) -> Option<String> {
+    state.settings_load_notice.lock().unwrap().take()
+}
+
 #[tauri::command]
 pub async fn save_settings(updated: Settings, state: State<'_, AppState>, app: AppHandle)
     -> Result<(), String>

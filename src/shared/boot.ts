@@ -200,6 +200,18 @@ async function maybeOfferLegacyImport(): Promise<void> {
   }
 }
 
+// ── Settings salvage/reset notice ──────────────────────────────────────────
+/** One-shot: the Rust side `take()`s the notice, so this cannot double-toast. */
+async function maybeShowSettingsLoadNotice(): Promise<void> {
+  if (isRemote()) return;
+  try {
+    const notice = await api.getSettingsLoadNotice();
+    if (notice) showToast(notice, { ttlMs: 10000 });
+  } catch (e) {
+    console.warn("[settings] load-notice check failed", e);
+  }
+}
+
 function applyThemeFromSettings(s: SettingsShape): void {
   const fullId = (s.theme as string) || "void";
   const isLight = fullId.endsWith("-light");
@@ -292,6 +304,9 @@ export function initBoot(): void {
   wireHookModal();
   void maybeOfferLegacyImport();
   void maybeShowHookModal();
+  // Main window only: otherwise the Chats window can win the take() race and
+  // swallow the one toast.
+  if (_isMainWindow) void maybeShowSettingsLoadNotice();
 
   shortcuts.register("new-chat", triggerNewSessionGlobal);
   shortcuts.register("go-home", () => showView("dashboard"));
