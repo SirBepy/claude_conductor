@@ -4,13 +4,14 @@ import type { RenderedMessage } from "./chat-transforms";
 export function clampUserMessages(messages: RenderedMessage[], messageEls: HTMLElement[]): void {
   const MAX_PX = 220;
   for (let i = 0; i < messageEls.length; i++) {
-    if (messages[i]?.kind !== "user") continue;
+    const msg = messages[i];
+    if (msg?.kind !== "user") continue;
     const el = messageEls[i];
     if (!el || el.dataset.clampChecked) continue;
-    // Authored (inter-session) bubbles already collapse behind their own
-    // <details> - a second clamp toggle nested inside would double up the
-    // disclosure UI for no benefit.
-    if (el.classList.contains("msg-user--authored")) continue;
+    // Authored (inter-session) rows are handled entirely by
+    // groupAuthoredMessages (a tool-chip, not a bubble) - clamping would
+    // fight its own DOM rewrite for no benefit.
+    if (msg.authorSessionId) continue;
     el.dataset.clampChecked = "1";
     if (el.scrollHeight <= MAX_PX + 40) continue;
     const body = document.createElement("div");

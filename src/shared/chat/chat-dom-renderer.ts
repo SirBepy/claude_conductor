@@ -8,10 +8,10 @@
 import { wrapBlockquotes, RenderedMessage, renderMessage, isBoundaryMessage } from "./chat-transforms";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { hydrateAttachments } from "./attachment-hydrator";
-import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../projects";
 import { toolSummary } from "./tool-meta";
 import { applyTurnCollapse, groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
+import { groupAuthoredMessages } from "./author-message-group";
 import { renderQuestionCardHtml } from "./tool-views";
 import { type TurnUsageTotals } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";
@@ -101,7 +101,10 @@ export function flushRender(r: ChatRenderer): void {
     wrapBlockquotes(el);
     highlightInlineCode(el);
   }
-  if (appendedAny) clampUserMessages(r.messages, r.messageEls);
+  if (appendedAny) {
+    clampUserMessages(r.messages, r.messageEls);
+    groupAuthoredMessages(r.messages, r.messageEls);
+  }
 }
 
 /** The active turn's history-timestamp span (duration fallback), or 0. */
@@ -387,13 +390,6 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
   el.dataset.ts = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (el.querySelector(".attachment-chip[data-attachment-path]")) {
     void hydrateAttachments(el);
-  }
-  // Author-tag icon pair (todo 682): fills the placeholders renderAuthorTagHtml
-  // emitted, from the same lazy per-id/per-path caches every other avatar
-  // surface already shares - never a fresh RPC per bubble.
-  if (el.querySelector(".author-tag")) {
-    void hydrateCharacterAvatars(el);
-    void hydrateProjectTechIcons(el);
   }
   return el;
 }

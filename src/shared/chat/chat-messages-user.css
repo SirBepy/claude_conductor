@@ -8,64 +8,65 @@
   margin-left: 32px;
 }
 
-/* Icon-pair tag (todo 682): the sending AI's character + project, read as a
-   chat-room participant photo - trailing edge of the summary row, like an
-   avatar beside a bubble, not a caption stacked above the text. Character
-   icon leads (identity matters most), project icon overlaps it slightly. */
-.author-tag {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  padding-left: 8px;
-  flex-shrink: 0;
+/* Authored (inter-session) messages: see author-message-group.ts. Consecutive
+ * runs collapse into one real .tool-chip (chat-tool-strip.css) instead of a
+ * bubble - clicking it reuses the existing delegated .tool-chip handler
+ * (chat-renderer-click-handlers.ts), no bespoke click wiring here. */
+.author-group-host {
+  position: relative;
+  margin-bottom: 12px;
+  align-self: flex-end;
+  max-width: 85%;
 }
-.author-tag-icon {
-  width: 18px;
-  height: 18px;
+.author-group-strip {
+  justify-content: flex-end;
+}
+.author-avatar {
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  font-size: 0.65rem;
   flex-shrink: 0;
 }
-.author-tag-proj {
-  margin-left: -6px;
-}
-
-/* Unconditional <details> collapse (see renderMessage's authored `case
- * "user"`); same marker-suppression + ▸/▾ affordance as .system-long. */
-.msg.user.msg-user--authored {
-  cursor: default;
-}
-.msg.user.msg-user--authored > summary {
+.author-group-avatars {
   display: flex;
   align-items: center;
-  list-style: none;
-  cursor: pointer;
 }
-.msg.user.msg-user--authored > summary::-webkit-details-marker {
-  display: none;
+.author-group-avatars .author-avatar {
+  width: 14px;
+  height: 14px;
 }
-.msg.user.msg-user--authored > summary::before {
-  content: "▸ ";
-  flex-shrink: 0;
-  opacity: 0.7;
+.author-group-avatars .author-avatar + .author-avatar {
+  margin-left: -5px;
 }
-.msg.user.msg-user--authored[open] > summary::before {
-  content: "▾ ";
+
+/* Expanded exchange: one row per message, colored avatar ring + name so a
+ * multi-peer back-and-forth reads who-said-what at a glance. */
+.author-group-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-surface-alt);
 }
-.author-summary-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+.author-group-row {
+  display: flex;
+  gap: 8px;
 }
-.author-full {
-  margin-top: 8px;
+.author-group-row-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.author-group-row-text {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Long user messages (pasted/typed walls) collapse to ~10 lines behind a

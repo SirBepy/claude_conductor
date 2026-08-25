@@ -20,6 +20,7 @@ export interface PaginatorCallbacks {
   setMessageEls(els: HTMLElement[]): void;
   buildMessageEl(m: RenderedMessage): HTMLElement;
   clampUserMessages(): void;
+  groupAuthoredMessages(): void;
   /** Called after a prepend with the number of rows inserted at the front. */
   onShift(n: number): void;
   /**
@@ -436,6 +437,7 @@ export class ChatPaginator {
     void highlightCodeBlocks(this.container);
     highlightInlineCode(this.container);
     this.cb.clampUserMessages();
+    this.cb.groupAuthoredMessages();
   }
 
   findScroller(): HTMLElement | null {
