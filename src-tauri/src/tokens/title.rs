@@ -1,6 +1,10 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
+// Left as a single file (todo 767): first_user_prompt/is_real_user_turn and
+// their helpers deliberately mirror each other's skip rules; splitting them
+// would hide that coupling rather than clarify it.
+
 /// Record type `ai_milestone_title` looks for, appended by the Stop hook when
 /// `report_turn_status`'s `title` arg is set (todo 435 - retires the
 /// `<cc-title:…>` text marker). Mirrors `/close`'s manual-rename lines: a

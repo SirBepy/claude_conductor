@@ -6,6 +6,9 @@
 use crate::types::chat::{ChatEvent, ContentBlock};
 use serde_json::Value;
 
+mod blocks;
+use blocks::{extract_content_blocks, strip_daemon_author_sentinel, strip_daemon_meta_sentinel};
+
 // Marker detection (`<cc-status:...>` / `<cc-autopilot:...>`) is chat-protocol
 // concern, not stream-json line parsing; it lives in `markers.rs`. Re-export
 // `detect_awaiting` under this module's path so existing `chat::parser::detect_awaiting`
@@ -286,7 +289,7 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
             // `isMeta:true` marks a turn Claude Code itself injected (a fired
             // ScheduleWakeup, autopilot/resume) rather than something the human
             // typed. A daemon-injected wake (repo-channel/Jarvis/schedule) has
-            // no such field on replay - see `strip_daemon_meta_sentinel` below.
+            // no such field on replay - see `strip_daemon_meta_sentinel` in `blocks.rs`.
             let mut content = extract_content_blocks(content_val);
             let sentinel_stripped = strip_daemon_meta_sentinel(&mut content);
             let is_meta = sentinel_stripped
@@ -513,51 +516,6 @@ fn tool_result_output(content_val: Option<&Value>) -> ContentBlock {
         .collect::<Vec<_>>()
         .join("\n");
     ContentBlock::Text { text }
-}
-
-/// Strips a leading `DAEMON_META_SENTINEL` off the first text block, if
-/// present, and reports whether it found one. Always written at the very
-/// start of the wire text by `lifecycle::send_message`, so a plain
-/// `starts_with` on the first block is the only check needed.
-fn strip_daemon_meta_sentinel(content: &mut [ContentBlock]) -> bool {
-    let Some(ContentBlock::Text { text }) = content.first_mut() else { return false };
-    let Some(stripped) = text.strip_prefix(crate::types::chat::DAEMON_META_SENTINEL) else { return false };
-    *text = stripped.to_string();
-    true
-}
-
-/// Strips a leading `DAEMON_AUTHOR_SENTINEL_PREFIX..SUFFIX` marker off the
-/// first text block, returning the extracted sending-session id if present.
-/// Mirrors `strip_daemon_meta_sentinel`'s single-first-block check.
-fn strip_daemon_author_sentinel(content: &mut [ContentBlock]) -> Option<String> {
-    let Some(ContentBlock::Text { text }) = content.first_mut() else { return None };
-    let (author, remainder) = crate::types::chat::strip_daemon_author_sentinel(text);
-    let author = author.map(str::to_string);
-    if author.is_some() {
-        *text = remainder.to_string();
-    }
-    author
-}
-
-fn extract_content_blocks(v: &Value) -> Vec<ContentBlock> {
-    if let Some(s) = v.as_str() {
-        return vec![ContentBlock::Text { text: s.to_string() }];
-    }
-    if let Some(arr) = v.as_array() {
-        return arr.iter().filter_map(|item| {
-            match item.get("type")?.as_str()? {
-                "text" => Some(ContentBlock::Text {
-                    text: item.get("text")?.as_str()?.to_string(),
-                }),
-                "image" => Some(ContentBlock::Image {
-                    mime: item.get("source")?.get("media_type")?.as_str()?.to_string(),
-                    data: item.get("source")?.get("data")?.as_str()?.to_string(),
-                }),
-                _ => None,
-            }
-        }).collect();
-    }
-    vec![]
 }
 
 /// Extracts a `<cc-preview:SLUG>..</cc-preview>` block (todo 291): the in-app
