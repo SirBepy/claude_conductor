@@ -7,6 +7,7 @@ use std::path::PathBuf;
 /// means fail open. `~/.claude` is the fallback for an EMPTY registry only -
 /// it belongs to no registered account, so probing it when one IS registered
 /// let an expired terminal login disable every account at once (todo 758).
+/// Deliberately does not follow `resolve_default_account`'s never-fall-back-to-`~/.claude` rule.
 pub(super) fn config_dir_for_account(account_id: Option<&str>) -> Option<PathBuf> {
     let settings = crate::settings::paths::settings_file()
         .map(|p| crate::settings::load(&p))
