@@ -16,6 +16,7 @@ const nextFrame = (): Promise<void> => new Promise((r) => requestAnimationFrame(
 let hostGeneration = 0;
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
 let backDisposer: (() => void) | null = null;
+let focusGuardDisposer: (() => void) | null = null;
 
 // What a shared-backdrop click (or hardware back) should do right now - see
 // setBackdropCancel.
@@ -49,6 +50,21 @@ export function setBackdropCancel(fn: (() => void) | null): void {
   backdropCancel = fn;
 }
 
+/** Blocks background keystrokes while a modal is open - the backdrop stops
+ *  clicks by hit-testing, but focus is independent of that, so a still-
+ *  focused textarea behind it keeps eating typed characters otherwise. */
+function trapFocusInsideHost(host: HTMLElement): () => void {
+  if (document.activeElement instanceof HTMLElement && !host.contains(document.activeElement)) {
+    document.activeElement.blur();
+  }
+  const onFocusIn = (e: FocusEvent) => {
+    const target = e.target;
+    if (target instanceof HTMLElement && !host.contains(target)) target.blur();
+  };
+  document.addEventListener("focusin", onFocusIn);
+  return () => document.removeEventListener("focusin", onFocusIn);
+}
+
 /** Renders a step's card via `renderFn`, morphing from whatever was showing
  *  (shrink -> swap -> expand), or fading in if nothing was. Safe right after
  *  an unrelated closeHostCard() - reuses its still-collapsing card as the
@@ -77,6 +93,7 @@ export async function presentHostCard(renderFn: () => void): Promise<void> {
       backdropCancel?.();
       return true;
     });
+    focusGuardDisposer = trapFocusInsideHost(host);
   }
   renderFn();
   if (myGen !== hostGeneration) return;
@@ -106,6 +123,8 @@ export function closeHostCard(): void {
     render(html``, modalCardSlot());
     backDisposer?.();
     backDisposer = null;
+    focusGuardDisposer?.();
+    focusGuardDisposer = null;
     closeTimer = null;
   }, COLLAPSE_MS);
 }

@@ -171,6 +171,15 @@ export async function openModelEffortModal(
       renderBody();
     }
 
+    function cycleAccount(delta: number): void {
+      if (accounts.length === 0) return;
+      const cur = Math.max(0, accounts.findIndex((a) => a.id === accountField.accountId));
+      const next = accounts[(cur + delta + accounts.length) % accounts.length];
+      if (!next) return;
+      accountField.accountId = next.id;
+      onAccountPicked();
+    }
+
     function commitSliderValue(kind: SliderKind, idx: number): void {
       if (kind === "model") {
         const next = models[idx];
@@ -317,8 +326,7 @@ export async function openModelEffortModal(
       if (e.key === "Escape") {
         e.preventDefault();
         close(null);
-      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        // Ctrl/Cmd+Enter submits; plain Enter is free for the 1-9 shortcuts below.
+      } else if (e.key === "Enter" && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void startWithCurrentConfig();
       } else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -326,6 +334,12 @@ export async function openModelEffortModal(
         if (!models[idx]) return;
         e.preventDefault();
         commitSliderValue("model", idx);
+      } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // The model/effort sliders own arrow keys while focused (see
+        // slider-controller.ts's own keydown wiring) - don't double-handle.
+        if ((document.activeElement as HTMLElement | null)?.closest(".me-slider-wrap")) return;
+        e.preventDefault();
+        cycleAccount(e.key === "ArrowRight" ? 1 : -1);
       }
     }
 
