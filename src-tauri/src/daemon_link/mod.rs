@@ -113,12 +113,15 @@ fn spawn_pending_prompt_poll(app_handle: tauri::AppHandle) {
         let mut interval = MIN_POLL_INTERVAL;
         loop {
             tokio::time::sleep(interval).await;
-            let (prompts, connected) = {
-                let guard = state.daemon_client.lock().await;
-                match guard.as_ref() {
-                    Some(c) => (c.list_pending_prompts().await.ok(), true),
-                    None => (None, false),
-                }
+            // Clone the client and drop the lock BEFORE the RPC await: this is the
+            // global `daemon_client` mutex every command needs, so holding it across
+            // `list_pending_prompts()` lets one wedged daemon response freeze every
+            // other daemon-backed feature, the usage scheduler included.
+            let client = state.daemon_client.lock().await.clone();
+            let connected = client.is_some();
+            let prompts = match client {
+                Some(c) => c.list_pending_prompts().await.ok(),
+                None => None,
             };
             // Reconnected after being offline: forget what we'd "emitted" so any
             // STILL-pending prompt re-surfaces (its card vanished when the app was
