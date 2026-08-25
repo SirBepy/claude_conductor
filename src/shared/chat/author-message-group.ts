@@ -8,6 +8,7 @@ import { escapeHtml } from "../escape-html";
 import { authorTagFor } from "./author-tag-source";
 import { basename } from "../path-utils";
 import { hydrateCharacterAvatars } from "../projects";
+import { ensureMainStrip } from "./tool-strip";
 
 const PALETTE = ["#7cb6ff", "#c794f5", "#7ee0b0", "#f5a97c", "#f57ca3", "#a3c97c"];
 
@@ -51,8 +52,8 @@ function buildGroupHost(host: HTMLElement, run: RenderedMessage[]): void {
   const label = names.length <= 2 ? names.join(" & ") : `${names[0]} +${names.length - 1}`;
   const count = run.length > 1 ? `<span class="tool-chip-count">×${run.length}</span>` : "";
 
-  const strip = document.createElement("div");
-  strip.className = "tool-strip author-group-strip";
+  const { strip, panel } = ensureMainStrip(host);
+  strip.classList.add("author-group-strip");
   const chip = document.createElement("span");
   chip.className = "tool-chip";
   chip.dataset.tool = groupKey;
@@ -61,9 +62,6 @@ function buildGroupHost(host: HTMLElement, run: RenderedMessage[]): void {
     `<span class="tool-chip-label">${escapeHtml(label)}</span>${count}`;
   strip.appendChild(chip);
 
-  const panel = document.createElement("div");
-  panel.className = "tool-strip-panel";
-  panel.hidden = true;
   const group = document.createElement("div");
   group.className = "tool-strip-group author-group-panel";
   group.dataset.tool = groupKey;
@@ -81,8 +79,6 @@ function buildGroupHost(host: HTMLElement, run: RenderedMessage[]): void {
   }
   panel.appendChild(group);
 
-  host.appendChild(strip);
-  host.appendChild(panel);
   void hydrateCharacterAvatars(host);
 }
 
