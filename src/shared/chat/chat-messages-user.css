@@ -31,6 +31,19 @@
   justify-content: center;
   background: var(--color-surface-alt);
   flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--author-color);
+}
+
+/* Categorical palette for per-session author colors (author-message-group.ts).
+ * Own scale, not the semantic --color-primary/--surface tokens. */
+.author-color-0 { --author-color: #7cb6ff; }
+.author-color-1 { --author-color: #c794f5; }
+.author-color-2 { --author-color: #7ee0b0; }
+.author-color-3 { --author-color: #f5a97c; }
+.author-color-4 { --author-color: #f57ca3; }
+.author-color-5 { --author-color: #a3c97c; }
+.author-group-row-name {
+  color: var(--author-color);
 }
 .author-group-avatars {
   display: flex;
