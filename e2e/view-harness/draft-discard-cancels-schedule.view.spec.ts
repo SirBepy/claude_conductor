@@ -34,6 +34,10 @@ function scheduledNewChat(over: Record<string, unknown> = {}): Record<string, un
  *  generated) placeholderId, read back off the rendered sidebar row. */
 async function createDraft(page: Page): Promise<string> {
   await mountView(page, { view: "sessions", invoke: BASE_INVOKE });
+  // wirePreviewPanel installs this seam asynchronously after mountView's
+  // navigation resolves; under suite concurrency it can still be pending
+  // (todo 784 - flaked twice in one day with "not a function").
+  await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
   await page.evaluate(() => {
     (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: { model: string; effort: string }) => void })
       .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "high" });
