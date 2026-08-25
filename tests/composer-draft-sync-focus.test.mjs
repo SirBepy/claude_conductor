@@ -27,7 +27,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function mountComposer() {
+async function mountComposer(sessionId = "sess-1") {
   const { resetTransportForTests } = await import("../src/shared/transport.ts");
   resetTransportForTests();
   const { Composer } = await import("../src/shared/chat/composer.ts");
@@ -35,7 +35,7 @@ async function mountComposer() {
   document.body.appendChild(root);
   const composer = new Composer(root, { onSend: vi.fn(async () => {}) });
   mounted.push(composer);
-  composer.setSessionId("sess-1");
+  composer.setSessionId(sessionId);
   await vi.waitFor(() => expect(invokeMock).toHaveBeenCalled());
   invokeMock.mockClear();
   const textarea = root.querySelector(".composer-textarea");
@@ -61,7 +61,7 @@ function regainVisibility() {
 
 describe("Composer draft sync - debounce coalescing", () => {
   it("coalesces rapid keystrokes into a single set_composer_draft call", async () => {
-    const { textarea } = await mountComposer();
+    const { textarea } = await mountComposer("sess-debounce");
     vi.useFakeTimers();
 
     typeInto(textarea, "h");
@@ -72,13 +72,13 @@ describe("Composer draft sync - debounce coalescing", () => {
 
     await vi.advanceTimersByTimeAsync(500);
     expect(draftPushCalls().length).toBe(1);
-    expect(draftPushCalls()[0][1]).toMatchObject({ sessionId: "sess-1", text: "hello" });
+    expect(draftPushCalls()[0][1]).toMatchObject({ sessionId: "sess-debounce", text: "hello" });
   });
 });
 
 describe("Composer draft sync - flush on blur", () => {
   it("fires the pending write immediately on blur, bypassing the 500ms wait", async () => {
-    const { textarea } = await mountComposer();
+    const { textarea } = await mountComposer("sess-blur");
     vi.useFakeTimers();
 
     typeInto(textarea, "typed then blurred");
@@ -93,7 +93,7 @@ describe("Composer draft sync - flush on blur", () => {
 
 describe("Composer draft sync - focused-input rule", () => {
   it("does NOT overwrite the textarea while it is focused, even when a newer remote draft arrives", async () => {
-    const { textarea } = await mountComposer();
+    const { textarea } = await mountComposer("sess-focused");
     invokeMock.mockImplementation(async (cmd) => {
       if (cmd === "get_session_drafts") {
         return { composer: { text: "REMOTE TEXT FROM ANOTHER DEVICE", updated_at: "2099-01-01T00:00:00Z" }, auq: null, held: [], held_updated_at: null };
@@ -114,7 +114,7 @@ describe("Composer draft sync - focused-input rule", () => {
   });
 
   it("DOES apply the remote draft once the textarea is no longer focused", async () => {
-    const { textarea } = await mountComposer();
+    const { textarea } = await mountComposer("sess-unfocused");
     invokeMock.mockImplementation(async (cmd) => {
       if (cmd === "get_session_drafts") {
         return { composer: { text: "REMOTE TEXT", updated_at: "2099-01-01T00:00:00Z" }, auq: null, held: [], held_updated_at: null };
