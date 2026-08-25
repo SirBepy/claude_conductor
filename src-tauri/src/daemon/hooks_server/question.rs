@@ -89,10 +89,16 @@ instead, treat this question as dropped."
 async fn post_fire_and_forget_question(
     ctx: &Arc<HookCtx>,
     id: &str,
-    payload: Value,
+    mut payload: Value,
     session_id: Option<&str>,
     wake_label: &str,
 ) -> usize {
+    // `seq` lets the frontend tell a genuinely newer question apart from a
+    // stale/ghost one when it lists multiple pending prompts for the same
+    // session - see `DaemonState::prompt_seq`'s doc.
+    if let Value::Object(map) = &mut payload {
+        map.insert("seq".to_string(), json!(ctx.state.next_prompt_seq()));
+    }
     ctx.state.add_prompt(id, "question-requested", payload.clone(), true).await;
     ctx.state.fire_blocked_prompt(session_id, id);
     crate::daemon::jarvis_wake::wake_on_worker_blocked(&ctx.state, session_id, id, Some(wake_label)).await;

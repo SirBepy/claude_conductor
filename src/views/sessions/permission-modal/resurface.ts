@@ -103,7 +103,7 @@ export async function rehydratePendingPrompts(sessionId: string): Promise<boolea
   }
   // This window may never have seen the live event (fresh reload) - seed the
   // stale-question tracker from the daemon's own record too.
-  markLatestQuestion(sessionId, rec.payload.id);
+  markLatestQuestion(sessionId, rec.payload.id, rec.payload.seq);
   // No in-memory snapshot survives a reload - attach whichever of the
   // daemon/localStorage copies is newer, same reconciliation showQuestionCard
   // itself falls back to, so a re-parked card doesn't open blank.

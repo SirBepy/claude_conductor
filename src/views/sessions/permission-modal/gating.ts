@@ -54,19 +54,24 @@ export function setAutoAccept(sessionId: string, value: boolean): void {
 // ── Stale-question guard: a late answer to a card superseded by a NEWER
 // question for the same session must not inject into a moved-on conversation.
 
-const _latestQuestionId = new Map<string, string>();
+const _latestQuestion = new Map<string, { id: string; seq: number | undefined }>();
 
-/** Record `id` as the newest question seen for `sessionId`. */
-export function markLatestQuestion(sessionId: string | undefined, id: string): void {
+/** Record `id` as newest for `sessionId`. `seq` (daemon's monotonic prompt
+ *  order) guards against out-of-order arrival - a stale/ghost question
+ *  surfacing after a genuinely newer one must not un-mark it and drop the
+ *  real answer. No `seq` always wins (older payload shape). */
+export function markLatestQuestion(sessionId: string | undefined, id: string, seq?: number): void {
   if (!sessionId) return;
-  _latestQuestionId.set(sessionId, id);
+  const current = _latestQuestion.get(sessionId);
+  if (current?.seq !== undefined && seq !== undefined && seq < current.seq) return;
+  _latestQuestion.set(sessionId, { id, seq });
 }
 
 /** False iff a newer question has since superseded `id` for `sessionId`. */
 export function isLatestQuestion(sessionId: string | undefined, id: string): boolean {
   if (!sessionId) return true;
-  const latest = _latestQuestionId.get(sessionId);
-  return latest === undefined || latest === id;
+  const latest = _latestQuestion.get(sessionId);
+  return latest === undefined || latest.id === id;
 }
 
 // ── Session-ID gating ──────────────────────────────────────────────────────

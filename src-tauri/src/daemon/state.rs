@@ -13,6 +13,7 @@ use crate::daemon::push::PushManager;
 use crate::storage::StorageManager;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Mutex, Notify};
@@ -90,6 +91,11 @@ pub struct DaemonState {
     /// messages) - see `draft_store.rs` module doc. In-memory only, never
     /// persisted; `held_count` on `Instance` is the separate broadcast signal.
     pub draft_store: DraftStore,
+    /// Monotonic source for `question-requested` payloads' `seq` field.
+    /// `pending_prompts` is a `HashMap` - iteration order isn't chronological,
+    /// so this lets callers tell a genuinely newer question apart from a
+    /// stale/ghost one for the same session.
+    prompt_seq: AtomicU64,
 }
 
 impl DaemonState {
@@ -123,7 +129,13 @@ impl DaemonState {
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
             repo_channel_wakes: crate::daemon::repo_channel_wake::new_queue(),
             draft_store: DraftStore::new(),
+            prompt_seq: AtomicU64::new(0),
         })
+    }
+
+    /// Next value in the `question-requested` ordering sequence (see `prompt_seq`).
+    pub fn next_prompt_seq(&self) -> u64 {
+        self.prompt_seq.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Load the Web Push manager (VAPID key + persisted phone subscriptions
@@ -180,8 +192,12 @@ impl DaemonState {
     }
 
     /// Snapshot of all open prompts, for the app's `list_pending_prompts` poll.
+    /// Sorted by `seq` (oldest first) - `pending_prompts` is a `HashMap`, whose
+    /// own iteration order is not chronological.
     pub async fn list_prompts(&self) -> Vec<Value> {
-        self.pending_prompts.lock().await.values().cloned().collect()
+        let mut prompts: Vec<Value> = self.pending_prompts.lock().await.values().cloned().collect();
+        prompts.sort_by_key(|p| p["payload"]["seq"].as_u64().unwrap_or(u64::MAX));
+        prompts
     }
 
     /// The session a recorded prompt belongs to, if it is still open.
@@ -337,6 +353,39 @@ mod tests {
         assert!(!st.try_acquire_commit_lock("proj-1", "sess-b"), "sess-a's lock must still stand");
         st.release_commit_lock("proj-1", "sess-a");
         assert!(st.try_acquire_commit_lock("proj-1", "sess-b"), "freed after the real holder released");
+    }
+
+    #[tokio::test]
+    async fn next_prompt_seq_is_monotonic() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let a = st.next_prompt_seq();
+        let b = st.next_prompt_seq();
+        let c = st.next_prompt_seq();
+        assert!(a < b && b < c);
+    }
+
+    /// Regression: `list_prompts()` must sort by `seq`, not by `pending_prompts`'
+    /// HashMap iteration order (which carries no chronological meaning).
+    #[tokio::test]
+    async fn list_prompts_sorts_by_seq_regardless_of_insertion_order() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        // Insert newest first, oldest last (opposite of insertion order).
+        st.add_prompt("newer", "question-requested", serde_json::json!({"seq": 5}), true).await;
+        st.add_prompt("older", "question-requested", serde_json::json!({"seq": 1}), true).await;
+        let prompts = st.list_prompts().await;
+        let ids: Vec<&str> = prompts.iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["older", "newer"], "must be seq-ascending, not insertion order");
+    }
+
+    /// A `seq`-less prompt (permission requests) must sort after every question.
+    #[tokio::test]
+    async fn list_prompts_sorts_seqless_prompts_after_seq_ed_ones() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.add_prompt("no-seq", "permission-requested", serde_json::json!({}), false).await;
+        st.add_prompt("has-seq", "question-requested", serde_json::json!({"seq": 1}), true).await;
+        let prompts = st.list_prompts().await;
+        let ids: Vec<&str> = prompts.iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["has-seq", "no-seq"]);
     }
 
     #[tokio::test]

@@ -55,6 +55,11 @@ export interface QuestionRequestedPayload {
    *  (hooks_server/question.rs) when the model ignored the redirect to the
    *  MCP tool - never present on the normal path. */
   degraded_builtin?: boolean;
+  /** Daemon-assigned monotonic order (`DaemonState::next_prompt_seq`) - lets
+   *  `markLatestQuestion` tell a genuinely newer question apart from a stale
+   *  one surfaced out of order (the prompt store's snapshot order is not
+   *  reliably chronological). Absent on prompts from an older daemon build. */
+  seq?: number;
 }
 
 export type Answers = Record<string, string | string[]>;

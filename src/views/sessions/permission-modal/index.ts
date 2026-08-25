@@ -262,7 +262,7 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
   console.info("[perm-relay] frontend received question-requested", { session: payload.session_id, ...gateDiag() });
   // Track staleness (see gating.ts) before the park/show branch below, so a
   // superseded card's late answer can be told apart from a live one.
-  markLatestQuestion(payload.session_id, payload.id);
+  markLatestQuestion(payload.session_id, payload.id, payload.seq);
   if (!isForSelectedSession(payload.session_id)) {
     if (payload.session_id) {
       storePendingPrompt(payload.session_id, { kind: "question", payload });
