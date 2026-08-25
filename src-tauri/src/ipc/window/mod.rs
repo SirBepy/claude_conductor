@@ -221,6 +221,10 @@ pub fn build_main_window(app: &AppHandle, nav: Option<&str>) -> Result<(), Strin
                 {
                     if let Some(state) = w.app_handle().try_state::<crate::state::AppState>() {
                         state.main_window_loaded.store(true, Ordering::SeqCst);
+                        // Reset the paint-liveness baseline per window: otherwise it still
+                        // holds its boot-time default, the first `frontend_ping`'s
+                        // `raf_tick: 0` equals it, and the watchdog misfires on a live window.
+                        *state.last_frontend_raf.lock().unwrap() = (0, std::time::Instant::now());
                     }
                     log::info!("build_main_window: page loaded, showing window");
                     let _ = w.show();
