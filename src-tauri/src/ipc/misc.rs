@@ -70,10 +70,18 @@ pub fn frontend_ready(app: AppHandle) {
 
 /// Heartbeat for the lib.rs renderer-crash watchdog; catches a WebView2
 /// crash after boot that `frontend_alive` (one-way, set-once) can't see.
+/// `raf_tick` is a `requestAnimationFrame` counter - a paint-liveness signal
+/// distinct from this call succeeding, since JS can keep running while the
+/// compositor stops presenting frames. Only bumps the timestamp when the
+/// tick actually changes, so a frozen tick reads as increasingly stale.
 #[tauri::command]
-pub fn frontend_ping(app: AppHandle) {
+pub fn frontend_ping(app: AppHandle, raf_tick: u64) {
     if let Some(state) = app.try_state::<crate::state::AppState>() {
         *state.last_frontend_ping.lock().unwrap() = Some(std::time::Instant::now());
+        let mut raf = state.last_frontend_raf.lock().unwrap();
+        if raf.0 != raf_tick {
+            *raf = (raf_tick, std::time::Instant::now());
+        }
     }
 }
 

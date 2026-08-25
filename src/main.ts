@@ -211,8 +211,19 @@ const currentWindowLabel = (window as unknown as {
   __TAURI__?: { window?: { getCurrentWindow: () => { label: string } } };
 }).__TAURI__?.window?.getCurrentWindow().label;
 if (currentWindowLabel === "main") {
+  // Paint-liveness counter: JS can keep running (so pings keep firing) while
+  // WebView2's compositor stops presenting frames. rAF only fires on an
+  // actual paint, so a frozen count here (while pings keep arriving) is the
+  // watchdog's signal for that distinct failure mode.
+  let rafTick = 0;
+  function tickRaf(): void {
+    rafTick++;
+    requestAnimationFrame(tickRaf);
+  }
+  requestAnimationFrame(tickRaf);
+
   function pingFrontend(): void {
-    if (document.visibilityState === "visible") void invoke("frontend_ping").catch(() => {});
+    if (document.visibilityState === "visible") void invoke("frontend_ping", { rafTick }).catch(() => {});
   }
   pingFrontend();
   setInterval(pingFrontend, 10_000);

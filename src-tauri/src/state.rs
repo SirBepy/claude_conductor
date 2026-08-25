@@ -54,6 +54,11 @@ pub struct AppState {
     /// `ipc::misc::frontend_ping`). The renderer-crash watchdog in lib.rs
     /// setup reloads the main window if this goes stale while it's visible.
     pub last_frontend_ping: Arc<Mutex<Option<std::time::Instant>>>,
+    /// `(last raf_tick reported, when it last changed)` - paint-liveness
+    /// signal distinct from `last_frontend_ping`: JS can keep pinging while
+    /// WebView2's compositor stops presenting frames. The heartbeat watchdog
+    /// uses this to catch that case, which a JS-alive check alone can't see.
+    pub last_frontend_raf: Arc<Mutex<(u64, std::time::Instant)>>,
     /// Set to true only once the main dashboard window's `on_page_load`
     /// "Finished" event has fired for the first time (see
     /// `ipc::window::build_main_window`). Every show-path that surfaces an
@@ -129,6 +134,7 @@ impl AppState {
             should_quit: Arc::new(AtomicBool::new(false)),
             frontend_alive: Arc::new(AtomicBool::new(false)),
             last_frontend_ping: Arc::new(Mutex::new(None)),
+            last_frontend_raf: Arc::new(Mutex::new((0, std::time::Instant::now()))),
             main_window_loaded: Arc::new(AtomicBool::new(false)),
             pending_chat_open: Mutex::new(None),
             pending_new_chat: Mutex::new(None),
