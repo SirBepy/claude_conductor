@@ -21,7 +21,6 @@
 //! `async fn`; it has always worked for exactly this reason.
 
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
 pub mod chats;
@@ -69,12 +68,11 @@ fn main_window_loaded(app: &AppHandle) -> bool {
 /// Show + focus `w` only if its webview has finished loading at least once.
 /// Guards every "window already exists" branch below: a `main` window that
 /// was just built (see `build_main_window`) exists as soon as `.build()`
-/// returns, well before its `on_page_load` "Finished" event fires. Calling
+/// returns, well before its `ipc::ready` heartbeat gate fires. Calling
 /// `surface_main` unconditionally in that window would force a still-loading,
 /// unpainted webview visible - producing a blank white window that swallows
 /// input until the user notices and re-triggers a show (ai_todo-095 ghost
-/// dashboard bug). When not yet loaded, this is a no-op: `build_main_window`'s
-/// own `on_page_load` handler shows the window itself once loading finishes.
+/// dashboard bug). When not yet loaded, `ipc::ready::mark_ready` shows it once alive.
 fn surface_main_if_ready(app: &AppHandle, w: &tauri::WebviewWindow) {
     if main_window_loaded(app) {
         surface_main(w);
@@ -194,20 +192,16 @@ pub fn open_dashboard_account(app: AppHandle, account_id: String) {
 /// NOT depend on this window: `scheduler::spawn` runs an independent backend
 /// poll loop, so the dashboard webview is purely UI.
 ///
-/// Built hidden and shown + focused only after the page finishes loading (via
-/// `on_page_load`), so the first open shows the rendered dashboard, never a
-/// white webview-boot frame. `nav` queues a navigation (e.g. `"project:<cwd>"`)
-/// for `frontend_ready` to drain once the SPA mounts; pass `None` for the
-/// default dashboard view.
+/// Built hidden and shown + focused only once the frontend reports it's
+/// actually alive (`ipc::ready`) - not just page-load-finished, which can
+/// be WebView2's own error page (ai_todo 786). `nav` queues a navigation.
 pub fn build_main_window(app: &AppHandle, nav: Option<&str>) -> Result<(), String> {
-    use std::sync::atomic::AtomicBool;
-    use tauri::webview::PageLoadEvent;
+    const URL: &str = "index.html";
     if let (Some(nav), Some(state)) = (nav, app.try_state::<crate::state::AppState>()) {
         *state.pending_main_nav.lock().unwrap() = Some(nav.to_string());
     }
-    let shown = Arc::new(AtomicBool::new(false));
     let window =
-        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(URL.into()))
             .title(test_title("Claude Conductor"))
             .inner_size(520.0, 720.0)
             // Config used minWidth only (no min height); 200 is a harmless floor
@@ -216,28 +210,14 @@ pub fn build_main_window(app: &AppHandle, nav: Option<&str>) -> Result<(), Strin
             .resizable(true)
             .decorations(true)
             .visible(false)
-            .on_page_load(move |w, payload| {
-                if payload.event() == PageLoadEvent::Finished && !shown.swap(true, Ordering::SeqCst)
-                {
-                    if let Some(state) = w.app_handle().try_state::<crate::state::AppState>() {
-                        state.main_window_loaded.store(true, Ordering::SeqCst);
-                        // Reset the paint-liveness baseline per window: otherwise it still
-                        // holds its boot-time default, the first `frontend_ping`'s
-                        // `raf_tick: 0` equals it, and the watchdog misfires on a live window.
-                        *state.last_frontend_raf.lock().unwrap() = (0, std::time::Instant::now());
-                    }
-                    log::info!("build_main_window: page loaded, showing window");
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
-            })
             .build()
             .map_err(|e| {
                 log::error!("build_main_window FAILED: {e}");
                 e.to_string()
             })?;
-    log::info!("build_main_window: built (hidden until on_page_load finishes)");
+    log::info!("build_main_window: built (hidden until ready heartbeat)");
     attach_hide_to_tray(&window);
+    crate::ipc::ready::watch(app, "main", URL);
     Ok(())
 }
 

@@ -4,46 +4,11 @@
 use crate::state::AppState;
 use tauri::Manager;
 
-/// Webview boot watchdog. If `frontend_ready` IPC never fires within ~6s,
-/// force-navigate the main window back to the start URL. Covers: WebView2
-/// showing "localhost refused to connect" when the start URL was
-/// unreachable at boot (autostart racing a slow vite dev server, or just
-/// no network when something upstream needed it). Retries every 5s for up
-/// to 2 minutes.
-pub(super) fn spawn_boot_watchdog(app: &tauri::AppHandle) {
-    let h = app.clone();
-    let alive = app.state::<AppState>().frontend_alive.clone();
-    tauri::async_runtime::spawn(async move {
-        use std::sync::atomic::Ordering;
-        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-        // Bound by wall-clock (~2 min from boot). The main window is
-        // lazy, so it usually does not exist here; only act when it
-        // does - an unopened dashboard is not a stalled one.
-        let mut ticks = 0u32;
-        let mut acted = false;
-        while !alive.load(Ordering::SeqCst) && ticks < 24 {
-            ticks += 1;
-            if let Some(w) = h.get_webview_window("main") {
-                acted = true;
-                let url = boot_start_url();
-                log::warn!(
-                    "main webview not ready (tick {ticks}); reloading -> {url}"
-                );
-                if let Ok(parsed) = url.parse::<tauri::Url>() {
-                    let _ = w.navigate(parsed);
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        }
-        if alive.load(Ordering::SeqCst) {
-            if acted {
-                log::info!("main webview recovered after {ticks} reload tick(s)");
-            }
-        } else if acted {
-            log::error!("main webview never reported ready; giving up");
-        }
-    });
-}
+/// Retired (ai_todo 786): `ipc::ready::watch` now owns reload-on-no-heartbeat
+/// for `main`, backoff and visibility gate included. Running both would
+/// double-navigate `main`, or undo `ipc::ready`'s Retry panel. Kept as a
+/// no-op stub so `bootstrap.rs`'s call site still compiles unchanged.
+pub(super) fn spawn_boot_watchdog(_app: &tauri::AppHandle) {}
 
 /// `frontend_alive` only ever latches true, so it can't see a WebView2
 /// crash after boot; a stale heartbeat means the renderer died silently.

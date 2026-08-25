@@ -71,8 +71,8 @@ fn record_timeout(entry: &mut Entry) -> TimeoutOutcome {
 }
 
 /// Register `label` and start waiting for its heartbeat. Call exactly once,
-/// right after `WebviewWindowBuilder::build()`, for every window except
-/// `main`. `url` is the app-relative URL the window was built with (e.g.
+/// right after `WebviewWindowBuilder::build()`, for every window. `url` is
+/// the app-relative URL the window was built with (e.g.
 /// `"index.html?chatswindow=1#sessions"`), reused verbatim on reload.
 pub fn watch(app: &AppHandle, label: &str, url: &str) {
     registry()
@@ -184,8 +184,8 @@ fn app_url(path: &str) -> String {
 
 /// Frontend heartbeat: "I am alive and rendering", called as early in boot as
 /// that's meaningful. Shows + focuses the window on the first call for a
-/// registered label; a label never registered here (namely `main`) or a
-/// heartbeat that arrives after the window is already shown is a no-op.
+/// registered label; a label never registered here or a heartbeat that
+/// arrives after the window is already shown is a no-op.
 pub fn mark_ready(app: &AppHandle, label: &str) {
     let outcome = {
         let mut reg = registry().lock().unwrap();
@@ -193,6 +193,20 @@ pub fn mark_ready(app: &AppHandle, label: &str) {
         record_heartbeat(entry)
     };
     if outcome == HeartbeatOutcome::Show {
+        // `main` alone also drives two AppState flags formerly set from its
+        // `on_page_load` "Finished" handler (ai_todo 786): a heartbeat can't
+        // be a WebView2 error page, so it's the correct "opened" signal.
+        if label == "main" {
+            if let Some(state) = app.try_state::<crate::state::AppState>() {
+                state.main_window_loaded.store(true, std::sync::atomic::Ordering::SeqCst);
+                // Reset the paint-liveness baseline: otherwise it still holds
+                // its boot-time default, the first `frontend_ping`'s
+                // `raf_tick: 0` equals it, and the watchdog misfires on a
+                // live window.
+
+                *state.last_frontend_raf.lock().unwrap() = (0, std::time::Instant::now());
+            }
+        }
         if let Some(w) = app.get_webview_window(label) {
             let _ = w.show();
             let _ = w.set_focus();
