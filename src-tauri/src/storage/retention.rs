@@ -114,7 +114,12 @@ impl Dataset {
 }
 
 /// The active retention policy for every dataset.
+///
+/// `serde(default)` is load-bearing: a settings.json written before a dataset
+/// existed carries `retention` present but missing that key, and without this
+/// the whole Settings document is rejected, not just this struct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct RetentionPolicies {
     pub usage_snapshots: RetentionPolicy,

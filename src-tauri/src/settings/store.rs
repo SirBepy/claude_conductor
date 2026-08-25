@@ -12,30 +12,68 @@ pub use super::identity::{
 };
 use super::identity::dedupe_projects_by_path_key;
 
-/// Loads settings from disk. If the file is missing, returns defaults.
-/// If the file is present but unparsable, renames it to
-/// `settings.json.broken-<unix-ts>` before returning defaults so the next
-/// save can't clobber the only copy of the user's data. Recovery is then
-/// a manual rename away.
+/// Probes each top-level key against an otherwise-default document: kept if it
+/// round-trips alone, defaulted if not. Returns the keys it had to default;
+/// empty means no single key reproduced the failure.
+fn salvage_fields(v: &serde_json::Value) -> (Settings, Vec<String>) {
+    let Some(obj) = v.as_object() else {
+        return (Settings::default(), Vec::new());
+    };
+    let default_obj = match serde_json::to_value(Settings::default()) {
+        Ok(serde_json::Value::Object(m)) => m,
+        _ => return (Settings::default(), Vec::new()),
+    };
+    let mut candidate = default_obj.clone();
+    let mut failed = Vec::new();
+    for (key, val) in obj {
+        let mut probe = default_obj.clone();
+        probe.insert(key.clone(), val.clone());
+        if serde_json::from_value::<Settings>(serde_json::Value::Object(probe)).is_ok() {
+            candidate.insert(key.clone(), val.clone());
+        } else {
+            failed.push(key.clone());
+        }
+    }
+    let settings = serde_json::from_value::<Settings>(serde_json::Value::Object(candidate))
+        .unwrap_or_default();
+    (settings, failed)
+}
+
+/// Loads settings from disk, defaulting when the file is missing. An
+/// unparsable file is renamed to `settings.json.broken-<unix-ts>` and then
+/// salvaged key-by-key, so one bad field cannot discard the whole document.
 pub fn load(path: &Path) -> Settings {
+    load_with_notice(path).0
+}
+
+/// Same as `load`, plus a one-line, user-facing notice when the file had to
+/// be salvaged or reset (`None` on a clean load). The caller surfaces this
+/// once to the frontend - see `AppState::settings_load_notice`.
+pub fn load_with_notice(path: &Path) -> (Settings, Option<String>) {
+    let mut notice: Option<String> = None;
     let mut s: Settings = match std::fs::read_to_string(path) {
         Err(_) => Settings::default(),
         Ok(raw) => {
-            let backup_and_default = |err: serde_json::Error| -> Settings {
+            let backup = |err: &serde_json::Error| -> std::path::PathBuf {
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
                 let backup = path.with_extension(format!("json.broken-{ts}"));
                 let _ = std::fs::rename(path, &backup);
-                eprintln!(
-                    "[settings] parse failed ({err}); preserved at {} and loaded defaults",
-                    backup.display()
-                );
-                Settings::default()
+                log::error!("[settings] parse failed ({err}); preserved at {}", backup.display());
+                backup
             };
             match serde_json::from_str::<serde_json::Value>(&raw) {
-                Err(err) => backup_and_default(err),
+                Err(err) => {
+                    let backup_path = backup(&err);
+                    log::error!("[settings] raw file was not valid JSON; loaded defaults");
+                    notice = Some(format!(
+                        "Some settings could not be read and were reset. Your previous file is kept as {}.",
+                        backup_path.display()
+                    ));
+                    Settings::default()
+                }
                 Ok(mut v) => {
                     // Legacy snake_case → camelCase migration. We used to use
                     // `#[serde(alias = "auto_update")]` here, but ts-rs warns
@@ -47,9 +85,32 @@ pub fn load(path: &Path) -> Settings {
                             }
                         }
                     }
-                    match serde_json::from_value::<Settings>(v) {
+                    match serde_json::from_value::<Settings>(v.clone()) {
                         Ok(parsed) => parsed,
-                        Err(err) => backup_and_default(err),
+                        Err(err) => {
+                            let backup_path = backup(&err);
+                            let (settings, failed) = salvage_fields(&v);
+                            if failed.is_empty() {
+                                log::error!(
+                                    "[settings] no single field reproduced the failure; loaded defaults"
+                                );
+                                notice = Some(format!(
+                                    "Some settings could not be read and were reset. Your previous file is kept as {}.",
+                                    backup_path.display()
+                                ));
+                            } else {
+                                log::error!(
+                                    "[settings] defaulted unparsable field(s) [{}], salvaged the rest",
+                                    failed.join(", ")
+                                );
+                                notice = Some(format!(
+                                    "Some settings ({}) could not be read and were reset; the rest were kept. Your previous file is kept as {}.",
+                                    failed.join(", "),
+                                    backup_path.display()
+                                ));
+                            }
+                            settings
+                        }
                     }
                 }
             }
@@ -66,7 +127,7 @@ pub fn load(path: &Path) -> Settings {
     // Avatar::Character on each ProjectConfig in v2 (Characters feature).
     s.extra.remove("projectNotifOverrides");
     dedupe_projects_by_path_key(&mut s.projects);
-    s
+    (s, notice)
 }
 
 /// Finds or creates a `ProjectConfig` for this cwd. Returns `(id, created_new)`.
@@ -170,8 +231,14 @@ pub fn save(path: &Path, settings: &Settings) -> Result<()> {
     }
     let raw = serde_json::to_string_pretty(settings)
         .context("serializing settings")?;
-    std::fs::write(path, raw)
-        .with_context(|| format!("writing settings to {path:?}"))?;
+    // Write-temp-then-rename: a crash or kill mid-write truncates the temp
+    // file, never `path` itself, so it can't produce the same torn-file
+    // shape `load` has to salvage from.
+    let tmp_path = path.with_extension(format!("json.tmp-{}", std::process::id()));
+    std::fs::write(&tmp_path, raw)
+        .with_context(|| format!("writing settings to {tmp_path:?}"))?;
+    std::fs::rename(&tmp_path, path)
+        .with_context(|| format!("renaming {tmp_path:?} to {path:?}"))?;
     Ok(())
 }
 
@@ -484,5 +551,72 @@ mod tests {
             matches!(p.avatar, crate::types::Avatar::Emoji(ref e) if e == "🦊"),
             "avatar from duplicate propagates when survivor had none",
         );
+    }
+
+    /// Redacted copy of a real `settings.json.broken-*` recovered on
+    /// 2026-08-22. Its `retention` object predates the `skipped_questions`
+    /// dataset, so it is present-but-incomplete: the shape that used to
+    /// reject the whole document and wipe 7 top-level keys.
+    const BROKEN_FIXTURE: &str =
+        include_str!("../../tests/fixtures/settings_broken_1787406007.json");
+
+    /// The root-cause guard. `RetentionPolicies` carries `#[serde(default)]`,
+    /// so an older `retention` object missing a newer dataset key no longer
+    /// fails. Remove that attribute and this test goes red.
+    #[test]
+    fn a_retention_object_predating_a_dataset_still_parses() {
+        let v: serde_json::Value = serde_json::from_str(BROKEN_FIXTURE).unwrap();
+        let s = serde_json::from_value::<Settings>(v)
+            .expect("an older retention object must not reject the whole document");
+
+        assert_eq!(s.default_account_id.as_deref(), Some("11111111-1111-1111-1111-111111111111"));
+        for key in [
+            "defaultAutoAllow",
+            "defaultRemoteControl",
+            "models",
+            "effortPresets",
+            "colorThresholds",
+            "newProjectLastParent",
+            "newsNotificationsEnabled",
+            "statuslineRows",
+        ] {
+            assert!(s.extra.contains_key(key), "{key} must survive");
+        }
+        assert_eq!(
+            s.retention.skipped_questions,
+            crate::storage::RetentionPolicies::default().skipped_questions,
+        );
+    }
+
+    #[test]
+    fn a_clean_load_moves_nothing_aside_and_raises_no_notice() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, BROKEN_FIXTURE).unwrap();
+        let (s, notice) = load_with_notice(&path);
+
+        assert!(path.exists(), "a parseable file must not be moved aside");
+        assert!(notice.is_none(), "a clean load must not nag the user");
+        assert_eq!(s.extra.get("defaultAutoAllow"), Some(&serde_json::json!(true)));
+    }
+
+    /// The safety net, for a field no default can rescue: `retention` present
+    /// but the wrong TYPE. Everything else must still survive.
+    #[test]
+    fn load_salvages_every_other_key_when_one_field_is_unparsable() {
+        let mut v: serde_json::Value = serde_json::from_str(BROKEN_FIXTURE).unwrap();
+        v["retention"] = serde_json::json!("not an object");
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+
+        let (s, notice) = load_with_notice(&path);
+
+        assert!(!path.exists(), "an unsalvageable file must be moved aside");
+        assert!(notice.is_some_and(|n| n.contains("retention")), "the notice must name the field");
+        assert_eq!(s.retention, crate::storage::RetentionPolicies::default());
+        assert_eq!(s.default_account_id.as_deref(), Some("11111111-1111-1111-1111-111111111111"));
+        assert_eq!(s.extra.get("defaultAutoAllow"), Some(&serde_json::json!(true)));
+        assert!(s.extra.contains_key("statuslineRows"), "statuslineRows must survive");
     }
 }

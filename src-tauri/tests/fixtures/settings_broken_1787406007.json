@@ -1,0 +1,222 @@
+{
+  "poll_interval_secs": 600,
+  "autostart": true,
+  "autoUpdate": "onStartup",
+  "hook_port": null,
+  "projects": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "path": "C:\\Users\\devuser\\Desktop\\Projects\\project-alpha",
+      "name": "project-alpha",
+      "avatar": {
+        "kind": "none"
+      },
+      "automation": {
+        "enabled": true,
+        "autostart_on_boot": true,
+        "session_name_prefix": null,
+        "continue_flag": true
+      },
+      "created_at": "2026-07-08T17:07:48Z",
+      "last_active_at": "2026-07-13T07:30:18Z",
+      "whitelist": {
+        "mode": "default"
+      },
+      "preferred_account_id": null,
+      "last_worktree_path": null,
+      "last_start_folder_rel": null
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "path": "C:\\Users\\devuser\\Desktop\\Projects\\project-beta",
+      "name": "project-beta",
+      "avatar": {
+        "kind": "none"
+      },
+      "automation": null,
+      "created_at": "2026-07-08T22:00:12Z",
+      "last_active_at": "2026-08-12T14:28:02Z",
+      "whitelist": {
+        "mode": "custom",
+        "games": [
+          "example-game"
+        ],
+        "ids": []
+      },
+      "preferred_account_id": "11111111-1111-1111-1111-111111111111",
+      "last_worktree_path": "C:\\Users\\devuser\\Desktop\\Projects\\project-beta",
+      "last_start_folder_rel": "frontend"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000003",
+      "path": "C:\\Users\\devuser\\Desktop\\Projects\\project-gamma",
+      "name": "project-gamma",
+      "avatar": {
+        "kind": "none"
+      },
+      "automation": null,
+      "created_at": "2026-07-09T06:50:08Z",
+      "last_active_at": "2026-07-09T06:50:08Z",
+      "whitelist": {
+        "mode": "default"
+      },
+      "preferred_account_id": "11111111-1111-1111-1111-111111111111",
+      "last_worktree_path": null,
+      "last_start_folder_rel": null
+    }
+  ],
+  "projects_sort_by": "recent",
+  "hooks_registered": true,
+  "hook_registration_declined": false,
+  "hook_install_version": 3,
+  "legacy_obsidian_import_handled": true,
+  "audioOutputDevice": null,
+  "defaultCharacterWhitelist": {
+    "mode": "custom",
+    "games": [
+      "heroes-of-the-storm"
+    ],
+    "ids": []
+  },
+  "sessionCharacters": {
+    "00000000-1111-2222-3333-444444444444": "grunt",
+    "00000000-1111-2222-3333-444444444445": "peasant"
+  },
+  "retention": {
+    "usage_snapshots": "90d",
+    "token_records": "90d",
+    "skill_events": "forever"
+  },
+  "remote_access_enabled": true,
+  "default_account_id": "11111111-1111-1111-1111-111111111111",
+  "jarvis_session_id": "00000000-1111-2222-3333-444444444444",
+  "accounts_setup_prompt_dismissed": false,
+  "schedule_grace_secs": null,
+  "characterBackfillVersion": 2,
+  "characterSoundSlots": {
+    "annoyed": true,
+    "death": true,
+    "questionAsked": true,
+    "ready": true,
+    "select": true,
+    "workFinished": true
+  },
+  "colorApplyTo": {
+    "dashboard": true,
+    "overlay": true
+  },
+  "colorThresholds": [
+    {
+      "color": "#27ae60",
+      "min": 0
+    },
+    {
+      "color": "#e67e22",
+      "min": 50
+    },
+    {
+      "color": "#e74c3c",
+      "min": 80
+    }
+  ],
+  "dashboardWidgets": [
+    {
+      "enabled": false,
+      "id": "today"
+    },
+    {
+      "enabled": true,
+      "id": "weekly-chart"
+    }
+  ],
+  "defaultAutoAllow": true,
+  "defaultRemoteControl": true,
+  "effortPresets": [
+    {
+      "effort": "high",
+      "model": "sonnet",
+      "name": "Light"
+    },
+    {
+      "effort": "medium",
+      "model": "opus",
+      "name": "Normal"
+    },
+    {
+      "effort": "high",
+      "model": "fable",
+      "name": "Heavy"
+    }
+  ],
+  "hideInMeeting": false,
+  "models": [
+    "haiku",
+    "sonnet",
+    "opus",
+    "fable"
+  ],
+  "muteAll": false,
+  "muteSounds": false,
+  "muteSystemNotifications": false,
+  "newProjectLastParent": "C:\\Users\\devuser\\Desktop\\Projects",
+  "newsNotificationsEnabled": true,
+  "notifications": {},
+  "overlayBackgroundStyle": "circles",
+  "overlayOpacity": 1,
+  "overlayX": 18,
+  "overlayY": 1223,
+  "paceBand": 10,
+  "paceColors": {
+    "nearOver": "#e67e22",
+    "nearSafe": "#f1c40f",
+    "over": "#e74c3c",
+    "under": "#27ae60"
+  },
+  "pauseInMeeting": true,
+  "projectAliases": {
+    "C:\\Users\\devuser\\Desktop\\Projects\\old-name\\api": {
+      "mergedInto": "C:\\Users\\devuser\\Desktop\\Projects\\new-name\\api"
+    },
+    "C:\\Users\\devuser\\Desktop\\Projects\\new-name\\api": {
+      "mergedPaths": [
+        "C:\\Users\\devuser\\Desktop\\Projects\\old-name\\api"
+      ]
+    }
+  },
+  "projectBlacklist": [],
+  "projectLastChoice": {
+    "C:\\Users\\devuser\\Desktop\\Projects\\project-alpha": {
+      "effort": "high",
+      "model": "sonnet"
+    },
+    "C:\\Users\\devuser\\Desktop\\Projects\\project-beta": {
+      "effort": "high",
+      "model": "opus"
+    }
+  },
+  "selectOnSessionClick": false,
+  "statuslineRows": [
+    [
+      "account",
+      "separator",
+      "model",
+      "effort",
+      "context_pct",
+      "flex_separator",
+      "servers",
+      "ai_todos",
+      "messages",
+      "turns"
+    ],
+    [
+      "branch",
+      "commits",
+      "flex_separator",
+      "tool:Read",
+      "tool:Edit",
+      "tool:Task",
+      "tool:Search"
+    ]
+  ],
+  "theme": "cosmo"
+}
