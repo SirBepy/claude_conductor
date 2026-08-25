@@ -735,7 +735,9 @@ export class Composer {
     return !text && this.att.isEmpty();
   }
 
-  /** Programmatically send a plain-text message, bypassing busy/held checks. */
+  /** Programmatically send a plain-text message, bypassing busy/held checks.
+   * On failure the text goes back into the composer (same recovery as the
+   * normal typed-send path) instead of vanishing silently. */
   async sendText(text: string): Promise<void> {
     if (this.sending) return;
     this.sending = true;
@@ -744,6 +746,7 @@ export class Composer {
       await this.opts.onSend(blocks);
     } catch (err) {
       console.error("[Composer] sendText failed", err);
+      this.setDraftText(text);
     } finally {
       this.sending = false;
     }
