@@ -4,7 +4,7 @@ Depends on: 01 (accounts), 02 (routing consumes the resolved account). See `00-o
 
 ## Goal
 Bind an account to a project, resolve the account for a new chat (binding -> default), and let the
-user pick/remember it in the existing new-chat modal.
+user pick it via always-visible chips in the existing new-chat modal.
 
 ## Context
 - `ProjectConfig` (`types/project.rs:46-61`) already holds `automation: Option<AutomationConfig>`;
@@ -23,10 +23,12 @@ user pick/remember it in the existing new-chat modal.
    `updateProject`.
 3. Account-detail view: a reverse "projects using this account" list (query ProjectConfigs by
    `preferred_account_id`), add/remove from there.
-4. New-chat modal: the collapse/edit/remember account picker (see mockup board 2). Resolve initial
-   account = project binding else `defaultAccountId`; "change" reveals chips; changing offers
-   "remember for this project" (writes the binding). Thread the chosen `account_id` into the
-   session start (feeds 02).
+4. New-chat modal: all registered accounts render as chips, always visible (no collapsed trigger).
+   Initial selection = project binding else `defaultAccountId` else, with exactly one account
+   registered, that account, else unselected (`resolveInitialAccountId` in
+   `account-picker-logic.ts`). Picking a chip and clicking Start writes the binding
+   unconditionally, no confirmation step. Thread the chosen `account_id` into the session start
+   (feeds 02).
 
 ## Files
 - `src-tauri/src/types/project.rs`, `src-tauri/src/settings/identity.rs`
@@ -35,5 +37,5 @@ user pick/remember it in the existing new-chat modal.
 
 ## Acceptance
 - A bound project auto-selects its account on new chat; unbound falls back to the default.
-- Changing the account and ticking remember writes the binding; it survives a path-casing merge.
+- Starting a session with a different chip picked writes the binding; it survives a path-casing merge.
 - The account view lists and edits that account's projects.
