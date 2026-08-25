@@ -16,8 +16,9 @@
 //! overflow - this is a short-lived coordination log, not a durable history.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChannelMessage {
@@ -82,6 +83,44 @@ pub fn list(project_id: &str) -> Vec<ChannelMessage> {
 /// read back a `post_at`-written tempdir file without touching real app data.
 pub(crate) fn list_at(path: &Path) -> Vec<ChannelMessage> {
     load(path)
+}
+
+/// Read cursor per (channel file path, reading session), keyed in-memory only
+/// (todo 743) - a session id never survives a daemon restart, so there is
+/// nothing to persist to disk here.
+fn cursors() -> &'static Mutex<HashMap<(PathBuf, String), String>> {
+    static CURSORS: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
+    CURSORS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Messages posted since `session_id` last called this for `project_id`,
+/// oldest first; advances that session's cursor to the newest message
+/// returned. First call for a given session returns the full backlog.
+pub fn list_unread(project_id: &str, session_id: &str) -> Vec<ChannelMessage> {
+    let Some(path) = store_path_for(project_id) else { return Vec::new() };
+    list_unread_at(&path, session_id)
+}
+
+/// `pub(crate)`: the tempdir-injectable form real unit tests use, same
+/// rationale as `post_at`/`list_at`.
+pub(crate) fn list_unread_at(path: &Path, session_id: &str) -> Vec<ChannelMessage> {
+    let all = list_at(path);
+    let key = (path.to_path_buf(), session_id.to_string());
+    let mut cursors = cursors().lock().unwrap_or_else(|e| e.into_inner());
+    // No cursor, or the cursor's message aged out of MAX_MESSAGES retention:
+    // both fail open to "everything currently retained" rather than silently
+    // dropping messages this session has never actually seen.
+    let unread = match cursors.get(&key) {
+        Some(last_id) => match all.iter().position(|m| &m.id == last_id) {
+            Some(idx) => all[idx + 1..].to_vec(),
+            None => all,
+        },
+        None => all,
+    };
+    if let Some(newest) = unread.last() {
+        cursors.insert(key, newest.id.clone());
+    }
+    unread
 }
 
 /// Appends one message, pruning to `MAX_MESSAGES` (oldest dropped first).
@@ -181,5 +220,44 @@ mod tests {
         let long = "x".repeat(MAX_TEXT_LEN + 500);
         let msg = post_at(None, "s1", "Alice", &long);
         assert_eq!(msg.text.chars().count(), MAX_TEXT_LEN);
+    }
+
+    #[test]
+    fn list_unread_returns_the_full_backlog_on_a_sessions_first_call() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-cursor-1.json");
+        post_at(Some(&path), "s1", "Alice", "one");
+        post_at(Some(&path), "s1", "Alice", "two");
+
+        let unread = list_unread_at(&path, "reader-a");
+        assert_eq!(unread.len(), 2);
+    }
+
+    #[test]
+    fn list_unread_advances_the_cursor_and_excludes_already_seen_messages() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-cursor-2.json");
+        post_at(Some(&path), "s1", "Alice", "one");
+
+        let first = list_unread_at(&path, "reader-b");
+        assert_eq!(first.len(), 1);
+        assert_eq!(list_unread_at(&path, "reader-b").len(), 0, "no new messages since last read");
+
+        post_at(Some(&path), "s1", "Alice", "two");
+        let second = list_unread_at(&path, "reader-b");
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].text, "two");
+    }
+
+    #[test]
+    fn list_unread_tracks_cursors_independently_per_session() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-cursor-3.json");
+        post_at(Some(&path), "s1", "Alice", "one");
+
+        assert_eq!(list_unread_at(&path, "reader-c").len(), 1);
+        // A different reader against the same channel has never read anything yet.
+        assert_eq!(list_unread_at(&path, "reader-d").len(), 1);
+        assert_eq!(list_unread_at(&path, "reader-c").len(), 0);
     }
 }

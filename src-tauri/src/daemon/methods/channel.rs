@@ -95,11 +95,12 @@ pub(crate) fn list_peers(state: &Arc<DaemonState>, session_id: &str) -> Result<V
     Ok(json!({"peers": peers}))
 }
 
-/// `read_messages` tool: recent coordination-channel history for this
-/// project (see `sessions::repo_channel` for retention/ordering).
+/// `read_messages` tool: messages this session hasn't read yet for its
+/// project (see `sessions::repo_channel::list_unread` for the cursor), not
+/// the full retained history - repeat calls don't redeliver the same note.
 pub(crate) fn read_messages(state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    let messages = repo_channel::list(&project_id);
+    let messages = repo_channel::list_unread(&project_id, session_id);
     Ok(json!({"messages": messages}))
 }
 
