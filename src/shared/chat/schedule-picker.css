@@ -67,6 +67,12 @@
   border-color: var(--color-primary);
 }
 
+.schedule-picker-row:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
 .schedule-picker-row-label {
   display: flex;
   align-items: center;

@@ -578,9 +578,15 @@ export class Composer {
       if (empty) return;
       const anchor = this.sendBtn ?? this.textarea;
       if (!anchor) return;
-      const choice = await openFrozenChoice(anchor);
-      if (choice === null) return; // dismissed - draft stays put
+      // Set before the await, not after: the choice popover is async, and
+      // an Enter re-fired while it's still open must not re-enter this
+      // branch and stack a second popover on top of the first.
       this.sending = true;
+      const choice = await openFrozenChoice(anchor);
+      if (choice === null) {
+        this.sending = false;
+        return; // dismissed - draft stays put
+      }
       const blocks = this.buildBlocks(text);
       const savedAttachments = this.att.attachments;
       const savedPastedBlocks = this.att.pastedBlocks;

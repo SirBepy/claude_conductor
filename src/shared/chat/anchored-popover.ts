@@ -37,6 +37,9 @@ export interface ActionPopoverOptions {
   /** Selector matching the buttons inside bodyHtml that trigger onPick. */
   buttonSelector: string;
   onPick: (btn: HTMLButtonElement) => void;
+  /** Index (into the buttonSelector matches, in DOM order) focused when the
+   *  popover opens. Defaults to 0. */
+  defaultIndex?: number;
   /** Extra teardown run after the popover element is removed (outside
    *  click, Escape, or an explicit `close()`) - not called on a pick. */
   onClose?: () => void;
@@ -65,9 +68,21 @@ export function openActionPopover(opts: ActionPopoverOptions): ActionPopoverHand
     },
   });
 
-  pop.querySelectorAll<HTMLButtonElement>(opts.buttonSelector).forEach((btn) => {
+  const buttons = Array.from(pop.querySelectorAll<HTMLButtonElement>(opts.buttonSelector));
+  buttons.forEach((btn) => {
     btn.addEventListener("click", () => opts.onPick(btn));
   });
+
+  // Roving focus: Up/Down move it between rows; a focused <button>'s native
+  // Enter/Space behavior fires the click listener above for free.
+  pop.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const delta = e.key === "ArrowDown" ? 1 : -1;
+    buttons[(current + delta + buttons.length) % buttons.length]?.focus();
+  });
+  buttons[opts.defaultIndex ?? 0]?.focus();
 
   popover.reposition();
   return { close: popover.close };

@@ -29,6 +29,7 @@ export function openFrozenChoice(anchor: HTMLElement): Promise<FrozenChoice | nu
       className: "schedule-picker-popover composer-frozen-choice-popover",
       bodyHtml,
       buttonSelector: "[data-choice]",
+      defaultIndex: 1, // "now" - Enter re-fired from the composer sends immediately
       onPick: (btn) => {
         resolved = true;
         popover.close();
