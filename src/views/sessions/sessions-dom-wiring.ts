@@ -211,8 +211,7 @@ export function wireStaticListeners(
     }
   };
 
-  // Right-click anywhere on a session row opens the same context menu the
-  // hover-revealed ⋮ button does (the button stays for discoverability).
+  // Right-click anywhere on a session row opens the row's context menu.
   listEl.addEventListener("contextmenu", (e) => {
     const li = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id], li[data-placeholder-id]");
     if (!li) return;
@@ -221,15 +220,6 @@ export function wireStaticListeners(
   });
 
   listEl.addEventListener("click", (e) => {
-    // All row menu buttons (3-dot) — handles live sessions, active drafts, and parked drafts.
-    const menuBtn = (e.target as HTMLElement).closest<HTMLButtonElement>(".session-row-menu-btn");
-    if (menuBtn) {
-      e.stopPropagation();
-      const li = menuBtn.closest<HTMLLIElement>("li[data-session-id], li[data-placeholder-id]");
-      if (li) openMenuForRow(li, menuBtn);
-      return;
-    }
-
     // Click on a parked draft row body: resume it as a new draft.
     const parkedLi = (e.target as HTMLElement).closest<HTMLLIElement>("li.parked-draft[data-placeholder-id]");
     if (parkedLi) {

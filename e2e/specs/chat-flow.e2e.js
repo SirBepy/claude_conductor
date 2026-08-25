@@ -230,14 +230,14 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
     expect(c.user).toBe(1);
   });
 
-  it("close B via 3-dot menu: row disappears", async () => {
+  it("close B via right-click menu: row disappears", async () => {
     const before = await sidebarSessionIds();
     if (!before.includes(bId)) note("bug", "B not in sidebar before close", { before, bId });
 
-    // Open the row's 3-dot menu and click Close.
-    const menuBtn = await $(`#sessions-list li[data-session-id="${bId}"] .session-row-menu-btn`);
-    await menuBtn.waitForClickable({ timeout: 10000 });
-    await menuBtn.click();
+    // Right-click the row to open its context menu, then click Close.
+    const row = await $(`#sessions-list li[data-session-id="${bId}"]`);
+    await row.waitForExist({ timeout: 10000 });
+    await row.click({ button: "right" });
     // The ctx menu's last item is Close.
     const items = await $$(".session-ctx-menu .session-ctx-item");
     const closeItem = items[items.length - 1];

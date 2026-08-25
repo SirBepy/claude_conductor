@@ -208,12 +208,6 @@
     height: 44px;
   }
 
-  /* Touch has no hover, so the per-row ⋮ menu (revealed on hover at desktop)
-     would never appear. Keep it always visible on mobile. */
-  .session-row-menu-btn {
-    visibility: visible;
-  }
-
   /* Phone bubbles: the desktop 32px side margins waste a third of a narrow
      screen. Trim them and let bubbles use nearly the full width. */
   .session-messages {

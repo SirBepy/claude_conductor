@@ -304,35 +304,3 @@
 .sessions-list li.active .session-row-project {
   color: var(--color-background);
 }
-
-/* 3-dot menu button */
-.session-row-menu-btn {
-  visibility: hidden;
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.sessions-list li:hover .session-row-menu-btn,
-.sessions-list li.active .session-row-menu-btn {
-  visibility: visible;
-}
-
-.session-row-menu-btn:hover {
-  background: rgba(255,255,255,0.1);
-}
-
-.sessions-list li.active .session-row-menu-btn {
-  color: var(--color-background);
-  opacity: 0.85;
-}

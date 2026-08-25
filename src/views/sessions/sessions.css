@@ -781,11 +781,6 @@
   pointer-events: none;
 }
 
-/* Ctrl-held keyboard hint badges — rendered over the more-options button */
-#sessions-list.kbd-hint-active li[data-kbd-hint] .session-row-menu-btn {
-  visibility: hidden;
-}
-
 #sessions-list.kbd-hint-active li[data-kbd-hint]::before {
   content: attr(data-kbd-hint);
   position: absolute;
