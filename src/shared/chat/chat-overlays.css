@@ -107,6 +107,10 @@
 .cc-typing-input.lightbox-composer:focus {
   min-height: 44px;
   max-height: 160px;
+  /* Explicit, not relying on the textarea UA default: this is the half of
+   * core.css's zero-width-scrollbar fix that only bites once a consumer
+   * actually caps height and scrolls. */
+  overflow-y: auto;
   resize: none;
   background: transparent;
   color: transparent;

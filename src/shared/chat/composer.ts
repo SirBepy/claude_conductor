@@ -16,6 +16,7 @@ import { blocksToText } from "./content-blocks";
 import { ComposerCore } from "./composer-core/core";
 import { ComposerVoice } from "./voice/composer-voice";
 import { ComposerPtt } from "./voice/composer-ptt";
+import "./composer-core/core.css";
 import "./voice/voice.css";
 import "./builtins/register";
 import "./caret-popup/popup.css";
@@ -286,9 +287,9 @@ export class Composer {
     this.root.innerHTML = `
       <div class="composer-attachments"></div>
       <div class="composer-row">
-        <div class="composer-input-wrap">
-          <div class="composer-highlight" aria-hidden="true"></div>
-          <textarea class="composer-textarea" rows="1" placeholder="${placeholder}" ${this.disabled ? "disabled" : ""}></textarea>
+        <div class="composer-input-wrap cc-typing-wrap">
+          <div class="composer-highlight cc-typing-highlight" aria-hidden="true"></div>
+          <textarea class="composer-textarea cc-typing-input" rows="1" placeholder="${placeholder}" ${this.disabled ? "disabled" : ""}></textarea>
         </div>
         <div class="composer-actions">
           <button class="composer-mic icon-btn" ${this.disabled ? "disabled" : ""} title="Voice dictation (tap to start/stop)">

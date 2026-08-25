@@ -42,6 +42,14 @@
   field-sizing: content;
 }
 
+/* Zero-width scrollbar: a scrolled textarea must not lose layout width the
+ * highlight backdrop keeps, or the two wrap text at different columns and
+ * ghost where they diverge (composer.css fixed this once for its own pair;
+ * every cc-typing-* adopter needs it too). */
+.cc-typing-input::-webkit-scrollbar {
+  width: 0;
+}
+
 /* Mirrors .prompt-q__other-input/.prompt-extra-input's box model exactly
  * (permission-modal-question.css, owned by a concurrent session - values
  * duplicated on purpose rather than shared; keep in sync by hand). Compound
