@@ -22,7 +22,7 @@
 
 use crate::daemon::lifecycle;
 use crate::daemon::state::DaemonState;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -72,16 +72,10 @@ pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, author_session
     pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text });
 }
 
-/// Deliver everything queued for `target_session_id` as ONE coalesced,
-/// newline-joined, `is_meta`-marked message, IFF the session is a still-live
-/// registry entry and isn't mid-turn. Otherwise a no-op that leaves the queue
-/// standing for the next drain trigger (the next `post_message` call, or this
-/// session's own turn ending - see `pump.rs`'s unconditional drain-on-idle
-/// call).
-///
-/// On a send failure the drained lines are pushed back onto the front of the
-/// queue (in original order) so a transient respawn failure doesn't silently
-/// lose a wake - the next trigger retries the same coalesced batch.
+/// Delivers everything queued for `target_session_id` if idle, else a no-op
+/// that leaves the queue for the next trigger. Same-sender lines still
+/// coalesce into one message; distinct senders each get their own message
+/// (todo 766). Undelivered lines are pushed back to the queue on failure.
 pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
     drain_with(state, target_session_id, |text, author| async move {
         lifecycle::send_message_with_respawn_meta_and_author(state, target_session_id, &text, &author).await
@@ -90,11 +84,11 @@ pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
 }
 
 /// [`drain`] with the child-stdin write injected, so the queue/coalescing
-/// logic is exercisable without a live session (a real one would try to
-/// respawn `claude`). `drain` is the only production instantiation.
+/// logic is exercisable without a live session. `send` is `Fn`, not
+/// `FnOnce`: a multi-sender batch calls it once per sender group.
 async fn drain_with<F, Fut, E>(state: &Arc<DaemonState>, target_session_id: &str, send: F)
 where
-    F: FnOnce(String, String) -> Fut,
+    F: Fn(String, String) -> Fut,
     Fut: std::future::Future<Output = Result<(), E>>,
     E: std::fmt::Display,
 {
@@ -109,26 +103,44 @@ where
             _ => return,
         }
     };
-    let combined = lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
-    // Multiple lines can come from different senders inside one coalescing
-    // window, but the wire format carries only one author sentinel per
-    // message - attribute the batch to its most recent poster.
-    let author = lines.last().map(|l| l.author_session_id.clone()).unwrap_or_default();
-    match send(combined, author).await {
-        Ok(()) => {
-            state.registry.set_awaiting(target_session_id, None);
-            state.registry.set_busy_from_wake(target_session_id);
-            crate::sessions::chat_state::set_busy(target_session_id, true);
-            state.notifier.publish(
-                "instances_changed",
-                serde_json::json!({"instances": state.registry.list()}),
-            );
+    // First-appearance order; one message per sender, not one sentinel for
+    // the whole batch (todo 766).
+    let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
+    for line in &lines {
+        match groups.iter_mut().find(|(author, _)| *author == line.author_session_id) {
+            Some((_, texts)) => texts.push(line.text.as_str()),
+            None => groups.push((line.author_session_id.clone(), vec![line.text.as_str()])),
         }
-        Err(e) => {
-            log::warn!("repo_channel_wake: failed to deliver wake to {target_session_id}: {e}");
-            let mut queues = state.repo_channel_wakes.lock().unwrap();
-            let pending = queues.entry(target_session_id.to_string()).or_default();
-            for line in lines.into_iter().rev() {
+    }
+    let mut delivered: HashSet<String> = HashSet::new();
+    let mut failed = false;
+    for (author, texts) in groups {
+        let combined = texts.join("\n");
+        match send(combined, author.clone()).await {
+            Ok(()) => {
+                delivered.insert(author);
+            }
+            Err(e) => {
+                log::warn!("repo_channel_wake: failed to deliver wake to {target_session_id}: {e}");
+                failed = true;
+                break;
+            }
+        }
+    }
+    if !delivered.is_empty() {
+        state.registry.set_awaiting(target_session_id, None);
+        state.registry.set_busy_from_wake(target_session_id);
+        crate::sessions::chat_state::set_busy(target_session_id, true);
+        state.notifier.publish(
+            "instances_changed",
+            serde_json::json!({"instances": state.registry.list()}),
+        );
+    }
+    if failed {
+        let mut queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.entry(target_session_id.to_string()).or_default();
+        for line in lines.into_iter().rev() {
+            if !delivered.contains(&line.author_session_id) {
                 pending.push_front(line);
             }
         }
@@ -287,9 +299,44 @@ mod tests {
         // Mirrors spawn_drain's body with the child-stdin write recorded instead.
         let wake = |state: Arc<DaemonState>, sent: Arc<std::sync::Mutex<Vec<(String, String)>>>| async move {
             tokio::time::sleep(IDLE_COALESCE_WINDOW).await;
-            drain_with(&state, "s1", |text, author| async move {
-                sent.lock().unwrap().push((text, author));
-                Ok::<(), String>(())
+            drain_with(&state, "s1", |text, author| {
+                let sent = sent.clone();
+                async move {
+                    sent.lock().unwrap().push((text, author));
+                    Ok::<(), String>(())
+                }
+            })
+            .await;
+        };
+
+        enqueue(&state, "s1", "peer-a", "first".into());
+        let h1 = tokio::spawn(wake(state.clone(), sent.clone()));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        enqueue(&state, "s1", "peer-a", "second".into());
+        let h2 = tokio::spawn(wake(state.clone(), sent.clone()));
+        h1.await.unwrap();
+        h2.await.unwrap();
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 1, "two same-sender posts inside the window must produce one wake");
+        assert_eq!(sent[0].0, "first\nsecond");
+        assert_eq!(sent[0].1, "peer-a");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn near_simultaneous_idle_posts_from_distinct_senders_attribute_separately() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        let sent: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let wake = |state: Arc<DaemonState>, sent: Arc<std::sync::Mutex<Vec<(String, String)>>>| async move {
+            tokio::time::sleep(IDLE_COALESCE_WINDOW).await;
+            drain_with(&state, "s1", |text, author| {
+                let sent = sent.clone();
+                async move {
+                    sent.lock().unwrap().push((text, author));
+                    Ok::<(), String>(())
+                }
             })
             .await;
         };
@@ -303,9 +350,9 @@ mod tests {
         h2.await.unwrap();
 
         let sent = sent.lock().unwrap();
-        assert_eq!(sent.len(), 1, "two posts inside the window must produce one wake");
-        assert_eq!(sent[0].0, "first\nsecond");
-        assert_eq!(sent[0].1, "peer-b", "batch attributes to its most recent poster");
+        assert_eq!(sent.len(), 2, "distinct senders must not collapse into one wake");
+        assert_eq!(sent[0], ("first".to_string(), "peer-a".to_string()));
+        assert_eq!(sent[1], ("second".to_string(), "peer-b".to_string()));
     }
 
     #[test]
