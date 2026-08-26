@@ -208,6 +208,12 @@ export function buildChatMenuBlock(
         : async () => {
             try {
               await invoke<void>(ctx.isFrozen ? "unfreeze_session" : "freeze_session", { sessionId });
+              // Manual freeze also parks the row in Hidden; unfreeze restores it.
+              // Auto-freeze never reaches this branch - see sessionSegment.
+              const hidden = loadHiddenSessions();
+              if (ctx.isFrozen) hidden.delete(sessionId);
+              else hidden.add(sessionId);
+              saveHiddenSessions(hidden);
             } catch (err) {
               alert(`Failed to ${ctx.isFrozen ? "unfreeze" : "freeze"} chat: ${err}`);
             }

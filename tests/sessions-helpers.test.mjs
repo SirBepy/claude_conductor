@@ -240,9 +240,13 @@ describe("sessionSegment", () => {
   it("frozen is not its own segment - falls through to its real state (rendered as a chip instead)", () => {
     expect(seg(makeInstance({ busy: false, frozen: true }))).toBe(1);
   });
-  it("a rate-limit auto-freeze still segments as Waiting for Reset", () => {
+  it("a rate-limit auto-freeze segments as Scheduled - it already has a resume queued", () => {
     const i = makeInstance({ session_id: "fr", frozen: true, auto_frozen: true });
-    expect(seg(i, { rateLimited: new Set(["fr"]) })).toBe(4);
+    expect(seg(i, { rateLimited: new Set(["fr"]) })).toBe(6);
+  });
+  it("plain rate-limited (not auto-frozen) still segments as Waiting for Reset", () => {
+    const i = makeInstance({ session_id: "r2", frozen: false, auto_frozen: false });
+    expect(seg(i, { rateLimited: new Set(["r2"]) })).toBe(4);
   });
   // 2026-08-16 correction: Remote is driven by `kind` (a process this app
   // didn't spawn - terminal `claude` or a channel bridge), not `is_remote`

@@ -206,8 +206,9 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
  *  process this app didn't spawn, terminal or channel bridge - wins over
  *  every other state; the row's own dot still shows the real state. NOT
  *  `is_remote`, which only means "reached over remote transport").
- *  Closing and rate-limited both still win over Scheduled. `frozen` is a row
- *  chip now (`frozenBadgeHtml`), not a segment - see sidebar-row-visuals.ts. */
+ *  Closing wins over Scheduled; auto_frozen wins over plain rate-limited (it
+ *  already has a resume queued, see rate_limit.rs). `frozen` is a row chip
+ *  now (`frozenBadgeHtml`), not a segment - see sidebar-row-visuals.ts. */
 export function sessionSegment(
   s: Instance,
   unread: Set<string>,
@@ -219,6 +220,7 @@ export function sessionSegment(
 ): number {
   if (s.kind === "external" || s.kind === "automated") return 7;
   if (closing.has(s.session_id)) return 3;
+  if (s.auto_frozen) return 6;
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);
   if (priority === 0 || priority === 1) return 0; // Input Needed
