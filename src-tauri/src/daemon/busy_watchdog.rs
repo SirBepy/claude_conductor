@@ -8,11 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
-/// How long `busy` may sit with zero events before the sweep force-clears
-/// it. Generous: Joe routinely runs 40+ minute builds with a steady tool
-/// trickle well under this, and killing a live turn is worse than a stuck
-/// row sitting an extra 20 minutes.
-const STALE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(20);
+/// How long `busy` may sit with zero events before the sweep force-clears it.
+/// `touch_activity` re-stamps on every stdout line, so only a hung or dead
+/// process goes fully silent. Cut from 20m: a stuck `busy` makes the composer
+/// stage instead of send, so this is how long a message sits invisibly queued.
+const STALE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(3);
 
 pub fn spawn(state: Arc<DaemonState>) {
     tokio::spawn(async move {
@@ -93,9 +93,9 @@ mod tests {
         state.registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
         state.registry.set_busy("s", true);
         state.registry.touch_activity("s"); // a tool event refreshes activity
-        // Sweep runs only 5 minutes after the (real-time) refresh - well
-        // under threshold, unlike the 25-minute gap in the fires-after test.
-        let later = chrono::Utc::now() + chrono::Duration::minutes(5);
+        // Sweep runs 1 minute after the (real-time) refresh - well under
+        // threshold, unlike the 25-minute gap in the fires-after test.
+        let later = chrono::Utc::now() + chrono::Duration::minutes(1);
         sweep(&state, later);
         assert!(state.registry.get("s").unwrap().busy, "a steady trickle of events must never be swept");
     }
