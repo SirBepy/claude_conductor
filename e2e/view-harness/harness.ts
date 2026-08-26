@@ -256,7 +256,7 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
     if (o.pager) {
       const pager = await import("/views/sessions/mobile-pager.ts");
       const layout = view.querySelector<HTMLElement>(".sessions-layout")!;
-      pager.mountMobilePager(view.querySelector<HTMLElement>("#mobile-tabbar-host")!, layout, controller);
+      pager.mountMobilePager(view.querySelector<HTMLElement>("#mobile-tabbar-host")!, layout);
     }
   }, cfg);
 }
