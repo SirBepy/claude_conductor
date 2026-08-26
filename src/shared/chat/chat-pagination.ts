@@ -1,6 +1,6 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import type { RenderedMessage } from "./chat-transforms";
-import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
+import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, stripAuqAnswerBlock, extractAuqExtraText, stripAuqExtraBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
@@ -20,7 +20,6 @@ export interface PaginatorCallbacks {
   setMessageEls(els: HTMLElement[]): void;
   buildMessageEl(m: RenderedMessage): HTMLElement;
   clampUserMessages(): void;
-  groupAuthoredMessages(): void;
   /** Called after a prepend with the number of rows inserted at the front. */
   onShift(n: number): void;
   /**
@@ -251,6 +250,29 @@ export class ChatPaginator {
         }
       }
     }
+    // The card's extra-message note (<auq-extra/>), keyed like sentinelAnswerById
+    // above but without "still open" gating - it can attach to an already-answered
+    // card (the in-band `delivered` path resolves the answer from the tool_result
+    // alone, so the note always arrives as its own later message).
+    const sentinelExtraById = new Map<string, string>();
+    const foldedExtraMsgs = new Map<ChatEvent, string>();
+    {
+      let opened = 0;
+      for (const ev of events) {
+        if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
+          opened++;
+          continue;
+        }
+        if (ev.type !== "user_message") continue;
+        const extra = extractAuqExtraText(cleanUserBlocks(ev.content));
+        if (extra === null || opened === 0) continue;
+        const qid = questionCards[opened - 1]!.id;
+        sentinelExtraById.set(qid, extra);
+        foldedExtraMsgs.set(ev, qid);
+      }
+      // A cross-page stranded extra (adjacent already-rendered page) is not
+      // folded here - known gap, see todo; both same-page cases are covered.
+    }
     // Folded in client-side; never spliced into the page's cursor math.
     const skippedQuestionIds = matchSkipMarks(
       questionCards,
@@ -312,20 +334,23 @@ export class ChatPaginator {
         continue;
       }
       const answeredQid = ev.type === "user_message" ? foldedUserMsgs.get(ev) : undefined;
-      if (ev.type === "user_message" && answeredQid !== undefined) {
-        // Folded into the question card's text (set via sentinelAnswerById
-        // below) - only held prose riding the same bundle (held-messages.ts's
-        // bundleHeld) still renders, mirroring handleUserMessageEvent's
-        // resolvedQuestionCard branch.
-        const card = deferredQuestions.get(answeredQid);
-        if (card) {
-          deferredQuestions.delete(answeredQid);
-          newMessages.push(card);
-          const cardEl = this.cb.buildMessageEl(card);
-          newEls.push(cardEl);
-          frag.appendChild(cardEl);
+      const extraQid = ev.type === "user_message" ? foldedExtraMsgs.get(ev) : undefined;
+      if (ev.type === "user_message" && (answeredQid !== undefined || extraQid !== undefined)) {
+        // Folded into the card's text/extraText - only held prose riding the
+        // same bundle (held-messages.ts's bundleHeld) still renders.
+        if (answeredQid !== undefined) {
+          const card = deferredQuestions.get(answeredQid);
+          if (card) {
+            deferredQuestions.delete(answeredQid);
+            newMessages.push(card);
+            const cardEl = this.cb.buildMessageEl(card);
+            newEls.push(cardEl);
+            frag.appendChild(cardEl);
+          }
         }
-        const remainder = stripAuqAnswerBlock(cleanUserBlocks(ev.content));
+        let remainder = cleanUserBlocks(ev.content);
+        if (answeredQid !== undefined) remainder = stripAuqAnswerBlock(remainder);
+        if (extraQid !== undefined) remainder = stripAuqExtraBlock(remainder);
         if (remainder.length === 0) continue;
         const rMsg: RenderedMessage = { kind: "user", content: remainder, ts: Number(ev.timestamp), authorSessionId: ev.author_session_id ?? null };
         boundaries.push({ index: newMessages.length, usage: acc, firstTs: accFirstTs, lastTs: accLastTs });
@@ -342,6 +367,11 @@ export class ChatPaginator {
       if (!msg) continue;
       if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
         msg.failed = true;
+      }
+      // Baked in before the branches below so it survives regardless of
+      // which one runs (see sentinelExtraById above).
+      if (ev.type === "tool_use" && msg.kind === "question" && sentinelExtraById.has(ev.id)) {
+        msg.extraText = sentinelExtraById.get(ev.id);
       }
       if (ev.type === "tool_use" && msg.kind === "question" && sentinelAnswerById.has(ev.id)) {
         msg.text = sentinelAnswerById.get(ev.id);
@@ -437,7 +467,6 @@ export class ChatPaginator {
     void highlightCodeBlocks(this.container);
     highlightInlineCode(this.container);
     this.cb.clampUserMessages();
-    this.cb.groupAuthoredMessages();
   }
 
   findScroller(): HTMLElement | null {

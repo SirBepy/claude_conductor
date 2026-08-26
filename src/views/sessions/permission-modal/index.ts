@@ -23,7 +23,7 @@ import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
 import { getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
-import { AUQ_ANSWER_SENTINEL } from "../../../shared/chat/chat-transforms";
+import { AUQ_ANSWER_SENTINEL, AUQ_EXTRA_SENTINEL } from "../../../shared/chat/chat-transforms";
 import type { ContentBlock } from "../../../types/ipc.generated";
 import { clearQuestionDraft, saveQuestionDraft } from "./draft-persistence";
 import { scheduleAuqPush, clearAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
@@ -161,29 +161,28 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
       const answerBlocks: ContentBlock[] = delivered
         ? []
         : [{ type: "text", text: `${AUQ_ANSWER_SENTINEL}${formatAnswersAsMessage(questions, answers)}` }];
-      const extraBlocks: ContentBlock[] = [];
-      if (extras.additionalMessage) extraBlocks.push({ type: "text", text: extras.additionalMessage });
+      // Tagged AUQ_EXTRA_SENTINEL so this folds into the SAME card (see
+      // chat-question-card.ts's resolvePendingQuestionExtra), not a detached bubble.
+      const cardExtraBlocks: ContentBlock[] = [];
+      if (extras.additionalMessage) cardExtraBlocks.push({ type: "text", text: `${AUQ_EXTRA_SENTINEL}${extras.additionalMessage}` });
       for (const a of extras.attachments) {
-        if (a.path) extraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
+        if (a.path) cardExtraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
       }
       if (state.selectedId === sid && state.heldMessages) {
-        // Fold whatever's half-typed in the underlying composer at answer time
-        // (the card only anchors above it, not over it) - flushHeldWithDraft
-        // only bundles what's passed in, never the live composer state itself.
+        // Unrelated to the card - staged as its own item so it joins any
+        // already-queued prose, never merged with the card's own extras.
         const attach = state.heldMessages.getAttached();
         if (attach && !attach.isDraftEmpty()) {
-          extraBlocks.push(...attach.getDraftBlocks());
+          state.heldMessages.stage(attach.getDraftBlocks());
           attach.clearComposer();
         }
-        // Stage the extras FIRST so flushHeldWithDraft's single bundleHeld call
-        // folds them alongside the isolated sentinel block into one bundle,
-        // instead of a second message queued behind it. A no-op if both are
-        // empty (delivered, no extras) - flush() bails on an empty bundle.
-        if (extraBlocks.length) state.heldMessages.stage(extraBlocks);
+        // Its own held item so bundleHeld's sentinel-group check (held-messages.ts)
+        // keeps the note+attachments intact, not merged into the queued prose.
+        if (cardExtraBlocks.length) state.heldMessages.stage(cardExtraBlocks);
         await state.heldMessages.flushHeldWithDraft(answerBlocks);
-      } else if (answerBlocks.length || extraBlocks.length) {
+      } else if (answerBlocks.length || cardExtraBlocks.length) {
         const cwd = resolveCwdForSession(sid) ?? ".";
-        await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...extraBlocks] });
+        await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
       }
     },
     onCancel: async () => {

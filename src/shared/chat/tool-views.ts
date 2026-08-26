@@ -203,16 +203,25 @@ function summaryResolutionHtml(
   resolution: "pending" | "answered" | "skipped" | "timed-out",
   answers: Map<string, string> | null,
   questions: AskQuestion[],
+  extraText?: string,
 ): string {
+  const parts: string[] = [];
   if (resolution === "answered" && answers) {
-    return questions.map((q) => {
+    for (const q of questions) {
       const ans = answers.get(q.question);
-      return ans ? `<span class="question-card-answer-chip">${escapeHtml(truncateForSummary(ans, 40))}</span>` : "";
-    }).join("");
+      if (ans) parts.push(`<span class="question-card-answer-chip">${escapeHtml(truncateForSummary(ans, 40))}</span>`);
+    }
+  } else if (resolution === "skipped") {
+    parts.push(`<span class="question-card-status-pill question-card-status-pill--skipped">Skipped</span>`);
+  } else if (resolution === "timed-out") {
+    parts.push(`<span class="question-card-status-pill question-card-status-pill--timed-out">Timed out</span>`);
   }
-  if (resolution === "skipped") return `<span class="question-card-status-pill question-card-status-pill--skipped">Skipped</span>`;
-  if (resolution === "timed-out") return `<span class="question-card-status-pill question-card-status-pill--timed-out">Timed out</span>`;
-  return "";
+  // A resolved card can carry a note independent of resolution kind. Full
+  // text passed through - CSS truncates via the nested span's ellipsis.
+  if (extraText) {
+    parts.push(`<span class="question-card-extra-chip"><i class="ph ph-pencil-simple"></i><span class="question-card-extra-chip-text">${escapeHtml(extraText)}</span></span>`);
+  }
+  return parts.join("");
 }
 
 /**
@@ -259,14 +268,19 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
   const badge = questions.length > 1 ? `<span class="question-card-badge">${questions.length}</span>` : "";
   // Only a still-actionable question stays expanded.
   const isOpen = resolution === "pending" ? " open" : "";
-  const resolutionInner = summaryResolutionHtml(resolution, answers, questions);
+  const resolutionInner = summaryResolutionHtml(resolution, answers, questions, m.extraText);
   // Omitted entirely (not just empty) so a pending card's summary keeps its
   // single-line layout instead of an empty wrapper row underneath it.
   const resolutionHtml = resolutionInner ? `<span class="question-card-summary-resolution">${resolutionInner}</span>` : "";
   // No degraded-builtin badge here: the daemon stamps it on the prompt payload,
   // not the tool_use input this renders from. The live card carries it instead.
   const summary = `<summary class="question-card-summary"><i class="ph ph-chat-circle-dots"></i><span class="question-card-label">${escapeHtml(truncated)}</span>${badge}<i class="ph ph-caret-down question-card-chevron"></i>${resolutionHtml}</summary>`;
-  return `<details class="question-card-collapsible" data-resolution="${resolution}"${isOpen}>${summary}${cards}</details>`;
+  // Shown only when expanded (inside <details>) - escapeHtml not
+  // renderMarkdown, since this is user-typed prose, not Claude's markdown.
+  const extraHtml = m.extraText
+    ? `<div class="question-card-extra"><div class="question-card-extra-label"><i class="ph ph-pencil-simple"></i>also wrote</div><div class="question-card-extra-text">${escapeHtml(m.extraText)}</div></div>`
+    : "";
+  return `<details class="question-card-collapsible" data-resolution="${resolution}"${isOpen}>${summary}${cards}${extraHtml}</details>`;
 }
 
 /**

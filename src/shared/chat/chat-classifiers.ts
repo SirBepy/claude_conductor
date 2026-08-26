@@ -179,6 +179,11 @@ export interface RenderedMessage {
    *  it (ChatRenderer.updateQuestionProgress). Index-aligned with the parsed
    *  questions in `input`. Never set once `text` is populated (resolved). */
   liveAnswered?: boolean[];
+  /** The user's free-form note typed into the card's own review step (never
+   *  the composer/held-queue), folded in via the <auq-extra/> sentinel once it
+   *  arrives - see chat-question-card.ts's resolvePendingQuestionExtra. Renders
+   *  inside the SAME card (tool-views.ts), never as a separate bubble. */
+  extraText?: string;
   /** Set on tool_result events whose `output` was shortened to a preview by
    *  `read_page` (see types/chat.rs). The row renders a "Load full output"
    *  affordance instead of the preview text; clicking it fetches the real

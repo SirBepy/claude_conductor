@@ -18,7 +18,7 @@ export { isBoundaryMessage, compactionOrdinal, stripStatusToken, detectStatusTok
 // Barrel: eventToRenderedMessage + its extraction helpers moved to
 // chat-event-to-message.ts (see todo 589); re-exported so existing
 // importers keep working unchanged.
-export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, AUQ_SKIPPED_TEXT } from "./chat-event-to-message";
+export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, AUQ_SKIPPED_TEXT, extractAuqExtraText, stripAuqExtraBlock, AUQ_EXTRA_SENTINEL } from "./chat-event-to-message";
 
 const md = new MarkdownIt({
   html: false,

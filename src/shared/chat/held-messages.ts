@@ -12,7 +12,7 @@
 
 import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
-import { AUQ_ANSWER_SENTINEL } from "./chat-transforms";
+import { AUQ_ANSWER_SENTINEL, AUQ_EXTRA_SENTINEL } from "./chat-transforms";
 import { loadAllHeld, saveAllHeld } from "./held-messages-persistence";
 import { HeldMessagesRender } from "./held-messages-render";
 import { HeldDraftSync } from "./held-draft-sync";
@@ -56,19 +56,18 @@ export interface HeldAttach {
  * (none today — images become `<file:…>` text in the composer) are appended
  * after, preserving order.
  *
- * A group that IS an AUQ answer (see chat-transforms.ts's AUQ_ANSWER_SENTINEL,
- * sent as the sole content of the draft by permission-modal/index.ts onSubmit)
- * is kept as its OWN block instead of being joined into the merged prose text:
- * joining it would bury the sentinel mid-string and pollute the folded
- * question-card answer with unrelated held prose (extractAuqAnswerText below
- * finds it regardless of position in the output array). */
+ * A group whose FIRST block is an AUQ sentinel (AUQ_ANSWER_SENTINEL or
+ * AUQ_EXTRA_SENTINEL) stays its own protected block, whole, instead of
+ * joining into the merged prose text - keeping the whole group (not just
+ * block 0) lets an extra-sentinel group carry its attachments along too. */
 export function bundleHeld(items: ContentBlock[][], draftBlocks: ContentBlock[] = []): ContentBlock[] {
   const groups = draftBlocks.length ? [...items, draftBlocks] : items;
   const texts: string[] = [];
   const extras: ContentBlock[] = [];
   for (const g of groups) {
-    if (g.length === 1 && g[0]?.type === "text" && g[0].text.startsWith(AUQ_ANSWER_SENTINEL)) {
-      extras.push(g[0]);
+    const first = g[0];
+    if (first?.type === "text" && (first.text.startsWith(AUQ_ANSWER_SENTINEL) || first.text.startsWith(AUQ_EXTRA_SENTINEL))) {
+      extras.push(...g);
       continue;
     }
     const t = blocksToText(g).trim();

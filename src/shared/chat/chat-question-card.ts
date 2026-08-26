@@ -20,6 +20,15 @@ export function findOpenQuestionIndex(messages: readonly RenderedMessage[]): num
   return -1;
 }
 
+/** Index of the most recent question card, resolved or not - the extra-message
+ *  note can arrive after the card already answered (only one AUQ in flight). */
+export function findLastQuestionIndex(messages: readonly RenderedMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.kind === "question") return i;
+  }
+  return -1;
+}
+
 /** Batch-replay twin of findOpenQuestionIndex, keyed on id (no
  *  RenderedMessage array exists yet at fold time in chat-pagination.ts). */
 export function findNearestOpenQuestionId(cards: { id: string }[], resolved: Set<string>): string | null {
@@ -55,6 +64,16 @@ export function resolvePendingQuestionCard(r: ChatRenderer, answerText: string):
   r.messages[i] = { ...r.messages[i]!, text: answerText };
   r.dirtyIndices.add(i);
   moveMessageToEnd(r, i);
+  return true;
+}
+
+/** Folds a fire-and-forget AUQ extra-message note into its card so it renders
+ *  inside it, not a separate bubble. Matches ANY card, resolved or not. */
+export function resolvePendingQuestionExtra(r: ChatRenderer, extraText: string): boolean {
+  const i = findLastQuestionIndex(r.messages);
+  if (i < 0) return false;
+  r.messages[i] = { ...r.messages[i]!, extraText };
+  r.dirtyIndices.add(i);
   return true;
 }
 

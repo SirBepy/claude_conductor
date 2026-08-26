@@ -26,6 +26,11 @@ const FILE_TOKEN_RE = /<file:(.+?)(?:::(.+?))?>/g;
 export const AUQ_ANSWER_SENTINEL = "<auq-answer/>";
 const AUQ_ANSWER_RE = /<auq-answer\s*\/>/g;
 
+// Sentinel prefixing the card's own "additional message" note - distinct
+// from AUQ_ANSWER_SENTINEL so a queued composer draft never collides with it.
+export const AUQ_EXTRA_SENTINEL = "<auq-extra/>";
+const AUQ_EXTRA_RE = /<auq-extra\s*\/>/g;
+
 /** Carries the "dismissed" substring tool-views.ts's resolution detection already
  *  matches on. Live-only: set from a `question_skipped` notification, never
  *  replayed from history (todo 661). */
@@ -70,6 +75,22 @@ export function extractAuqAnswerText(blocks: ContentBlock[]): string | null {
  *  the sentinel block has been folded into the question card. */
 export function stripAuqAnswerBlock(blocks: ContentBlock[]): ContentBlock[] {
   const idx = blocks.findIndex((b) => b && b.type === "text" && b.text.startsWith(AUQ_ANSWER_SENTINEL));
+  if (idx === -1) return blocks;
+  return blocks.filter((_, i) => i !== idx);
+}
+
+/** The card's own free-form note (sentinel stripped), or null if none.
+ *  Mirrors extractAuqAnswerText but for the review step's own sentinel. */
+export function extractAuqExtraText(blocks: ContentBlock[]): string | null {
+  const b = blocks.find((x) => x && x.type === "text" && x.text.startsWith(AUQ_EXTRA_SENTINEL));
+  if (!b || b.type !== "text") return null;
+  AUQ_EXTRA_RE.lastIndex = 0;
+  return b.text.replace(AUQ_EXTRA_RE, "").trim();
+}
+
+/** Mirrors stripAuqAnswerBlock for the card-note sentinel. */
+export function stripAuqExtraBlock(blocks: ContentBlock[]): ContentBlock[] {
+  const idx = blocks.findIndex((b) => b && b.type === "text" && b.text.startsWith(AUQ_EXTRA_SENTINEL));
   if (idx === -1) return blocks;
   return blocks.filter((_, i) => i !== idx);
 }

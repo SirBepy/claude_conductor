@@ -109,6 +109,61 @@
   white-space: nowrap;
 }
 
+/* The card's own "additional message" note (permission-modal review step),
+   appended after the tool-qa rows inside <details> - only visible expanded.
+   Dashed top border + tinted background sets it apart from the Q/A rows
+   above without a second nested card. */
+.question-card-extra {
+  padding: 8px 9px 9px;
+  border-top: 1px dashed color-mix(in srgb, var(--color-border) 70%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+}
+.question-card-extra-label {
+  text-transform: uppercase;
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+.question-card-extra-label .ph { color: var(--color-primary); }
+/* pre-wrap: this is escaped plain text (not markdown), so line breaks the
+   user typed need CSS to survive - no <br> conversion in JS. */
+.question-card-extra-text {
+  font-size: 0.78rem;
+  color: var(--color-text);
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+/* Collapsed-summary preview chip: reuses the answer chip's row, one more
+   muted/italic chip hinting a note exists. The card's own <details> open/close
+   is the only toggle - no separate expand affordance on the chip itself. */
+.question-card-extra-chip {
+  background: var(--color-surface-3, rgba(255, 255, 255, 0.06));
+  color: var(--color-text-muted);
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-style: italic;
+  max-width: 22ch;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.question-card-extra-chip .ph { font-style: normal; flex-shrink: 0; }
+/* text-overflow:ellipsis on the flex container above doesn't reliably fire
+   with an icon sibling in the box (needs its own overflow context) - the
+   truncating text lives in this nested span instead; do not move the rule
+   back onto .question-card-extra-chip (regression fixed during mockup review). */
+.question-card-extra-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Read-only option labels (inline rendering; interaction is in the modal) */
 .ask-option-label {
   display: inline-block;

@@ -17,12 +17,15 @@ import {
   noiseAssistantLabel,
   extractAuqAnswerText,
   stripAuqAnswerBlock,
+  extractAuqExtraText,
+  stripAuqExtraBlock,
   compactionOrdinal,
   RenderedMessage,
 } from "./chat-transforms";
 import { isRawViewEnabled } from "./message-filter-pref";
 import {
   resolvePendingQuestionCard,
+  resolvePendingQuestionExtra,
   tryHandleQuestionSkipped,
 } from "./chat-question-card";
 import {
@@ -158,10 +161,17 @@ function handleUserMessageEvent(
 
   const auqAnswerText = !isCompact && !isSilent && !isMeta ? extractAuqAnswerText(cleaned) : null;
   const resolvedQuestionCard = auqAnswerText !== null && resolvePendingQuestionCard(r, auqAnswerText);
-  // Held prose bundled alongside the answer (bundleHeld keeps it as its own
-  // block - see held-messages.ts) still needs to reach the transcript as
-  // ordinary content once the sentinel block is folded above.
-  const remainderBlocks = resolvedQuestionCard ? stripAuqAnswerBlock(cleaned) : cleaned;
+  // Independent of the answer fold above - the card's own extra-message note
+  // can ride the same event (a distinct block) or arrive as its own later
+  // event (the in-band `delivered` path resolves the answer from the
+  // tool_result alone, so the note is the ONLY sentinel in its message).
+  const auqExtraText = !isCompact && !isSilent && !isMeta ? extractAuqExtraText(cleaned) : null;
+  const resolvedQuestionExtra = auqExtraText !== null && resolvePendingQuestionExtra(r, auqExtraText);
+  // Held prose bundled alongside either sentinel (bundleHeld keeps them as
+  // their own blocks - see held-messages.ts) still needs to reach the
+  // transcript as ordinary content once the sentinel block(s) are folded above.
+  let remainderBlocks = resolvedQuestionCard ? stripAuqAnswerBlock(cleaned) : cleaned;
+  if (resolvedQuestionExtra) remainderBlocks = stripAuqExtraBlock(remainderBlocks);
   enqueueTurnClose(r);
   r.setActivity(null);
   r.setTurnStatus(null);
@@ -198,10 +208,13 @@ function handleUserMessageEvent(
       detail: meta.detail,
       streakCount: 1,
     });
-  } else if (resolvedQuestionCard) {
+  } else if (resolvedQuestionCard || resolvedQuestionExtra) {
     // Folded into the question card above instead of a separate bubble -
     // except any held prose that rode along in the same bundle, which
-    // still renders as a normal user message (must not be swallowed).
+    // still renders as a normal user message (must not be swallowed). Uses
+    // remainderBlocks (both sentinels already stripped), never the raw
+    // `cleaned` - an extra-only event (resolvedQuestionCard false) would
+    // otherwise leak its sentinel text into this bubble.
     if (remainderBlocks.length > 0) {
       r.messages.push({ kind: "user", content: remainderBlocks, ts, authorSessionId: ev.author_session_id ?? null });
     }
