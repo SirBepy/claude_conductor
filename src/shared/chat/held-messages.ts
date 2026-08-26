@@ -193,9 +193,9 @@ export class HeldMessages {
    *  The id is local until add_held_message resolves and swaps it for the
    *  server-assigned one, so two surfaces staging independently can't
    *  collide - see removeItem for the race guard against that swap. */
-  stage(blocks: ContentBlock[]): void {
+  stage(blocks: ContentBlock[]): boolean {
     const sid = this.sid;
-    if (!sid) return;
+    if (!sid) return false;
     const localId = this.nextId++;
     const list = this.map.get(sid) ?? [];
     list.push({ id: localId, blocks });
@@ -212,6 +212,7 @@ export class HeldMessages {
         if (this.attached?.sessionId === sid) this.render.renderChip();
       }
     });
+    return true;
   }
 
   // ---- flush paths -------------------------------------------------------
@@ -258,11 +259,12 @@ export class HeldMessages {
 
   /** Composer routed a normal (not-busy) send here because held items exist:
    * bundle the existing held set with this draft into one message. The composer
-   * clears itself after calling. */
-  async flushHeldWithDraft(draftBlocks: ContentBlock[]): Promise<void> {
+   * clears itself after calling, and puts the draft back when this returns
+   * false - without that, an unattached controller ate the draft in silence. */
+  async flushHeldWithDraft(draftBlocks: ContentBlock[]): Promise<boolean> {
     const a = this.attached;
     const sid = this.sid;
-    if (!a || !sid) return;
+    if (!a || !sid) return false;
     const items = this.itemsForActive();
     const bundle = bundleHeld(items.map((i) => i.blocks), draftBlocks);
     this.map.set(sid, []);
@@ -272,8 +274,9 @@ export class HeldMessages {
     this.clearDeferRetry();
     this.render.reset();
     a.onChange();
-    if (bundle.length === 0) return;
+    if (bundle.length === 0) return true;
     await a.send(bundle);
+    return true;
   }
 
   /** Flush the held set of a BACKGROUNDED (not-attached) session. The mounted

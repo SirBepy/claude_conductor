@@ -578,6 +578,44 @@ export class ChatRenderer {
     await bulkLoadEvents(this, events, opts);
   }
 
+  /** Flag the last user bubble as never-delivered and hang a Retry off it.
+   * Direct DOM, like injectCta below. The bubble stays deliberately: once the
+   * composer clears, it is the only on-screen copy of what the user typed, and
+   * Retry re-sends exactly those blocks. */
+  markLastUserSendFailed(detail: string, retry: () => Promise<void>): void {
+    const last = [...this.container.querySelectorAll<HTMLElement>(".msg.user")].at(-1);
+    if (!last || last.querySelector(".send-failed-strip")) return;
+    last.classList.add("send-failed");
+
+    const strip = document.createElement("div");
+    strip.className = "send-failed-strip";
+
+    const pill = document.createElement("span");
+    pill.className = "chat-pill failed-chip";
+    pill.title = detail;
+    pill.innerHTML = `<i class="ph ph-wifi-slash"></i>Failed to send`;
+
+    const btn = document.createElement("button");
+    btn.className = "api-retry-btn";
+    btn.innerHTML = `<i class="ph ph-arrow-clockwise"></i>Retry`;
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      retry()
+        .then(() => {
+          last.classList.remove("send-failed");
+          strip.remove();
+        })
+        .catch((err) => {
+          console.error("[chat-renderer] retry send failed", err);
+          btn.disabled = false;
+          pill.title = String(err);
+        });
+    });
+
+    strip.append(pill, btn);
+    last.appendChild(strip);
+  }
+
   /** Append an action button to the last assistant message bubble. */
   injectCta(actionId: string): void {
     const action = getCta(actionId);

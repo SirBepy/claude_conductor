@@ -59,18 +59,21 @@ export function mountComposer(
     // an explicit signal. The frontend no longer watches this turn for it.
     const cwd = String(sess.cwd ?? ".");
 
+    const attempt = (): Promise<void> => invoke<void>("send_message", { sessionId, cwd, blocks });
     try {
-      await invoke<void>("send_message", { sessionId, cwd, blocks });
+      await attempt();
     } catch (err) {
       console.error("[sessions] send_message failed", err);
-      // The optimistic bubble above claimed the send succeeded; roll it back
-      // so a genuinely failed send doesn't keep looking like it went through.
-      sessionEvents.removeSynthetic(sessionId, optimisticEvent);
-      if (state.renderer && state.renderer.currentSessionId() === sessionId) {
-        // The failed send never started a turn, so this session is not busy
-        // from it - but check live rather than assume, in case another turn
-        // is genuinely still in flight.
-        await state.renderer.loadFromStore(cwd, { resumeLiveTicking: isCurrentSessionBusy() });
+      const onScreen = state.renderer?.currentSessionId() === sessionId;
+      if (onScreen) {
+        // Keep the optimistic bubble and mark it: after clearComposer() it is
+        // the only surviving copy of what the user typed, and Retry re-sends
+        // exactly these blocks. A toast alone loses the text on dismiss.
+        state.renderer?.markLastUserSendFailed(String(err), attempt);
+      } else {
+        // Nothing on screen to mark, so the bubble would just linger looking
+        // sent. Roll it back; sent-outbox.ts still holds the text for Ctrl+Z.
+        sessionEvents.removeSynthetic(sessionId, optimisticEvent);
       }
       showToast(`Send failed: ${err}`);
     }
@@ -100,10 +103,10 @@ export function mountComposer(
       const inst = state.sessions.find((s) => s.session_id === sessionId);
       return !!inst?.frozen;
     },
-    onStage: (blocks) => state.heldMessages?.stage(blocks),
+    onStage: (blocks) => state.heldMessages?.stage(blocks) ?? false,
     hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
     popLastHeld: () => state.heldMessages?.popLastForActive() ?? null,
-    flushHeldWithDraft: (draftBlocks) => { void state.heldMessages?.flushHeldWithDraft(draftBlocks); },
+    flushHeldWithDraft: (draftBlocks) => state.heldMessages?.flushHeldWithDraft(draftBlocks) ?? false,
     sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
     onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
     getNextTokenReset: async () => {

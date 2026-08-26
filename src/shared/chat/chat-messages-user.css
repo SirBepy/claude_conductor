@@ -114,3 +114,18 @@
   cursor: pointer;
 }
 .msg-clamp-toggle:hover { text-decoration: underline; }
+
+/* Never-delivered bubble (ChatRenderer.markLastUserSendFailed). The text stays
+ * put and readable - it is the user's only copy - so the failure reads as a
+ * danger-tinted border plus the strip below, never a dimmed-out row. */
+.msg.user.send-failed {
+  border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface-alt));
+}
+.send-failed-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.send-failed-strip .api-retry-btn { margin-top: 0; }

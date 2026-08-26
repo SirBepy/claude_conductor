@@ -22,6 +22,7 @@ import "./builtins/register";
 import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
+import { recordSent, popLastSent, moveSentOutbox } from "./sent-outbox";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { isMobileViewport } from "../mobile-viewport";
@@ -46,15 +47,15 @@ export interface ComposerOptions {
    * opens a hold-vs-send-now popover instead of sending directly. */
   isFrozen?: () => boolean;
   /** Stage the built blocks as a held message (while busy, or frozen-hold). */
-  onStage?: (blocks: ContentBlock[]) => void;
+  onStage?: (blocks: ContentBlock[]) => boolean | void;
   /** True when a held set exists for the active session. When not busy but
    * held items exist, a normal send bundles them via flushHeldWithDraft. */
   hasHeld?: () => boolean;
   /** Ctrl+Z pop-back: pull the last-staged held message off the queue. */
   popLastHeld?: () => ContentBlock[] | null;
   /** Flush the held set together with the current draft as one message. The
-   * composer clears itself after calling. */
-  flushHeldWithDraft?: (draftBlocks: ContentBlock[]) => void;
+   * composer clears itself after calling, and restores the draft on false. */
+  flushHeldWithDraft?: (draftBlocks: ContentBlock[]) => Promise<boolean | void> | boolean | void;
   /** Interrupt + flush the held set now (same as the chip's "Send now").
    * Ctrl+Enter on an empty draft routes here instead of a normal send. */
   sendQueuedNow?: () => Promise<void> | void;
@@ -208,6 +209,7 @@ export class Composer {
       if (prevStored && !loadDraft(id)) saveDraft(id, prevStored);
       clearDraft(prevId!);
       this.att.migrateSession(prevId!, id);
+      moveSentOutbox(prevId!, id);
     }
     this.sessionId = id;
     this.disabled = !!opts.readOnly;
@@ -509,14 +511,15 @@ export class Composer {
     void this.send();
   }
 
-  /** Ctrl/Cmd+Z: pop the last queued message back into the draft. Fires when
-   *  empty, or mid-chain to walk the queue LIFO. Declines when nothing's
-   *  queued, handing the keystroke back to native text-undo. */
+  /** Ctrl/Cmd+Z: pop the last queued message back into the draft, then the
+   *  sent-outbox. Both empty declines, handing back to native text-undo. */
   private handleUndoQueued(): boolean {
     if (!this.isDraftEmpty() && !this.undoChainActive) return false;
     const blocks = this.opts.popLastHeld?.();
-    if (!blocks) return false;
-    const popped = blocksToText(blocks);
+    const popped = blocks
+      ? blocksToText(blocks)
+      : (this.sessionId ? popLastSent(this.sessionId) : null);
+    if (popped === null) return false;
     const rest = this.undoChainActive ? (this.textarea?.value ?? "") : "";
     this.setDraftText(rest ? `${popped}\n\n${rest}` : popped);
     this.undoChainActive = true;
@@ -547,6 +550,10 @@ export class Composer {
       this.sending = false;
       return;
     }
+
+    // Every branch below clears the box, and several can end without the text
+    // reaching the daemon. Ctrl+Z walks this back even when nothing surfaced.
+    if (text && this.sessionId) recordSent(this.sessionId, text);
 
     // Account is out of usage: schedule the draft for the reset instead of
     // sending (or staging) it now. Skips the schedule-picker popover - the
@@ -610,7 +617,11 @@ export class Composer {
     // Builtins above still run immediately; only real messages are held.
     if (this.opts.isBusy?.()) {
       if (empty) return;
-      this.opts.onStage?.(this.buildBlocks(text));
+      // Staging into an unattached controller no-ops, so clear only once taken.
+      if (this.opts.onStage?.(this.buildBlocks(text)) === false) {
+        this.showNotice("Couldn't queue that - your message is still here.");
+        return;
+      }
       this.clearComposer();
       return;
     }
@@ -619,8 +630,14 @@ export class Composer {
     // with this draft into ONE message (handled by the held controller).
     if (this.opts.hasHeld?.()) {
       const draftBlocks = empty ? [] : this.buildBlocks(text);
+      const savedHeldAttachments = this.att.attachments;
+      const savedHeldPastedBlocks = this.att.pastedBlocks;
       this.clearComposer();
-      this.opts.flushHeldWithDraft?.(draftBlocks);
+      void Promise.resolve(this.opts.flushHeldWithDraft?.(draftBlocks)).then((ok) => {
+        if (ok !== false) return;
+        this.restoreDraft(text, savedHeldAttachments, savedHeldPastedBlocks);
+        this.showNotice("Couldn't send that - your message is still here.");
+      });
       return;
     }
 

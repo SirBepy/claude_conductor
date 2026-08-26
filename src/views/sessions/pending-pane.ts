@@ -177,10 +177,14 @@ export async function renderPendingPane(
         content: blocks,
         timestamp: BigInt(Date.now()),
       } as ChatEvent);
+      const attempt = (): Promise<void> =>
+        invoke<void>("send_message", { sessionId: target, cwd: project.path, blocks });
       try {
-        await invoke<void>("send_message", { sessionId: target, cwd: project.path, blocks });
+        await attempt();
       } catch (err) {
         console.error("[sessions] held flush send failed", err);
+        // The queue cleared before this call, so the bubble is the only copy.
+        state.renderer?.markLastUserSendFailed(String(err), attempt);
         showToast(`Send failed: ${err}`);
       }
     };
@@ -197,10 +201,10 @@ export async function renderPendingPane(
       // stages (isBusy is false until firstMessageSent), so it still starts the
       // session via onSend below.
       isBusy: () => isCurrentSessionBusy(),
-      onStage: (blocks) => state.heldMessages?.stage(blocks),
+      onStage: (blocks) => state.heldMessages?.stage(blocks) ?? false,
       hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
       popLastHeld: () => state.heldMessages?.popLastForActive() ?? null,
-      flushHeldWithDraft: (draftBlocks) => { void state.heldMessages?.flushHeldWithDraft(draftBlocks); },
+      flushHeldWithDraft: (draftBlocks) => state.heldMessages?.flushHeldWithDraft(draftBlocks) ?? false,
       sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
       onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
       // Phase 3: schedule a follow-up. The KIND is decided at scheduling time,
@@ -251,11 +255,12 @@ export async function renderPendingPane(
         // Synthetic push: claude -p never echoes the prompt on stdout, so
         // without this the user wouldn't see their typed text in the chat.
         const targetSid = state.renderer?.currentSessionId() ?? placeholderId;
-        sessionEvents.pushSynthetic(targetSid, {
+        const optimisticEvent = {
           type: "user_message",
           content: blocks,
           timestamp: BigInt(Date.now()),
-        } as ChatEvent);
+        } as ChatEvent;
+        sessionEvents.pushSynthetic(targetSid, optimisticEvent);
 
         if (!started) {
           started = true;
@@ -317,6 +322,10 @@ export async function renderPendingPane(
             }
             rebuildSidebar();
             showToast(`Failed to start session: ${err}`);
+            // The row is back to a draft, so put the text back in the composer
+            // to match: rethrowing is what triggers its restoreDraft.
+            sessionEvents.removeSynthetic(targetSid, optimisticEvent);
+            throw err;
           }
           return;
         }
@@ -324,12 +333,18 @@ export async function renderPendingPane(
         const realId = state.pendingNewSession?.realId ?? state.selectedId;
         if (!realId || realId === placeholderId) {
           showToast("Session is still starting; please wait for the first response.");
-          return;
+          // Throw, don't return: the composer restores the draft only on a
+          // rejection. Drop the bubble too, or the restore reads as a dupe.
+          sessionEvents.removeSynthetic(targetSid, optimisticEvent);
+          throw new Error("session not started yet");
         }
+        const attempt = (): Promise<void> =>
+          invoke<void>("send_message", { sessionId: realId, cwd: project.path, blocks });
         try {
-          await invoke<void>("send_message", { sessionId: realId, cwd: project.path, blocks });
+          await attempt();
         } catch (err) {
           console.error("[sessions] send_message failed", err);
+          state.renderer?.markLastUserSendFailed(String(err), attempt);
           showToast(`Send failed: ${err}`);
         }
       },

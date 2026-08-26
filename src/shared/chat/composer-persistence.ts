@@ -1,4 +1,5 @@
 import { clearComposerDraft } from "./session-draft-sync";
+import { clearSentOutbox, moveSentOutbox } from "./sent-outbox";
 
 const DRAFT_PREFIX = "chat-draft:v1:";
 
@@ -78,6 +79,7 @@ export function clearAttachmentsMeta(sessionId: string): void {
 export function discardComposerDraft(sessionId: string): void {
   clearDraft(sessionId);
   clearAttachmentsMeta(sessionId);
+  clearSentOutbox(sessionId);
   void clearComposerDraft(sessionId).catch((e) => console.warn("[composer-sync] discard clear failed:", e));
 }
 
@@ -90,4 +92,5 @@ export function moveComposerDraft(fromId: string, toId: string): void {
   const metas = loadAttachmentsMeta(fromId);
   if (metas.length) saveAttachmentsMeta(toId, metas);
   clearAttachmentsMeta(fromId);
+  moveSentOutbox(fromId, toId);
 }
