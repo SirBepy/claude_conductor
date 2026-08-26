@@ -159,6 +159,15 @@ function handleUserMessageEvent(
     return { touched: true, coalesce: false };
   }
 
+  // A peer's relayed message is not a turn of its own. Everything between two
+  // of the USER's own messages is one block, so an authored message stays in
+  // the open turn and folds into its chip line (foldAuthoredIntoStrip) instead
+  // of rotating the footer and splitting the run in half.
+  if (!isCompact && !isSilent && ev.author_session_id && r.activeTurnChipKey !== null) {
+    r.messages.push({ kind: "user", content: cleaned, ts, authorSessionId: ev.author_session_id });
+    return { touched: true, coalesce: false };
+  }
+
   const auqAnswerText = !isCompact && !isSilent && !isMeta ? extractAuqAnswerText(cleaned) : null;
   const resolvedQuestionCard = auqAnswerText !== null && resolvePendingQuestionCard(r, auqAnswerText);
   // Independent of the answer fold above - the card's own extra-message note
@@ -221,7 +230,12 @@ function handleUserMessageEvent(
   } else {
     r.messages.push({ kind: "user", content: cleaned, ts, authorSessionId: ev.author_session_id ?? null });
   }
-  r.activeTurnStart = r.messages.length;
+  // A peer message that had to open a turn (nothing was live yet) still belongs
+  // on that turn's chip line, so the range keeps it - unlike the user's own
+  // opener, which renders as the bubble above the footer.
+  const authoredOpener = !isCompact && !isSilent && !!ev.author_session_id
+    && (r.messages[r.messages.length - 1] as RenderedMessage | undefined)?.kind === "user";
+  r.activeTurnStart = authoredOpener ? r.messages.length - 1 : r.messages.length;
   return { touched: true, coalesce: false };
 }
 

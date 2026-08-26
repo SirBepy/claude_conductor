@@ -6,6 +6,7 @@ import type { RenderedMessage } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { CUSTOM_VIEW_TOOLS, renderCustomToolView } from "./tool-views";
 import { collectScreenshotShots, mountScreenshotBlock } from "./screenshot-row";
+import { foldAuthoredIntoStrip } from "./author-message-group";
 
 /** Per-tool-type state for one turn's strip. */
 export interface ToolGroup {
@@ -440,6 +441,8 @@ export function groupToolRange(
   // originating tool_use always folds - and thus creates the main strip -
   // before its tool_result can arrive).
   // ------------------------------------------------------------------
+  if (stripHost) foldAuthoredIntoStrip(messages, messageEls, start, end, stripHost);
+
   if (stripHost && strip) {
     const shotsByKey = collectScreenshotShots(messages, start, end);
     for (const [shotKey, shots] of shotsByKey) {
@@ -447,12 +450,9 @@ export function groupToolRange(
       let group = groups.get(shotKey);
       if (!group) {
         // Every call for this key was nested under a subagent, so no
-        // top-level chip exists yet - create one purely to host the
-        // screenshot-block header. Its bucket stays empty (that tool's raw
-        // action log lives under the subagent's own chip, same as any other
-        // nested call); its count is set to the screenshot count instead of
-        // the usual call-count semantics, since it never sees a top-level
-        // tool_use to bump it.
+        // top-level chip exists yet. Its bucket stays empty (that tool's raw
+        // action log lives under the subagent's own chip) and its count is the
+        // screenshot count, since no top-level tool_use ever bumps it.
         group = addGroupToStrip(shotKey, strip, panel!);
         groups.set(shotKey, group);
         group.chip.dataset.count = String(shots.length);
@@ -479,8 +479,21 @@ function recoverGroupsFromDom(
   messageEls: HTMLElement[],
   start: number,
   end: number,
+  stripHost?: HTMLElement | null,
 ): Map<string, ToolGroup> {
   const groups = new Map<string, ToolGroup>();
+  // Chip-driven pass first: a custom-view tool deletes its rows, so the
+  // row-driven pass below can't find its group and minted a second chip.
+  const hostStrip = stripHost?.querySelector<HTMLElement>(":scope > .tool-strip");
+  const hostPanel = hostStrip?.nextElementSibling;
+  if (hostStrip && hostPanel instanceof HTMLElement && hostPanel.classList.contains("tool-strip-panel")) {
+    for (const bucket of hostPanel.querySelectorAll<HTMLElement>(":scope > .tool-strip-group")) {
+      const key = bucket.dataset.tool;
+      if (!key || groups.has(key)) continue;
+      const chip = hostStrip.querySelector<HTMLElement>(`:scope > .tool-chip[data-tool="${key}"]`);
+      if (chip) groups.set(key, { chip, bucket, strip: hostStrip, panel: hostPanel });
+    }
+  }
   for (let i = start; i < end; i++) {
     const el = messageEls[i];
     if (!el || el.dataset.toolGrouped !== "1") continue;
@@ -492,11 +505,7 @@ function recoverGroupsFromDom(
     // Skip nested strips (those whose .tool-strip is itself inside a .tool-strip-group).
     if (strip.closest(".tool-strip-group")) continue;
     if (groups.has(key)) continue;
-    // A screenshot-tool's chip may have been relocated out of `strip` into
-    // its screenshot-block's header (mountScreenshotBlock) - check there too.
-    const chip = strip.querySelector<HTMLElement>(`.tool-chip[data-tool="${key}"]`)
-      ?? strip.parentElement?.querySelector<HTMLElement>(`:scope > .screenshot-block[data-tool="${key}"] .tool-chip`)
-      ?? null;
+    const chip = strip.querySelector<HTMLElement>(`.tool-chip[data-tool="${key}"]`);
     if (!chip) continue;
     groups.set(key, { chip, bucket, strip, panel });
   }
@@ -518,5 +527,6 @@ export function applyTurnCollapse(
 ): void {
   if (end <= start) return;
 
-  groupToolRange(messages, messageEls, start, end, recoverGroupsFromDom(messageEls, start, end), stripHost);
+  const recovered = recoverGroupsFromDom(messageEls, start, end, stripHost);
+  groupToolRange(messages, messageEls, start, end, recovered, stripHost);
 }

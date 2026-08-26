@@ -1,12 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
-// Todo 682/follow-up: consecutive session-relayed ("authored") user messages
-// collapse into one real .tool-chip (author-message-group.ts) instead of
-// rendering as their own bubbles. Drives the real pipeline (sessions view +
-// load_history_page), not a raw renderMessage() string assert.
+// Todo 682/follow-up: session-relayed ("authored") messages fold into one
+// .tool-chip on their turn's shared chip line, never their own bubbles. A peer
+// message does not rotate the turn, so it is one chip per run between two of
+// Joe's own messages. Real pipeline, not a renderMessage() string assert.
 
 const SHOTS = ".for_bepy/screenshots/_specs";
+const PEER_CHIP = '#session-pane .session-messages .turn-footer .tool-chip[data-tool="peer-msgs"]';
 const FAKE_ICON_B64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==";
 
 function historyPage(): { events: unknown[]; oldest_seq: number; newest_seq: number; has_more: boolean } {
@@ -45,22 +46,23 @@ async function mountChat(page: Page): Promise<void> {
     },
   });
   await page.locator('#sessions-list li[data-session-id="s1"]').click();
-  await page.locator("#session-pane .session-messages .author-group-host").first().waitFor();
+  await page.locator(PEER_CHIP).first().waitFor();
 }
 
 test("two different peer sessions back to back fold into one chip", async ({ page }) => {
   await mountChat(page);
 
-  const hosts = page.locator("#session-pane .session-messages .author-group-host");
-  await expect(hosts).toHaveCount(3); // [jarvis+scout ×2], [jarvis ×1], [ghost ×1] - each run separated by a Joe message
+  const chips = page.locator(PEER_CHIP);
+  await expect(chips).toHaveCount(3); // [jarvis+scout ×2], [jarvis ×1], [ghost ×1] - each run separated by a Joe message
 
-  const firstChip = hosts.first().locator(".tool-chip");
+  const firstChip = chips.first();
   await expect(firstChip.locator(".tool-chip-label")).toHaveText("jarvis-home & scout-worker");
   await expect(firstChip.locator(".tool-chip-count")).toHaveText("×2");
   await expect(firstChip.locator(".author-avatar")).toHaveCount(2);
 
   // Panel starts closed.
-  const panel = hosts.first().locator(".tool-strip-panel");
+  const footer = page.locator("#session-pane .session-messages .turn-footer").first();
+  const panel = footer.locator(".tool-strip-panel");
   await expect(panel).toBeHidden();
   await firstChip.click();
   await expect(panel).toBeVisible();
@@ -72,7 +74,7 @@ test("two different peer sessions back to back fold into one chip", async ({ pag
   await expect(rows.nth(1).locator(".author-group-row-name")).toHaveText("scout-worker");
   await expect(rows.nth(1).locator(".author-group-row-text")).toHaveText("found the root cause");
 
-  await hosts.first().screenshot({ path: `${SHOTS}/author-message-group.png` });
+  await footer.screenshot({ path: `${SHOTS}/author-message-group.png` });
 });
 
 test("a message Joe typed himself breaks the run and renders no chip", async ({ page }) => {
@@ -84,8 +86,7 @@ test("a message Joe typed himself breaks the run and renders no chip", async ({ 
 
   // The lone post-interruption Jarvis message gets its OWN chip, not folded
   // into the first group.
-  const hosts = page.locator("#session-pane .session-messages .author-group-host");
-  const secondChip = hosts.nth(1).locator(".tool-chip");
+  const secondChip = page.locator(PEER_CHIP).nth(1);
   await expect(secondChip.locator(".tool-chip-label")).toHaveText("jarvis-home");
   await expect(secondChip.locator(".tool-chip-count")).toHaveCount(0); // singular - no ×N suffix
 });
@@ -93,10 +94,9 @@ test("a message Joe typed himself breaks the run and renders no chip", async ({ 
 test("an author id that resolves to nothing still renders a chip, never a broken row", async ({ page }) => {
   await mountChat(page);
 
-  const hosts = page.locator("#session-pane .session-messages .author-group-host");
-  const ghostChip = hosts.last().locator(".tool-chip");
+  const ghostChip = page.locator(PEER_CHIP).last();
   await expect(ghostChip.locator(".tool-chip-label")).toHaveText("peer session");
   await expect(ghostChip.locator(".author-avatar i.ph-robot")).toHaveCount(1);
   await expect(ghostChip.locator("img.char-avatar")).toHaveCount(0);
-  await expect(hosts.last()).toBeVisible();
+  await expect(ghostChip).toBeVisible();
 });

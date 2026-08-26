@@ -148,9 +148,9 @@ function paintScreenshotRow(row: HTMLElement, shots: ScreenshotShot[]): void {
 
 /**
  * Mount or refresh the always-visible screenshot block for one canonical tool
- * key within a turn: a small header (title + the tool's real chip, relocated
- * here from the main strip) over a divider, then the horizontally-scrolling
- * thumbnail row. Idempotent: safe to call every flush as more screenshots
+ * key within a turn: a small title over a divider, then the horizontally-
+ * scrolling thumbnail row, mounted under the turn's chip line.
+ * Idempotent: safe to call every flush as more screenshots
  * stream in; the row only repaints (and its scroll position resets to the
  * start) when the shot count actually changed, so an unrelated flush never
  * disturbs an in-progress scroll position.
@@ -180,16 +180,12 @@ export function mountScreenshotBlock(
     block.appendChild(divider);
     block.appendChild(row);
   }
-  // Keep the block immediately before the shared main strip, so it reads as
-  // "replacing" the relocated chip's old position (screenshot-block, then
-  // whatever other tools' chips remain, then the shared accordion panel).
-  if (block.parentElement !== stripHost || block.nextElementSibling !== group.strip) {
-    stripHost.insertBefore(block, group.strip);
+  // Below the chip line and its accordion, never above: the strip is the one
+  // row every chip lives on, and the thumbnails read as that line's overflow.
+  const anchor = group.panel.nextElementSibling;
+  if (block.parentElement !== stripHost || block.previousElementSibling !== group.panel) {
+    stripHost.insertBefore(block, anchor);
   }
-  // Relocate the tool's real chip into the header (idempotent DOM move) so it
-  // keeps its normal label/count/click-to-toggle behavior, just repositioned.
-  const header = block.querySelector<HTMLElement>(".screenshot-block-header")!;
-  if (group.chip.parentElement !== header) header.appendChild(group.chip);
 
   if (block.dataset.shotCount === String(shots.length)) return;
   block.dataset.shotCount = String(shots.length);

@@ -2,9 +2,9 @@
 
 /* ── Screenshot block (turn-collapse.ts's mountScreenshotBlock): an
    always-visible thumbnail row for a tool's image results, replacing the
-   click-to-expand accordion for screenshots specifically. Header: title left,
-   the tool's real (relocated) .tool-chip floated right over a divider, then
-   a CSS-native horizontally-scrolling thumbnail row (screenshot-row.ts). ── */
+   click-to-expand accordion for screenshots specifically. Sits under the
+   turn's chip line: a title over a divider, then a CSS-native horizontally-
+   scrolling thumbnail row (screenshot-row.ts). ── */
 
 .screenshot-block {
   margin: 2px 0 4px;
@@ -17,7 +17,6 @@
 .screenshot-block-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 2px 2px 7px;
 }
@@ -28,12 +27,6 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
-}
-
-/* The relocated tool chip: same real .tool-chip look, just floated right in
-   the header instead of sitting in its own .tool-strip row. */
-.screenshot-block-header .tool-chip {
-  margin: 0;
 }
 
 .screenshot-block-divider {

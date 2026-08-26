@@ -143,15 +143,7 @@ export function createHandleToolChipClick(_renderer: ChatRenderer): (e: MouseEve
   return (e: MouseEvent): void => {
     const chip = (e.target as HTMLElement).closest<HTMLElement>(".tool-chip");
     if (!chip) return;
-    let strip = chip.closest<HTMLElement>(".tool-strip");
-    if (!strip) {
-      // Chip relocated into a screenshot-block's header (turn-collapse.ts's
-      // mountScreenshotBlock, for a tool with image results): resolve the
-      // shared top-level .tool-strip via the block's host instead - there is
-      // exactly one main strip+panel pair per turn footer / stripHost.
-      const block = chip.closest<HTMLElement>(".screenshot-block");
-      strip = block?.parentElement?.querySelector<HTMLElement>(":scope > .tool-strip") ?? null;
-    }
+    const strip = chip.closest<HTMLElement>(".tool-strip");
     const panel = strip?.nextElementSibling as HTMLElement | null;
     if (!strip || !panel?.classList.contains("tool-strip-panel")) return;
 
@@ -160,12 +152,8 @@ export function createHandleToolChipClick(_renderer: ChatRenderer): (e: MouseEve
 
     // Scope to DIRECT-child chips/groups so a click at one nesting level never
     // toggles a deeper level's chips/buckets (3-level: Subagent > subagent >
-    // tool). A relocated screenshot-block chip isn't a .tool-strip child, so
-    // it's cleared via the block's own host lookup alongside the strip's chips.
+    // tool).
     strip.querySelectorAll<HTMLElement>(":scope > .tool-chip").forEach(c => c.classList.remove("tool-chip--active"));
-    strip.parentElement
-      ?.querySelectorAll<HTMLElement>(":scope > .screenshot-block > .screenshot-block-header > .tool-chip")
-      .forEach(c => c.classList.remove("tool-chip--active"));
     for (const grp of panel.querySelectorAll<HTMLElement>(":scope > .tool-strip-group")) {
       grp.hidden = true;
     }

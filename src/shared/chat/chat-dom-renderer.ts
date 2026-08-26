@@ -11,7 +11,6 @@ import { hydrateAttachments } from "./attachment-hydrator";
 import { toolSummary } from "./tool-meta";
 import { applyTurnCollapse, groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
-import { groupAuthoredMessages } from "./author-message-group";
 import { renderQuestionCardHtml } from "./tool-views";
 import { type TurnUsageTotals } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";
@@ -101,10 +100,7 @@ export function flushRender(r: ChatRenderer): void {
     wrapBlockquotes(el);
     highlightInlineCode(el);
   }
-  if (appendedAny) {
-    clampUserMessages(r.messages, r.messageEls);
-    groupAuthoredMessages(r.messages, r.messageEls);
-  }
+  if (appendedAny) clampUserMessages(r.messages, r.messageEls);
 }
 
 /** The active turn's history-timestamp span (duration fallback), or 0. */
@@ -212,7 +208,8 @@ export function foldClosedRange(
     // no foldable tool rows, no meta chip) - an empty box helps nobody.
     const hasToolRows = r.messages
       .slice(start, end)
-      .some((m) => m.kind === "tool_use" || m.kind === "tool_result");
+      .some((m) => m.kind === "tool_use" || m.kind === "tool_result"
+        || (m.kind === "user" && !!m.authorSessionId));
     if (!totals && !hasToolRows && !metaRow) {
       applyTurnCollapse(r.messages, r.messageEls, start, end, null);
       return;
@@ -317,17 +314,9 @@ export function applyRunningHighlight(r: ChatRenderer): void {
     (c): c is HTMLElement => c instanceof HTMLElement && c.classList.contains("tool-strip"),
   );
   if (!strip) return;
-  // Top-level chips can live in either the strip itself OR (for a tool with
-  // image results) a screenshot-block's header, where turn-collapse.ts's
-  // mountScreenshotBlock relocates the chip - still "top-level" for pulsing.
   const topChips = [...strip.children].filter(
     (c): c is HTMLElement => c instanceof HTMLElement && c.classList.contains("tool-chip"),
   );
-  for (const block of footer.children) {
-    if (!(block instanceof HTMLElement) || !block.classList.contains("screenshot-block")) continue;
-    const header = block.querySelector<HTMLElement>(":scope > .screenshot-block-header > .tool-chip");
-    if (header) topChips.push(header);
-  }
   for (const node of topChips) {
     const tool = node.dataset.tool;
     const running = !!tool && tool === r.activityToolCanon;

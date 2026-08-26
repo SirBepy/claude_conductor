@@ -3,13 +3,24 @@
 
 /* ── Per-turn footer: meta row (tokens + time) above the tool chip strip ── */
 
-/* Plain two-row block, no card chrome (user explicitly does not want a box):
-   row 1 = meta chips (tokens + time), row 2 = the clickable tool strip. */
+/* One wrapping line of chips, no card chrome (user explicitly does not want a
+   box): tokens, time and every tool chip flow together and wrap as one band.
+   Full-width members (accordion, screenshots, progress, checklist) break the
+   line below it via flex-basis:100%. */
 .turn-footer {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin: 4px 0 14px;
+}
+
+.turn-footer > .tool-strip-panel,
+.turn-footer > .screenshot-block,
+.turn-footer > .turn-progress,
+.turn-footer > .todo-checklist {
+  flex-basis: 100%;
+  width: 100%;
 }
 
 /* A turn with no usage and no tools leaves its footer empty - hide the box. */

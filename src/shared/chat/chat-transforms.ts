@@ -275,7 +275,7 @@ export function renderMessage(m: RenderedMessage): string {
       if (!m.authorSessionId) {
         return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;
       }
-      // Bookkeeping-only row, like the meta-marker above: groupAuthoredMessages
+      // Bookkeeping-only row, like the meta-marker above: foldAuthoredIntoStrip
       // (author-message-group.ts) merges consecutive authored rows into one
       // real tool-chip after render, so this placeholder never gets shown.
       return `<div class="msg user author-marker" style="display:none"></div>`;

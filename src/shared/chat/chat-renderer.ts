@@ -8,7 +8,6 @@ import { type ToolTally } from "./tool-meta";
 import { ToolTallyState } from "./tool-tally-state";
 import { handleCopyClick, handleSlashClick, handleAttachmentClick, handlePastedLogClick, handleAuqAnswerClick, handleTableFullscreen, handlePrPreviewClick } from "./chat-click-handlers";
 import { clampUserMessages } from "./turn-collapse";
-import { groupAuthoredMessages } from "./author-message-group";
 import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
 import { ChatPaginator } from "./chat-pagination";
@@ -302,7 +301,6 @@ export class ChatRenderer {
       setMessageEls: (els) => { this.messageEls = els; },
       buildMessageEl: (m) => buildMessageEl(m),
       clampUserMessages: () => clampUserMessages(this.messages, this.messageEls),
-      groupAuthoredMessages: () => groupAuthoredMessages(this.messages, this.messageEls),
       foldClosedRange: (start, end, usage, tsSpanMs) => foldClosedRange(this, start, end, usage, tsSpanMs),
       // Prepend: every tracked index moves down the transcript by n.
       onShift: (n) => this.remapIndices((i) => i + n),

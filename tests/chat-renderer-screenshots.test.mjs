@@ -61,11 +61,10 @@ describe("screenshot block", () => {
     const block = container.querySelector('.screenshot-block[data-tool="mcp:playwright"]');
     expect(block).not.toBeNull();
 
-    // The tool's real chip relocated into the block's header, count intact
-    // (3 calls total: navigate + 2 screenshots).
-    const chip = block.querySelector(".screenshot-block-header .tool-chip");
+    // The tool's chip stays on the turn's shared chip line, count intact
+    // (3 calls total: navigate + 2 screenshots); the block sits under it.
+    const chip = container.querySelector('.tool-strip > .tool-chip[data-tool="mcp:playwright"]');
     expect(chip).not.toBeNull();
-    expect(chip.dataset.tool).toBe("mcp:playwright");
     expect(chip.querySelector(".tool-chip-count").textContent).toBe("x3");
     // No duplicate chip left behind in a normal .tool-strip.
     expect(container.querySelectorAll('.tool-chip[data-tool="mcp:playwright"]').length).toBe(1);
@@ -81,10 +80,9 @@ describe("screenshot block", () => {
     // The raw image tool_result rows never stack in the chat flow / accordion.
     expect(container.querySelector('img[src^="data:image/png"].block.image')).toBeNull();
 
-    // Clicking the relocated chip still opens the accordion for the tool's
-    // NON-image call (navigate) - the screenshots themselves aren't in there.
-    // (DOM order: screenshot-block, then the now-empty .tool-strip the chip
-    // moved out of, then the shared .tool-strip-panel.)
+    // Clicking the chip still opens the accordion for the tool's NON-image
+    // call (navigate) - the screenshots themselves aren't in there.
+    // (DOM order: .tool-strip, the shared .tool-strip-panel, then the block.)
     chip.click();
     const panel = block.parentElement.querySelector(".tool-strip-panel");
     expect(panel).not.toBeNull();

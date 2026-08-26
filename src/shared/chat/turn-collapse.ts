@@ -9,7 +9,7 @@ export function clampUserMessages(messages: RenderedMessage[], messageEls: HTMLE
     const el = messageEls[i];
     if (!el || el.dataset.clampChecked) continue;
     // Authored (inter-session) rows are handled entirely by
-    // groupAuthoredMessages (a tool-chip, not a bubble) - clamping would
+    // foldAuthoredIntoStrip (a tool-chip, not a bubble) - clamping would
     // fight its own DOM rewrite for no benefit.
     if (msg.authorSessionId) continue;
     el.dataset.clampChecked = "1";

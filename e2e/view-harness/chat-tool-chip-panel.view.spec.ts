@@ -38,6 +38,49 @@ async function mountBashChat(page: Page): Promise<void> {
   await page.locator('#session-pane .session-messages .tool-chip[data-tool="Bash"]').waitFor();
 }
 
+function agentTranscript(): { events: unknown[]; oldest_seq: number; newest_seq: number; has_more: boolean } {
+  const events: unknown[] = [
+    { type: "user_message", content: [{ type: "text", text: "delegate it" }], timestamp: 0, remote_echo: false },
+    { type: "tool_use", tool_name: "Task", input: { description: "sweep the logs" }, id: "t1", timestamp: 0, parent_tool_use_id: null },
+    { type: "tool_use", tool_name: "Bash", input: { command: "rg retry" }, id: "c1", timestamp: 0, parent_tool_use_id: "t1" },
+    { type: "tool_result", tool_use_id: "c1", output: { type: "text", text: "ok" }, is_error: false, timestamp: 0 },
+    { type: "tool_result", tool_use_id: "t1", output: { type: "text", text: "done" }, is_error: false, timestamp: 0 },
+    { type: "tool_use", tool_name: "Edit", input: { file_path: "C:/p/a.ts", old_string: "a", new_string: "b" }, id: "e1", timestamp: 0, parent_tool_use_id: null },
+    { type: "tool_result", tool_use_id: "e1", output: { type: "text", text: "ok" }, is_error: false, timestamp: 0 },
+    { type: "user_message", content: [{ type: "text", text: "thanks" }], timestamp: 0, remote_echo: false },
+  ];
+  return { events, oldest_seq: 0, newest_seq: 0, has_more: false };
+}
+
+test("a Subagent chip opens its nested strip, and File Changes its file rows", async ({ page }) => {
+  await mountView(page, {
+    view: "sessions",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [sessionInstance()],
+      get_active_sessions: [sessionInstance()],
+      load_history_page: agentTranscript(),
+    },
+  });
+  await page.locator("#sessions-list li[data-session-id]").first().click();
+  const messages = page.locator("#session-pane .session-messages");
+
+  // Raw rows: the subagent's own tool row must be readable once drilled into.
+  const taskChip = messages.locator('.tool-chip[data-tool="Task"]');
+  await taskChip.click();
+  const subChip = messages.locator(".tool-chip--agent").first();
+  await expect(subChip).toBeVisible();
+  await subChip.click();
+  await messages.locator('.tool-strip-group .tool-chip[data-tool="Bash"]').click();
+  await expect(messages.locator(".tool-strip-group .tool-row").first()).toBeVisible();
+
+  // Custom view: generated rows, never narration-hidden, and only ONE chip.
+  const editChip = messages.locator('.tool-chip[data-tool="Edit"]');
+  await expect(editChip).toHaveCount(1);
+  await editChip.click();
+  await expect(messages.locator(".tool-file-row").first()).toBeVisible();
+});
+
 test("a Ran chip opens its folded Bash rows in quiet mode", async ({ page }) => {
   await mountBashChat(page);
 

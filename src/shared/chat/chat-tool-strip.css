@@ -11,9 +11,8 @@
   padding: 0 2px;
 }
 
-/* A turn whose only tool has image results relocates that tool's chip into
-   its screenshot-block header (mountScreenshotBlock), leaving the strip
-   empty - collapse it instead of showing an empty gap. */
+/* No chips folded yet (a turn that only produced screenshots reaches the
+   footer before its first fold): collapse the row instead of a stray gap. */
 .tool-strip:empty {
   display: none;
 }
