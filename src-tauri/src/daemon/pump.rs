@@ -68,15 +68,11 @@ pub(crate) async fn run_stdout_pump(
     let mut line_buf = Vec::new();
     // Owns the turn-sound gate and, since chat 20176, the `busy` flag.
     let mut turn = TurnBoundary::new(resumed);
-    // Generation counter captured on the turn's first stdout line of ANY
-    // kind (todo 525 root cause 2: not gated on the first `stream_event`,
-    // so an eventless turn still captures the CURRENT gen instead of a
-    // prior turn's stale one). Guards the turn-end set_busy(false) below.
+    // Generation of the turn being watched, HANDED over by whoever opened it
+    // (`Registry::set_busy(true)` stamps it, this consumes it once). Inferring
+    // it from stdout timing latched `busy` on for a whole session (todo 525).
     let mut pump_turn_gen: u64 = 0;
     let mut pump_turn_gen_captured = false;
-    // Gen of the turn whose result line we last consumed, so a trailing line
-    // from it can't be mistaken for the next turn's first line.
-    let mut last_ended_gen: Option<u64> = None;
     // True while the daemon-authoritative `closing` registry flag is set for
     // the current turn: armed at the turn's first live output when the user
     // opened it with `/close` (no text marker involved), cleared at turn end
@@ -114,14 +110,11 @@ pub(crate) async fn run_stdout_pump(
                         // Watchdog signal: any stdout line at all counts as activity.
                         state_for_pump.registry.touch_activity(&pump_session.session_id);
                         if !pump_turn_gen_captured {
-                            let gen = state_for_pump
+                            // Trailing and spawn-banner lines find nothing pending.
+                            if let Some(gen) = state_for_pump
                                 .registry
-                                .current_turn_gen(&pump_session.session_id);
-                            // Trailing lines of the ended turn arrive before the next
-                            // send_message bumps the gen. Latching there pins the OLD
-                            // gen across the whole next turn, so its end-of-turn clear
-                            // is rejected and the row sticks on "In progress".
-                            if last_ended_gen != Some(gen) {
+                                .take_pending_turn_gen(&pump_session.session_id)
+                            {
                                 pump_turn_gen_captured = true;
                                 pump_turn_gen = gen;
                                 log::info!(
@@ -255,12 +248,9 @@ pub(crate) async fn run_stdout_pump(
                                 }
                                 turn_text.clear();
                                 let live_turn = turn.on_result_line() == TurnAction::TurnEnded;
+                                // Keeps `pump_turn_gen`: a replayed result line must
+                                // not strand the live turn it sits inside without one.
                                 pump_turn_gen_captured = false;
-                                // Only a real end retires the gen; a replay's result
-                                // shares the live turn's gen and must stay capturable.
-                                if live_turn {
-                                    last_ended_gen = Some(pump_turn_gen);
-                                }
                                 // report_turn_status (todo 435) is authoritative for a live
                                 // turn; a replayed history line keeps the legacy marker scan.
                                 let taken_report = if live_turn {
@@ -506,9 +496,11 @@ mod tests {
             r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
         ] {
             ctx.feed(format!("{line}\n").as_bytes());
+            if let Some(gen) = registry.take_pending_turn_gen("s") {
+                pump_turn_gen = gen;
+            }
             if !saw_stream_turn && ctx.take_stream_event_seen() {
                 saw_stream_turn = true;
-                pump_turn_gen = registry.current_turn_gen("s");
             }
         }
         assert!(saw_stream_turn, "tool-only turn must still be recognised as live");
@@ -533,15 +525,15 @@ mod tests {
         let mut ctx = ParserContext::new_live();
         let mut saw_stream_turn = false;
         let mut pump_turn_gen: u64 = 0;
-        // Mirrors pump.rs: capture on the first line of ANY kind, gated by
-        // this flag - NOT gated on take_stream_event_seen().
         let mut pump_turn_gen_captured = false;
         // No stream_event at all - straight to a rejection result line.
         let line = r#"{"type":"result","subtype":"success","is_error":true,"result":"error","timestamp":1}"#;
         ctx.feed(format!("{line}\n").as_bytes());
         if !pump_turn_gen_captured {
-            pump_turn_gen_captured = true;
-            pump_turn_gen = registry.current_turn_gen("s");
+            if let Some(gen) = registry.take_pending_turn_gen("s") {
+                pump_turn_gen_captured = true;
+                pump_turn_gen = gen;
+            }
         }
         if !saw_stream_turn && ctx.take_stream_event_seen() {
             saw_stream_turn = true;
@@ -570,12 +562,9 @@ mod tests {
 
         let mut pump_turn_gen: u64 = 0;
         let mut pump_turn_gen_captured = false;
-        let mut last_ended_gen: Option<u64> = None;
-        // The pump's capture rule, mirrored so the guard is exercised directly.
-        fn on_line(registry: &Registry, gen_out: &mut u64, captured: &mut bool, last_ended_gen: Option<u64>) {
+        fn on_line(registry: &Registry, gen_out: &mut u64, captured: &mut bool) {
             if !*captured {
-                let gen = registry.current_turn_gen("s");
-                if last_ended_gen != Some(gen) {
+                if let Some(gen) = registry.take_pending_turn_gen("s") {
                     *captured = true;
                     *gen_out = gen;
                 }
@@ -583,20 +572,19 @@ mod tests {
         }
 
         registry.set_busy("s", true); // send_message's pre-write bump -> gen 1
-        on_line(&registry, &mut pump_turn_gen, &mut pump_turn_gen_captured, last_ended_gen);
+        on_line(&registry, &mut pump_turn_gen, &mut pump_turn_gen_captured);
         assert_eq!(pump_turn_gen, 1, "turn A captures its own gen");
 
         // Turn A's result line.
         pump_turn_gen_captured = false;
-        last_ended_gen = Some(pump_turn_gen);
         assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "turn A clears its own busy");
 
-        // The trailing line. Under the old rule this re-captured gen 1.
-        on_line(&registry, &mut pump_turn_gen, &mut pump_turn_gen_captured, last_ended_gen);
+        // The trailing line. Under the old timing rule this re-captured gen 1.
+        on_line(&registry, &mut pump_turn_gen, &mut pump_turn_gen_captured);
         assert!(!pump_turn_gen_captured, "a trailing line of the ended turn must not capture");
 
         registry.set_busy("s", true); // next send_message -> gen 2
-        on_line(&registry, &mut pump_turn_gen, &mut pump_turn_gen_captured, last_ended_gen);
+        on_line(&registry, &mut pump_turn_gen, &mut pump_turn_gen_captured);
         assert_eq!(pump_turn_gen, 2, "turn B must capture the NEW gen, not turn A's");
 
         // Turn B's result line: this is the clear that used to be rejected.
@@ -607,9 +595,8 @@ mod tests {
         assert!(!registry.get("s").unwrap().busy);
     }
 
-    /// The guard must not block a turn that starts WITHOUT a gen bump (wake paths
-    /// use `mark_turn_live`, which deliberately doesn't bump). The retained gen
-    /// still equals the registry's, so the clear matches anyway.
+    /// A turn started WITHOUT a gen bump (`mark_turn_live`, the wake paths)
+    /// stamps nothing, so the pump keeps the gen it holds - which still matches.
     #[test]
     fn turn_started_without_a_gen_bump_still_clears_busy() {
         use crate::sessions::registry::Registry;
@@ -620,17 +607,41 @@ mod tests {
         registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-19T00:00:00Z");
 
         registry.set_busy("s", true); // gen 1
-        let mut pump_turn_gen = registry.current_turn_gen("s");
-        let last_ended_gen = Some(pump_turn_gen); // turn A ended
+        let mut pump_turn_gen = registry.take_pending_turn_gen("s").expect("turn A hands its gen over");
 
-        // A wake marks the session live again without bumping the gen, so the
-        // pump declines to re-capture and keeps gen 1.
         registry.mark_turn_live("s");
-        let gen = registry.current_turn_gen("s");
-        if last_ended_gen != Some(gen) {
+        if let Some(gen) = registry.take_pending_turn_gen("s") {
             pump_turn_gen = gen;
         }
-        assert_eq!(pump_turn_gen, 1);
+        assert_eq!(pump_turn_gen, 1, "a no-bump wake hands over nothing, so gen 1 is retained");
         assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "no-bump turn must still clear");
+    }
+
+    /// The observed failure (daemon.log 2026-08-26, session b20747fe): the CLI's
+    /// spawn banner reached the pump while `turn_gen` was still 0, so every later
+    /// turn captured one generation behind and `busy` never cleared again.
+    #[test]
+    fn spawn_banner_before_the_first_message_does_not_skew_every_later_turn() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-26T10:34:39Z");
+
+        // 10:34:39 - spawn banner, before any message exists.
+        assert!(registry.take_pending_turn_gen("s").is_none(), "the banner must capture nothing");
+
+        registry.set_busy("s", true); // 10:38:46 - first send_message
+        let turn_one = registry.take_pending_turn_gen("s").expect("turn 1 hands its gen over");
+        assert_eq!(turn_one, 1);
+        assert!(registry.set_busy_false_if_gen("s", turn_one), "turn 1 must clear its own busy");
+
+        assert!(registry.take_pending_turn_gen("s").is_none(), "a trailing line must capture nothing");
+        registry.set_busy("s", true); // 10:43:09 - second send_message
+        let turn_two = registry.take_pending_turn_gen("s").expect("turn 2 hands its gen over");
+        assert_eq!(turn_two, 2, "turn 2 must not inherit turn 1's generation");
+        assert!(registry.set_busy_false_if_gen("s", turn_two), "turn 2 must clear its own busy");
+        assert!(!registry.get("s").unwrap().busy);
     }
 }

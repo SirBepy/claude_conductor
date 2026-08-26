@@ -153,17 +153,33 @@ impl Registry {
 
     /// Path C helper: flip the `busy` flag on a session entry. Sidebar uses
     /// this to render running vs idle. No-op if session is unknown.
-    /// When `busy=true`, also bumps `turn_gen` (stale-clear guard) and
-    /// stamps `last_event_at` so the busy-watchdog sees a fresh turn.
+    /// When `busy=true`, also bumps `turn_gen` (stale-clear guard), stamps
+    /// `last_event_at` so the busy-watchdog sees a fresh turn, and hands the
+    /// new generation to the pump via `pending_turn_gen`.
     pub fn set_busy(&self, session_id: &str, busy: bool) {
-        let mut guard = self.inner.lock().unwrap();
-        if let Some(i) = guard.get_mut(session_id) {
-            i.busy = busy;
-            if busy {
-                i.turn_gen = i.turn_gen.wrapping_add(1);
-                i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
+        let mut opened: Option<u64> = None;
+        {
+            let mut guard = self.inner.lock().unwrap();
+            if let Some(i) = guard.get_mut(session_id) {
+                i.busy = busy;
+                if busy {
+                    i.turn_gen = i.turn_gen.wrapping_add(1);
+                    i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
+                    opened = Some(i.turn_gen);
+                }
             }
         }
+        if let Some(gen) = opened {
+            self.pending_turn_gen.lock().unwrap().insert(session_id.to_string(), gen);
+        }
+    }
+
+    /// Consume the generation of the turn this session most recently opened;
+    /// `None` once taken, so only a turn's first stdout frame ever captures.
+    /// The pump calls this instead of reading `turn_gen` off the clock, where
+    /// a trailing line or the spawn banner read as a new turn (todo 525).
+    pub fn take_pending_turn_gen(&self, session_id: &str) -> Option<u64> {
+        self.pending_turn_gen.lock().unwrap().remove(session_id)
     }
 
     /// A real turn is running, whoever started it. Must NOT bump `turn_gen` -
@@ -341,6 +357,35 @@ mod tests {
         // The captured-gen path still clears, so the guard itself is sound.
         assert!(registry.set_busy_false_if_gen("s", 1));
         assert!(!registry.get("s").unwrap().busy);
+    }
+
+    #[test]
+    fn pending_turn_gen_is_handed_over_exactly_once() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-26T00:00:00Z");
+        assert!(registry.take_pending_turn_gen("s").is_none(), "no turn opened yet");
+
+        registry.set_busy("s", true);
+        assert_eq!(registry.take_pending_turn_gen("s"), Some(1));
+        assert!(registry.take_pending_turn_gen("s").is_none(), "a second take must find it consumed");
+
+        registry.set_busy("s", false);
+        assert!(registry.take_pending_turn_gen("s").is_none(), "clearing busy opens no turn");
+        registry.set_busy("s", true);
+        assert_eq!(registry.take_pending_turn_gen("s"), Some(2));
+    }
+
+    #[test]
+    fn mark_turn_live_hands_over_nothing() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-26T00:00:00Z");
+        registry.mark_turn_live("s");
+        assert!(
+            registry.take_pending_turn_gen("s").is_none(),
+            "no gen bump means no new generation to hand over"
+        );
     }
 
     #[test]

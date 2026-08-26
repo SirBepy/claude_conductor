@@ -61,6 +61,11 @@ pub struct Registry {
     /// `mark_ended` and `DaemonState::expire_prompts_for_session`, so the
     /// redirect-then-fallback budget never carries over stale.
     pub(super) builtin_ask_attempts: Mutex<HashMap<String, u32>>,
+    /// `session_id` -> the `turn_gen` of a turn that has been opened but not
+    /// yet picked up by the pump. Written by `set_busy(true)`, consumed once by
+    /// `take_pending_turn_gen`. Exists so the pump is HANDED the generation it
+    /// is watching instead of inferring one from stdout timing (todo 525).
+    pub(super) pending_turn_gen: Mutex<HashMap<String, u64>>,
 }
 
 impl Registry {
@@ -74,6 +79,7 @@ impl Registry {
             message_sent_gen: Mutex::new(HashMap::new()),
             turn_opened_by_wake: Mutex::new(HashMap::new()),
             builtin_ask_attempts: Mutex::new(HashMap::new()),
+            pending_turn_gen: Mutex::new(HashMap::new()),
         }
     }
 
@@ -296,6 +302,7 @@ impl Registry {
         // Non-interactive kinds never hit `expire_prompts_for_session`'s reset,
         // so a session-end sweep here is the only cleanup they get.
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
+        self.pending_turn_gen.lock().unwrap().remove(session_id);
         crate::sessions::repo_channel::forget_session(session_id);
         true
     }
