@@ -1,0 +1,297 @@
+/* "Drafts" FAB-card body (todo 666). Lives inside the card owned by
+   fab-dial.css, so this file styles only the list, the cards and the editor -
+   never the card chrome, the spine or the close button.
+   The palette ships no amber (see todos-panel.css's own note), so the
+   attention accent is one local token reusing that file's approved value. */
+:root {
+  --dr-attention: #f0c674;
+}
+
+.drafts-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  background: var(--color-background);
+}
+
+/* ── List ─────────────────────────────────────────────────────────────────── */
+
+.dr-group {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  padding: 10px 10px 4px;
+}
+
+.dr-none {
+  margin: 0;
+  padding: 0 10px 6px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+
+.dr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: calc(100% - 16px);
+  margin: 0 8px 6px;
+  padding: 9px 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.dr-card:hover { border-color: var(--color-primary); }
+.dr-card.attn { border-left: 2px solid var(--dr-attention); }
+
+.dr-card-top { display: flex; align-items: center; gap: 8px; }
+
+.dr-topic {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dr-ver {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.dr-excerpt {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.dr-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+.dr-handle {
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+
+.dr-edited { color: var(--dr-attention); font-weight: 600; }
+.dr-dot { opacity: 0.5; }
+
+.dr-empty {
+  margin: auto;
+  padding: 24px 18px;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.dr-empty i { font-size: 26px; opacity: 0.5; }
+.dr-empty p { margin: 8px 0 0; font-size: 12.5px; }
+.dr-empty-hint { font-size: 11.5px; opacity: 0.75; }
+
+/* ── Editor ───────────────────────────────────────────────────────────────── */
+
+.dr-top { flex: 0 0 auto; }
+
+.dr-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dr-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dr-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dr-icon:hover { background: var(--color-surface-alt); color: var(--color-text); }
+
+.dr-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.dr-drop {
+  font: inherit;
+  font-size: 11.5px;
+  max-width: 45%;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.dr-stamp {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.dr-bar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-border);
+  flex: 0 0 auto;
+}
+
+.dr-fbtn {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dr-fbtn:hover { background: var(--color-surface-alt); color: var(--color-text); }
+
+.dr-fsep {
+  width: 1px;
+  height: 15px;
+  margin: 0 4px;
+  background: var(--color-border);
+}
+
+.dr-body {
+  flex: 1 1 auto;
+  min-height: 90px;
+  overflow-y: auto;
+  padding: 11px 12px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  outline: none;
+}
+
+.dr-body p { margin: 0 0 10px; }
+.dr-body ul, .dr-body ol { margin: 0 0 10px; padding-left: 20px; }
+.dr-body li { margin-bottom: 3px; }
+.dr-body strong { font-weight: 700; }
+
+.dr-body code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.dr-body pre {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+}
+
+.dr-body pre code { background: none; border: none; padding: 0; }
+
+.dr-body blockquote {
+  margin: 0 0 10px;
+  padding-left: 9px;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.dr-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex: 0 0 auto;
+}
+
+.dr-grow { flex: 1; }
+
+.dr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 6px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.dr-btn:hover { border-color: var(--color-primary); }
+.dr-btn.on { color: var(--color-success); }
+
+.dr-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-background);
+}
+
+/* The editor takes over the whole panel, so the panel must stop scrolling and
+   let the body be the one scroller - otherwise the toolbar scrolls away. */
+.drafts-panel:has(.dr-body) {
+  overflow-y: hidden;
+}

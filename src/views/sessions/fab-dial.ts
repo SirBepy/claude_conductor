@@ -1,16 +1,17 @@
-// The chat pane's FAB: tap to fan out Ask / Todos / Preview, pick one, and it
-// opens in a card floating OVER the transcript (Joe, 2026-08-24 - the rail
-// stealing layout width was the complaint). Preview is the odd one out: it
-// toggles the docked rail instead, so the dial is one door to all three.
+// The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Preview, pick one,
+// and it opens in a card floating OVER the transcript (Joe, 2026-08-24 - the
+// rail stealing layout width was the complaint). Preview is the odd one out: it
+// toggles the docked rail instead, so the dial is one door to all four.
 
 import { mountAskPanel, type AskPanelHandle } from "./ask-panel";
 import { mountTodosPanel, type TodosPanelHandle } from "./todos-panel";
+import { mountDraftsPanel, type DraftsPanelHandle } from "./drafts-panel";
 import type { PreviewController } from "./preview-panel";
 import "./fab-dial.css";
 
 /** What the card can hold. Preview is reachable from the dial but never lives
  *  in the card - it stays docked, so it is not a CardPanel. */
-export type CardPanel = "ask" | "todos";
+export type CardPanel = "ask" | "todos" | "drafts";
 
 type Surface = "rest" | "dial" | "card";
 
@@ -30,6 +31,7 @@ export interface FabDialHandle {
 const DIAL = [
   { target: "ask", icon: "ph-chat-teardrop-dots", label: "Ask" },
   { target: "todos", icon: "ph-list-checks", label: "Todos" },
+  { target: "drafts", icon: "ph-note-pencil", label: "Drafts" },
 ] as const;
 
 class FabDial implements FabDialHandle {
@@ -42,6 +44,7 @@ class FabDial implements FabDialHandle {
   private cwd: string | null = null;
   private ask: AskPanelHandle | null = null;
   private todos: TodosPanelHandle | null = null;
+  private drafts: DraftsPanelHandle | null = null;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
     this.pane = pane;
@@ -143,8 +146,8 @@ class FabDial implements FabDialHandle {
         `</button>` +
       `</div>` +
       (this.surface === "card" ? this.cardHtml() : "") +
-      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Preview" ` +
-        `aria-label="Ask, Todos, Preview"><i class="ph ph-list"></i></button>`;
+      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Drafts, Preview" ` +
+        `aria-label="Ask, Todos, Drafts, Preview"><i class="ph ph-list"></i></button>`;
 
     this.disposeBodies();
     if (this.surface === "card") this.mountBody();
@@ -174,6 +177,9 @@ class FabDial implements FabDialHandle {
       this.ask = mountAskPanel(body, { onDraft: this.deps.onDraft });
       this.ask.setCwd(this.cwd);
       this.ask.setSessionScope(this.sessionId);
+    } else if (this.panel === "drafts") {
+      this.drafts = mountDraftsPanel(body);
+      this.drafts.setSessionScope(this.sessionId);
     } else {
       this.todos = mountTodosPanel(body);
       this.todos.setSessionScope(this.sessionId);
@@ -185,6 +191,8 @@ class FabDial implements FabDialHandle {
     this.ask = null;
     this.todos?.destroy();
     this.todos = null;
+    this.drafts?.destroy();
+    this.drafts = null;
   }
 
   destroy(): void {
