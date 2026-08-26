@@ -218,12 +218,9 @@ function handleUserMessageEvent(
       streakCount: 1,
     });
   } else if (resolvedQuestionCard || resolvedQuestionExtra) {
-    // Folded into the question card above instead of a separate bubble -
-    // except any held prose that rode along in the same bundle, which
-    // still renders as a normal user message (must not be swallowed). Uses
-    // remainderBlocks (both sentinels already stripped), never the raw
-    // `cleaned` - an extra-only event (resolvedQuestionCard false) would
-    // otherwise leak its sentinel text into this bubble.
+    // Folded into the card above - held prose still renders below. Uses
+    // remainderBlocks (sentinels stripped), never raw `cleaned`, or an
+    // extra-only event (resolvedQuestionCard false) leaks its sentinel text.
     if (remainderBlocks.length > 0) {
       r.messages.push({ kind: "user", content: remainderBlocks, ts, authorSessionId: ev.author_session_id ?? null });
     }
