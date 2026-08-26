@@ -9,10 +9,11 @@ use std::time::Duration;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// How long `busy` may sit with zero events before the sweep force-clears it.
-/// `touch_activity` re-stamps on every stdout line, so only a hung or dead
-/// process goes fully silent. Cut from 20m: a stuck `busy` makes the composer
-/// stage instead of send, so this is how long a message sits invisibly queued.
-const STALE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(3);
+/// Generous on purpose: the only stamps are stdout lines and the turn-end
+/// status hook, so ONE long tool call (a 15-minute build) is total silence.
+/// Clearing under a live turn flushes held messages into it, bumping
+/// `turn_gen` mid-turn - which re-creates the very latch todo 525 fixed.
+const STALE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(20);
 
 pub fn spawn(state: Arc<DaemonState>) {
     tokio::spawn(async move {
@@ -93,9 +94,9 @@ mod tests {
         state.registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
         state.registry.set_busy("s", true);
         state.registry.touch_activity("s"); // a tool event refreshes activity
-        // Sweep runs 1 minute after the (real-time) refresh - well under
-        // threshold, unlike the 25-minute gap in the fires-after test.
-        let later = chrono::Utc::now() + chrono::Duration::minutes(1);
+        // Sweep runs only 5 minutes after the (real-time) refresh - well
+        // under threshold, unlike the 25-minute gap in the fires-after test.
+        let later = chrono::Utc::now() + chrono::Duration::minutes(5);
         sweep(&state, later);
         assert!(state.registry.get("s").unwrap().busy, "a steady trickle of events must never be swept");
     }
