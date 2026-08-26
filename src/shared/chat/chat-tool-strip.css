@@ -97,6 +97,14 @@
   overflow: hidden;
 }
 
+/* Folding a row into a chip bucket is what makes it reachable in quiet mode:
+   the chip IS the reveal affordance, so .chat-narration's display:none (which
+   tags every tool_use/tool_result element) must not follow it in here, or the
+   panel opens empty for every non-custom-view chip. */
+.tool-strip-panel .tool-strip-group .chat-narration {
+  display: block;
+}
+
 .tool-strip-group .tool-row {
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
   margin: 0;
