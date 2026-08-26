@@ -8,6 +8,7 @@ pub mod persistence;
 pub mod chat_config;
 pub mod chat_state;
 pub mod recurrence;
+pub mod message_drafts;
 pub mod repo_channel;
 pub mod scheduled_items;
 pub mod user_todos;

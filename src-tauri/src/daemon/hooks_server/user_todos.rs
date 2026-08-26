@@ -5,6 +5,7 @@
 
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
+use crate::daemon::methods::drafts_store as draft_methods;
 use crate::daemon::methods::user_todos as todo_methods;
 use axum::{
     extract::{Query, State as AxState},
@@ -64,12 +65,25 @@ pub(super) async fn on_prompt_submit(
     Query(q): Query<PromptSubmitQuery>,
     _body: String,
 ) -> impl IntoResponse {
-    let Some(block) = todo_methods::render_for_injection(&ctx.state, &q.session_id) else {
+    // One hook, two features (todo 666): the drafts block rides on the same
+    // UserPromptSubmit event rather than registering a second hook the CLI
+    // would have to fire separately.
+    let blocks: Vec<String> = [
+        todo_methods::render_for_injection(&ctx.state, &q.session_id),
+        draft_methods::render_for_injection(&ctx.state, &q.session_id),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if blocks.is_empty() {
         return (StatusCode::OK, String::new());
-    };
+    }
+    let block = blocks.join("
+");
     // Consume, then serve: a turn that reads the cards has by definition seen
     // Joe's changes to them.
     let _ = todo_methods::mark_todos_seen(&ctx.state, &q.session_id, &q.session_id);
+    let _ = draft_methods::mark_drafts_seen(&ctx.state, &q.session_id);
     let payload: Value = json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",

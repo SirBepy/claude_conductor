@@ -10,7 +10,7 @@ use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_RESPOND_WORKER_PROMPT,
     TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER,
-    TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
+    TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -215,6 +215,18 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 }
             }
             Some(ctx.relay("/todos/write", Value::Object(body), Some("invalid todo write"), None))
+        }
+        TOOL_WRITE_DRAFT => {
+            // Same omit-absent-keys rule as the todo write above.
+            let mut body = serde_json::Map::new();
+            body.insert("session_id".to_string(), json!(ctx.session_id));
+            body.insert("action".to_string(), ctx.args["action"].clone());
+            for key in ["id", "topic", "recipient", "body", "note", "brief", "receipts"] {
+                if let Some(v) = ctx.args.get(key) {
+                    body.insert(key.to_string(), v.clone());
+                }
+            }
+            Some(ctx.relay("/drafts/write", Value::Object(body), Some("invalid draft write"), None))
         }
         _ => None,
     }

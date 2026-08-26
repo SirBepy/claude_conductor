@@ -35,6 +35,9 @@ pub const TOOL_RESPAWN: &str = "respawn";
 // deliberately short description - this schema is injected into every turn of
 // every session, so see `project_mcp_tool_def_per_turn_cost`.
 pub const TOOL_WRITE_USER_TODO: &str = "write_user_todo";
+// Draft messages the user sends elsewhere (todo 666). Unconditional: any
+// session can be asked to write one, and the panel is project-scoped.
+pub const TOOL_WRITE_DRAFT: &str = "write_draft";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -220,6 +223,34 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     "text": {"type": "string", "description": "The action item, one line, imperative. Inline `code` is fine."},
                     "id": {"type": "string", "description": "Which card, for rewrite/done/drop."},
                     "reason": {"type": "string", "description": "Why it is no longer needed. Required for drop, shown on the card."}
+                },
+                "required": ["action"]
+            }
+        }),
+        json!({
+            "name": TOOL_WRITE_DRAFT,
+            "description": "Write a message the user will send SOMEWHERE ELSE (Slack, email, a ticket) into this project's Drafts panel, instead of pasting it in a reply where he cannot edit it, format it, or find it again. Never put a draft message in your chat text. `add` needs topic+recipient+body; `revise` needs id+body; `variant` needs id+recipient+body for the same topic worded for a second person; `drop` needs id. Refer to a draft by the handle in the injected list, e.g. `Bruno #2`, which also names the recipient. `body` is markdown.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "revise", "variant", "drop"]},
+                    "id": {"type": "string", "description": "Which draft, for revise/variant/drop. A handle like `Bruno #2` or the short id."},
+                    "topic": {"type": "string", "description": "What the message is about, a few words. One card per topic, not per person."},
+                    "recipient": {"type": "string", "description": "Who it goes to. Their name as the user says it."},
+                    "body": {"type": "string", "description": "The message itself, in markdown."},
+                    "note": {"type": "string", "description": "What changed, for the version list. Revise only."},
+                    "brief": {"type": "string", "description": "Why this message exists and what must land, for a later reviewer."},
+                    "receipts": {
+                        "type": "array",
+                        "description": "Each factual claim in the body paired with where it came from: a file:line, a command's output, or the user's own words.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "claim": {"type": "string"},
+                                "source": {"type": "string"}
+                            }
+                        }
+                    }
                 },
                 "required": ["action"]
             }

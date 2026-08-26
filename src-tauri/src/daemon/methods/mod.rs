@@ -10,6 +10,10 @@ mod ask;
 mod channels;
 mod context;
 mod drafts;
+// pub(crate): `hooks_server::drafts` (the `write_draft` MCP tool route and
+// the drafts half of the per-turn injection, todo 666) calls this module's
+// handlers directly - same non-RPC shape as `channel` above.
+pub(crate) mod drafts_store;
 // pub(crate): `hooks_server::jarvis` (the fleet-tool HTTP routes, todo 272
 // chunk 2b) calls this module's `spawn_worker`/`send_to_session`/
 // `fleet_status`/`respond_worker_prompt` directly - those aren't RPC methods
@@ -45,6 +49,7 @@ pub(crate) mod user_todos;
 pub use channels::register_channels;
 pub use context::register_context;
 pub use drafts::register_drafts;
+pub use drafts_store::register_drafts_store;
 pub use history::register_history;
 pub use jarvis::register_jarvis;
 pub use lifecycle::{register, register_notifier, register_settings};

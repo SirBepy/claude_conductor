@@ -7,6 +7,7 @@
 
 mod ask;
 mod channels;
+mod message_drafts;
 mod misc;
 mod permission;
 mod preview;
