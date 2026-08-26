@@ -34,19 +34,7 @@
 .aem-overlay .aem-close {
   width: 28px;
   height: 28px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text-muted, #8a8a96);
   font-size: 16px;
-  cursor: pointer;
-}
-.aem-overlay .aem-close:hover {
-  background: var(--color-surface-alt, #24242e);
-  color: var(--color-text, #e8e8ee);
 }
 
 .aem-overlay .aem-tabs {

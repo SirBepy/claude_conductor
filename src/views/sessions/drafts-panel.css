@@ -141,17 +141,9 @@
 .dr-icon {
   width: 24px;
   height: 24px;
-  display: grid;
-  place-items: center;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  color: var(--color-text-muted);
   font-size: 14px;
-  cursor: pointer;
+  border-radius: 6px;
 }
-
-.dr-icon:hover { background: var(--color-surface-alt); color: var(--color-text); }
 
 .dr-meta {
   display: flex;

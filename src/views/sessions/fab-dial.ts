@@ -162,7 +162,7 @@ class FabDial implements FabDialHandle {
     return (
       `<div class="fab-card">` +
         `<div class="fab-spine">${spine}<span class="fab-spine-grow"></span>` +
-          `<button type="button" class="fab-spine-close" data-card-close title="Close">` +
+          `<button type="button" class="icon-btn-sq fab-spine-close" data-card-close title="Close">` +
             `<i class="ph ph-x"></i></button>` +
         `</div>` +
         `<div class="fab-card-body"></div>` +

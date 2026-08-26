@@ -78,7 +78,7 @@ function buildHeader(path: string): HTMLElement {
     `<span class="file-viewer-name">${escapeHtml(name)}</span>` +
     `<span class="file-viewer-path">${escapeHtml(path)}</span>` +
     `</div>` +
-    `<button class="file-viewer-close" type="button" aria-label="Close">` +
+    `<button class="icon-btn-sq file-viewer-close" type="button" aria-label="Close">` +
     `<i class="ph ph-x"></i>` +
     `</button>`;
   header.querySelector<HTMLButtonElement>(".file-viewer-close")?.addEventListener("click", closeFileViewer);

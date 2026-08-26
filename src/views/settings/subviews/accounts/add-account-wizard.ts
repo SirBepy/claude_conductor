@@ -194,7 +194,7 @@ function render(ctx: WizardCtx): void {
       <div class="wz-head">
         <div class="wz-head-row">
           <div class="t">Add a Claude account</div>
-          <button class="wz-close" id="aaw-close-btn" title="Close" aria-label="Close"><i class="ph ph-x"></i></button>
+          <button class="icon-btn-sq wz-close" id="aaw-close-btn" title="Close" aria-label="Close"><i class="ph ph-x"></i></button>
         </div>
         <div class="wz-steps">${stepsHtml(ctx.state)}</div>
       </div>

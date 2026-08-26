@@ -215,9 +215,9 @@ export function pagerHtml(
 
   const nextDisabled = nextArrowDisabled(activeTab, totalPanels, questions, answeredAt);
   return `<span class="prompt-pager">
-    <button type="button" class="prompt-icon-btn" data-nav="-1" ${activeTab === 0 ? "disabled" : ""}><i class="ph ph-caret-left"></i></button>
+    <button type="button" class="icon-btn-sq prompt-icon-btn" data-nav="-1" ${activeTab === 0 ? "disabled" : ""}><i class="ph ph-caret-left"></i></button>
     ${dotsHtml}
-    <button type="button" class="prompt-icon-btn" data-nav="1" ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
+    <button type="button" class="icon-btn-sq prompt-icon-btn" data-nav="1" ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
   </span>`;
 }
 
@@ -236,7 +236,7 @@ export function collapsedHtml(
       <span class="prompt-collapsed__dot"></span>
       <span class="prompt-collapsed__q">${escapeHtml(text)}</span>
       <span class="prompt-collapsed__step">${activeTab + 1}/${totalPanels}</span>
-      <button type="button" class="prompt-icon-btn" data-act="restore" title="Restore"><i class="ph ph-caret-up"></i></button>
+      <button type="button" class="icon-btn-sq prompt-icon-btn" data-act="restore" title="Restore"><i class="ph ph-caret-up"></i></button>
     </div>
   `;
 }

@@ -160,9 +160,9 @@ export class DraftsEditor {
     return (
       `<div class="dr-top">` +
         `<div class="dr-head">` +
-          `<button type="button" class="dr-icon" data-back title="Back to drafts"><i class="ph ph-arrow-left"></i></button>` +
+          `<button type="button" class="icon-btn-sq dr-icon" data-back title="Back to drafts"><i class="ph ph-arrow-left"></i></button>` +
           `<span class="dr-title">${escapeHtml(this.draft.topic)}</span>` +
-          `<button type="button" class="dr-icon" data-delete title="Delete draft"><i class="ph ph-trash"></i></button>` +
+          `<button type="button" class="icon-btn-sq dr-icon" data-delete title="Delete draft"><i class="ph ph-trash"></i></button>` +
         `</div>` +
         `<div class="dr-meta">` +
           `<select class="dr-drop" data-recipient aria-label="Recipient">${recipients}</select>` +

@@ -140,25 +140,7 @@
 .pv-icon-btn {
   width: 28px;
   height: 28px;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-muted);
-  border-radius: 7px;
-  cursor: pointer;
   font-size: 15px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-
-.pv-icon-btn:hover:not(:disabled) {
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-}
-
-.pv-icon-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 .pv-icon-btn.on {

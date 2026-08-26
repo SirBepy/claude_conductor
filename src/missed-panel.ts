@@ -76,8 +76,8 @@ function render(): void {
           </div>
         </div>
         <div class="missed-row-actions">
-          <button class="missed-icon-btn missed-icon-btn--open" title="Open schedule" data-open><i class="ph ph-arrow-square-out"></i></button>
-          <button class="missed-icon-btn missed-icon-btn--dismiss" title="Dismiss — won't show again" data-dismiss="${escapeHtml(m.id)}"><i class="ph ph-x"></i></button>
+          <button class="icon-btn-sq missed-icon-btn missed-icon-btn--open" title="Open schedule" data-open><i class="ph ph-arrow-square-out"></i></button>
+          <button class="icon-btn-sq missed-icon-btn missed-icon-btn--dismiss" title="Dismiss - won't show again" data-dismiss="${escapeHtml(m.id)}"><i class="ph ph-x"></i></button>
         </div>
       </li>`,
     )

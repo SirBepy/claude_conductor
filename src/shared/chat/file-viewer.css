@@ -61,22 +61,19 @@
 }
 
 .file-viewer-close {
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  color: #fff;
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
   font-size: 18px;
-  padding: 0;
 }
 
-.file-viewer-close:hover {
+/* Ties .icon-btn-sq's hover specificity so this white-icon variant's colors
+   win over the shared muted-color hover instead of being silently overridden. */
+.file-viewer-close:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.25);
+  color: #fff;
 }
 
 .file-viewer-body {

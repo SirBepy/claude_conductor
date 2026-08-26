@@ -70,15 +70,8 @@
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  border: none;
-  background: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
   font-size: 0.95rem;
 }
-.missed-icon-btn:hover { background: var(--color-surface-alt); color: var(--color-text); }
 .missed-icon-btn--dismiss:hover { color: var(--color-danger, #e05252); }
 .missed-icon-btn--open:hover { color: var(--color-primary); }
 .missed-foot { display: flex; gap: 8px; padding: 10px 16px 14px; }

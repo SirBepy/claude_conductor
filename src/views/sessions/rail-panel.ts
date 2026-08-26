@@ -295,8 +295,8 @@ class RailPanel implements RailController {
         <div class="rail-strip">
           <span class="rail-strip-title">Preview</span>
           <span class="rail-strip-grow"></span>
-          <button type="button" class="pv-icon-btn" data-act="popout" title="Pop out into its own window"${this.mode === "window" ? " hidden" : ""}><i class="ph ph-arrows-out-simple"></i></button>
-          <button type="button" class="pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
+          <button type="button" class="icon-btn-sq pv-icon-btn" data-act="popout" title="Pop out into its own window"${this.mode === "window" ? " hidden" : ""}><i class="ph ph-arrows-out-simple"></i></button>
+          <button type="button" class="icon-btn-sq pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
         </div>
         <div class="rail-tab-body" data-tab-body="preview"></div>
       </div>

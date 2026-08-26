@@ -44,19 +44,7 @@
 .aaw-overlay .wz-close {
   width: 28px;
   height: 28px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--color-text-muted, #8a8a96);
   font-size: 16px;
-  cursor: pointer;
-}
-
-.aaw-overlay .wz-close:hover {
-  background: var(--color-surface-alt, #24242e);
-  color: var(--color-text, #e8e8ee);
 }
 
 .aaw-overlay .wz-steps {

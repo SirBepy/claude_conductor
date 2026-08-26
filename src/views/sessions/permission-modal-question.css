@@ -243,24 +243,14 @@
 
 /* Header icon buttons (nav arrows + minimize). */
 .prompt-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 26px;
   height: 26px;
-  padding: 0;
-  border-radius: 7px;
-  background: transparent;
   border: 1px solid transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
 }
 .prompt-icon-btn i {
   font-size: 1.05rem;
 }
-.prompt-icon-btn:hover {
-  color: var(--color-text);
-  background: var(--color-surface-alt);
+.prompt-icon-btn:hover:not(:disabled) {
   border-color: var(--color-border);
 }
 /* Collapsed bar (minimized state), shown in place of the full card. */

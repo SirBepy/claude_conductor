@@ -148,7 +148,7 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
         <div class="aem-modal" style="--acc:${escapeHtml(appearance.colour)}" role="dialog" aria-modal="true" aria-label="Edit ${escapeHtml(account.label)}">
           <div class="aem-head">
             <span class="t">Edit ${escapeHtml(account.label)}</span>
-            <button class="aem-close" id="aem-close-btn" title="Close" aria-label="Close"><i class="ph ph-x"></i></button>
+            <button class="icon-btn-sq aem-close" id="aem-close-btn" title="Close" aria-label="Close"><i class="ph ph-x"></i></button>
           </div>
           <div class="aem-tabs">
             <button class="aem-tab${tab === "details" ? " active" : ""}" data-tab="details">Details</button>

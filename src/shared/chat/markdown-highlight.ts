@@ -14,7 +14,7 @@ const CELL_COPY_BTN = '<button class="copy-btn cell-copy-btn" aria-label="Copy c
 export function wrapTables(html: string): string {
   return html.replace(TABLE_RE, (t) => {
     const withBtns = t.replace(CELL_OPEN_RE, (m) => `${m}${CELL_COPY_BTN}`);
-    return `<div class="table-wrap"><button class="table-fs-btn" aria-label="Fullscreen table"><i class="ph ph-arrows-out"></i></button>${withBtns}</div>`;
+    return `<div class="table-wrap"><button class="icon-btn-sq table-fs-btn" aria-label="Fullscreen table"><i class="ph ph-arrows-out"></i></button>${withBtns}</div>`;
   });
 }
 
