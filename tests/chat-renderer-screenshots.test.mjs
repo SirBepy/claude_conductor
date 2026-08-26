@@ -121,6 +121,26 @@ describe("screenshot block", () => {
     r.detach();
   });
 
+  // Two screenshot-producing tools in one turn share the footer's single strip
+  // and panel, so anchoring each block on that panel's next sibling made the
+  // second block land ahead of the first and swap places on every flush.
+  it("keeps two tools' screenshot blocks in encounter order across flushes", () => {
+    const { r, container } = makeRenderer();
+    r.handleEvent(toolUseEvent("mcp__playwright__browser_take_screenshot", {}, "p1"));
+    r.handleEvent(imageResultEvent("p1", "PLAYDATA"));
+    r.handleEvent(toolUseEvent("Read", { file_path: "/a/shot.png" }, "r1"));
+    r.handleEvent(imageResultEvent("r1", "READDATA"));
+
+    const order = () => [...container.querySelectorAll(".screenshot-block")].map((b) => b.dataset.tool);
+    expect(order()).toEqual(["mcp:playwright", "Read"]);
+
+    // An unrelated later call re-runs the mount for both keys.
+    r.handleEvent(toolUseEvent("Bash", { command: "ls" }, "b1"));
+    r.handleEvent({ type: "tool_result", tool_use_id: "b1", output: { type: "text", text: "ok" }, is_error: false, timestamp: 0 });
+    expect(order()).toEqual(["mcp:playwright", "Read"]);
+    r.detach();
+  });
+
   it("clicking a thumbnail opens the gallery, clamped at both ends, closable via Escape", () => {
     const { r, container } = makeRenderer();
     r.handleEvent(toolUseEvent("mcp__playwright__browser_take_screenshot", {}, "t1"));

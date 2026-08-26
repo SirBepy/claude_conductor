@@ -2,7 +2,6 @@ import type { RenderedMessage } from "./chat-transforms";
 import { extractAttachedFilePaths } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
-import type { ToolGroup } from "./tool-strip";
 
 /** One screenshot surfaced from a turn's tool_result image outputs. */
 export interface ScreenshotShot {
@@ -157,7 +156,6 @@ function paintScreenshotRow(row: HTMLElement, shots: ScreenshotShot[]): void {
  */
 export function mountScreenshotBlock(
   stripHost: HTMLElement,
-  group: ToolGroup,
   key: string,
   shots: ScreenshotShot[],
 ): void {
@@ -182,10 +180,10 @@ export function mountScreenshotBlock(
   }
   // Below the chip line and its accordion, never above: the strip is the one
   // row every chip lives on, and the thumbnails read as that line's overflow.
-  const anchor = group.panel.nextElementSibling;
-  if (block.parentElement !== stripHost || block.previousElementSibling !== group.panel) {
-    stripHost.insertBefore(block, anchor);
-  }
+  // Plain append, so a turn with two screenshot tools keeps them in encounter
+  // order - anchoring on the shared panel's next sibling made the second block
+  // jump ahead of the first, then swap back on every flush.
+  if (block.parentElement !== stripHost) stripHost.appendChild(block);
 
   if (block.dataset.shotCount === String(shots.length)) return;
   block.dataset.shotCount = String(shots.length);

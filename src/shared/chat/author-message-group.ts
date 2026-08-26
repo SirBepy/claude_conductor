@@ -50,13 +50,10 @@ export function foldAuthoredIntoStrip(
   stripHost: HTMLElement,
 ): void {
   const run: RenderedMessage[] = [];
-  const els: HTMLElement[] = [];
   for (let i = start; i < end; i++) {
     const m = messages[i];
-    const el = messageEls[i];
-    if (!m || !el || m.kind !== "user" || !m.authorSessionId) continue;
+    if (!m || !messageEls[i] || m.kind !== "user" || !m.authorSessionId) continue;
     run.push(m);
-    els.push(el);
   }
   if (run.length === 0) return;
 
@@ -100,7 +97,6 @@ export function foldAuthoredIntoStrip(
     })
     .join("");
 
-  for (const el of els) el.dataset.groupChecked = "1";
   void hydrateCharacterAvatars(chip);
   void hydrateCharacterAvatars(bucket);
 }

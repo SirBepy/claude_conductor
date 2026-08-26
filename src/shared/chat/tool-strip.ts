@@ -459,7 +459,7 @@ export function groupToolRange(
         const countEl = group.chip.querySelector(".tool-chip-count");
         if (countEl) countEl.textContent = `x${shots.length}`;
       }
-      mountScreenshotBlock(stripHost, group, shotKey, shots);
+      mountScreenshotBlock(stripHost, shotKey, shots);
     }
   }
 }
