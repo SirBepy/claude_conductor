@@ -92,6 +92,7 @@ export async function renderPendingPane(
       sessionId: placeholderId,
       sessionModel: config.model || null,
       hideZero,
+      accountId: config.accountId ?? null,
       onEffortChange: (e) => { config.effort = e; },
       onModelChange: (m) => { config.model = m; },
     });
@@ -388,17 +389,20 @@ export async function renderPendingPane(
 }
 
 function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
+  const sess = state.sessions.find((s) => s.session_id === sessionId);
   if (state.statusbar) {
     state.statusbar.setSessionId(sessionId);
     state.statusbar.setReadOnlyEffort(false);
     state.statusbar.disableModelEdit();
+    // The picked-in-modal accountId already painted the chip; resync against
+    // the now-real session record in case the daemon resolved a different one
+    // (e.g. the picked account vanished mid-flow and it fell back to default).
+    state.statusbar.setAccountId(sess?.account_id ?? null);
   }
   pane.querySelector(".session-pending-hint")?.remove();
 
   const h = _pendingHeader;
   if (!h) return;
-
-  const sess = state.sessions.find((s) => s.session_id === sessionId);
   if (sess) {
     h.setTitle(sessionSubtitle(sess));
     h.setMeta(projectName(sess));

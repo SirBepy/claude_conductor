@@ -162,6 +162,10 @@ export function renderContext(asTokens: boolean, ctx: ChipRenderCtx): string {
     const pctStr = raw < 1 && raw > 0 ? "<1" : String(Math.min(100, Math.round(raw)));
     const body = asTokens ? `${formatTokenCount(Number(c.occupancy), { decimals: 0 })} / ${formatTokenCount(Number(c.window), { decimals: 0 })}` : `${pctStr}%`;
     return `<span class="sb-chip sb-context${cls}${animClass(ctx.animatedKeys, key)}" title="${occ} / ${win} tokens (conversation + system prompt + tools)${note}"><i class="ph ph-stack"></i>${body}</span>`;
+  } else if (ctx.startedAt === null && !ctx.metaLoaded) {
+    // startedAt is null only pre-start (pending pane); with no meta streamed
+    // in yet, nothing is actually loading, so 0% beats a skeleton.
+    return `<span class="sb-chip sb-context${animClass(ctx.animatedKeys, key)}"><i class="ph ph-stack"></i>${asTokens ? "0" : "0%"}</span>`;
   } else if (!ctx.metaLoaded || ctx.meta.hasUsage) {
     // No independent window heuristic here anymore (ai_todo 31): the daemon's
     // context_status is the sole source of truth. While it's still resolving
