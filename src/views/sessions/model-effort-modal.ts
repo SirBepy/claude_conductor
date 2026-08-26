@@ -2,8 +2,9 @@ import { html, render } from "lit-html";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
-import type { Account } from "../../shared/api";
+import type { Account, ProjectConfig } from "../../shared/api";
 import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
+import { settingsData, projectsListData, accountsListData, projectAccountData } from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
   accountPickIncomplete,
@@ -30,70 +31,38 @@ export async function openModelEffortModal(
   projectPath: string,
   projectName: string,
 ): Promise<SessionConfig | null> {
-  let settings: Record<string, unknown> = {};
-  try {
-    // The remote (phone) transport resolves get_settings to null rather than
-    // throwing, so `?? {}` is load-bearing: without it readModels(null) throws
-    // and the whole new-chat flow dead-ends back to the list.
-    settings = (await invoke<Record<string, unknown> | null>("get_settings")) ?? {};
-  } catch {
-    // ignore — fall back to defaults
-  }
-
-  const models = readModels(settings);
-  const defaultFlags = readDefaultFlags(settings);
-  // No presets anymore - first-ever session in a project defaults to Opus/high.
-  const initial = readLastChoice(settings, projectPath) ?? { model: "opus", effort: "high" };
-
-  // Resolve projectId for whitelist + live-taken dedup, and the project's
-  // bound account (if any) for the account picker below.
-  let projectId: string | null = null;
-  let preferredAccountId: string | null = null;
-  try {
-    const projects = await api.listProjects();
-    const proj = projects.find((p) => String(p.path) === projectPath) as
-      | { id: string; preferred_account_id?: string | null }
-      | undefined;
-    projectId = proj?.id ?? null;
-    preferredAccountId = proj?.preferred_account_id ?? null;
-  } catch {
-    // stay null
-  }
-  // Backend-normalized override: resolves worktree/casing cases the raw
-  // find() above misses. On throw (e.g. remote transport, no mirror yet)
-  // keep the raw-match result from above as a best-effort fallback.
-  try {
-    preferredAccountId = await api.resolveProjectAccount(projectPath);
-  } catch {
-    // keep raw-match fallback
-  }
-
-  // Account picker (multi-account milestone 04): resolve project binding ->
-  // default -> sole-account fallback -> null (ambiguous/empty registry).
-  let accounts: Account[] = [];
-  try {
-    accounts = await api.listAccounts();
-  } catch {
-    accounts = [];
-  }
-  const defaultAccountId = (settings["default_account_id"] as string | null | undefined) ?? null;
-  const resolvedAccountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
+  // Reads (each triggers/reuses a background revalidation - see
+  // new-session-cache.ts) fire immediately so all four are in flight
+  // concurrently regardless of how loadAndBuild() below awaits them.
+  const settingsRead = settingsData();
+  const projectsRead = projectsListData();
+  const accountsRead = accountsListData();
+  const projectAccountRead = projectAccountData(projectPath);
+  // Cold: at least one of the four has no cached value yet, so the modal
+  // opens on a loading shell instead of the real form (issue: this popup
+  // used to show nothing at all while these awaits ran).
+  const cold = settingsRead.cached === undefined || projectsRead.cached === undefined
+    || accountsRead.cached === undefined || projectAccountRead.cached === undefined;
 
   return new Promise<SessionConfig | null>((resolve) => {
-    // Assigned once the shared host's morph transition (presentHostCard,
-    // below) has mounted our card - every function here is only ever
-    // CALLED after that (renderBody etc. are all deferred closures), so the
+    // Assigned once loadAndBuild() (below) resolves the four reads above and
+    // mounts the real card - every function here is only ever CALLED after
+    // that (renderBody etc. are all deferred closures), so the
     // definite-assignment gap is safe.
     let card: HTMLElement;
     let charPane: CharacterPane;
     let slider: SliderController;
+    let models: string[] = [];
+    let projectId: string | null = null;
+    let preferredAccountId: string | null = null;
+    let accounts: Account[] = [];
 
-    let model = initial.model;
-    let effort = initial.effort;
+    let model = "";
+    let effort = "";
     // Default flags come from settings (defaultAutoAllow / defaultRemoteControl),
     // NOT lastChoice, which doesn't store them. Both default on.
-    let autoAccept = defaultFlags.autoAccept;
-    let remote = defaultFlags.remote;
+    let autoAccept = true;
+    let remote = true;
     // Per-model availability from the count_tokens probe. Empty until the probe
     // resolves; absent/true => model is selectable. A disabled model (e.g. Fable
     // 5 when Anthropic has it off) stays clickable but blocks "Start session".
@@ -116,7 +85,7 @@ export async function openModelEffortModal(
     // Rendering/wiring live in account-field.ts; this modal just owns the
     // state and passes it in/out (see account-field.ts's AccountFieldState).
     const accountField: AccountFieldState = {
-      accountId: resolvedAccountId,
+      accountId: null,
     };
 
     function modelIdx(): number { return Math.max(0, models.indexOf(model)); }
@@ -125,12 +94,9 @@ export async function openModelEffortModal(
     function sessionBlocked(): boolean { return authExpired || modelDisabled(); }
 
     // Map family -> latest id (count_tokens rejects bare aliases), probe
-    // those, key results back by family.
+    // those, key results back by family. Populated in loadAndBuild() below
+    // once `models` is known.
     const idByFamily = new Map<string, string>();
-    for (const fam of models) {
-      const id = latestIdForFamily(fam);
-      if (id) idByFamily.set(fam, id);
-    }
     // Which account the in-flight/last probe ran under, so a chip click that
     // lands back on the already-probed account doesn't re-fire it.
     let probedAccountId: string | null | undefined;
@@ -346,30 +312,98 @@ export async function openModelEffortModal(
     setBackdropCancel(() => close(null));
     document.addEventListener("keydown", onKey);
 
-    void presentHostCard(() => {
-      render(
-        html`<div
-          class="modal-card model-effort-modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-label="New session in ${projectName}"
-        ></div>`,
-        modalCardSlot(),
-      );
-      card = modalCardSlot().querySelector<HTMLElement>(".model-effort-modal-card")!;
-      // Attached once here (not in attachHandlers(), which reruns every
-      // renderBody) so it doesn't stack a duplicate listener per re-render.
-      attachChipKeyboardActivation(card);
-      charPane = createCharacterPane(card, projectId);
-      slider = createSliderController(card, { modelIdx, effortIdx, onCommit: commitSliderValue });
+    // Cold cache: paint a loading shell now so the popup never sits blank
+    // while the four reads above settle - loadAndBuild()'s own
+    // presentHostCard() call morphs it into the real form once they land.
+    // Warm cache: skip straight to loadAndBuild(), which resolves ~instantly.
+    if (cold) {
+      void presentHostCard(() => {
+        render(
+          html`<div
+            class="modal-card modal-card-loading"
+            role="dialog"
+            aria-modal="true"
+            aria-label="New session in ${projectName}"
+          ><i class="ph ph-circle-notch" aria-hidden="true"></i> Loading&hellip;</div>`,
+          modalCardSlot(),
+        );
+      });
+    }
 
-      modelProbeLoading = idByFamily.size > 0;
-      renderBody();
+    async function loadAndBuild(): Promise<void> {
+      const settingsRaw = settingsRead.cached !== undefined
+        ? settingsRead.cached
+        : await settingsRead.ready.catch(() => ({}) as Record<string, unknown>);
+      models = readModels(settingsRaw);
+      const defaultFlags = readDefaultFlags(settingsRaw);
+      // No presets anymore - first-ever session in a project defaults to Opus/high.
+      const initial = readLastChoice(settingsRaw, projectPath) ?? { model: "opus", effort: "high" };
+      model = initial.model;
+      effort = initial.effort;
+      autoAccept = defaultFlags.autoAccept;
+      remote = defaultFlags.remote;
 
-      // ── Load character pool in background (see character-pane.ts) ────────
-      charPane.loadPool();
+      // Resolve projectId for whitelist + live-taken dedup, and the project's
+      // bound account (if any) for the account picker below.
+      const projectsListVal: ProjectConfig[] = projectsRead.cached !== undefined
+        ? projectsRead.cached
+        : await projectsRead.ready.catch((): ProjectConfig[] => []);
+      const proj = projectsListVal.find((p) => String(p.path) === projectPath) as
+        | { id: string; preferred_account_id?: string | null }
+        | undefined;
+      projectId = proj?.id ?? null;
+      preferredAccountId = proj?.preferred_account_id ?? null;
+      // Backend-normalized override: resolves worktree/casing cases the raw
+      // find() above misses. On throw (e.g. remote transport, no mirror yet)
+      // keep the raw-match result from above as a best-effort fallback.
+      try {
+        preferredAccountId = projectAccountRead.cached !== undefined
+          ? projectAccountRead.cached
+          : await projectAccountRead.ready;
+      } catch {
+        // keep raw-match fallback
+      }
 
-      runModelProbe();
-    });
+      // Account picker (multi-account milestone 04): resolve project binding ->
+      // default -> sole-account fallback -> null (ambiguous/empty registry).
+      accounts = accountsRead.cached !== undefined
+        ? accountsRead.cached
+        : await accountsRead.ready.catch((): Account[] => []);
+      const defaultAccountId = (settingsRaw["default_account_id"] as string | null | undefined) ?? null;
+      accountField.accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
+
+      for (const fam of models) {
+        const id = latestIdForFamily(fam);
+        if (id) idByFamily.set(fam, id);
+      }
+
+      void presentHostCard(() => {
+        render(
+          html`<div
+            class="modal-card model-effort-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="New session in ${projectName}"
+          ></div>`,
+          modalCardSlot(),
+        );
+        card = modalCardSlot().querySelector<HTMLElement>(".model-effort-modal-card")!;
+        // Attached once here (not in attachHandlers(), which reruns every
+        // renderBody) so it doesn't stack a duplicate listener per re-render.
+        attachChipKeyboardActivation(card);
+        charPane = createCharacterPane(card, projectId);
+        slider = createSliderController(card, { modelIdx, effortIdx, onCommit: commitSliderValue });
+
+        modelProbeLoading = idByFamily.size > 0;
+        renderBody();
+
+        // ── Load character pool in background (see character-pane.ts) ────────
+        charPane.loadPool();
+
+        runModelProbe();
+      });
+    }
+
+    void loadAndBuild();
   });
 }

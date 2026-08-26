@@ -34,6 +34,7 @@ import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
 import { applyBackgroundFx } from "./background-fx";
+import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 
 function activeViewName(): string {
   return window.location.hash.replace(/^#/, "") || "dashboard";
@@ -304,6 +305,10 @@ export function initBoot(): void {
   void api.fetchAvailableModels().then((models) => {
     if (models && models.length > 0) setApiModels(curateLatestPerFamily(models));
   }).catch(() => {});
+
+  // Warm the new-session popup's data cache so the first "+ New session" tap
+  // of the session is already instant (see new-session-cache.ts).
+  warmNewSessionCache();
 
   // Modal + banner wiring (idempotent; safe to call on boot).
   wireHookModal();

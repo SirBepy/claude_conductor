@@ -7,6 +7,7 @@ import type { ProjectGroup } from "../../types/ipc.generated";
 import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal";
 import { openLocationModal } from "./location-picker";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
+import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
 
 export type SortChoice = "name" | "recent" | "todos";
 export const SORT_STORAGE_KEY = "claude_companion_sessions_modal_sort";
@@ -43,40 +44,24 @@ export function writeShowTodos(show: boolean): void {
   catch { /* ignore */ }
 }
 
+/** Kicks the per-project stat (last-activity + todo count) revalidation once
+ *  per project - called after the list is known, never from a render path
+ *  (computeRows/row markup read the cache synchronously via
+ *  cachedProjectStat() instead, or every keystroke would refire fetches). */
+function warmProjectStats(projects: ProjectGroup[], onSettle: () => void): void {
+  for (const p of projects) {
+    void projectStatData(p.path).ready.then(onSettle).catch(() => {});
+  }
+}
+
 export async function pickProject(): Promise<{ path: string; name: string } | null> {
-  let projects: ProjectGroup[] = [];
-  try {
-    projects = (await invoke<ProjectGroup[]>("list_project_groups")) || [];
-  } catch (err) {
-    console.error("[sessions] list_project_groups failed", err);
-  }
-  if (!projects.length) {
-    alert("No projects detected yet. Run claude in a folder first or add a project.");
-    return null;
-  }
-
-  // Fetch latest .jsonl mtime per project for the "Most recent" sort and
-  // ai_todos counts for the "Most todos" sort. Both are best-effort.
-  const [mtimes, todoCounts] = await Promise.all([
-    Promise.all(
-      projects.map((p) =>
-        invoke<number>("project_last_activity_at", { cwd: p.path }).catch(() => 0),
-      ),
-    ),
-    Promise.all(
-      projects.map((p) =>
-        invoke<number>("count_ai_todos", { cwd: p.path }).catch(() => 0),
-      ),
-    ),
-  ]);
-
-  return openProjectPickerModal(projects, mtimes, todoCounts);
+  const { cached, ready } = projectGroupsData();
+  return openProjectPickerModal(cached, ready);
 }
 
 export function openProjectPickerModal(
-  projects: ProjectGroup[],
-  mtimes: number[],
-  todoCounts: number[] = [],
+  cachedProjects: ProjectGroup[] | undefined,
+  projectsReady: Promise<ProjectGroup[]>,
 ): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const host = ensureModalHost();
@@ -88,6 +73,10 @@ export function openProjectPickerModal(
       closeHostCard();
       resolve(val);
     };
+
+    // undefined = still loading (cold cache; renderModal() shows a spinner
+    // shell instead of the list until this resolves).
+    let projects: ProjectGroup[] | undefined = cachedProjects;
 
     let sort: SortChoice = readStoredSort();
     let showTodos: boolean = readShowTodos();
@@ -107,9 +96,13 @@ export function openProjectPickerModal(
       return 3;
     };
 
+    // Only ever called once `projects` is populated - the search input (the
+    // only thing that can trigger computeRows()) doesn't exist in the DOM
+    // during the loading-shell render below.
     const computeRows = (): ProjectGroup[] => {
+      const list = projects!;
       const f = filter.trim().toLowerCase();
-      let rows = projects.filter((p) =>
+      let rows = list.filter((p) =>
         !f
         || p.name.toLowerCase().includes(f)
         || p.path.toLowerCase().includes(f)
@@ -118,19 +111,15 @@ export function openProjectPickerModal(
         rows = rows.slice().sort((a, b) => a.name.localeCompare(b.name));
       } else if (sort === "todos") {
         rows = rows.slice().sort((a, b) => {
-          const ai = projects.indexOf(a);
-          const bi = projects.indexOf(b);
-          const ac = todoCounts[ai] ?? 0;
-          const bc = todoCounts[bi] ?? 0;
+          const ac = cachedProjectStat(a.path)?.todoCount ?? 0;
+          const bc = cachedProjectStat(b.path)?.todoCount ?? 0;
           return bc - ac; // descending: most todos first
         });
       } else {
-        // "recent": use mtimes index lookup. Items with mtime=0 sort last.
+        // "recent": items with no cached mtime yet (or genuinely 0) sort last.
         rows = rows.slice().sort((a, b) => {
-          const ai = projects.indexOf(a);
-          const bi = projects.indexOf(b);
-          const am = mtimes[ai] ?? 0;
-          const bm = mtimes[bi] ?? 0;
+          const am = cachedProjectStat(a.path)?.mtime ?? 0;
+          const bm = cachedProjectStat(b.path)?.mtime ?? 0;
           return bm - am;
         });
       }
@@ -159,6 +148,15 @@ export function openProjectPickerModal(
     };
 
     const renderModal = () => {
+      if (!projects) {
+        render(
+          html`<div class="modal-card modal-card-loading" role="dialog" aria-modal="true" aria-label="Pick project">
+            <i class="ph ph-circle-notch" aria-hidden="true"></i> Loading projects&hellip;
+          </div>`,
+          slot,
+        );
+        return;
+      }
       const rows = computeRows();
       const tpl = html`
         <div
@@ -259,8 +257,7 @@ export function openProjectPickerModal(
                 ? html`<li class="project-picker-empty">No matches</li>`
                 : rows.map(
                     (p, i) => {
-                      const pIdx = projects.indexOf(p);
-                      const todoCount = todoCounts[pIdx] ?? 0;
+                      const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
                       return html`
                       <li
                         class="project-picker-row ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${p.path_exists === false ? "project-picker-row--missing" : ""}"
@@ -342,7 +339,43 @@ export function openProjectPickerModal(
       }
     };
 
+    // Applies a resolved (or revalidated) project list: paints it and kicks
+    // per-project stat revalidation. Morphs (presentHostCard) only when
+    // replacing the loading shell; a later revalidation just patches in
+    // place, same as a sort/filter change.
+    const applyGroups = (groups: ProjectGroup[]): void => {
+      if (resolved) return;
+      const wasLoading = !projects;
+      projects = groups;
+      if (wasLoading) void presentHostCard(renderModal);
+      else renderModal();
+      warmProjectStats(groups, () => { if (!resolved) renderModal(); });
+    };
+
+    if (projects) warmProjectStats(projects, () => { if (!resolved) renderModal(); });
+
     setBackdropCancel(() => finish(null));
     void presentHostCard(renderModal);
+
+    // Cold cache: projects is undefined and the shell above shows a spinner
+    // until this resolves. Warm cache: this still runs, silently revalidating
+    // the list (and stats) in the background per the stale-while-revalidate
+    // policy - a project added/removed elsewhere shows up on next render.
+    void projectsReady.then((groups) => {
+      if (!groups.length) {
+        if (!projects) {
+          alert("No projects detected yet. Run claude in a folder first or add a project.");
+          finish(null);
+        }
+        return;
+      }
+      applyGroups(groups);
+    }).catch((err) => {
+      console.error("[sessions] list_project_groups failed", err);
+      if (!projects) {
+        alert("No projects detected yet. Run claude in a folder first or add a project.");
+        finish(null);
+      }
+    });
   });
 }

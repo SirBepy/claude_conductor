@@ -10,6 +10,7 @@ import type { Character } from "../../shared/api";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
 import { state } from "./state";
 import { characterForSession } from "./session-characters";
+import { whitelistCharsData } from "./new-session-cache";
 
 // ── Sound debounce ────────────────────────────────────────────────────────────
 // Module-level so multiple rapid picks don't stack timers.
@@ -195,18 +196,28 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
   return {
     render: renderCharPane,
     loadPool(): void {
-      api.resolveWhitelistCharacters(projectId ?? "")
-        .then((chars) => {
-          pool = chars;
-          if (pool.length > 0) {
-            pickCharacter(null); // initial pick (plays sound)
-          }
+      // Cached (see new-session-cache.ts): a warm reopen picks + renders
+      // immediately below; the background revalidation just keeps `pool`
+      // fresh for the NEXT pick (re-roll / full picker) rather than
+      // re-rolling the character already shown on this same open.
+      const { cached, ready } = whitelistCharsData(projectId ?? "");
+      if (cached !== undefined) {
+        pool = cached;
+        if (pool.length > 0) pickCharacter(null); // initial pick (plays sound)
+        renderCharPane();
+      }
+      ready.then((chars) => {
+        pool = chars;
+        if (cached === undefined) {
+          if (pool.length > 0) pickCharacter(null); // cold path: pick now
           renderCharPane();
-        })
-        .catch(() => {
+        }
+      }).catch(() => {
+        if (cached === undefined) {
           pool = []; // treat as unavailable
           renderCharPane();
-        });
+        }
+      });
     },
     currentCharacterId(): string | null {
       return character?.id ?? null;

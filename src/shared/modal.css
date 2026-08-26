@@ -37,3 +37,21 @@
   transform: translate(-50%, -50%) scaleY(0.05);
   opacity: 0;
 }
+
+/* Generic loading-shell card for a chain step whose data isn't cached yet
+ * (project-picker cold-load, new-session data). Morphs into the populated
+ * card the same way any other step transition does. */
+.modal-card-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 280px;
+  padding: 48px 24px;
+  color: var(--color-text-muted, #8a8a96);
+  font-size: 0.85rem;
+}
+.modal-card-loading i {
+  font-size: 1rem;
+  animation: icon-btn-spin 0.8s linear infinite;
+}

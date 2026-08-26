@@ -1,6 +1,7 @@
 import { discardComposerDraft } from "../../shared/chat/composer";
 import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
+import { lockBackgroundInput, unlockBackgroundInputIfClosed } from "../../shared/modal";
 import { state, setActiveSession, type ParkedDraft } from "./state";
 import { pickProject } from "./project-picker";
 import { renderSidebar } from "./sidebar";
@@ -144,15 +145,30 @@ export async function resumeDraft(pane: HTMLElement): Promise<void> {
   }
 }
 
+// True while a start-new-session flow is in flight - guards the FAB/+New/
+// keyboard-shortcut triggers (all funnel through here) so rapid taps can't
+// each open their own project-picker into the same shared modal slot.
+let inFlight = false;
+
 export async function startNewSession(pane: HTMLElement): Promise<void> {
-  const myMount = state.mountId;
-  const project = await pickProject();
-  if (!project) return;
-  if (state.mountId !== myMount) return;
-  const config = await openModelEffortModal(project.path, project.name);
-  if (!config) return;
-  if (state.mountId !== myMount) return;
-  await launchNewSession(pane, project, config);
+  if (inFlight) return;
+  inFlight = true;
+  // Blur the composer behind the popup now, before pickProject()'s fetch
+  // starts - the gap otherwise leaves it focused/typable until data lands.
+  lockBackgroundInput();
+  try {
+    const myMount = state.mountId;
+    const project = await pickProject();
+    if (!project) return;
+    if (state.mountId !== myMount) return;
+    const config = await openModelEffortModal(project.path, project.name);
+    if (!config) return;
+    if (state.mountId !== myMount) return;
+    await launchNewSession(pane, project, config);
+  } finally {
+    inFlight = false;
+    unlockBackgroundInputIfClosed();
+  }
 }
 
 export async function launchNewSession(

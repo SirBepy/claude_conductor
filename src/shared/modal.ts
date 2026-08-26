@@ -65,6 +65,22 @@ function trapFocusInsideHost(host: HTMLElement): () => void {
   return () => document.removeEventListener("focusin", onFocusIn);
 }
 
+/** Blurs whatever's focused and blocks refocus, ahead of presentHostCard()
+ *  mounting - call this on the triggering click, before an async fetch.
+ *  presentHostCard() reuses the guard instead of double-locking. */
+export function lockBackgroundInput(): void {
+  if (focusGuardDisposer) return;
+  focusGuardDisposer = trapFocusInsideHost(ensureModalHost());
+}
+
+/** Releases the guard if the flow bailed before any card ever opened - no-op if a real modal owns it or none is held. */
+export function unlockBackgroundInputIfClosed(): void {
+  const host = document.getElementById("modal-host");
+  if (host?.classList.contains("open")) return;
+  focusGuardDisposer?.();
+  focusGuardDisposer = null;
+}
+
 /** Renders a step's card via `renderFn`, morphing from whatever was showing
  *  (shrink -> swap -> expand), or fading in if nothing was. Safe right after
  *  an unrelated closeHostCard() - reuses its still-collapsing card as the
@@ -93,8 +109,8 @@ export async function presentHostCard(renderFn: () => void): Promise<void> {
       backdropCancel?.();
       return true;
     });
-    focusGuardDisposer = trapFocusInsideHost(host);
   }
+  lockBackgroundInput(); // no-op if a caller already locked it pre-fetch
   renderFn();
   if (myGen !== hostGeneration) return;
 
