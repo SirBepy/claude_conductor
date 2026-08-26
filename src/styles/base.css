@@ -97,13 +97,10 @@ body {
     transform: scale(0.92);
 }
 
-/* Shared reset for small square icon-only buttons (panel headers, list-row
-   actions - pop-out, close, delete...). Callers add this class alongside
-   their own rule for width/height/font-size, which legitimately vary by
-   context (26-28px). The one thing every caller MUST inherit from here is
-   `padding: 0` - the bare `button {}` reset below sets `padding: 7px 16px`,
-   and any square button that goes unstyled on that property gets forced
-   wider than its own width/height and its icon rendered off-center. */
+/* Callers add this alongside their own width/height/font-size rule. Must
+   supply `padding: 0` - the bare `button {}` reset below sets `7px 16px`,
+   which forces an unstyled square button wider than its own box and
+   renders its icon off-center. */
 .icon-btn-sq {
     border: 0;
     background: transparent;

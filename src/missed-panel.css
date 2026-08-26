@@ -72,8 +72,8 @@
   border-radius: 6px;
   font-size: 0.95rem;
 }
-.missed-icon-btn--dismiss:hover { color: var(--color-danger, #e05252); }
-.missed-icon-btn--open:hover { color: var(--color-primary); }
+.missed-icon-btn--dismiss:hover:not(:disabled) { color: var(--color-danger, #e05252); }
+.missed-icon-btn--open:hover:not(:disabled) { color: var(--color-primary); }
 .missed-foot { display: flex; gap: 8px; padding: 10px 16px 14px; }
 .missed-foot button {
   font-family: inherit;

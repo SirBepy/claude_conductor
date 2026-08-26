@@ -45,7 +45,7 @@
   z-index: 1;
 }
 
-.table-fs-btn:hover {
+.table-fs-btn:hover:not(:disabled) {
   background: var(--color-surface);
   color: var(--color-text);
 }
