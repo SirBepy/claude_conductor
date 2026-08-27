@@ -140,6 +140,8 @@ test.describe("view-harness / delivered answer sends no duplicate message", () =
     expect(result.sendCount).toBe(1);
     expect(result.blockCount).toBe(1);
     expect(result.hasSentinel).toBe(false);
-    expect(result.extraText).toBe("Also check the CI logs while you're at it.");
+    // Carries the card-note sentinel (9c7f0ce6), which is distinct from the
+    // answer one asserted absent above.
+    expect(result.extraText).toBe("<auq-extra/>Also check the CI logs while you're at it.");
   });
 });

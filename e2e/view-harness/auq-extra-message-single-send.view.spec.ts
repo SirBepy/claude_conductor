@@ -106,8 +106,9 @@ test.describe("view-harness / AUQ review-step extra message rides in the SAME se
     expect(result.foldText).toContain("Q: Q1?\nA: A");
     expect(result.foldText).toContain("Q: Q2?\nA: X");
     expect(result.foldText).not.toContain("CI logs");
-    // The extra message still arrives, as ordinary content in the same bundle.
-    expect(result.extraText).toBe("Also check the CI logs while you're at it.");
+    // The extra still rides in the same bundle, tagged with its own sentinel
+    // (9c7f0ce6) so the card folds it rather than spawning a detached bubble.
+    expect(result.extraText).toBe("<auq-extra/>Also check the CI logs while you're at it.");
     // Nothing left sitting in the held queue after the single flush.
     expect(result.stillHeld).toBe(false);
   });

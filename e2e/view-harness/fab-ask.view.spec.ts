@@ -81,12 +81,14 @@ async function mountFab(page: Page, seed: unknown[]): Promise<void> {
   );
 }
 
-test("FAB rests closed, fans out to three, and opens Ask in a floating card", async ({ page }) => {
+test("FAB rests closed, fans out to four, and opens Ask in a floating card", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
 
   const fab = page.locator(".fab-dial-fab");
   await expect(fab).toBeVisible();
-  await expect(page.locator(".fab-dial-item")).toHaveCount(3);
+  // The three DIAL card panels plus the Preview toggle, which is a dial item
+  // but never a panel.
+  await expect(page.locator(".fab-dial-item")).toHaveCount(4);
   // Dial exists in the DOM but is hidden until the FAB is tapped.
   await expect(page.locator(".fab-dial-item").first()).toBeHidden();
   await expect(page.locator(".fab-card")).toHaveCount(0);
@@ -107,7 +109,7 @@ test("Preview is a toggle in the dial, not a card panel", async ({ page }) => {
 
   const preview = page.locator('[data-dial="preview"]');
   await expect(preview).toHaveClass(/is-toggle/);
-  // Never lands in the card, and the spine only ever offers the two that do.
+  // Never lands in the card, and the spine only ever offers the three that do.
   await expect(page.locator('[data-spine="preview"]')).toHaveCount(0);
 });
 
