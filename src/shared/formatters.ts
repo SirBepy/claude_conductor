@@ -5,6 +5,16 @@
  * migrated off them.
  */
 
+/** `clockify-week` / `cc_conductor` -> "Clockify Week" / "Cc Conductor". Mirrors
+ *  the Rust `preview_title_from_slug`, so both sides label a slug the same. */
+export function titleCaseWords(s: string): string {
+  return s
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";

@@ -1,9 +1,9 @@
 /* show_preview card: a pushed HTML document as its own centered message row.
-   Geometry deliberately tracks .msg.question-card (chat-question-card.css) so
-   the two read as one family; the 640px cap is the one intentional divergence
-   (Joe 2026-08-27) - a 460px frame is too narrow for the wide content these
-   pushes carry. */
+   Geometry tracks .msg.question-card (chat-question-card.css) so the two read
+   as one family. */
 
+/* 640px, not the question card's 460px: a 460px frame is too narrow for the
+   wide content these pushes carry (Joe 2026-08-27). */
 .msg.preview-card {
   align-self: center;
   background: var(--color-surface-alt);

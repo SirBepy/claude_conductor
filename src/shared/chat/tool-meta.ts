@@ -1,5 +1,6 @@
 import { basename } from "../path-utils";
 import { asObj, strField } from "../obj-utils";
+import { titleCaseWords } from "../formatters";
 
 export const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
 
@@ -59,11 +60,7 @@ function parseMcp(tool: string): { server: string } | null {
 
 /** "playwright" -> "Playwright", "cc_conductor" -> "Cc Conductor". */
 function prettyMcpServer(server: string): string {
-  return server
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return titleCaseWords(server);
 }
 
 /** The sub-tool of a raw `mcp__server__some_action` -> "some action". */

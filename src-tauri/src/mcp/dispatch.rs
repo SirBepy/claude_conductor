@@ -231,8 +231,9 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/drafts/write", Value::Object(body), Some("invalid draft write"), None))
         }
         TOOL_SHOW_PREVIEW => {
-            // Same endpoint terminal Claude curls; `source: "chat"` is what
-            // scopes the snapshot to this session's rail.
+            // Same endpoint terminal Claude curls. `session_id` scopes the
+            // snapshot to this chat's rail; the source value is what tells the
+            // rail an inline card already exists, so it must not force open.
             let slug = ctx.args["slug"].as_str().unwrap_or("").to_string();
             let title = match ctx.args["title"].as_str().map(str::trim) {
                 Some(t) if !t.is_empty() => t.to_string(),

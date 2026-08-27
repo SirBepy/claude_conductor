@@ -12,8 +12,9 @@ const { invokeMock } = vi.hoisted(() => ({
 }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
-const { previewFieldsOf, titleFromSlug, renderPreviewCardHtml, PREVIEW_SOURCE_CHAT_CARD } =
+const { previewFieldsOf, renderPreviewCardHtml, PREVIEW_SOURCE_CHAT_CARD } =
   await import("../src/shared/chat/chat-preview-card.ts");
+const { titleCaseWords } = await import("../src/shared/formatters.ts");
 const { eventToRenderedMessage } = await import("../src/shared/chat/chat-event-to-message.ts");
 const { isShowPreviewTool, MCP_SHOW_PREVIEW_TOOL } = await import("../src/shared/chat/tool-meta.ts");
 
@@ -33,7 +34,7 @@ beforeEach(() => {
 
 describe("show_preview field extraction", () => {
   it("derives a title from the slug when the push omits one", () => {
-    expect(titleFromSlug("clockify-week")).toBe("Clockify Week");
+    expect(titleCaseWords("clockify-week")).toBe("Clockify Week");
     expect(previewFieldsOf({ slug: "clockify-week", html: "<p>x</p>" }).text).toBe("Clockify Week");
   });
 

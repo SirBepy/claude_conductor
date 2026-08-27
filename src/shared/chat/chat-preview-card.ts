@@ -6,6 +6,7 @@ import { invoke } from "../ipc";
 import type { RenderedMessage } from "./chat-classifiers";
 import { escapeHtml } from "../escape-html";
 import { asObj, strField } from "../obj-utils";
+import { titleCaseWords } from "../formatters";
 import { buildPreviewDocumentHtml } from "../../views/sessions/preview-panel-document";
 
 /** Fired on `window` when a card's ⤢ is clicked; the sessions view listens and
@@ -17,16 +18,6 @@ export const PREVIEW_OPEN_EVENT = "cc-preview-open";
  *  not force itself open for them. */
 export const PREVIEW_SOURCE_CHAT_CARD = "chat_card";
 
-/** Title derived from a slug when the push omitted one, matching the Rust
- *  side's `preview_title_from_slug` so both paths label a card the same. */
-export function titleFromSlug(slug: string): string {
-  return slug
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
 /** The `kind:"preview"` row's own fields, read off the tool_use input. Shared
  *  by the live and scrollback paths so the two can never drift. */
 export function previewFieldsOf(input: unknown): Pick<RenderedMessage, "text" | "previewHtml" | "previewSlug"> {
@@ -34,7 +25,7 @@ export function previewFieldsOf(input: unknown): Pick<RenderedMessage, "text" | 
   const slug = strField(o, "slug");
   const title = strField(o, "title").trim();
   return {
-    text: title || titleFromSlug(slug) || "Preview",
+    text: title || titleCaseWords(slug) || "Preview",
     previewHtml: strField(o, "html"),
     previewSlug: slug,
   };
