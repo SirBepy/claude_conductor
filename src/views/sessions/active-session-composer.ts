@@ -16,6 +16,7 @@ import { state } from "./state";
 import { api } from "../../shared/api";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
+import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 
 /** Attach the composer + held-messages controller, including the `sendBundle`
  * closure both use to actually send to the daemon. */
@@ -37,6 +38,10 @@ export function mountComposer(
     if (inst?.frozen) {
       try {
         await invoke<void>("unfreeze_session", { sessionId });
+        // Manual freeze (chat-menu.ts) parks the row in Hidden; mirror that
+        // pairing here so an auto-unfreeze-on-send also restores it.
+        const hidden = loadHiddenSessions();
+        if (hidden.delete(sessionId)) saveHiddenSessions(hidden);
       } catch (err) {
         console.error("[sessions] unfreeze_session failed", err);
         showToast(`Failed to unfreeze: ${err}`);
