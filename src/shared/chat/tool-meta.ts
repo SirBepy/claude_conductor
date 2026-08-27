@@ -14,6 +14,14 @@ export function isAskQuestionTool(tool: string): boolean {
   return tool === BUILTIN_ASK_QUESTION_TOOL || tool === MCP_ASK_QUESTION_TOOL;
 }
 
+// Rendered-HTML push. Same live/scrollback drift guard as the ask channel
+// above: one predicate, both paths.
+export const MCP_SHOW_PREVIEW_TOOL = "mcp__cc_conductor__show_preview";
+
+export function isShowPreviewTool(tool: string): boolean {
+  return tool === MCP_SHOW_PREVIEW_TOOL;
+}
+
 /** Lowercased file extension (including the dot), or "" if none. */
 function extOf(path: string): string {
   const base = basename(path).toLowerCase();

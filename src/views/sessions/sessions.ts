@@ -1,6 +1,8 @@
 ﻿import { render } from "lit-html";
 import { template, detachedTemplate } from "./template";
 import { invoke } from "../../shared/ipc";
+import type { PreviewMeta } from "../../types/ipc.generated";
+import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
 import "./sessions-mobile.css";
@@ -224,6 +226,26 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     })();
   });
 
+  // ⤢ on a show_preview card: resolve its slug to the daemon's snapshot id and
+  // hand it to the rail. Announced on `window` by the card's click handler so
+  // shared/chat never has to reach into this view.
+  const onPreviewOpen = (e: Event): void => {
+    const slug = (e as CustomEvent<{ slug?: string }>).detail?.slug ?? "";
+    void (async () => {
+      let id: string | undefined;
+      try {
+        const all = await invoke<PreviewMeta[]>("list_previews");
+        // Newest match wins: a same-slug re-push replaces in place, but a
+        // stale entry can still be listed while the fresh one is written.
+        id = (Array.isArray(all) ? all : []).filter((m) => m.slug === slug).pop()?.id;
+      } catch (err) {
+        console.error("[sessions] could not resolve preview slug", err);
+      }
+      previewController?.open(id);
+    })();
+  };
+  window.addEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
+
   const teardownUsageDials = wireRateLimitBanner(root, listEl, myMount);
 
   if (consumePendingOpenPicker()) {
@@ -277,6 +299,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     teardownOverflowMenu();
     teardownDaemonStatusListeners();
     teardownMobileKeyboard();
+    window.removeEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
     previewController?.destroy();
     previewController = null;
     state.previewController = null;

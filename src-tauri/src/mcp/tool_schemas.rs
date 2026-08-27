@@ -38,6 +38,11 @@ pub const TOOL_WRITE_USER_TODO: &str = "write_user_todo";
 // Draft messages the user sends elsewhere (todo 666). Unconditional: any
 // session can be asked to write one, and the panel is project-scoped.
 pub const TOOL_WRITE_DRAFT: &str = "write_draft";
+// Rendered-HTML push (todo 291's `<cc-preview:..>` sentinel replaced by a real
+// tool, Joe 2026-08-27). A sentinel the model has to open AND close correctly
+// is the failure mode the status/title markers already hit; a tool call cannot
+// be half-emitted. Unconditional, same as send_message.
+pub const TOOL_SHOW_PREVIEW: &str = "show_preview";
 // Jarvis-only fleet-orchestration tools (todo 272, chunk 2b). Only advertised
 // in `tools/list` when the MCP child's env carries `CC_JARVIS=1` - see
 // `tool_list_response` and `daemon::claude_config::write_mcp_config`.
@@ -253,6 +258,19 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
                     }
                 },
                 "required": ["action"]
+            }
+        }),
+        json!({
+            "name": TOOL_SHOW_PREVIEW,
+            "description": "Render HTML for the user to LOOK at - a mockup, a chart, a timeline, a diagram. The card lands inline in the chat, expanded, and he can promote it to the side panel from there. Use it whenever the answer is easier to see than to read; a table in your message text is the fallback, not the goal.\n\nThe HTML is self-contained: it renders in a sandboxed frame with no access to the app, so inline `<style>`/`<script>` and CDN links all work, but nothing relative resolves - no `<link href=\"./x.css\">`.\n\n`slug` is the identity. Pushing the same slug again REPLACES that card in place rather than stacking a second one, so iterate on a design by re-pushing one slug.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Stable kebab-case id. Re-push the same slug to update the card in place."},
+                    "html": {"type": "string", "description": "A complete self-contained HTML document."},
+                    "title": {"type": "string", "description": "Short human label for the card header. Derived from the slug if omitted."}
+                },
+                "required": ["slug", "html"]
             }
         }),
     ];

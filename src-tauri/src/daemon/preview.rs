@@ -29,6 +29,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use ts_rs::TS;
 
+/// `source` for a push from the `show_preview` MCP tool. Distinct from plain
+/// `"chat"` (the `<cc-preview:..>` sentinel) because this one ALSO renders as a
+/// card in the transcript, so the rail must not force itself open for it.
+pub const PREVIEW_SOURCE_CHAT_CARD: &str = "chat_card";
+
 /// Max snapshots retained in the timeline. Oldest (smallest `created_at`) is
 /// evicted first when a genuinely NEW slug would push the count over this.
 pub const MAX_HISTORY: usize = 30;

@@ -1,0 +1,137 @@
+/* show_preview card: a pushed HTML document as its own centered message row.
+   Geometry deliberately tracks .msg.question-card (chat-question-card.css) so
+   the two read as one family; the 640px cap is the one intentional divergence
+   (Joe 2026-08-27) - a 460px frame is too narrow for the wide content these
+   pushes carry. */
+
+.msg.preview-card {
+  align-self: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0;
+  max-width: 640px;
+  width: 90%;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  /* Own container so the header can shed its button label by CARD width, not
+     viewport width - the pane can be narrow while the window is wide. */
+  container-type: inline-size;
+}
+
+.pc-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  user-select: none;
+  border-bottom: 1px solid transparent;
+}
+
+.msg.preview-card.open .pc-summary {
+  border-bottom-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.pc-summary > .ph:first-child {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.pc-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-pop {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.pc-pop:hover {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.pc-chevron {
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: transform 0.15s;
+}
+
+.msg.preview-card.open .pc-chevron {
+  transform: rotate(180deg);
+}
+
+.pc-body {
+  background: var(--color-background);
+}
+
+.msg.preview-card:not(.open) .pc-body,
+.msg.preview-card:not(.open) .pc-foot {
+  display: none;
+}
+
+/* resize:vertical needs a block-level box with its own height; the iframe
+   itself takes the drag handle so the frame grows, not the card chrome. */
+.pc-frame {
+  display: block;
+  width: 100%;
+  height: 300px;
+  min-height: 120px;
+  border: 0;
+  background: var(--color-background);
+  resize: vertical;
+  overflow: auto;
+}
+
+.pc-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 7px;
+  font-size: 0.62rem;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+}
+
+.pc-foot-grow {
+  flex: 1;
+}
+
+.pc-failed {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 18px 12px;
+  font-size: 0.78rem;
+  color: var(--color-danger);
+}
+
+/* Narrow panes (detached session window, or the desktop pane with the rail
+   open) drop the button to its icon - the label is the first thing that can go. */
+@container (max-width: 460px) {
+  .pc-pop-label {
+    display: none;
+  }
+}

@@ -8,6 +8,7 @@ import { openChatImageGallery } from "./chat-image-gallery";
 import { openLightbox } from "./lightbox";
 import { onWaitingChipClick } from "./turn-chips";
 import { getCta } from "./cta-registry";
+import { PREVIEW_OPEN_EVENT } from "./chat-preview-card";
 import type { ChatRenderer } from "./chat-renderer";
 
 /** Delegated `click` handlers for `ChatRenderer`'s container. Each factory
@@ -136,6 +137,24 @@ export function createHandleCtaClick(_renderer: ChatRenderer): (e: MouseEvent) =
     if (!action) return;
     btn.closest<HTMLElement>(".msg-cta")?.remove();
     void action.handler();
+  };
+}
+
+/** The show_preview card header: ⤢ promotes the pushed snapshot to the rail,
+ *  anywhere else on the header folds the card. */
+export function createHandlePreviewCardClick(_renderer: ChatRenderer): (e: MouseEvent) => void {
+  return (e: MouseEvent): void => {
+    const pop = (e.target as HTMLElement).closest<HTMLElement>(".pc-pop");
+    if (pop) {
+      e.stopPropagation();
+      // Announced, not called directly: the rail controller lives in the
+      // sessions view, and importing it from shared/ would close a cycle.
+      window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug: pop.dataset.previewPop ?? "" } }));
+      return;
+    }
+    const summary = (e.target as HTMLElement).closest<HTMLElement>("[data-preview-toggle]");
+    const card = summary?.closest<HTMLElement>(".msg.preview-card");
+    if (card) card.classList.toggle("open");
   };
 }
 

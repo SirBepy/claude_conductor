@@ -8,7 +8,8 @@ import {
   classifyMetaTurn,
   noiseAssistantLabel,
 } from "./chat-classifiers";
-import { isAskQuestionTool } from "./tool-meta";
+import { isAskQuestionTool, isShowPreviewTool } from "./tool-meta";
+import { previewFieldsOf } from "./chat-preview-card";
 export type { RenderedMessage } from "./chat-classifiers";
 
 // Matches <file:PATH> or <file:PATH::DISPLAYNAME> tokens in user message text.
@@ -142,6 +143,11 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       // chat-pagination.ts's prependEvents (mirrors the tool_result absorb).
       if (isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
         return { kind: "question", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: null };
+      }
+      // Mirrors chat-event-handler-tools.ts's show_preview special-case so a
+      // pushed mockup renders as the same card on the scrollback path.
+      if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
+        return { ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null };
       }
       return { kind: "tool_use", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: ev.parent_tool_use_id ?? null };
     case "tool_result":

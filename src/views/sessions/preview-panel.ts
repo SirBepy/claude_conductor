@@ -11,6 +11,7 @@ import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
+import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
 import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
 import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./preview-panel-composer";
@@ -133,7 +134,9 @@ class PreviewTab implements RailTabHandle {
     const scoped = (Array.isArray(all) ? all : []).filter((m) => m.session_id === this.currentSessionId);
     const unseen = scoped.filter((m) => !this.seenIds.has(m.id));
     scoped.forEach((m) => this.seenIds.add(m.id));
-    const mostRecentUnseen = unseen[unseen.length - 1];
+    // Same carve-out as onLivePush: a show_preview push is already on screen
+    // as a card, so it must not force the rail open on the next focus either.
+    const mostRecentUnseen = unseen.filter((m) => m.source !== PREVIEW_SOURCE_CHAT_CARD).pop();
     if (opts.allowOpen && mostRecentUnseen && !this.deps.isOpen()) {
       this.deps.requestOpen(mostRecentUnseen.id);
     }
@@ -189,14 +192,14 @@ class PreviewTab implements RailTabHandle {
     void this.renderIframe();
   }
 
-  /** `preview` notifier broadcast handler. Always opens the panel for the
-   * active chat's push (Joe, 2026-07-20: no opt-out on auto-refresh). A push
-   * for a background chat never switches the view (Joe, 2026-08-03: never
-   * force-switch) - it only flags that chat's own open state for next time. */
+  /** `preview` notifier broadcast handler. Opens the panel for the active
+   * chat's push (Joe, 2026-07-20: no opt-out on auto-refresh), EXCEPT a
+   * `show_preview` push, which already rendered as a card in the transcript.
+   * A background chat's push never switches the view (Joe, 2026-08-03). */
   private onLivePush(meta: PreviewMeta | undefined): void {
     if (!meta) return;
     if (meta.session_id !== this.currentSessionId) {
-      if (meta.session_id) this.deps.markOpenFor(meta.session_id);
+      if (meta.session_id && meta.source !== PREVIEW_SOURCE_CHAT_CARD) this.deps.markOpenFor(meta.session_id);
       return;
     }
     this.seenIds.add(meta.id);
@@ -206,7 +209,7 @@ class PreviewTab implements RailTabHandle {
     else this.snapshots.unshift(meta);
 
     if (!this.deps.isOpen()) {
-      this.deps.requestOpen(meta.id);
+      if (meta.source !== PREVIEW_SOURCE_CHAT_CARD) this.deps.requestOpen(meta.id);
       return;
     }
     void this.selectSnapshot(meta.id);

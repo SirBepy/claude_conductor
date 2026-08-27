@@ -12,6 +12,7 @@ import { toolSummary } from "./tool-meta";
 import { applyTurnCollapse, groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
 import { renderQuestionCardHtml } from "./tool-views";
+import { renderPreviewCardHtml, mountPreviewFrame } from "./chat-preview-card";
 import { type TurnUsageTotals } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";
 
@@ -360,6 +361,13 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
     const el = document.createElement("div");
     el.className = "msg question-card";
     el.innerHTML = renderQuestionCardHtml(m);
+    return el;
+  }
+  if (m.kind === "preview") {
+    const el = document.createElement("div");
+    el.className = "msg preview-card open";
+    el.innerHTML = renderPreviewCardHtml(m);
+    void mountPreviewFrame(el, m);
     return el;
   }
   const wrap = document.createElement("div");

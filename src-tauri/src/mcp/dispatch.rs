@@ -4,13 +4,15 @@
 
 use serde_json::{json, Value};
 
+use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
+
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_RESPOND_WORKER_PROMPT,
-    TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER,
-    TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_USER_TODO,
+    TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT,
+    TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -227,6 +229,23 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 }
             }
             Some(ctx.relay("/drafts/write", Value::Object(body), Some("invalid draft write"), None))
+        }
+        TOOL_SHOW_PREVIEW => {
+            // Same endpoint terminal Claude curls; `source: "chat"` is what
+            // scopes the snapshot to this session's rail.
+            let slug = ctx.args["slug"].as_str().unwrap_or("").to_string();
+            let title = match ctx.args["title"].as_str().map(str::trim) {
+                Some(t) if !t.is_empty() => t.to_string(),
+                _ => crate::chat::parser::preview_title_from_slug(&slug),
+            };
+            let body = json!({
+                "title": title,
+                "slug": slug,
+                "html": ctx.args["html"],
+                "source": PREVIEW_SOURCE_CHAT_CARD,
+                "session_id": ctx.session_id,
+            });
+            Some(ctx.relay("/hooks/preview", body, None, Some("preview shown in chat")))
         }
         _ => None,
     }

@@ -158,8 +158,8 @@ mod tests {
     use super::super::tool_schemas::{
         TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN,
-        TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SPAWN_CHAT,
-        TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
+        TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SHOW_PREVIEW,
+        TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
     };
 
     thread_local! {
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_twelve_base_tools() {
+    fn tools_list_returns_every_base_tool() {
         // Non-jarvis (the default for every normal session): base set is the
         // original 3 permission/question/close tools plus the 3 unconditional
         // coordination-channel tools (list_peers/post_message/read_messages)
@@ -245,7 +245,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 14);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -261,6 +261,8 @@ mod tests {
         assert!(names.contains(&"spawn_chat"));
         assert!(names.contains(&"respawn"));
         assert!(names.contains(&"write_user_todo"));
+        assert!(names.contains(&"write_draft"));
+        assert!(names.contains(&"show_preview"));
     }
 
     #[test]
@@ -272,7 +274,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 16, "12 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 18, "14 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -334,6 +336,7 @@ mod tests {
             (TOOL_SEND_MESSAGE, "/messages/send"),
             (TOOL_UPDATE_MESSAGE, "/messages/update"),
             (TOOL_WRITE_USER_TODO, "/todos/write"),
+            (TOOL_SHOW_PREVIEW, "/hooks/preview"),
             (TOOL_SPAWN_WORKER, "/jarvis/spawn-worker"),
             (TOOL_SEND_TO_SESSION, "/jarvis/send-to-session"),
             (TOOL_FLEET_STATUS, "/jarvis/fleet-status"),

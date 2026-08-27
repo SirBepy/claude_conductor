@@ -6,7 +6,8 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
-import { canonicalTool } from "./tool-meta";
+import { canonicalTool, isShowPreviewTool } from "./tool-meta";
+import { previewFieldsOf } from "./chat-preview-card";
 import {
   tryHandleQuestionToolUse,
   tryHandleQuestionResult,
@@ -35,6 +36,12 @@ export function handleToolUseEvent(
     const text = typeof (ev.input as { text?: unknown })?.text === "string"
       ? (ev.input as { text: string }).text : "";
     r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null });
+    return { touched: true, coalesce: false };
+  }
+  // Pushed HTML the user is meant to LOOK at: its own centered card row, not
+  // narration. The rail still gets the same snapshot via the daemon push.
+  if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
+    r.messages.push({ ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null });
     return { touched: true, coalesce: false };
   }
   // Revise/retract a message Claude already sent (see resolveOrdinalIn in

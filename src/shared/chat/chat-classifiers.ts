@@ -134,7 +134,7 @@ export function detectProgressToken(text: string): { n: number; m: number } | nu
 }
 
 export interface RenderedMessage {
-  kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question" | "message";
+  kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question" | "message" | "preview";
   content?: ContentBlock[];
   text?: string;
   tool?: string;
@@ -194,6 +194,12 @@ export interface RenderedMessage {
    *  todo 682) - set only on kind:"user" rows, null/undefined when Joe typed
    *  it himself. Drives the character+project icon-pair tag. */
   authorSessionId?: string | null;
+  /** `kind:"preview"` only. The pushed document and its identity, read off the
+   *  show_preview tool_use input - the daemon's snapshot store is the rail's
+   *  source, not this row's, so a card renders even when the push never
+   *  reached the store. */
+  previewHtml?: string;
+  previewSlug?: string;
 }
 
 /**

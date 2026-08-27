@@ -27,6 +27,7 @@ import {
   createHandleWaitingChipClick,
   createHandleCtaClick,
   createHandleToolChipClick,
+  createHandlePreviewCardClick,
 } from "./chat-renderer-click-handlers";
 
 export interface SessionMeta {
@@ -287,6 +288,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", handleTableFullscreen);
     this.container.addEventListener("click", handlePrPreviewClick);
     this.container.addEventListener("click", createHandleToolChipClick(this));
+    this.container.addEventListener("click", createHandlePreviewCardClick(this));
     this.container.addEventListener("click", createHandleToolFileClick(this));
     this.container.addEventListener("click", createHandleToolResultLoadFullClick(this));
     this.container.addEventListener("click", createHandleRetryClick(this));
