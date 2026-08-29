@@ -78,20 +78,12 @@ pub async fn accept_loop(pipe_name: &str, router: Router) -> io::Result<()> {
                 // (or was disconnected) and how often.
                 Ok(()) => log::info!("daemon: client pid {pid_str} disconnected"),
                 Err(e) => match e {
-                    // A garbage frame length means the client wrote bytes that
-                    // are not length-prefixed. The classic case is raw,
-                    // newline-delimited JSON: the first 4 bytes ("{\"..") decode
-                    // to a huge big-endian length (e.g. 2065852772 = `{"` + two
-                    // more ASCII chars) that trips the MAX_FRAME_SIZE cap. Every
-                    // current writer in this codebase uses `write_frame`, so the
-                    // culprit is almost always an OLD pre-frame-protocol app
-                    // binary connecting during an auto-update transition. The
-                    // daemon drops the frame and the connection dies cleanly, so
-                    // this is harmless: log at debug (with the client PID, when
-                    // available, to correlate the owning binary) instead of warn
-                    // to keep the daemon log clean.
+                    // A garbage length means the byte stream desynced: a JSON
+                    // payload's first 4 bytes decode to a ~2GB big-endian length.
+                    // Warn, never debug - logging this at debug is why todo 228
+                    // read the daemon as closing these connections silently.
                     FrameError::TooLarge(len) => {
-                        log::debug!(
+                        log::warn!(
                             "daemon: dropped unframed/garbage frame (len {len}) from pid {pid_str}"
                         );
                     }
