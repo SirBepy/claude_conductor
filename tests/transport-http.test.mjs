@@ -119,6 +119,21 @@ describe("HttpTransport.call mapping", () => {
     });
   });
 
+  // todo 773: the caller reads this as "answer already delivered in-band" and
+  // skips sending its own answer message, so the raw envelope (always truthy)
+  // silently ate every answer submitted from a remote surface.
+  it("unwraps respond_question's {ok, delivered} envelope to a bare false", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, delivered: false }) });
+    const out = await new HttpTransport().call("respond_question", { id: "q-1", answers: {} });
+    expect(out).toBe(false);
+  });
+
+  it("unwraps respond_question's envelope to true when a live waiter was resolved", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, delivered: true }) });
+    const out = await new HttpTransport().call("respond_question", { id: "q-1", answers: {} });
+    expect(out).toBe(true);
+  });
+
   it("threads a real Skip through to the skipped flag", async () => {
     await new HttpTransport().call("respond_question", {
       id: "q-1",

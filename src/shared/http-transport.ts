@@ -221,12 +221,19 @@ export class HttpTransport implements Transport {
           updated_input: args.updatedInput,
           message: args.message,
         });
-      case "respond_question":
-        return this.rpc<T>("respond_question", {
+      // Unwrapped to a bare bool, matching the Tauri command's `Result<bool>`:
+      // the daemon router answers `{ok, delivered}`, and the caller treats any
+      // truthy value as "already delivered in-band" and drops its own answer
+      // message (permission-modal/index.ts) - so the raw object loses answers.
+      case "respond_question": {
+        const res = await this.rpc<{ delivered?: boolean } | boolean | null>("respond_question", {
           request_id: args.id,
           answers: args.answers,
           skipped: args.skipped ?? false,
         });
+        const delivered = typeof res === "object" && res !== null ? res.delivered === true : res === true;
+        return delivered as T;
+      }
       case "get_skipped_question_marks":
         return this.rpc<T>("get_skipped_question_marks", {
           session_id: args.sessionId ?? args.session_id,

@@ -139,9 +139,12 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
       // delivered=true means the answer already reached the model in-band, as
       // the MCP tool's own result (our only live AUQ path) - see answerBlocks
       // below, which used to send it again unconditionally and race that.
+      // `=== true`, never truthiness: a transport that returns the daemon's
+      // raw `{ok, delivered}` envelope would otherwise read as delivered and
+      // silently drop the answer block below (todo 773).
       let delivered = false;
       try {
-        delivered = await invoke<boolean>("respond_question", { id: payload.id, answers, skipped: false });
+        delivered = (await invoke<boolean>("respond_question", { id: payload.id, answers, skipped: false })) === true;
       } catch (e) {
         console.warn("respond_question (settle) failed:", e);
         clearPendingPromptById(payload.id);
