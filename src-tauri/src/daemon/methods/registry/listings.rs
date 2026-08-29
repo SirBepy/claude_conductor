@@ -141,7 +141,11 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                     // the "jarvis-home" pseudo-project and temp-dir scratch
                     // sessions, mirroring the desktop Tauri command - see
                     // `filter_out_jarvis_home`/`filter_out_ephemeral_projects`.
-                    let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(groups);
+                    // `fold_worktrees` also mirrors desktop, collapsing worktree
+                    // rows into their main repo instead of listing them flat.
+                    let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(
+                        crate::ipc::project_groups::fold_worktrees(groups),
+                    );
                     crate::ipc::project_groups::groups_test_helpers::filter_out_ephemeral_projects(groups)
                 })
                 .await

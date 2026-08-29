@@ -188,7 +188,10 @@ pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate
 /// main repo isn't present among `groups` (the repo itself was never opened
 /// as its own project) is left as a standalone top-level entry - losing the
 /// only way to reach it would be worse than one extra flat row.
-fn fold_worktrees(groups: Vec<crate::types::ProjectGroup>) -> Vec<crate::types::ProjectGroup> {
+///
+/// `pub(crate)` so the daemon's `list_project_groups` RPC handler (the phone's
+/// data source) can apply the same fold as the desktop Tauri command above.
+pub(crate) fn fold_worktrees(groups: Vec<crate::types::ProjectGroup>) -> Vec<crate::types::ProjectGroup> {
     use crate::settings::identity::{normalize_path, worktree_main_repo};
     use crate::types::WorktreeSummary;
     use std::collections::HashMap;
