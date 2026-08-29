@@ -178,7 +178,7 @@ async fn scheduled_message_fires_via_tick_loop() {
     let cwd = std::env::temp_dir();
     let cwd_str = cwd.to_string_lossy().to_string();
     let session_id = client
-        .start_session(&cwd_str, "haiku", "low", None, false, Some(&account_id), false)
+        .start_session(&cwd_str, "haiku", "low", None, false, Some(&account_id), false, None)
         .await
         .expect("start_session");
     eprintln!("started session {session_id}");

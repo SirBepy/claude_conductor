@@ -27,6 +27,13 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // a network-latency caller's own send_message can otherwise race
                 // ahead of it (same pattern move_session_to_account guards against).
                 let auto_accept = params_value.get("auto_accept").and_then(Value::as_bool).unwrap_or(false);
+                // Idempotency key: the placeholder id is the one value that
+                // survives the caller's retry (`daemon::start_tokens`). Absent
+                // for channels, schedules and resumes - those spawn as before.
+                let token = params_value
+                    .get("placeholder_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
                 let p: StartSessionParams = serde_json::from_value(params_value)
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 let cwd = p.cwd.clone();
@@ -37,8 +44,25 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // through (see remote_handlers.rs), so ctx.remote is set exactly
                 // when the request actually arrived over that surface.
                 let is_remote = ctx.remote;
+                // Held across the spawn, so a racing retry waits for it.
+                let mut claim = match token.as_deref() {
+                    Some(t) => Some(state.start_tokens.claim(t).await),
+                    None => None,
+                };
+                let already = claim.as_ref().and_then(|c| c.existing()).map(str::to_string);
+                // A recorded id whose child is gone is not reusable.
+                if let Some(sid) = already.filter(|sid| state.sessions.contains_key(sid)) {
+                    log::info!(
+                        "daemon: start_session token {} already spawned {sid}; returning it",
+                        token.as_deref().unwrap_or("")
+                    );
+                    return Ok(json!({"session_id": sid}));
+                }
                 let session = lifecycle::spawn_session(&state, p).await.map_err(err_to_rpc)?;
                 let sid = session.session_id.clone();
+                if let Some(c) = claim.as_mut() {
+                    c.record(&sid);
+                }
                 let account_id = session.account_id.clone();
                 let now = chrono::Utc::now().to_rfc3339();
                 crate::daemon::session_registration::register_new_session(

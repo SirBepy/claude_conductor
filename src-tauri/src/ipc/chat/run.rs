@@ -9,10 +9,29 @@
 //! Mutations to the Registry also emit `instances-changed` (per existing
 //! convention, the IPC layer fires it after the registry call).
 
+use crate::daemon_client::ClientError;
 use crate::state::AppState;
 use crate::types::chat::{ChatEvent, ContentBlock};
 use chrono::Utc;
 use tauri::{AppHandle, Emitter, State};
+
+/// Errors where the daemon may well have done the work and only the reply was
+/// lost. An `Rpc` error is its considered answer and never qualifies.
+fn is_transport_error(e: &ClientError) -> bool {
+    matches!(e, ClientError::Closed | ClientError::Io(_) | ClientError::Frame(_) | ClientError::Handshake(_))
+}
+
+/// Block until `daemon_link` installs a connection newer than `stale_generation`.
+/// Bounded at ~10s so a daemon that never returns can't hang the IPC command.
+async fn wait_for_reconnect(state: &State<'_, AppState>, stale_generation: u64) {
+    for _ in 0..100 {
+        let current = { state.daemon_client.lock().await.clone() };
+        match current {
+            Some(c) if c.generation != stale_generation => return,
+            _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+        }
+    }
+}
 
 #[tauri::command]
 pub async fn start_session(
@@ -44,14 +63,31 @@ async fn start_session_daemon(
     state: &State<'_, AppState>,
     app: &AppHandle,
 ) -> Result<String, String> {
-    let real_id = {
-        let guard = state.daemon_client.lock().await;
-        let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
-        // account_id: Some when the new-chat picker (milestone 04) has the
-        // user's explicit pick; None (unbound project, default untouched)
-        // resolves to Settings.default_account_id daemon-side (see
-        // docs/multi-account/02-chat-routing.md step 5).
-        client.start_session(&cwd, &model, &effort, None, remote, account_id.as_deref(), auto_accept).await.map_err(|e| e.to_string())?
+    // account_id: None (unbound project, default untouched) resolves to
+    // Settings.default_account_id daemon-side - docs/multi-account/02-chat-routing.md step 5.
+    let spawn = || async {
+        let client = { state.daemon_client.lock().await.clone() };
+        let Some(client) = client else {
+            return Err((0, ClientError::Closed));
+        };
+        let generation = client.generation;
+        client
+            .start_session(&cwd, &model, &effort, None, remote, account_id.as_deref(), auto_accept, placeholder_id.as_deref())
+            .await
+            .map_err(|e| (generation, e))
+    };
+    let real_id = match spawn().await {
+        Ok(id) => id,
+        // A dead connection doesn't cancel the daemon's spawn: the session is
+        // live, only the reply was lost. Retrying under the same placeholder id
+        // resolves to that same session (`daemon::start_tokens`) instead of
+        // stranding it and spawning a second one (todo 228).
+        Err((generation, e)) if is_transport_error(&e) => {
+            log::warn!("start_session lost the daemon connection on generation {generation} ({e}); retrying once");
+            wait_for_reconnect(state, generation).await;
+            spawn().await.map_err(|(_, e)| e.to_string())?
+        }
+        Err((_, e)) => return Err(e.to_string()),
     };
 
     // Bridge daemon chat_event -> chat:<real_id> BEFORE sending the prompt so
@@ -171,7 +207,7 @@ async fn send_message_daemon(
                     // auto_accept: false - this session_id already exists, so
                     // register_new_session's "only write when true" semantics
                     // leave its already-persisted chat_config flag untouched.
-                    .start_session(cwd, model, effort, Some(session_id), false, account_id, false)
+                    .start_session(cwd, model, effort, Some(session_id), false, account_id, false, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }

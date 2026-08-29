@@ -91,6 +91,10 @@ pub struct DaemonState {
     /// messages) - see `draft_store.rs` module doc. In-memory only, never
     /// persisted; `held_count` on `Instance` is the separate broadcast signal.
     pub draft_store: DraftStore,
+    /// Idempotency keys for `start_session` - see `daemon::start_tokens`. A
+    /// dropped connection doesn't cancel a spawn, so a retry under the same
+    /// placeholder id must resolve to the child that already booted.
+    pub start_tokens: crate::daemon::start_tokens::StartTokens,
     /// Monotonic source for `question-requested` payloads' `seq` field.
     /// `pending_prompts` is a `HashMap` - iteration order isn't chronological,
     /// so this lets callers tell a genuinely newer question apart from a
@@ -129,6 +133,7 @@ impl DaemonState {
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
             repo_channel_wakes: crate::daemon::repo_channel_wake::new_queue(),
             draft_store: DraftStore::new(),
+            start_tokens: crate::daemon::start_tokens::StartTokens::new(),
             prompt_seq: AtomicU64::new(0),
         })
     }

@@ -23,6 +23,10 @@ impl PersistentClient {
     }
 
     /// Start (or resume) a daemon-owned session. Returns the real session_id.
+    ///
+    /// `placeholder_id` is the caller's idempotency key: pass the same value on
+    /// a retry and the daemon returns the session the first attempt already
+    /// spawned instead of spawning a second one (`daemon::start_tokens`).
     pub async fn start_session(
         &self,
         cwd: &str,
@@ -32,6 +36,7 @@ impl PersistentClient {
         remote: bool,
         account_id: Option<&str>,
         auto_accept: bool,
+        placeholder_id: Option<&str>,
     ) -> Result<String, ClientError> {
         let res = self
             .call("start_session", json!({
@@ -42,6 +47,7 @@ impl PersistentClient {
                 "remote": remote,
                 "account_id": account_id,
                 "auto_accept": auto_accept,
+                "placeholder_id": placeholder_id,
             }))
             .await?;
         res.get("session_id")
