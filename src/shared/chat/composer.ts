@@ -106,6 +106,13 @@ export class Composer {
     else if (document.visibilityState === "visible") void this.reconcileFromDaemon();
   };
 
+  // An app window that is merely behind another one never fires
+  // visibilitychange, so window focus is the only cue that a draft sent from
+  // the phone meanwhile should disappear from an already-open chat.
+  private _windowFocusHandler = (): void => {
+    void this.reconcileFromDaemon();
+  };
+
   private _globalKeydown = (e: KeyboardEvent): void => {
     if (this.disabled || !this.textarea || this.textarea.disabled) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -167,6 +174,7 @@ export class Composer {
     this.render();
     document.addEventListener("keydown", this._globalKeydown);
     document.addEventListener("visibilitychange", this._visibilityHandler);
+    window.addEventListener("focus", this._windowFocusHandler);
     shortcuts.register("blur-composer", () => { this.textarea?.blur(); });
     this.ptt.mount();
     _composerInstanceCount++;
@@ -180,6 +188,7 @@ export class Composer {
   destroy(): void {
     document.removeEventListener("keydown", this._globalKeydown);
     document.removeEventListener("visibilitychange", this._visibilityHandler);
+    window.removeEventListener("focus", this._windowFocusHandler);
     shortcuts.unregister("blur-composer");
     this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
     this.ptt.destroy();
@@ -246,7 +255,10 @@ export class Composer {
     if (document.activeElement === this.textarea) return;
     if (!this.textarea || this.textarea.value === remoteText) return;
     this.textarea.value = remoteText;
-    saveDraft(sid, remoteText);
+    // "" is the daemon's clear tombstone - another surface sent this draft,
+    // so drop the local copy too instead of storing an empty string.
+    if (remoteText) saveDraft(sid, remoteText);
+    else clearDraft(sid);
     this.autoResize();
     this.updateHighlight();
   }

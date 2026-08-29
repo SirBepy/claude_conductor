@@ -101,11 +101,15 @@ impl DraftStore {
         now
     }
 
+    /// Records an empty-text TOMBSTONE rather than dropping the draft: a
+    /// `None` composer is indistinguishable from "never had one", so another
+    /// surface's reconcile has no timestamp to compare and silently keeps
+    /// showing text this device already sent.
     pub fn clear_composer(&self, session_id: &str) -> String {
         let now = now_iso();
         let mut map = self.inner.lock().unwrap();
         if let Some(e) = map.get_mut(session_id) {
-            e.drafts.composer = None;
+            e.drafts.composer = Some(ComposerDraft { text: String::new(), updated_at: now.clone() });
         }
         now
     }

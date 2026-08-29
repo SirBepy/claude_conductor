@@ -251,9 +251,15 @@ mod tests {
         let resp = call(st.clone(), "get_session_drafts", json!({"session_id": "s1"})).await;
         assert_eq!(resp.result.unwrap()["composer"]["text"], json!("hello"));
 
-        call(st.clone(), "clear_composer_draft", json!({"session_id": "s1"})).await;
+        let cleared = call(st.clone(), "clear_composer_draft", json!({"session_id": "s1"})).await;
+        let cleared_at = cleared.result.unwrap()["updated_at"].clone();
+        // Empty-text tombstone, not null: another surface reconciles by
+        // comparing `updated_at`, so a dropped entry would leave its stale
+        // copy of "hello" on screen forever.
         let resp = call(st, "get_session_drafts", json!({"session_id": "s1"})).await;
-        assert_eq!(resp.result.unwrap()["composer"], json!(null));
+        let composer = resp.result.unwrap()["composer"].clone();
+        assert_eq!(composer["text"], json!(""));
+        assert_eq!(composer["updated_at"], cleared_at);
     }
 
     #[tokio::test]

@@ -108,6 +108,35 @@ describe("ComposerDraftSync - reconcile (last-write-wins by server updated_at)",
     expect(await sync.reconcile("s-echo")).toBeNull();
   });
 
+  // Regression for "I sent it from my phone and it's still a draft on my PC":
+  // the daemon answers a cleared composer with an empty-text tombstone, and
+  // that has to come back as "" (apply the clear), not null (keep the text).
+  it("returns \"\" when the daemon holds a newer clear tombstone", async () => {
+    getSessionDrafts.mockResolvedValue({
+      composer: { text: "", updated_at: "2026-08-13T00:00:09Z" },
+      auq: null, held: [], held_updated_at: null,
+    });
+    const sync = new ComposerDraftSync();
+    sync.notifyTyped("s-tombstone", "sent from the phone");
+    sync.flush();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(await sync.reconcile("s-tombstone")).toBe("");
+  });
+
+  it("ignores a clear tombstone older than what this instance already pushed", async () => {
+    const sync = new ComposerDraftSync();
+    sync.notifyTyped("s-late-type", "typed after the other device sent");
+    sync.flush();
+    await vi.advanceTimersByTimeAsync(0); // learns updated_at = ...01Z
+
+    getSessionDrafts.mockResolvedValue({
+      composer: { text: "", updated_at: "2026-08-13T00:00:00Z" },
+      auq: null, held: [], held_updated_at: null,
+    });
+    expect(await sync.reconcile("s-late-type")).toBeNull();
+  });
+
   it("degrades to null (never throws) when get_session_drafts fails", async () => {
     getSessionDrafts.mockRejectedValue(new Error("command not found"));
     const sync = new ComposerDraftSync();
