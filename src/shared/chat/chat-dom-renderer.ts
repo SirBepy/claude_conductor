@@ -356,6 +356,12 @@ export function processTurnCloseQueue(r: ChatRenderer): void {
   if (r.closeTurnQueue.length === 0) return;
   for (const { start, end, chipKey, usage, tsSpanMs, mergeIntoKey } of r.closeTurnQueue) {
     let footer: HTMLElement | null = null;
+    // History turns have no duration_ms; fall back to the ts span. Resolved
+    // once here, so an absorbed turn contributes the same corrected duration
+    // to its host's row that it would have displayed on its own.
+    const settled = usage
+      ? { ...usage, durationMs: usage.durationMs > 0 ? usage.durationMs : tsSpanMs }
+      : null;
     if (chipKey !== null) {
       footer = r.turnFooters.getOrCreateFooter(chipKey);
       // Pin the footer at the turn's bottom: right before the next turn's
@@ -366,12 +372,8 @@ export function processTurnCloseQueue(r: ChatRenderer): void {
       } else if (footer.parentElement !== r.container) {
         r.container.appendChild(footer);
       }
-      if (usage) {
-        // History turns have no duration_ms; fall back to the ts span.
-        r.turnFooters.settleMetaRow(chipKey, {
-          ...usage,
-          durationMs: usage.durationMs > 0 ? usage.durationMs : tsSpanMs,
-        });
+      if (settled) {
+        r.turnFooters.settleMetaRow(chipKey, settled);
       } else {
         // No usage ever arrived (interrupted live turn): freeze the live
         // row at its last elapsed/estimate. No-op when no row exists.
@@ -383,8 +385,8 @@ export function processTurnCloseQueue(r: ChatRenderer): void {
     // before it moves house.
     if (chipKey !== null && mergeIntoKey !== null) {
       const destTotals = r.turnFooters.getTotals(mergeIntoKey);
-      if (r.turnFooters.absorbInto(chipKey, mergeIntoKey) && usage) {
-        r.turnFooters.settleMetaRow(mergeIntoKey, destTotals ? sumTurnTotals(destTotals, usage) : usage);
+      if (r.turnFooters.absorbInto(chipKey, mergeIntoKey) && settled) {
+        r.turnFooters.settleMetaRow(mergeIntoKey, destTotals ? sumTurnTotals(destTotals, settled) : settled);
       }
     }
   }

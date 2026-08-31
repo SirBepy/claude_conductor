@@ -161,7 +161,7 @@ export interface RenderedMessage {
   compactionN?: number;
   /** Set on an `is_meta` "Auto-continued" system note once 2+ consecutive
    *  silent turns merged into it (see turnProducedVisibleContent in
-   *  chat-event-handler.ts). Renders as a trailing "×N" instead of a
+   *  turn-visible-content.ts). Renders as a trailing "×N" instead of a
    *  separate note per retry. */
   streakCount?: number;
   /** Source of an `is_meta` note (classifyMetaTurn); renders as a chip. */

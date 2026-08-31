@@ -734,6 +734,26 @@ describe("Silent auto-continue streak merge", () => {
     expect(blocks[0].closest(".turn-footer")).toBe(container.querySelector(".turn-footer"));
   });
 
+  it("counts an absorbed history turn's ts-span duration, not its absent duration_ms", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("do X", 1000));
+    renderer.handleEvent(makeSendMessage("Done.", "tu1", 1000));
+    renderer.handleEvent(makeTurnUsage({ durationMs: 14000, outputTokens: 100 }));
+    // History replay: no duration_ms, so the wake turn's 6s comes from its
+    // own timestamp span.
+    renderer.handleEvent(makeMetaUserMessage(undefined, 20000));
+    renderer.handleEvent(makeToolUse("t2", 26000));
+    renderer.handleEvent(makeToolResult("t2", 26000));
+    renderer.handleEvent(makeTurnUsage({ durationMs: 0, outputTokens: 50 }));
+    renderer.handleEvent(makeUserMessage("and now Y", 30000));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 10 }));
+
+    const footers = container.querySelectorAll(".turn-footer");
+    expect(footers.length).toBe(2);
+    expect(footers[0].querySelector(".turn-chip--time").textContent).toContain("20s");
+  });
+
   it("leaves a wake turn that DID speak its own footer", async () => {
     const { renderer, container } = await createRenderer();
 

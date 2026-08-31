@@ -105,7 +105,7 @@ export class ChatRenderer {
   // Silent-streak merge: index of the current chain's first meta-turn chip
   // (see classifyMetaTurn), and how many turns have folded into it so far. Null/0 when
   // the open turn isn't (yet) part of a merged streak. See
-  // turnProducedVisibleContent in chat-event-handler.ts.
+  // turnProducedVisibleContent in turn-visible-content.ts.
   silentStreakBoundaryIndex: number | null = null;
   silentStreakCount = 0;
   // Per-renderer footer registry (instance state - chip keys are a local
