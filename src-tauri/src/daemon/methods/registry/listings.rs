@@ -117,7 +117,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     // command's JSON shape (frontend `ProjectGroup[]`). Reuses the same PURE
     // `build_groups` helper; inputs are sourced daemon-side: `projects` from the
     // in-memory settings cache, `instances` from the registry snapshot (same as
-    // `list_instances`), and `token_history` loaded from disk.
+    // `list_instances`), and `token_history` from the `token_records` table.
     {
         let state = state.clone();
         router.register("list_project_groups", move |_params, _ctx| {
@@ -126,11 +126,16 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                 let projects = state.settings.snapshot().projects;
                 let instances = state.registry.list();
                 let now_ms = chrono::Utc::now().timestamp_millis();
+                let db = state.db.clone();
                 let groups = tokio::task::spawn_blocking(move || {
-                    let token_history = match crate::settings::paths::token_history_file() {
-                        Ok(p) => crate::tokens::load_history(&p),
-                        Err(_) => Vec::new(),
-                    };
+                    let token_history = db
+                        .as_ref()
+                        .map(|db| {
+                            let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
+                            crate::storage::token_store::get_token_records(mgr.conn(), 0)
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
                     let mut groups = crate::ipc::project_groups::groups_test_helpers::build_groups(
                         &projects, &token_history, &instances, now_ms,
                     );

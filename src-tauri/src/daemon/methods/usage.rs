@@ -76,17 +76,22 @@ pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    // Mirrors `get_token_history` -> Vec<TokenRecord>, filtering empty session
-    // ids to match the desktop's `load_history_from_db` behaviour.
+    // Mirrors `get_token_history` (params: { since }) -> Vec<TokenRecord>,
+    // filtering empty session ids to match the desktop's `load_history_from_db`.
+    // `since` is a unix-seconds floor on `recorded_at`; omitting it returns all.
     {
         let state = state.clone();
-        router.register("get_token_history", move |_params, _ctx| {
+        router.register("get_token_history", move |params, _ctx| {
             let state = state.clone();
             async move {
+                #[derive(serde::Deserialize, Default)]
+                struct P { since: Option<i64> }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null)).unwrap_or_default();
+                let since = p.since.unwrap_or(0);
                 let Some(db) = state.db.clone() else { return Ok(json!([])) };
                 let records = tokio::task::spawn_blocking(move || {
                     let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
-                    crate::storage::token_store::get_token_records(mgr.conn(), 0)
+                    crate::storage::token_store::get_token_records(mgr.conn(), since)
                         .unwrap_or_default()
                         .into_iter()
                         .filter(|r| !r.session_id.is_empty())

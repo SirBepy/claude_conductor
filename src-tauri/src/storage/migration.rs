@@ -1,8 +1,7 @@
 //! One-time import of the legacy on-disk stores into SQLite.
 //!
-//! Three sources, three shapes:
+//! Two sources, two shapes:
 //! - `history.jsonl` - JSONL, one [`UsageSnapshot`] per line.
-//! - `token-history.json` - a single JSON **array** of [`TokenRecord`].
 //! - `skill-usage/events-YYYY-MM-DD.jsonl` - daily JSONL files, one
 //!   [`SkillUsageEvent`] per line.
 //!
@@ -16,9 +15,8 @@ use rusqlite::Connection;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use super::{skill_store, token_store, usage_store};
+use super::{skill_store, usage_store};
 use crate::skill_usage::types::SkillUsageEvent;
-use crate::tokens::record::TokenRecord;
 use crate::types::usage::UsageSnapshot;
 
 /// Outcome of a single source import.
@@ -87,38 +85,16 @@ pub fn import_usage_jsonl(conn: &Connection, path: &Path) -> Result<ImportStats>
     Ok(stats)
 }
 
-/// Imports the `token-history.json` array of `TokenRecord`. Missing file is a
-/// clean no-op. On success the source is renamed to `.bak`.
-pub fn import_token_history_json(conn: &Connection, path: &Path) -> Result<ImportStats> {
-    let mut stats = ImportStats::default();
+/// Renames a leftover `token-history.json` to `.bak`. Missing file is a clean
+/// no-op; safe to call on every launch. Renamed rather than deleted so the
+/// pre-SQLite history stays recoverable on disk.
+pub fn retire_token_history_json() {
+    let Ok(path) = crate::settings::paths::token_history_file() else { return };
     if !path.exists() {
-        return Ok(stats);
+        return;
     }
-    let raw = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            log::warn!("storage migration: cannot read {path:?}: {e}");
-            return Ok(stats);
-        }
-    };
-    let records: Vec<TokenRecord> = match serde_json::from_str(&raw) {
-        Ok(r) => r,
-        Err(e) => {
-            log::warn!("storage migration: {path:?} is not a TokenRecord array: {e}");
-            return Ok(stats);
-        }
-    };
-    for record in &records {
-        match token_store::insert_token_record(conn, record) {
-            Ok(()) => stats.imported += 1,
-            Err(e) => {
-                log::warn!("storage migration: insert token record failed: {e}");
-                stats.skipped += 1;
-            }
-        }
-    }
-    rename_to_bak(path);
-    Ok(stats)
+    rename_to_bak(&path);
+    log::info!("storage: retired legacy token-history.json (SQLite is the store)");
 }
 
 /// Imports every `events-*.jsonl` daily file under `dir`. Each file is JSONL of
@@ -179,17 +155,12 @@ pub fn import_skill_events_dir(conn: &Connection, dir: &Path) -> Result<ImportSt
     Ok(stats)
 }
 
-/// Runs all three imports against the standard data-dir paths. The caller is
-/// responsible for the `storage_migrated_v1` settings gate (later slice).
-pub fn import_all_default(conn: &Connection) -> Result<[ImportStats; 3]> {
+/// Runs the remaining legacy imports against the standard data-dir paths. The
+/// caller is responsible for the `storage_migrated_v1` settings gate.
+pub fn import_all_default(conn: &Connection) -> Result<[ImportStats; 2]> {
     let usage = crate::settings::paths::history_file()
         .ok()
         .map(|p| import_usage_jsonl(conn, &p))
-        .transpose()?
-        .unwrap_or_default();
-    let tokens = crate::settings::paths::token_history_file()
-        .ok()
-        .map(|p| import_token_history_json(conn, &p))
         .transpose()?
         .unwrap_or_default();
     let skills = crate::settings::paths::skill_usage_dir()
@@ -197,5 +168,5 @@ pub fn import_all_default(conn: &Connection) -> Result<[ImportStats; 3]> {
         .map(|p| import_skill_events_dir(conn, &p))
         .transpose()?
         .unwrap_or_default();
-    Ok([usage, tokens, skills])
+    Ok([usage, skills])
 }

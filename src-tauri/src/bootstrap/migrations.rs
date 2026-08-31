@@ -10,7 +10,22 @@ use tauri::Manager;
 /// retention policies (subsequent prunes run on each scheduler poll tick).
 pub(super) fn run_sqlite_startup_migration(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    let mgr = state.db.lock().unwrap();
+    let mut mgr = state.db.lock().unwrap();
+
+    // Before `conn`'s shared borrow: this one needs the mutable handle.
+    match crate::storage::token_store::dedupe_records(mgr.conn_mut()) {
+        Ok(0) => {}
+        Ok(removed) => {
+            log::info!("storage: dedupe removed {removed} duplicate token record(s)");
+            // Deleting rows only frees pages inside the file (145MB for ~1MB).
+            match mgr.conn().execute_batch("VACUUM") {
+                Ok(()) => log::info!("storage: vacuumed the database after dedupe"),
+                Err(e) => log::warn!("storage: VACUUM after dedupe failed: {e:#}"),
+            }
+        }
+        Err(e) => log::error!("storage: token record dedupe failed: {e:#}"),
+    }
+
     let conn = mgr.conn();
 
     // Usage (history.jsonl -> usage_snapshots).
@@ -27,19 +42,9 @@ pub(super) fn run_sqlite_startup_migration(app: &tauri::AppHandle) {
         }
     }
 
-    // Tokens (token-history.json array -> token_records).
-    if let Ok(token_path) = paths::token_history_file() {
-        if token_path.exists() {
-            match crate::storage::migration::import_token_history_json(conn, &token_path) {
-                Ok(stats) => log::info!(
-                    "storage: imported token history into SQLite (imported={}, skipped={})",
-                    stats.imported,
-                    stats.skipped,
-                ),
-                Err(e) => log::error!("storage: token history import failed: {e:#}"),
-            }
-        }
-    }
+    // The import that was here re-read the whole `token-history.json` on EVERY
+    // launch with a bare INSERT, reaching 233k rows for 2.4k sessions.
+    crate::storage::migration::retire_token_history_json();
 
     // Skills (skill-usage/events-*.jsonl -> skill_events). The
     // importer renames each daily file to `.bak`; a dir with no

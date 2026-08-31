@@ -35,21 +35,18 @@ import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
 import { applyBackgroundFx } from "./background-fx";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
+import { loadTokenHistory, mergeLiveSessions } from "./token-history";
 
 function activeViewName(): string {
   return window.location.hash.replace(/^#/, "") || "dashboard";
 }
 
 // ── Live token history merge ───────────────────────────────────────────────
+/** Only the Dashboard reads this, and the phone lands on Chats, so it is not
+ *  fetched there at boot - `renderDashboard` loads it on mount instead. */
 async function fetchTokenHistoryWithLive(): Promise<TokenRecord[]> {
-  const history = (await api.getTokenHistory().catch(() => [])) ?? [];
-  try {
-    const active = (await api.getActiveSessions()) ?? [];
-    if (active.length) return [...history, ...active];
-  } catch {
-    // handler may not be registered yet
-  }
-  return history;
+  if (isRemote()) return [];
+  return loadTokenHistory();
 }
 
 // ── Dead-path reconciliation ──────────────────────────────────────────────
@@ -275,7 +272,7 @@ export function initBoot(): void {
     } catch {
       /* ignore */
     }
-    const merged = active.length ? [...(th || []), ...active] : th || [];
+    const merged = mergeLiveSessions(th, active);
     setTokenHistory(merged);
     refreshDashboardView();
     const view = activeViewName();
@@ -308,7 +305,9 @@ export function initBoot(): void {
 
   // Warm the new-session popup's data cache so the first "+ New session" tap
   // of the session is already instant (see new-session-cache.ts).
-  warmNewSessionCache();
+  // Desktop only: it fans out 76 requests here, which over the phone's tunnel
+  // queue behind HTTP/1.1's 6-connection cap and delay the Chats list.
+  if (!isRemote()) warmNewSessionCache();
 
   // Modal + banner wiring (idempotent; safe to call on boot).
   wireHookModal();

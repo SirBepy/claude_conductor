@@ -1,5 +1,4 @@
 use crate::state::AppState;
-use crate::settings::paths;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use tauri::State;
@@ -165,11 +164,14 @@ pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate
     let projects = state.settings.lock().unwrap().projects.clone();
     let instances = state.cached_instances.lock().unwrap().clone();
     let now_ms = chrono::Utc::now().timestamp_millis();
+    // Read here rather than inside the blocking closure: `AppState.db` is a bare
+    // `Mutex`, so it can't cross the thread boundary. Same shape as `projects`
+    // and `instances` above.
+    let token_history = {
+        let mgr = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        crate::storage::token_store::get_token_records(mgr.conn(), 0).unwrap_or_default()
+    };
     let groups = tauri::async_runtime::spawn_blocking(move || {
-        let token_history = match paths::token_history_file() {
-            Ok(p) => crate::tokens::load_history(&p),
-            Err(_) => Vec::new(),
-        };
         let mut groups = groups_test_helpers::build_groups(&projects, &token_history, &instances, now_ms);
         for g in &mut groups {
             g.path_exists = Path::new(&g.path).exists();

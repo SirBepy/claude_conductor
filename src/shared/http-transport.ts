@@ -380,7 +380,9 @@ export class HttpTransport implements Transport {
       case "get_history":
         return this.rpc<T>("get_history", { limit: args.limit ?? null });
       case "get_token_history":
-        return this.rpc<T>("get_token_history", null);
+        // `since` (unix seconds) bounds the window. Unbounded here used to be
+        // a 100MB response on this dev's machine - see boot.ts's window.
+        return this.rpc<T>("get_token_history", { since: args.since ?? 0 });
       case "get_active_sessions":
         return this.rpc<T>("get_active_sessions", null);
       // Per-account current-usage-percentage + login-state maps for the phone

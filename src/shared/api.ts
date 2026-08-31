@@ -337,8 +337,11 @@ export const api = {
   syncPush: async (): Promise<null> => null,
 
   // --- Token stats ---
-  getTokenHistory: async (): Promise<TokenRecord[]> => {
-    try { return (await invoke<TokenRecord[]>("get_token_history")) || []; }
+  /** `since` is a unix-SECONDS floor on `recordedAt`; omit for all history.
+   *  Callers should pass the window they actually draw - the table holds one
+   *  row per session ever run, so "all" grows without bound. */
+  getTokenHistory: async (since?: number): Promise<TokenRecord[]> => {
+    try { return (await invoke<TokenRecord[]>("get_token_history", { since })) || []; }
     catch (e) { console.error("get_token_history failed", e); return []; }
   },
   getActiveSessions: async (): Promise<TokenRecord[]> => {

@@ -202,10 +202,18 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "get_history", params: { limit: null } });
   });
 
-  it("forwards get_token_history to the rpc", async () => {
+  it("forwards get_token_history to the rpc, defaulting since to all history", async () => {
     await new HttpTransport().call("get_token_history");
     expect(url()).toBe("/api/rpc");
-    expect(body()).toEqual({ method: "get_token_history", params: null });
+    expect(body()).toEqual({ method: "get_token_history", params: { since: 0 } });
+  });
+
+  it("forwards the get_token_history since window through to the rpc", async () => {
+    await new HttpTransport().call("get_token_history", { since: 1756000000 });
+    expect(body()).toEqual({
+      method: "get_token_history",
+      params: { since: 1756000000 },
+    });
   });
 
   it("forwards get_active_sessions to the rpc", async () => {

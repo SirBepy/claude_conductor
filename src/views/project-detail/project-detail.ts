@@ -8,6 +8,7 @@ import { invoke } from "../../shared/ipc";
 import type { HistoryEntry } from "../../types/ipc.generated";
 import { projectLabel, renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { resolveMergeChain, doMerge } from "../../shared/merges";
+import { loadTokenHistory } from "../../shared/token-history";
 import { timeAgo } from "../../shared/time";
 import {
   getSettings,
@@ -200,6 +201,11 @@ export async function renderProjectDetailView(
       const s = getProjectDetailState();
       s.range = btn.dataset.range || "30d";
       s.offset = 0;
+      // The one range that reaches past the window boot loads.
+      if (s.range === "all") {
+        void loadTokenHistory(0).then(renderProjectDetailContent);
+        return;
+      }
       renderProjectDetailContent();
     };
   });

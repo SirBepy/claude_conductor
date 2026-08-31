@@ -6,7 +6,6 @@
 mod migrations;
 mod watchdogs;
 
-use crate::settings::paths;
 use crate::state::AppState;
 use tauri::{Emitter, Listener, Manager};
 
@@ -166,10 +165,15 @@ fn spawn_audio_device_follow(app: &tauri::AppHandle) {
 fn spawn_token_backfill(app: &tauri::AppHandle) {
     let h = app.clone();
     tauri::async_runtime::spawn(async move {
-        let Ok(path) = paths::token_history_file() else { return };
-        let path_clone = path.clone();
+        // `AppState.db` is a bare `Mutex`, not an `Arc`, so the handle (which is
+        // `Clone + Send`) is what crosses into the blocking thread; the state is
+        // looked up on the far side.
+        let backfill_handle = h.clone();
+        let read_handle = h.clone();
         match tauri::async_runtime::spawn_blocking(move || {
-            crate::tokens::backfill_all(&path_clone)
+            let state = backfill_handle.state::<AppState>();
+            let mut mgr = state.db.lock().unwrap_or_else(|e| e.into_inner());
+            crate::tokens::backfill_all(mgr.conn_mut())
         })
         .await
         {
@@ -178,7 +182,13 @@ fn spawn_token_backfill(app: &tauri::AppHandle) {
                     "startup backfill: {} new, {} skipped (sub: {} new, {} skipped)",
                     r.processed, r.skipped, r.sub_processed, r.sub_skipped
                 );
-                let history = crate::tokens::load_history(&path);
+                let history = tauri::async_runtime::spawn_blocking(move || {
+                    let state = read_handle.state::<AppState>();
+                    let mgr = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                    crate::storage::token_store::get_token_records(mgr.conn(), 0).unwrap_or_default()
+                })
+                .await
+                .unwrap_or_default();
                 let _ = h.emit("token-history-updated", history);
             }
             Ok(Err(e)) => log::warn!("startup backfill failed: {e:?}"),

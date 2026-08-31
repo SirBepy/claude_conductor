@@ -6,6 +6,7 @@ import { getSettings, setSettings, setUsageHistory, getUsageHistory } from "../.
 import { api } from "../../shared/api";
 import type { AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
+import { loadTokenHistory } from "../../shared/token-history";
 import { navigateTo } from "../../router";
 import { escapeHtml } from "../../shared/escape-html";
 import {
@@ -115,6 +116,13 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
     } catch (e) {
       console.error("[dashboard] initial history fetch failed", e);
     }
+  }
+  // Boot skips this on the phone (it lands on Chats), so this is where it
+  // first loads there. A no-op once the window is in memory.
+  try {
+    await loadTokenHistory();
+  } catch (e) {
+    console.error("[dashboard] token history fetch failed", e);
   }
   if (content) await fullRefresh(content);
 

@@ -45,6 +45,12 @@ impl StorageManager {
         &self.conn
     }
 
+    /// Mutable handle, for the few callers that need `Connection::transaction`
+    /// (which borrows mutably) rather than single statements.
+    pub fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
     /// Prunes every dataset per the supplied policies. Returns rows deleted.
     pub fn prune(&self, policies: &RetentionPolicies) -> Result<usize> {
         prune_all(&self.conn, policies)
