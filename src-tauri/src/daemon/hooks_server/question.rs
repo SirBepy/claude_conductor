@@ -22,13 +22,17 @@ use std::sync::Arc;
 /// much "waiting on the user" as a question card, and used to write nothing
 /// here at all - leaving the phone and every non-receiving window showing
 /// In Progress while claude sat blocked.
-pub(super) fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option<&str>, asking: bool) {
-    let Some(sid) = session_id else { return };
+///
+/// Returns whether the registry was actually written. On the `asking` side a
+/// `false` means the card surfaces nowhere, which is what the Stop hook's
+/// undelivered-question block keys off (todo 818).
+pub(super) fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option<&str>, asking: bool) -> bool {
+    let Some(sid) = session_id else { return false };
     let changed = if asking {
         // Publish only for sessions the registry actually tracks - hook tests
         // (and terminal-side sessions) pass ids the registry has never seen.
         if state.registry.get(sid).is_none() {
-            return;
+            return false;
         }
         state.registry.set_awaiting(sid, Some("question".into()));
         true
@@ -44,6 +48,7 @@ pub(super) fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option
             json!({"instances": state.registry.list()}),
         );
     }
+    changed
 }
 
 #[derive(Deserialize)]
@@ -102,7 +107,11 @@ async fn post_fire_and_forget_question(
     ctx.state.add_prompt(id, "question-requested", payload.clone(), true).await;
     ctx.state.fire_blocked_prompt(session_id, id);
     crate::daemon::jarvis_wake::wake_on_worker_blocked(&ctx.state, session_id, id, Some(wake_label)).await;
-    set_question_awaiting(&ctx.state, session_id, true);
+    let surfaced = set_question_awaiting(&ctx.state, session_id, true);
+    if let Some(sid) = session_id {
+        let gen = ctx.state.registry.current_turn_gen(sid);
+        ctx.state.registry.mark_question_posted(sid, gen, surfaced);
+    }
     let subs = ctx.state.notifier.publish("question_request", payload);
     ctx.state.notifier.publish(
         "turn_sound",

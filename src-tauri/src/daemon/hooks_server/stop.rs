@@ -13,6 +13,10 @@ use std::sync::Arc;
 /// because `stop_hook_active` caps the retry at one block per turn.
 const REPORT_MISSING_REASON: &str = "Call the report_turn_status tool as the very last thing you do before ending your turn - required every turn, even a tool-only one with no chat reply. It requires a 'status' argument (one of done|question|waiting|working) - calling it with no arguments will fail.";
 const SEND_MISSING_REASON: &str = "Call the send_message tool before ending your turn - it is the ONLY channel Joe sees. Your assistant text and tool-call narration are not rendered in the chat at all. Send him a terse, self-contained summary of what happened this turn.";
+/// todo 818: `ask_user_question` answers `{"acknowledged": true}` the instant
+/// the daemon takes the card, so a card that surfaced NOWHERE looks identical
+/// to a delivered one and the turn ends waiting for an answer nobody can give.
+const QUESTION_UNDELIVERED_REASON: &str = "Your ask_user_question card was accepted but never surfaced - this session is not in the app's live registry, so no window, sidebar row or phone ever showed it and no answer can ever arrive. Do NOT end the turn waiting on it: ask the same question as plain text through send_message instead, and carry on from the user's reply.";
 const BOTH_MISSING_REASON: &str = "Before ending your turn, call BOTH tools: report_turn_status (required every turn, even a tool-only one with no chat reply; it requires a 'status' argument - one of done|question|waiting|working, calling it with no arguments will fail) and send_message (the ONLY channel Joe sees - your assistant text and tool-call narration are not rendered in the chat at all; send him a terse, self-contained summary of what happened this turn).";
 
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
@@ -97,6 +101,18 @@ pub(super) async fn on_stop(
         // caps the retry) if report_turn_status and/or send_message weren't
         // called this turn - folded into ONE block, see missing_requirement_reason.
         let gen = ctx.state.registry.current_turn_gen(&session_id);
+        // Checked before the report/send pair: one block per turn is all
+        // `stop_hook_active` allows, and a question nobody can see is the more
+        // urgent of the two failures.
+        if payload.stop_hook_active != Some(true)
+            && ctx.state.registry.question_undelivered_this_turn(&session_id, gen)
+        {
+            log::warn!("hook /hooks/stop: blocking {session_id} - ask_user_question card never surfaced");
+            return (
+                StatusCode::OK,
+                Json(json!({"decision": "block", "reason": QUESTION_UNDELIVERED_REASON})),
+            );
+        }
         let reported = ctx.state.registry.peek_reported_status(&session_id);
         let has_current_report = reported.as_ref().map(|r| r.turn_gen == gen).unwrap_or(false);
         let has_current_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);

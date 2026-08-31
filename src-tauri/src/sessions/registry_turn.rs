@@ -41,6 +41,13 @@ impl TurnActivity {
     }
 }
 
+/// See `Registry::question_posted`.
+#[derive(Clone, Copy, Debug)]
+pub struct QuestionPost {
+    pub turn_gen: u64,
+    pub surfaced: bool,
+}
+
 /// See `Registry::reported_status`.
 #[derive(Clone, Debug)]
 pub struct ReportedStatus {
@@ -92,9 +99,10 @@ impl Registry {
     /// Consume: always removes the entry, but only returns it on a gen
     /// match - mirrors `set_awaiting_if_gen`'s stale-turn guard.
     pub fn take_reported_status_if_gen(&self, session_id: &str, gen: u64) -> Option<ReportedStatus> {
-        // Runs after the Stop hook has read both, so this is also where
-        // message_sent_gen self-cleans instead of growing per session forever.
+        // Runs after the Stop hook has read them, so this is also where the
+        // per-turn side maps self-clean instead of growing per session forever.
         self.message_sent_gen.lock().unwrap().remove(session_id);
+        self.question_posted.lock().unwrap().remove(session_id);
         let entry = self.reported_status.lock().unwrap().remove(session_id)?;
         if entry.turn_gen == gen {
             Some(entry)
@@ -117,6 +125,29 @@ impl Registry {
 
     pub fn peek_message_sent_gen(&self, session_id: &str) -> Option<u64> {
         self.message_sent_gen.lock().unwrap().get(session_id).copied()
+    }
+
+    /// Record the outcome of an `ask_user_question` post for this turn.
+    /// `surfaced` is whether the session was actually flipped to "awaiting a
+    /// question" - false means no window, sidebar row or phone will ever show
+    /// the card, so nobody can answer it.
+    pub fn mark_question_posted(&self, session_id: &str, turn_gen: u64, surfaced: bool) {
+        self.question_posted
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), QuestionPost { turn_gen, surfaced });
+    }
+
+    /// True when this turn posted a question that never surfaced anywhere.
+    /// A post from an earlier turn is ignored: it either got answered or is
+    /// still legitimately open.
+    pub fn question_undelivered_this_turn(&self, session_id: &str, turn_gen: u64) -> bool {
+        self.question_posted
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|p| p.turn_gen == turn_gen && !p.surfaced)
+            .unwrap_or(false)
     }
 
     /// Record what the Stop hook says this session is still doing. `Idle`
@@ -274,6 +305,27 @@ mod tests {
         let taken = registry.take_reported_status_if_gen("s", 1).unwrap();
         assert_eq!(taken.status, "done");
         assert!(registry.peek_reported_status("s").is_none(), "take must consume the entry");
+    }
+
+    /// todo 818: only an unsurfaced post from THIS turn blocks the Stop hook.
+    #[test]
+    fn question_undelivered_only_fires_for_an_unsurfaced_post_this_turn() {
+        let registry = Registry::new();
+        assert!(!registry.question_undelivered_this_turn("s", 1), "no post at all");
+        registry.mark_question_posted("s", 1, true);
+        assert!(!registry.question_undelivered_this_turn("s", 1), "surfaced post is fine");
+        registry.mark_question_posted("s", 1, false);
+        assert!(registry.question_undelivered_this_turn("s", 1));
+        assert!(!registry.question_undelivered_this_turn("s", 2), "stale gen must not block");
+    }
+
+    #[test]
+    fn question_post_is_consumed_with_the_turn() {
+        let registry = Registry::new();
+        registry.set_reported_status("s", 1, "question".into(), None, None);
+        registry.mark_question_posted("s", 1, false);
+        registry.take_reported_status_if_gen("s", 1);
+        assert!(!registry.question_undelivered_this_turn("s", 1), "must not outlive its turn");
     }
 
     #[test]
