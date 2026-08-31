@@ -4,6 +4,7 @@
  */
 
 import { api, type Character, type CharacterSlot } from "./api";
+import { clearPersistedIcons } from "./character-icon-store";
 
 let cache: Character[] | null = null;
 
@@ -20,6 +21,10 @@ export async function loadCharacters(): Promise<Character[]> {
 
 export function invalidateCharactersCache(): void {
   cache = null;
+  // Icon data URLs persist across reloads (character-icon-store.ts), so a
+  // character whose artwork was replaced on disk would keep serving the old
+  // image forever without this.
+  void clearPersistedIcons();
   // Fire-and-forget: also drop the Rust-side cache so the next list reads
   // fresh from disk. Backend errors are non-fatal here; the frontend cache
   // is already cleared and the next `loadCharacters()` will surface any

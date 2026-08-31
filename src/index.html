@@ -28,8 +28,14 @@
             crossorigin="anonymous"></script>
     <!-- Devicon: brand/tech-stack logos for the project face (ai_todo 99). Phosphor
          has no tech logos; this is the same icon set + host (unpkg) Joe uses in
-         server_supervisor. CSS + font both served from the CSP-allowed unpkg. -->
-    <link rel="stylesheet" href="https://unpkg.com/devicon@2.17.0/devicon.min.css">
+         server_supervisor. CSS + font both served from the CSP-allowed unpkg.
+
+         Loaded non-render-blocking: it is 130KB and measured 3.8s cold from
+         unpkg, and nothing in the app's chrome depends on it - only decorative
+         tech logos on project faces. `media="print"` keeps it off the critical
+         path; the onload flip applies it as soon as it arrives. -->
+    <link rel="stylesheet" href="https://unpkg.com/devicon@2.17.0/devicon.min.css"
+          media="print" onload="this.media='all'">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Manrope:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">

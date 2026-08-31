@@ -101,20 +101,19 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Hashed/static assets: cache-first (immutable names), revalidating in the
-  // background and falling back to the network on a cache miss.
+  // Cache-first with NO background revalidation: the names are content-hashed,
+  // so a hit can never be stale, and revalidating re-downloaded the whole
+  // bundle on every load over the phone's tunnel.
   event.respondWith(
     caches.match(req).then((cached) => {
-      const fromNetwork = fetch(req)
-        .then((res) => {
-          if (res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fromNetwork;
+      if (cached) return cached;
+      return fetch(req).then((res) => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+        }
+        return res;
+      });
     })
   );
 });

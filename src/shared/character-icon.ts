@@ -12,13 +12,15 @@
  */
 
 import { api } from "./api";
+import { persistIcon, readPersistedIcon } from "./character-icon-store";
 
 const iconUrlCache = new Map<string, string | null>();
 const inflight = new Map<string, Promise<string | null>>();
 
 /** Resolve (and cache) a character's `icon.png` data URL. Returns null when the
  *  character has no icon or the lookup fails. Cached + de-duped, so calling it
- *  repeatedly only ever fetches each id once. */
+ *  repeatedly only ever fetches each id once. Checks the cross-reload store
+ *  first; a "no icon" result stays memory-only so later artwork is picked up. */
 export async function getCharacterIconUrl(id: string): Promise<string | null> {
   const cached = iconUrlCache.get(id);
   if (cached !== undefined) return cached;
@@ -26,11 +28,14 @@ export async function getCharacterIconUrl(id: string): Promise<string | null> {
   if (existing) return existing;
 
   const p = (async () => {
-    let url: string | null = null;
-    try {
-      url = (await api.characterAssetUrl(id, "icon.png")) ?? null;
-    } catch {
-      url = null;
+    let url = await readPersistedIcon(id);
+    if (!url) {
+      try {
+        url = (await api.characterAssetUrl(id, "icon.png")) ?? null;
+      } catch {
+        url = null;
+      }
+      if (url) void persistIcon(id, url);
     }
     iconUrlCache.set(id, url);
     inflight.delete(id);
