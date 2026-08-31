@@ -19,6 +19,8 @@ import {
   peekPendingPrompt,
 } from "./gating";
 import type { PendingPrompt } from "./gating";
+import { state } from "../state";
+import type { Question, QuestionRequestedPayload } from "./types";
 import { showPermissionCard } from "./permission-card";
 import { rerenderSidebar, showQuestionCard, dismissQuestionCard } from "./index";
 
@@ -61,9 +63,9 @@ export function replayPendingPrompt(sessionId: string): boolean {
 
 /** Shared tail of replay/reopen: render the parked prompt's card, applying the
  *  arrival path's auto-accept / remembered-rule shortcuts. */
-function surfacePending(pending: PendingPrompt): void {
+function surfacePending(pending: PendingPrompt, reopened = false): void {
   if (pending.kind === "question") {
-    void showQuestionCard(pending.payload, pending.draft);
+    void showQuestionCard(pending.payload, pending.draft, { reopened });
     return;
   }
   const payload = pending.payload;
@@ -113,20 +115,45 @@ export async function rehydratePendingPrompts(sessionId: string): Promise<boolea
   return true;
 }
 
-/** Put the real card back up for a transcript card the user clicked: local park
- *  first, then the daemon's store. False when nothing is open for this chat, so
- *  the caller can say so - silently doing nothing is the whole complaint. */
-export async function reopenPendingPrompt(sessionId: string): Promise<boolean> {
+/** Rebuild an answerable payload from the transcript alone. The daemon's prompt
+ *  store is memory-only, but the tool_use `input` is in history and a
+ *  fire-and-forget answer travels as an ordinary message, not the dead oneshot.
+ *  Null if the card isn't loaded or carries no questions. */
+function rebuildQuestionFromTranscript(sessionId: string, cardId: string): QuestionRequestedPayload | null {
+  const msg = state.renderer?.getOpenQuestion(cardId);
+  const raw = (msg?.input as { questions?: unknown } | undefined)?.questions;
+  const questions = (Array.isArray(raw) ? raw : [raw]).filter(
+    (q): q is Question => !!q && typeof (q as Question).question === "string",
+  );
+  if (!questions.length) return null;
+  return { id: cardId, questions, session_id: sessionId };
+}
+
+/** Put the real card back up for a transcript card the user clicked: local
+ *  park, then the daemon's store, then the transcript. A park for a card other
+ *  than `cardId` is left untouched for its own click. */
+export async function reopenPendingPrompt(sessionId: string, cardId?: string): Promise<boolean> {
   if (!sessionId) return false;
+  const wanted = (p: PendingPrompt): boolean => !cardId || p.payload.id === cardId;
   let pending = takePendingPrompt(sessionId);
+  if (pending && !wanted(pending)) {
+    storePendingPrompt(sessionId, pending);
+    pending = null;
+  }
   if (!pending) {
     await rehydratePendingPrompts(sessionId);
-    pending = takePendingPrompt(sessionId);
+    const rehydrated = takePendingPrompt(sessionId);
+    if (rehydrated && !wanted(rehydrated)) storePendingPrompt(sessionId, rehydrated);
+    else pending = rehydrated;
+  }
+  if (!pending && cardId) {
+    const payload = rebuildQuestionFromTranscript(sessionId, cardId);
+    if (payload) pending = { kind: "question", payload };
   }
   if (!pending) return false;
   // Only safe to drop what's on screen now we hold a replacement.
   dismissQuestionCard();
   rerenderSidebar();
-  surfacePending(pending);
+  surfacePending(pending, true);
   return true;
 }

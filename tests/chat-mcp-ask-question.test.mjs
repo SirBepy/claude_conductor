@@ -194,6 +194,10 @@ describe("pagination (older-page load): fire-and-forget answer via <auq-answer/>
 // to show "awaiting answer" forever. The daemon's durable skipped_questions
 // marks are folded in client-side instead (non-paginated lookup, option (b)).
 describe("pagination (older-page load): durable skip marks", () => {
+  // A pre-v4 row: timestamp only, no card id, matched by the nearest-preceding
+  // heuristic. v4+ rows name their card and take the `questionId` path instead.
+  const legacyMark = (timestamp) => ({ timestamp, questionId: null });
+
   async function paginateWithMarks(prefix, marks, olderEvents) {
     invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("later question", 2_000_000)],
@@ -209,7 +213,7 @@ describe("pagination (older-page load): durable skip marks", () => {
   }
 
   it("renders a card as Skipped when a mark follows it, with no transcript evidence at all", async () => {
-    const { renderer, container } = await paginateWithMarks("sess-skip-mark-", [1_001_400], [
+    const { renderer, container } = await paginateWithMarks("sess-skip-mark-", [legacyMark(1_001_400)], [
       userEvent("old question", 1_000_000),
       mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
     ]);
@@ -235,7 +239,7 @@ describe("pagination (older-page load): durable skip marks", () => {
   });
 
   it("a real answer wins over a stray mark, and an out-of-page mark is a no-op", async () => {
-    const { renderer, container } = await paginateWithMarks("sess-skip-answered-", [1_001_400, 9_999_999], [
+    const { renderer, container } = await paginateWithMarks("sess-skip-answered-", [legacyMark(1_001_400), legacyMark(9_999_999)], [
       userEvent("old question", 1_000_000),
       mcpAskEvent([{ question: "Pick one?" }], "q1", 1_001_000),
       toolResultEvent("q1", "User answered the question(s):\nQ: Pick one?\nA: Real answer", {}, 1_001_200),
@@ -250,11 +254,69 @@ describe("pagination (older-page load): durable skip marks", () => {
   it("matchSkipMarks ignores marks that precede every card and never reuses one card", async () => {
     const { matchSkipMarks } = await import("../src/shared/chat/chat-pagination.ts");
     const cards = [{ id: "q1", ts: 1000 }, { id: "q2", ts: 3000 }];
-    expect([...matchSkipMarks(cards, [500], new Set())]).toEqual([]);
-    expect([...matchSkipMarks(cards, [1500, 1600], new Set())]).toEqual(["q1"]);
-    expect([...matchSkipMarks(cards, [1500, 3500], new Set())]).toEqual(["q1", "q2"]);
-    expect([...matchSkipMarks(cards, [3500], new Set(["q2"]))]).toEqual([]);
-    expect([...matchSkipMarks([], [1500], new Set())]).toEqual([]);
+    const ts = (...stamps) => stamps.map(legacyMark);
+    expect([...matchSkipMarks(cards, ts(500), new Set())]).toEqual([]);
+    expect([...matchSkipMarks(cards, ts(1500, 1600), new Set())]).toEqual(["q1"]);
+    expect([...matchSkipMarks(cards, ts(1500, 3500), new Set())]).toEqual(["q1", "q2"]);
+    expect([...matchSkipMarks(cards, ts(3500), new Set(["q2"]))]).toEqual([]);
+    expect([...matchSkipMarks([], ts(1500), new Set())]).toEqual([]);
+  });
+
+  it("a mark naming its card skips THAT card, not the newest open one", async () => {
+    const { matchSkipMarks } = await import("../src/shared/chat/chat-pagination.ts");
+    const cards = [{ id: "q1", ts: 1000 }, { id: "q2", ts: 3000 }];
+    // Recorded after both cards existed - the timestamp heuristic would walk
+    // back to q2. The id says otherwise and wins.
+    const named = [{ timestamp: 4000, questionId: "q1" }];
+    expect([...matchSkipMarks(cards, named, new Set())]).toEqual(["q1"]);
+    expect([...matchSkipMarks(cards, named, new Set(["q1"]))]).toEqual([]);
+    expect([...matchSkipMarks(cards, [{ timestamp: 4000, questionId: "elsewhere" }], new Set())]).toEqual([]);
+  });
+});
+
+// Reopening a stale card answers it out of order, so the newest-open-card
+// heuristic folds the answer onto the wrong question. The sentinel names its
+// card to settle it.
+describe("an id-carrying <auq-answer/> folds onto the card it names", () => {
+  const answerFor = (id, text, ts = 0) =>
+    userEvent(`<auq-answer id="${id}"/>User answered the question(s):\nQ: Pick one?\nA: ${text}`, ts);
+
+  it("resolves the OLDER of two open cards when the sentinel names it", () => {
+    const { r, container } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(mcpAskEvent([{ question: "Pick one?" }], "q1", 1_000));
+    r.handleEvent(mcpAskEvent([{ question: "Pick one?" }], "q2", 2_000));
+    r.handleEvent(answerFor("q1", "First card", 3_000));
+
+    const byId = Object.fromEntries(r.messages.filter((m) => m.kind === "question").map((m) => [m.id, m]));
+    expect(byId.q1.text).toContain("First card");
+    expect(byId.q2.text).toBeUndefined();
+    // Folded into the card, never a second bubble.
+    expect(container.querySelector(".auq-answer-chip")).toBeNull();
+    r.detach();
+  });
+
+  it("falls back to the newest open card when the sentinel names none", () => {
+    const { r } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(mcpAskEvent([{ question: "Pick one?" }], "q1", 1_000));
+    r.handleEvent(mcpAskEvent([{ question: "Pick one?" }], "q2", 2_000));
+    r.handleEvent(userEvent("<auq-answer/>User answered the question(s):\nQ: Pick one?\nA: Newest", 3_000));
+
+    const byId = Object.fromEntries(r.messages.filter((m) => m.kind === "question").map((m) => [m.id, m]));
+    expect(byId.q2.text).toContain("Newest");
+    expect(byId.q1.text).toBeUndefined();
+    r.detach();
+  });
+
+  it("names an unloaded card: falls back rather than dropping the answer", () => {
+    const { r } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(mcpAskEvent([{ question: "Pick one?" }], "q1", 1_000));
+    r.handleEvent(answerFor("gone", "Orphan", 3_000));
+
+    expect(r.messages.find((m) => m.kind === "question").text).toContain("Orphan");
+    r.detach();
   });
 });
 

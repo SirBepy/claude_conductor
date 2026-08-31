@@ -360,6 +360,9 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
   if (m.kind === "question") {
     const el = document.createElement("div");
     el.className = "msg question-card";
+    // Click-to-reopen needs to name the card it came from - two open cards
+    // are indistinguishable otherwise (see sessions.ts's reopen handler).
+    if (m.id) el.dataset.questionId = m.id;
     el.innerHTML = renderQuestionCardHtml(m);
     return el;
   }

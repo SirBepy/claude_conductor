@@ -77,15 +77,19 @@ pub(crate) async fn respond_permission_inner(
 /// Records a Skip in `companion.db` so scrollback can still show the card as
 /// dismissed after a reopen. Nothing is ever written to Claude's transcript
 /// JSONL for a skip (by design - the model's context stays clean), so this row
-/// is the only durable trace. Warn-and-skip on any failure, never fatal.
-fn record_skip(state: &Arc<DaemonState>, session_id: &str) {
+/// is the only durable trace. `question_id` is the prompt/tool_use id, so the
+/// mark lands on the card that was actually dismissed even with several open.
+/// Warn-and-skip on any failure, never fatal.
+fn record_skip(state: &Arc<DaemonState>, session_id: &str, question_id: &str) {
     let Some(db) = state.db.as_ref() else {
         log::warn!("daemon: companion.db unavailable; dropping skipped-question mark");
         return;
     };
     let mgr = db.lock().unwrap_or_else(|p| p.into_inner());
     let ts = chrono::Utc::now().timestamp_millis();
-    if let Err(e) = crate::storage::skipped_question_store::insert_skip(mgr.conn(), session_id, ts) {
+    if let Err(e) = crate::storage::skipped_question_store::insert_skip(
+        mgr.conn(), session_id, ts, Some(question_id),
+    ) {
         log::warn!("daemon: insert_skip failed: {e:#}");
     }
 }
@@ -114,7 +118,7 @@ pub(crate) async fn respond_question_inner(
     settle_prompt(state, request_id, true).await;
     if skipped {
         if let Some(sid) = session_id.as_deref() {
-            record_skip(state, sid);
+            record_skip(state, sid, request_id);
         }
         if let Some(session) = session_id.as_deref().and_then(|sid| state.sessions.get(sid).map(|s| s.clone())) {
             crate::daemon::broadcast::publish(&session, crate::types::chat::ChatEvent::Notification {

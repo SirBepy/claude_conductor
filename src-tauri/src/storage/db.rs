@@ -13,7 +13,7 @@ use std::path::Path;
 /// Current schema version, mirrored into `PRAGMA user_version` by
 /// [`run_migrations`]. Bump alongside any structural change and add the
 /// matching branch to `run_migrations`.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Opens (creating if absent) the SQLite database at `path` and ensures the
 /// schema is present. The parent directory must already exist.
@@ -59,9 +59,10 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_skill_ts ON skill_events(timestamp);
 
         CREATE TABLE IF NOT EXISTS skipped_questions (
-          id         INTEGER PRIMARY KEY AUTOINCREMENT,
-          session_id TEXT NOT NULL,
-          timestamp  INTEGER NOT NULL
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id  TEXT NOT NULL,
+          timestamp   INTEGER NOT NULL,
+          question_id TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_skipped_q_session ON skipped_questions(session_id);
         "#,
@@ -106,6 +107,15 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 
     // v3 (skipped_questions) needs no branch here: it is a brand-new table, so
     // init_schema's CREATE TABLE IF NOT EXISTS already covers pre-v3 DBs.
+
+    if current < 4 {
+        // v4: a skip mark names the card it dismissed. Pre-v4 rows keep NULL
+        // and fall back to the timestamp heuristic, which mis-attributes once
+        // two question cards are open at once.
+        if !has_column(conn, "skipped_questions", "question_id")? {
+            conn.execute("ALTER TABLE skipped_questions ADD COLUMN question_id TEXT", [])?;
+        }
+    }
 
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())

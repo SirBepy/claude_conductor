@@ -11,6 +11,7 @@ import { clampUserMessages } from "./turn-collapse";
 import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
 import { ChatPaginator } from "./chat-pagination";
+import { normalizeSkipMarks, type SkipMark } from "./skip-marks";
 import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
 import { buildMessageEl, foldClosedRange, revealTranscript } from "./chat-dom-renderer";
 import { onTranscriptTail } from "./chat-resync";
@@ -52,10 +53,9 @@ export interface CumulativeUsage {
 
 /** Best-effort: a fetch failure just means no skip fold this load, not a
  *  broken history load (mirrors sessionEvents.loadInitial's own tolerance). */
-async function fetchSkipMarks(sessionId: string): Promise<number[]> {
+async function fetchSkipMarks(sessionId: string): Promise<SkipMark[]> {
   try {
-    const marks = await invoke<number[]>("get_skipped_question_marks", { sessionId });
-    return Array.isArray(marks) ? marks : [];
+    return normalizeSkipMarks(await invoke<unknown>("get_skipped_question_marks", { sessionId }));
   } catch {
     return [];
   }
@@ -542,6 +542,15 @@ export class ChatRenderer {
 
   getFileEdits(): FileEditView[] {
     return [...this.fileEdits];
+  }
+
+  /** The still-unresolved AUQ card with this id, or null. The transcript keeps
+   *  the tool_use `input` verbatim, so this is enough to rebuild an answerable
+   *  card for a prompt the daemon no longer holds - its store is memory-only
+   *  and does not survive a daemon restart. */
+  getOpenQuestion(promptId: string): RenderedMessage | null {
+    const m = this.messages.find((x) => x.kind === "question" && x.id === promptId);
+    return m && m.text === undefined ? m : null;
   }
 
   /** Mirror the floating AUQ prompt card's live per-question progress into

@@ -18,7 +18,11 @@ export { isBoundaryMessage, compactionOrdinal, stripStatusToken, detectStatusTok
 // Barrel: eventToRenderedMessage + its extraction helpers moved to
 // chat-event-to-message.ts (see todo 589); re-exported so existing
 // importers keep working unchanged.
-export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, AUQ_SKIPPED_TEXT, extractAuqExtraText, stripAuqExtraBlock, AUQ_EXTRA_SENTINEL } from "./chat-event-to-message";
+export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, auqAnswerSentinel, isAuqAnswerBlock, AUQ_SKIPPED_TEXT, extractAuqExtraText, stripAuqExtraBlock, AUQ_EXTRA_SENTINEL } from "./chat-event-to-message";
+// Imported, not re-declared: renderTextBlock strips the sentinel for the chip,
+// and a second copy of the pattern would miss the `id` attribute and leave raw
+// markup in the transcript.
+import { AUQ_ANSWER_RE } from "./chat-event-to-message";
 
 const md = new MarkdownIt({
   html: false,
@@ -70,10 +74,6 @@ const PASTED_LOG_RE = /<pasted-log id="([^"]+)" name="([^"]*)">\n?([\s\S]*?)\n?<
 // no content; the renderer strips it and prepends a small mic chip so the user
 // sees "this was voice" without raw markup (the model still receives the tag).
 const VOICE_INPUT_RE = /<voice-input\s*\/>/g;
-
-// Sentinel + extraction helpers moved to chat-event-to-message.ts; the regex
-// is re-declared here since renderTextBlock also strips it for the chip.
-const AUQ_ANSWER_RE = /<auq-answer\s*\/>/g;
 
 function renderTextBlock(rawText: string, breaks = false, fileChips = false): string {
   const stripped = stripStatusToken(rawText);

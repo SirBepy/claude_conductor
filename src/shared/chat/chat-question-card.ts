@@ -6,6 +6,7 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
 import { AUQ_SKIPPED_TEXT, RenderedMessage, extractAuqAnswerText } from "./chat-transforms";
+import type { SkipMark } from "./skip-marks";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-dom-renderer";
@@ -54,12 +55,13 @@ export function findStrandedSentinelAnswer(rendered: readonly RenderedMessage[])
 /** Fold a fire-and-forget AUQ answer message back into the question card it
  *  answers (see permission-modal/index.ts onSubmit), so the transcript shows
  *  the card resolved with the real answers instead of stuck on "awaiting
- *  answer" plus a separate answer bubble. Only one AUQ can be in flight per
- *  session at a time, so the most recent still-unresolved question card is
- *  always the right match. Returns false if none is found (caller falls back
- *  to rendering a normal bubble, same as before this existed). */
-export function resolvePendingQuestionCard(r: ChatRenderer, answerText: string): boolean {
-  const i = findOpenQuestionIndex(r.messages);
+ *  answer" plus a separate bubble. `cardId` names the card exactly; without it
+ *  - pre-id history - the newest unresolved one wins. False if none matched. */
+export function resolvePendingQuestionCard(r: ChatRenderer, answerText: string, cardId?: string | null): boolean {
+  const byId = cardId
+    ? r.messages.findIndex((m) => m.kind === "question" && m.id === cardId && m.text === undefined)
+    : -1;
+  const i = byId >= 0 ? byId : findOpenQuestionIndex(r.messages);
   if (i < 0) return false;
   r.messages[i] = { ...r.messages[i]!, text: answerText };
   r.dirtyIndices.add(i);
@@ -168,21 +170,24 @@ export function tryHandleQuestionSkipped(
   return true;
 }
 
-/** Pair each durable skip mark (unix ms) with the nearest PRECEDING
- *  question card - a Skip never reaches the transcript, so there is no
- *  tool_use_id to key on. Same one-AUQ-in-flight heuristic as the live path's
- *  resolvePendingQuestionCard; marks for other pages match nothing. */
+/** Pair each durable skip mark with the card it dismissed. A v4+ mark names its
+ *  `questionId`; pre-v4 rows use the nearest preceding open card instead. */
 export function matchSkipMarks(
   cards: { id: string; ts: number }[],
-  marks: number[],
+  marks: SkipMark[],
   resolved: Set<string>,
 ): Set<string> {
   const skipped = new Set<string>();
+  const known = new Set(cards.map((c) => c.id));
   for (const mark of marks) {
-    if (!Number.isFinite(mark)) continue;
+    if (mark.questionId) {
+      if (known.has(mark.questionId) && !resolved.has(mark.questionId)) skipped.add(mark.questionId);
+      continue;
+    }
+    if (!Number.isFinite(mark.timestamp)) continue;
     for (let i = cards.length - 1; i >= 0; i--) {
       const card = cards[i]!;
-      if (card.ts <= 0 || card.ts > mark) continue;
+      if (card.ts <= 0 || card.ts > mark.timestamp) continue;
       // The nearest preceding card being answered means this mark belongs to a
       // card on another page, not to an older one here.
       if (!resolved.has(card.id) && !skipped.has(card.id)) skipped.add(card.id);
@@ -196,7 +201,7 @@ export function matchSkipMarks(
  *  card still open as Skipped if a durable mark matches it - the counterpart
  *  to prependEvents' older-page fold, which the initial hydrate never runs
  *  through. No move-to-end: the card's element isn't built yet. */
-export function applySkipMarks(r: ChatRenderer, marks: number[]): void {
+export function applySkipMarks(r: ChatRenderer, marks: SkipMark[]): void {
   if (marks.length === 0) return;
   const cards: { id: string; ts: number }[] = [];
   const resolved = new Set<string>();

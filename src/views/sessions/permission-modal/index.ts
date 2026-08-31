@@ -23,7 +23,7 @@ import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
 import { getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
-import { AUQ_ANSWER_SENTINEL, AUQ_EXTRA_SENTINEL } from "../../../shared/chat/chat-transforms";
+import { auqAnswerSentinel, AUQ_EXTRA_SENTINEL } from "../../../shared/chat/chat-transforms";
 import type { ContentBlock } from "../../../types/ipc.generated";
 import { clearQuestionDraft, saveQuestionDraft } from "./draft-persistence";
 import { scheduleAuqPush, clearAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
@@ -89,8 +89,16 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
   state.renderer?.updateQuestionProgress(promptId, liveAnswered);
 }
 
+/** `reopened`: clicked in the transcript, so it is deliberately answered out
+ *  of order and the isLatestQuestion drop below must not fire. */
+export interface ShowQuestionCardOpts { reopened?: boolean }
+
 // Exported for resurface.ts (split out of this file, ai_todo 517).
-export async function showQuestionCard(payload: QuestionRequestedPayload, restoredDraft?: QuestionDraft): Promise<void> {
+export async function showQuestionCard(
+  payload: QuestionRequestedPayload,
+  restoredDraft?: QuestionDraft,
+  opts: ShowQuestionCardOpts = {},
+): Promise<void> {
   // Park the prompt while it's on screen so switching chats and back re-surfaces
   // it (the reliable poll only emits each id once, so a card torn down by
   // navigation is otherwise lost while the daemon turn hangs). Cleared when the
@@ -151,7 +159,7 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
         rerenderSidebar();
       }
       if (!sid) return;
-      if (!isLatestQuestion(sid, payload.id)) {
+      if (!opts.reopened && !isLatestQuestion(sid, payload.id)) {
         // A newer question superseded this card while it sat unanswered - the
         // conversation already moved on, so don't inject a reply into it now.
         console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
@@ -161,9 +169,10 @@ export async function showQuestionCard(payload: QuestionRequestedPayload, restor
       // staying standalone (cca356d8). Only included when NOT delivered
       // in-band - extras still travel either way, since the tool_result only
       // ever carries the structured answers, never free-form extra text/files.
+      // Sentinel names the card so the fold lands on THIS one, not the newest.
       const answerBlocks: ContentBlock[] = delivered
         ? []
-        : [{ type: "text", text: `${AUQ_ANSWER_SENTINEL}${formatAnswersAsMessage(questions, answers)}` }];
+        : [{ type: "text", text: `${auqAnswerSentinel(payload.id)}${formatAnswersAsMessage(questions, answers)}` }];
       // Tagged AUQ_EXTRA_SENTINEL so this folds into the SAME card (see
       // chat-question-card.ts's resolvePendingQuestionExtra), not a detached bubble.
       const cardExtraBlocks: ContentBlock[] = [];

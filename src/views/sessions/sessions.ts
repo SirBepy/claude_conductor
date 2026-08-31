@@ -212,17 +212,17 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   const teardownMobileKeyboard = initMobileKeyboard(view);
 
   // Click an unanswered AUQ card to put the real (answerable) card back up.
-  // Gated on `.tool-qa-a--pending` so a resolved one doesn't reopen.
-  // reopenPendingPrompt falls back to the daemon store when the in-memory park
-  // died with its window; a dead click must say why - that was the bug.
+  // Gated on `.tool-qa-a--pending` so a resolved one doesn't reopen. Passing the
+  // card's id reopens the one CLICKED, not whichever the daemon hands back first;
+  // reopenPendingPrompt falls back to the daemon store, then the transcript.
   pane.addEventListener("click", (e) => {
-    const card = (e.target as HTMLElement).closest(".msg.question-card");
+    const card = (e.target as HTMLElement).closest<HTMLElement>(".msg.question-card");
     if (!card || !card.querySelector(".tool-qa-a--pending")) return;
     const sid = getSelectedSessionId();
     if (!sid) return;
     void (async () => {
-      if (await reopenPendingPrompt(sid)) return;
-      showToast("This question is no longer waiting for an answer.");
+      if (await reopenPendingPrompt(sid, card.dataset.questionId)) return;
+      showToast("This question can no longer be reopened.");
     })();
   });
 

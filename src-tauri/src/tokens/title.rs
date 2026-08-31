@@ -223,7 +223,7 @@ fn user_turn_text(v: &serde_json::Value) -> String {
 pub(crate) fn is_titleable_user_turn(v: &serde_json::Value) -> bool {
     if !is_real_user_turn(v) { return false; }
     let t = user_turn_text(v);
-    !t.starts_with("[Request interrupted by user]") && !t.starts_with("<auq-answer/>")
+    !t.starts_with("[Request interrupted by user]") && !t.starts_with("<auq-answer")
 }
 
 /// Concatenated text of an `assistant` message's text blocks, or None if the

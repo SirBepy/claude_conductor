@@ -16,6 +16,7 @@ import {
   classifyMetaTurn,
   noiseAssistantLabel,
   extractAuqAnswerText,
+  extractAuqAnswerCardId,
   stripAuqAnswerBlock,
   extractAuqExtraText,
   stripAuqExtraBlock,
@@ -169,7 +170,8 @@ function handleUserMessageEvent(
   }
 
   const auqAnswerText = !isCompact && !isSilent && !isMeta ? extractAuqAnswerText(cleaned) : null;
-  const resolvedQuestionCard = auqAnswerText !== null && resolvePendingQuestionCard(r, auqAnswerText);
+  const resolvedQuestionCard = auqAnswerText !== null
+    && resolvePendingQuestionCard(r, auqAnswerText, extractAuqAnswerCardId(cleaned));
   // Independent of the answer fold above - the card's own extra-message note
   // can ride the same event (a distinct block) or arrive as its own later
   // event (the in-band `delivered` path resolves the answer from the

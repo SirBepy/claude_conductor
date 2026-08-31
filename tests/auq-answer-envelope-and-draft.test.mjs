@@ -36,7 +36,7 @@ vi.mock("../src/views/sessions/permission-modal/question-ui.ts", () => ({
 const { handleQuestionRequested, setSelectedSessionId } = await import("../src/views/sessions/permission-modal/index.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { HeldMessages } = await import("../src/shared/chat/held-messages.ts");
-const { AUQ_ANSWER_SENTINEL } = await import("../src/shared/chat/chat-transforms.ts");
+const { isAuqAnswerBlock } = await import("../src/shared/chat/chat-transforms.ts");
 
 const SESSION = "s1";
 let sendCalls;
@@ -85,7 +85,9 @@ function flushMicrotasks() {
 }
 
 function sentinelBlock(blocks) {
-  return blocks.find((b) => b.type === "text" && b.text.startsWith(AUQ_ANSWER_SENTINEL));
+  // The production predicate, not a literal: the sentinel now carries the
+  // answered card's id, so an exact-string match would miss every real block.
+  return blocks.find(isAuqAnswerBlock);
 }
 
 async function answerOneCard() {

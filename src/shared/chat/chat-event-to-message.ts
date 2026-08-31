@@ -25,7 +25,20 @@ const FILE_TOKEN_RE = /<file:(.+?)(?:::(.+?))?>/g;
 // for the rare case where no matching pending card is found (e.g. it queued
 // alongside other held messages in the same send).
 export const AUQ_ANSWER_SENTINEL = "<auq-answer/>";
-const AUQ_ANSWER_RE = /<auq-answer\s*\/>/g;
+/** Shared by every spelling, with or without the `id` attribute. */
+export const AUQ_ANSWER_PREFIX = "<auq-answer";
+/** Group 1 = the answered card's id, absent on pre-id history. */
+export const AUQ_ANSWER_RE = /<auq-answer(?:\s+id="([^"]*)")?\s*\/>/g;
+
+/** Naming the card is what folds the answer onto THAT card rather than the
+ *  newest open one - they differ once a stale card is answered out of order. */
+export function auqAnswerSentinel(cardId?: string): string {
+  return cardId ? `<auq-answer id="${cardId}"/>` : AUQ_ANSWER_SENTINEL;
+}
+
+export function isAuqAnswerBlock(b: ContentBlock | undefined): boolean {
+  return b?.type === "text" && b.text.startsWith(AUQ_ANSWER_PREFIX);
+}
 
 // Sentinel prefixing the card's own "additional message" note - distinct
 // from AUQ_ANSWER_SENTINEL so a queued composer draft never collides with it.
@@ -64,10 +77,21 @@ export function extractAttachedFilePaths(blocks: ContentBlock[]): Set<string> {
  *  its own separate block(s) and is ignored here, not scanned into the
  *  fold. */
 export function extractAuqAnswerText(blocks: ContentBlock[]): string | null {
-  const b = blocks.find((x) => x && x.type === "text" && x.text.startsWith(AUQ_ANSWER_SENTINEL));
+  const b = blocks.find(isAuqAnswerBlock);
   if (!b || b.type !== "text") return null;
   AUQ_ANSWER_RE.lastIndex = 0;
   return b.text.replace(AUQ_ANSWER_RE, "").trim();
+}
+
+/** The card an answer names, or null on pre-id history (callers then fall
+ *  back to the newest-open-card heuristic). */
+export function extractAuqAnswerCardId(blocks: ContentBlock[]): string | null {
+  const b = blocks.find(isAuqAnswerBlock);
+  if (!b || b.type !== "text") return null;
+  AUQ_ANSWER_RE.lastIndex = 0;
+  const id = AUQ_ANSWER_RE.exec(b.text)?.[1];
+  AUQ_ANSWER_RE.lastIndex = 0;
+  return id || null;
 }
 
 /** `blocks` with its AUQ-answer sentinel block (if any) removed - the
@@ -75,7 +99,7 @@ export function extractAuqAnswerText(blocks: ContentBlock[]): string | null {
  *  which still needs to render/transform as an ordinary user message once
  *  the sentinel block has been folded into the question card. */
 export function stripAuqAnswerBlock(blocks: ContentBlock[]): ContentBlock[] {
-  const idx = blocks.findIndex((b) => b && b.type === "text" && b.text.startsWith(AUQ_ANSWER_SENTINEL));
+  const idx = blocks.findIndex(isAuqAnswerBlock);
   if (idx === -1) return blocks;
   return blocks.filter((_, i) => i !== idx);
 }

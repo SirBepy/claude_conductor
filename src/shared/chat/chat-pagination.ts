@@ -1,6 +1,7 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import type { RenderedMessage } from "./chat-transforms";
-import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, stripAuqAnswerBlock, extractAuqExtraText, stripAuqExtraBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
+import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, extractAuqExtraText, stripAuqExtraBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
+import type { SkipMark } from "./skip-marks";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
@@ -81,9 +82,9 @@ function rootChildOf(container: HTMLElement, el: HTMLElement): HTMLElement {
 
 export class ChatPaginator {
   cwdHint: string | undefined;
-  /** Durable Skip timestamps, from the non-paginated
+  /** Durable Skip marks, from the non-paginated
    *  `get_skipped_question_marks` lookup. Empty = no fold, exactly as before. */
-  skipMarks: number[] = [];
+  skipMarks: SkipMark[] = [];
   private topSentinel: HTMLElement | null = null;
   private topObserver: IntersectionObserver | null = null;
   // Usage + timestamp span carried between prepend batches for the turn that
@@ -231,9 +232,16 @@ export class ChatPaginator {
           continue;
         }
         if (ev.type !== "user_message") continue;
-        const answer = extractAuqAnswerText(cleanUserBlocks(ev.content));
+        const cleanedContent = cleanUserBlocks(ev.content);
+        const answer = extractAuqAnswerText(cleanedContent);
         if (answer === null) continue;
-        const qid = findNearestOpenQuestionId(questionCards.slice(0, opened), resolvedSoFar);
+        // A named card wins over position: an answer to a REOPENED older card
+        // arrives after newer ones, so the nearest-open walk would fold it
+        // onto the wrong question.
+        const namedId = extractAuqAnswerCardId(cleanedContent);
+        const qid = namedId && questionToolIds.has(namedId)
+          ? namedId
+          : findNearestOpenQuestionId(questionCards.slice(0, opened), resolvedSoFar);
         if (qid === null) continue;
         sentinelAnswerById.set(qid, answer);
         foldedUserMsgs.set(ev, qid);
