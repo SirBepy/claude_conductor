@@ -86,15 +86,17 @@ test.describe("view-harness / AUQ review-step extra message rides in the SAME se
 
     await expect(card).toHaveCount(0);
 
-    const result = await page.evaluate(() => {
-      const AUQ_ANSWER_SENTINEL = "<auq-answer/>";
+    const result = await page.evaluate(async () => {
+      // Imported, not re-declared: the sentinel carries an `id` attribute once a
+      // card is named, so a local copy of the bare spelling silently stops matching.
+      const { AUQ_ANSWER_PREFIX, AUQ_ANSWER_RE } = await import("/shared/chat/chat-event-to-message.ts");
       const bundles = window.__sentBundles!;
       const bundle = bundles[0] ?? [];
-      const sentinelBlock = bundle.find((b) => b.type === "text" && b.text?.startsWith(AUQ_ANSWER_SENTINEL));
+      const sentinelBlock = bundle.find((b) => b.type === "text" && b.text?.startsWith(AUQ_ANSWER_PREFIX));
       const extraBlock = bundle.find((b) => b.type === "text" && b.text?.includes("CI logs"));
       return {
         sendCount: bundles.length,
-        foldText: sentinelBlock ? sentinelBlock.text!.replace(AUQ_ANSWER_SENTINEL, "") : null,
+        foldText: sentinelBlock ? sentinelBlock.text!.replace(AUQ_ANSWER_RE, "") : null,
         extraText: extraBlock?.text ?? null,
         stillHeld: window.__held!.hasItemsForActive(),
       };
