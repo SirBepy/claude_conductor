@@ -26,6 +26,10 @@ use super::tool_schemas::tool_list_response;
 /// of the waiting target will need to reach.
 pub mod waiting_target;
 
+/// `ask_user_question` enum validation, sibling of `waiting_target` for the
+/// same reason.
+pub mod question_args;
+
 /// Read the hooks port from <app-data>/hooks_port.txt.
 fn read_port() -> Option<u16> {
     crate::settings::paths::read_hook_port("")

@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
 
 use super::relay::{http_post, Ctx, HttpPost};
-use super::server::{mcp_error, waiting_target};
+use super::server::{mcp_error, question_args, tool_error_result, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_RESPOND_WORKER_PROMPT,
@@ -73,7 +73,13 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/permissions/request", body, None, None))
         }
         TOOL_QUESTION => {
-            let questions = ctx.args["questions"].clone();
+            // todo 818: reject out-of-enum domain/badges HERE - downstream is
+            // permissive (untyped relay, card strips unknowns), so a bad chip
+            // used to vanish behind a normal `{"acknowledged": true}`.
+            let questions = match question_args::normalize(&ctx.args["questions"]) {
+                Ok(q) => q,
+                Err(reason) => return Some(tool_error_result(ctx.id, &reason)),
+            };
             let body = json!({
                 "id": request_id,
                 "questions": questions,
