@@ -86,6 +86,10 @@
   display: flex;
   background: var(--color-surface);
   border-radius: 4px;
+  /* One knob for BOTH backdrop layers - a host restyling only the textarea's
+     border shifts the painted text 1px right and narrows its line box 2px,
+     wrapping a just-fitting last word early (todo 774). */
+  --composer-input-border: 1px;
 }
 
 .composer-highlight {
@@ -97,7 +101,7 @@
   box-sizing: border-box;
   /* MUST match .composer-textarea box + type metrics exactly. */
   padding: 6px 8px;
-  border: 1px solid transparent;
+  border: var(--composer-input-border) solid transparent;
   border-radius: 4px;
   font-family: inherit;
   font-size: 0.88rem;
@@ -125,7 +129,7 @@
   background: transparent;
   color: transparent;
   caret-color: var(--color-text);
-  border: 1px solid var(--color-border);
+  border: var(--composer-input-border) solid var(--color-border);
   border-radius: 4px;
   padding: 6px 8px;
   font-family: inherit;

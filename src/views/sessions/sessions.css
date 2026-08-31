@@ -683,13 +683,15 @@
   border-radius: 8px;
 }
 
-/* Shell draws the single outer boundary now - textarea's own is redundant. */
+/* Shell draws the single outer boundary now - the pair's own is redundant.
+ * Dropped through composer.css's shared var so the highlight backdrop loses
+ * the same 1px the textarea does and keeps wrapping at the same column. */
 .composer-shell .composer-input-wrap {
   background: transparent;
+  --composer-input-border: 0px;
 }
 
 .composer-shell .composer-textarea {
-  border: none;
   border-radius: 0;
 }
 
