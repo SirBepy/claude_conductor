@@ -23,7 +23,7 @@ import {
   compactionOrdinal,
   RenderedMessage,
 } from "./chat-transforms";
-import { isRawViewEnabled } from "./message-filter-pref";
+import { turnProducedVisibleContent } from "./turn-visible-content";
 import {
   resolvePendingQuestionCard,
   resolvePendingQuestionExtra,
@@ -55,37 +55,6 @@ export interface HandleEventOpts {
 interface EventOutcome {
   touched: boolean;
   coalesce: boolean;
-}
-
-/** True if the open turn has produced anything the user would see - real
- *  assistant text, send_message, a user/question row, or an interrupted
- *  notice. Tool calls/results and TodoWrite don't count. */
-function turnProducedVisibleContent(r: ChatRenderer): boolean {
-  if (r.activeTurnStart === null) return false;
-  for (let i = r.activeTurnStart; i < r.messages.length; i++) {
-    const m = r.messages[i]!;
-    switch (m.kind) {
-      case "assistant":
-        // Raw narration is hidden by default (chat-narration CSS, see
-        // message-filter-pref.ts) - only counts as visible when the user has
-        // the raw-chat toggle on for this session, else it wrongly blocks
-        // the silent-streak merge below.
-        if ((r.sessionId ? isRawViewEnabled(r.sessionId) : false) && blocksToText(m.content ?? []).trim()) return true;
-        break;
-      case "message":
-        if (!m.failed) return true;
-        break;
-      case "user":
-      case "question":
-        return true;
-      case "system":
-        if (m.noiseLabel) return true;
-        break;
-      default:
-        break;
-    }
-  }
-  return false;
 }
 
 function handleSessionStartedEvent(
@@ -191,6 +160,7 @@ function handleUserMessageEvent(
   // elapsed display - history replay uses the message's real ts (not
   // replay-time Date.now()) so a resumed tick's baseline stays correct.
   r.activeTurnChipKey = ++r._chipKeySeq;
+  r.activeTurnIsMeta = isMeta;
   r.activeTurnStreamedText = "";
   r.activeTurnStartedAtMs = ts > 0 ? ts : Date.now();
   r.activeTurnUsage = null;

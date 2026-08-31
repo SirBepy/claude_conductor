@@ -139,6 +139,27 @@ function makeToolUse(id = "tool1", tsMs = 0) {
   };
 }
 
+function makeShotToolUse(id, tsMs = 0) {
+  return {
+    type: "tool_use",
+    tool_name: "mcp__playwright__browser_take_screenshot",
+    input: {},
+    id,
+    timestamp: BigInt(tsMs),
+    parent_tool_use_id: null,
+  };
+}
+
+function makeImageResult(id, data = "AAAA", tsMs = 0) {
+  return {
+    type: "tool_result",
+    tool_use_id: id,
+    output: { type: "image", mime: "image/png", data },
+    is_error: false,
+    timestamp: BigInt(tsMs),
+  };
+}
+
 function makeToolResult(id = "tool1", tsMs = 0) {
   return {
     type: "tool_result",
@@ -659,5 +680,73 @@ describe("Silent auto-continue streak merge", () => {
     renderer.handleEvent(makeTurnUsage({ outputTokens: 200 }));
 
     expect(container.querySelectorAll(".turn-footer").length).toBe(2);
+  });
+
+  // A scheduled wake that never speaks renders no bubble, so its footer used
+  // to stack straight under the previous turn's as a detached block of chips
+  // and screenshots ("images + chips separated" with no message of mine).
+  it("absorbs a silent wake turn's footer into the turn above it on close", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeToolUse("t1"));
+    renderer.handleEvent(makeToolResult("t1"));
+    renderer.handleEvent(makeSendMessage("Done.", "tu1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    // Wake turn: tools only, never a send_message.
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeToolUse("t2"));
+    renderer.handleEvent(makeToolResult("t2"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 }));
+    // Closing boundary.
+    renderer.handleEvent(makeUserMessage("and now Y"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 10 }));
+
+    const footers = container.querySelectorAll(".turn-footer");
+    expect(footers.length).toBe(2);
+    const bashChips = footers[0].querySelectorAll('.tool-strip > .tool-chip[data-tool="Bash"]');
+    expect(bashChips.length).toBe(1);
+    expect(bashChips[0].querySelector(".tool-chip-count").textContent).toBe("x2");
+    expect(footers[0].querySelector(".tool-chip--meta").textContent).toContain("Scheduled wake");
+    expect(footers[0].querySelectorAll(".turn-meta-chips").length).toBe(1);
+    // Tokens are the two turns summed, not the survivor's alone.
+    expect(footers[0].querySelector(".turn-chip--tokens").textContent).toContain("150");
+  });
+
+  it("merges the absorbed turn's screenshots into one thumbnail row", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("shoot it"));
+    renderer.handleEvent(makeShotToolUse("s1"));
+    renderer.handleEvent(makeImageResult("s1"));
+    renderer.handleEvent(makeSendMessage("First shot.", "tu1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeShotToolUse("s2"));
+    renderer.handleEvent(makeImageResult("s2"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 }));
+    renderer.handleEvent(makeUserMessage("thanks"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 10 }));
+
+    const blocks = container.querySelectorAll(".screenshot-block");
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].querySelectorAll(".screenshot-thumb").length).toBe(2);
+    expect(blocks[0].closest(".turn-footer")).toBe(container.querySelector(".turn-footer"));
+  });
+
+  it("leaves a wake turn that DID speak its own footer", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeSendMessage("Answer 1", "tu1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeToolUse("t2"));
+    renderer.handleEvent(makeSendMessage("Answer 2", "tu2"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 }));
+    renderer.handleEvent(makeUserMessage("and now Y"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 10 }));
+
+    expect(container.querySelectorAll(".turn-footer").length).toBe(3);
   });
 });

@@ -6,7 +6,7 @@ import {
   type TodoChecklistState,
   type TodoStepStatus,
 } from "./turn-todo-checklist";
-import { ensureMainStrip } from "./tool-strip";
+import { ensureMainStrip, absorbFooterContents } from "./tool-strip";
 import { META_KIND_ICONS, type MetaTurnKind } from "./chat-classifiers";
 import {
   formatTurnDuration,
@@ -94,6 +94,9 @@ export interface TurnFooterState {
    *  report; this names the actual thing being waited on). Null until a
    *  `waiting_on` notification lands for this turn. */
   waitingChip: HTMLElement | null;
+  /** Totals the row last settled from, so a silent wake turn folding into
+   *  this one (absorb) can add to them instead of overwriting. */
+  lastTotals: TurnUsageTotals | null;
 }
 
 /** Build tooltip text for the settled token breakdown. */
@@ -143,8 +146,31 @@ export class TurnFooterRegistry {
       todoChecklist: null,
       metaChip: null,
       waitingChip: null,
+      lastTotals: null,
     });
     return footer;
+  }
+
+  /** Totals this turn's meta row last settled from, or null if it never did. */
+  getTotals(key: TurnChipKey): TurnUsageTotals | null {
+    return this.turns.get(key)?.lastTotals ?? null;
+  }
+
+  /** Fold `srcKey`'s whole footer into `destKey`'s and forget it. Callers own
+   *  the token/time arithmetic (getTotals + settleMetaRow). */
+  absorbInto(srcKey: TurnChipKey, destKey: TurnChipKey): boolean {
+    const src = this.turns.get(srcKey);
+    const dest = this.turns.get(destKey);
+    if (!src || !dest || src === dest) return false;
+    if (src.tickTimer !== null) {
+      clearInterval(src.tickTimer);
+      src.tickTimer = null;
+    }
+    absorbFooterContents(src.footer, dest.footer);
+    if (!dest.metaChip && src.metaChip) dest.metaChip = src.metaChip;
+    if (!dest.todoChecklist && src.todoChecklist) dest.todoChecklist = src.todoChecklist;
+    this.turns.delete(srcKey);
+    return true;
   }
 
   /** Meta row (tokens + time) as the FIRST child of the footer. */
@@ -240,6 +266,7 @@ export class TurnFooterRegistry {
     if (!st) return;
     this.buildMetaRow(st);
     st.settled = true;
+    st.lastTotals = totals;
     if (st.tickTimer !== null) {
       clearInterval(st.tickTimer);
       st.tickTimer = null;

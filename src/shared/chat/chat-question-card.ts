@@ -113,7 +113,7 @@ export function tryHandleQuestionToolUse(
   } else {
     r.auqPreContent = null;
   }
-  enqueueTurnClose(r);
+  enqueueTurnClose(r, { allowMetaMerge: false });
   r.messages.push({
     kind: "question",
     tool: ev.tool_name,

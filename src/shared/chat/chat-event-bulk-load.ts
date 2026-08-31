@@ -42,6 +42,7 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.activeTurnStart = null;
   r.compactionCount = 0;
   r.resetActiveTurnMeta();
+  r.prevTurnChipKey = null;
   r.turnFooters.clear();
   r.closeTurnQueue = [];
   r.paginator.resetTurnCarry();

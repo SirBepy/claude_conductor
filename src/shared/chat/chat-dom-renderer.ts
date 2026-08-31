@@ -14,6 +14,7 @@ import { clampUserMessages } from "./turn-collapse";
 import { renderQuestionCardHtml } from "./tool-views";
 import { renderPreviewCardHtml, mountPreviewFrame } from "./chat-preview-card";
 import { type TurnUsageTotals } from "./turn-chips";
+import { turnProducedVisibleContent } from "./turn-visible-content";
 import type { ChatRenderer } from "./chat-renderer";
 
 // Re-exported for callers still importing scroll helpers from here (ai_todo 598
@@ -255,7 +256,23 @@ export function finalizeStreamingBubble(r: ChatRenderer): void {
   r.streamingIndex = null;
 }
 
-export function enqueueTurnClose(r: ChatRenderer): void {
+/** Combined totals for two turns rendered as one footer. Input is the LATEST
+ *  turn's (it's context size, not a per-turn cost), everything else adds. */
+function sumTurnTotals(a: TurnUsageTotals, b: TurnUsageTotals): TurnUsageTotals {
+  return {
+    durationMs: a.durationMs + b.durationMs,
+    outputTokens: a.outputTokens + b.outputTokens,
+    inputTokens: Math.max(a.inputTokens, b.inputTokens),
+    cacheCreate: a.cacheCreate + b.cacheCreate,
+    cacheRead: a.cacheRead + b.cacheRead,
+    costUsd: a.costUsd + b.costUsd,
+    awaiting: b.awaiting ?? a.awaiting,
+  };
+}
+
+/** `allowMetaMerge: false` for a close that only SPLITS a turn (the AUQ card):
+ *  its visible row lands AFTER this call, so the merge test below misreads it. */
+export function enqueueTurnClose(r: ChatRenderer, opts?: { allowMetaMerge?: boolean }): void {
   finalizeStreamingBubble(r);
   // The next turn folds into fresh groups; closed-turn rows already carry
   // data-tool-grouped, so processTurnCloseQueue won't re-fold them.
@@ -271,13 +288,23 @@ export function enqueueTurnClose(r: ChatRenderer): void {
     // visual order: chips → divider label → next user message.
     let end = r.messages.length;
     while (end > turnStart && r.messages[end - 1]?.noiseLabel) end--;
+    // A wake turn that never spoke has no bubble, so its footer would stack
+    // under the previous turn's as a detached block of chips and screenshots.
+    const mergeIntoKey = opts?.allowMetaMerge !== false
+      && r.activeTurnIsMeta
+      && r.prevTurnChipKey !== null
+      && !turnProducedVisibleContent(r)
+      ? r.prevTurnChipKey
+      : null;
     r.closeTurnQueue.push({
       start: turnStart,
       end,
       chipKey: r.activeTurnChipKey,
       usage: r.activeTurnUsage,
       tsSpanMs: activeTurnTsSpan(r),
+      mergeIntoKey,
     });
+    r.prevTurnChipKey = mergeIntoKey ?? r.activeTurnChipKey;
   }
   r.resetActiveTurnMeta();
   r.activeTurnStart = null;
@@ -327,7 +354,7 @@ export function applyRunningHighlight(r: ChatRenderer): void {
 
 export function processTurnCloseQueue(r: ChatRenderer): void {
   if (r.closeTurnQueue.length === 0) return;
-  for (const { start, end, chipKey, usage, tsSpanMs } of r.closeTurnQueue) {
+  for (const { start, end, chipKey, usage, tsSpanMs, mergeIntoKey } of r.closeTurnQueue) {
     let footer: HTMLElement | null = null;
     if (chipKey !== null) {
       footer = r.turnFooters.getOrCreateFooter(chipKey);
@@ -352,6 +379,14 @@ export function processTurnCloseQueue(r: ChatRenderer): void {
       }
     }
     applyTurnCollapse(r.messages, r.messageEls, start, end, footer);
+    // After the collapse, so every chip/screenshot this turn produced exists
+    // before it moves house.
+    if (chipKey !== null && mergeIntoKey !== null) {
+      const destTotals = r.turnFooters.getTotals(mergeIntoKey);
+      if (r.turnFooters.absorbInto(chipKey, mergeIntoKey) && usage) {
+        r.turnFooters.settleMetaRow(mergeIntoKey, destTotals ? sumTurnTotals(destTotals, usage) : usage);
+      }
+    }
   }
   r.closeTurnQueue = [];
 }

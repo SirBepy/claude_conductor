@@ -114,6 +114,13 @@ export class ChatRenderer {
   // Key for the current turn's footer (created on user_message, frozen on
   // close). Null when no turn is in progress.
   activeTurnChipKey: TurnChipKey | null = null;
+  // True when the open turn was opened by an is_meta row (a fired
+  // ScheduleWakeup, an autopilot tick) rather than by the user. Such a turn
+  // renders no bubble of its own, so if it also produces no visible message
+  // its footer folds into prevTurnChipKey's at close (enqueueTurnClose).
+  activeTurnIsMeta = false;
+  // Key of the turn that closed most recently - the absorb target above.
+  prevTurnChipKey: TurnChipKey | null = null;
   // Monotonically-increasing counter for chip keys. Using a counter instead of
   // Date.now() ensures uniqueness even when tests freeze system time.
   _chipKeySeq = 0;
@@ -155,6 +162,8 @@ export class ChatRenderer {
     chipKey: TurnChipKey | null;
     usage: TurnUsageTotals | null;
     tsSpanMs: number;
+    /** Turn to fold this one's footer into once it's collapsed, or null. */
+    mergeIntoKey: TurnChipKey | null;
   }[] = [];
   fileEdits: FileEditView[] = [];
   lastActivity: string | null = null;
@@ -236,6 +245,7 @@ export class ChatRenderer {
   /** Clear all per-turn meta tracking (key, usage, timestamps, streamed text). */
   resetActiveTurnMeta(): void {
     this.activeTurnChipKey = null;
+    this.activeTurnIsMeta = false;
     this.activeTurnStreamedText = "";
     this.activeTurnStartedAtMs = 0;
     this.activeTurnUsage = null;
@@ -332,6 +342,7 @@ export class ChatRenderer {
     this.container.innerHTML = "";
     this.activeTurnStart = null;
     this.resetActiveTurnMeta();
+    this.prevTurnChipKey = null;
     this.turnFooters.clear();
     this.closeTurnQueue = [];
     this.installAnimObserver();
@@ -467,6 +478,7 @@ export class ChatRenderer {
     this.liveBuffer = null;
     this.activeTurnStart = null;
     this.resetActiveTurnMeta();
+    this.prevTurnChipKey = null;
     this.turnFooters.clear();
     this.activeToolGroups.clear();
     this.closeTurnQueue = [];
