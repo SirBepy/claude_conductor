@@ -186,7 +186,9 @@ export function draftRowOptions(
     projectLabel: pending.projectName || "New session",
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
-    isRemote: !!pending.config.remote,
+    // config.remote is the *intended* flag for once this draft starts, not
+    // a live transport fact - nothing is reachable yet, so never badge it.
+    isRemote: false,
     isAutopilot: false,
     frozen: false,
     autoFrozen: false,
@@ -212,7 +214,8 @@ export function parkedRowOptions(d: ParkedDraft): RowOptions {
     projectLabel: d.projectName || "New session",
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
-    isRemote: !!d.config.remote,
+    // Same as draftRowOptions - config.remote is only the future intent.
+    isRemote: false,
     isAutopilot: false,
     frozen: false,
     autoFrozen: false,
