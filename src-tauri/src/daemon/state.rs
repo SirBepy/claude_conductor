@@ -15,24 +15,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Mutex, Notify};
 
+mod commit_lock;
+mod prompts;
+
+use commit_lock::CommitLock;
+
 pub type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
-
-/// A project's held commit lock (see `hooks_server::commit_lock`): which
-/// session holds it, and when, so a stale lock (holder crashed before its
-/// PostToolUse release hook could fire) can expire instead of deadlocking
-/// every other session's commits forever.
-struct CommitLock {
-    session_id: String,
-    acquired_at: Instant,
-}
-
-/// Safety net for a lock whose holder never released it (daemon killed
-/// mid-commit, PostToolUse hook itself failed to fire). A real `git commit`
-/// takes seconds; this is generous headroom, not the expected case.
-const COMMIT_LOCK_TTL: Duration = Duration::from_secs(5 * 60);
 
 pub struct DaemonState {
     pub sessions: SessionMap,
@@ -172,148 +162,6 @@ impl DaemonState {
             pm.maybe_notify_blocked(sid, name, pid).await;
         });
     }
-
-    /// Record an open prompt for reliable poll-based delivery to the app.
-    /// `event` is the Tauri event name the app should emit (e.g.
-    /// `"question-requested"`); `payload` is its body.
-    ///
-    /// `durable` marks a fire-and-forget AskUserQuestion prompt: the asking
-    /// turn ENDS the instant the card is posted (the hook returns immediately
-    /// instead of blocking), so the `claude -p` child EOFs and the pump loop's
-    /// `expire_prompts_for_session` would otherwise wipe the card before the
-    /// user ever answered. Durable prompts are skipped by that expiry and are
-    /// cleared ONLY by an explicit answer/skip (`respond_question` -> the
-    /// ghost-tolerant `settle_prompt`).
-    pub async fn add_prompt(&self, id: &str, event: &str, payload: Value, durable: bool) {
-        self.pending_prompts.lock().await.insert(
-            id.to_string(),
-            serde_json::json!({ "id": id, "event": event, "payload": payload, "durable": durable }),
-        );
-    }
-
-    /// Drop an open prompt once it has been answered or timed out.
-    pub async fn remove_prompt(&self, id: &str) {
-        self.pending_prompts.lock().await.remove(id);
-    }
-
-    /// Snapshot of all open prompts, for the app's `list_pending_prompts` poll.
-    /// Sorted by `seq` (oldest first) - `pending_prompts` is a `HashMap`, whose
-    /// own iteration order is not chronological.
-    pub async fn list_prompts(&self) -> Vec<Value> {
-        let mut prompts: Vec<Value> = self.pending_prompts.lock().await.values().cloned().collect();
-        prompts.sort_by_key(|p| p["payload"]["seq"].as_u64().unwrap_or(u64::MAX));
-        prompts
-    }
-
-    /// The session a recorded prompt belongs to, if it is still open.
-    /// `respond_*` uses this to resolve the session BEFORE removing the record.
-    pub async fn prompt_session_id(&self, id: &str) -> Option<String> {
-        self.pending_prompts
-            .lock()
-            .await
-            .get(id)
-            .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
-    }
-
-    /// The recorded `event` kind for a still-open prompt (`"permission-requested"`
-    /// or `"question-requested"`), if any. `daemon::methods::jarvis::respond_worker_prompt`
-    /// uses this to route a Jarvis worker-prompt answer to the matching
-    /// `respond_permission_inner`/`respond_question_inner` without the caller
-    /// having to know (or be trusted about) which kind of prompt it's
-    /// answering.
-    pub async fn prompt_event(&self, id: &str) -> Option<String> {
-        self.pending_prompts
-            .lock()
-            .await
-            .get(id)
-            .and_then(|v| v["event"].as_str().map(str::to_string))
-    }
-
-    /// Expire every open prompt belonging to `session_id`: drop the prompt
-    /// records (so `list_pending_prompts` stops resurrecting their cards) and
-    /// the pending oneshots (waking any still-blocked hook handler into its
-    /// timeout branch). Publishes `question_expired` per question prompt.
-    ///
-    /// Called when a session's `claude -p` child hits EOF: the hook `curl`
-    /// dies with the process, axum then drops the blocked handler future on
-    /// client disconnect, and the handler's own post-await cleanup never runs
-    /// - which used to leave ghost cards that, when answered, resolved into
-    /// nothing and left the row on "Input Needed" forever. Returns how many
-    /// prompts were expired.
-    pub async fn expire_prompts_for_session(&self, session_id: &str) -> usize {
-        // Each turn is a fresh `claude -p` child, so this EOF-triggered sweep
-        // is also where the builtin AskUserQuestion redirect budget resets.
-        self.registry.reset_builtin_ask_attempts(session_id);
-        let expired: Vec<(String, bool)> = {
-            let mut prompts = self.pending_prompts.lock().await;
-            let ids: Vec<(String, bool)> = prompts
-                .iter()
-                // Skip durable (fire-and-forget AskUserQuestion) prompts: their
-                // asking turn ends on purpose the moment the card is posted, so
-                // the EOF that triggers this expiry is NORMAL, not a crash. They
-                // outlive the turn and are cleared only by an explicit answer or
-                // skip. Non-durable prompts (blocking permission/MCP-question
-                // relays) still expire as before.
-                .filter(|(_, v)| {
-                    v["payload"]["session_id"].as_str() == Some(session_id)
-                        && v["durable"].as_bool() != Some(true)
-                })
-                .map(|(id, v)| (id.clone(), v["event"].as_str() == Some("question-requested")))
-                .collect();
-            for (id, _) in &ids {
-                prompts.remove(id);
-            }
-            ids
-        };
-        if expired.is_empty() {
-            return 0;
-        }
-        let mut pending = self.pending.lock().await;
-        for (id, is_question) in &expired {
-            pending.remove(id);
-            if *is_question {
-                self.notifier.publish(
-                    "question_expired",
-                    serde_json::json!({ "session_id": session_id, "id": id }),
-                );
-            }
-        }
-        expired.len()
-    }
-
-    /// Try to acquire the commit lock for `project_id` on behalf of
-    /// `session_id`. Succeeds (returns `true`) if the lock is free, expired
-    /// (see [`COMMIT_LOCK_TTL`]), or already held by this SAME session
-    /// (re-entrant safe - a retried commit in the same turn doesn't
-    /// self-deadlock). Fails (`false`) only if a different, still-live
-    /// session holds it.
-    pub fn try_acquire_commit_lock(&self, project_id: &str, session_id: &str) -> bool {
-        self.try_acquire_commit_lock_with_ttl(project_id, session_id, COMMIT_LOCK_TTL)
-    }
-
-    fn try_acquire_commit_lock_with_ttl(&self, project_id: &str, session_id: &str, ttl: Duration) -> bool {
-        let mut locks = self.commit_locks.lock().unwrap();
-        if let Some(existing) = locks.get(project_id) {
-            if existing.session_id != session_id && existing.acquired_at.elapsed() < ttl {
-                return false;
-            }
-        }
-        locks.insert(
-            project_id.to_string(),
-            CommitLock { session_id: session_id.to_string(), acquired_at: Instant::now() },
-        );
-        true
-    }
-
-    /// Release `project_id`'s commit lock IFF it is currently held by
-    /// `session_id` - never clobbers a different session's lock (e.g. a late
-    /// release racing a fresh acquire by someone else after this one expired).
-    pub fn release_commit_lock(&self, project_id: &str, session_id: &str) {
-        let mut locks = self.commit_locks.lock().unwrap();
-        if locks.get(project_id).map(|l| l.session_id.as_str()) == Some(session_id) {
-            locks.remove(project_id);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -331,76 +179,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn commit_lock_free_project_acquires() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        assert!(st.try_acquire_commit_lock("proj-1", "sess-a"));
-    }
-
-    #[tokio::test]
-    async fn commit_lock_blocks_a_different_session() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        assert!(st.try_acquire_commit_lock("proj-1", "sess-a"));
-        assert!(!st.try_acquire_commit_lock("proj-1", "sess-b"), "held by sess-a");
-    }
-
-    #[tokio::test]
-    async fn commit_lock_reacquire_by_same_session_is_reentrant() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        assert!(st.try_acquire_commit_lock("proj-1", "sess-a"));
-        assert!(st.try_acquire_commit_lock("proj-1", "sess-a"), "same session must not self-deadlock");
-    }
-
-    #[tokio::test]
-    async fn commit_lock_release_only_clears_own_holder() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        assert!(st.try_acquire_commit_lock("proj-1", "sess-a"));
-        st.release_commit_lock("proj-1", "sess-b"); // not the holder - must be a no-op
-        assert!(!st.try_acquire_commit_lock("proj-1", "sess-b"), "sess-a's lock must still stand");
-        st.release_commit_lock("proj-1", "sess-a");
-        assert!(st.try_acquire_commit_lock("proj-1", "sess-b"), "freed after the real holder released");
-    }
-
-    #[tokio::test]
     async fn next_prompt_seq_is_monotonic() {
         let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let a = st.next_prompt_seq();
         let b = st.next_prompt_seq();
         let c = st.next_prompt_seq();
         assert!(a < b && b < c);
-    }
-
-    /// Regression: `list_prompts()` must sort by `seq`, not by `pending_prompts`'
-    /// HashMap iteration order (which carries no chronological meaning).
-    #[tokio::test]
-    async fn list_prompts_sorts_by_seq_regardless_of_insertion_order() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        // Insert newest first, oldest last (opposite of insertion order).
-        st.add_prompt("newer", "question-requested", serde_json::json!({"seq": 5}), true).await;
-        st.add_prompt("older", "question-requested", serde_json::json!({"seq": 1}), true).await;
-        let prompts = st.list_prompts().await;
-        let ids: Vec<&str> = prompts.iter().map(|p| p["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["older", "newer"], "must be seq-ascending, not insertion order");
-    }
-
-    /// A `seq`-less prompt (permission requests) must sort after every question.
-    #[tokio::test]
-    async fn list_prompts_sorts_seqless_prompts_after_seq_ed_ones() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        st.add_prompt("no-seq", "permission-requested", serde_json::json!({}), false).await;
-        st.add_prompt("has-seq", "question-requested", serde_json::json!({"seq": 1}), true).await;
-        let prompts = st.list_prompts().await;
-        let ids: Vec<&str> = prompts.iter().map(|p| p["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["has-seq", "no-seq"]);
-    }
-
-    #[tokio::test]
-    async fn commit_lock_expires_after_ttl() {
-        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        assert!(st.try_acquire_commit_lock_with_ttl("proj-1", "sess-a", Duration::from_millis(20)));
-        tokio::time::sleep(Duration::from_millis(30)).await;
-        assert!(
-            st.try_acquire_commit_lock_with_ttl("proj-1", "sess-b", Duration::from_millis(20)),
-            "a stale lock past its TTL must not deadlock other sessions"
-        );
     }
 }
