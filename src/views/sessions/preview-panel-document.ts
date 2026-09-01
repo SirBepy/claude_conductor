@@ -6,7 +6,10 @@
  * before it becomes the iframe's data: URL document. */
 export function wrapFragmentIfNeeded(html: string): string {
   if (/<html[\s>]/i.test(html) || /<body[\s>]/i.test(html)) return html;
-  return `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
+  // Literal colours, not CSS vars: this loads via a data: URL into an opaque
+  // origin with no access to the parent's custom properties. Matches the
+  // app's dark chrome (--color-background/--color-text-primary fallbacks).
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{background:#15151e;color:#e0e0e0}</style></head><body>${html}</body></html>`;
 }
 
 // Inner document CSP. Locked decision (Joe, 2026-06-26): do NOT hard-block
