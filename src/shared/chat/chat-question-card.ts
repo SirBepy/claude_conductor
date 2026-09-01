@@ -9,7 +9,7 @@ import { AUQ_SKIPPED_TEXT, RenderedMessage, extractAuqAnswerText, extractAuqExtr
 import type { SkipMark } from "./skip-marks";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
-import { enqueueTurnClose } from "./chat-dom-renderer";
+import { enqueueTurnClose } from "./chat-turn-fold";
 import type { ChatRenderer } from "./chat-renderer";
 
 /** Index of the question card with this id, or -1. `openOnly` also requires
