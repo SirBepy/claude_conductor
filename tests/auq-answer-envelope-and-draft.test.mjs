@@ -6,6 +6,7 @@
 // draft - the 2026-08-29 field report's receipt (`I wa` arrived, answer did not).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mockIpc, mockQuestionUi, questionPayload as questionPayloadFor, flushMicrotasks, makeSentinelBlock } from "./helpers/auq-test-harness.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn((cmd) => {
@@ -17,21 +18,14 @@ const { invokeMock } = vi.hoisted(() => ({
     return Promise.resolve(undefined);
   }),
 }));
-vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
+mockIpc(invokeMock);
 
 const { renderCalls, renderQuestionUISpy } = vi.hoisted(() => {
   const renderCalls = [];
   return { renderCalls, renderQuestionUISpy: vi.fn((opts) => { renderCalls.push(opts); }) };
 });
 import * as qs from "../src/views/sessions/permission-modal/question-state.ts";
-vi.mock("../src/views/sessions/permission-modal/question-ui.ts", () => ({
-  extractQuestions: (...a) => qs.extractQuestions(...a),
-  formatAnswersAsMessage: (...a) => qs.formatAnswersAsMessage(...a),
-  dismissQuestionCard: (...a) => qs.dismissQuestionCard(...a),
-  snapshotActiveCardDraft: (...a) => qs.snapshotActiveCardDraft(...a),
-  isQuestionAnswered: (...a) => qs.isQuestionAnswered(...a),
-  renderQuestionUI: (opts) => renderQuestionUISpy(opts),
-}));
+mockQuestionUi(qs, renderQuestionUISpy);
 
 const { handleQuestionRequested, setSelectedSessionId } = await import("../src/views/sessions/permission-modal/index.ts");
 const { state } = await import("../src/views/sessions/state.ts");
@@ -42,13 +36,8 @@ const SESSION = "s1";
 let sendCalls;
 let draftText;
 
-function questionPayload(id) {
-  return {
-    id,
-    session_id: SESSION,
-    questions: [{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }],
-  };
-}
+const questionPayload = (id) => questionPayloadFor(SESSION, id, "Pick one?");
+const sentinelBlock = makeSentinelBlock(isAuqAnswerBlock);
 
 beforeEach(() => {
   renderCalls.length = 0;
@@ -79,16 +68,6 @@ beforeEach(() => {
     onChange: () => {},
   });
 });
-
-function flushMicrotasks() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function sentinelBlock(blocks) {
-  // The production predicate, not a literal: the sentinel now carries the
-  // answered card's id, so an exact-string match would miss every real block.
-  return blocks.find(isAuqAnswerBlock);
-}
 
 async function answerOneCard() {
   handleQuestionRequested(questionPayload("q1"));

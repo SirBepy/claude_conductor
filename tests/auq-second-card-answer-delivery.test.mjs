@@ -6,6 +6,7 @@
 // renderQuestionUI, same as the other permission-modal tests).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mockIpc, mockQuestionUi, questionPayload as questionPayloadFor, flushMicrotasks, makeSentinelBlock } from "./helpers/auq-test-harness.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn((cmd) => {
@@ -15,21 +16,14 @@ const { invokeMock } = vi.hoisted(() => ({
     return Promise.resolve(undefined);
   }),
 }));
-vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
+mockIpc(invokeMock);
 
 const { renderCalls, renderQuestionUISpy } = vi.hoisted(() => {
   const renderCalls = [];
   return { renderCalls, renderQuestionUISpy: vi.fn((opts) => { renderCalls.push(opts); }) };
 });
 import * as qs from "../src/views/sessions/permission-modal/question-state.ts";
-vi.mock("../src/views/sessions/permission-modal/question-ui.ts", () => ({
-  extractQuestions: (...a) => qs.extractQuestions(...a),
-  formatAnswersAsMessage: (...a) => qs.formatAnswersAsMessage(...a),
-  dismissQuestionCard: (...a) => qs.dismissQuestionCard(...a),
-  snapshotActiveCardDraft: (...a) => qs.snapshotActiveCardDraft(...a),
-  isQuestionAnswered: (...a) => qs.isQuestionAnswered(...a),
-  renderQuestionUI: (opts) => renderQuestionUISpy(opts),
-}));
+mockQuestionUi(qs, renderQuestionUISpy);
 
 const { handleQuestionRequested, setSelectedSessionId } = await import("../src/views/sessions/permission-modal/index.ts");
 const { state } = await import("../src/views/sessions/state.ts");
@@ -38,13 +32,8 @@ const { isAuqAnswerBlock } = await import("../src/shared/chat/chat-transforms.ts
 
 const SESSION = "s1";
 
-function questionPayload(id) {
-  return {
-    id,
-    session_id: SESSION,
-    questions: [{ question: `Pick one for ${id}?`, options: [{ label: "A" }, { label: "B" }] }],
-  };
-}
+const questionPayload = (id) => questionPayloadFor(SESSION, id, `Pick one for ${id}?`);
+const sentinelBlock = makeSentinelBlock(isAuqAnswerBlock);
 
 beforeEach(() => {
   renderCalls.length = 0;
@@ -75,19 +64,6 @@ beforeEach(() => {
   });
   state.sendCalls = sendCalls; // stash for assertions
 });
-
-// showQuestionCard chains several awaits (fetchFreshestAuqDraft -> invoke ->
-// its own .then) before renderQuestionUI runs - a macrotask tick clears all
-// of them at once instead of guessing the microtask depth.
-function flushMicrotasks() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function sentinelBlock(blocks) {
-  // The production predicate, not a literal: the sentinel now carries the
-  // answered card's id, so an exact-string match would miss every real block.
-  return blocks.find(isAuqAnswerBlock);
-}
 
 describe("two ask_user_question cards in one session both deliver their answer", () => {
   it("delivers the auq-answer payload for BOTH the first and second card", async () => {
