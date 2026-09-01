@@ -1,6 +1,6 @@
 import { html, render } from "lit-html";
 import { invoke } from "../../shared/ipc";
-import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
+import { modalCardSlot, presentHostCard, setBackdropCancel, registerHostOptions } from "../../shared/modal";
 import { askConfirm } from "../../shared/confirm";
 import { randomName } from "../../shared/random-name";
 import type { ProjectGroup, WorktreeDetail, BranchEntry } from "../../types/ipc.generated";
@@ -129,26 +129,29 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
       <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Open ${project.name}">
         <header class="modal-header"><h3>Open ${project.name}</h3></header>
         <div class="modal-body wt-picker-body">
-          <button class="wt-picker-choice" @click=${goNew}>
+          <button class="wt-picker-choice" style="position:relative" @click=${goNew}>
             <i class="ph ph-git-fork"></i>
             <div class="wt-picker-choice-text">
               <span class="wt-picker-choice-title">New worktree</span>
               <span class="wt-picker-choice-sub">Branch off into a fresh working directory</span>
             </div>
+            <span class="modal-option-badge">1</span>
           </button>
-          <button class="wt-picker-choice" @click=${goExisting}>
+          <button class="wt-picker-choice" style="position:relative" @click=${goExisting}>
             <i class="ph ph-git-branch"></i>
             <div class="wt-picker-choice-text">
               <span class="wt-picker-choice-title">Existing worktree (${project.worktrees.length})</span>
               <span class="wt-picker-choice-sub">Resume one you've already created</span>
             </div>
+            <span class="modal-option-badge">2</span>
           </button>
-          <button class="wt-picker-choice" @click=${() => finish({ path: project.path, name: project.name })}>
+          <button class="wt-picker-choice" style="position:relative" @click=${() => finish({ path: project.path, name: project.name })}>
             <i class="ph ph-house"></i>
             <div class="wt-picker-choice-text">
               <span class="wt-picker-choice-title">Default worktree</span>
               <span class="wt-picker-choice-sub">${project.path}</span>
             </div>
+            <span class="modal-option-badge">3</span>
           </button>
         </div>
         <footer class="modal-footer">
@@ -177,8 +180,8 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
             ` : ""}
             ${details && details.length > 0 ? html`
               <ul class="wt-picker-list">
-                ${details.map((d) => html`
-                  <li class="wt-picker-row ${d.stale ? "wt-picker-row--stale" : ""}">
+                ${details.map((d, i) => html`
+                  <li class="wt-picker-row ${d.stale ? "wt-picker-row--stale" : ""}" style="position:relative">
                     ${d.stale ? html`
                       <input
                         type="checkbox"
@@ -199,6 +202,7 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
                       </span>
                     </div>
                     ${d.stale ? html`<span class="wt-picker-stale-tag" title=${d.stale_reason ?? "stale"}>stale</span>` : ""}
+                    ${i < 9 ? html`<span class="modal-option-badge">${i + 1}</span>` : ""}
                   </li>
                 `)}
               </ul>
@@ -300,6 +304,13 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
         : step === "new" ? renderNew()
         : renderChoice();
       render(tpl, slot);
+      // "new" is a form step (todo 835 opts it out) - number-select goes
+      // stale automatically since these queries just return nothing there.
+      if (step === "choice") {
+        registerHostOptions(() => Array.from(slot.querySelectorAll<HTMLElement>(".wt-picker-choice")));
+      } else if (step === "existing") {
+        registerHostOptions(() => Array.from(slot.querySelectorAll<HTMLElement>(".wt-picker-row-info")));
+      }
     };
 
     setBackdropCancel(() => finish(null));

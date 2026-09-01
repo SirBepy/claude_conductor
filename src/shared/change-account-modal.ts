@@ -10,11 +10,12 @@
 import "./change-character-modal.css";
 import "./account-chip.css";
 import "./change-account-modal.css";
+import "./modal.css";
 import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
 import { accountChipHtml, attachChipKeyboardActivation } from "./account-chip";
-import { lockInputToHost } from "./modal-input-lock";
+import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 
 export async function openChangeAccountModal(opts: {
   currentId: string | null;
@@ -54,12 +55,20 @@ export async function openChangeAccountModal(opts: {
       `;
 
       overlay.querySelector<HTMLButtonElement>(".cc-modal-close")?.addEventListener("click", () => close(null));
-      overlay.querySelectorAll<HTMLElement>(".cam-account-list .account-chip").forEach((chip) => {
+      const chips = overlay.querySelectorAll<HTMLElement>(".cam-account-list .account-chip");
+      chips.forEach((chip, i) => {
         chip.addEventListener("click", () => {
           const id = chip.dataset.accId;
           if (id) close(id);
         });
+        if (i >= 9) return; // only 1-9 are reachable by number key
+        chip.style.position = "relative";
+        const badge = document.createElement("span");
+        badge.className = "modal-option-badge";
+        badge.textContent = String(i + 1);
+        chip.appendChild(badge);
       });
+      registerSelectableOptions(overlay, () => Array.from(chips));
     }
 
     function onKey(e: KeyboardEvent) {

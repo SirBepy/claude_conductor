@@ -1,7 +1,7 @@
 import { html, render } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { invoke } from "../../shared/ipc";
-import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
+import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel, registerHostOptions } from "../../shared/modal";
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal";
@@ -253,15 +253,22 @@ export function openProjectPickerModal(
               }}
             />
             <ul class="project-picker-list">
-              ${rows.length === 0
-                ? html`<li class="project-picker-empty">No matches</li>`
-                : rows.map(
-                    (p, i) => {
-                      const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
-                      return html`
+              ${(() => {
+                if (rows.length === 0) return html`<li class="project-picker-empty">No matches</li>`;
+                // Only a clickable (path_exists) row is reachable by number key
+                // (todo 835) - the counter skips missing rows so badges never
+                // promise an activation selectProjectRow() would refuse.
+                let optionIdx = -1;
+                return rows.map((p, i) => {
+                  const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
+                  const missing = p.path_exists === false;
+                  if (!missing) optionIdx++;
+                  const badgeNum = !missing && optionIdx < 9 ? optionIdx + 1 : null;
+                  return html`
                       <li
-                        class="project-picker-row ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${p.path_exists === false ? "project-picker-row--missing" : ""}"
+                        class="project-picker-row ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${missing ? "project-picker-row--missing" : ""}"
                         data-row-idx=${i}
+                        style="position:relative"
                         @mouseenter=${() => {
                           if (selectedIdx !== i) {
                             selectedIdx = i;
@@ -274,13 +281,15 @@ export function openProjectPickerModal(
                         <div class="project-picker-info">
                           <span class="project-picker-name">${p.name}</span>
                           <span class="project-picker-path">${p.path}</span>
-                          ${p.path_exists === false ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
+                          ${missing ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
                         </div>
                         ${p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}
                         ${showTodos && todoCount > 0 ? html`<span class="project-picker-todo-badge">${todoCount}</span>` : ""}
+                        ${badgeNum ? html`<span class="modal-option-badge">${badgeNum}</span>` : ""}
                       </li>
-                    `;}
-                  )}
+                    `;
+                });
+              })()}
             </ul>
           </div>
           <footer class="modal-footer">
@@ -318,6 +327,9 @@ export function openProjectPickerModal(
         </div>
       `;
       render(tpl, slot);
+      registerHostOptions(() =>
+        Array.from(host.querySelectorAll<HTMLElement>(".project-picker-row:not(.project-picker-row--missing)")),
+      );
       hydrateProjectTechIcons(host).catch(() => {});
       hydrateCharacterAvatars(host).catch(() => {});
       // Autofocus the search input on first render. Re-focus on subsequent

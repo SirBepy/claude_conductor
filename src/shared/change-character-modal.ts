@@ -1,9 +1,10 @@
 import "./change-character-modal.css";
+import "./modal.css";
 import { api } from "./api";
 import type { Character } from "./api";
 import { escapeHtml } from "./escape-html";
 import { getCharacterIconUrl, cachedCharacterIconUrl } from "./character-icon";
-import { lockInputToHost } from "./modal-input-lock";
+import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 
 export async function openChangeCharacterModal(opts: {
   projectId: string;
@@ -55,7 +56,7 @@ export async function openChangeCharacterModal(opts: {
       } else if (filtered.length === 0) {
         bodyHtml = `<div class="cc-modal-empty">No characters found.</div>`;
       } else {
-        const cards = filtered.map((c) => {
+        const cards = filtered.map((c, i) => {
           const iconUrl = cachedCharacterIconUrl(c.id);
           let iconHtml: string;
           if (iconUrl) {
@@ -66,10 +67,13 @@ export async function openChangeCharacterModal(opts: {
           const gameLabel = c.game_label
             ? `<span class="cc-char-game">${escapeHtml(c.game_label)}</span>`
             : "";
-          return `<button class="cc-char-card${c.id === currentId ? " selected" : ""}" data-char-id="${escapeHtml(c.id)}" type="button">
+          // Only the first 9 are reachable by number key (todo 835) - no badge past that.
+          const badge = i < 9 ? `<span class="modal-option-badge">${i + 1}</span>` : "";
+          return `<button class="cc-char-card${c.id === currentId ? " selected" : ""}" data-char-id="${escapeHtml(c.id)}" type="button" style="position:relative">
             ${iconHtml}
             <span class="cc-char-label">${escapeHtml(c.label)}</span>
             ${gameLabel}
+            ${badge}
           </button>`;
         });
         bodyHtml = `<div class="cc-char-grid">${cards.join("")}</div>`;
@@ -99,6 +103,7 @@ export async function openChangeCharacterModal(opts: {
       `;
 
       attachHandlers();
+      registerSelectableOptions(overlay, () => Array.from(overlay.querySelectorAll<HTMLElement>(".cc-char-card")));
 
       // Focus the search input, preserve cursor position
       const searchEl = overlay.querySelector<HTMLInputElement>(".cc-modal-search");

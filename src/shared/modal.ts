@@ -1,6 +1,6 @@
 import { html, render } from "lit-html";
 import { registerOverlayBack } from "./back-button";
-import { lockInputToHost } from "./modal-input-lock";
+import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 import "./modal.css";
 
 // Shared host for the project -> location -> worktree -> new-session chain.
@@ -49,6 +49,14 @@ export function modalCardSlot(): HTMLElement {
  *  sub-picker resolves (to restore its own handler). */
 export function setBackdropCancel(fn: (() => void) | null): void {
   backdropCancel = fn;
+}
+
+/** Registers the shared host's number-selectable options (todo 835) for
+ *  whichever step is currently mounted - call from a step's renderModal() so
+ *  a later step's options replace an earlier one's. A step with no ordered
+ *  options (a form, a free-text field) just never calls this. */
+export function registerHostOptions(getOptions: () => HTMLElement[]): void {
+  registerSelectableOptions(ensureModalHost(), getOptions);
 }
 
 // Hosts currently locking background input, outermost first - a stack so a

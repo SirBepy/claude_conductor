@@ -4,10 +4,24 @@
 
 const lockedHosts: HTMLElement[] = [];
 const keyAllowlists = new WeakMap<HTMLElement, (e: KeyboardEvent) => boolean>();
+const selectableOptions = new WeakMap<HTMLElement, () => HTMLElement[]>();
 let globalGuardDisposer: (() => void) | null = null;
 
 function isInsideLockedHost(target: EventTarget | null): boolean {
   return target instanceof Node && lockedHosts.some((h) => h.contains(target));
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+}
+
+/** Registers `host`'s ordered, number-selectable option elements - the trap
+ *  below resolves `1`-`9` to the Nth and clicks it. The getter runs fresh on
+ *  every keypress, so a re-rendered DOM needs no re-registration. Cleared
+ *  when `host`'s lock is released. */
+export function registerSelectableOptions(host: HTMLElement, getOptions: () => HTMLElement[]): void {
+  selectableOptions.set(host, getOptions);
 }
 
 /** True while any modal (host-based or own-backdrop) holds the input lock -
@@ -32,7 +46,25 @@ function ensureGlobalGuard(): void {
   // matches skip stopPropagation so the modal's own handler still sees them,
   // but still get preventDefault so they can't also type into the background.
   const onKeyDown = (e: KeyboardEvent) => {
-    if (lockedHosts.length === 0 || isInsideLockedHost(e.target)) return;
+    if (lockedHosts.length === 0) return;
+    const inside = isInsideLockedHost(e.target);
+
+    // Number-key select (todo 835): skipped while typing into the modal's
+    // own text field so "2" still types a 2. Only the topmost (most
+    // recently locked) host's registered options respond, matching which
+    // step is actually mounted right now.
+    if (/^[1-9]$/.test(e.key) && !(inside && isEditableTarget(e.target))) {
+      const topHost = lockedHosts[lockedHosts.length - 1]!;
+      const opt = selectableOptions.get(topHost)?.()[Number(e.key) - 1];
+      if (opt) {
+        e.preventDefault();
+        if (!inside) e.stopPropagation();
+        opt.click();
+        return;
+      }
+    }
+
+    if (inside) return;
     if (e.key === "Escape") return;
     const allowed = lockedHosts.some((h) => keyAllowlists.get(h)?.(e));
     if (allowed) {
@@ -72,5 +104,6 @@ export function lockInputToHost(host: HTMLElement, allowKey?: (e: KeyboardEvent)
     const idx = lockedHosts.indexOf(host);
     if (idx !== -1) lockedHosts.splice(idx, 1);
     keyAllowlists.delete(host);
+    selectableOptions.delete(host);
   };
 }

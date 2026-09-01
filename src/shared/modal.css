@@ -55,3 +55,29 @@
   font-size: 1rem;
   animation: icon-btn-spin 0.8s linear infinite;
 }
+
+/* Quiet number-key badge - a small corner numeral, absolutely positioned so
+ * it never reflows an option's own markup. The option element gets
+ * `position: relative` set inline wherever this is added; only ever
+ * attached to an index the modal-input-lock.ts trap can resolve (1-9). */
+.modal-option-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
+  color: var(--color-text-muted, #8a8aa0);
+  background: var(--color-surface, #1c1c24);
+  border: 1px solid var(--color-border, #2a2a36);
+  pointer-events: none;
+}
