@@ -3,7 +3,7 @@ use crate::settings::paths;
 /// Shared env_logger default filter for both the app binary's daemon mode
 /// and the standalone `cc_conductor_daemon` bin, so the two never drift.
 pub fn default_log_filter() -> &'static str {
-    "info,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn"
+    "info,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn,tracing::span=warn"
 }
 
 /// Initialize logging for the detached daemon process. The daemon is spawned
