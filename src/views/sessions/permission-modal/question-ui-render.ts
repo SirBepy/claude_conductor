@@ -182,8 +182,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       });
     };
 
-    // Both can coexist now (inlineExtras) - wire each independently instead
-    // of the old single combined-selector match.
+    // A one-question card inlines the extra-message box, so both fields can be
+    // present at once; each is wired independently.
     const ownEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input");
     const extraEl = bar.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
     if (ownEl) wireField(ownEl, false);

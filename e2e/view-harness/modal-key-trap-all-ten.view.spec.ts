@@ -171,10 +171,9 @@ test.describe("view-harness / modal-open must swallow every keystroke (all ten c
     await assertKeySwallowed(page, composer);
   });
 
-  // RED, documented finding (see the todo's ## Notes): the focused cancel
-  // button is non-editable, so modal-input-lock lets its keydown through -
-  // and Composer._globalKeydown (composer.ts:116-142), which has no
-  // modal-open check, then hijacks that unblocked keystroke into itself.
+  // The regression guard: confirm's focused cancel button is non-editable, so
+  // modal-input-lock lets its keydown through by design, and only
+  // Composer._globalKeydown's isAnyModalOpen check stops it landing in the composer.
   test("own-backdrop: confirm", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openConfirm(page);
