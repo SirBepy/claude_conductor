@@ -9,29 +9,12 @@
 //! Mutations to the Registry also emit `instances-changed` (per existing
 //! convention, the IPC layer fires it after the registry call).
 
+use super::start_retry::start_session_with_retry;
 use crate::daemon_client::ClientError;
 use crate::state::AppState;
 use crate::types::chat::{ChatEvent, ContentBlock};
 use chrono::Utc;
 use tauri::{AppHandle, Emitter, State};
-
-/// Errors where the daemon may well have done the work and only the reply was
-/// lost. An `Rpc` error is its considered answer and never qualifies.
-fn is_transport_error(e: &ClientError) -> bool {
-    matches!(e, ClientError::Closed | ClientError::Io(_) | ClientError::Frame(_) | ClientError::Handshake(_))
-}
-
-/// Block until `daemon_link` installs a connection newer than `stale_generation`.
-/// Bounded at ~10s so a daemon that never returns can't hang the IPC command.
-async fn wait_for_reconnect(state: &State<'_, AppState>, stale_generation: u64) {
-    for _ in 0..100 {
-        let current = { state.daemon_client.lock().await.clone() };
-        match current {
-            Some(c) if c.generation != stale_generation => return,
-            _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
-        }
-    }
-}
 
 #[tauri::command]
 pub async fn start_session(
@@ -76,19 +59,7 @@ async fn start_session_daemon(
             .await
             .map_err(|e| (generation, e))
     };
-    let real_id = match spawn().await {
-        Ok(id) => id,
-        // A dead connection doesn't cancel the daemon's spawn: the session is
-        // live, only the reply was lost. Retrying under the same placeholder id
-        // resolves to that same session (`daemon::start_tokens`) instead of
-        // stranding it and spawning a second one (todo 228).
-        Err((generation, e)) if is_transport_error(&e) => {
-            log::warn!("start_session lost the daemon connection on generation {generation} ({e}); retrying once");
-            wait_for_reconnect(state, generation).await;
-            spawn().await.map_err(|(_, e)| e.to_string())?
-        }
-        Err((_, e)) => return Err(e.to_string()),
-    };
+    let real_id = start_session_with_retry(state, spawn).await?;
 
     // Bridge daemon chat_event -> chat:<real_id> BEFORE sending the prompt so
     // no turn events are missed.

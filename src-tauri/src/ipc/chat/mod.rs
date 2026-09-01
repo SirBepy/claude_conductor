@@ -26,6 +26,7 @@ pub mod history;
 pub mod history_list;
 pub mod lifecycle;
 pub mod run;
+pub mod start_retry;
 pub mod terminal;
 pub mod watcher;
 
