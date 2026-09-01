@@ -3,7 +3,7 @@ import { api } from "./api";
 import type { Character } from "./api";
 import { escapeHtml } from "./escape-html";
 import { getCharacterIconUrl, cachedCharacterIconUrl } from "./character-icon";
-import { lockInputToHost } from "./modal";
+import { lockInputToHost } from "./modal-input-lock";
 
 export async function openChangeCharacterModal(opts: {
   projectId: string;

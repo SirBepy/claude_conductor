@@ -1,6 +1,6 @@
 import { invoke } from "../../shared/ipc";
 import { escapeHtml } from "../../shared/escape-html";
-import { lockInputToHost } from "../../shared/modal";
+import { lockInputToHost } from "../../shared/modal-input-lock";
 
 const LAST_PARENT_KEY = "newProjectLastParent";
 

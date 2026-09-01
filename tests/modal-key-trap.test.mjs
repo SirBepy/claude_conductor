@@ -3,7 +3,7 @@
 // whatever's still focused behind it (the composer) or to global shortcuts.
 
 import { describe, it, expect, afterEach } from "vitest";
-import { lockInputToHost, isAnyModalOpen } from "../src/shared/modal.ts";
+import { lockInputToHost, isAnyModalOpen } from "../src/shared/modal-input-lock.ts";
 import { register, unregister, setBinding, resetBinding } from "../src/shared/shortcuts.ts";
 
 afterEach(() => {

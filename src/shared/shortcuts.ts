@@ -191,7 +191,7 @@ function _init(): void {
   let getActiveView: (() => string) | null = null;
   void import("./navigation").then(m => { getActiveView = m.getActiveView; });
   let isAnyModalOpen: (() => boolean) | null = null;
-  void import("./modal").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
+  void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Control" || e.key === "Meta") {

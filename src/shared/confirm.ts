@@ -6,7 +6,7 @@
 // it doesn't. A DOM overlay has neither failure mode and can't block the
 // webview thread.
 import "./confirm.css";
-import { lockInputToHost } from "./modal";
+import { lockInputToHost } from "./modal-input-lock";
 
 export interface ConfirmOptions {
   /** Confirm-button label, e.g. "Remove". Defaults to "Confirm". */

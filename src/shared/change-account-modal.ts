@@ -14,7 +14,7 @@ import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
 import { accountChipHtml, attachChipKeyboardActivation } from "./account-chip";
-import { lockInputToHost } from "./modal";
+import { lockInputToHost } from "./modal-input-lock";
 
 export async function openChangeAccountModal(opts: {
   currentId: string | null;

@@ -12,7 +12,7 @@ import type { ProjectConfig } from "../../../../types/ipc.generated";
 import { pickProject } from "../../../sessions/project-picker";
 import { registerOverlayBack } from "../../../../shared/back-button";
 import { renderAppearancePicker, type AppearanceState } from "./appearance-picker";
-import { lockInputToHost } from "../../../../shared/modal";
+import { lockInputToHost } from "../../../../shared/modal-input-lock";
 import "./edit-account-modal.css";
 
 type Tab = "details" | "projects";

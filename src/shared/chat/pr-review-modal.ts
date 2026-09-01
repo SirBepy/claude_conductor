@@ -8,7 +8,7 @@
 import { invoke } from "../ipc";
 import { escapeHtml } from "../escape-html";
 import { basename } from "../path-utils";
-import { lockInputToHost } from "../modal";
+import { lockInputToHost } from "../modal-input-lock";
 import { createFileSurface, type FileSurfaceHandle, type SurfaceFile } from "./file-surface";
 import {
   resetPrReviewData,
