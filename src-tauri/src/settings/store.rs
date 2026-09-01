@@ -12,31 +12,36 @@ pub use super::identity::{
 };
 use super::identity::dedupe_projects_by_path_key;
 
-/// Probes each top-level key against an otherwise-default document: kept if it
-/// round-trips alone, defaulted if not. Returns the keys it had to default;
-/// empty means no single key reproduced the failure.
-fn salvage_fields(v: &serde_json::Value) -> (Settings, Vec<String>) {
+/// Adds each key onto a running document, re-parsing after every insertion,
+/// so no key is ever kept until the whole document parses with it in. No
+/// separate final re-parse can fail as a unit after per-field probes pass.
+/// Returns the keys that never made it in.
+fn salvage_fields<T>(v: &serde_json::Value) -> (T, Vec<String>)
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + Default,
+{
     let Some(obj) = v.as_object() else {
-        return (Settings::default(), Vec::new());
+        return (T::default(), Vec::new());
     };
-    let default_obj = match serde_json::to_value(Settings::default()) {
+    let default_obj = match serde_json::to_value(T::default()) {
         Ok(serde_json::Value::Object(m)) => m,
-        _ => return (Settings::default(), Vec::new()),
+        _ => return (T::default(), Vec::new()),
     };
-    let mut candidate = default_obj.clone();
+    let mut accepted = default_obj.clone();
+    let mut result = T::default();
     let mut failed = Vec::new();
     for (key, val) in obj {
-        let mut probe = default_obj.clone();
-        probe.insert(key.clone(), val.clone());
-        if serde_json::from_value::<Settings>(serde_json::Value::Object(probe)).is_ok() {
-            candidate.insert(key.clone(), val.clone());
-        } else {
-            failed.push(key.clone());
+        let mut candidate = accepted.clone();
+        candidate.insert(key.clone(), val.clone());
+        match serde_json::from_value::<T>(serde_json::Value::Object(candidate.clone())) {
+            Ok(parsed) => {
+                accepted = candidate;
+                result = parsed;
+            }
+            Err(_) => failed.push(key.clone()),
         }
     }
-    let settings = serde_json::from_value::<Settings>(serde_json::Value::Object(candidate))
-        .unwrap_or_default();
-    (settings, failed)
+    (result, failed)
 }
 
 /// Loads settings from disk, defaulting when the file is missing. An
@@ -89,7 +94,7 @@ pub fn load_with_notice(path: &Path) -> (Settings, Option<String>) {
                         Ok(parsed) => parsed,
                         Err(err) => {
                             let backup_path = backup(&err);
-                            let (settings, failed) = salvage_fields(&v);
+                            let (settings, failed) = salvage_fields::<Settings>(&v);
                             if failed.is_empty() {
                                 log::error!(
                                     "[settings] no single field reproduced the failure; loaded defaults"
@@ -672,5 +677,52 @@ mod tests {
         assert!(automation.autostart_on_boot);
         assert_eq!(automation.continue_flag, bool::default());
         assert_eq!(automation.session_name_prefix, None);
+    }
+
+    /// Manufactures the conflict real `Settings` cannot reproduce (todo
+    /// 797's caveat): `a` and `b` each parse fine alone but reject each
+    /// other's presence together.
+    #[derive(serde::Serialize, Default, Debug, PartialEq)]
+    #[serde(default)]
+    struct ConflictProbe {
+        a: bool,
+        b: bool,
+    }
+
+    impl<'de> serde::Deserialize<'de> for ConflictProbe {
+        fn deserialize<D>(d: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            #[derive(serde::Deserialize, Default)]
+            #[serde(default)]
+            struct Raw {
+                a: bool,
+                b: bool,
+            }
+            let raw = Raw::deserialize(d)?;
+            if raw.a && raw.b {
+                return Err(serde::de::Error::custom("a and b cannot both be true"));
+            }
+            Ok(ConflictProbe { a: raw.a, b: raw.b })
+        }
+    }
+
+    #[test]
+    fn salvage_fields_reports_a_conflict_it_could_not_apply_instead_of_claiming_it() {
+        let v = serde_json::json!({ "a": true, "b": true });
+        let (result, failed) = salvage_fields::<ConflictProbe>(&v);
+
+        // A probe-only implementation would report `failed` as empty while
+        // actually keeping just one field - a false "everything kept".
+        assert!(!failed.is_empty(), "the conflicting key must be reported, not silently dropped");
+        assert!(!(result.a && result.b), "the returned value must be a state that actually parsed");
+        if result.a {
+            assert_eq!(failed, vec!["b".to_string()]);
+        } else if result.b {
+            assert_eq!(failed, vec!["a".to_string()]);
+        } else {
+            panic!("neither key was applied; the accepted default state was never overwritten");
+        }
     }
 }
