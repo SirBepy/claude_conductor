@@ -24,6 +24,7 @@ import { SessionHeader } from "./session-header";
 import { showToast } from "../../shared/toast";
 import { wireRenderer } from "./active-session-mount";
 import { retainChat } from "./chat-pane-cache";
+import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 
 let _pendingHeader: SessionHeader | null = null;
 
@@ -173,21 +174,13 @@ export async function renderPendingPane(
     const heldSend = async (blocks: ContentBlock[]): Promise<void> => {
       const target = state.pendingNewSession?.realId ?? state.selectedId;
       if (!target || target === placeholderId) return;
-      sessionEvents.pushSynthetic(target, {
+      const optimisticEvent = {
         type: "user_message",
         content: blocks,
         timestamp: BigInt(Date.now()),
-      } as ChatEvent);
-      const attempt = (): Promise<void> =>
-        invoke<void>("send_message", { sessionId: target, cwd: project.path, blocks });
-      try {
-        await attempt();
-      } catch (err) {
-        console.error("[sessions] held flush send failed", err);
-        // The queue cleared before this call, so the bubble is the only copy.
-        state.renderer?.markLastUserSendFailed(String(err), attempt);
-        showToast(`Send failed: ${err}`);
-      }
+      } as ChatEvent;
+      sessionEvents.pushSynthetic(target, optimisticEvent);
+      await sendWithFailureRecovery(target, project.path, blocks, optimisticEvent);
     };
     const heldInterrupt = (): Promise<void> => {
       const target = state.pendingNewSession?.realId ?? state.selectedId ?? placeholderId;
@@ -339,15 +332,7 @@ export async function renderPendingPane(
           sessionEvents.removeSynthetic(targetSid, optimisticEvent);
           throw new Error("session not started yet");
         }
-        const attempt = (): Promise<void> =>
-          invoke<void>("send_message", { sessionId: realId, cwd: project.path, blocks });
-        try {
-          await attempt();
-        } catch (err) {
-          console.error("[sessions] send_message failed", err);
-          state.renderer?.markLastUserSendFailed(String(err), attempt);
-          showToast(`Send failed: ${err}`);
-        }
+        await sendWithFailureRecovery(realId, project.path, blocks, optimisticEvent);
       },
     });
     state.composer = composer;

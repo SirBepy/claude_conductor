@@ -17,6 +17,7 @@ import { api } from "../../shared/api";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
+import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 
 /** Attach the composer + held-messages controller, including the `sendBundle`
  * closure both use to actually send to the daemon. */
@@ -64,24 +65,7 @@ export function mountComposer(
     // an explicit signal. The frontend no longer watches this turn for it.
     const cwd = String(sess.cwd ?? ".");
 
-    const attempt = (): Promise<void> => invoke<void>("send_message", { sessionId, cwd, blocks });
-    try {
-      await attempt();
-    } catch (err) {
-      console.error("[sessions] send_message failed", err);
-      const onScreen = state.renderer?.currentSessionId() === sessionId;
-      if (onScreen) {
-        // Keep the optimistic bubble and mark it: after clearComposer() it is
-        // the only surviving copy of what the user typed, and Retry re-sends
-        // exactly these blocks. A toast alone loses the text on dismiss.
-        state.renderer?.markLastUserSendFailed(String(err), attempt);
-      } else {
-        // Nothing on screen to mark, so the bubble would just linger looking
-        // sent. Roll it back; sent-outbox.ts still holds the text for Ctrl+Z.
-        sessionEvents.removeSynthetic(sessionId, optimisticEvent);
-      }
-      showToast(`Send failed: ${err}`);
-    }
+    await sendWithFailureRecovery(sessionId, cwd, blocks, optimisticEvent);
   };
 
   state.composer?.destroy();
