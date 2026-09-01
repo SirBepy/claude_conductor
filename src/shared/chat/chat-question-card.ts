@@ -41,6 +41,13 @@ export function findNearestOpenQuestionId(cards: { id: string }[], resolved: Set
   return null;
 }
 
+/** Batch-replay twin of findLastQuestionIndex - the extra-message fold has no
+ *  "still open" gating (unlike findNearestOpenQuestionId above), since a note
+ *  can attach to an already-answered card. */
+export function findLastQuestionId(cards: { id: string }[]): string | null {
+  return cards.length > 0 ? cards[cards.length - 1]!.id : null;
+}
+
 /** An already-rendered plain bubble whose sentinel-tagged ask hadn't loaded
  *  yet when ITS OWN page folded. `rendered` (cb.getMessages()) is chronologically ascending, so the earliest match is nearest. */
 export function findStrandedSentinelAnswer(rendered: readonly RenderedMessage[]): string | null {

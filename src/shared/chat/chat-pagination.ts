@@ -6,7 +6,7 @@ import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
-import { findNearestOpenQuestionId, findStrandedSentinelAnswer, matchSkipMarks } from "./chat-question-card";
+import { findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
 // Re-exported: tests/chat-mcp-ask-question.test.mjs imports matchSkipMarks
@@ -273,8 +273,9 @@ export class ChatPaginator {
         }
         if (ev.type !== "user_message") continue;
         const extra = extractAuqExtraText(cleanUserBlocks(ev.content));
-        if (extra === null || opened === 0) continue;
-        const qid = questionCards[opened - 1]!.id;
+        if (extra === null) continue;
+        const qid = findLastQuestionId(questionCards.slice(0, opened));
+        if (qid === null) continue;
         sentinelExtraById.set(qid, extra);
         foldedExtraMsgs.set(ev, qid);
       }
