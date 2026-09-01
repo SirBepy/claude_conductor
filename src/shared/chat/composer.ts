@@ -12,7 +12,6 @@ import type { SuggestProvider } from "./caret-popup/types";
 import type { ChatRenderer } from "./chat-renderer";
 import { parseBuiltin, HANDLERS, type BuiltinContext } from "./builtins";
 import { highlightComposerInput } from "./chat-transforms";
-import { blocksToText } from "./content-blocks";
 import { ComposerCore } from "./composer-core/core";
 import { ComposerVoice } from "./voice/composer-voice";
 import { ComposerPtt } from "./voice/composer-ptt";
@@ -22,9 +21,10 @@ import "./builtins/register";
 import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
-import { recordSent, popLastSent, moveSentOutbox } from "./sent-outbox";
+import { recordSent, moveSentOutbox } from "./sent-outbox";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
+import { ComposerUndo } from "./composer-undo";
 import { isMobileViewport } from "../mobile-viewport";
 import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
 import * as shortcuts from "../shortcuts";
@@ -91,8 +91,7 @@ export class Composer {
   // Wall-clock of the last keystroke; feeds isComposing() so an auto-flush
   // doesn't fire out from under the user mid-type.
   private lastKeyAt = 0;
-  // True mid Ctrl+Z chain - lets repeated presses keep walking the queue.
-  private undoChainActive = false;
+  private undo: ComposerUndo;
   private cv: ComposerVoice;
   private ptt: ComposerPtt;
   private att: ComposerAttachments;
@@ -144,6 +143,19 @@ export class Composer {
   constructor(root: HTMLElement, opts: ComposerOptions) {
     this.root = root;
     this.opts = opts;
+    this.undo = new ComposerUndo({
+      getTextarea: () => this.textarea,
+      getAttachments: () => this.att.attachments,
+      getPastedBlocks: () => this.att.pastedBlocks,
+      isVoiceUsed: () => this.cv.isUsed,
+      isDraftEmpty: () => this.isDraftEmpty(),
+      getSessionId: () => this.sessionId,
+      setDraftText: (text) => this.setDraftText(text),
+      send: () => this.send(),
+      hasHeld: opts.hasHeld,
+      popLastHeld: opts.popLastHeld,
+      sendQueuedNow: opts.sendQueuedNow,
+    });
     this.cv = new ComposerVoice({
       onAfterEdit: () => { this.autoResize(); this.updateHighlight(); this.persistDraft(); this.opts.onDraftActivity?.(); },
       onHighlightOnly: () => this.updateHighlight(),
@@ -153,7 +165,7 @@ export class Composer {
     this.ptt = new ComposerPtt({
       start: (pos) => this.cv.startForPtt(pos),
       stop: () => this.cv.stopForPtt(),
-      currentInsertPos: () => this.currentInsertPos(),
+      currentInsertPos: () => this.undo.currentInsertPos(),
       isMobile: () => isMobileViewport(),
       isDisabled: () => this.disabled,
     });
@@ -349,15 +361,15 @@ export class Composer {
         onInput: interactive
           ? () => {
               this.lastKeyAt = Date.now();
-              this.undoChainActive = false;
+              this.undo.resetChain();
               this.persistDraft();
               this.updateScheduleBtnState();
               this.opts.onDraftActivity?.();
             }
           : undefined,
         onEnter: interactive ? () => void this.send() : undefined,
-        onCtrlEnter: interactive ? () => this.handleCtrlEnter() : undefined,
-        onUndoQueued: interactive ? () => this.handleUndoQueued() : undefined,
+        onCtrlEnter: interactive ? () => this.undo.handleCtrlEnter() : undefined,
+        onUndoQueued: interactive ? () => this.undo.handleUndoQueued() : undefined,
         // An Escape that closed the "/"-suggest popup must not also fall
         // through to the document-level blur-composer shortcut.
         stopPropagationOnPopupConsume: true,
@@ -440,13 +452,6 @@ export class Composer {
     return highlightComposerInput(val);
   }
 
-  /** Mobile = the same 768px breakpoint the sessions layout uses to switch to
-   *  single-pane mode. On a soft keyboard there is no easy Shift+Enter, so a
-   *  bare Enter must insert a newline (the send button sends instead). */
-  private currentInsertPos(): number {
-    return this.textarea?.selectionStart ?? this.textarea?.value.length ?? 0;
-  }
-
   /** Build + open the split-send chevron menu: Voice + (mobile-only) Attach +
    *  Schedule. Voice lives here on both platforms now - the mic button itself
    *  only surfaces while actively recording (see composer-mic in voice.css).
@@ -461,7 +466,7 @@ export class Composer {
       label: "Voice dictation",
       run: () => {
         this.textarea?.focus();
-        void this.cv.toggle(this.currentInsertPos());
+        void this.cv.toggle(this.undo.currentInsertPos());
       },
     });
     if (isMobileViewport()) {
@@ -484,7 +489,7 @@ export class Composer {
       nextTokenReset: this.opts.getNextTokenReset?.(),
       onConfirm: (result) => {
         const text = (this.textarea?.value ?? "").trim();
-        const blocks = this.buildBlocks(text);
+        const blocks = this.undo.buildBlocks(text);
         this.clearComposer();
         void this.opts.onSchedule?.(blocks, result.fireAtUtcIso, result.recurrence);
       },
@@ -509,33 +514,6 @@ export class Composer {
       getRenderer: this.opts.getRenderer ?? (() => null),
       pane: this.root.closest<HTMLElement>(".session-pane") ?? this.root.parentElement,
     };
-  }
-
-  /** Ctrl/Cmd+Enter with an empty draft and a queued (held) set sends the
-   *  queue immediately, busy or not - the same action as the chip's "Send
-   *  now". Any other case (draft has content, or nothing queued) falls
-   *  through to the normal send() path unchanged. */
-  private handleCtrlEnter(): void {
-    if (this.isDraftEmpty() && this.opts.hasHeld?.()) {
-      void this.opts.sendQueuedNow?.();
-      return;
-    }
-    void this.send();
-  }
-
-  /** Ctrl/Cmd+Z: pop the last queued message back into the draft, then the
-   *  sent-outbox. Both empty declines, handing back to native text-undo. */
-  private handleUndoQueued(): boolean {
-    if (!this.isDraftEmpty() && !this.undoChainActive) return false;
-    const blocks = this.opts.popLastHeld?.();
-    const popped = blocks
-      ? blocksToText(blocks)
-      : (this.sessionId ? popLastSent(this.sessionId) : null);
-    if (popped === null) return false;
-    const rest = this.undoChainActive ? (this.textarea?.value ?? "") : "";
-    this.setDraftText(rest ? `${popped}\n\n${rest}` : popped);
-    this.undoChainActive = true;
-    return true;
   }
 
   private async send(): Promise<void> {
@@ -575,7 +553,7 @@ export class Composer {
     if (blocked) {
       if (empty) return;
       this.sending = true;
-      const blocks = this.buildBlocks(text);
+      const blocks = this.undo.buildBlocks(text);
       const savedBlockedAttachments = this.att.attachments;
       const savedBlockedPastedBlocks = this.att.pastedBlocks;
       this.clearComposer();
@@ -606,7 +584,7 @@ export class Composer {
         this.sending = false;
         return; // dismissed - draft stays put
       }
-      const blocks = this.buildBlocks(text);
+      const blocks = this.undo.buildBlocks(text);
       const savedAttachments = this.att.attachments;
       const savedPastedBlocks = this.att.pastedBlocks;
       this.clearComposer();
@@ -630,7 +608,7 @@ export class Composer {
     if (this.opts.isBusy?.()) {
       if (empty) return;
       // Staging into an unattached controller no-ops, so clear only once taken.
-      if (this.opts.onStage?.(this.buildBlocks(text)) === false) {
+      if (this.opts.onStage?.(this.undo.buildBlocks(text)) === false) {
         this.showNotice("Couldn't queue that - your message is still here.");
         return;
       }
@@ -641,7 +619,7 @@ export class Composer {
     // Not busy, but a held set exists: a normal send bundles the held messages
     // with this draft into ONE message (handled by the held controller).
     if (this.opts.hasHeld?.()) {
-      const draftBlocks = empty ? [] : this.buildBlocks(text);
+      const draftBlocks = empty ? [] : this.undo.buildBlocks(text);
       const savedHeldAttachments = this.att.attachments;
       const savedHeldPastedBlocks = this.att.pastedBlocks;
       this.clearComposer();
@@ -655,7 +633,7 @@ export class Composer {
 
     if (empty) return;
     this.sending = true;
-    const blocks = this.buildBlocks(text);
+    const blocks = this.undo.buildBlocks(text);
     const savedAttachments = this.att.attachments;
     const savedPastedBlocks = this.att.pastedBlocks;
     this.clearComposer();
@@ -667,37 +645,6 @@ export class Composer {
     } finally {
       this.sending = false;
     }
-  }
-
-  /** Build the ContentBlock[] for the current draft: typed text + any held
-   * pasted-log sentinels + attachment <file:…> mentions. Pure (no clear). The
-   * <pasted-log> wrapper is collapsed into a chip by the chat renderer so the
-   * user never sees the wall of text in their own message. */
-  private buildBlocks(text: string): ContentBlock[] {
-    let fullText = text;
-    for (const b of this.att.pastedBlocks) {
-      const nonce = Math.random().toString(36).slice(2, 10);
-      const wrapped = `<pasted-log id="${nonce}" name="${b.name}">\n${b.text}\n</pasted-log:${nonce}>`;
-      fullText += (fullText ? "\n\n" : "") + wrapped;
-    }
-    // Mark voice-dictated messages so the model reads them charitably (homophones,
-    // transcription noise); the renderer collapses this into a mic chip.
-    if (this.cv.isUsed) {
-      fullText += (fullText ? "\n" : "") + "<voice-input/>";
-    }
-    const blocks: ContentBlock[] = [];
-    if (fullText) blocks.push({ type: "text", text: fullText });
-    for (const a of this.att.attachments) {
-      if (a.path) {
-        blocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
-      } else {
-        blocks.push({
-          type: "text",
-          text: "[attachment dropped - paste_attachment IPC not available]",
-        });
-      }
-    }
-    return blocks;
   }
 
   /** Focus the textarea. Public so the held-messages controller can return
@@ -741,7 +688,7 @@ export class Composer {
    * caller, which only stores a flattened prompt string. The lightbox caption
    * round-trip passes false so dismissing a preview never drops attachments. */
   setDraftText(text: string, clearAttachments = true): void {
-    this.undoChainActive = false;
+    this.undo.resetChain();
     if (clearAttachments) this.att.clear();
     if (this.textarea) {
       this.textarea.value = text;
@@ -762,7 +709,7 @@ export class Composer {
   getDraftBlocks(): ContentBlock[] {
     const text = (this.textarea?.value ?? "").trim();
     if (this.isDraftEmpty()) return [];
-    return this.buildBlocks(text);
+    return this.undo.buildBlocks(text);
   }
 
   isDraftEmpty(): boolean {
