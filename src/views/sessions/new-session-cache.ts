@@ -44,6 +44,14 @@ function mapEntry<K, T>(map: Map<K, Entry<T>>, key: K): Entry<T> {
   return e;
 }
 
+/** Resolves a CacheRead<T> to its value: the cached value synchronously if
+ *  present, otherwise awaits the in-flight/triggered fetch, falling back to
+ *  `fallback` on rejection. */
+export async function resolveCached<T>(read: CacheRead<T>, fallback: T): Promise<T> {
+  if (read.cached !== undefined) return read.cached;
+  return read.ready.catch(() => fallback);
+}
+
 /** Synchronous, non-triggering read - unlike the `*Data()` functions below,
  *  this never kicks a fetch. Use it in render paths that run on every
  *  keystroke/re-render (a computeRows() sort, a row's todo badge); calling

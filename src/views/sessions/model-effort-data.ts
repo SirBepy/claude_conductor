@@ -4,7 +4,7 @@
  *  loadAndBuild() (todo 810). */
 
 import type { Account, ProjectConfig } from "../../shared/api";
-import type { CacheRead } from "./new-session-cache";
+import { resolveCached, type CacheRead } from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
   readLastChoice,
@@ -33,9 +33,7 @@ export async function resolveModelEffortData(
   accountsRead: CacheRead<Account[]>,
   projectAccountRead: CacheRead<string | null>,
 ): Promise<ModelEffortResolvedData> {
-  const settingsRaw = settingsRead.cached !== undefined
-    ? settingsRead.cached
-    : await settingsRead.ready.catch(() => ({}) as Record<string, unknown>);
+  const settingsRaw = await resolveCached(settingsRead, {} as Record<string, unknown>);
   const models = readModels(settingsRaw);
   const defaultFlags = readDefaultFlags(settingsRaw);
   // No presets anymore - first-ever session in a project defaults to Opus/high.
@@ -43,9 +41,7 @@ export async function resolveModelEffortData(
 
   // Resolve projectId for whitelist + live-taken dedup, and the project's
   // bound account (if any) for the account picker below.
-  const projectsListVal: ProjectConfig[] = projectsRead.cached !== undefined
-    ? projectsRead.cached
-    : await projectsRead.ready.catch((): ProjectConfig[] => []);
+  const projectsListVal: ProjectConfig[] = await resolveCached(projectsRead, [] as ProjectConfig[]);
   const proj = projectsListVal.find((p) => String(p.path) === projectPath) as
     | { id: string; preferred_account_id?: string | null }
     | undefined;
@@ -64,9 +60,7 @@ export async function resolveModelEffortData(
 
   // Account picker (multi-account milestone 04): resolve project binding ->
   // default -> sole-account fallback -> null (ambiguous/empty registry).
-  const accounts = accountsRead.cached !== undefined
-    ? accountsRead.cached
-    : await accountsRead.ready.catch((): Account[] => []);
+  const accounts = await resolveCached(accountsRead, [] as Account[]);
   const defaultAccountId = (settingsRaw["default_account_id"] as string | null | undefined) ?? null;
   const accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
 
