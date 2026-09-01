@@ -12,6 +12,7 @@ import type { ProjectConfig } from "../../../../types/ipc.generated";
 import { pickProject } from "../../../sessions/project-picker";
 import { registerOverlayBack } from "../../../../shared/back-button";
 import { renderAppearancePicker, type AppearanceState } from "./appearance-picker";
+import { lockInputToHost } from "../../../../shared/modal";
 import "./edit-account-modal.css";
 
 type Tab = "details" | "projects";
@@ -37,8 +38,11 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
     let projects: ProjectConfig[] = [];
     let projectsLoaded = false;
 
+    const unlock = lockInputToHost(overlay);
+
     function close(result: Account | null): void {
       disposeBack();
+      unlock();
       overlay.remove();
       document.removeEventListener("keydown", onKey);
       resolve(result);

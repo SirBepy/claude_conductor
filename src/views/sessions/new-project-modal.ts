@@ -1,5 +1,6 @@
 import { invoke } from "../../shared/ipc";
 import { escapeHtml } from "../../shared/escape-html";
+import { lockInputToHost } from "../../shared/modal";
 
 const LAST_PARENT_KEY = "newProjectLastParent";
 
@@ -35,10 +36,13 @@ export function openNewProjectModal(): Promise<{ path: string; name: string } | 
     let projectName = "";
     let resolved = false;
 
+    const unlock = lockInputToHost(overlay);
+
     const finish = (val: { path: string; name: string } | null) => {
       if (resolved) return;
       resolved = true;
       _isOpen = false;
+      unlock();
       overlay.remove();
       document.removeEventListener("keydown", onKey);
       resolve(val);

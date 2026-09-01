@@ -190,12 +190,16 @@ function _init(): void {
   // Lazy import avoids loading DOM-dependent navigation module in test environments.
   let getActiveView: (() => string) | null = null;
   void import("./navigation").then(m => { getActiveView = m.getActiveView; });
+  let isAnyModalOpen: (() => boolean) | null = null;
+  void import("./modal").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Control" || e.key === "Meta") {
       fireCtrlHeld(true);
       return;
     }
+
+    if (isAnyModalOpen?.()) return;
 
     const combo = normalizeEvent(e);
     if (!combo) return;

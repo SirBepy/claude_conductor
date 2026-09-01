@@ -3,6 +3,7 @@ import { api } from "./api";
 import type { Character } from "./api";
 import { escapeHtml } from "./escape-html";
 import { getCharacterIconUrl, cachedCharacterIconUrl } from "./character-icon";
+import { lockInputToHost } from "./modal";
 
 export async function openChangeCharacterModal(opts: {
   projectId: string;
@@ -24,7 +25,10 @@ export async function openChangeCharacterModal(opts: {
     const overlay = document.createElement("div");
     overlay.className = "cc-modal-overlay";
 
+    const unlock = lockInputToHost(overlay);
+
     function close(result: string | null) {
+      unlock();
       overlay.remove();
       document.removeEventListener("keydown", onKey);
       resolve(result);

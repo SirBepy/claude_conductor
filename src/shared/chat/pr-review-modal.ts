@@ -8,6 +8,7 @@
 import { invoke } from "../ipc";
 import { escapeHtml } from "../escape-html";
 import { basename } from "../path-utils";
+import { lockInputToHost } from "../modal";
 import { createFileSurface, type FileSurfaceHandle, type SurfaceFile } from "./file-surface";
 import {
   resetPrReviewData,
@@ -46,6 +47,15 @@ interface ModalEls {
 let overlay: HTMLDivElement | null = null;
 let surface: FileSurfaceHandle | null = null;
 let els: ModalEls | null = null;
+let unlockInput: (() => void) | null = null;
+
+// j/k step nav and Ctrl+F both route through onModalKeydown regardless of
+// where focus sits (see FileSurfaceHandle.handleKey) - let those keep
+// reaching it instead of being fully swallowed by the background-input guard.
+function isSurfaceNavKey(e: KeyboardEvent): boolean {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") return true;
+  return e.key === "j" || e.key === "k";
+}
 
 let mSidebarTab: "commits" | "files" = "commits";
 let mDrillSha: string | null = null;
@@ -61,6 +71,8 @@ export function closePrModal(): void {
   els = null;
   resetPrReviewData(null);
   document.removeEventListener("keydown", onModalKeydown);
+  unlockInput?.();
+  unlockInput = null;
 }
 
 function onModalKeydown(e: KeyboardEvent): void {
@@ -511,6 +523,7 @@ export function openPrPreviewModal(card: HTMLElement): void {
   ov.appendChild(modal);
   document.body.appendChild(ov);
   document.addEventListener("keydown", onModalKeydown);
+  unlockInput = lockInputToHost(ov, isSurfaceNavKey);
 
   els = {
     sidebarTabsEl: sidebar.tabsEl,

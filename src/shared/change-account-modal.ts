@@ -14,6 +14,7 @@ import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
 import { accountChipHtml, attachChipKeyboardActivation } from "./account-chip";
+import { lockInputToHost } from "./modal";
 
 export async function openChangeAccountModal(opts: {
   currentId: string | null;
@@ -26,7 +27,10 @@ export async function openChangeAccountModal(opts: {
     const overlay = document.createElement("div");
     overlay.className = "cc-modal-overlay";
 
+    const unlock = lockInputToHost(overlay);
+
     function close(result: string | null) {
+      unlock();
       overlay.remove();
       document.removeEventListener("keydown", onKey);
       resolve(result);

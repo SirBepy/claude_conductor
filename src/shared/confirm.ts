@@ -6,6 +6,7 @@
 // it doesn't. A DOM overlay has neither failure mode and can't block the
 // webview thread.
 import "./confirm.css";
+import { lockInputToHost } from "./modal";
 
 export interface ConfirmOptions {
   /** Confirm-button label, e.g. "Remove". Defaults to "Confirm". */
@@ -77,8 +78,11 @@ export function askConfirm(text: string, options: ConfirmOptions = {}): Promise<
     confirmBtn.className = `app-confirm-ok ${danger ? "btn-danger" : "btn-primary"}`;
     confirmBtn.textContent = options.confirmLabel ?? "Confirm";
 
+    const unlock = lockInputToHost(overlay);
+
     function finish(result: boolean): void {
       document.removeEventListener("keydown", onKey, true);
+      unlock();
       overlay.remove();
       resolve(result);
     }
