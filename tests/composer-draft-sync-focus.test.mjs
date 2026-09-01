@@ -60,6 +60,10 @@ function regainVisibility() {
 }
 
 describe("Composer draft sync - debounce coalescing", () => {
+  // Measured 2026-09-01: this test's own jsdom mount + fake-timer path takes
+  // 4.7-4.9s on an idle machine, leaving under 300ms of headroom against the
+  // 5000ms default testTimeout - one loaded run tipped over at 5010ms. Widen
+  // just this test rather than the file's default.
   it("coalesces rapid keystrokes into a single set_composer_draft call", async () => {
     const { textarea } = await mountComposer("sess-debounce");
     vi.useFakeTimers();
@@ -73,7 +77,7 @@ describe("Composer draft sync - debounce coalescing", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(draftPushCalls().length).toBe(1);
     expect(draftPushCalls()[0][1]).toMatchObject({ sessionId: "sess-debounce", text: "hello" });
-  });
+  }, 15000);
 });
 
 describe("Composer draft sync - flush on blur", () => {
