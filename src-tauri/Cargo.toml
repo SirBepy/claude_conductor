@@ -98,6 +98,12 @@ windows = { version = "0.58", features = [
     "Win32_System_SystemInformation",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Reads the login-Keychain OAuth item Claude Code writes instead of
+# .credentials.json on macOS (see accounts::keychain). Already in the tree via
+# rustls/reqwest, so this pins no new resolved version.
+security-framework = "3"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

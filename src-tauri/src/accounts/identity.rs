@@ -54,13 +54,17 @@ pub struct OauthRecord {
     pub refresh_token_expires_at: Option<i64>,
 }
 
-/// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth`. `None` if the
-/// file is missing, unparsable, or has no `claudeAiOauth` block. The app
-/// never writes this file (locked decision, 00-overview.md).
-pub fn read_oauth_record(config_dir: &Path) -> Option<OauthRecord> {
-    let raw = std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    let o = v.get("claudeAiOauth")?;
+/// Parses one stored credential blob: the `.credentials.json` wrapper
+/// (`{"claudeAiOauth": {...}}`) or, for the Keychain, a bare record. A bare
+/// blob must carry `accessToken`, else any JSON object at all would read as
+/// a blanked record and trip `credentials::assess`.
+fn parse_oauth_record(raw: &str) -> Option<OauthRecord> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let o = match v.get("claudeAiOauth") {
+        Some(wrapped) => wrapped,
+        None if v.get("accessToken").is_some() => &v,
+        None => return None,
+    };
     let str_of = |k: &str| o.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     Some(OauthRecord {
         access_token: str_of("accessToken"),
@@ -68,6 +72,17 @@ pub fn read_oauth_record(config_dir: &Path) -> Option<OauthRecord> {
         refresh_token: str_of("refreshToken"),
         refresh_token_expires_at: o.get("refreshTokenExpiresAt").and_then(|x| x.as_i64()),
     })
+}
+
+/// Reads `<config_dir>/.credentials.json` -> `claudeAiOauth`, falling back
+/// to the macOS login Keychain (see `accounts::keychain`). `None` if neither
+/// store has a parseable record. The app never writes either one (locked
+/// decision, 00-overview.md).
+pub fn read_oauth_record(config_dir: &Path) -> Option<OauthRecord> {
+    std::fs::read_to_string(config_dir.join(".credentials.json"))
+        .ok()
+        .and_then(|raw| parse_oauth_record(&raw))
+        .or_else(|| parse_oauth_record(&super::keychain::read_secret(config_dir)?))
 }
 
 /// `claudeAiOauth.expiresAt` (unix-ms epoch), for the read-only "token expiry"
@@ -222,5 +237,39 @@ mod tests {
         std::fs::write(dir.path().join(".claude.json"), FIXTURE).unwrap();
         let identity = terminal_identity(dir.path()).expect("expected identity");
         assert_eq!(identity.email_address, "joe@example.com");
+    }
+
+    #[test]
+    fn parse_oauth_record_accepts_the_credentials_file_wrapper() {
+        let r = parse_oauth_record(
+            r#"{"claudeAiOauth":{"accessToken":"tok","refreshToken":"ref","expiresAt":17,"refreshTokenExpiresAt":42}}"#,
+        )
+        .expect("expected a record");
+        assert_eq!(r.access_token, "tok");
+        assert_eq!(r.expires_at, Some(17));
+        assert_eq!(r.refresh_token_expires_at, Some(42));
+    }
+
+    #[test]
+    fn parse_oauth_record_accepts_a_bare_unwrapped_record() {
+        // The Keychain blob's wrapper is not guaranteed to match the file's.
+        let r = parse_oauth_record(r#"{"accessToken":"tok","expiresAt":17}"#).expect("expected a record");
+        assert_eq!(r.access_token, "tok");
+        assert_eq!(r.expires_at, Some(17));
+    }
+
+    #[test]
+    fn parse_oauth_record_rejects_an_unrelated_object() {
+        // Must not read as a blanked record - that would trip credentials::assess.
+        assert_eq!(parse_oauth_record(r#"{"someOtherThing": true}"#), None);
+    }
+
+    #[test]
+    fn parse_oauth_record_keeps_a_blanked_wrapped_record_visible() {
+        // The shape a failed refresh leaves behind still parses, so
+        // credentials::assess can report Blanked instead of "not logged in".
+        let r = parse_oauth_record(r#"{"claudeAiOauth":{"accessToken":"","expiresAt":0}}"#)
+            .expect("expected a record");
+        assert!(r.access_token.is_empty());
     }
 }

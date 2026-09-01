@@ -7,6 +7,7 @@
 pub mod model;
 pub mod store;
 pub mod identity;
+pub mod keychain;
 pub mod profile;
 pub mod login_step;
 pub mod wizard;
