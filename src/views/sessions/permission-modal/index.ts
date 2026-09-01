@@ -17,6 +17,7 @@
  */
 
 import { invoke } from "../../../shared/ipc";
+import { showToast } from "../../../shared/toast";
 import { getTransport } from "../../../shared/transport";
 import { state } from "../state";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
@@ -140,7 +141,9 @@ export async function showQuestionCard(
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
     onSubmit: async (answers, extras) => {
-      clearQuestionDraft(payload.id);
+      // NOT cleared here (ai_todo 820): the card tears down before this runs,
+      // so the localStorage draft is the only surviving copy of what was
+      // typed. Cleared per-branch below, only once delivery actually succeeds.
       void clearAuqPush(payload.session_id, payload.id);
       const sid = payload.session_id;
       // Settle the daemon card + learn whether a live oneshot was resolved:
@@ -158,11 +161,12 @@ export async function showQuestionCard(
         clearPendingPromptById(payload.id);
         rerenderSidebar();
       }
-      if (!sid) return;
+      if (!sid) { clearQuestionDraft(payload.id); return; }
       if (!opts.reopened && !isLatestQuestion(sid, payload.id)) {
         // A newer question superseded this card while it sat unanswered - the
         // conversation already moved on, so don't inject a reply into it now.
         console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
+        clearQuestionDraft(payload.id);
         return;
       }
       // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
@@ -191,10 +195,26 @@ export async function showQuestionCard(
         // Its own held item so bundleHeld's sentinel-group check (held-messages.ts)
         // keeps the note+attachments intact, not merged into the queued prose.
         if (cardExtraBlocks.length) state.heldMessages.stage(cardExtraBlocks);
-        await state.heldMessages.flushHeldWithDraft(answerBlocks);
+        try {
+          await state.heldMessages.flushHeldWithDraft(answerBlocks);
+          clearQuestionDraft(payload.id);
+        } catch (e) {
+          console.warn("[perm-relay] flushHeldWithDraft (answer delivery) failed:", e);
+          showToast(`Answer delivery failed: ${e}`);
+        }
       } else if (answerBlocks.length || cardExtraBlocks.length) {
         const cwd = resolveCwdForSession(sid) ?? ".";
-        await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
+        try {
+          await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
+          clearQuestionDraft(payload.id);
+        } catch (e) {
+          console.warn("[perm-relay] send_message (answer delivery) failed:", e);
+          showToast(`Answer delivery failed: ${e}`);
+        }
+      } else {
+        // Nothing left to deliver (in-band via the oneshot, no extras): the
+        // draft is safe to drop now.
+        clearQuestionDraft(payload.id);
       }
     },
     onCancel: async () => {
