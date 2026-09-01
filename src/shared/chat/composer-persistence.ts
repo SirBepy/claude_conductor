@@ -31,6 +31,31 @@ export function clearDraft(sessionId: string): void {
   }
 }
 
+// The server `updated_at` this device last knows the daemon holds, persisted
+// beside the draft so a reload compares real timestamps instead of
+// defaulting to "remote wins".
+const SYNC_BASELINE_PREFIX = "chat-draft-sync:v1:";
+
+function syncBaselineKey(sessionId: string): string {
+  return SYNC_BASELINE_PREFIX + sessionId;
+}
+
+export function loadSyncBaseline(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(syncBaselineKey(sessionId));
+  } catch {
+    return null;
+  }
+}
+
+export function saveSyncBaseline(sessionId: string, updatedAt: string): void {
+  try {
+    localStorage.setItem(syncBaselineKey(sessionId), updatedAt);
+  } catch {
+    /* quota or storage disabled - the in-memory Map still tracks it */
+  }
+}
+
 // ── Attachment metadata persistence ────────────────────────────────────────
 //
 // Only paths + mime + filename are stored, not the base64 bytes - those are

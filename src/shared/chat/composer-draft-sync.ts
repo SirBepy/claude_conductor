@@ -5,14 +5,28 @@
 
 import { debounce, type Debounced } from "../debounce";
 import { getSessionDrafts, setComposerDraft, clearComposerDraft } from "./session-draft-sync";
+import { loadSyncBaseline, saveSyncBaseline } from "./composer-persistence";
 
 const PUSH_DEBOUNCE_MS = 500;
 
 // Last-write-wins baseline, keyed by session id and shared across every
-// ComposerDraftSync instance - a fire-and-forget clear/set already in flight
-// when the Composer remounts (session switch, reopening a chat) still lands
-// here instead of being lost to a fresh, amnesiac per-instance field.
+// ComposerDraftSync instance, also persisted to localStorage so a reload
+// seeds a real baseline instead of defaulting to "remote always wins".
 const lastKnownUpdatedAt = new Map<string, string>();
+
+/** Seeds the in-memory baseline from storage on first access per session. */
+function getKnownUpdatedAt(sessionId: string): string | undefined {
+  if (!lastKnownUpdatedAt.has(sessionId)) {
+    const stored = loadSyncBaseline(sessionId);
+    if (stored) lastKnownUpdatedAt.set(sessionId, stored);
+  }
+  return lastKnownUpdatedAt.get(sessionId);
+}
+
+function setKnownUpdatedAt(sessionId: string, updatedAt: string): void {
+  lastKnownUpdatedAt.set(sessionId, updatedAt);
+  saveSyncBaseline(sessionId, updatedAt);
+}
 
 export class ComposerDraftSync {
   private push: Debounced<[sessionId: string, text: string]>;
@@ -20,7 +34,7 @@ export class ComposerDraftSync {
   constructor() {
     this.push = debounce((sessionId, text) => {
       void setComposerDraft(sessionId, text)
-        .then((res) => { lastKnownUpdatedAt.set(sessionId, res.updated_at); })
+        .then((res) => { setKnownUpdatedAt(sessionId, res.updated_at); })
         .catch((e) => console.warn("[composer-sync] set_composer_draft failed:", e));
     }, PUSH_DEBOUNCE_MS);
   }
@@ -51,7 +65,7 @@ export class ComposerDraftSync {
     this.push.cancel();
     try {
       const res = await clearComposerDraft(sessionId);
-      lastKnownUpdatedAt.set(sessionId, res.updated_at);
+      setKnownUpdatedAt(sessionId, res.updated_at);
     } catch (e) {
       console.warn("[composer-sync] clear_composer_draft failed:", e);
     }
@@ -65,9 +79,9 @@ export class ComposerDraftSync {
       const drafts = await getSessionDrafts(sessionId);
       const remote = drafts.composer;
       if (!remote) return null;
-      const known = lastKnownUpdatedAt.get(sessionId);
+      const known = getKnownUpdatedAt(sessionId);
       if (known && remote.updated_at <= known) return null;
-      lastKnownUpdatedAt.set(sessionId, remote.updated_at);
+      setKnownUpdatedAt(sessionId, remote.updated_at);
       return remote.text;
     } catch (e) {
       console.warn("[composer-sync] get_session_drafts failed:", e);
