@@ -6,7 +6,11 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { foldAuthoredIntoStrip } from "../src/shared/chat/author-message-group.ts";
+
+const userCssPath = fileURLToPath(new URL("../src/shared/chat/chat-messages-user.css", import.meta.url));
 
 beforeEach(() => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -87,5 +91,21 @@ describe("foldAuthoredIntoStrip across separate flush passes", () => {
 
     expect(chips(a)).toHaveLength(1);
     expect(chips(b)).toHaveLength(1);
+  });
+});
+
+describe("todo 789: .author-group-panel's own [hidden] must actually hide it", () => {
+  it("setting hidden on an isolated panel makes it display:none", () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(userCssPath, "utf8");
+    document.head.appendChild(style);
+
+    const panel = document.createElement("div");
+    panel.className = "author-group-panel";
+    document.body.appendChild(panel);
+    expect(window.getComputedStyle(panel).display).toBe("flex");
+
+    panel.hidden = true;
+    expect(window.getComputedStyle(panel).display).toBe("none");
   });
 });

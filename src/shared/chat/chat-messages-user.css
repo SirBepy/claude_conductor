@@ -50,7 +50,7 @@
 
 /* Expanded exchange: one row per message, colored avatar ring + name so a
  * multi-peer back-and-forth reads who-said-what at a glance. */
-.author-group-panel {
+.author-group-panel:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: 10px;
