@@ -4,10 +4,16 @@
 // one. Since the peer chip moved onto the turn's shared line, "same chip" now
 // means one chip per turn footer, extended in place.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+vi.mock("../src/shared/projects.ts", () => ({
+  hydrateCharacterAvatars: vi.fn(async () => {}),
+}));
+
+import { hydrateCharacterAvatars } from "../src/shared/projects.ts";
 import { foldAuthoredIntoStrip } from "../src/shared/chat/author-message-group.ts";
 
 const userCssPath = fileURLToPath(new URL("../src/shared/chat/chat-messages-user.css", import.meta.url));
@@ -113,6 +119,27 @@ describe("todo 789: .author-group-panel's own [hidden] must actually hide it", (
 // Todo 790: hashStr(sessionId) % PALETTE_SIZE has no export, so this locks
 // the mapping via the rendered .author-avatar class, the same surface a
 // hash/palette-size change would actually break.
+// Todo 807: live flushes (~80ms throttle) re-run this over the same range for
+// unrelated tool events - it must not rebuild each time.
+describe("todo 807: fold is a no-op when the authored-message set in range is unchanged", () => {
+  it("rebuilds the peer chip once across a peer message plus ten unrelated flushes", () => {
+    hydrateCharacterAvatars.mockClear();
+    const host = footer();
+    const messages = [userMsg("peer-a", "hello")];
+    const messageEls = [authoredEl()];
+    document.body.append(...messageEls);
+
+    foldAuthoredIntoStrip(messages, messageEls, 0, 1, host);
+    for (let i = 0; i < 10; i++) {
+      foldAuthoredIntoStrip(messages, messageEls, 0, 1, host);
+    }
+
+    expect(chips(host)).toHaveLength(1);
+    // Chip + bucket = 2 calls per real rebuild - one rebuild total.
+    expect(hydrateCharacterAvatars).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("todo 790: avatar palette mapping is stable", () => {
   const golden = [
     ["peer-a", "author-color-4"],

@@ -40,8 +40,16 @@ function avatarHtml(sessionId: string, colorClass: string): string {
  *  that streams in across several flushes keeps extending the same chip. */
 const AUTHOR_KEY = "peer-msgs";
 
-/** Full rebuild each call (same idempotence as the custom-view buckets), so a
- *  late-arriving peer message just grows the count. */
+/** Marker key stashed on stripHost, gating the rebuild below - same idea as
+ *  `rebuildCustomBucket`'s `data-tool-grouped` check, but keyed on the
+ *  authored-message identity since this rebuild spans a range instead of a
+ *  single element. */
+const FOLD_MARKER_ATTR = "authoredFoldMarker";
+
+/** Full rebuild each call that the authored-message set in range actually
+ *  changed (same idempotence as the custom-view buckets), so a late-arriving
+ *  peer message just grows the count - but an unrelated tool flush with no
+ *  new/changed peer message is a no-op. */
 export function foldAuthoredIntoStrip(
   messages: RenderedMessage[],
   messageEls: HTMLElement[],
@@ -56,6 +64,10 @@ export function foldAuthoredIntoStrip(
     run.push(m);
   }
   if (run.length === 0) return;
+
+  const marker = run.map((m) => `${m.id ?? m.ts}:${m.authorSessionId}`).join("|");
+  if (stripHost.dataset[FOLD_MARKER_ATTR] === marker) return;
+  stripHost.dataset[FOLD_MARKER_ATTR] = marker;
 
   const { strip, panel } = ensureMainStrip(stripHost);
   let chip = strip.querySelector<HTMLButtonElement>(`:scope > .tool-chip[data-tool="${AUTHOR_KEY}"]`);
