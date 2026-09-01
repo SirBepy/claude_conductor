@@ -62,9 +62,8 @@ test.describe("view-harness / delivered answer sends no duplicate message", () =
     const card = page.locator(".prompt-card");
     await expect(card).toBeVisible();
     await card.locator('.prompt-opt input[data-label="A"]').click();
-    // showQuestionCard hardcodes supportsExtras:true, so even a single
-    // question gets a review step - Next, then Submit from there.
-    await card.locator('[data-act="primary"]').click();
+    // A one-question card submits in a single step (ai_todo 821); only two or
+    // more questions get a review panel.
     await card.locator('[data-act="primary"]').click();
 
     await expect(card).toHaveCount(0);

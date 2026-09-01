@@ -56,9 +56,8 @@ test.describe("view-harness / AUQ answer delivery failure surfaces and stays rec
     const card = page.locator(".prompt-card");
     await expect(card).toBeVisible();
     await card.locator('.prompt-opt input[data-label="A"]').click();
-    // showQuestionCard hardcodes supportsExtras:true, so even a single
-    // question gets a review step - Next, then Submit from there.
-    await card.locator('[data-act="primary"]').click();
+    // A one-question card submits in a single step (ai_todo 821); only two or
+    // more questions get a review panel.
     await card.locator('[data-act="primary"]').click();
 
     // The card tears down on submit regardless of outcome (question-ui.ts) -
