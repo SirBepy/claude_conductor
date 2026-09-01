@@ -5,7 +5,7 @@
 
 import type { ChatEvent } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
-import { AUQ_SKIPPED_TEXT, RenderedMessage, extractAuqAnswerText } from "./chat-transforms";
+import { AUQ_SKIPPED_TEXT, RenderedMessage, extractAuqAnswerText, extractAuqExtraText } from "./chat-transforms";
 import type { SkipMark } from "./skip-marks";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
@@ -55,6 +55,18 @@ export function findStrandedSentinelAnswer(rendered: readonly RenderedMessage[])
     if (m.kind !== "user" || !m.content) continue;
     const answer = extractAuqAnswerText(m.content);
     if (answer !== null) return answer;
+  }
+  return null;
+}
+
+/** An already-rendered plain bubble whose sentinel-tagged extra note hadn't
+ *  loaded yet when ITS OWN page folded. Mirrors findStrandedSentinelAnswer,
+ *  for the card-note sentinel (todo 813). */
+export function findStrandedSentinelExtra(rendered: readonly RenderedMessage[]): string | null {
+  for (const m of rendered) {
+    if (m.kind !== "user" || !m.content) continue;
+    const extra = extractAuqExtraText(m.content);
+    if (extra !== null) return extra;
   }
   return null;
 }

@@ -6,7 +6,7 @@ import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { isAskQuestionTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
-import { findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, matchSkipMarks } from "./chat-question-card";
+import { findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
 // Re-exported: tests/chat-mcp-ask-question.test.mjs imports matchSkipMarks
@@ -264,6 +264,8 @@ export class ChatPaginator {
     // alone, so the note always arrives as its own later message).
     const sentinelExtraById = new Map<string, string>();
     const foldedExtraMsgs = new Map<ChatEvent, string>();
+    // Cross-page extras render at the ask, mirroring strandedAnswerById above.
+    const strandedExtraById = new Map<string, string>();
     {
       let opened = 0;
       for (const ev of events) {
@@ -279,8 +281,15 @@ export class ChatPaginator {
         sentinelExtraById.set(qid, extra);
         foldedExtraMsgs.set(ev, qid);
       }
-      // A cross-page stranded extra (adjacent already-rendered page) is not
-      // folded here - known gap, see todo; both same-page cases are covered.
+      // An extra note that landed on an adjacent, already-rendered page never
+      // appears in `events` - reach across via cb.getMessages() (replay-only).
+      // No "still open" gating (see findLastQuestionId), so guard against
+      // clobbering a note this batch already folded onto the same card.
+      const strandedExtraQid = findLastQuestionId(questionCards);
+      if (strandedExtraQid !== null && !sentinelExtraById.has(strandedExtraQid)) {
+        const strandedExtra = findStrandedSentinelExtra(this.cb.getMessages());
+        if (strandedExtra !== null) strandedExtraById.set(strandedExtraQid, strandedExtra);
+      }
     }
     // Folded in client-side; never spliced into the page's cursor math.
     const skippedQuestionIds = matchSkipMarks(
@@ -381,6 +390,8 @@ export class ChatPaginator {
       // which one runs (see sentinelExtraById above).
       if (ev.type === "tool_use" && msg.kind === "question" && sentinelExtraById.has(ev.id)) {
         msg.extraText = sentinelExtraById.get(ev.id);
+      } else if (ev.type === "tool_use" && msg.kind === "question" && strandedExtraById.has(ev.id)) {
+        msg.extraText = strandedExtraById.get(ev.id);
       }
       if (ev.type === "tool_use" && msg.kind === "question" && sentinelAnswerById.has(ev.id)) {
         msg.text = sentinelAnswerById.get(ev.id);
