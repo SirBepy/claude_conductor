@@ -4,12 +4,6 @@
 use crate::state::AppState;
 use tauri::Manager;
 
-/// Retired (ai_todo 786): `ipc::ready::watch` now owns reload-on-no-heartbeat
-/// for `main`, backoff and visibility gate included. Running both would
-/// double-navigate `main`, or undo `ipc::ready`'s Retry panel. Kept as a
-/// no-op stub so `bootstrap.rs`'s call site still compiles unchanged.
-pub(super) fn spawn_boot_watchdog(_app: &tauri::AppHandle) {}
-
 /// `frontend_alive` only ever latches true, so it can't see a WebView2
 /// crash after boot; a stale heartbeat means the renderer died silently.
 /// Also catches a paint-stall (JS alive, compositor stuck - Windows ghosts

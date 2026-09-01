@@ -50,7 +50,7 @@ pub fn frontend_ready(app: AppHandle, window: tauri::Window) {
     use std::sync::atomic::Ordering;
     use tauri::{Emitter, Manager};
     // Every window sends this, so it doubles as the per-window ready gate in
-    // `ipc::ready`; unregistered labels (`main`) are a no-op there.
+    // `ipc::ready`, which now also registers `main` (ai_todo 786).
     crate::ipc::ready::mark_ready(&app, window.label());
     if let Some(state) = app.try_state::<crate::state::AppState>() {
         state.frontend_alive.store(true, Ordering::SeqCst);

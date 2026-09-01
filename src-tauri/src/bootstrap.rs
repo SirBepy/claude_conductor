@@ -74,7 +74,6 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     // on a wedged event loop. See `shutdown_guard` for the full why.
     crate::shutdown_guard::arm(handle.clone());
 
-    watchdogs::spawn_boot_watchdog(&handle);
     watchdogs::spawn_heartbeat_watchdog(&handle);
     trigger_auto_login_if_needed(&handle);
     Ok(())
