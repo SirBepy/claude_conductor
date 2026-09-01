@@ -30,6 +30,7 @@ import {
   createHandleToolChipClick,
   createHandlePreviewCardClick,
 } from "./chat-renderer-click-handlers";
+import { findQuestionIndexById } from "./chat-question-card";
 
 export interface SessionMeta {
   model: string | null;
@@ -561,8 +562,8 @@ export class ChatRenderer {
    *  card for a prompt the daemon no longer holds - its store is memory-only
    *  and does not survive a daemon restart. */
   getOpenQuestion(promptId: string): RenderedMessage | null {
-    const m = this.messages.find((x) => x.kind === "question" && x.id === promptId);
-    return m && m.text === undefined ? m : null;
+    const idx = findQuestionIndexById(this.messages, promptId, true);
+    return idx < 0 ? null : this.messages[idx]!;
   }
 
   /** Mirror the floating AUQ prompt card's live per-question progress into
@@ -571,7 +572,7 @@ export class ChatRenderer {
    *  (its tool_result landed), or progress is unchanged - avoids replacing
    *  the message's DOM node on every keystroke for no visible change. */
   updateQuestionProgress(promptId: string, liveAnswered: boolean[]): void {
-    const idx = this.messages.findIndex((m) => m.kind === "question" && m.id === promptId);
+    const idx = findQuestionIndexById(this.messages, promptId);
     if (idx < 0) return;
     const m = this.messages[idx]!;
     if (m.text !== undefined) return;

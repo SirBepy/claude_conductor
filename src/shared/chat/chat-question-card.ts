@@ -12,6 +12,12 @@ import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-dom-renderer";
 import type { ChatRenderer } from "./chat-renderer";
 
+/** Index of the question card with this id, or -1. `openOnly` also requires
+ *  `text === undefined` (the fold/progress-mirror callers' shared filter). */
+export function findQuestionIndexById(messages: readonly RenderedMessage[], id: string, openOnly = false): number {
+  return messages.findIndex((m) => m.kind === "question" && m.id === id && (!openOnly || m.text === undefined));
+}
+
 /** Index of the last unresolved question card - only one AUQ is ever open. */
 export function findOpenQuestionIndex(messages: readonly RenderedMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -77,9 +83,7 @@ export function findStrandedSentinelExtra(rendered: readonly RenderedMessage[]):
  *  answer" plus a separate bubble. `cardId` names the card exactly; without it
  *  - pre-id history - the newest unresolved one wins. False if none matched. */
 export function resolvePendingQuestionCard(r: ChatRenderer, answerText: string, cardId?: string | null): boolean {
-  const byId = cardId
-    ? r.messages.findIndex((m) => m.kind === "question" && m.id === cardId && m.text === undefined)
-    : -1;
+  const byId = cardId ? findQuestionIndexById(r.messages, cardId, true) : -1;
   const i = byId >= 0 ? byId : findOpenQuestionIndex(r.messages);
   if (i < 0) return false;
   r.messages[i] = { ...r.messages[i]!, text: answerText };
