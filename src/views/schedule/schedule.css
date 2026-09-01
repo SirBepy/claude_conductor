@@ -30,7 +30,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
   height: 30px;
   font-family: inherit;
 }
-.cal-nav { width: 30px; font-size: 1.05rem; line-height: 1; display: grid; place-items: center; }
+.cal-nav { width: 30px; padding: 0; font-size: 1.05rem; line-height: 1; display: grid; place-items: center; }
 .cal-today { padding: 0 12px; font-size: 0.8rem; color: var(--color-text-muted); }
 .cal-nav:hover, .cal-today:hover { border-color: var(--color-primary); }
 
