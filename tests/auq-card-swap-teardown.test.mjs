@@ -136,9 +136,19 @@ describe("a second question card tears the first one down", () => {
 // showQuestionCard seeds a new card from the LIVE card's snapshot, which is
 // keyed by session alone - so a second question in the same chat inherited the
 // outgoing card's answers AND its activeTab, opening on the review panel.
+//
+// Two questions (ai_todo 821: a single question no longer has a review panel
+// to open on) so this still exercises a real review-panel handoff.
 
 function askOpts(overrides = {}) {
-  return baseOpts({ supportsExtras: true, ...overrides });
+  return baseOpts({
+    supportsExtras: true,
+    questions: [
+      { question: "Pick one?", header: "Choice", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Pick another?", header: "Choice 2", options: [{ label: "C" }, { label: "D" }] },
+    ],
+    ...overrides,
+  });
 }
 
 /** The options a user can actually see: .prompt-track-viewport clips to the
@@ -151,10 +161,17 @@ function activePanelIndex() {
   return document.querySelector(".prompt-panel.is-active")?.dataset.panel;
 }
 
-function answerFirstOption() {
-  const radio = document.querySelector('.prompt-panel[data-panel="0"] input[data-label="A"]');
+function answerOption(panelIndex, label) {
+  const radio = document.querySelector(`.prompt-panel[data-panel="${panelIndex}"] input[data-label="${label}"]`);
   radio.checked = true;
   radio.dispatchEvent(new window.Event("change", { bubbles: true }));
+}
+
+// Q0's answer auto-advances to Q1 (single-select, more than one question);
+// Q1 is the last question so answering it does not auto-advance again.
+function answerAllQuestions() {
+  answerOption(0, "A");
+  answerOption(1, "C");
 }
 
 describe("every card in a run renders its answer options", () => {
@@ -170,9 +187,9 @@ describe("every card in a run renders its answer options", () => {
 
   it("a re-ask does not open on the previous card's review panel", () => {
     renderQuestionUI(askOpts({ id: "p1", sessionId: "s1" }));
-    answerFirstOption();
+    answerAllQuestions();
     document.querySelector('[data-act="primary"]').click();
-    expect(activePanelIndex()).toBe("1"); // review
+    expect(activePanelIndex()).toBe("2"); // review
 
     // Exactly what showQuestionCard does before rendering the next card.
     const seeded = snapshotActiveCardDraft("s1") ?? undefined;
@@ -185,13 +202,13 @@ describe("every card in a run renders its answer options", () => {
 
   it("still restores the same prompt's own snapshot on re-delivery", () => {
     renderQuestionUI(askOpts({ id: "p1", sessionId: "s1" }));
-    answerFirstOption();
+    answerAllQuestions();
     document.querySelector('[data-act="primary"]').click();
 
     const seeded = snapshotActiveCardDraft("s1") ?? undefined;
     renderQuestionUI(askOpts({ id: "p1", sessionId: "s1", initialDraft: seeded }));
 
-    expect(activePanelIndex()).toBe("1");
+    expect(activePanelIndex()).toBe("2");
     expect(document.querySelector('.prompt-panel[data-panel="0"] input[data-label="A"]').checked).toBe(true);
   });
 });

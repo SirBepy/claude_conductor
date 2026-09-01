@@ -16,7 +16,7 @@ import { mountView } from "./harness";
 
 declare global {
   interface Window {
-    __auqResult?: { submitted?: Record<string, string | string[]>; cancelled?: boolean };
+    __auqResult?: { submitted?: Record<string, string | string[]>; cancelled?: boolean; extra?: string };
     __auqDraftChanges?: Array<{ freeText: [number, string][]; selections: [number, string | string[]][]; activeTab: number }>;
   }
 }
@@ -314,5 +314,73 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
     changes = await page.evaluate(() => window.__auqDraftChanges ?? []);
     expect(changes.at(-1)).toEqual({ freeText: [[0, "A (typed)"]], selections: [[1, ["X"]]], activeTab: 1 });
+  });
+});
+
+// ai_todo 821: a single question - even with supportsExtras (the review
+// panel's only other reason to exist) - never gets a second panel or a live
+// pager. The extra-message box rides along inline instead.
+test.describe("view-harness / AUQ single-question card has no review step", () => {
+  async function openSingleCard(page: import("@playwright/test").Page): Promise<void> {
+    await page.evaluate(async () => {
+      const mod = await import("/views/sessions/permission-modal/question-ui.ts");
+      window.__auqResult = {};
+      mod.renderQuestionUI({
+        questions: [{ question: "Deploy now?", header: "Deploy", options: [{ label: "Yes" }, { label: "No" }] }],
+        titleIcon: "ph-chat-circle-dots",
+        submitLabel: "Submit",
+        submitIcon: "ph-paper-plane-right",
+        cancelLabel: "Skip",
+        supportsExtras: true,
+        onSubmit: (answers, extras) => {
+          window.__auqResult!.submitted = answers;
+          window.__auqResult!.extra = extras.additionalMessage;
+        },
+        onCancel: () => { window.__auqResult!.cancelled = true; },
+      });
+    });
+  }
+
+  test("renders one panel with no pager arrows and the extra-message box inline", async ({ page }) => {
+    await mountView(page);
+    await openSingleCard(page);
+
+    const card = page.locator(".prompt-card");
+    await expect(card).toBeVisible();
+    await expect(card.locator(".prompt-panel")).toHaveCount(1);
+    await expect(card.locator(".prompt-pager [data-nav]")).toHaveCount(0);
+    await expect(card.locator(".prompt-extra-input")).toBeVisible();
+  });
+
+  test("one click submits with the extra message folded in - no review step to page through", async ({ page }) => {
+    await mountView(page);
+    await openSingleCard(page);
+
+    const card = page.locator(".prompt-card");
+    await card.locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]').click();
+    await card.locator(".prompt-extra-input").fill("please double-check staging first");
+    await card.locator('[data-act="primary"]').click();
+
+    const result = await page.evaluate(() => window.__auqResult);
+    expect(result?.submitted).toEqual({ "Deploy now?": "Yes" });
+    expect(result?.extra).toBe("please double-check staging first");
+    await expect(card).toHaveCount(0);
+  });
+
+  test("Ctrl+Enter submits directly once answered - never advances to a hidden review tab", async ({ page }) => {
+    await mountView(page);
+    await openSingleCard(page);
+
+    const card = page.locator(".prompt-card");
+    await card.locator(".prompt-extra-input").press("Control+Enter");
+    expect(await page.evaluate(() => window.__auqResult?.submitted)).toBeUndefined();
+    await expect(card).toHaveCount(1);
+
+    await card.locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]').click();
+    await card.locator(".prompt-extra-input").press("Control+Enter");
+
+    const result = await page.evaluate(() => window.__auqResult);
+    expect(result?.submitted).toEqual({ "Deploy now?": "Yes" });
+    await expect(card).toHaveCount(0);
   });
 });

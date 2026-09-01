@@ -43,10 +43,10 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     return { ...q, options: [...q.options, { label: NONE_LABEL }] };
   });
 
-  // The recap/review step is only worth a panel when there's something to
-  // review across multiple questions, or extras (message/attachments) to add -
-  // a single bare question goes straight from its own panel to Submit.
-  const hasSummary = Boolean(opts.supportsExtras) || questions.length > 1;
+  // The recap/review step is only worth a panel when there's more than one
+  // question to review (ai_todo 821) - a single question, extras or not,
+  // inlines the extra-message box under its own panel and goes to Submit.
+  const hasSummary = questions.length > 1;
   const totalPanels = questions.length + (hasSummary ? 1 : 0);
 
   const selections = new Map<number, Selection>();
