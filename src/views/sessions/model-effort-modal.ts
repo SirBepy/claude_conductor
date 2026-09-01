@@ -3,7 +3,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
 import type { Account } from "../../shared/api";
-import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
+import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel, registerHostOptions } from "../../shared/modal";
 import { settingsData, projectsListData, accountsListData, projectAccountData } from "./new-session-cache";
 import { resolveModelEffortData } from "./model-effort-data";
 import {
@@ -147,6 +147,13 @@ export async function openModelEffortModal(
 
       slider.positionAll(modelIdx(), effortIdx());
       slider.playFlip(flipFrom);
+
+      // Model stops are the only flat, number-selectable list here (todo
+      // 835) - they already carry the .me-key-hint badge. Effort/checkboxes
+      // aren't an ordered pick list, so they opt out.
+      registerHostOptions(() =>
+        Array.from(card.querySelectorAll<HTMLElement>('.slider-stop-label[data-kind="model"]')),
+      );
     }
 
     function attachHandlers() {
@@ -232,11 +239,6 @@ export async function openModelEffortModal(
       } else if (e.key === "Enter" && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         void startWithCurrentConfig();
-      } else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const idx = Number(e.key) - 1;
-        if (!models[idx]) return;
-        e.preventDefault();
-        commitSliderValue("model", idx);
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         // The model/effort sliders own arrow keys while focused (see
         // slider-controller.ts's own keydown wiring) - don't double-handle.
