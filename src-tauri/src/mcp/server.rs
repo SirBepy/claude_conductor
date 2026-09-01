@@ -321,7 +321,7 @@ mod tests {
         // One shared args blob: every arm just indexes into it, and Value
         // indexing on a missing key returns Null rather than panicking.
         let args = json!({
-            "tool_name": "x", "input": {}, "questions": [],
+            "tool_name": "x", "input": {}, "questions": [{"question": "q?"}],
             "cwd": "c", "prompt": "p", "text": "t", "target": null,
             "status": "done", "title": "t", "message": "m",
             "action": "add", "task": "task", "session_id": "s2",
