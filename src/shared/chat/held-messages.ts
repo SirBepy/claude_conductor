@@ -45,6 +45,8 @@ export interface HeldAttach {
   isDraftEmpty: () => boolean;
   isComposing: () => boolean;
   clearComposer: () => void;
+  /** Return focus to the composer's textarea (dropdown row Ctrl+Enter). */
+  focusComposer: () => void;
   getIsBusy: () => boolean;
   /** Re-evaluate the working-bar visibility + chip (-> updateThinkingBar). */
   onChange: () => void;

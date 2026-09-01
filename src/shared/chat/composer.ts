@@ -700,6 +700,12 @@ export class Composer {
     return blocks;
   }
 
+  /** Focus the textarea. Public so the held-messages controller can return
+   * focus here after closing the unsent-messages dropdown. */
+  focus(): void {
+    this.textarea?.focus();
+  }
+
   /** Reset the input, attachments, pasted blocks and persisted draft. Public so
    * the held-messages controller can clear after bundling the draft. */
   clearComposer(): void {

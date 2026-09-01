@@ -371,6 +371,7 @@ export async function renderPendingPane(
         isDraftEmpty: () => composer.isDraftEmpty(),
         isComposing: () => composer.isComposing(),
         clearComposer: () => composer.clearComposer(),
+        focusComposer: () => composer.focus(),
         getIsBusy: () => isCurrentSessionBusy(),
         onChange: () => updateThinkingBar(),
       });

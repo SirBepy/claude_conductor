@@ -109,6 +109,17 @@ export class HeldMessagesRender {
         else this.host.flushEditPush(item.id);
         this.host.onRowBlur();
       });
+      // Ctrl/Cmd+Enter saves this edit and closes the dropdown, handing focus
+      // back to the composer - a second Ctrl+Enter there sends the queue
+      // (Composer.handleCtrlEnter), so two presses mirrors "edit, then send".
+      row.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" || e.shiftKey || (!e.ctrlKey && !e.metaKey)) return;
+        e.preventDefault();
+        row.blur();
+        this.expanded = false;
+        this.renderChip();
+        this.host.getAttached()?.focusComposer();
+      });
       rows.appendChild(row);
     }
     dd.appendChild(rows);
