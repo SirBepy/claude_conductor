@@ -21,7 +21,7 @@ import {
 import type { PendingPrompt } from "./gating";
 import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
-import { showPermissionCard } from "./permission-card";
+import { showPermissionCard, showQuestionReplay } from "./permission-card";
 import { rerenderSidebar, showQuestionCard, dismissQuestionCard } from "./index";
 
 /**
@@ -155,5 +155,17 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   dismissQuestionCard();
   rerenderSidebar();
   surfacePending(pending, true);
+  return true;
+}
+
+/** Reopen an ANSWERED (or skipped/timed-out) transcript question card as a
+ *  read-only replay (todo 755) - a resolved prompt has left every
+ *  pending-prompt store, so the loaded transcript is the only source left.
+ *  False if the card isn't loaded, so the caller can toast instead. */
+export function reopenAnsweredPrompt(cardId?: string): boolean {
+  if (!cardId) return false;
+  const msg = state.renderer?.messages.find((m) => m.kind === "question" && m.id === cardId);
+  if (!msg) return false;
+  showQuestionReplay(msg);
   return true;
 }

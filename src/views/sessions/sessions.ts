@@ -36,6 +36,7 @@ import {
   getSelectedSessionId,
   reopenPendingPrompt,
 } from "./permission-modal";
+import { reopenAnsweredPrompt } from "./permission-modal/resurface";
 import { showToast } from "../../shared/toast";
 import {
   setPaneRef,
@@ -211,19 +212,25 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   initThinkingBar(pane);
   const teardownMobileKeyboard = initMobileKeyboard(view);
 
-  // Click an unanswered AUQ card to put the real (answerable) card back up.
-  // Gated on `.tool-qa-a--pending` so a resolved one doesn't reopen. Passing the
-  // card's id reopens the one CLICKED, not whichever the daemon hands back first;
-  // reopenPendingPrompt falls back to the daemon store, then the transcript.
+  // Click a question card in the transcript to reopen it. A still-pending one
+  // (gated on `.tool-qa-a--pending`) puts the real, answerable card back up;
+  // an already-resolved one pops a read-only replay instead (todo 755) - the
+  // question and whichever answer was given, dismissable, no submit control.
   pane.addEventListener("click", (e) => {
     const card = (e.target as HTMLElement).closest<HTMLElement>(".msg.question-card");
-    if (!card || !card.querySelector(".tool-qa-a--pending")) return;
+    if (!card) return;
     const sid = getSelectedSessionId();
     if (!sid) return;
-    void (async () => {
-      if (await reopenPendingPrompt(sid, card.dataset.questionId)) return;
+    if (card.querySelector(".tool-qa-a--pending")) {
+      void (async () => {
+        if (await reopenPendingPrompt(sid, card.dataset.questionId)) return;
+        showToast("This question can no longer be reopened.");
+      })();
+      return;
+    }
+    if (!reopenAnsweredPrompt(card.dataset.questionId)) {
       showToast("This question can no longer be reopened.");
-    })();
+    }
   });
 
   // ⤢ on a show_preview card: resolve its slug to the daemon's snapshot id and

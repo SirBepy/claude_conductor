@@ -6,6 +6,8 @@ import { extractQuestions, formatAnswersAsMessage, renderQuestionUI } from "./qu
 import { clearActivePermissionCardIfCurrent, setActivePermissionCard } from "./question-state";
 import { resolveCwdForSession, storePendingPrompt } from "./gating";
 import { isAskQuestionTool } from "../../../shared/chat/tool-meta";
+import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
+import type { RenderedMessage } from "../../../shared/chat/chat-transforms";
 import type { PermissionRequestedPayload, QuestionDraft } from "./types";
 
 // Deliberately not "User skipped the question." - that exact string once
@@ -143,4 +145,33 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
     .addEventListener("click", () => void respond("deny"));
   host.querySelector<HTMLButtonElement>('[data-act="always"]')
     ?.addEventListener("click", () => void alwaysAllow());
+}
+
+/** Read-only replay of an answered/skipped/timed-out transcript question card
+ *  (todo 755): tool-views.ts's own markup for that card, mounted in the
+ *  floating shell behind a Close button - no submit, no second renderer.
+ *  Dismissable like the live card above (Escape / ensureHost() swap). */
+export function showQuestionReplay(m: RenderedMessage): void {
+  const { host } = ensureHost();
+
+  const close = () => { clearHost(); teardownEsc(); };
+  const escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") close();
+  };
+  document.addEventListener("keydown", escHandler);
+  const teardownEsc = () => {
+    document.removeEventListener("keydown", escHandler);
+    clearActivePermissionCardIfCurrent(teardownEsc);
+  };
+  setActivePermissionCard(teardownEsc);
+
+  const title = `
+    <span class="prompt-card__title">
+      <i class="ph ph-chat-circle-dots"></i>
+      Question
+    </span>
+  `;
+  const footer = `<button type="button" class="btn btn-secondary" data-act="close">Close</button>`;
+  host.innerHTML = renderCardShell(title, renderQuestionCardHtml(m), footer);
+  host.querySelector<HTMLButtonElement>('[data-act="close"]')!.addEventListener("click", close);
 }
