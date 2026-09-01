@@ -14,6 +14,9 @@ on:
 permissions:
   contents: write
   actions: read
+  # The Claude Code Action authenticates by exchanging a GitHub OIDC token;
+  # without this the step dies on "Could not fetch an OIDC token" before it runs.
+  id-token: write
 
 jobs:
   fix:
