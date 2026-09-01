@@ -15,6 +15,7 @@ import {
 import { attachChipKeyboardActivation } from "../../shared/account-chip";
 import { createCharacterPane, cancelCharacterPaneSound, type CharacterPane } from "./character-pane";
 import { createSliderController, type SliderController, type SliderKind } from "./slider-controller";
+import { createModelProbeController, type ModelProbeController } from "./model-effort-probe";
 import {
   EFFORTS,
   type SessionConfig,
@@ -59,20 +60,6 @@ export async function openModelEffortModal(
     // NOT lastChoice, which doesn't store them. Both default on.
     let autoAccept = true;
     let remote = true;
-    // Per-model availability from the count_tokens probe. Empty until the probe
-    // resolves; absent/true => model is selectable. A disabled model (e.g. Fable
-    // 5 when Anthropic has it off) stays clickable but blocks "Start session".
-    const availability: Record<string, boolean> = {};
-    // Set when the backend's CLI-driven token-refresh retry still 401'd - the
-    // account is genuinely logged out, not just "this model is disabled".
-    // Distinct from per-model `availability` so the dialog shows a reconnect
-    // prompt instead of a per-model "disabled" warning, and blocks Start
-    // regardless of which model is selected (none of the probe data is
-    // trustworthy while auth is expired).
-    let authExpired = false;
-    // True while the availability probe below is in flight - the only one of
-    // the modal's two background loads with no prior loading affordance.
-    let modelProbeLoading = false;
     // Replaces native <details>'s own open state now that the trigger lives
     // in the footer row instead of directly above the content it reveals.
     let moreOpen = false;
@@ -86,61 +73,15 @@ export async function openModelEffortModal(
 
     function modelIdx(): number { return Math.max(0, models.indexOf(model)); }
     function effortIdx(): number { return Math.max(0, EFFORTS.indexOf(effort as typeof EFFORTS[number])); }
-    function modelDisabled(): boolean { return availability[model] === false; }
-    function sessionBlocked(): boolean { return authExpired || modelDisabled(); }
+    function modelDisabled(): boolean { return probe.state.availability[model] === false; }
+    function sessionBlocked(): boolean { return probe.state.authExpired || modelDisabled(); }
 
-    // Map family -> latest id (count_tokens rejects bare aliases), probe
-    // those, key results back by family. Populated in loadAndBuild() below
-    // once `models` is known.
-    const idByFamily = new Map<string, string>();
-    // Which account the in-flight/last probe ran under, so a chip click that
-    // lands back on the already-probed account doesn't re-fire it.
-    let probedAccountId: string | null | undefined;
-    // Stops a slow reply from a previously-picked account overwriting a
-    // newer one's results.
-    let probeSeq = 0;
-
-    /** Probes the picked account, since availability and auth are per-account:
-     * one expired account must not disable "Start session" for the others
-     * (todo 758). Fails open on a transport error; `authExpired: true` never
-     * does - see api.ts's ModelAvailability doc. */
-    function runModelProbe(): void {
-      if (idByFamily.size === 0) return;
-      const acct = accountField.accountId;
-      probedAccountId = acct;
-      const seq = ++probeSeq;
-      modelProbeLoading = true;
-      void api.probeModelsAvailability([...idByFamily.values()], acct)
-        .then((results) => {
-          if (seq !== probeSeq) return;
-          authExpired = results.some((r) => r.authExpired);
-          const byId = new Map(results.map((r) => [r.id, r.available]));
-          for (const [fam, id] of idByFamily) availability[fam] = byId.get(id) ?? true;
-        })
-        .catch(() => { /* fail open - leave all models enabled */ })
-        .finally(() => {
-          if (seq !== probeSeq) return;
-          modelProbeLoading = false;
-          renderBody();
-        });
-    }
-
-    function onAccountPicked(): void {
-      if (accountField.accountId !== probedAccountId) {
-        authExpired = false;
-        runModelProbe();
-      }
-      renderBody();
-    }
-
-    function cycleAccount(delta: number): void {
-      if (accounts.length === 0) return;
-      const cur = Math.max(0, accounts.findIndex((a) => a.id === accountField.accountId));
-      const next = accounts[(cur + delta + accounts.length) % accounts.length];
-      if (!next) return;
-      accountField.accountId = next.id;
-      onAccountPicked();
-    }
+    // Model-availability probe + account cycling: see model-effort-probe.ts.
+    const probe: ModelProbeController = createModelProbeController({
+      accountField,
+      getAccounts: () => accounts,
+      renderBody,
+    });
 
     function commitSliderValue(kind: SliderKind, idx: number): void {
       if (kind === "model") {
@@ -178,11 +119,11 @@ export async function openModelEffortModal(
               </div>
               ${renderAccountFieldHtml(accountField, { accounts })}
 
-              ${slider.html("model", "Model", modelIdx(), models.map(modelDisplayLabel), true, modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : "")}
+              ${slider.html("model", "Model", modelIdx(), models.map(modelDisplayLabel), true, probe.state.modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : "")}
 
               ${moreOpen ? `<div class="me-more-body">${slider.html("effort", "Effort", effortIdx(), [...EFFORTS], false)}${checkboxesHtml}</div>` : ""}
 
-              ${authExpired
+              ${probe.state.authExpired
                 ? `<div class="me-model-warning" role="alert">Claude login session expired - reconnect (run <code>claude</code> in a terminal to log back in), then reopen this dialog</div>`
                 : modelDisabled()
                   ? `<div class="me-model-warning" role="alert">${escapeHtml(modelDisplayLabel(model))} is disabled, please choose another model</div>`
@@ -225,7 +166,7 @@ export async function openModelEffortModal(
       });
 
       // ── Account picker (multi-account milestone 04) ──────────────────────────
-      attachAccountFieldHandlers(card, accountField, onAccountPicked, () => {
+      attachAccountFieldHandlers(card, accountField, probe.onAccountPicked, () => {
         close(null);
         // Route through the dashboard window rather than this window's own
         // router - navigating this (chats) window to settings-accounts left
@@ -301,7 +242,7 @@ export async function openModelEffortModal(
         // slider-controller.ts's own keydown wiring) - don't double-handle.
         if ((document.activeElement as HTMLElement | null)?.closest(".me-slider-wrap")) return;
         e.preventDefault();
-        cycleAccount(e.key === "ArrowRight" ? 1 : -1);
+        probe.cycleAccount(e.key === "ArrowRight" ? 1 : -1);
       }
     }
 
@@ -343,7 +284,7 @@ export async function openModelEffortModal(
       preferredAccountId = data.preferredAccountId;
       accounts = data.accounts;
       accountField.accountId = data.accountId;
-      for (const [fam, id] of data.idByFamily) idByFamily.set(fam, id);
+      probe.seedIdByFamily(data.idByFamily);
 
       void presentHostCard(() => {
         render(
@@ -362,13 +303,13 @@ export async function openModelEffortModal(
         charPane = createCharacterPane(card, projectId);
         slider = createSliderController(card, { modelIdx, effortIdx, onCommit: commitSliderValue });
 
-        modelProbeLoading = idByFamily.size > 0;
+        probe.primeLoadingFlag();
         renderBody();
 
         // ── Load character pool in background (see character-pane.ts) ────────
         charPane.loadPool();
 
-        runModelProbe();
+        probe.runProbe();
       });
     }
 
