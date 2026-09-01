@@ -109,3 +109,35 @@ describe("todo 789: .author-group-panel's own [hidden] must actually hide it", (
     expect(window.getComputedStyle(panel).display).toBe("none");
   });
 });
+
+// Todo 790: hashStr(sessionId) % PALETTE_SIZE has no export, so this locks
+// the mapping via the rendered .author-avatar class, the same surface a
+// hash/palette-size change would actually break.
+describe("todo 790: avatar palette mapping is stable", () => {
+  const golden = [
+    ["peer-a", "author-color-4"],
+    ["peer-b", "author-color-3"],
+    ["peer-gamma", "author-color-0"],
+    ["session-xyz-123", "author-color-3"],
+  ];
+
+  it("maps fixed session ids to their expected palette class", () => {
+    for (const [id, expectedClass] of golden) {
+      const host = footer();
+      foldAuthoredIntoStrip([userMsg(id, "hi")], [authoredEl()], 0, 1, host);
+      const avatar = host.querySelector(".author-avatar");
+      expect(avatar.className).toContain(expectedClass);
+    }
+  });
+
+  it("the same session id maps to the same class across separate calls", () => {
+    const hostA = footer();
+    const hostB = footer();
+    foldAuthoredIntoStrip([userMsg("peer-a", "one")], [authoredEl()], 0, 1, hostA);
+    foldAuthoredIntoStrip([userMsg("peer-a", "two")], [authoredEl()], 0, 1, hostB);
+
+    const classA = hostA.querySelector(".author-avatar").className;
+    const classB = hostB.querySelector(".author-avatar").className;
+    expect(classA).toBe(classB);
+  });
+});
