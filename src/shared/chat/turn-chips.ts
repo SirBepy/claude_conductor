@@ -6,7 +6,8 @@ import {
   type TodoChecklistState,
   type TodoStepStatus,
 } from "./turn-todo-checklist";
-import { ensureMainStrip, absorbFooterContents } from "./tool-strip";
+import { ensureMainStrip } from "./tool-strip";
+import { absorbFooterContents } from "./tool-strip-merge";
 import { META_KIND_ICONS, type MetaTurnKind } from "./chat-classifiers";
 import {
   formatTurnDuration,
