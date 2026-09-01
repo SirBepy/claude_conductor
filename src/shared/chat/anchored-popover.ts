@@ -80,7 +80,10 @@ export function openActionPopover(opts: ActionPopoverOptions): ActionPopoverHand
     e.preventDefault();
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const delta = e.key === "ArrowDown" ? 1 : -1;
-    buttons[(current + delta + buttons.length) % buttons.length]?.focus();
+    // -1 (focus outside the button set) must not fall through the modulo as-is:
+    // that landed ArrowUp on the second-to-last row instead of the last.
+    const from = current === -1 ? (delta > 0 ? -1 : 0) : current;
+    buttons[(from + delta + buttons.length) % buttons.length]?.focus();
   });
   buttons[opts.defaultIndex ?? 0]?.focus();
 
