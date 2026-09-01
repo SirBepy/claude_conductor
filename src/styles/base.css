@@ -68,6 +68,8 @@ body {
     letter-spacing: -0.01em;
 }
 
+/* Fixed 32px icon button. For a caller-sized 24-28px target, use
+   .icon-btn-sq instead. */
 .icon-btn {
     background: none;
     border: none;
@@ -97,10 +99,10 @@ body {
     transform: scale(0.92);
 }
 
-/* Callers add this alongside their own width/height/font-size rule. Must
-   supply `padding: 0` - the bare `button {}` reset below sets `7px 16px`,
-   which forces an unstyled square button wider than its own box and
-   renders its icon off-center. */
+/* Caller-sized 24-28px icon button, unlike the fixed 32px .icon-btn above.
+   Callers add this alongside their own width/height/font-size rule and
+   must supply `padding: 0` - the bare `button {}` reset below sets
+   `7px 16px`, forcing an unstyled square button wider than its own box. */
 .icon-btn-sq {
     border: 0;
     background: transparent;
