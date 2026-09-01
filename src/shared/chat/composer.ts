@@ -11,7 +11,6 @@ import { FileProvider } from "./caret-popup/providers/file";
 import type { SuggestProvider } from "./caret-popup/types";
 import type { ChatRenderer } from "./chat-renderer";
 import { parseBuiltin, HANDLERS, type BuiltinContext } from "./builtins";
-import { highlightComposerInput } from "./chat-transforms";
 import { ComposerCore } from "./composer-core/core";
 import { ComposerVoice } from "./voice/composer-voice";
 import { ComposerPtt } from "./voice/composer-ptt";
@@ -25,6 +24,7 @@ import { recordSent, moveSentOutbox } from "./sent-outbox";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
+import { ComposerHighlight } from "./composer-highlight";
 import { isMobileViewport } from "../mobile-viewport";
 import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
 import * as shortcuts from "../shortcuts";
@@ -92,6 +92,7 @@ export class Composer {
   // doesn't fire out from under the user mid-type.
   private lastKeyAt = 0;
   private undo: ComposerUndo;
+  private highlight: ComposerHighlight;
   private cv: ComposerVoice;
   private ptt: ComposerPtt;
   private att: ComposerAttachments;
@@ -159,6 +160,12 @@ export class Composer {
     this.cv = new ComposerVoice({
       onAfterEdit: () => { this.autoResize(); this.updateHighlight(); this.persistDraft(); this.opts.onDraftActivity?.(); },
       onHighlightOnly: () => this.updateHighlight(),
+    });
+    this.highlight = new ComposerHighlight({
+      getText: () => this.textarea?.value ?? "",
+      isRecording: () => this.cv.state === "recording",
+      getVolatileLen: () => this.cv.volatileLen,
+      getCommitPos: () => this.cv.commitPos,
     });
     // Push-to-talk (desktop only): hold the bound key / mouse side-button to
     // record, release to stop.
@@ -357,7 +364,7 @@ export class Composer {
           ? ([this.slash, this.file] as unknown as SuggestProvider<unknown>[])
           : [],
         paste: interactive ? { handlePaste: (e) => this.att.handlePaste(e) } : undefined,
-        computeHighlightHtml: () => this.computeHighlightHtml(),
+        computeHighlightHtml: () => this.highlight.computeHtml(),
         onInput: interactive
           ? () => {
               this.lastKeyAt = Date.now();
@@ -427,30 +434,12 @@ export class Composer {
 
   // Repaint the highlight backdrop (colors known /slash commands) behind the
   // transparent-text textarea, and keep it scroll-aligned. Delegates to the
-  // shared core; computeHighlightHtml() below supplies the voice-volatile
-  // split this composer alone needs.
+  // shared core; `this.highlight` supplies the voice-volatile split this
+  // composer alone needs.
   private updateHighlight(): void {
     this.core?.updateHighlight();
   }
 
-  // While recording, paint the volatile (still-revising) voice tail faintly so
-  // it reads as "live, not yet committed". Committed voice text renders
-  // normally. Voice/PTT stay main-composer-only, so this stays here rather
-  // than in the shared core.
-  private computeHighlightHtml(): string {
-    const val = this.textarea?.value ?? "";
-    if (this.cv.state === "recording" && this.cv.volatileLen > 0) {
-      const a = val.slice(0, this.cv.commitPos);
-      const vol = val.slice(this.cv.commitPos, this.cv.commitPos + this.cv.volatileLen);
-      const b = val.slice(this.cv.commitPos + this.cv.volatileLen);
-      return (
-        highlightComposerInput(a) +
-        `<span class="voice-volatile">${highlightComposerInput(vol)}</span>` +
-        highlightComposerInput(b)
-      );
-    }
-    return highlightComposerInput(val);
-  }
 
   /** Build + open the split-send chevron menu: Voice + (mobile-only) Attach +
    *  Schedule. Voice lives here on both platforms now - the mic button itself
