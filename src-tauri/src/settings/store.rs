@@ -644,4 +644,33 @@ mod tests {
         assert_eq!(s.default_account_id.as_deref(), Some("11111111-1111-1111-1111-111111111111"));
         assert_eq!(s.extra.get("defaultAutoAllow"), Some(&serde_json::json!(true)));
     }
+
+    /// Todo 787: `AutomationConfig` carries `#[serde(default)]`, so a project's
+    /// `automation` object predating a newer field no longer fails that
+    /// project entry. Remove that attribute and this test goes red.
+    #[test]
+    fn an_automation_object_predating_a_field_still_parses() {
+        let mut v: serde_json::Value = serde_json::from_str(BROKEN_FIXTURE).unwrap();
+        v["projects"] = serde_json::json!([
+            {
+                "id": "keep",
+                "path": "C:/keep",
+                "name": "keep",
+                "created_at": "2026-01-01T00:00:00Z",
+                "automation": { "enabled": true, "autostart_on_boot": true }
+            }
+        ]);
+        let s = serde_json::from_value::<Settings>(v)
+            .expect("an older automation object must not reject the project entry");
+
+        assert_eq!(s.projects.len(), 1);
+        let automation = s.projects[0]
+            .automation
+            .as_ref()
+            .expect("automation must still parse");
+        assert!(automation.enabled);
+        assert!(automation.autostart_on_boot);
+        assert_eq!(automation.continue_flag, bool::default());
+        assert_eq!(automation.session_name_prefix, None);
+    }
 }

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default, ts_rs::TS)]
+#[serde(default)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct AutomationConfig {
     pub enabled: bool,
