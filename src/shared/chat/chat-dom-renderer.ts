@@ -21,6 +21,9 @@ import type { ChatRenderer } from "./chat-renderer";
 // moved their implementation to chat-scroll.ts).
 export { isElNearBottom, isNearBottom, scrollToBottom, beginRevealHold, revealTranscript, scrollToBottomWhenSettled } from "./chat-scroll";
 
+/** Dataset key marking a row's footer, independent of DOM ancestry (todo 808). */
+const FOOTER_KEY_ATTR = "foldedFooterKey";
+
 export function describeActivity(toolName: string, input: unknown): string {
   const { target } = toolSummary(toolName, input);
   let s: string;
@@ -188,12 +191,19 @@ export function foldClosedRange(
   tsSpanMs: number,
 ): void {
   if (end <= start) return;
-  // An existing footer for this turn: rows folded earlier live inside its
-  // strip buckets.
+  // An existing footer: rows folded earlier moved into it (tool rows) OR
+  // carry the marker stamped below (authored rows never move, todo 808).
   let footer: HTMLElement | null = null;
   for (let i = start; i < end; i++) {
-    const f = r.messageEls[i]?.closest<HTMLElement>(".turn-footer");
-    if (f) { footer = f; break; }
+    const el = r.messageEls[i];
+    if (!el) continue;
+    const viaAncestry = el.closest<HTMLElement>(".turn-footer");
+    if (viaAncestry) { footer = viaAncestry; break; }
+    const markedKey = Number(el.dataset[FOOTER_KEY_ATTR]);
+    if (el.dataset[FOOTER_KEY_ATTR] !== undefined && Number.isFinite(markedKey)) {
+      footer = r.turnFooters.getOrCreateFooter(markedKey);
+      break;
+    }
   }
   const totals = usage
     ? { ...usage, durationMs: usage.durationMs > 0 ? usage.durationMs : tsSpanMs }
@@ -241,6 +251,13 @@ export function foldClosedRange(
       detail: metaRow.metaDetail ?? "",
       streakCount: metaRows.length,
     });
+  }
+  // Marks rows that never physically moved (authored) for the lookup above.
+  if (key !== null) {
+    for (let i = start; i < end; i++) {
+      const el = r.messageEls[i];
+      if (el) el.dataset[FOOTER_KEY_ATTR] = String(key);
+    }
   }
   applyTurnCollapse(r.messages, r.messageEls, start, end, footer);
 }

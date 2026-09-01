@@ -13,10 +13,21 @@ vi.mock("../src/shared/projects.ts", () => ({
   hydrateCharacterAvatars: vi.fn(async () => {}),
 }));
 
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
+vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
+
 import { hydrateCharacterAvatars } from "../src/shared/projects.ts";
 import { foldAuthoredIntoStrip } from "../src/shared/chat/author-message-group.ts";
+import { foldClosedRange } from "../src/shared/chat/chat-dom-renderer.ts";
 
 const userCssPath = fileURLToPath(new URL("../src/shared/chat/chat-messages-user.css", import.meta.url));
+
+// chat-renderer.ts's transitive imports touch `window` at module-eval time
+// (sidemenu.ts), before this file's beforeEach installs the real jsdom
+// window - a placeholder makes that side effect a no-op, same pattern as
+// chat-pagination-fold.test.mjs.
+if (!globalThis.window) globalThis.window = {};
+const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 
 beforeEach(() => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -25,6 +36,14 @@ beforeEach(() => {
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;
   globalThis.Node = dom.window.Node;
+  globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  };
+  globalThis.window.__TAURI__ = undefined;
+  invokeMock.mockReset();
 });
 
 // Mirrors the hidden placeholder renderMessage() produces for an authored
@@ -166,5 +185,37 @@ describe("todo 790: avatar palette mapping is stable", () => {
     const classA = hostA.querySelector(".author-avatar").className;
     const classB = hostB.querySelector(".author-avatar").className;
     expect(classA).toBe(classB);
+  });
+});
+
+// Todo 808: foldAuthoredIntoStrip never moves the authored placeholder into
+// the footer, so a turn made ENTIRELY of peer messages has no DOM ancestry
+// for foldClosedRange's `.closest(".turn-footer")` detection to find.
+describe("todo 808: foldClosedRange reuses a peer-only turn's footer across pagination", () => {
+  it("a prepend revealing one more authored message stays on one footer", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const r = new ChatRenderer(container);
+
+    const msgA = { kind: "user", content: [{ type: "text", text: "first" }], ts: 0, authorSessionId: "peer-a" };
+    const elA = authoredEl();
+    container.appendChild(elA);
+    r.messages = [msgA];
+    r.messageEls = [elA];
+
+    foldClosedRange(r, 0, 1, null, 0);
+    expect(container.querySelectorAll(".turn-footer")).toHaveLength(1);
+
+    // Pagination prepends an OLDER authored message of the same turn, ahead
+    // of the already-folded one - mirrors chat-pagination.ts's trailing-range
+    // heal, whose range spans both previously-rendered and newly-prepended rows.
+    const msgB = { kind: "user", content: [{ type: "text", text: "older" }], ts: 0, authorSessionId: "peer-a" };
+    const elB = authoredEl();
+    container.insertBefore(elB, elA);
+    r.messages = [msgB, msgA];
+    r.messageEls = [elB, elA];
+
+    foldClosedRange(r, 0, 2, null, 0);
+    expect(container.querySelectorAll(".turn-footer")).toHaveLength(1);
   });
 });
