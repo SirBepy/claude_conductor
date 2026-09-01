@@ -2,10 +2,10 @@ import { html, render } from "lit-html";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
-import type { Account, ProjectConfig } from "../../shared/api";
+import type { Account } from "../../shared/api";
 import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
 import { settingsData, projectsListData, accountsListData, projectAccountData } from "./new-session-cache";
-import { resolveInitialAccountId } from "./account-picker-logic";
+import { resolveModelEffortData } from "./model-effort-data";
 import {
   accountPickIncomplete,
   renderAccountFieldHtml,
@@ -18,11 +18,7 @@ import { createSliderController, type SliderController, type SliderKind } from "
 import {
   EFFORTS,
   type SessionConfig,
-  readLastChoice,
-  readModels,
-  readDefaultFlags,
   modelDisplayLabel,
-  latestIdForFamily,
 } from "../../shared/effort-presets";
 
 export type { SessionConfig };
@@ -331,51 +327,23 @@ export async function openModelEffortModal(
     }
 
     async function loadAndBuild(): Promise<void> {
-      const settingsRaw = settingsRead.cached !== undefined
-        ? settingsRead.cached
-        : await settingsRead.ready.catch(() => ({}) as Record<string, unknown>);
-      models = readModels(settingsRaw);
-      const defaultFlags = readDefaultFlags(settingsRaw);
-      // No presets anymore - first-ever session in a project defaults to Opus/high.
-      const initial = readLastChoice(settingsRaw, projectPath) ?? { model: "opus", effort: "high" };
-      model = initial.model;
-      effort = initial.effort;
-      autoAccept = defaultFlags.autoAccept;
-      remote = defaultFlags.remote;
-
-      // Resolve projectId for whitelist + live-taken dedup, and the project's
-      // bound account (if any) for the account picker below.
-      const projectsListVal: ProjectConfig[] = projectsRead.cached !== undefined
-        ? projectsRead.cached
-        : await projectsRead.ready.catch((): ProjectConfig[] => []);
-      const proj = projectsListVal.find((p) => String(p.path) === projectPath) as
-        | { id: string; preferred_account_id?: string | null }
-        | undefined;
-      projectId = proj?.id ?? null;
-      preferredAccountId = proj?.preferred_account_id ?? null;
-      // Backend-normalized override: resolves worktree/casing cases the raw
-      // find() above misses. On throw (e.g. remote transport, no mirror yet)
-      // keep the raw-match result from above as a best-effort fallback.
-      try {
-        preferredAccountId = projectAccountRead.cached !== undefined
-          ? projectAccountRead.cached
-          : await projectAccountRead.ready;
-      } catch {
-        // keep raw-match fallback
-      }
-
-      // Account picker (multi-account milestone 04): resolve project binding ->
-      // default -> sole-account fallback -> null (ambiguous/empty registry).
-      accounts = accountsRead.cached !== undefined
-        ? accountsRead.cached
-        : await accountsRead.ready.catch((): Account[] => []);
-      const defaultAccountId = (settingsRaw["default_account_id"] as string | null | undefined) ?? null;
-      accountField.accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
-
-      for (const fam of models) {
-        const id = latestIdForFamily(fam);
-        if (id) idByFamily.set(fam, id);
-      }
+      const data = await resolveModelEffortData(
+        projectPath,
+        settingsRead,
+        projectsRead,
+        accountsRead,
+        projectAccountRead,
+      );
+      models = data.models;
+      model = data.model;
+      effort = data.effort;
+      autoAccept = data.autoAccept;
+      remote = data.remote;
+      projectId = data.projectId;
+      preferredAccountId = data.preferredAccountId;
+      accounts = data.accounts;
+      accountField.accountId = data.accountId;
+      for (const [fam, id] of data.idByFamily) idByFamily.set(fam, id);
 
       void presentHostCard(() => {
         render(
