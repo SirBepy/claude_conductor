@@ -22,6 +22,7 @@ import type { PendingPrompt } from "./gating";
 import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
 import { showPermissionCard, showQuestionReplay } from "./permission-card";
+import { findQuestionIndexById } from "../../../shared/chat/chat-question-card";
 import { rerenderSidebar, showQuestionCard, dismissQuestionCard } from "./index";
 
 /**
@@ -164,8 +165,9 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
  *  False if the card isn't loaded, so the caller can toast instead. */
 export function reopenAnsweredPrompt(cardId?: string): boolean {
   if (!cardId) return false;
-  const msg = state.renderer?.messages.find((m) => m.kind === "question" && m.id === cardId);
-  if (!msg) return false;
-  showQuestionReplay(msg);
+  const messages = state.renderer?.messages ?? [];
+  const i = findQuestionIndexById(messages, cardId);
+  if (i === -1) return false;
+  showQuestionReplay(messages[i]!);
   return true;
 }
