@@ -28,6 +28,7 @@ import { ComposerHighlight } from "./composer-highlight";
 import { isMobileViewport } from "../mobile-viewport";
 import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
 import * as shortcuts from "../shortcuts";
+import { isAnyModalOpen } from "../modal-input-lock";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -115,6 +116,10 @@ export class Composer {
 
   private _globalKeydown = (e: KeyboardEvent): void => {
     if (this.disabled || !this.textarea || this.textarea.disabled) return;
+    // A modal's focused control (e.g. askConfirm's Cancel button) is
+    // non-editable, so modal-input-lock lets the keydown bubble here - this
+    // listener must not hijack it just because activeElement isn't a field.
+    if (isAnyModalOpen()) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key.length !== 1) return;
     const active = document.activeElement;
