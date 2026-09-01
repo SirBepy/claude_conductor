@@ -328,6 +328,9 @@ class PreviewTab implements RailTabHandle {
     }
   }
 
+  // No re-entry guard like chat-preview-card.ts's mountPreviewFrame: this
+  // rebuilds .pv-canvas fresh on every snapshot selection, so its iframe
+  // is never stale.
   private async renderIframe(): Promise<void> {
     if (!this.selected) return;
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");

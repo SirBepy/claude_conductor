@@ -47,7 +47,9 @@ export function renderPreviewCardHtml(m: RenderedMessage): string {
 }
 
 /** Stage the pushed document and point the card's iframe at it - the same
- *  `render_preview_doc` round-trip the rail uses. */
+ *  `render_preview_doc` round-trip preview-panel.ts's renderIframe uses.
+ *  Guards re-entry via `dataset.mounted`, unlike renderIframe, which
+ *  rebuilds its canvas fresh every time and needs no such guard. */
 export async function mountPreviewFrame(el: HTMLElement, m: RenderedMessage): Promise<void> {
   const iframe = el.querySelector<HTMLIFrameElement>(".pc-frame");
   if (!iframe || !m.previewHtml) return;
