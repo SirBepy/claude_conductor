@@ -1,5 +1,6 @@
 pub mod kinds;
 pub mod registry;
+pub mod registry_lifecycle;
 pub mod registry_flags;
 pub mod registry_account;
 pub mod registry_turn;
