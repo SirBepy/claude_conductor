@@ -211,7 +211,7 @@ async function maybeShowSettingsLoadNotice(): Promise<void> {
   }
 }
 
-function applyThemeFromSettings(s: SettingsShape): void {
+export function applyThemeFromSettings(s: SettingsShape): void {
   const fullId = (s.theme as string) || "void";
   const isLight = fullId.endsWith("-light");
   const baseId = isLight ? fullId.replace("-light", "") : fullId;
@@ -232,6 +232,21 @@ function coerceSettings(s: SettingsShape): SettingsShape {
   return s;
 }
 
+/** Coerce, store, and paint one settings fetch: theme + animated background.
+ *  Shared by initBoot()'s live-subscription path and any window that skips
+ *  initBoot() but still needs a one-shot settings apply (e.g. detached
+ *  single-session windows - see main.ts's detachedSessionId branch). */
+export function applySettingsToDocument(s: SettingsShape): SettingsShape {
+  const coerced = coerceSettings(s);
+  setSettings(coerced);
+  applyThemeFromSettings(coerced);
+  applyBackgroundFx(
+    !!coerced.backgroundEnabled,
+    coerced.backgroundVariant === "gradient" ? "gradient" : "pattern",
+  );
+  return coerced;
+}
+
 // ── Public entrypoint ──────────────────────────────────────────────────────
 export function initBoot(): void {
   // Initial data fetches: render once all three settle (success OR failure, so
@@ -243,15 +258,7 @@ export function initBoot(): void {
     onUsage: (h) => setUsageHistory(h),
     onTokens: (t) => setTokenHistory(t),
     onSettings: (s) => {
-      if (s) {
-        const coerced = coerceSettings(s);
-        setSettings(coerced);
-        applyThemeFromSettings(coerced);
-        applyBackgroundFx(
-          !!coerced.backgroundEnabled,
-          coerced.backgroundVariant === "gradient" ? "gradient" : "pattern",
-        );
-      }
+      if (s) applySettingsToDocument(s);
     },
     onReady: () => {
       refreshDashboardView();

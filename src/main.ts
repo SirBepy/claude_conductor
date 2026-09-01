@@ -8,7 +8,8 @@ import "./styles/base.css";
 import "./styles/widgets.css";
 
 import { mountRouter, registerView } from "./router";
-import { initBoot } from "./shared/boot";
+import { initBoot, applySettingsToDocument } from "./shared/boot";
+import { api } from "./shared/api";
 import { ensureRemoteToken } from "./shared/remote-gate";
 import { isRemote } from "./shared/transport";
 import { showView } from "./shared/navigation";
@@ -301,8 +302,11 @@ if (detachedSessionId) {
   document.body.classList.add("detached-mode");
   // Hide all static legacy views from index.html so only #app renders.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
+  // Skip mountRouter + initBoot's live-subscription wiring (this window is
+  // single-purpose), but still fetch settings once so theme/background match
+  // the rest of the app instead of index.html's static defaults.
+  void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
   void import("./views/sessions/sessions").then((m) => m.renderDetachedSession(app, detachedSessionId));
-  // Skip mountRouter + sidemenu wiring; this window is single-purpose.
 } else if (isScheduleWindow) {
   // Solo calendar render. Hide the static legacy views and mount the schedule
   // view straight into #app; no router, no boot (this window only shows the
