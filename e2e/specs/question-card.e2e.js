@@ -104,18 +104,13 @@ describe("AskUserQuestion card relay (frontend hop)", () => {
     );
   });
 
-  it("selecting an option + Next + submit clears the card", async () => {
+  it("selecting an option + submit clears the card", async () => {
     await browser.execute(() => {
       const opt = Array.from(document.querySelectorAll(".prompt-opt")).find((el) => el.textContent.includes("Tabs"));
       opt?.querySelector("input")?.click();
     });
-    // showQuestionCard always sets supportsExtras, so even a single question
-    // gets a review panel - the footer button is Next here, Submit only on review.
-    await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.click());
-    await browser.waitUntil(
-      async () => browser.execute(() => document.querySelector(".prompt-panel.is-active .prompt-summary") !== null),
-      { timeout: 5000, timeoutMsg: "never reached the review panel" }
-    );
+    // A one-question card submits in a single step (ai_todo 821); only two or
+    // more questions get a review panel.
     await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.click());
     const card = await $(".prompt-card");
     await card.waitForExist({ reverse: true, timeout: 8000 }).catch(() => {});
