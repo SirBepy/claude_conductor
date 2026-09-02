@@ -47,6 +47,7 @@ test.describe("view-harness / delivered answer sends no duplicate message", () =
         isDraftEmpty: () => true,
         isComposing: () => false,
         clearComposer: () => {},
+        focusComposer: () => {},
         getIsBusy: () => false,
         onChange: () => {},
       });
@@ -99,6 +100,7 @@ test.describe("view-harness / delivered answer sends no duplicate message", () =
         isDraftEmpty: () => true,
         isComposing: () => false,
         clearComposer: () => {},
+        focusComposer: () => {},
         getIsBusy: () => false,
         onChange: () => {},
       });

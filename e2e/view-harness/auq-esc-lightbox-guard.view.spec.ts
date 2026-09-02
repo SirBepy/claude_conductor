@@ -8,7 +8,10 @@ import { mountView } from "./harness";
 
 declare global {
   interface Window {
-    __auqResult?: { submitted?: Record<string, string | string[]>; cancelled?: boolean };
+    // Must stay identical to auq-flow.view.spec.ts's declaration: TS merges
+    // global interfaces, and a property declared twice with differing types is
+    // an error in whichever file declares it second.
+    __auqResult?: { submitted?: Record<string, string | string[]>; cancelled?: boolean; extra?: string };
   }
 }
 

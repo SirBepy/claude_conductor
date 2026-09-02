@@ -9,8 +9,12 @@ import { describe, it, expect } from "vitest";
 import { isQuestionAnswered, computeAnswer } from "../src/views/sessions/permission-modal/question-ui.ts";
 
 describe("isQuestionAnswered", () => {
-  it("a question with no options is always answered (free-text-only, optional)", () => {
-    expect(isQuestionAnswered({ question: "Notes?" }, "", undefined)).toBe(true);
+  // Contract flipped by 3ed8494c: an options-less question is free-text-only,
+  // not exempt, so an empty one stays unanswered and Submit marks it with
+  // NO_ANSWER_TEXT rather than silently counting it as done.
+  it("a question with no options is unanswered until something is typed", () => {
+    expect(isQuestionAnswered({ question: "Notes?" }, "", undefined)).toBe(false);
+    expect(isQuestionAnswered({ question: "Notes?" }, "hi", undefined)).toBe(true);
   });
 
   it("free text alone answers ANY question type, regardless of selection", () => {

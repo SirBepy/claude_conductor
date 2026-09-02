@@ -51,6 +51,7 @@ test.describe("view-harness / AUQ review-step extra message rides in the SAME se
         isDraftEmpty: () => true,
         isComposing: () => false,
         clearComposer: () => {},
+        focusComposer: () => {},
         getIsBusy: () => false,
         onChange: () => {},
       });
