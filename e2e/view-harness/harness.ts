@@ -23,7 +23,7 @@
 // Events: `installMockTauri`'s event.listen registers callbacks; `fireEvent`
 // (below) is the drive side, for specs that push a backend event sequence.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -268,6 +268,11 @@ function sessionShotId(): string {
   if (pinned) return pinned;
   const sid = process.env.CLAUDE_CODE_SESSION_ID;
   const dir = path.join(homedir(), ".claude", "sessions");
+  const cachePath = sid ? path.join(dir, ".getid-cache", `${sid}.txt`) : null;
+  if (cachePath && existsSync(cachePath)) {
+    const cached = readFileSync(cachePath, "utf8").trim();
+    if (cached) return cached;
+  }
   if (sid && existsSync(dir)) {
     for (const file of readdirSync(dir)) {
       if (!file.endsWith(".json")) continue;
@@ -275,7 +280,20 @@ function sessionShotId(): string {
         const rec = JSON.parse(readFileSync(path.join(dir, file), "utf8")) as {
           sessionId?: string; pid?: number; procStart?: string;
         };
-        if (rec.sessionId === sid && rec.pid && rec.procStart) return `${rec.pid}-${rec.procStart}`;
+        if (rec.sessionId === sid && rec.pid && rec.procStart) {
+          const id = `${rec.pid}-${rec.procStart}`;
+          // First writer wins, matching rename-session.ps1's Set-CachedGetId, so whichever
+          // side resolves first is authoritative for both.
+          if (cachePath && !existsSync(cachePath)) {
+            try {
+              mkdirSync(path.dirname(cachePath), { recursive: true });
+              writeFileSync(cachePath, id);
+            } catch {
+              /* best effort - a race with rename-session.ps1 writing the same file */
+            }
+          }
+          return id;
+        }
       } catch {
         /* a session file mid-write - skip it */
       }
