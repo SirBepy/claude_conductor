@@ -101,7 +101,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       track.style.transform = `translateX(-${state.activeTab * 100}%)`;
     }
     const activePanel = track.querySelector<HTMLElement>(`.prompt-panel[data-panel="${state.activeTab}"]`);
-    if (activePanel) track.style.height = `${activePanel.offsetHeight}px`;
+    // getBoundingClientRect(), not offsetHeight: offsetHeight rounds to the
+    // nearest integer pixel, and at a fractional DPI scale that rounding can
+    // land under the panel's real height, clipping the last option's
+    // bottom border against the viewport's overflow:clip.
+    if (activePanel) track.style.height = `${activePanel.getBoundingClientRect().height}px`;
 
     // .prompt-track-viewport clips rather than scrolls vertically (see its CSS
     // doc comment), so a height snapshot going stale after this tick (webfont
@@ -110,7 +114,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     state.panelResizeObs?.disconnect();
     if (activePanel && typeof ResizeObserver !== "undefined") {
       state.panelResizeObs = new ResizeObserver(() => {
-        track.style.height = `${activePanel.offsetHeight}px`;
+        track.style.height = `${activePanel.getBoundingClientRect().height}px`;
       });
       state.panelResizeObs.observe(activePanel);
     }
