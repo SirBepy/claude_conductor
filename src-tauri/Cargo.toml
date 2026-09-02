@@ -1,6 +1,6 @@
 [package]
 name = "claude-conductor"
-version = "0.1.110"
+version = "0.2.91"
 edition = "2021"
 rust-version = "1.91"
 # Two bins live here (the app + cc-conductor-daemon). `cargo tauri dev`/`cargo

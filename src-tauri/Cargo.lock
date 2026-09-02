@@ -1091,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "claude-conductor"
-version = "0.1.110"
+version = "0.2.91"
 dependencies = [
  "ab_glyph",
  "anyhow",
