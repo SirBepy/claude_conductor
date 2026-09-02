@@ -136,6 +136,18 @@ pub(crate) async fn run_stdout_pump(
                                 }
                             }
                         }
+                        // Raw stdout, off unless RUST_LOG turns this module to trace:
+                        // the only way to see which stream-json lines claude actually
+                        // sent when a turn's reply never finalizes (todo 719).
+                        if log::log_enabled!(log::Level::Trace) {
+                            let raw = String::from_utf8_lossy(&line_buf);
+                            let raw = raw.trim_end();
+                            // 2000: a `result` line's own `result` text sits past
+                            // 600 chars of usage/cost fields, and that field is the
+                            // one that decides whether a turn finalizes.
+                            let cut = raw.char_indices().nth(2000).map(|(i, _)| i).unwrap_or(raw.len());
+                            log::trace!("daemon stdout[{}]: {}", pump_session.session_id, &raw[..cut]);
+                        }
                         let feed_events = ctx.feed(&line_buf);
                         // `--resume` history replay never emits `stream_event` lines, so this
                         // is the earliest live-exclusive signal, firing even for tool-only turns.

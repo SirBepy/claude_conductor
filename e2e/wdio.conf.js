@@ -195,7 +195,17 @@ export const config = {
     }
     daemon = spawn(daemonBin, [], {
       stdio: "ignore",
-      env: { ...process.env, CC_DAEMON_NO_AUTOSTART: "1", CC_DAEMON_INSTANCE: DAEMON_INSTANCE },
+      env: {
+        ...process.env,
+        CC_DAEMON_NO_AUTOSTART: "1",
+        CC_DAEMON_INSTANCE: DAEMON_INSTANCE,
+        // stdio is "ignore", so daemon-<instance>.log is the only record of a
+        // billed run. The pump's raw stdout trace is what makes that record
+        // worth reading (todo 719).
+        RUST_LOG:
+          process.env.RUST_LOG ||
+          "info,claude_conductor_lib=debug,claude_conductor_lib::daemon::pump=trace,iroh=warn,iroh_relay=warn,quinn=warn,netwatch=warn,portmapper=warn,tracing::span=warn",
+      },
     });
     process.env.CC_WDIO_DAEMON_PID = String(daemon.pid);
     // Give the daemon a moment to bind its named pipe before the app connects.
