@@ -8,7 +8,7 @@ import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { splitAsk } from "./question-state";
 import { BADGE_META, DOMAIN_META } from "./types";
 import type { AuqAttachmentsController } from "./attachments";
-import type { OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
+import type { AuqAttachment, OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
 
 /** Fields the renderer mutates that question-ui.ts also reads/writes
  *  directly (initial clamp, teardown, draft snapshots). One shared box. */
@@ -128,15 +128,16 @@ export function panelHtml(
   selections: Map<number, Selection>,
   noneLabel: string,
   opts: QuestionUIOpts,
-  auqAttachments: AuqAttachmentsController,
 ): string {
   const isActive = qi === activeTab;
   const pickSect = q.options?.length
     ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
        <div class="prompt-q__opts">${optsRowsHtml(q, qi, selections, noneLabel)}</div>`
     : "";
-  const attachHtml = opts.supportsExtras && auqAttachments.attachments.length
-    ? `<div class="prompt-attachments composer-attachments"></div>`
+  // Emitted even while empty (`.composer-attachments:empty` hides it) - the
+  // paste path patches this node in place instead of re-rendering.
+  const attachHtml = opts.supportsExtras
+    ? `<div class="prompt-attachments composer-attachments" data-attach-panel="${qi}"></div>`
     : "";
   return `
     <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
@@ -145,6 +146,16 @@ export function panelHtml(
       ${attachHtml}
     </section>
   `;
+}
+
+// Review-step stand-in for a question's own thumbnail strip: the recap lists
+// answers, so an attached image gets one muted chip rather than a 80px thumb.
+function attachChipHtml(staged: AuqAttachment[]): string {
+  if (!staged.length) return "";
+  const allImages = staged.every((a) => a.mime.startsWith("image/"));
+  const icon = allImages ? "ph-image" : "ph-paperclip";
+  const noun = staged.length === 1 ? (allImages ? "image" : "file") : (allImages ? "images" : "files");
+  return `<span class="prompt-summary-row__attach" title="${staged.length} ${noun} attached"><i class="ph ${icon}"></i>${staged.length}</span>`;
 }
 
 export function summaryPanelHtml(
@@ -165,13 +176,14 @@ export function summaryPanelHtml(
           <span class="prompt-summary-row__label">${escapeHtml(label)}</span>
           <span class="prompt-summary-row__answer">${escapeHtml(answerPreview(qi))}</span>
         </span>
+        ${attachChipHtml(auqAttachments.attachmentsForPanel(qi))}
         <i class="ph ph-pencil-simple"></i>
       </button>
     `;
   }).join("");
 
-  const attachmentsStripHtml = opts.supportsExtras && auqAttachments.attachments.length
-    ? `<div class="prompt-attachments composer-attachments"></div>`
+  const attachmentsStripHtml = opts.supportsExtras
+    ? `<div class="prompt-attachments composer-attachments" data-attach-panel="${questions.length}"></div>`
     : "";
 
   return `

@@ -37,6 +37,9 @@ export interface AuqAttachmentsOpts {
    *  reported back to the caller as a message (not a silent no-op). */
   supportsExtras?: boolean;
   initial?: AuqAttachment[];
+  /** Panel index the card is currently showing, read at attach time so an
+   *  image stays on the step it was pasted into. */
+  currentPanel?: () => number;
   /** Called after every mutation (attach/remove) to trigger a re-render. */
   onChange: () => void;
 }
@@ -48,11 +51,13 @@ export interface AuqAttachmentsController {
   /** Returns null on success, or a rejection message (over the per-draft cap). */
   attachBlob(blob: Blob, filename: string): Promise<string | null>;
   attachFromPath(srcPath: string): Promise<string | null>;
+  /** The subset staged from `panel`. A pre-stamp draft entry counts as panel 0. */
+  attachmentsForPanel(panel: number): AuqAttachment[];
   /** Wired onto every free-text input (per-question + review-step) so an
    *  image can be pasted from any step. Returns null for a plain-text paste
    *  or on success; otherwise a message to surface (unsupported card, over cap). */
   handleAttachmentPaste(e: ClipboardEvent): Promise<string | null>;
-  renderAttachmentsStrip(container: HTMLElement): void;
+  renderAttachmentsStrip(container: HTMLElement, panel: number): void;
 }
 
 export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsController {
@@ -78,6 +83,18 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
       }
       opts.onChange();
     })();
+  }
+
+  function panelOf(a: AuqAttachment): number {
+    return a.panel ?? 0;
+  }
+
+  function attachmentsForPanel(panel: number): AuqAttachment[] {
+    return attachments.filter((a) => panelOf(a) === panel);
+  }
+
+  function stagePanel(): number {
+    return opts.currentPanel?.() ?? 0;
   }
 
   function attachedBytes(): number {
@@ -107,7 +124,7 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
         console.warn("[AUQ] paste_attachment failed:", err);
       }
     }
-    attachments.push({ mime, data, path, filename: displayName, size: toStage.size });
+    attachments.push({ mime, data, path, filename: displayName, size: toStage.size, panel: stagePanel() });
     opts.onChange();
     return null;
   }
@@ -136,6 +153,7 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
       data: result?.base64 ?? "",
       path: result?.path ?? null,
       size,
+      panel: stagePanel(),
     });
     opts.onChange();
     return null;
@@ -154,9 +172,12 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     return null;
   }
 
-  function renderAttachmentsStrip(container: HTMLElement): void {
+  // Only this panel's own attachments - every panel used to render the whole
+  // array, so one pasted image appeared on all of them at once.
+  function renderAttachmentsStrip(container: HTMLElement, panel: number): void {
     container.innerHTML = "";
-    attachments.forEach((a, i) => {
+    attachments.forEach((a) => {
+      if (panelOf(a) !== panel) return;
       const div = document.createElement("div");
       const isImage = a.mime.startsWith("image/");
       div.className = `attachment${isImage ? "" : " file-chip"}`;
@@ -180,7 +201,8 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
       rm.innerHTML = '<i class="ph ph-x"></i>';
       rm.addEventListener("click", (e) => {
         e.stopPropagation();
-        attachments.splice(i, 1);
+        const idx = attachments.indexOf(a);
+        if (idx >= 0) attachments.splice(idx, 1);
         opts.onChange();
       });
       div.appendChild(rm);
@@ -188,5 +210,5 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     });
   }
 
-  return { attachments, attachBlob, attachFromPath, handleAttachmentPaste, renderAttachmentsStrip };
+  return { attachments, attachBlob, attachFromPath, attachmentsForPanel, handleAttachmentPaste, renderAttachmentsStrip };
 }

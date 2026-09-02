@@ -79,6 +79,10 @@ export interface AuqAttachment {
   filename: string;
   /** Raw decoded byte size, known at attach time regardless of hydration. */
   size: number;
+  /** Panel index this was attached from (a question index, or questions.length
+   *  for the review step). The strip only renders on its own panel; a legacy
+   *  draft with no stamp falls back to 0. */
+  panel?: number;
 }
 
 export interface QuestionDraft {

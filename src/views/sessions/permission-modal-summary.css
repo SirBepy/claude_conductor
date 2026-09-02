@@ -59,6 +59,19 @@
      overflow:hidden box clips the last letter even though it "fits". */
   padding-right: 2px;
 }
+/* Stands in for the question panel's own thumbnail strip - the recap is a
+   text list, so an 80px thumb would dominate the row it summarizes. */
+.prompt-summary-row__attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  color: var(--color-text-muted);
+}
+.prompt-summary-row__attach i {
+  font-size: 0.95rem;
+}
 .prompt-summary-row i {
   color: var(--color-text-muted);
   flex-shrink: 0;

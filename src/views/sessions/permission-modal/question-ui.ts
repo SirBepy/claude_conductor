@@ -78,6 +78,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     sessionId: opts.sessionId,
     supportsExtras: opts.supportsExtras,
     initial: initialDraft?.attachments,
+    currentPanel: () => state.activeTab,
     // A full render() would recreate the answer-bar textarea and drop focus/
     // cursor - exactly the class of bug mergeFreshDraft's isTyping guard
     // avoids below. A paste is typed FROM that same field, so patch just the

@@ -19,6 +19,8 @@ interface StoredAttachment {
   path: string;
   filename: string;
   size: number;
+  /** Which card step staged it - see AuqAttachment.panel. */
+  panel?: number;
 }
 
 interface StoredDraft {
@@ -42,7 +44,7 @@ export function serializeQuestionDraft(draft: QuestionDraft): unknown {
     additionalMessage: draft.additionalMessage || undefined,
     attachments: (draft.attachments ?? [])
       .filter((a): a is typeof a & { path: string } => Boolean(a.path))
-      .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename, size: a.size })),
+      .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename, size: a.size, panel: a.panel })),
   };
   return stored;
 }
@@ -53,7 +55,7 @@ export function deserializeQuestionDraft(payload: unknown): QuestionDraft | null
   const attachments = Array.isArray(parsed.attachments)
     ? parsed.attachments
         .filter((a) => a && typeof a.path === "string" && typeof a.mime === "string")
-        .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename ?? a.path, size: a.size ?? 0, data: "" }))
+        .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename ?? a.path, size: a.size ?? 0, data: "", panel: typeof a.panel === "number" ? a.panel : 0 }))
     : [];
   return {
     freeText: new Map(parsed.freeText),

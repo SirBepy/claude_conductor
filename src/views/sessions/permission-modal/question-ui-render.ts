@@ -70,6 +70,15 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     hintTimer = window.setTimeout(() => hint.remove(), 2500);
   }
 
+  // Each strip renders only the panel it belongs to (data-attach-panel), so a
+  // pasted image stays on the step it was pasted into.
+  function paintAttachmentStrips(): void {
+    host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => {
+      const panel = Number(el.dataset.attachPanel);
+      if (Number.isFinite(panel)) auqAttachments.renderAttachmentsStrip(el, panel);
+    });
+  }
+
   const syncMessagesPadding = (): void => {
     if (!messagesEl) return;
     // Broadened to the minimized bar too - it replaces .prompt-card wholesale
@@ -258,7 +267,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
       const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
       const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
-      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, auqAttachments)).join("")
+      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
       const footerHtml = `
         <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
@@ -336,7 +345,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
       syncAnswerBar();
 
-      host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
+      paintAttachmentStrips();
 
       host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
         ?.addEventListener("click", cancel);
@@ -361,7 +370,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   };
 
   const refreshAttachments = (): void => {
-    host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => auqAttachments.renderAttachmentsStrip(el));
+    paintAttachmentStrips();
     syncMessagesPadding();
   };
 

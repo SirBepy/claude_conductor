@@ -63,7 +63,9 @@ describe("AUQ draft persistence", () => {
     expect(loaded.additionalMessage).toBe("also check the staging env");
     // Base64 bytes never hit localStorage (5MB/origin quota) - only enough
     // metadata to re-fetch via read_attachment (attachments.ts's hydrate).
-    expect(loaded.attachments).toEqual([{ mime: "image/png", data: "", path: "/tmp/x.png", filename: "x.png", size: 3 }]);
+    // `panel` round-trips too, defaulting to 0 when the saved draft predates it
+    // (deserializeQuestionDraft's `typeof a.panel === "number" ? a.panel : 0`).
+    expect(loaded.attachments).toEqual([{ mime: "image/png", data: "", path: "/tmp/x.png", filename: "x.png", size: 3, panel: 0 }]);
   });
 
   it("drops an attachment with no daemon-backed path (can't survive a reload)", () => {
