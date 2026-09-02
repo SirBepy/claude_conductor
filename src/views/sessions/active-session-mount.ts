@@ -149,6 +149,10 @@ export function wireRenderer(
   // Expose the panel toggle through the state seam so view-more-menu and
   // sidebar-ctx-menu can offer "View changes" for the active session.
   state.activeChatActions = { viewChanges: () => panel.toggle() };
+  // Resolved lazily through state.composer (not bound to a closure captured
+  // here) so this is safe to wire before mountComposer has run for this
+  // session - by the time a CTA is actually clicked, state.composer is current.
+  renderer.onSendText = (text) => { void state.composer?.sendText(text); };
 }
 
 /** Re-show a cached chat: swap the pane's empty `.session-messages` for the

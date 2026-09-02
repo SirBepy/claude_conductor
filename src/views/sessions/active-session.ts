@@ -350,6 +350,12 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   if (headerCharId) void hydrateCharacterAvatars(pane);
   void hydrateProjectTechIcons(pane);
 
+  // Attach composer + held-messages controller first: it needs only `sess`,
+  // already in hand, not the statusbar/transcript loads below - mounting it
+  // here instead of after them is what keeps the input from sitting collapsed
+  // and empty while a chat switch's IPC round-trips are still in flight.
+  mountComposer(pane, sess, sessionId, readOnly);
+
   // Mount statusbar.
   await mountStatusbar(pane, sess, () => { void changeAccountForSession(sess.session_id); });
 
@@ -360,9 +366,6 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     void selectSession(sessionId, pane);
   });
   if (!rendererMounted) return;
-
-  // Attach composer + held-messages controller.
-  mountComposer(pane, sess, sessionId, readOnly);
 
   // Start real-time file watcher for all sessions. External sessions get new
   // messages this way; Interactive sessions also need it so that turns

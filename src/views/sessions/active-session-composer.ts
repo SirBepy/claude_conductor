@@ -138,10 +138,6 @@ export function mountComposer(
         onEdit: (item) => composer.setDraftText(item.prompt),
       })
     : null;
-  if (state.renderer) {
-    state.renderer.onSendText = (text) => { void sendBundle([{ type: "text", text }]); };
-  }
-
   // Held-messages controller is a singleton (its per-session set survives
   // session switches); re-attach it to this freshly-mounted pane + session.
   if (!state.heldMessages) state.heldMessages = new HeldMessages();
