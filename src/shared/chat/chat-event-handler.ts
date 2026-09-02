@@ -357,6 +357,10 @@ function handleTurnUsageEvent(
   ev: Extract<ChatEvent, { type: "turn_usage" }>,
   opts: HandleEventOpts,
 ): void {
+  // A live turn whose `result` line carries no text (it ended on a tool call)
+  // emits NO finalized assistant_message, so this is the only turn-end event
+  // the streamed bubble ever sees - without this it streams forever (todo 719).
+  finalizeStreamingBubble(r);
   const totalCtx = Number(ev.input_tokens) + Number(ev.cache_creation_input_tokens) + Number(ev.cache_read_input_tokens);
   console.debug("[ctx] turn_usage", { model: ev.model, input: Number(ev.input_tokens), cacheCreate: Number(ev.cache_creation_input_tokens), cacheRead: Number(ev.cache_read_input_tokens), output: Number(ev.output_tokens), totalCtx });
   r.meta.inputTokens = totalCtx;
