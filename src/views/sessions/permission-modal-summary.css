@@ -37,6 +37,9 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  /* Absorbs the row's free space so space-between can't strand the
+     attachment chip mid-row instead of beside the pencil. */
+  flex: 1 1 auto;
 }
 .prompt-summary-row__label {
   font-size: 0.72rem;
