@@ -1,7 +1,7 @@
 // Footer-merge machinery, split off tool-strip.ts (ai_todo 832): merges two
 // ALREADY-BUILT footers into one, distinct from folding raw rows into a strip.
 
-import { ensureMainStrip } from "./tool-strip";
+import { ensureMainStrip, bucketViewIds } from "./tool-strip";
 import { mountScreenshotBlock, getScreenshotRowShots } from "./screenshot-row";
 
 /** Write a chip's count to `n` (both the dataset and the visible "xN").
@@ -38,6 +38,10 @@ export function absorbFooterContents(src: HTMLElement, dest: HTMLElement): void 
         const destBucket = panel.querySelector<HTMLElement>(`:scope > .tool-strip-group[data-tool="${key}"]`);
         if (srcBucket && destBucket) {
           while (srcBucket.firstChild) destBucket.appendChild(srcBucket.firstChild);
+          // Custom-view buckets rebuild from these; losing src's ids would drop
+          // its rows the next time dest's chip folds another call.
+          const merged = new Set([...bucketViewIds(destBucket), ...bucketViewIds(srcBucket)]);
+          if (merged.size > 0) destBucket.dataset.viewIds = [...merged].join(",");
         }
         srcBucket?.remove();
         node.remove();

@@ -66,6 +66,46 @@ describe("custom chip-panel views", () => {
     r.detach();
   });
 
+  // A subagent call whose parent Task isn't in the folded range falls through
+  // to the MAIN strip and bumps its chip. The view used to skip every child, so
+  // the chip read "Read x1" over a panel with nothing in it (Joe, 2026-09-02).
+  it("lists a subagent Read whose parent Task is outside the range", () => {
+    const { r, container } = makeRenderer();
+    const orphan = toolUseEvent("Read", { file_path: "/a/x.ts" }, "r1");
+    orphan.parent_tool_use_id = "task-from-another-page";
+    r.handleEvent(orphan);
+    r.handleEvent(toolResultEvent("r1"));
+    r.handleEvent(userEvent("next")); // close the turn
+
+    const chip = container.querySelector('.tool-chip[data-tool="Read"]');
+    expect(chip.querySelector(".tool-chip-count").textContent).toBe("x1");
+    const rows = container.querySelectorAll(".tool-file-row");
+    expect(rows.length).toBe(1);
+    expect(rows[0].dataset.path).toBe("/a/x.ts");
+    r.detach();
+  });
+
+  // A meta tick that produced nothing visible (task-notification, wake) keeps
+  // the same chip strip but moves activeTurnStart to the end of the transcript.
+  // Rebuilding the panel from that shortened range erased every file read
+  // before the tick, leaving "Read x2" over one row - or none.
+  it("keeps files read before a meta tick that reused the same strip", () => {
+    const { r, container } = makeRenderer();
+    r.handleEvent(toolUseEvent("Read", { file_path: "/a/before.ts" }, "r1"));
+    r.handleEvent(toolResultEvent("r1"));
+    r.handleEvent({ ...userEvent("[schedule] wake tick"), is_meta: true });
+    r.handleEvent(toolUseEvent("Read", { file_path: "/a/after.ts" }, "r2"));
+    r.handleEvent(toolResultEvent("r2"));
+
+    // One strip, not two: the tick reused the open turn's footer.
+    expect(container.querySelectorAll(".turn-footer").length).toBe(1);
+    const chip = container.querySelector('.tool-chip[data-tool="Read"]');
+    expect(chip.querySelector(".tool-chip-count").textContent).toBe("x2");
+    const paths = [...container.querySelectorAll(".tool-file-row")].map((e) => e.dataset.path);
+    expect(paths).toEqual(["/a/before.ts", "/a/after.ts"]);
+    r.detach();
+  });
+
   it("combines Edit + Write into one 'File Changes' chip, aggregated per file", () => {
     const { r, container } = makeRenderer();
     r.handleEvent(toolUseEvent("Edit", { file_path: "/a/z.rs", old_string: "a", new_string: "b" }, "e1"));

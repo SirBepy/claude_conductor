@@ -21,6 +21,31 @@ import { asObj, strField } from "../obj-utils";
 // generic stack of raw tool rows / target list.
 export const CUSTOM_VIEW_TOOLS = new Set(["Read", "Edit", "Skill", "AskUserQuestion"]);
 
+/** Messages a chip's view covers: top-level calls in [start, end) UNION the ids
+ *  the strip folded into this chip. It folds an orphan subagent child into the
+ *  MAIN strip and bumps the chip, so range-only rendered "Read x3" over
+ *  nothing. */
+function scopedIndices(
+  messages: RenderedMessage[],
+  start: number,
+  end: number,
+  ids?: ReadonlySet<string>,
+): number[] {
+  const picked = new Set<number>();
+  for (let i = start; i < end; i++) {
+    const m = messages[i];
+    if (!m || m.parentToolUseId) continue;
+    picked.add(i);
+  }
+  if (ids && ids.size > 0) {
+    for (let i = 0; i < messages.length; i++) {
+      const id = messages[i]?.id;
+      if (id && ids.has(id)) picked.add(i);
+    }
+  }
+  return [...picked].sort((a, b) => a - b);
+}
+
 /** Edit/Write/MultiEdit/NotebookEdit + Read all target a single path. */
 function filePathOf(input: unknown): string {
   const o = asObj(input);
@@ -44,11 +69,12 @@ export function renderFilesView(
   start: number,
   end: number,
   kind: "Read" | "Edit",
+  ids?: ReadonlySet<string>,
 ): string {
   const byPath = new Map<string, number>();
-  for (let i = start; i < end; i++) {
+  for (const i of scopedIndices(messages, start, end, ids)) {
     const m = messages[i];
-    if (!m || m.kind !== "tool_use" || m.parentToolUseId) continue;
+    if (!m || m.kind !== "tool_use") continue;
     if (canonicalTool(m.tool ?? "") !== kind) continue;
     const path = filePathOf(m.input);
     if (!path) continue;
@@ -67,11 +93,16 @@ export function renderFilesView(
 }
 
 /** One clean row per skill used in range, with a repeat-count badge. */
-export function renderSkillsView(messages: RenderedMessage[], start: number, end: number): string {
+export function renderSkillsView(
+  messages: RenderedMessage[],
+  start: number,
+  end: number,
+  ids?: ReadonlySet<string>,
+): string {
   const bySkill = new Map<string, number>();
-  for (let i = start; i < end; i++) {
+  for (const i of scopedIndices(messages, start, end, ids)) {
     const m = messages[i];
-    if (!m || m.kind !== "tool_use" || m.parentToolUseId || m.tool !== "Skill") continue;
+    if (!m || m.kind !== "tool_use" || m.tool !== "Skill") continue;
     const name = strField(asObj(m.input), "skill") || "(skill)";
     bySkill.set(name, (bySkill.get(name) ?? 0) + 1);
   }
@@ -164,10 +195,27 @@ function extractAskQuestions(input: unknown): AskQuestion[] {
 
 /** Pairs each question with its answer. Top-level asks are kind:"question"
  *  (answer in `m.text`); nested ones stay kind:"tool_use" with a tool_result. */
-export function renderQuestionsView(messages: RenderedMessage[], start: number, end: number): string {
+export function renderQuestionsView(
+  messages: RenderedMessage[],
+  start: number,
+  end: number,
+  ids?: ReadonlySet<string>,
+): string {
+  // Range plus the ids this chip folded (see scopedIndices), keeping in-range
+  // question CARDS - which carry no tool_use id to match on - either way.
+  const inScope = new Set<number>();
+  for (let i = start; i < end; i++) inScope.add(i);
+  if (ids && ids.size > 0) {
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (m?.id && ids.has(m.id)) inScope.add(i);
+      if (m?.kind === "tool_result" && m.tool_use_id && ids.has(m.tool_use_id)) inScope.add(i);
+    }
+  }
+  const order = [...inScope].sort((a, b) => a - b);
   // tool_use id -> parsed answers, harvested from each call's tool_result.
   const answersById = new Map<string, Map<string, string>>();
-  for (let i = start; i < end; i++) {
+  for (const i of order) {
     const m = messages[i];
     if (m?.kind === "tool_result" && m.tool_use_id) {
       const resolved = resolveQuestionText(resultText(m));
@@ -175,11 +223,14 @@ export function renderQuestionsView(messages: RenderedMessage[], start: number, 
     }
   }
   const cards: string[] = [];
-  for (let i = start; i < end; i++) {
+  for (const i of order) {
     const m = messages[i];
     if (!m) continue;
     const isTopLevel = m.kind === "question";
-    const isNestedToolUse = m.kind === "tool_use" && !m.parentToolUseId && isAskQuestionTool(m.tool ?? "");
+    const folded = !!m.id && !!ids?.has(m.id);
+    const isNestedToolUse = m.kind === "tool_use"
+      && (!m.parentToolUseId || folded)
+      && isAskQuestionTool(m.tool ?? "");
     if (!isTopLevel && !isNestedToolUse) continue;
     const questions = extractAskQuestions(m.input);
     const answers = isTopLevel
@@ -284,21 +335,22 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
 }
 
 /**
- * Render a custom tool's view for `tool` (a canonical key) over [start, end), or
- * null when the tool has no custom view. "" means "custom view, but nothing to
- * show in this range" - callers can render their own empty state.
+ * Render a custom tool's view for `tool` (a canonical key) over [start, end)
+ * plus `ids` (calls the chip folded from outside that range), or null when the
+ * tool has no custom view. "" means "custom view, but nothing to show".
  */
 export function renderCustomToolView(
   tool: string,
   messages: RenderedMessage[],
   start: number,
   end: number,
+  ids?: ReadonlySet<string>,
 ): string | null {
   switch (tool) {
-    case "Read": return renderFilesView(messages, start, end, "Read");
-    case "Edit": return renderFilesView(messages, start, end, "Edit");
-    case "Skill": return renderSkillsView(messages, start, end);
-    case "AskUserQuestion": return renderQuestionsView(messages, start, end);
+    case "Read": return renderFilesView(messages, start, end, "Read", ids);
+    case "Edit": return renderFilesView(messages, start, end, "Edit", ids);
+    case "Skill": return renderSkillsView(messages, start, end, ids);
+    case "AskUserQuestion": return renderQuestionsView(messages, start, end, ids);
     default: return null;
   }
 }

@@ -127,8 +127,24 @@ function descOf(input: unknown): string {
   return label.length > 60 ? label.slice(0, 60) + "…" : label;
 }
 
+/** tool_use ids folded into a custom-view bucket. Kept on the element (not in a
+ *  Map) so it survives the bucket being moved between footers by an absorb. */
+export function bucketViewIds(bucket: HTMLElement): Set<string> {
+  const raw = bucket.dataset.viewIds;
+  return new Set(raw ? raw.split(",") : []);
+}
+
+function addBucketViewId(bucket: HTMLElement, id: string): void {
+  const ids = bucketViewIds(bucket);
+  if (ids.has(id)) return;
+  ids.add(id);
+  bucket.dataset.viewIds = [...ids].join(",");
+}
+
 /** Rebuild a custom bucket's content from the turn's message data (shared with
- *  the statusline popover via tool-views.ts). */
+ *  the statusline popover via tool-views.ts). Rendered from the range UNION the
+ *  ids folded here, so a call the range misses (an orphan subagent child) still
+ *  gets a row instead of counting on the chip over an empty panel. */
 function rebuildCustomBucket(
   bucket: HTMLElement,
   key: string,
@@ -136,7 +152,7 @@ function rebuildCustomBucket(
   start: number,
   end: number,
 ): void {
-  bucket.innerHTML = renderCustomToolView(key, messages, start, end) ?? "";
+  bucket.innerHTML = renderCustomToolView(key, messages, start, end, bucketViewIds(bucket)) ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +426,10 @@ export function groupToolRange(
       group.bucket.dataset.customView = key;
       el.dataset.toolGrouped = "1";
       el.remove();
-      if (isUse) bumpChip(group.chip);
+      if (isUse) {
+        bumpChip(group.chip);
+        if (m.kind === "tool_use" && m.id) addBucketViewId(group.bucket, m.id);
+      }
       customBuckets.set(group.bucket, key);
       continue;
     }
