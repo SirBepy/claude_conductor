@@ -194,7 +194,7 @@ export function enqueueTurnClose(r: ChatRenderer, opts?: { allowMetaMerge?: bool
   // else it permanently blocks the next turn's activity label from clearing.
   r.outstandingActivityToolIds.clear();
   if (r.activeTurnChipKey !== null) {
-    const turnStart = r.activeTurnStart ?? r.messages.length;
+    const turnStart = r.activeTurnFoldStart ?? r.activeTurnStart ?? r.messages.length;
     // Trim trailing noise-tail messages (e.g. "Request interrupted by user")
     // from the turn range so the chips footer lands BEFORE them, keeping the
     // visual order: chips → divider label → next user message.
@@ -220,6 +220,7 @@ export function enqueueTurnClose(r: ChatRenderer, opts?: { allowMetaMerge?: bool
   }
   r.resetActiveTurnMeta();
   r.activeTurnStart = null;
+  r.activeTurnFoldStart = null;
 }
 
 /**

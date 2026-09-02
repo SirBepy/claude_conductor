@@ -96,9 +96,10 @@ export function flushRender(r: ChatRenderer): void {
   }
   processTurnCloseQueue(r);
   ensureActiveTurnFooter(r);
-  if (r.activeTurnStart !== null) {
+  const foldStart = r.activeTurnFoldStart ?? r.activeTurnStart;
+  if (foldStart !== null) {
     const footer = r.activeTurnChipKey !== null ? r.turnFooters.getOrCreateFooter(r.activeTurnChipKey) : null;
-    groupToolRange(r.messages, r.messageEls, r.activeTurnStart, r.messages.length, r.activeToolGroups, footer);
+    groupToolRange(r.messages, r.messageEls, foldStart, r.messages.length, r.activeToolGroups, footer);
   }
   applyRunningHighlight(r);
   // Nothing rendered this flush (a redundant trailing-throttle tick, or a

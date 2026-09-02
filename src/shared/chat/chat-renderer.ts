@@ -103,6 +103,11 @@ export class ChatRenderer {
   meta: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
   _cumulative: CumulativeUsage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
   activeTurnStart: number | null = null;
+  // Where the open FOOTER's tools start, vs. activeTurnStart's "where the
+  // current silent-streak segment starts" - a meta tick advances that one while
+  // keeping the same strip, so folding from it dropped every pre-tick call.
+  // Only a genuinely new turn moves this.
+  activeTurnFoldStart: number | null = null;
   // Silent-streak merge: index of the current chain's first meta-turn chip
   // (see classifyMetaTurn), and how many turns have folded into it so far. Null/0 when
   // the open turn isn't (yet) part of a merged streak. See
@@ -264,6 +269,7 @@ export class ChatRenderer {
     const mapOrNull = (i: number | null): number | null => (i === null ? null : fn(i));
     this.streamingIndex = mapOrNull(this.streamingIndex);
     this.activeTurnStart = mapOrNull(this.activeTurnStart);
+    this.activeTurnFoldStart = mapOrNull(this.activeTurnFoldStart);
     this.silentStreakBoundaryIndex = mapOrNull(this.silentStreakBoundaryIndex);
     if (this.dirtyIndices.size > 0) {
       const remapped = new Set<number>();
@@ -342,6 +348,7 @@ export class ChatRenderer {
     this.onActivityUpdate?.(null);
     this.container.innerHTML = "";
     this.activeTurnStart = null;
+    this.activeTurnFoldStart = null;
     this.resetActiveTurnMeta();
     this.prevTurnChipKey = null;
     this.turnFooters.clear();
@@ -478,6 +485,7 @@ export class ChatRenderer {
     this._liveParked = false;
     this.liveBuffer = null;
     this.activeTurnStart = null;
+    this.activeTurnFoldStart = null;
     this.resetActiveTurnMeta();
     this.prevTurnChipKey = null;
     this.turnFooters.clear();

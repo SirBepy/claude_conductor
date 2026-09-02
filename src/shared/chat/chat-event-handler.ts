@@ -205,6 +205,7 @@ function handleUserMessageEvent(
   const authoredOpener = !isCompact && !isSilent && !!ev.author_session_id
     && (r.messages[r.messages.length - 1] as RenderedMessage | undefined)?.kind === "user";
   r.activeTurnStart = authoredOpener ? r.messages.length - 1 : r.messages.length;
+  r.activeTurnFoldStart = r.activeTurnStart;
   return { touched: true, coalesce: false };
 }
 

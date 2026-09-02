@@ -148,6 +148,7 @@ export function tryHandleQuestionToolUse(
   // Open a fresh sub-turn for post-question chips.
   r.activeTurnChipKey = ++r._chipKeySeq;
   r.activeTurnStart = r.messages.length;
+  r.activeTurnFoldStart = r.activeTurnStart;
   r.activeTurnStreamedText = "";
   r.activeTurnStartedAtMs = ts > 0 ? ts : Date.now();
   r.activeTurnUsage = null;

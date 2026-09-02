@@ -40,6 +40,7 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.activityToolCanon = null;
   r.activeToolGroups.clear();
   r.activeTurnStart = null;
+  r.activeTurnFoldStart = null;
   r.compactionCount = 0;
   r.resetActiveTurnMeta();
   r.prevTurnChipKey = null;
