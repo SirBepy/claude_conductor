@@ -35,13 +35,15 @@ async function startNewChatPickingFirstProject() {
     await accChip.click();
   }
 
-  // .me-remote-input now lives inside .me-more-body (ba44deea); open it, ensure checked (ai_todo 719).
+  // .me-remote-input lives inside .me-more-body (ba44deea); open it, then match
+  // the app default (on) unless E2E_REMOTE=0 asks for the remote-off A/B.
   const moreOptionsBtn = await $(".me-more-btn");
   await moreOptionsBtn.waitForClickable({ timeout: 10000 });
   await moreOptionsBtn.click();
+  const wantRemote = process.env.E2E_REMOTE !== "0";
   const remoteInput = await $(".me-remote-input");
   await remoteInput.waitForExist({ timeout: 10000 });
-  if (!(await remoteInput.isSelected())) {
+  if ((await remoteInput.isSelected()) !== wantRemote) {
     await remoteInput.click();
   }
 
@@ -84,9 +86,21 @@ describe("Chat reload de-duplication (ai_todo 65)", () => {
     await startNewChatPickingFirstProject();
 
     // --- Switch back to A (first loadInitial -> the merge that used to dup) ---
-    const aRow = await $(`#sessions-list li[data-session-id="${aId}"]`);
-    await aRow.waitForClickable({ timeout: 15000 });
-    await aRow.click();
+    // rebuildSidebar() can replace the row between the clickable check and the
+    // click, so re-query every attempt instead of holding one element handle.
+    await browser.waitUntil(
+      async () => {
+        try {
+          const row = await $(`#sessions-list li[data-session-id="${aId}"]`);
+          if (!(await row.isClickable())) return false;
+          await row.click();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 15000, interval: 500, timeoutMsg: "chat A row never became clickable" }
+    );
     await browser.waitUntil(
       async () => (await msgCounts()).assistant >= 1,
       { timeout: 20000, interval: 500, timeoutMsg: "chat A did not re-render on switch-back" }
