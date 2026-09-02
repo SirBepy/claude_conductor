@@ -230,7 +230,7 @@ export class CommitsPopover {
         ? `<button class="sb-git-pop-push-btn" disabled><i class="ph ph-spinner-gap sb-git-pop-spin"></i></button>`
         : `<button class="sb-git-pop-push-btn"><i class="ph ph-cloud-arrow-up"></i> Push</button>`;
       parts.push(`<div class="sb-git-pop-section ahead"><i class="ph ph-arrow-up"></i>Unpushed <span class="sb-git-pop-count">${sync.ahead.length}</span>${pushBtn}</div>`);
-    } else {
+    } else if (sync.behind.length === 0) {
       parts.push(`<div class="sb-git-pop-section synced"><i class="ph ph-check-circle"></i>Up to date with upstream</div>`);
     }
     if (sync.behind.length > 0) {

@@ -158,4 +158,18 @@ describe("commits popover history", () => {
     await flush();
     expect(pop()).toBeNull();
   });
+
+  it("shows Incoming, not the synced pill, when behind with nothing ahead", async () => {
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new CommitsPopover();
+    const sync = { ahead: [], behind: [{ short_sha: "sha9", message: "commit 9" }], has_upstream: true };
+    p.open(anchor(), CWD, sync, "master", () => {});
+    await flush();
+    expect(pop().textContent).not.toContain("Up to date with upstream");
+    expect(pop().querySelector(".sb-git-pop-section.behind")).toBeTruthy();
+    p.close();
+  });
 });
