@@ -130,6 +130,23 @@ function rebuildQuestionFromTranscript(sessionId: string, cardId: string): Quest
   return { id: cardId, questions, session_id: sessionId };
 }
 
+/** The session's newest still-open question in the DAEMON's store, or null.
+ *  By `seq`: the snapshot's own order is only incidentally chronological. */
+export async function newestOpenQuestion(sessionId: string): Promise<QuestionRequestedPayload | null> {
+  let prompts: unknown;
+  try {
+    prompts = await getTransport().call("list_pending_prompts");
+  } catch (e) {
+    console.warn("[perm-gate] newest-open-question lookup failed:", e);
+    return null;
+  }
+  const questions = findPendingPromptsForSession(prompts, sessionId)
+    .filter((r) => r.kind === "question")
+    .map((r) => r.payload as QuestionRequestedPayload);
+  if (!questions.length) return null;
+  return questions.reduce((a, b) => ((b.seq ?? -1) >= (a.seq ?? -1) ? b : a));
+}
+
 /** Put the real card back up for a transcript card the user clicked: local
  *  park, then the daemon's store, then the transcript. A park for a card other
  *  than `cardId` is left untouched for its own click. */
@@ -147,6 +164,19 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     if (rehydrated && !wanted(rehydrated)) storePendingPrompt(sessionId, rehydrated);
     else pending = rehydrated;
   }
+  // `cardId` is Claude's tool_use_id and can never equal the daemon's prompt
+  // uuid, so an MCP card always reached the rebuild below and settled a
+  // request_id the daemon never held, stranding the real prompt (todo 833).
+  // Newest open question wins instead - resolvePendingQuestionCard's own rule.
+  if (!pending) {
+    const newest = await newestOpenQuestion(sessionId);
+    if (newest) {
+      markLatestQuestion(sessionId, newest.id, newest.seq);
+      const draft = await fetchFreshestAuqDraft(sessionId, newest.id);
+      pending = { kind: "question", payload: newest, draft: draft ?? undefined };
+    }
+  }
+  // Memory-only prompt store: after a daemon restart the transcript is all there is.
   if (!pending && cardId) {
     const payload = rebuildQuestionFromTranscript(sessionId, cardId);
     if (payload) pending = { kind: "question", payload };
