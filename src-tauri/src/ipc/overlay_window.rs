@@ -165,6 +165,36 @@ pub fn toggle_overlay_window(app: &AppHandle, icon_rect: tauri::Rect) {
     }
 }
 
+/// Bottom-right of the primary monitor, standing in for the tray icon's rect
+/// when the platform will not report one. Only ever used for the first open,
+/// since every later one reuses the persisted position.
+fn fallback_tray_rect(app: &AppHandle) -> tauri::Rect {
+    let (x, y) = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let (s, p) = (m.size(), m.position());
+            (p.x + s.width as i32, p.y + s.height as i32)
+        })
+        .unwrap_or((0, 0));
+    tauri::Rect {
+        position: tauri::Position::Physical(tauri::PhysicalPosition { x, y }),
+        size: tauri::Size::Physical(tauri::PhysicalSize { width: 0, height: 0 }),
+    }
+}
+
+/// Menu-triggered open, now that left-click opens the chat instead. The first
+/// ever build needs the tray icon's rect to position against, so ask the tray
+/// for it rather than the click event that no longer routes here.
+pub fn show_overlay_from_menu(app: &AppHandle) {
+    let rect = app
+        .tray_by_id("main-tray")
+        .and_then(|t| t.rect().ok().flatten())
+        .unwrap_or_else(|| fallback_tray_rect(app));
+    toggle_overlay_window(app, rect);
+}
+
 /// After the overlay is hidden, destroy it outright if it's still hidden
 /// `OVERLAY_IDLE_TIMEOUT` later - see `OVERLAY_GEN` for how a re-show/re-hide
 /// before then cancels this. Destroying (vs just hiding) frees the WebView2

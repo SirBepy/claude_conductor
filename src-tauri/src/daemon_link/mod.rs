@@ -220,6 +220,14 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
     use tauri::{Emitter, Manager};
     match method {
         "instances_changed" => handlers::handle_instances_changed(app, params).await,
+        // A widget host claimed or released our overlay surface; the tray menu
+        // offers "Show overlay" only while nobody else is drawing it.
+        "widget_host_changed" => {
+            let hosted = params.get("hosted").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let state = app.state::<crate::state::AppState>();
+            *state.widget_hosted.lock().unwrap() = hosted;
+            crate::tray::rebuild_menu_and_render(app);
+        }
         "channels_changed" => {
             let state = app.state::<crate::state::AppState>();
             // params is the channel-snapshot JSON array (see daemon::channels::emit_changed).

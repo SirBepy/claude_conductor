@@ -36,6 +36,7 @@ pub fn setup(app: &AppHandle) -> Result<()> {
                         let _ = crate::ipc::open_chats_window(h);
                     });
                 }
+                "show-overlay" => crate::ipc::show_overlay_from_menu(app),
                 "open-jarvis" => {
                     let h = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -90,9 +91,9 @@ pub fn setup(app: &AppHandle) -> Result<()> {
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
-                button_state: MouseButtonState::Up, rect, ..
+                button_state: MouseButtonState::Up, ..
             } = event {
-                on_left_click(tray.app_handle().clone(), rect);
+                on_left_click(tray.app_handle().clone());
             }
         })
         .build(app);
@@ -145,31 +146,30 @@ pub fn setup(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// Left-click toggles the multi-account overlay (milestone 06 — this used to
-/// cycle the icon face through icon/session/weekly; the overlay now shows
-/// every account's full detail at once, making that cycle redundant). Right
-/// click keeps the unchanged context menu, which still has "Open Dashboard".
-fn on_left_click(app: AppHandle, icon_rect: tauri::Rect) {
+/// Left-click opens the chat window. The overlay it used to toggle moved to
+/// the right-click menu, which offers it only while no widget host is drawing
+/// our widget for us.
+fn on_left_click(app: AppHandle) {
     let logged_in = matches!(
         *app.state::<AppState>().auth_state.lock().unwrap(),
         AuthState::LoggedIn
     );
     log::info!("tray: left-click received (logged_in={logged_in})");
     if !logged_in {
-        // Not logged in — kick login. `start_login` exists in ipc.rs.
+        // Not logged in, kick login. `start_login` exists in ipc.rs.
         tauri::async_runtime::spawn(async move {
             let _ = crate::ipc::start_login(app).await;
         });
         return;
     }
-    crate::ipc::toggle_overlay_window(&app, icon_rect);
+    let _ = crate::ipc::open_chats_window(app);
 }
 
 /// Rebuild the tray menu from current mute/update state and re-render the
 /// icon, marshaled onto the main thread. Shared by the `settings-changed` and
 /// `update-state` listeners, whose rebuild-and-render bodies were previously
 /// byte-for-byte duplicated.
-fn rebuild_menu_and_render(app: &AppHandle) {
+pub fn rebuild_menu_and_render(app: &AppHandle) {
     let h = app.clone();
     let _ = app.run_on_main_thread(move || {
         let mute = h.state::<AppState>().settings.lock().unwrap().mute_all();
@@ -208,7 +208,13 @@ fn build_menu(app: &AppHandle, mute_all: bool, update: &serde_json::Value) -> Re
     let mut builder = MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?)
         .item(&MenuItemBuilder::with_id("open-chats", "Open Chats").build(app)?)
-        .item(&MenuItemBuilder::with_id("open-jarvis", "Jarvis").build(app)?)
+        .item(&MenuItemBuilder::with_id("open-jarvis", "Jarvis").build(app)?);
+    // Hidden while a widget host draws our widget: that host owns the overlay
+    // surface for as long as it stays connected.
+    if !*app.state::<AppState>().widget_hosted.lock().unwrap() {
+        builder = builder.item(&MenuItemBuilder::with_id("show-overlay", "Show overlay").build(app)?);
+    }
+    builder = builder
         .separator()
         .item(&MenuItemBuilder::with_id("refresh", "Refresh Now").build(app)?)
         .item(&mute);

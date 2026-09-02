@@ -35,6 +35,10 @@ pub struct AppState {
     /// `channels_changed` notifications. Replaces the app-owned `channels`
     /// Manager for read paths now that the daemon owns channel processes.
     pub cached_channels: Arc<Mutex<Vec<serde_json::Value>>>,
+    /// True while a widget host (windows_taskbar_widgets) is rendering our
+    /// widget itself, which hides the tray menu's own "Show overlay" entry.
+    /// Connection-scoped: the daemon clears it when that client's socket drops.
+    pub widget_hosted: Mutex<bool>,
     /// session_id -> the `channel_epoch` a live `attach_session` pump task is
     /// subscribed at, so a daemon-internal respawn can be detected. Daemon
     /// chat mode only.
@@ -131,6 +135,7 @@ impl AppState {
             preview,
             cached_instances: Arc::new(Mutex::new(Vec::new())),
             cached_channels: Arc::new(Mutex::new(Vec::new())),
+            widget_hosted: Mutex::new(false),
             attached_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             daemon_client: Arc::new(tokio::sync::Mutex::new(None)),
             hook_registration_pending: Mutex::new(false),

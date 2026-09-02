@@ -51,6 +51,17 @@ fn instances_changed_frame(state: &DaemonState) -> String {
 /// method (`list_instances`, `list_pending_prompts`, `get_token_history`,
 /// `list_session_characters`, ...), so nothing here is more sensitive than
 /// what a paired remote client can already read over REST.
+/// A widget host announcing whether it is currently rendering our widget
+/// itself. Returns `None` for every other client frame, all of which stay
+/// ignored - this is the only inbound method this socket understands.
+fn parse_host_overlay(txt: &str) -> Option<bool> {
+    let v: serde_json::Value = serde_json::from_str(txt).ok()?;
+    if v.get("method").and_then(serde_json::Value::as_str)? != "host_overlay" {
+        return None;
+    }
+    v.pointer("/params/hosted").and_then(serde_json::Value::as_bool)
+}
+
 pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonState>) {
     // Heal a client that just (re)connected: send a full snapshot before any
     // future mutation, mirroring `fetch_and_reseed_instances` on the
@@ -66,6 +77,8 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
     let mut rx = state.notifier.subscribe();
     let mut heartbeat = tokio::time::interval(GLOBAL_HEARTBEAT_INTERVAL);
     heartbeat.tick().await; // consume the immediate first tick (right after the snapshot)
+    // Per connection, so an unrelated client closing clears nothing.
+    let mut hosting = false;
 
     loop {
         tokio::select! {
@@ -107,7 +120,13 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
                 Err(RecvError::Closed) => break, // notifier sender dropped (daemon shutting down)
             },
             incoming = socket.recv() => match incoming {
-                Some(Ok(_)) => {} // ignore client->server frames
+                Some(Ok(Message::Text(t))) => {
+                    if let Some(h) = parse_host_overlay(&t) {
+                        hosting = h;
+                        state.notifier.publish("widget_host_changed", serde_json::json!({"hosted": h}));
+                    }
+                }
+                Some(Ok(_)) => {} // ignore every other client->server frame
                 _ => break,       // client closed or errored
             },
             _ = heartbeat.tick() => {
@@ -117,6 +136,11 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
                 }
             }
         }
+    }
+    // Covers the host quitting, crashing and being killed alike, so a hosting
+    // claim can never outlive the socket that made it.
+    if hosting {
+        state.notifier.publish("widget_host_changed", serde_json::json!({"hosted": false}));
     }
 }
 
