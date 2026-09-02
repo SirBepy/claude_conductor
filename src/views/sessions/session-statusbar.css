@@ -592,6 +592,7 @@
 }
 .sb-git-pop-section.ahead { color: #4ade80; }
 .sb-git-pop-section.behind { color: #60a5fa; }
+.sb-git-pop-section.synced { color: var(--color-text-muted); text-transform: none; letter-spacing: normal; font-weight: 500; }
 .sb-git-pop-section i { font-size: 0.85rem; }
 .sb-git-pop-count { font-weight: 400; opacity: 0.8; }
 
@@ -619,6 +620,47 @@
   color: var(--color-text);
   font-size: 0.75rem;
 }
+
+/* Merged branch history: one scroll region, capped so the popover keeps its
+   header/incoming rows fixed above it while the history pages in. */
+.sb-commit-history {
+  max-height: 260px;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border);
+}
+
+.sb-history-row {
+  align-items: center;
+  gap: 6px;
+  border-left: 2px solid transparent;
+  padding-left: 10px;
+}
+
+.sb-history-row.unpushed { border-left-color: #4ade80; background: rgba(74, 222, 128, 0.06); }
+.sb-history-row.unpushed .sb-history-mark { color: #4ade80; }
+.sb-history-row.unpushed .sb-git-pop-msg { color: var(--color-text); }
+
+.sb-history-row.pushed .sb-history-mark { color: var(--color-text-muted); opacity: 0.55; }
+.sb-history-row.pushed .sb-git-pop-msg { color: var(--color-text-muted); }
+
+.sb-history-mark { font-size: 0.8rem; flex-shrink: 0; }
+
+.sb-history-age {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.sb-history-sentinel {
+  padding: 6px 12px;
+  min-height: 6px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  opacity: 0.6;
+}
+.sb-history-sentinel.end { font-style: italic; }
 
 .sb-git-pop-push-btn {
   margin-left: auto;

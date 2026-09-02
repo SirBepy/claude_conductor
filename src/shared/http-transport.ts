@@ -156,6 +156,12 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("get_git_dirty", { cwd: args.cwd });
       case "get_commit_sync":
         return this.rpc<T>("get_commit_sync", { cwd: args.cwd });
+      case "get_commit_history":
+        return this.rpc<T>("get_commit_history", {
+          cwd: args.cwd,
+          offset: args.offset ?? 0,
+          limit: args.limit ?? 30,
+        });
       case "list_project_servers":
         return this.rpc<T>("list_project_servers", { cwd: args.cwd });
       case "list_claude_md_scopes":

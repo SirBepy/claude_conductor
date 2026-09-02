@@ -303,6 +303,7 @@ pub fn run() {
             ipc::get_git_dirty,
             ipc::get_recent_branches,
             ipc::get_commit_sync,
+            ipc::get_commit_history,
             ipc::push_commits,
             ipc::get_range_files,
             ipc::get_file_diff,

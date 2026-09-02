@@ -63,6 +63,32 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
+        router.register("get_commit_history", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    cwd: String,
+                    #[serde(default)]
+                    offset: u32,
+                    #[serde(default = "default_history_limit")]
+                    limit: u32,
+                }
+                fn default_history_limit() -> u32 {
+                    30
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                Ok(json!(
+                    crate::ipc::git::get_commit_history(p.cwd, p.offset, p.limit).await
+                ))
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
         router.register("push_commits", move |params, _ctx| {
             let state = state.clone();
             async move {
@@ -174,6 +200,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_commit_history_pages_and_flags_pushed_state() {
+        let st = state();
+        let cwd = std::env::current_dir().unwrap();
+        st.settings.upsert_project_for_cwd(&cwd, "2026-01-01T00:00:00Z");
+        let resp = call(st, "get_commit_history", json!({"cwd": cwd.to_string_lossy(), "offset": 0, "limit": 3})).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        let result = resp.result.unwrap();
+        let entries = result["entries"].as_array().unwrap();
+        assert!(entries.len() <= 3, "limit not honored: {}", entries.len());
+        for e in entries {
+            assert!(e["pushed"].is_boolean());
+            assert!(!e["short_sha"].as_str().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn get_commit_history_defaults_its_paging_params() {
+        let st = state();
+        let cwd = std::env::current_dir().unwrap();
+        st.settings.upsert_project_for_cwd(&cwd, "2026-01-01T00:00:00Z");
+        let resp = call(st, "get_commit_history", json!({"cwd": cwd.to_string_lossy()})).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        assert!(resp.result.unwrap()["entries"].is_array());
+    }
+
+    #[tokio::test]
     async fn list_project_servers_dispatches_for_a_known_cwd() {
         let st = state();
         let cwd = std::env::current_dir().unwrap();
@@ -193,7 +245,7 @@ mod tests {
         assert!(resp.result.as_ref().map(serde_json::Value::is_array).unwrap_or(false));
     }
 
-    /// All six are in `remote_handlers.rs`'s SAFE_METHODS, so an unknown
+    /// All seven are in `remote_handlers.rs`'s SAFE_METHODS, so an unknown
     /// path must be refused before it reaches git or the filesystem.
     /// push_commits has no "known cwd" dispatch test alongside the others -
     /// running it for real would push this repo's own ahead commits to origin.
@@ -203,6 +255,7 @@ mod tests {
             ("get_git_info", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("get_git_dirty", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("get_commit_sync", json!({"cwd": "C:\\nope\\not\\registered"})),
+            ("get_commit_history", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("push_commits", json!({"cwd": "C:\\nope\\not\\registered", "publish": false})),
             ("list_project_servers", json!({"cwd": "C:\\nope\\not\\registered"})),
             ("list_claude_md_scopes", json!({"worktree_path": "C:\\nope\\not\\registered"})),
