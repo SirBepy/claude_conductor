@@ -55,6 +55,9 @@
 .prompt-summary-row.is-unanswered .prompt-summary-row__answer {
   color: var(--color-text-muted);
   font-style: italic;
+  /* Italic glyphs slant past their own advance width - without this the
+     overflow:hidden box clips the last letter even though it "fits". */
+  padding-right: 2px;
 }
 .prompt-summary-row i {
   color: var(--color-text-muted);

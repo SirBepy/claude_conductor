@@ -123,8 +123,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const btn = host.querySelector<HTMLButtonElement>('[data-act="primary"]');
     if (!btn) return;
     const isSubmitMode = !hasSummary || state.activeTab === questions.length;
+    // Unlike Next (which still requires the current question answered before
+    // advancing), Submit is never blocked - an unanswered question becomes
+    // NO_ANSWER_TEXT in the payload rather than silently vanishing.
     btn.disabled = isSubmitMode
-      ? !questions.every((_, i) => answeredAt(i))
+      ? false
       : nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt);
     btn.innerHTML = `<i class="ph ${isSubmitMode ? opts.submitIcon : "ph-caret-right"}"></i> ${escapeHtml(isSubmitMode ? opts.submitLabel : "Next")}`;
     btn.onclick = isSubmitMode ? submit : advance;

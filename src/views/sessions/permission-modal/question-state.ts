@@ -15,11 +15,18 @@ import type { Answers, OptionBadge, Question, QuestionDomain, QuestionDraft, Sel
  * QuestionDraft, not question-ui.ts's closures.
  */
 export function isQuestionAnswered(q: Question | undefined, freeText: string, selection: Selection | undefined): boolean {
-  if (!q?.options?.length) return true;
   if (freeText.trim()) return true;
+  // An options-less question is free-text-only, not exempt from answering -
+  // it just has no selection to fall back on if nothing was typed.
+  if (!q?.options?.length) return false;
   if (q.multiSelect) return (selection instanceof Set ? selection.size : 0) > 0;
   return typeof selection === "string";
 }
+
+/** Wire text for a question left unanswered at submit time - keeps the
+ *  question visible to Claude (formatAnswersAsMessage/Answers payload)
+ *  instead of the key silently vanishing. */
+export const NO_ANSWER_TEXT = "(No answer provided)";
 
 /**
  * Pure "what did the user answer" computation, shared between the floating

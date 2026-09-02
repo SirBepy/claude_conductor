@@ -12,6 +12,7 @@ import {
   isDraftForPrompt,
   setActiveCard,
   clearActiveCardIfCurrent,
+  NO_ANSWER_TEXT,
 } from "./question-state";
 import { flushAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
 
@@ -240,8 +241,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       const a = answerFor(i);
       if (q.multiSelect) {
         answers[q.question] = a as string[];
-      } else if (a != null) {
-        answers[q.question] = a;
+      } else {
+        answers[q.question] = a ?? NO_ANSWER_TEXT;
       }
     });
     teardown();
@@ -303,7 +304,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // or when there is no review panel at all (single bare question).
   const triggerPrimaryShortcut = () => {
     if (!hasSummary) {
-      if (answeredAt(0)) submit();
+      submit();
       return;
     }
     if (state.activeTab === questions.length) { submit(); return; }
