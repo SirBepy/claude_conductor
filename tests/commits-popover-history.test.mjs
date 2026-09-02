@@ -159,6 +159,27 @@ describe("commits popover history", () => {
     expect(pop()).toBeNull();
   });
 
+  it("drops a stale page after close+reopen on the same repo, no duplicate rows", async () => {
+    const resolvers = [];
+    ipcMock.impl = async (cmd) => {
+      if (cmd !== "get_commit_history") return null;
+      return new Promise((res) => resolvers.push(res));
+    };
+    const p = new CommitsPopover();
+    p.open(anchor(), CWD, SYNC_AHEAD, "master", () => {});
+    p.close();
+    p.open(anchor(), CWD, SYNC_AHEAD, "master", () => {});
+    resolvers[0]({ entries: entries(0, 2, true), has_more: false, has_upstream: true });
+    resolvers[1]({ entries: entries(0, 2, true), has_more: false, has_upstream: true });
+    await flush();
+    await flush();
+
+    expect(rows().length).toBe(2);
+    expect(rows()[0].textContent).toContain("commit 0");
+    expect(rows()[1].textContent).toContain("commit 1");
+    p.close();
+  });
+
   it("shows Incoming, not the synced pill, when behind with nothing ahead", async () => {
     ipcMock.impl = async (cmd) => {
       if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };

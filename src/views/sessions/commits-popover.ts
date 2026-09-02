@@ -35,6 +35,8 @@ export class CommitsPopover {
   private historyLoaded = false;
   private historyMore = false;
   private historyLoading = false;
+  /** Increments each resetHistory() call; a page from a superseded open() can't append. */
+  private historyGen = 0;
 
   get isOpen(): boolean { return this.shell.isOpen; }
 
@@ -73,6 +75,7 @@ export class CommitsPopover {
     this.historyLoaded = false;
     this.historyMore = false;
     this.historyLoading = false;
+    this.historyGen++;
   }
 
   private rebuild(): void {
@@ -116,12 +119,13 @@ export class CommitsPopover {
     if (this.historyLoading || !this.cwd) return;
     if (this.historyLoaded && !this.historyMore) return;
     const cwd = this.cwd;
+    const gen = this.historyGen;
     const offset = this.history.length;
     this.historyLoading = true;
     this.paintSentinel();
     try {
       const page = await invoke<CommitHistory>("get_commit_history", { cwd, offset, limit: PAGE_SIZE });
-      if (this.cwd !== cwd) return; // popover moved on (session switch) mid-fetch
+      if (this.cwd !== cwd || this.historyGen !== gen) return; // popover moved on (session switch, or reopened) mid-fetch
       this.historyLoading = false;
       this.historyMore = page.has_more;
       this.history = this.history.concat(page.entries);
@@ -132,7 +136,7 @@ export class CommitsPopover {
         this.appendRows(page.entries);
       }
     } catch (err) {
-      if (this.cwd !== cwd) return;
+      if (this.cwd !== cwd || this.historyGen !== gen) return;
       this.historyLoading = false;
       this.historyLoaded = true;
       this.historyMore = false;
