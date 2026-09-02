@@ -158,28 +158,26 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
     await expect(card.locator(".prompt-panel.is-active .prompt-q__text")).toHaveText("Which features?");
   });
 
-  test("submit stays disabled until every question is answered; the submitted payload is keyed by question text", async ({ page }) => {
+  test("submit is never blocked on review; the submitted payload is keyed by question text", async ({ page }) => {
     await mountView(page);
     await openCard(page);
 
     const card = page.locator(".prompt-card");
     // Dots aren't gated, so jump straight to review (dot 3) with nothing
-    // answered yet - the primary button there is Submit, disabled until every
-    // question is answered, regardless of how review was reached.
+    // answered yet. 3ed8494c: Submit fires from there regardless - an
+    // unanswered question ships as NO_ANSWER_TEXT rather than a dead button.
     await card.locator('.prompt-dot[data-dot="3"]').click();
     const primaryBtn = card.locator('[data-act="primary"]');
     await expect(primaryBtn).toHaveText(/Submit/);
-    await expect(primaryBtn).toBeDisabled();
+    await expect(primaryBtn).toBeEnabled();
 
     await card.locator('.prompt-summary-row').nth(0).click();
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("A (typed)");
     await card.locator('.prompt-dot[data-dot="3"]').click();
-    await expect(primaryBtn).toBeDisabled();
 
     await card.locator('.prompt-summary-row').nth(1).click();
     await card.locator('.prompt-panel.is-active .prompt-q__opts input[data-label="X"]').check();
     await card.locator('.prompt-dot[data-dot="3"]').click();
-    await expect(primaryBtn).toBeDisabled();
 
     await card.locator('.prompt-summary-row').nth(2).click();
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("nothing else");
@@ -319,7 +317,8 @@ test.describe("view-harness / AUQ horizontal-track pager flow", () => {
 
 // ai_todo 821: a single question - even with supportsExtras (the review
 // panel's only other reason to exist) - never gets a second panel or a live
-// pager. The extra-message box rides along inline instead.
+// pager. ai_todo 850: it shows only its own answer field, never a second box -
+// typed prose combines with the picked option instead (computeAnswer).
 test.describe("view-harness / AUQ single-question card has no review step", () => {
   async function openSingleCard(page: import("@playwright/test").Page): Promise<void> {
     await page.evaluate(async () => {
@@ -341,7 +340,7 @@ test.describe("view-harness / AUQ single-question card has no review step", () =
     });
   }
 
-  test("renders one panel with no pager arrows and the extra-message box inline", async ({ page }) => {
+  test("renders one panel with no pager arrows and exactly one text box", async ({ page }) => {
     await mountView(page);
     await openSingleCard(page);
 
@@ -349,38 +348,48 @@ test.describe("view-harness / AUQ single-question card has no review step", () =
     await expect(card).toBeVisible();
     await expect(card.locator(".prompt-panel")).toHaveCount(1);
     await expect(card.locator(".prompt-pager [data-nav]")).toHaveCount(0);
-    await expect(card.locator(".prompt-extra-input")).toBeVisible();
+    await expect(card.locator(".prompt-q__other-input")).toBeVisible();
+    await expect(card.locator(".prompt-extra-input")).toHaveCount(0);
   });
 
-  test("one click submits with the extra message folded in - no review step to page through", async ({ page }) => {
+  test("one click submits the pick plus the typed note - no review step to page through", async ({ page }) => {
     await mountView(page);
     await openSingleCard(page);
 
     const card = page.locator(".prompt-card");
     await card.locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]').click();
-    await card.locator(".prompt-extra-input").fill("please double-check staging first");
+    await card.locator(".prompt-q__other-input").fill("please double-check staging first");
     await card.locator('[data-act="primary"]').click();
 
     const result = await page.evaluate(() => window.__auqResult);
-    expect(result?.submitted).toEqual({ "Deploy now?": "Yes" });
-    expect(result?.extra).toBe("please double-check staging first");
+    expect(result?.submitted).toEqual({ "Deploy now?": ["Yes", "please double-check staging first"] });
     await expect(card).toHaveCount(0);
   });
 
-  test("Ctrl+Enter submits directly once answered - never advances to a hidden review tab", async ({ page }) => {
+  test("Ctrl+Enter submits directly - never advances to a hidden review tab", async ({ page }) => {
     await mountView(page);
     await openSingleCard(page);
 
     const card = page.locator(".prompt-card");
-    await card.locator(".prompt-extra-input").press("Control+Enter");
-    expect(await page.evaluate(() => window.__auqResult?.submitted)).toBeUndefined();
-    await expect(card).toHaveCount(1);
-
     await card.locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]').click();
-    await card.locator(".prompt-extra-input").press("Control+Enter");
+    await card.locator(".prompt-q__other-input").press("Control+Enter");
 
     const result = await page.evaluate(() => window.__auqResult);
     expect(result?.submitted).toEqual({ "Deploy now?": "Yes" });
+    await expect(card).toHaveCount(0);
+  });
+
+  // 3ed8494c: with no review panel to page to, the shortcut always submits -
+  // an untouched question ships explicitly rather than swallowing the keypress.
+  test("Ctrl+Enter with nothing answered submits an explicit no-answer", async ({ page }) => {
+    await mountView(page);
+    await openSingleCard(page);
+
+    const card = page.locator(".prompt-card");
+    await card.locator(".prompt-q__other-input").press("Control+Enter");
+
+    const result = await page.evaluate(() => window.__auqResult);
+    expect(result?.submitted).toEqual({ "Deploy now?": "(No answer provided)" });
     await expect(card).toHaveCount(0);
   });
 });

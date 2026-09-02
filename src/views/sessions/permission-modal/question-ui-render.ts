@@ -156,12 +156,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     // with the DOM node below - drop its document-level listeners first.
     slashPopup.destroyAll();
     const isSummary = hasSummary && state.activeTab === questions.length;
-    // A one-question card has no review panel to host the extra-message box
-    // (ai_todo 821) - it rides along under the question's own answer field.
-    const inlineExtras = !hasSummary && Boolean(opts.supportsExtras) && questions.length === 1;
+    // Exactly one text box on screen, always (ai_todo 850). A one-question
+    // card has no review panel, so it shows only its own answer field - typed
+    // prose there already rides along with the picked option (computeAnswer).
     bar.innerHTML = isSummary
       ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
-      : ownZoneHtml(state.activeTab, freeText) + (inlineExtras ? extraMessageZoneHtml(state.additionalMessage) : "");
+      : ownZoneHtml(state.activeTab, freeText);
 
     const wireField = (el: HTMLTextAreaElement, isExtraField: boolean): void => {
       const highlightEl = el.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
@@ -198,8 +198,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       });
     };
 
-    // A one-question card inlines the extra-message box, so both fields can be
-    // present at once; each is wired independently.
     const ownEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input");
     const extraEl = bar.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
     if (ownEl) wireField(ownEl, false);
