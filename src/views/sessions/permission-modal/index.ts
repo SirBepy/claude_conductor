@@ -157,6 +157,10 @@ export async function showQuestionCard(
       try {
         delivered = (await invoke<boolean>("respond_question", { id: payload.id, answers, skipped: false })) === true;
       } catch (e) {
+        // respond_question_inner (permission.rs) has no error path of its own -
+        // this catch only fires on a transport/arg-level failure, which says
+        // nothing about the prompt's server-side state. So falling through to
+        // attempt delivery below is intentional, not a missed `return`.
         console.warn("respond_question (settle) failed:", e);
         clearPendingPromptById(payload.id);
         rerenderSidebar();
