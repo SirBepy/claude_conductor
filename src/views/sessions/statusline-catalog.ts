@@ -32,8 +32,8 @@ export const STATIC_CHIPS = {
   thinking:       { section: "model",   icon: "ph-brain",            sample: "thinking",   tooltip: "Shows while extended thinking is active." },
 
   branch:         { section: "git",     icon: "ph-git-branch",       sample: "main",       tooltip: "Current git branch." },
-  repo:           { section: "git",     icon: "ph-folder-simple",    sample: "my-project", tooltip: "Repository name (from origin)." },
-  folder:         { section: "git",     icon: "ph-folder-open",      sample: "my-project", tooltip: "Working directory. Click to open in your file explorer." },
+  repo:           { section: "git",     icon: "ph-folder-simple",    sample: "my-project", tooltip: "Repository name (from origin). Hidden while the chat is still in the folder it was opened in." },
+  folder:         { section: "git",     icon: "ph-folder-open",      sample: "my-project", tooltip: "Working directory. Hidden while the chat is still in the folder it was opened in; appears once the AI moves elsewhere. Click to open in your file explorer." },
   commits:        { section: "git",     icon: "ph-arrows-down-up",   sample: "↑2 ↓1",      tooltip: "Commits ahead/behind the upstream branch." },
   commits_ahead:  { section: "git",     icon: "ph-arrow-up",         sample: "↑2",         tooltip: "Commits ahead of upstream (unpushed)." },
   commits_behind: { section: "git",     icon: "ph-arrow-down",       sample: "↓1",         tooltip: "Commits behind upstream (unpulled)." },

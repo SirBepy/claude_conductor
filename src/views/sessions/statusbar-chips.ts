@@ -38,6 +38,21 @@ export interface ChipRenderCtx {
   renderImagesChip: (animClass: (key: string) => string) => string;
 }
 
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/** True while the live git cwd is still inside the dir the chat was opened in;
+ *  the repo/folder chips stay hidden until it isn't. Prefix-matched on a
+ *  separator boundary so `/foo-2` never reads as inside `/foo`, and
+ *  case-insensitively because Windows paths are. */
+export function isAtSpawnLocation(spawnCwd: string | null, gitCwd: string | null): boolean {
+  if (!spawnCwd || !gitCwd) return false;
+  const spawn = normalizePath(spawnCwd);
+  const live = normalizePath(gitCwd);
+  return live === spawn || live.startsWith(`${spawn}/`);
+}
+
 export function animClass(animatedKeys: Set<string>, key: string): string {
   if (animatedKeys.has(key)) return "";
   animatedKeys.add(key);
@@ -93,6 +108,7 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       return "";
     }
     case "repo": {
+      if (isAtSpawnLocation(ctx.cwd, ctx.gitCwd)) return "";
       if (ctx.gitInfo.repo) return `<span class="sb-chip sb-repo${ac("repo")}"><i class="ph ph-folder-simple"></i>${escapeHtml(ctx.gitInfo.repo)}</span>`;
       if (!ctx.gitInfoLoaded) return skeletonChip("repo", "sb-repo", "ph-folder-simple", "80px");
       return "";
@@ -101,7 +117,7 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       // Git-section chip: follow the live git cwd so it stays coherent with
       // the branch/repo chips when the AI is working in a worktree.
       const dir = ctx.gitCwd;
-      if (!dir) return "";
+      if (!dir || isAtSpawnLocation(ctx.cwd, dir)) return "";
       const folderName = dir.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? dir;
       const cwdEsc = escapeHtml(dir);
       return `<span class="sb-chip sb-folder sb-folder-btn${ac("folder")}" role="button" title="${cwdEsc}" data-cwd="${cwdEsc}"><i class="ph ph-folder-open"></i>${escapeHtml(folderName)}</span>`;
