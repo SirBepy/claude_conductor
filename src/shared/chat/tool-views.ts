@@ -30,17 +30,20 @@ function scopedIndices(
   start: number,
   end: number,
   ids?: ReadonlySet<string>,
+  isEligible: (m: RenderedMessage) => boolean = (m) => !m.parentToolUseId,
+  matchesId: (m: RenderedMessage, ids: ReadonlySet<string>) => boolean = (m, ids) =>
+    !!m.id && ids.has(m.id),
 ): number[] {
   const picked = new Set<number>();
   for (let i = start; i < end; i++) {
     const m = messages[i];
-    if (!m || m.parentToolUseId) continue;
+    if (!m || !isEligible(m)) continue;
     picked.add(i);
   }
   if (ids && ids.size > 0) {
     for (let i = 0; i < messages.length; i++) {
-      const id = messages[i]?.id;
-      if (id && ids.has(id)) picked.add(i);
+      const m = messages[i];
+      if (m && matchesId(m, ids)) picked.add(i);
     }
   }
   return [...picked].sort((a, b) => a - b);
@@ -201,18 +204,12 @@ export function renderQuestionsView(
   end: number,
   ids?: ReadonlySet<string>,
 ): string {
-  // Range plus the ids this chip folded (see scopedIndices), keeping in-range
-  // question CARDS - which carry no tool_use id to match on - either way.
-  const inScope = new Set<number>();
-  for (let i = start; i < end; i++) inScope.add(i);
-  if (ids && ids.size > 0) {
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i];
-      if (m?.id && ids.has(m.id)) inScope.add(i);
-      if (m?.kind === "tool_result" && m.tool_use_id && ids.has(m.tool_use_id)) inScope.add(i);
-    }
-  }
-  const order = [...inScope].sort((a, b) => a - b);
+  // Range keeps every message (question CARDS carry no tool_use id to match
+  // on), plus folded ids matched on either m.id or a tool_result's tool_use_id
+  // (the answer arrives as a later, separate message).
+  const order = scopedIndices(messages, start, end, ids, () => true, (m, idSet) =>
+    (!!m.id && idSet.has(m.id))
+    || (m.kind === "tool_result" && !!m.tool_use_id && idSet.has(m.tool_use_id)));
   // tool_use id -> parsed answers, harvested from each call's tool_result.
   const answersById = new Map<string, Map<string, string>>();
   for (const i of order) {
