@@ -32,7 +32,12 @@ function makeHarness() {
   document.body.appendChild(anchor);
 
   const send = vi.fn(async () => {});
-  const interrupt = vi.fn(async () => {});
+  const state = { busy: true };
+  // sendNow waits for the turn to actually end (todo 873), so the interrupt
+  // has to clear busy here or the poll never resolves.
+  const interrupt = vi.fn(async () => {
+    state.busy = false;
+  });
   const held = new HeldMessages();
   const attach = {
     sessionId: "sess-A",
@@ -44,11 +49,11 @@ function makeHarness() {
     isDraftEmpty: () => true,
     isComposing: () => false,
     clearComposer: vi.fn(),
-    getIsBusy: () => true,
+    getIsBusy: () => state.busy,
     onChange: () => held.renderChip(),
   };
   held.attach(attach);
-  return { held, attach, send };
+  return { held, attach, send, interrupt, state };
 }
 
 beforeEach(() => {

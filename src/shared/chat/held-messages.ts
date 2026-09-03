@@ -30,9 +30,10 @@ const DEFER_RETRY_MS = 2100;
 
 // sendNow()'s post-interrupt poll (todo 873): cancel_turn no longer force-
 // clears busy, so flush() must wait for the real turn-end, not race fresh
-// stdin into a still-live child. Ceiling stays well under busy_watchdog's 20m.
+// stdin into a still-live child. On timeout the set stays held rather than
+// flushing anyway, which would be the same race the wait exists to avoid.
 const SEND_NOW_IDLE_POLL_MS = 150;
-const SEND_NOW_IDLE_TIMEOUT_MS = 90_000;
+const SEND_NOW_IDLE_TIMEOUT_MS = 20_000;
 
 /** Everything the controller needs from the currently-mounted pane/composer.
  * Re-supplied on every `attach()` because the pane DOM and the per-session
@@ -255,10 +256,11 @@ export class HeldMessages {
   /** Explicit "Send now": interrupt the turn, wait for it to genuinely end,
    *  then send held + draft as one. The wait matters (todo 873): cancel_turn
    *  no longer force-clears busy, so flushing before the interrupted turn's
-   *  own result line lands would write fresh stdin into a still-live child. */
-  async sendNow(): Promise<void> {
+   *  own result line lands would write fresh stdin into a still-live child.
+   *  Resolves false when the turn never ended - the set stays held. */
+  async sendNow(): Promise<boolean> {
     const a = this.attached;
-    if (!a) return;
+    if (!a) return false;
     try {
       await a.interrupt();
     } catch {
@@ -268,7 +270,14 @@ export class HeldMessages {
     while (a.getIsBusy() && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, SEND_NOW_IDLE_POLL_MS));
     }
+    if (a.getIsBusy()) {
+      // The child ignored the interrupt. Flushing anyway is the exact race the
+      // wait exists to avoid, so the set stays queued and the chip stays up.
+      console.warn("[held] send-now: turn still live after interrupt, keeping messages held");
+      return false;
+    }
     await this.flush(true);
+    return true;
   }
 
   /** Composer routed a normal (not-busy) send here because held items exist:

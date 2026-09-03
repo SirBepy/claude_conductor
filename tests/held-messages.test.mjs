@@ -182,15 +182,38 @@ describe("HeldMessages — flush triggers", () => {
 
   it("Send now interrupts the turn, then sends held + draft as one", async () => {
     const { held, send, interrupt, state } = makeHarness();
+    // The interrupt is cooperative: the turn's own trailing result line is what
+    // clears busy, so model that rather than a child that never yields.
+    interrupt.mockImplementation(async () => {
+      state.busy = false;
+    });
     held.stage(textBlocks("queued"));
     state.draftEmpty = false;
     state.draftBlocks = textBlocks("half-typed");
 
-    await held.sendNow();
+    await expect(held.sendNow()).resolves.toBe(true);
 
     expect(interrupt).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith([{ type: "text", text: "queued\n\nhalf-typed" }]);
     expect(held.hasItemsForActive()).toBe(false);
+  });
+
+  it("Send now keeps the set held when the turn ignores the interrupt", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, send, state } = makeHarness();
+      state.busy = true; // the child never yields, so busy never clears
+
+      held.stage(textBlocks("queued"));
+      const pending = held.sendNow();
+      await vi.advanceTimersByTimeAsync(21_000);
+
+      await expect(pending).resolves.toBe(false);
+      expect(send).not.toHaveBeenCalled();
+      expect(held.hasItemsForActive()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("flushHeldWithDraft bundles the existing set with the draft", async () => {
