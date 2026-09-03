@@ -164,6 +164,7 @@ pub fn read_page(
         oldest_seq,
         newest_seq,
         has_more,
+        continues_from: None,
     })
 }
 
@@ -173,6 +174,7 @@ fn empty_page() -> HistoryPage {
         oldest_seq: 0,
         newest_seq: 0,
         has_more: false,
+        continues_from: None,
     }
 }
 

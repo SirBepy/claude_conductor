@@ -54,8 +54,7 @@ pub async fn load_history_page(
     let limit = message_limit.clamp(1, 500);
 
     tauri::async_runtime::spawn_blocking(move || {
-        let path = crate::chat::history::locate_transcript(&session_id, cwd.as_deref())?;
-        crate::chat::history::read_page(&path, before_seq, limit)
+        crate::chat::history::read_page_for_session(&session_id, cwd.as_deref(), before_seq, limit)
     })
     .await
     .map_err(|e| format!("join: {}", e))?

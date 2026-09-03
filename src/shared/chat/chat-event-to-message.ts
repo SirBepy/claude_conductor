@@ -7,6 +7,7 @@ import {
   isSilentSystemUserMessage,
   classifyMetaTurn,
   noiseAssistantLabel,
+  CHAIN_DIVIDER_KIND,
 } from "./chat-classifiers";
 import { isAskQuestionTool, isShowPreviewTool } from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
@@ -185,6 +186,9 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
         fullSeq: ev.full_seq !== null ? Number(ev.full_seq) : undefined,
       };
     case "notification":
+      if (ev.kind === CHAIN_DIVIDER_KIND) {
+        return { kind: "system", text: "Previous chat", chainDivider: true, ts: 0 };
+      }
       return { kind: "notification", text: ev.body, ts: Date.now() };
     case "session_ended":
       return { kind: "system", text: `Session ended${ev.exit_code !== null ? ` (exit ${ev.exit_code})` : ""}`, ts };

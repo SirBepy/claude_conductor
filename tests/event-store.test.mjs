@@ -22,6 +22,20 @@ function routeHistoryPage(sid, ...pages) {
   return router;
 }
 
+// Chain form of the above. Calling routeHistoryPage twice does NOT stack:
+// makeInvokeRouter reinstalls the implementation, so the second call's `base`
+// is a fresh router and the first call's queue is unreachable.
+function routeHistoryChain(pagesBySid) {
+  makeInvokeRouter(invokeMock);
+  const queues = new Map(Object.entries(pagesBySid).map(([sid, pages]) => [sid, [...pages]]));
+  const base = invokeMock.getMockImplementation();
+  invokeMock.mockImplementation((cmd, args) => {
+    const q = cmd === "load_history_page" ? queues.get(args?.sessionId) : null;
+    if (q && q.length > 0) return Promise.resolve(q.shift());
+    return base(cmd, args);
+  });
+}
+
 beforeEach(() => {
   invokeMock.mockReset();
   globalThis.window = globalThis.window || {};
@@ -73,6 +87,56 @@ describe("SessionEventStore pagination", () => {
     expect(all).toHaveLength(4);
     expect(all[0].content[0].text).toBe("u1");
     expect(all[3].content[0].text).toBe("a3");
+  });
+
+  // /respawn hands a fresh context window a fresh session id, so scrolling up
+  // has to cross into the predecessor's own transcript or the takeover reads
+  // as "everything before this is gone".
+  it("loadOlder hops into the predecessor once this transcript runs out", async () => {
+    const sid = "sess-chain-head";
+    const prevId = "sess-chain-prev";
+    routeHistoryChain({
+      [sid]: [{
+        events: [userEvent("handoff", 9)],
+        oldest_seq: 0,
+        newest_seq: 1,
+        has_more: false,
+        continues_from: prevId,
+      }],
+      [prevId]: [{
+        events: [userEvent("older", 1), assistantEvent("older-reply", 2)],
+        oldest_seq: 0,
+        newest_seq: 4,
+        has_more: false,
+        continues_from: null,
+      }],
+    });
+
+    await sessionEvents.loadInitial(sid);
+    // The head's own file is exhausted, but the chain is not.
+    expect(sessionEvents.hasMore(sid)).toBe(true);
+
+    const older = await sessionEvents.loadOlder(sid);
+    expect(older).not.toBeNull();
+    // The hop asks for the PREDECESSOR's transcript, from its end - a byte
+    // offset from the other file would land anywhere.
+    const hop = invokeMock.mock.calls.find(
+      ([cmd, args]) => cmd === "load_history_page" && args?.sessionId === prevId,
+    );
+    expect(hop?.[1].beforeSeq).toBeUndefined();
+
+    const all = sessionEvents.events(sid);
+    expect(all.map((e) => e.type)).toEqual([
+      "user_message",
+      "assistant_message",
+      "notification",
+      "user_message",
+    ]);
+    // Divider sits between the two transcripts, not above both.
+    expect(all[2].kind).toBe("chain_divider");
+    expect(all[3].content[0].text).toBe("handoff");
+    // Predecessor started fresh, so the walk ends here.
+    expect(sessionEvents.hasMore(sid)).toBe(false);
   });
 
   it("loadOlder is single-flight under concurrent calls", async () => {

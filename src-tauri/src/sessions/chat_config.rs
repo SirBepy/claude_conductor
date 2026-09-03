@@ -39,6 +39,12 @@ pub struct ChatConfig {
     /// wanna see them whenever i come back to this specific chat".
     #[serde(default)]
     pub todo_columns: Vec<String>,
+    /// The chat this one took over from via `/respawn`. Mirrors the registry's
+    /// `successor_of`, but here because the registry snapshot drops a chat the
+    /// moment it ends and the transcript chain must still resolve years later.
+    /// Empty for a chat that started fresh. Written only via `set_predecessor`.
+    #[serde(default)]
+    pub predecessor: String,
 }
 
 /// Serialize read-modify-write within a process. Cross-process integrity comes
@@ -143,6 +149,28 @@ pub fn set_todo_columns(session_id: &str, columns: Vec<String>) {
     set_todo_columns_at(&path, session_id, columns);
 }
 
+/// Record which chat `session_id` took over from. Preserves everything else
+/// on the entry. Best-effort, never panics.
+pub fn set_predecessor(session_id: &str, predecessor: &str) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_predecessor_at(&path, session_id, predecessor);
+}
+
+/// The chat `session_id` took over from, or None if it started fresh.
+pub fn predecessor_of(session_id: &str) -> Option<String> {
+    get(session_id).map(|c| c.predecessor).filter(|p| !p.is_empty())
+}
+
+fn set_predecessor_at(path: &Path, session_id: &str, predecessor: &str) {
+    if session_id.is_empty() || predecessor.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    map.entry(session_id.to_string()).or_default().predecessor = predecessor.to_string();
+    write_atomic(path, &map);
+}
+
 fn set_todo_columns_at(path: &Path, session_id: &str, columns: Vec<String>) {
     if session_id.is_empty() {
         return;
@@ -218,6 +246,29 @@ mod tests {
         let path = tmp.path().join("chat-config.json");
         set_auto_accept_at(&path, "", true);
         assert!(!path.exists(), "no file written for empty session id");
+    }
+
+    #[test]
+    fn predecessor_round_trips_and_preserves_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        record_at(&path, "successor", "opus", "high");
+        set_predecessor_at(&path, "successor", "predecessor");
+        let got = get_at(&path, "successor").unwrap();
+        assert_eq!(got.predecessor, "predecessor");
+        assert_eq!(got.model, "opus", "model preserved across predecessor write");
+        assert!(get_at(&path, "predecessor").is_none(), "link is one-way, on the successor only");
+    }
+
+    /// A chat that started fresh must not report a chain, and an empty write
+    /// must not create a phantom entry the transcript reader would follow.
+    #[test]
+    fn set_predecessor_empty_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        set_predecessor_at(&path, "sess-1", "");
+        set_predecessor_at(&path, "", "sess-0");
+        assert!(!path.exists(), "no file written for an empty id on either side");
     }
 
     #[test]

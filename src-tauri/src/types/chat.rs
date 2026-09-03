@@ -180,6 +180,12 @@ pub struct HistoryPage {
     pub oldest_seq: u64,
     pub newest_seq: u64,
     pub has_more: bool,
+    /// Session id whose transcript continues above this one, set only on the
+    /// page that exhausts the current file (`has_more == false`). A `/respawn`
+    /// successor points at its predecessor here, so scrolling up walks the
+    /// whole chain instead of dead-ending at a fresh context window.
+    #[serde(default)]
+    pub continues_from: Option<String>,
 }
 
 #[cfg(test)]

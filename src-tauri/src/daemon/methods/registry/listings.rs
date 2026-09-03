@@ -181,11 +181,12 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
             let limit = p.message_limit.clamp(1, 500);
             // Filesystem + JSONL parsing is synchronous IO; run on blocking pool.
             tokio::task::spawn_blocking(move || {
-                let path = crate::chat::history::locate_transcript(
+                crate::chat::history::read_page_for_session(
                     &p.session_id,
                     p.cwd.as_deref(),
-                )?;
-                crate::chat::history::read_page(&path, p.before_seq, limit)
+                    p.before_seq,
+                    limit,
+                )
             })
             .await
             .map_err(|e| RpcError::internal(format!("join: {e}")))?

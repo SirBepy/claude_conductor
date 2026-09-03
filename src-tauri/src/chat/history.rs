@@ -54,6 +54,24 @@ fn locate_transcript_in(
     Err(format!("no transcript found for session {session_id}"))
 }
 
+/// [`read_page`] addressed by session id, tagging the page that exhausts the
+/// file with the predecessor it continues from. The cursor stays per-file:
+/// `oldest_seq` is a byte offset, so a chained page is fetched by re-calling
+/// this with the `continues_from` id and no `before_seq`.
+pub fn read_page_for_session(
+    session_id: &str,
+    cwd: Option<&str>,
+    before_seq: Option<u64>,
+    message_limit: u32,
+) -> Result<crate::types::chat::HistoryPage, String> {
+    let path = locate_transcript(session_id, cwd)?;
+    let mut page = read_page(&path, before_seq, message_limit)?;
+    if !page.has_more {
+        page.continues_from = crate::sessions::chat_config::predecessor_of(session_id);
+    }
+    Ok(page)
+}
+
 pub fn replay(path: &Path) -> Result<Vec<ChatEvent>, String> {
     let f = File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
     let reader = BufReader::new(f);

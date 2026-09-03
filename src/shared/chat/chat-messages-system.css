@@ -10,6 +10,32 @@
   padding: 4px;
 }
 
+/* `/respawn` chain boundary: everything above it belongs to the chat this one
+   took over from. A rule rather than a caption, since it separates two whole
+   transcripts, not two turns. */
+.msg.system.chain-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 16px;
+  padding: 0;
+  font-size: 0.68rem;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  user-select: none;
+}
+.msg.system.chain-divider .chain-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+/* The row still gets the shared hover-timestamp label (buildMessageEl sets
+   data-ts on every message); a wall-clock time on a chat boundary is noise. */
+.msg.system.chain-divider[data-ts]:hover::after {
+  content: none;
+}
+
 /* Collapsed long system note (see renderSystemNote) - the base .msg.system
    centered-italic-caption look only reads well for short text; a long
    relayed message gets a one-line truncated summary that expands. */

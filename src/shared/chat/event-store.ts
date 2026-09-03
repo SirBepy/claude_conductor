@@ -15,6 +15,7 @@
 import type { ChatEvent, HistoryPage } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
 import { getTransport } from "../transport";
+import { CHAIN_DIVIDER_KIND } from "./chat-classifiers";
 import { normalizeUserMessageText } from "./chat-transforms";
 import { visibleEventSigs } from "./chat-transcript-sig";
 import { EvictionPolicy, touchAccess } from "./event-store-eviction";
@@ -68,7 +69,14 @@ interface RecentSig {
 export interface CacheEntry {
   events: ChatEvent[];
   oldestSeq: number | null;
+  /** More to load from ANYWHERE - this file, or a predecessor above it. */
   hasMore: boolean;
+  /** Transcript `oldestSeq` points into; a predecessor's id after a chain hop.
+   *  Byte offsets are per-file, so the cursor is meaningless without it. */
+  pageSessionId: string | null;
+  pageHasMore: boolean;
+  /** The chat `pageSessionId` took over from. Null at the end of the walk. */
+  chainNextId: string | null;
   loadingOlder: boolean;
   initialLoaded: boolean;
   unlisten: Unlisten | null;
@@ -103,6 +111,11 @@ export interface CacheEntry {
 
 /** The `assistant_delta` member of the ChatEvent union. */
 type AssistantDeltaEvent = Extract<ChatEvent, { type: "assistant_delta" }>;
+
+/** Boundary row marking where a `/respawn` predecessor's transcript ends. */
+function chainDividerEvent(predecessorId: string): ChatEvent {
+  return { type: "notification", kind: CHAIN_DIVIDER_KIND, body: predecessorId };
+}
 
 class SessionEventStore {
   private cache = new Map<string, CacheEntry>();
@@ -184,7 +197,10 @@ class SessionEventStore {
       const liveAfterPage = entry.events.filter((ev) => !liveBefore.has(ev));
       entry.events = [...page.events, ...liveAfterPage];
       entry.oldestSeq = Number(page.oldest_seq);
-      entry.hasMore = page.has_more;
+      entry.pageSessionId = sessionId;
+      entry.pageHasMore = page.has_more;
+      entry.chainNextId = page.continues_from ?? null;
+      entry.hasMore = entry.pageHasMore || entry.chainNextId !== null;
     } catch {
       /* tolerate absence (no JSONL yet for brand-new sessions) */
     }
@@ -279,30 +295,42 @@ class SessionEventStore {
    * Fetch the previous page of older messages and prepend them to the cache.
    * Returns the prepended slice, or null if there is nothing more to load
    * or a load is already in flight.
+   *
+   * Once this chat's transcript runs out the walk hops to the chat it took over
+   * from, injecting a divider and restarting the cursor at that file's EOF.
    */
   async loadOlder(sessionId: string, cwd?: string): Promise<ChatEvent[] | null> {
     const entry = this.cache.get(sessionId);
     if (!entry || !entry.initialLoaded) return null;
     touchAccess(entry);
     if (!entry.hasMore || entry.loadingOlder) return null;
-    if (entry.oldestSeq == null) return null;
+    const hop = !entry.pageHasMore;
+    const targetId = hop ? entry.chainNextId : entry.pageSessionId;
+    if (!targetId) return null;
+    if (!hop && entry.oldestSeq == null) return null;
     entry.loadingOlder = true;
     try {
-      const args: { sessionId: string; cwd?: string; beforeSeq: number; messageLimit: number } = {
-        sessionId,
-        beforeSeq: entry.oldestSeq,
+      const args: { sessionId: string; cwd?: string; beforeSeq?: number; messageLimit: number } = {
+        sessionId: targetId,
         messageLimit: OLDER_PAGE_SIZE,
       };
+      if (!hop) args.beforeSeq = entry.oldestSeq as number;
       if (cwd) args.cwd = cwd;
       const page = await invoke<HistoryPage>("load_history_page", args);
       if (!page.events.length) {
         entry.hasMore = false;
+        entry.chainNextId = null;
         return null;
       }
-      entry.events = [...page.events, ...entry.events];
+      // Divider goes AFTER the older events - the array is oldest-first.
+      const incoming = hop ? [...page.events, chainDividerEvent(targetId)] : page.events;
+      entry.events = [...incoming, ...entry.events];
       entry.oldestSeq = Number(page.oldest_seq);
-      entry.hasMore = page.has_more;
-      return page.events;
+      entry.pageSessionId = targetId;
+      entry.pageHasMore = page.has_more;
+      entry.chainNextId = page.continues_from ?? null;
+      entry.hasMore = entry.pageHasMore || entry.chainNextId !== null;
+      return incoming;
     } catch {
       return null;
     } finally {
@@ -635,6 +663,9 @@ class SessionEventStore {
       events: [],
       oldestSeq: null,
       hasMore: false,
+      pageSessionId: null,
+      pageHasMore: false,
+      chainNextId: null,
       loadingOlder: false,
       initialLoaded: false,
       unlisten: null,

@@ -133,6 +133,12 @@ export function detectProgressToken(text: string): { n: number; m: number } | nu
   return { n, m };
 }
 
+/** `notification.kind` carrying a `/respawn` chain boundary. Rides a generic
+ *  Notification rather than its own ChatEvent variant (same call as todo 675's
+ *  `waiting_on`): the row is injected client-side on a pagination hop and is
+ *  never written to any transcript. */
+export const CHAIN_DIVIDER_KIND = "chain_divider";
+
 export interface RenderedMessage {
   kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question" | "message" | "preview";
   content?: ContentBlock[];
@@ -200,6 +206,10 @@ export interface RenderedMessage {
    *  reached the store. */
   previewHtml?: string;
   previewSlug?: string;
+  /** Boundary between a `/respawn` successor and the chat it took over from -
+   *  everything above the row belongs to the predecessor. Injected by the
+   *  event store on a chain hop, never present in any transcript. */
+  chainDivider?: boolean;
 }
 
 /**
@@ -212,7 +222,9 @@ export interface RenderedMessage {
  * becomes a kind:"user" row), so checking kind here is sufficient.
  */
 export function isBoundaryMessage(m: RenderedMessage): boolean {
-  return m.kind === "user" || (m.kind === "system" && m.isCompaction === true);
+  return m.kind === "user"
+    || (m.kind === "system" && m.isCompaction === true)
+    || m.chainDivider === true;
 }
 
 /** 1-based ordinal of `messages[index]` among compaction rows - pure

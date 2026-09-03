@@ -127,6 +127,10 @@ pub(crate) async fn spawn_chat(
     }
     if respawn {
         state.registry.set_successor_of(&sid, caller_session_id);
+        // Durable twin of the registry link: the snapshot drops the caller the
+        // moment it ends, and the successor's transcript chain must still
+        // resolve after that.
+        crate::sessions::chat_config::set_predecessor(&sid, caller_session_id);
         state.registry.set_close_requested(caller_session_id);
     }
     crate::sessions::persistence::save_snapshot_default(&state.registry);

@@ -256,6 +256,11 @@ function renderSystemNote(text: string): string {
 export function renderMessage(m: RenderedMessage): string {
   switch (m.kind) {
     case "system":
+      if (m.chainDivider) {
+        // Real span rules, not ::before/::after - .msg[data-ts]:hover::after is
+        // already taken by the hover-timestamp label on every row.
+        return `<div class="msg system chain-divider"><span class="chain-rule"></span>${escapeHtml(m.text ?? "Previous chat")}<span class="chain-rule"></span></div>`;
+      }
       if (m.isCompaction) {
         // compactionN can be unset here: the paginated (scrollback) path's
         // stateless converter has no list to derive it from - render the
