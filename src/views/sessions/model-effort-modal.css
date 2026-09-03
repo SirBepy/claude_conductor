@@ -253,24 +253,6 @@
   font-weight: 600;
 }
 
-/* 1-9 keyboard-shortcut hint next to each Model slider stop. Rendered as a
- * small kbd-style chip - the previous 0.62rem/70%-opacity text was present in
- * the DOM but unreadable at a glance (impeccable critique, 2026-08-22). */
-.model-effort-modal-card .me-key-hint {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 13px;
-  margin-left: 4px;
-  padding: 0 3px;
-  font-size: 0.68rem;
-  line-height: 1.4;
-  color: var(--color-text-muted, #8a8a96);
-  background: var(--color-surface-alt, #24242e);
-  border: 1px solid var(--color-border, #2a2a36);
-  border-radius: 3px;
-}
-
 /* Spinner next to the Model label while the availability probe is in flight -
  * reuses base.css's icon-btn-spin keyframes rather than adding another. */
 .model-effort-modal-card .me-label-spinner {

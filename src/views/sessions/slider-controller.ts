@@ -17,7 +17,7 @@ export interface SliderController {
    * labels). Native <input type=range> can't animate its thumb on a
    * programmatic value change (WebKit/Blink snap instantly - thumb position
    * isn't a transitionable CSS property), so track+fill+thumb are plain divs. */
-  html(kind: SliderKind, label: string, idx: number, stops: string[], keyHints: boolean, labelSuffixHtml?: string): string;
+  html(kind: SliderKind, label: string, idx: number, stops: string[], labelSuffixHtml?: string): string;
   /** FLIP "first" step - captures each slider's on-screen position right
    * before renderBody() tears the DOM down and rebuilds it. */
   captureFlipState(): FlipState;
@@ -70,10 +70,10 @@ export function createSliderController(
   }
 
   return {
-    html(kind, label, idx, stops, keyHints, labelSuffixHtml = ""): string {
+    html(kind, label, idx, stops, labelSuffixHtml = ""): string {
       const max = stops.length - 1;
       const stopsHtml = stops.map((s, i) => `
-        <button type="button" class="slider-stop-label${i === idx ? " active" : ""}" data-kind="${kind}" data-idx="${i}">${escapeHtml(s)}${keyHints && i < 9 ? `<span class="me-key-hint">${i + 1}</span>` : ""}</button>
+        <button type="button" class="slider-stop-label${i === idx ? " active" : ""}" data-kind="${kind}" data-idx="${i}">${escapeHtml(s)}</button>
       `).join("");
       return `
         <div class="me-field">
