@@ -23,7 +23,8 @@ import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
 import { showPermissionCard, showQuestionReplay } from "./permission-card";
 import { findQuestionIndexById } from "../../../shared/chat/chat-question-card";
-import { rerenderSidebar, showQuestionCard, dismissQuestionCard } from "./index";
+import { rerenderSidebar, dismissQuestionCard } from "./index";
+import { showQuestionCard } from "./question-submit";
 
 /**
  * Drain a parked permission prompt for a session that just had auto-accept

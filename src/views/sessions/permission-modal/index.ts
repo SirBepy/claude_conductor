@@ -16,34 +16,29 @@
  * Install once at app startup via `installPermissionModalListener()`.
  */
 
-import { invoke } from "../../../shared/ipc";
-import { showToast } from "../../../shared/toast";
 import { getTransport } from "../../../shared/transport";
-import { state } from "../state";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
-import { confirmQuestionRendered, dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
+import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
 import { getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
-import { auqAnswerSentinel, AUQ_EXTRA_SENTINEL } from "../../../shared/chat/chat-transforms";
-import type { ContentBlock } from "../../../types/ipc.generated";
-import { clearQuestionDraft, saveQuestionDraft } from "./draft-persistence";
-import { scheduleAuqPush, clearAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
+import { clearQuestionDraft } from "./draft-persistence";
+import { cancelAuqPush } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
   hydrateAutoAccept,
   isAutoAccept,
   isForSelectedSession,
-  isLatestQuestion,
   markLatestQuestion,
   gateDiag,
-  resolveCwdForSession,
   storePendingPrompt,
   clearPendingPromptById,
   peekPendingPrompt,
   pendingPromptSessionIds,
 } from "./gating";
-import type { PermissionRequestedPayload, Question, QuestionDraft, QuestionRequestedPayload } from "./types";
+import type { PermissionRequestedPayload, QuestionRequestedPayload } from "./types";
+import { showQuestionCard } from "./question-submit";
+export type { ShowQuestionCardOpts } from "./question-submit";
 
 export {
   isAutoAccept,
@@ -55,6 +50,7 @@ export {
 } from "./gating";
 export { dismissQuestionCard } from "./question-ui";
 export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, reopenPendingPrompt } from "./resurface";
+export { showQuestionCard };
 
 // Sidebar re-render is injected rather than statically imported: a direct
 // `import { renderSidebar } from "../sidebar"` would close a module cycle
@@ -72,171 +68,6 @@ export function setSidebarRerenderHook(fn: () => void): void {
  *  resurface.ts (split out of this file, ai_todo 517). */
 export function rerenderSidebar(): void {
   _rerenderSidebar?.();
-}
-
-/** Mirror per-question answered/unanswered progress into the chat transcript's
- *  question card while the floating card is still being answered. `state` is
- *  imported directly (not injected like the sidebar hook above) because
- *  gating.ts already imports it - that cycle is pre-existing and safe, since
- *  neither side reads the other at module-evaluation time, only inside
- *  functions called later. No-op for a prompt with no session (the headless
- *  permission-card path has no chat transcript to sync into) or when the
- *  prompt's session isn't the one currently on screen. */
-function syncQuestionProgress(sessionId: string | undefined, promptId: string, questions: Question[], draft: QuestionDraft): void {
-  if (!sessionId || state.selectedId !== sessionId) return;
-  const liveAnswered = questions.map((q, i) =>
-    isQuestionAnswered(q, draft.freeText.get(i) ?? "", draft.selections.get(i))
-  );
-  state.renderer?.updateQuestionProgress(promptId, liveAnswered);
-}
-
-/** `reopened`: clicked in the transcript, so it is deliberately answered out
- *  of order and the isLatestQuestion drop below must not fire. */
-export interface ShowQuestionCardOpts { reopened?: boolean }
-
-// Exported for resurface.ts (split out of this file, ai_todo 517).
-export async function showQuestionCard(
-  payload: QuestionRequestedPayload,
-  restoredDraft?: QuestionDraft,
-  opts: ShowQuestionCardOpts = {},
-): Promise<void> {
-  // Park the prompt while it's on screen so switching chats and back re-surfaces
-  // it (the reliable poll only emits each id once, so a card torn down by
-  // navigation is otherwise lost while the daemon turn hangs). Cleared when the
-  // prompt resolves (see the `prompt-resolved` listener).
-  if (payload.session_id) {
-    storePendingPrompt(payload.session_id, { kind: "question", payload });
-  }
-  const questions: Question[] = Array.isArray(payload.questions)
-    ? payload.questions
-    : [payload.questions];
-
-  // Priority: in-memory snapshot (switch-away/back, always freshest), then
-  // whichever of daemon/localStorage is NEWER by timestamp (fetchFreshestAuqDraft).
-  const initialDraft = restoredDraft
-    ?? (payload.session_id ? snapshotActiveCardDraft(payload.session_id, payload.id) : undefined)
-    ?? (await fetchFreshestAuqDraft(payload.session_id, payload.id))
-    ?? undefined;
-
-  renderQuestionUI({
-    id: payload.id,
-    sessionId: payload.session_id,
-    questions,
-    initialDraft,
-    cwd: resolveCwdForSession(payload.session_id),
-    titleIcon: "ph-chat-circle-dots",
-    submitLabel: "Submit",
-    submitIcon: "ph-paper-plane-right",
-    cancelLabel: "Skip",
-    // Only this flow can deliver an extra message / pasted images to Claude
-    // (see QuestionUIOpts.supportsExtras doc) - the built-in-tool flow in
-    // permission-card.ts settles via a plain deny.message string instead.
-    supportsExtras: true,
-    // Lives on the PROMPT PAYLOAD (question.rs), never the model's tool_use
-    // input - the one place this is actually readable.
-    degradedBuiltin: payload.degraded_builtin === true,
-    onDraftChange: (draft) => {
-      saveQuestionDraft(payload.id, draft);
-      scheduleAuqPush(payload.session_id, payload.id, draft);
-      syncQuestionProgress(payload.session_id, payload.id, questions, draft);
-    },
-    onSubmit: async (answers, extras) => {
-      // NOT cleared here (ai_todo 820): the card tears down before this runs,
-      // so the localStorage draft is the only surviving copy of what was
-      // typed. Cleared per-branch below, only once delivery actually succeeds.
-      void clearAuqPush(payload.session_id, payload.id);
-      const sid = payload.session_id;
-      // Settle the daemon card + learn whether a live oneshot was resolved:
-      // delivered=true means the answer already reached the model in-band, as
-      // the MCP tool's own result (our only live AUQ path) - see answerBlocks
-      // below, which used to send it again unconditionally and race that.
-      // `=== true`, never truthiness: a transport that returns the daemon's
-      // raw `{ok, delivered}` envelope would otherwise read as delivered and
-      // silently drop the answer block below (todo 773).
-      let delivered = false;
-      try {
-        delivered = (await invoke<boolean>("respond_question", { id: payload.id, answers, skipped: false })) === true;
-      } catch (e) {
-        // respond_question_inner (permission.rs) has no error path of its own -
-        // this catch only fires on a transport/arg-level failure, which says
-        // nothing about the prompt's server-side state. So falling through to
-        // attempt delivery below is intentional, not a missed `return`.
-        console.warn("respond_question (settle) failed:", e);
-        clearPendingPromptById(payload.id);
-        rerenderSidebar();
-      }
-      if (!sid) { clearQuestionDraft(payload.id); return; }
-      if (!opts.reopened && !isLatestQuestion(sid, payload.id)) {
-        // A newer question superseded this card while it sat unanswered - the
-        // conversation already moved on, so don't inject a reply into it now.
-        console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
-        clearQuestionDraft(payload.id);
-        return;
-      }
-      // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
-      // staying standalone (cca356d8). Only included when NOT delivered
-      // in-band - extras still travel either way, since the tool_result only
-      // ever carries the structured answers, never free-form extra text/files.
-      // Sentinel names the card so the fold lands on THIS one, not the newest.
-      const answerBlocks: ContentBlock[] = delivered
-        ? []
-        : [{ type: "text", text: `${auqAnswerSentinel(payload.id)}${formatAnswersAsMessage(questions, answers)}` }];
-      // Tagged AUQ_EXTRA_SENTINEL so this folds into the SAME card (see
-      // chat-question-card.ts's resolvePendingQuestionExtra), not a detached bubble.
-      const cardExtraBlocks: ContentBlock[] = [];
-      if (extras.additionalMessage) cardExtraBlocks.push({ type: "text", text: `${AUQ_EXTRA_SENTINEL}${extras.additionalMessage}` });
-      for (const a of extras.attachments) {
-        if (a.path) cardExtraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
-      }
-      if (state.selectedId === sid && state.heldMessages) {
-        // Unrelated to the card - staged as its own item so it joins any
-        // already-queued prose, never merged with the card's own extras.
-        const attach = state.heldMessages.getAttached();
-        if (attach && !attach.isDraftEmpty()) {
-          state.heldMessages.stage(attach.getDraftBlocks());
-          attach.clearComposer();
-        }
-        // Its own held item so bundleHeld's sentinel-group check (held-messages.ts)
-        // keeps the note+attachments intact, not merged into the queued prose.
-        if (cardExtraBlocks.length) state.heldMessages.stage(cardExtraBlocks);
-        try {
-          await state.heldMessages.flushHeldWithDraft(answerBlocks);
-          clearQuestionDraft(payload.id);
-        } catch (e) {
-          console.warn("[perm-relay] flushHeldWithDraft (answer delivery) failed:", e);
-          showToast(`Answer delivery failed: ${e}`);
-        }
-      } else if (answerBlocks.length || cardExtraBlocks.length) {
-        const cwd = resolveCwdForSession(sid) ?? ".";
-        try {
-          await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
-          clearQuestionDraft(payload.id);
-        } catch (e) {
-          console.warn("[perm-relay] send_message (answer delivery) failed:", e);
-          showToast(`Answer delivery failed: ${e}`);
-        }
-      } else {
-        // Nothing left to deliver (in-band via the oneshot, no extras): the
-        // draft is safe to drop now.
-        clearQuestionDraft(payload.id);
-      }
-    },
-    onCancel: async () => {
-      // Fire-and-forget skip: the asking turn already ended, so there is nothing
-      // to interrupt. Just settle the card (drop the durable prompt + clear
-      // "Input Needed"). No message is sent - skip means "no answer, move on",
-      // and with no blocking waiter the model never even sees a skip signal.
-      clearQuestionDraft(payload.id);
-      void clearAuqPush(payload.session_id, payload.id);
-      try {
-        await invoke("respond_question", { id: payload.id, answers: {}, skipped: true });
-      } catch (e) {
-        console.warn("respond_question (skip settle) failed:", e);
-        clearPendingPromptById(payload.id);
-        rerenderSidebar();
-      }
-    },
-  });
 }
 
 /** A permission tool fired. Allow (auto-accept / remembered rule), park (a
