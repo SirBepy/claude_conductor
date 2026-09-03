@@ -171,10 +171,13 @@ function flipNodes(nodes: HTMLLIElement[], beforeRects: Map<string, DOMRect>): v
  * final positions, so its own FLIP no-ops them.
  */
 export function markSessionExiting(listEl: HTMLElement, sessionId: string): void {
-  const key = `s:${sessionId}`;
-  if (exitingKeys.has(key)) return;
   const li = listEl.querySelector<HTMLLIElement>(`li[data-session-id="${CSS.escape(sessionId)}"]`);
   if (!li || li.classList.contains("row-exiting")) return;
+  // Read the key off the row rather than rebuilding it from the id: a respawn
+  // successor's row is keyed by the chat it took over from, so the two forms
+  // diverge and the reconciler would never clear a hand-built one.
+  const key = keyOf(li);
+  if (!key || exitingKeys.has(key)) return;
   exitingKeys.add(key);
   stickyExitKeys.add(key);
   // exitingKeys is cleared by reconcileList once the session is absent from

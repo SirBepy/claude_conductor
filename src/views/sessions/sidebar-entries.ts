@@ -25,6 +25,7 @@ import { getChatSlotMode, getSlotAssignment } from "../../shared/shortcuts";
 import { pendingPromptSessionIds } from "./permission-modal";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
+import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
 
 /** Builds the sidebar's flat `entries` array (filter, sort, segment) for
  *  renderSidebar to reconcile into the DOM. Drain/scheduled state and the
@@ -46,7 +47,14 @@ export function buildSidebarEntries(
   // here (segments, project rail, hidden section) - they live in Jarvis's
   // own window only. state.sessions itself stays the full unfiltered set;
   // only this list-building path filters.
-  const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s));
+  // A respawn predecessor is dropped here, not in state.sessions: it is still
+  // a real live session everything else (event store, pane, teardown) must
+  // keep seeing - it just no longer owns a row (see successor-follow.ts).
+  recordChainLinks(state.sessions);
+  const superseded = supersededPredecessors(state.sessions);
+  const listSessions = state.sessions.filter(
+    (s) => !isJarvisOrWorker(s) && !superseded.has(s.session_id),
+  );
   // The viewed chat's parked prompt is already shown as a card; don't also flag
   // its row with the attention alarm (backgrounded parked prompts still badge).
   const attention = pendingPromptSessionIds();
@@ -204,7 +212,7 @@ export function buildSidebarEntries(
           if (i < 9) kbdHint = ` data-kbd-hint="${i + 1}"`;
         }
         entries.push({
-          key: `s:${s.session_id}`,
+          key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {
             isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint,
           })),
@@ -243,7 +251,7 @@ export function buildSidebarEntries(
       for (const s of hiddenSessions) {
         const isActive = s.session_id === state.selectedId;
         entries.push({
-          key: `s:${s.session_id}`,
+          key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {
             isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint: "",
           })),

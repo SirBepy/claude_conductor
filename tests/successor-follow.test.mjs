@@ -3,6 +3,9 @@ import {
   findSuccessorToFollow,
   markFollowed,
   resetFollowed,
+  chainRowKey,
+  recordChainLinks,
+  supersededPredecessors,
 } from "../src/views/sessions/successor-follow.ts";
 
 const sess = (id, extra = {}) => ({
@@ -52,5 +55,44 @@ describe("findSuccessorToFollow", () => {
     markFollowed("a");
     const sessions = [sess("d", { successor_of: "c" })];
     expect(findSuccessorToFollow(sessions, "c")).toBe("d");
+  });
+});
+
+describe("sidebar row identity across a respawn", () => {
+  beforeEach(() => resetFollowed());
+
+  it("gives a fresh chat its own key", () => {
+    expect(chainRowKey("a")).toBe("s:a");
+  });
+
+  it("hands a successor its predecessor's key", () => {
+    recordChainLinks([sess("a"), sess("b", { successor_of: "a" })]);
+    expect(chainRowKey("b")).toBe("s:a");
+  });
+
+  // The whole point: the reconciler must see ONE key across the chain, or it
+  // animates a row out and another in on every respawn.
+  it("keeps the root's key through a chain of respawns", () => {
+    recordChainLinks([sess("b", { successor_of: "a" })]);
+    recordChainLinks([sess("c", { successor_of: "b" })]);
+    expect(chainRowKey("c")).toBe("s:a");
+  });
+
+  // The predecessor drops out of the list as soon as its turn ends, long
+  // before the successor does - a re-derived key would change under the row.
+  it("keeps a recorded key after the predecessor leaves the list", () => {
+    recordChainLinks([sess("a"), sess("b", { successor_of: "a" })]);
+    recordChainLinks([sess("b", { successor_of: "a" })]);
+    expect(chainRowKey("b")).toBe("s:a");
+  });
+
+  it("hides a predecessor that a live successor has taken over from", () => {
+    const sessions = [sess("a"), sess("b", { successor_of: "a" })];
+    expect([...supersededPredecessors(sessions)]).toEqual(["a"]);
+  });
+
+  it("keeps the predecessor visible once the successor itself has ended", () => {
+    const sessions = [sess("a"), sess("b", { successor_of: "a", ended_at: "2026-09-03T00:00:00Z" })];
+    expect(supersededPredecessors(sessions).size).toBe(0);
   });
 });

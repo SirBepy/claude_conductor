@@ -14,6 +14,7 @@ import {
   modelBatteryHtml,
 } from "./sidebar-row-visuals";
 import type { LeadingExtras } from "./sidebar-row-visuals";
+import { chainRowKey } from "./successor-follow";
 
 /** Every sidebar row - live session, draft, or parked draft - is built from
  *  this ONE bag of slot values and rendered by the ONE template below, so a
@@ -144,7 +145,9 @@ export function sessionRowOptions(
       idAttr: "session-id",
       id: s.session_id,
       liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} row-portrait`,
-      liExtraAttrs: ctx.kbdHint,
+      // Explicit key so a /respawn successor lands in its predecessor's own
+      // row (keyOf prefers data-row-key over data-session-id).
+      liExtraAttrs: `${ctx.kbdHint} data-row-key="${chainRowKey(s.session_id)}"`,
     },
     charId: characterForSession(s),
     cwd: s.cwd,
