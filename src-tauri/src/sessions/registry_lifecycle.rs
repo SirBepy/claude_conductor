@@ -441,4 +441,78 @@ mod tests {
         // Kind must not have been downgraded.
         assert_eq!(registry.get("ext-1").unwrap().kind, InstanceKind::Automated);
     }
+
+    #[test]
+    fn prune_ended_before_removes_ended_sessions_older_than_cutoff() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.register(
+            RegisterInput {
+                session_id: "prune-old".into(),
+                cwd: PathBuf::from("/tmp/prune"),
+                pid: 1,
+                kind: InstanceKind::External,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-05-08T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-05-08T00:00:00Z",
+        );
+        registry.mark_ended("prune-old", EndReason::Manual, "2026-05-08T03:00:00Z");
+
+        // Cutoff after ended_at: the entry is gone.
+        let removed = registry.prune_ended_before("2026-05-08T04:00:00Z");
+        assert_eq!(removed, 1);
+        assert!(registry.get("prune-old").is_none());
+    }
+
+    #[test]
+    fn prune_ended_before_keeps_ended_session_newer_than_cutoff() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.register(
+            RegisterInput {
+                session_id: "prune-new".into(),
+                cwd: PathBuf::from("/tmp/prune"),
+                pid: 2,
+                kind: InstanceKind::External,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-05-08T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-05-08T00:00:00Z",
+        );
+        registry.mark_ended("prune-new", EndReason::Manual, "2026-05-08T03:00:00Z");
+
+        // Cutoff before ended_at: the entry survives.
+        let removed = registry.prune_ended_before("2026-05-08T02:00:00Z");
+        assert_eq!(removed, 0);
+        assert!(registry.get("prune-new").is_some());
+    }
+
+    #[test]
+    fn prune_ended_before_never_removes_a_still_live_session() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.register(
+            RegisterInput {
+                session_id: "still-live".into(),
+                cwd: PathBuf::from("/tmp/prune"),
+                pid: 3,
+                kind: InstanceKind::External,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-05-08T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-05-08T00:00:00Z",
+        );
+
+        // No ended_at, so even a far-future cutoff leaves it alone.
+        let removed = registry.prune_ended_before("2099-01-01T00:00:00Z");
+        assert_eq!(removed, 0);
+        assert!(registry.get("still-live").is_some());
+    }
 }
