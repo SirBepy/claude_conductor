@@ -5,6 +5,11 @@
 // Spawns a real `claude` turn (tiny, subscription-billed). Run explicitly:
 //   npm run test:e2e:chat
 
+import path from "node:path";
+import { selectProjectRow } from "../helpers/select-project.js";
+
+const PROJECT_NAME = path.basename(process.cwd());
+
 async function msgCounts() {
   return browser.execute(() => ({
     user: document.querySelectorAll(".msg.user").length,
@@ -20,10 +25,8 @@ async function startNewChatPickingFirstProject() {
   const newBtn = await $("#newSessionBtn");
   await newBtn.waitForClickable({ timeout: 15000 });
   await newBtn.click();
-  // 1. Project picker -> pick the first project.
-  const row = await $(".project-picker-row");
-  await row.waitForExist({ timeout: 10000 });
-  await row.click();
+  // 1. Project picker -> pick this repo by name (todo 865).
+  await selectProjectRow(PROJECT_NAME);
 
   // openModelEffortModal awaits several IPC calls (get_settings, listProjects,
   // listAccounts) before its first render, so the field may not exist yet

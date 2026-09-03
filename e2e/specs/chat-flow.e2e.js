@@ -12,9 +12,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { selectProjectRow } from "../helpers/select-project.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FINDINGS = path.resolve(__dirname, "chat-flow-findings.json");
+const REPO_ROOT = process.cwd();
+const PROJECT_NAME = path.basename(REPO_ROOT);
+const normPath = (p) => path.resolve(p).replace(/\\/g, "/").toLowerCase();
 
 const findings = [];
 function note(kind, detail, extra) {
@@ -104,9 +108,7 @@ async function startHaikuChat() {
   await newBtn.waitForClickable({ timeout: 15000 });
   await newBtn.click();
 
-  const row = await $(".project-picker-row");
-  await row.waitForExist({ timeout: 10000 });
-  await row.click();
+  await selectProjectRow(PROJECT_NAME);
 
   // Model/effort modal: sliders are clickable stop-label buttons now, not
   // native <input type=range> (model-effort-modal.ts, impeccable session
@@ -124,6 +126,18 @@ async function startHaikuChat() {
   await confirm.click();
 
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
+
+  // Read back the started session's real cwd instead of trusting the click
+  // (todo 865): a picker mis-selection must fail loudly here, not surface
+  // later as a stray transcript in the wrong project.
+  const startedId = await activeSessionId();
+  const instances = await browser.execute(() => window.__TAURI__.core.invoke("list_instances"));
+  const started = instances.find((i) => i.session_id === startedId);
+  if (!started || normPath(started.cwd) !== normPath(REPO_ROOT)) {
+    throw new Error(
+      `startHaikuChat: session cwd "${started?.cwd}" does not match expected repo root "${REPO_ROOT}"`
+    );
+  }
 }
 
 async function sendMessage(text) {

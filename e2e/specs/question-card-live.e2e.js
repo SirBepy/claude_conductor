@@ -4,6 +4,10 @@
 // CLAUDE.md calls "the one ask channel". npm run test:e2e -- --spec e2e/specs/question-card-live.e2e.js
 
 import assert from "node:assert";
+import path from "node:path";
+import { selectProjectRow } from "../helpers/select-project.js";
+
+const PROJECT_NAME = path.basename(process.cwd());
 
 async function installConsoleHook() {
   await browser.execute(() => {
@@ -26,9 +30,7 @@ async function startHaikuChat() {
   const newBtn = await $("#newSessionBtn");
   await newBtn.waitForClickable({ timeout: 15000 });
   await newBtn.click();
-  const row = await $(".project-picker-row");
-  await row.waitForExist({ timeout: 10000 });
-  await row.click();
+  await selectProjectRow(PROJECT_NAME);
   // Sliders are clickable stop-label buttons now, not native <input
   // type=range> (model-effort-modal.ts, impeccable session 2026-08-23).
   const modelHaiku = await $('.slider-stop-label[data-kind="model"][data-idx="0"]');

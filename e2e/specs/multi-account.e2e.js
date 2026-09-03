@@ -38,6 +38,11 @@
 //     either a tray-click automation layer or a dedicated
 //     `open_overlay_window_for_test` command - out of this milestone's scope.
 
+import path from "node:path";
+import { selectProjectRow } from "../helpers/select-project.js";
+
+const PROJECT_NAME = path.basename(process.cwd());
+
 describe("Dashboard account selector (multi-account milestone 05)", () => {
   it("renders selector cards with a populated registry, legacy stat cards with an empty one", async () => {
     await browser.execute(() => window.showView("dashboard"));
@@ -98,10 +103,9 @@ describe("New-chat account picker (multi-account milestone 04)", () => {
     await newSessionBtn.waitForClickable({ timeout: 15000 });
     await newSessionBtn.click();
 
-    // `.project-picker-row` (project-picker.ts:266); `[data-project-path]` never matched.
-    const projectPickerItem = await $(".project-picker-row");
-    await projectPickerItem.waitForExist({ timeout: 15000 });
-    await projectPickerItem.click();
+    // Filter-then-click by name (todo 865); the old first-row selector had no
+    // assertion on which project it hit.
+    await selectProjectRow(PROJECT_NAME);
 
     const accField = await $(".me-acc-field");
     await accField.waitForExist({ timeout: 15000 });
