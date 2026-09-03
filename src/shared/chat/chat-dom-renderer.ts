@@ -19,16 +19,6 @@ import { ensureActiveTurnFooter, applyRunningHighlight, processTurnCloseQueue } 
 // Re-exported for callers still importing scroll helpers from here (ai_todo 598
 // moved their implementation to chat-scroll.ts).
 export { isElNearBottom, isNearBottom, scrollToBottom, beginRevealHold, revealTranscript, scrollToBottomWhenSettled } from "./chat-scroll";
-// Re-exported for callers still importing turn-fold helpers from here (ai_todo
-// 837 moved their implementation to chat-turn-fold.ts).
-export {
-  activeTurnTsSpan,
-  ensureActiveTurnFooter,
-  foldLeadingPartialTurn,
-  foldClosedRange,
-  enqueueTurnClose,
-  clearRunningHighlight,
-} from "./chat-turn-fold";
 
 export function describeActivity(toolName: string, input: unknown): string {
   const { target } = toolSummary(toolName, input);

@@ -32,12 +32,14 @@ import {
 import {
   scrollToBottom,
   isNearBottom,
+  finalizeStreamingBubble,
+} from "./chat-dom-renderer";
+import {
   enqueueTurnClose,
   ensureActiveTurnFooter,
   activeTurnTsSpan,
-  finalizeStreamingBubble,
   clearRunningHighlight,
-} from "./chat-dom-renderer";
+} from "./chat-turn-fold";
 import { scheduleFlush, flushRenderNow } from "./flush-scheduler";
 import { applyWaitingOnNotification } from "./turn-chips";
 import type { ChatRenderer } from "./chat-renderer";

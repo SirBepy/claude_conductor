@@ -9,11 +9,10 @@ import type { ChatEvent } from "../../types/ipc.generated";
 import {
   flushRender,
   scrollToBottom,
-  activeTurnTsSpan,
   beginRevealHold,
-  foldLeadingPartialTurn,
   scrollToBottomWhenSettled,
 } from "./chat-dom-renderer";
+import { activeTurnTsSpan, foldLeadingPartialTurn } from "./chat-turn-fold";
 import { handleChatEvent } from "./chat-event-handler";
 import { applySkipMarks } from "./chat-question-card";
 import { perfPhase } from "../perf";

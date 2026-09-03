@@ -18,7 +18,7 @@ vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
 import { hydrateCharacterAvatars } from "../src/shared/projects.ts";
 import { foldAuthoredIntoStrip } from "../src/shared/chat/author-message-group.ts";
-import { foldClosedRange } from "../src/shared/chat/chat-dom-renderer.ts";
+import { foldClosedRange } from "../src/shared/chat/chat-turn-fold.ts";
 
 const userCssPath = fileURLToPath(new URL("../src/shared/chat/chat-messages-user.css", import.meta.url));
 
