@@ -115,6 +115,11 @@ pub(super) struct RespondWorkerPromptBody {
     allow: bool,
     #[serde(default)]
     message: Option<String>,
+    /// Structured multi-question answer (todo 272 "structured answers"). When
+    /// present, preferred over `message` for a question-kind prompt - see
+    /// `jarvis_methods::respond_worker_prompt`'s fallback ordering.
+    #[serde(default)]
+    answers: Option<Value>,
     #[serde(default)]
     updated_input: Option<Value>,
 }
@@ -131,6 +136,7 @@ pub(super) async fn on_respond_worker_prompt(
         &body.request_id,
         body.allow,
         body.message,
+        body.answers,
         body.updated_input,
     )
     .await;

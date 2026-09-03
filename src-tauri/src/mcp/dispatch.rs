@@ -293,6 +293,7 @@ fn jarvis_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "request_id": ctx.args["request_id"],
                 "allow": ctx.args["allow"],
                 "message": ctx.args.get("message"),
+                "answers": ctx.args.get("answers"),
                 "updated_input": ctx.args.get("updated_input"),
             });
             Some(ctx.relay("/jarvis/respond-worker-prompt", body, None, None))

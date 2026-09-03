@@ -221,14 +221,17 @@ pub(crate) async fn fleet_status(state: &Arc<DaemonState>, jarvis_session_id: &s
 /// (allow OR deny) a prompt belonging to an unrelated session on the machine.
 ///
 /// A question prompt has no `allow`/`updated_input` concept - its answer is a
-/// free-form `answers` value - so for that kind `message` (if given, else an
-/// empty object) is forwarded as the answer text; `allow` is ignored.
+/// free-form `answers` value. `answers`, when given, is forwarded as-is (a
+/// structured multi-question form survives intact); otherwise `message` (if
+/// given, else an empty object) is wrapped as the answer, preserving the
+/// pre-todo-272 single-string behavior. `allow` is ignored either way.
 pub(crate) async fn respond_worker_prompt(
     state: &Arc<DaemonState>,
     jarvis_session_id: &str,
     request_id: &str,
     allow: bool,
     message: Option<String>,
+    answers: Option<Value>,
     updated_input: Option<Value>,
 ) -> Result<bool, String> {
     if !is_jarvis_caller(state, jarvis_session_id) {
@@ -255,7 +258,7 @@ pub(crate) async fn respond_worker_prompt(
             ).await
         }
         "question-requested" => {
-            let answers = message.map(Value::String).unwrap_or_else(|| json!({}));
+            let answers = answers.or_else(|| message.map(Value::String)).unwrap_or_else(|| json!({}));
             crate::daemon::methods::permission::respond_question_inner(state, request_id, answers, false).await
         }
         _ => false,
@@ -308,6 +311,50 @@ mod tests {
         .await;
         let err = r.expect_err("out-of-pool explicit account must be rejected");
         assert!(err.contains("not fleet-eligible"), "{err}");
+    }
+
+    // ── respond_worker_prompt structured answers (todo 272) ─────────────────
+
+    /// Wires a jarvis + owned worker pair and a recorded question-kind
+    /// prompt with a live oneshot in `state.pending`, so a test can call
+    /// `respond_worker_prompt` and read back exactly what
+    /// `respond_question_inner` sent down the channel.
+    async fn setup_question_prompt(state: &Arc<DaemonState>, jarvis_id: &str, worker_id: &str, request_id: &str) -> tokio::sync::oneshot::Receiver<Value> {
+        state.registry.upsert_interactive(jarvis_id, std::path::Path::new("."), "proj-x", "2026-07-27T00:00:00Z");
+        state.registry.set_jarvis(jarvis_id, true);
+        state.registry.upsert_interactive(worker_id, std::path::Path::new("."), "proj-x", "2026-07-27T00:00:00Z");
+        state.registry.set_worker_of(worker_id, Some(jarvis_id.to_string()));
+        state.add_prompt(request_id, "question-requested", json!({"session_id": worker_id}), true).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        state.pending.lock().await.insert(request_id.to_string(), tx);
+        rx
+    }
+
+    #[tokio::test]
+    async fn respond_worker_prompt_forwards_structured_answers_intact() {
+        let state = test_state();
+        let rx = setup_question_prompt(&state, "jv-fleet-2", "worker-2", "req-struct").await;
+        let form = json!({"q1": "yes", "q2": "no"});
+
+        let delivered = respond_worker_prompt(&state, "jv-fleet-2", "req-struct", false, None, Some(form.clone()), None)
+            .await
+            .expect("owned worker's question prompt must resolve");
+        assert!(delivered);
+        let sent = rx.await.expect("respond_question_inner must send on the oneshot");
+        assert_eq!(sent, json!({"answers": form}), "a structured multi-question form must survive intact");
+    }
+
+    #[tokio::test]
+    async fn respond_worker_prompt_falls_back_to_message_when_answers_absent() {
+        let state = test_state();
+        let rx = setup_question_prompt(&state, "jv-fleet-3", "worker-3", "req-msg").await;
+
+        let delivered = respond_worker_prompt(&state, "jv-fleet-3", "req-msg", false, Some("plain answer".to_string()), None, None)
+            .await
+            .expect("owned worker's question prompt must resolve");
+        assert!(delivered);
+        let sent = rx.await.expect("respond_question_inner must send on the oneshot");
+        assert_eq!(sent, json!({"answers": "plain answer"}), "pre-todo-272 message-as-string path must be unchanged");
     }
 
     #[tokio::test]

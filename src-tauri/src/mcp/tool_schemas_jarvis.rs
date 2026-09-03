@@ -47,13 +47,14 @@ pub fn jarvis_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_RESPOND_WORKER_PROMPT,
-            "description": "Answer a pending permission or question prompt raised by one of your workers. allow=true approves (optionally with updated_input); allow=false denies/answers using message.",
+            "description": "Answer a pending permission or question prompt raised by one of your workers. allow=true approves (optionally with updated_input); allow=false denies/answers using message. For a multi-question ask_user_question form, pass answers (an object keyed by question) instead of message; message is the fallback single-string answer.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "request_id": {"type": "string"},
                     "allow": {"type": "boolean"},
                     "message": {"type": "string"},
+                    "answers": {"type": "object", "description": "Structured answers for a multi-question prompt, keyed by question. Preferred over message when the prompt has more than one question."},
                     "updated_input": {"type": "object"}
                 },
                 "required": ["request_id", "allow"]
