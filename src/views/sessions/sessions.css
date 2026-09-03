@@ -810,11 +810,11 @@
 }
 
 /* Still frame held over the pane while a /respawn successor replaces it
-   (pane-freeze.ts). Opaque, so the empty pane behind it never shows through. */
+   (pane-freeze.ts). Body-hosted and fixed to the pane's measured box, because
+   selectSession's innerHTML reset would destroy a child of the pane itself. */
 .pane-freeze {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
+  position: fixed;
+  z-index: 30;
   background: var(--color-background);
   display: flex;
   flex-direction: column;

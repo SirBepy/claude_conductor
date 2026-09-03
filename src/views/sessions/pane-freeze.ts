@@ -18,7 +18,12 @@ export function freezePane(pane: HTMLElement): () => void {
   const clone = messages.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(UNCLONEABLE).forEach((n) => n.remove());
   still.appendChild(clone);
-  pane.appendChild(still);
+  // Hosted on body, not on `pane`: selectSession reaches `pane.innerHTML = ...`
+  // synchronously, so a child of the pane is destroyed before it ever paints.
+  const box = pane.getBoundingClientRect();
+  still.style.cssText =
+    `left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px`;
+  document.body.appendChild(still);
   // After append, not before: a detached clone has no layout to scroll, and a
   // frame stuck at the top shows rows the real pane wasn't showing.
   clone.scrollTop = messages.scrollTop;
