@@ -42,10 +42,10 @@ const edgeDriver = path.resolve(__dirname, "drivers", "msedgedriver.exe");
 // user has running (ai_todo 71 / ai_todo 74).
 const DAEMON_INSTANCE = "wdio";
 const daemonLock = path.join(os.homedir(), "AppData", "Roaming", "claude-conductor", `daemon-${DAEMON_INSTANCE}.lock`);
-// The debug app binary loads Tauri's devUrl (http://localhost:1420), not the
-// bundled dist/. So the harness runs the vite dev server itself rather than
-// requiring a slow `cargo tauri build`. Spawn vite's JS directly to skip the
-// `predev` kill-stale hook (which would kill our daemon).
+// The debug app binary loads Tauri's devUrl (http://localhost:1420). A live
+// `vite dev` server there means a peer's concurrent save under src/ hot-reloads
+// into a running billed test (ai_todo 868). Build once, then serve the fixed
+// dist/ via `vite preview`, so a run is a verdict about one artifact.
 const viteBin = path.resolve(repoRoot, "node_modules", "vite", "bin", "vite.js");
 const DEV_URL = "http://localhost:1420";
 
@@ -146,7 +146,7 @@ async function waitForServer(url, timeoutMs) {
       await sleep(300);
     }
   }
-  throw new Error(`vite dev server not up (or not ours) at ${url} within ${timeoutMs}ms`);
+  throw new Error(`vite preview server not up (or not ours) at ${url} within ${timeoutMs}ms`);
 }
 
 export const config = {
@@ -180,8 +180,27 @@ export const config = {
     // Specs run in a worker process, so the snapshot travels via env.
     process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS = daemonPidsNow().join(",");
 
-    // 1. Vite dev server (the debug app loads it via devUrl).
-    vite = spawn(process.execPath, [viteBin, "--port", "1420", "--strictPort"], {
+    // 1. Build once (execSync throws loud on a bad exit), then serve dist/.
+    const commit = (() => {
+      try {
+        return execSync("git rev-parse --short HEAD", { cwd: repoRoot, encoding: "utf8" }).trim();
+      } catch {
+        return "unknown";
+      }
+    })();
+    const dirty = (() => {
+      try {
+        return execSync("git status --porcelain", { cwd: repoRoot, encoding: "utf8" }).trim().length > 0;
+      } catch {
+        return "unknown";
+      }
+    })();
+    console.log(`[wdio] testing built dist/ at commit ${commit}${dirty ? " (dirty tree)" : ""}`);
+    execSync(`${JSON.stringify(process.execPath)} ${JSON.stringify(viteBin)} build`, {
+      cwd: repoRoot,
+      stdio: "inherit",
+    });
+    vite = spawn(process.execPath, [viteBin, "preview", "--port", "1420", "--strictPort"], {
       cwd: repoRoot,
       stdio: "ignore",
     });
