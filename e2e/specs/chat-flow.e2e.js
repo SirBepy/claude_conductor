@@ -238,18 +238,13 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
     const row = await $(`#sessions-list li[data-session-id="${bId}"]`);
     await row.waitForExist({ timeout: 10000 });
     await row.click({ button: "right" });
-    // openCtxMenu's DOM insertion is synchronous JS, but the WebDriver click
-    // action can resolve before the browser dispatches contextmenu - wait for
-    // the first item instead of racing it (todo 842 group 2).
-    await $(".session-ctx-menu .session-ctx-item").waitForExist({ timeout: 5000 }).catch(() => {});
-    // The ctx menu's last item is Close.
-    const items = await $$(".session-ctx-menu .session-ctx-item");
-    const closeItem = items[items.length - 1];
-    if (!closeItem) {
-      note("bug", "close B: no ctx-menu items rendered");
-    } else {
-      await closeItem.click();
-    }
+    // Items are `.smore-item`, built by chat-menu.ts's buildChatMenuBlock. The
+    // old `.session-ctx-item` selector matched nothing, so Close was never
+    // clicked and the two "row still there" findings were its consequences,
+    // not app bugs (todo 842 group 2).
+    const closeItem = await $(".session-ctx-menu .smore-item.smore-danger");
+    await closeItem.waitForExist({ timeout: 5000 });
+    await closeItem.click();
 
     await browser.waitUntil(
       async () => !(await sidebarSessionIds()).includes(bId),
@@ -259,6 +254,9 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
 
     const after = await sidebarSessionIds();
     if (after.includes(bId)) note("bug", "B still in sidebar after close", { after, bId });
+    // The test asserted nothing before: every failure path was a .catch(note),
+    // so a close that never happened still passed.
+    expect(after).not.toContain(bId);
   });
 
   it("reopen A and send a third message after all the churn", async () => {
