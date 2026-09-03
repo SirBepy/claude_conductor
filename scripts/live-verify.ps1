@@ -49,7 +49,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
 $stateDir = Join-Path $env:LOCALAPPDATA 'claude-conductor-live-verify'
 $statePath = Join-Path $stateDir 'state.json'
-$cargoTargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot 'src-tauri\target' }
+# `cargo metadata` is the only source that honours ~/.cargo/config.toml's
+# target-dir. This machine redirects builds to D:/cargo-target, which no env
+# var reflects, so the repo-relative guess never finds the exe (todo 795).
+$cargoTargetDir = if ($env:CARGO_TARGET_DIR) {
+    $env:CARGO_TARGET_DIR
+} else {
+    $manifest = Join-Path $repoRoot 'src-tauri\Cargo.toml'
+    $meta = & cargo metadata --format-version 1 --no-deps --manifest-path $manifest 2>$null | ConvertFrom-Json
+    if ($meta -and $meta.target_directory) { $meta.target_directory } else { Join-Path $repoRoot 'src-tauri\target' }
+}
 $exePath = Join-Path $cargoTargetDir 'debug\claude-conductor.exe'
 $vitePort = 1420
 
