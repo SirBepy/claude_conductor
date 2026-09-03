@@ -24,6 +24,11 @@ use commit_lock::CommitLock;
 
 pub type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
 
+/// Distinct from `PendingMap` (resolves only on a real user answer): this
+/// resolves the instant a client commits to a question's fate, shown or
+/// parked (todo 735).
+pub type RenderConfirmMap = Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>;
+
 pub struct DaemonState {
     pub sessions: SessionMap,
     pub registry: Arc<Registry>,
@@ -40,6 +45,8 @@ pub struct DaemonState {
     /// `payload` is its body. Inserted when the prompt opens, removed when it is
     /// answered or times out.
     pub pending_prompts: Arc<Mutex<HashMap<String, Value>>>,
+    /// See [`RenderConfirmMap`]'s doc for why this can't reuse `pending`.
+    pub render_confirm: RenderConfirmMap,
     /// Signalled by the `shutdown_daemon` RPC so the main loop exits the
     /// process. `run_daemon_main` selects on `shutdown.notified()`.
     pub shutdown: Arc<Notify>,
@@ -116,6 +123,7 @@ impl DaemonState {
             pending: Arc::new(Mutex::new(HashMap::new())),
             channels: Arc::new(ChannelsManager::new()),
             pending_prompts: Arc::new(Mutex::new(HashMap::new())),
+            render_confirm: Arc::new(Mutex::new(HashMap::new())),
             shutdown: Arc::new(Notify::new()),
             db,
             push: OnceLock::new(),
@@ -131,6 +139,28 @@ impl DaemonState {
     /// Next value in the `question-requested` ordering sequence (see `prompt_seq`).
     pub fn next_prompt_seq(&self) -> u64 {
         self.prompt_seq.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Register a fresh render-confirmation waiter `on_question_request` holds
+    /// across its timeout race. A redundant re-register just replaces the sender.
+    pub async fn register_render_confirm(&self, id: &str) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.render_confirm.lock().await.insert(id.to_string(), tx);
+        rx
+    }
+
+    /// Resolve `id`'s waiter, if still open - called from BOTH frontend
+    /// branches (shown or parked). No-op past the timeout or for an unknown id.
+    pub async fn confirm_question_rendered(&self, id: &str) {
+        if let Some(tx) = self.render_confirm.lock().await.remove(id) {
+            let _ = tx.send(());
+        }
+    }
+
+    /// Drop a still-open waiter once its timeout elapses, so an unconfirmed
+    /// question (no client attached) doesn't leak an entry forever.
+    pub async fn cancel_render_confirm(&self, id: &str) {
+        self.render_confirm.lock().await.remove(id);
     }
 
     /// Load the Web Push manager (VAPID key + persisted phone subscriptions
@@ -185,5 +215,31 @@ mod tests {
         let b = st.next_prompt_seq();
         let c = st.next_prompt_seq();
         assert!(a < b && b < c);
+    }
+
+    #[tokio::test]
+    async fn confirm_question_rendered_resolves_a_registered_waiter() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let rx = st.register_render_confirm("q1").await;
+        st.confirm_question_rendered("q1").await;
+        assert!(rx.await.is_ok(), "the waiter must resolve once confirmed");
+        assert!(st.render_confirm.lock().await.get("q1").is_none(), "confirming must remove the entry");
+    }
+
+    #[tokio::test]
+    async fn confirm_question_rendered_is_a_noop_for_an_unregistered_id() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        // Must not panic - a duplicate/late confirm for an id nobody (or no
+        // longer) has a waiter for is a normal race, not a bug.
+        st.confirm_question_rendered("never-registered").await;
+    }
+
+    #[tokio::test]
+    async fn cancel_render_confirm_drops_the_waiter_without_resolving_it() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let rx = st.register_render_confirm("q1").await;
+        st.cancel_render_confirm("q1").await;
+        assert!(rx.await.is_err(), "a cancelled waiter's sender is dropped, never resolved");
+        assert!(st.render_confirm.lock().await.get("q1").is_none());
     }
 }

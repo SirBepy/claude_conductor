@@ -15,10 +15,22 @@ import {
   NO_ANSWER_TEXT,
 } from "./question-state";
 import { flushAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
+import { invoke } from "../../../shared/ipc";
 
 // Cadence for the live cross-device reconcile poll below - matches the order
 // of magnitude of the phone's 700ms poll and the Rust adaptive poll (500-2000ms).
 const LIVE_DRAFT_POLL_MS = 1000;
+
+/** Tells `on_question_request` a client committed to this question's fate, so
+ *  its ack can mean "reached a client" (todo 735) - DISTINCT from
+ *  `respond_question`, which resolves only on a real answer. Fire-and-forget;
+ *  exported so index.ts's "parked" branch can fire it too. */
+export function confirmQuestionRendered(id: string | undefined): void {
+  if (!id) return;
+  void invoke("confirm_question_rendered", { id }).catch((e) => {
+    console.warn("[perm-relay] confirm_question_rendered failed:", e);
+  });
+}
 
 // Payload normalization, the active-card draft registry, the pure
 // answer-completeness check, and the pure question-text helpers now live in
@@ -315,4 +327,5 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   renderer.render();
+  confirmQuestionRendered(opts.id);
 }

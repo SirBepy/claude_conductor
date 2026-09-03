@@ -21,7 +21,7 @@ import { showToast } from "../../../shared/toast";
 import { getTransport } from "../../../shared/transport";
 import { state } from "../state";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
-import { dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
+import { confirmQuestionRendered, dismissQuestionCard, extractQuestions, formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
 import { getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
 import { auqAnswerSentinel, AUQ_EXTRA_SENTINEL } from "../../../shared/chat/chat-transforms";
@@ -301,6 +301,10 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
   if (!isForSelectedSession(payload.session_id)) {
     if (payload.session_id) {
       storePendingPrompt(payload.session_id, { kind: "question", payload });
+      // A parked prompt is a genuine delivery, just like the shown-card branch
+      // in question-ui.ts - the backgrounded chat WILL see it via its sidebar
+      // marker, so on_question_request must not time out and report false.
+      confirmQuestionRendered(payload.id);
       rerenderSidebar();
       console.warn("[perm-gate] PARKED question-requested for backgrounded chat", { eventSessionId: payload.session_id, ...gateDiag() });
     } else {

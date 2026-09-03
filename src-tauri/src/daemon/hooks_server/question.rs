@@ -1,7 +1,8 @@
 //! Fire-and-forget question endpoints: `/questions/request` (MCP
 //! `ask_user_question`) and the builtin `AskUserQuestion` PreToolUse hook.
-//! Both post a durable card and return immediately - split from `permission.rs`
-//! (todo 624) since that file blocks on a oneshot while this one never does.
+//! Both post a durable card and never block on an ANSWER - split from
+//! `permission.rs` (todo 624), which blocks on a oneshot while this one never
+//! does. `on_question_request` alone also awaits a render confirmation (todo 735).
 
 use super::decision::deny_decision;
 use super::validated_json::ValidatedJson;
@@ -11,6 +12,8 @@ use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, 
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::oneshot;
 
 /// Stamp the durable "waiting on the user" state for a question prompt and
 /// tell every window about it. Both halves matter: the registry write is what
@@ -120,8 +123,31 @@ async fn post_fire_and_forget_question(
     subs
 }
 
-/// Fire-and-forget, mirroring `ask_question_decision` below: no pending
-/// oneshot, no blocking wait, returns immediately.
+/// Well above the normal poll+emit+render round trip (well under 2s, todo
+/// 735's feasibility trace), but short enough that "no client attached" - a
+/// normal state - fails fast instead of hanging the calling agent.
+const RENDER_CONFIRM_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// `true` once a client commits (shown or parked), `false` on timeout -
+/// tearing down the waiter either way. Split out so tests can pass a short timeout.
+async fn await_render_confirmation(
+    state: &Arc<DaemonState>,
+    id: &str,
+    confirm_rx: oneshot::Receiver<()>,
+    timeout: Duration,
+) -> bool {
+    tokio::select! {
+        res = confirm_rx => res.is_ok(),
+        _ = tokio::time::sleep(timeout) => {
+            state.cancel_render_confirm(id).await;
+            false
+        }
+    }
+}
+
+/// No pending answer oneshot, no blocking wait on the USER. It DOES briefly
+/// wait on a render-confirmation signal before acking (todo 735), so a caller
+/// can no longer get `acknowledged: true` for a card nobody ever saw or parked.
 pub(super) async fn on_question_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<QuestRequestBody>,
@@ -131,12 +157,30 @@ pub(super) async fn on_question_request(
         "questions": body.questions,
         "session_id": body.session_id,
     });
+    // Registered BEFORE the post so a confirmation that races in fast (a
+    // client already polling) can never land before there's a waiter to hit.
+    let confirm_rx = ctx.state.register_render_confirm(&body.id).await;
     let subs =
         post_fire_and_forget_question(&ctx, &body.id, payload, body.session_id.as_deref(), "question").await;
     log::info!(
         "[perm-relay] published question_request id={} session={:?} -> {} subscriber(s)",
         body.id, body.session_id, subs
     );
+    if !await_render_confirmation(&ctx.state, &body.id, confirm_rx, RENDER_CONFIRM_TIMEOUT).await {
+        log::warn!(
+            "[perm-relay] question {} not confirmed shown/parked within {:?}; acknowledging false",
+            body.id, RENDER_CONFIRM_TIMEOUT
+        );
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "acknowledged": false,
+                "note": "Could not confirm any client actually received this question within the \
+timeout window - it may not have reached the user at all. Do not wait any longer on this call. \
+Re-send the same question as a plain-text message via send_message right now instead.",
+            })),
+        );
+    }
     (StatusCode::OK, Json(json!({ "acknowledged": true, "note": fire_and_forget_note("this tool") })))
 }
 
@@ -209,8 +253,8 @@ pub(super) async fn ask_question_decision(ctx: &Arc<HookCtx>, body: Value) -> Va
 #[cfg(test)]
 mod tests {
     use super::{
-        ask_question_decision, is_question_shaped, on_question_request, AxState, QuestRequestBody,
-        ValidatedJson, HookCtx,
+        ask_question_decision, await_render_confirmation, is_question_shaped, on_question_request,
+        AxState, QuestRequestBody, ValidatedJson, HookCtx,
     };
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
@@ -219,6 +263,7 @@ mod tests {
     use axum::response::IntoResponse;
     use serde_json::json;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn is_question_shaped_detects_well_formed_ask_user_question_payload() {
@@ -375,9 +420,10 @@ mod tests {
         assert!(reason.contains("mcp__cc_conductor__ask_user_question"), "counter must have reset to attempt 1");
     }
 
-    /// MCP `ask_user_question` now mirrors the built-in AskUserQuestion hook.
+    /// No pending answer oneshot is ever inserted - simulates the "shown"
+    /// frontend branch confirming almost immediately, well inside the timeout.
     #[tokio::test]
-    async fn question_request_fires_and_forgets_without_blocking() {
+    async fn question_request_acks_true_once_shown_branch_confirms() {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let ctx = Arc::new(HookCtx { state: state.clone() });
         let mut rx = state.notifier.subscribe();
@@ -387,7 +433,16 @@ mod tests {
             questions: json!([{ "question": "Tabs or spaces?" }]),
             session_id: Some("s1".to_string()),
         };
+        let confirmer_state = state.clone();
+        let confirmer = tokio::spawn(async move {
+            // A tiny head start lets on_question_request register its waiter
+            // first - mirrors the real ordering (register happens before the
+            // frontend can possibly have mounted anything).
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            confirmer_state.confirm_question_rendered("q1").await;
+        });
         let resp = on_question_request(AxState(ctx), ValidatedJson(body)).await.into_response();
+        confirmer.await.unwrap();
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let decision: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(decision["acknowledged"], true);
@@ -401,6 +456,50 @@ mod tests {
         let frame = rx.recv().await.expect("question_request published");
         assert_eq!(frame["method"], "question_request");
         assert_eq!(frame["params"]["session_id"], "s1");
+    }
+
+    /// The daemon can't tell a "shown" confirmation from a "parked" one - both
+    /// branches call the exact same RPC, and a backgrounded park is just as
+    /// genuine a delivery as mounting the card DOM (todo 735 requires both).
+    #[tokio::test]
+    async fn question_request_acks_true_once_parked_branch_confirms() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let body = QuestRequestBody {
+            id: "q2".to_string(),
+            questions: json!([{ "question": "Tabs or spaces?" }]),
+            session_id: Some("s1".to_string()),
+        };
+        let confirmer_state = state.clone();
+        let confirmer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            // Stands in for index.ts's parked branch (storePendingPrompt +
+            // rerenderSidebar) calling the same RPC as the render path.
+            confirmer_state.confirm_question_rendered("q2").await;
+        });
+        let resp = on_question_request(AxState(ctx), ValidatedJson(body)).await.into_response();
+        confirmer.await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let decision: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decision["acknowledged"], true, "a parked prompt is a genuine delivery, not a drop");
+    }
+
+    /// Timeout path: nobody ever confirms (no client attached - a normal
+    /// state). Drives the helper directly with a short timeout instead of
+    /// waiting out the real (multi-second) production ceiling.
+    #[tokio::test]
+    async fn await_render_confirmation_reports_false_and_cleans_up_on_timeout() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let confirm_rx = state.register_render_confirm("q3").await;
+
+        let rendered = await_render_confirmation(&state, "q3", confirm_rx, Duration::from_millis(30)).await;
+
+        assert!(!rendered, "no confirmation ever arrives -> must report false, not hang or silently succeed");
+        assert!(
+            state.render_confirm.lock().await.get("q3").is_none(),
+            "a timed-out waiter must be torn down, not leaked"
+        );
     }
 
     #[tokio::test]
