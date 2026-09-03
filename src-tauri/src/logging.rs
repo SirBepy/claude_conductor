@@ -42,12 +42,30 @@ struct ReopeningFileWriter {
     path: std::path::PathBuf,
     file: std::fs::File,
     warned: bool,
+    bytes_since_check: u64,
+    max_bytes: u64,
+}
+
+impl ReopeningFileWriter {
+    /// Checks size on every write rather than every N: `metadata()` on a
+    /// single small daemon.log is cheap next to the log line it follows.
+    fn roll_if_over_cap(&mut self) {
+        self.bytes_since_check = 0;
+        roll_if_oversized_with_cap(&self.path, self.max_bytes);
+        if let Ok(reopened) = open_append(&self.path) {
+            self.file = reopened;
+        }
+    }
 }
 
 impl std::io::Write for ReopeningFileWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Ok(n) = self.file.write(buf) {
             self.warned = false;
+            self.bytes_since_check += n as u64;
+            if self.bytes_since_check >= self.max_bytes {
+                self.roll_if_over_cap();
+            }
             return Ok(n);
         }
         // A reopen that succeeds but whose retry write still fails must warn too,
@@ -75,9 +93,8 @@ impl std::io::Write for ReopeningFileWriter {
     }
 }
 
-/// Startup-only cap: past this size, the previous run's log is rolled to
-/// `<name>.1` before a fresh file is opened. Not enforced per-write, so a
-/// single run can still exceed it.
+/// Past this size, `daemon.log` is rolled to `<name>.1`, both at startup and
+/// mid-run as `ReopeningFileWriter` writes cross it.
 const MAX_LOG_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Renames `path` to a sibling `.1` file if `path` is over `MAX_LOG_BYTES`,
@@ -85,8 +102,12 @@ const MAX_LOG_BYTES: u64 = 32 * 1024 * 1024;
 /// multi-hundred-MB one. Best-effort: a locked file (still held open by
 /// another process) is logged and left in place rather than treated as fatal.
 fn roll_if_oversized(path: &std::path::Path) {
+    roll_if_oversized_with_cap(path, MAX_LOG_BYTES);
+}
+
+fn roll_if_oversized_with_cap(path: &std::path::Path, max_bytes: u64) {
     let Ok(meta) = std::fs::metadata(path) else { return };
-    if meta.len() <= MAX_LOG_BYTES {
+    if meta.len() <= max_bytes {
         return;
     }
     let mut rolled = path.to_path_buf();
@@ -95,7 +116,7 @@ fn roll_if_oversized(path: &std::path::Path) {
         None => "1".to_string(),
     });
     if let Err(e) = std::fs::rename(path, &rolled) {
-        eprintln!("daemon.log: over {MAX_LOG_BYTES} bytes but rename failed, continuing to append: {e}");
+        eprintln!("daemon.log: over {max_bytes} bytes but rename failed, continuing to append: {e}");
     }
 }
 
@@ -108,7 +129,13 @@ pub fn init_daemon_file_logger() {
     }
 
     let file = log_path.and_then(|path| match open_append(&path) {
-        Ok(file) => Some(ReopeningFileWriter { path, file, warned: false }),
+        Ok(file) => Some(ReopeningFileWriter {
+            path,
+            file,
+            warned: false,
+            bytes_since_check: 0,
+            max_bytes: MAX_LOG_BYTES,
+        }),
         Err(e) => {
             eprintln!("daemon.log: could not open, logging to stderr only: {e}");
             None
@@ -138,7 +165,13 @@ mod daemon_file_logger_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("daemon.log");
         let file = open_append(&path).unwrap();
-        let mut w = ReopeningFileWriter { path: path.clone(), file, warned: false };
+        let mut w = ReopeningFileWriter {
+            path: path.clone(),
+            file,
+            warned: false,
+            bytes_since_check: 0,
+            max_bytes: MAX_LOG_BYTES,
+        };
         std::io::Write::write_all(&mut w, b"line1\n").unwrap();
 
         w.file = std::fs::OpenOptions::new().read(true).open(&path).unwrap();
@@ -183,6 +216,32 @@ mod daemon_file_logger_tests {
 
         assert!(path.exists());
         assert!(!dir.join("daemon.log.1").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A tiny injected cap so a write mid-run crosses it without a 32 MB fixture,
+    /// proving the roll happens without waiting for the next daemon startup.
+    #[test]
+    fn write_rolls_mid_run_past_a_small_injected_cap() {
+        let dir = std::env::temp_dir().join(format!("cc-log-test-roll-midrun-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.log");
+        let file = open_append(&path).unwrap();
+        let mut w = ReopeningFileWriter {
+            path: path.clone(),
+            file,
+            warned: false,
+            bytes_since_check: 0,
+            max_bytes: 100,
+        };
+
+        std::io::Write::write_all(&mut w, &vec![b'a'; 150]).unwrap();
+        std::io::Write::write_all(&mut w, b"after roll\n").unwrap();
+
+        let rolled = std::fs::read(dir.join("daemon.log.1")).unwrap();
+        assert_eq!(rolled.len(), 150);
+        let current = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(current, "after roll\n");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
