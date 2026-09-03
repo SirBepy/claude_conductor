@@ -70,7 +70,7 @@ export async function openChangeCharacterModal(opts: {
       const game = pickedChar?.game_label
         ? `<span class="cc-modal-pick-game">${escapeHtml(pickedChar.game_label)}</span>`
         : "";
-      return `${iconHtml}<span class="cc-modal-pick-name">${escapeHtml(label)}</span>${game}`;
+      return `${iconHtml}<span class="cc-modal-pick-text"><span class="cc-modal-pick-name">${escapeHtml(label)}</span>${game}</span>`;
     }
 
     /** In-place refresh of everything the staged pick drives. Never a full
@@ -153,14 +153,8 @@ export async function openChangeCharacterModal(opts: {
       overlay.innerHTML = `
         <div class="cc-modal-card" role="dialog" aria-modal="true" aria-label="Change character">
           <div class="cc-modal-header">
-            <div class="cc-modal-heading">
-              <span class="cc-modal-eyebrow">Change character</span>
-              <div class="cc-modal-pick">${pickHtml()}</div>
-            </div>
-            <div class="cc-modal-header-actions">
-              <button type="button" class="cc-modal-random"${loading ? " disabled" : ""}><i class="ph ph-shuffle"></i> Random</button>
-              <button type="button" class="cc-modal-close" title="Close"><i class="ph ph-x"></i></button>
-            </div>
+            <h3 class="cc-modal-title">Change character</h3>
+            <button type="button" class="cc-modal-close" title="Close"><i class="ph ph-x"></i></button>
           </div>
           <div class="cc-modal-search-row">
             <div class="cc-modal-search-wrap">
@@ -174,6 +168,8 @@ export async function openChangeCharacterModal(opts: {
           </div>
           <div class="cc-modal-body">${bodyHtml}</div>
           <div class="cc-modal-footer">
+            <div class="cc-modal-pick">${pickHtml()}</div>
+            <button type="button" class="cc-modal-random"${loading ? " disabled" : ""}><i class="ph ph-shuffle"></i> Random</button>
             <button type="button" class="btn btn-secondary cc-modal-cancel">Cancel</button>
             <button type="button" class="btn btn-primary cc-modal-save"${pickedId ? "" : " disabled"}>Save</button>
           </div>

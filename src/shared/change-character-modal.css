@@ -31,39 +31,38 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 10px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--color-border, #2a2a36);
   flex-shrink: 0;
 }
 
-.cc-modal-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.cc-modal-eyebrow {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--color-text-muted, #8a8a96);
-  letter-spacing: 0.02em;
-}
-
-/* Staged pick, mirrored in the header so rerolling/auditioning has somewhere
- * to land before Save commits it. */
-.cc-modal-pick {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.cc-modal-title {
+  margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
 }
 
+/* The staged pick rides the footer next to Save, so what gets committed sits
+ * beside the button that commits it. */
+.cc-modal-pick {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 8px;
+}
+
+.cc-modal-pick-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
 .cc-modal-pick-icon {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   object-fit: cover;
   background: var(--color-surface-alt, #24242e);
@@ -80,6 +79,9 @@
 }
 
 .cc-modal-pick-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text, #e8e8ee);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -87,16 +89,12 @@
 
 .cc-modal-pick-game,
 .cc-modal-pick-empty {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 400;
   color: var(--color-text-muted, #8a8a96);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.cc-modal-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .cc-modal-random {
@@ -216,6 +214,13 @@
 .cc-modal-footer .btn {
   font-size: 0.82rem;
   padding: 6px 16px;
+}
+
+/* Matches the 29px .btn beside it: 5px rather than 6px because .btn is
+ * borderless and Random carries a 1px border on each edge. */
+.cc-modal-footer .cc-modal-random {
+  font-size: 0.8rem;
+  padding: 5px 12px;
 }
 
 .cc-modal-save:disabled {
