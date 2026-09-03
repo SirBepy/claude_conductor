@@ -500,11 +500,16 @@ class SessionEventStore {
     const block = Number(ev.block);
     const seq = Number(ev.seq);
     const acc = entry.streamAcc;
+    const blockChanged = !!acc && block !== acc.block;
+    // A same-turn block change restarts the accumulator - finalize the OLD
+    // block's synth so it isn't silently overwritten below (todo 693).
+    if (blockChanged && acc!.evRef) this.finalizeStreamRef(entry, acc!.evRef);
+    const nextRef = blockChanged ? null : (acc?.evRef ?? null);
     if (ev.snapshot) {
       if (acc && block === acc.block && seq <= acc.seq) return; // stale resync
-      entry.streamAcc = { block, seq, text: ev.text, evRef: acc?.evRef ?? null };
-    } else if (!acc || block !== acc.block || seq === 1) {
-      entry.streamAcc = { block, seq, text: ev.text, evRef: acc?.evRef ?? null };
+      entry.streamAcc = { block, seq, text: ev.text, evRef: nextRef };
+    } else if (!acc || blockChanged || seq === 1) {
+      entry.streamAcc = { block, seq, text: ev.text, evRef: nextRef };
     } else if (seq <= acc.seq) {
       return; // already covered by a snapshot resync
     } else {
@@ -533,6 +538,18 @@ class SessionEventStore {
     touchAccess(entry);
     entry.subscribers.forEach((fn) => {
       try { fn(synth); } catch { /* ignore */ }
+    });
+  }
+
+  /** Marks a superseded block's synthesized event done (cache + subscribers);
+   *  no-op if `ref` already left `entry.events` (see `applyDelta`). */
+  private finalizeStreamRef(entry: CacheEntry, ref: ChatEvent): void {
+    const idx = entry.events.lastIndexOf(ref);
+    if (idx === -1) return;
+    const finalized = { ...ref, streaming: false } as ChatEvent;
+    entry.events[idx] = finalized;
+    entry.subscribers.forEach((fn) => {
+      try { fn(finalized); } catch { /* ignore */ }
     });
   }
 
