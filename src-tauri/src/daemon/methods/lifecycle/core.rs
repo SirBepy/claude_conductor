@@ -144,8 +144,10 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let p: SessionIdOnly = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 lifecycle::cancel_turn(&map, &p.session_id).await.map_err(err_to_rpc)?;
-                state.registry.set_busy(&p.session_id, false);
-                crate::sessions::chat_state::set_busy(&p.session_id, false);
+                // No force-clear here (todo 873): the interrupt is cooperative,
+                // so only the child's own trailing result line - via pump.rs's
+                // gen-matched set_busy_false_if_gen - should end the turn. An
+                // eager clear let a racing send_message write into the still-live child.
                 // The interrupted turn's verdict (an AUQ's "question", a prior
                 // turn's "waiting") is dead with the cancel - clear it so the
                 // sidebar doesn't keep flagging a question nobody is asking.

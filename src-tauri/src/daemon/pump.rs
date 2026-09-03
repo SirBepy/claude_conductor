@@ -656,4 +656,58 @@ mod tests {
         assert!(registry.set_busy_false_if_gen("s", turn_two), "turn 2 must clear its own busy");
         assert!(!registry.get("s").unwrap().busy);
     }
+
+    /// todo 873: `cancel_turn` no longer force-clears busy - only the
+    /// interrupted turn's own (possibly late) result line does. A stale
+    /// gen-3 completion after gen 4 opens must not clear gen 4's busy, and
+    /// gen 4's own completion must still clear it (session 0097d169 stuck 20m18s).
+    #[test]
+    fn stale_cancelled_turn_completion_does_not_strand_the_next_gens_busy() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-09-03T15:44:43Z");
+
+        // Turn 3 starts and goes live (a permission prompt opens mid-turn).
+        registry.set_busy("s", true);
+        let mut turn = TurnBoundary::new(false);
+        let turn_three = registry.take_pending_turn_gen("s").expect("turn 3 hands its gen over");
+        assert_eq!(turn.on_stream_event(), TurnAction::TurnStarted);
+        registry.mark_turn_live("s");
+
+        // Cancel arrives: interrupt is sent, but busy is NOT force-cleared -
+        // only turn 3's own result line (below) may clear it.
+        assert!(registry.get("s").unwrap().busy, "cancel must not clear busy up front");
+
+        // Turn 3's own (possibly delayed) result line finally lands.
+        assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
+        assert!(registry.set_busy_false_if_gen("s", turn_three), "turn 3 clears its own busy");
+        assert!(!registry.get("s").unwrap().busy);
+
+        // Only now does the queued send_message open gen 4.
+        registry.set_busy("s", true);
+        let turn_four = registry.take_pending_turn_gen("s").expect("turn 4 hands its gen over");
+        assert_eq!(turn_four, turn_three + 1);
+        assert_eq!(turn.on_stream_event(), TurnAction::TurnStarted);
+        registry.mark_turn_live("s");
+
+        // A stale duplicate of turn 3's completion arrives late: rejected by
+        // the gen guard, gen 4 stays busy.
+        assert!(
+            !registry.set_busy_false_if_gen("s", turn_three),
+            "a stale gen-3 completion must not clear gen 4's busy"
+        );
+        assert!(registry.get("s").unwrap().busy, "gen 4 must still read busy after the stale clear is rejected");
+
+        // Turn 4's own completion must still clear it - the exact case that
+        // silently never happened for session 0097d169.
+        assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
+        assert!(
+            registry.set_busy_false_if_gen("s", turn_four),
+            "gen 4's own busy must not be left silently uncleared"
+        );
+        assert!(!registry.get("s").unwrap().busy);
+    }
 }

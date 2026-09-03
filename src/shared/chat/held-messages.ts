@@ -28,6 +28,12 @@ export interface HeldItem {
 // its own one tick after the user stops typing.
 const DEFER_RETRY_MS = 2100;
 
+// sendNow()'s post-interrupt poll (todo 873): cancel_turn no longer force-
+// clears busy, so flush() must wait for the real turn-end, not race fresh
+// stdin into a still-live child. Ceiling stays well under busy_watchdog's 20m.
+const SEND_NOW_IDLE_POLL_MS = 150;
+const SEND_NOW_IDLE_TIMEOUT_MS = 90_000;
+
 /** Everything the controller needs from the currently-mounted pane/composer.
  * Re-supplied on every `attach()` because the pane DOM and the per-session
  * send/interrupt closures are rebuilt on each session switch. */
@@ -246,7 +252,10 @@ export class HeldMessages {
     this.sync.clear(sid);
   }
 
-  /** Explicit "Send now": interrupt the turn, then send held + draft as one. */
+  /** Explicit "Send now": interrupt the turn, wait for it to genuinely end,
+   *  then send held + draft as one. The wait matters (todo 873): cancel_turn
+   *  no longer force-clears busy, so flushing before the interrupted turn's
+   *  own result line lands would write fresh stdin into a still-live child. */
   async sendNow(): Promise<void> {
     const a = this.attached;
     if (!a) return;
@@ -254,6 +263,10 @@ export class HeldMessages {
       await a.interrupt();
     } catch {
       /* best-effort: cancel_turn may no-op if the turn already ended */
+    }
+    const deadline = Date.now() + SEND_NOW_IDLE_TIMEOUT_MS;
+    while (a.getIsBusy() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, SEND_NOW_IDLE_POLL_MS));
     }
     await this.flush(true);
   }
