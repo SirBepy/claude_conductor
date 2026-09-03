@@ -334,6 +334,14 @@ function handleNotificationEvent(r: ChatRenderer, ev: Extract<ChatEvent, { type:
     applyWaitingOnNotification(r.turnFooters, r.activeTurnChipKey, ev.body);
     return { touched: true, coalesce: false };
   }
+  // The CLI retries a 529/overloaded response on its own with no chat-visible
+  // error, so without this the turn just sits on "thinking..." indefinitely.
+  // Quiet affordance, not a message row - same thinking-bar text the tool
+  // activity and AUQ-waiting cases already use.
+  if (ev.kind === "api_retry") {
+    r.setActivity(ev.body ? `Retrying, hit a server error (${ev.body})…` : "Retrying, hit a server error…");
+    return { touched: true, coalesce: false };
+  }
   r.messages.push({ kind: "notification", text: ev.body, ts: Date.now() });
   return { touched: true, coalesce: false };
 }

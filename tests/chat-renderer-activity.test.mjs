@@ -85,6 +85,20 @@ describe("ChatRenderer — activity pinning", () => {
 
     expect(seen[seen.length - 1]).toBeNull();
   });
+
+  it("surfaces a 529/overloaded retry as quiet thinking-bar text, not a message bubble", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const r = new ChatRenderer(container);
+    const seen = [];
+    r.onActivityUpdate = (a) => seen.push(a);
+
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent({ type: "notification", kind: "api_retry", body: "529" }, { silent: true });
+
+    expect(seen[seen.length - 1]).toBe("Retrying, hit a server error (529)…");
+    expect(container.querySelectorAll(".msg").length).toBe(0);
+  });
 });
 
 describe("ChatRenderer - activity idles (not blanks) once a turn's tools all resolve", () => {

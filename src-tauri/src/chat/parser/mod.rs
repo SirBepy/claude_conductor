@@ -124,6 +124,10 @@ impl ParserContext {
                 // carrier of complete `tool_use` blocks (stream_event deltas never
                 // emit a finished tool_use), so salvage those before dropping the
                 // rest - without this the "changes" panel and tool rows stay empty.
+                // A CLI-synthesized 529 retry is also a bare `assistant` line with
+                // no stream_event/tool_use, so it fell into that drop too - "thinking..."
+                // forever, no error surfaced.
+                events.extend(api_retry_event_from_assistant_line(&line_str));
                 events.extend(tool_use_from_assistant_line(&line_str));
                 continue;
             } else {
@@ -521,6 +525,19 @@ fn tool_use_from_assistant_line(line: &str) -> Vec<ChatEvent> {
     tool_use_events(content, ts, parent_tool_use_id)
 }
 
+/// Detects the CLI's synthesized `isApiErrorMessage` line (a 529/overloaded
+/// response it retries automatically) inside a live-mode full `assistant`
+/// line, which `feed()` otherwise suppresses entirely - see the call site.
+/// Returns `None` for every ordinary assistant line.
+fn api_retry_event_from_assistant_line(line: &str) -> Vec<ChatEvent> {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return vec![]; };
+    if !v.get("isApiErrorMessage").and_then(Value::as_bool).unwrap_or(false) {
+        return vec![];
+    }
+    let status = v.get("apiErrorStatus").and_then(Value::as_u64).map(|s| s.to_string()).unwrap_or_default();
+    vec![ChatEvent::Notification { kind: "api_retry".into(), body: status }]
+}
+
 /// A tool_result's `content` field is a plain string for most tools, but MCP
 /// tools (e.g. a Playwright screenshot) and Read on an image file emit the
 /// array-of-blocks form instead. `ChatEvent::ToolResult.output` only carries
@@ -730,6 +747,34 @@ mod tests {
             .filter(|e| matches!(e, ChatEvent::AssistantDelta { snapshot: false, .. }))
             .count();
         assert!(streaming >= 1, "streaming deltas still flow through live mode");
+    }
+
+    // A 529/overloaded retry is a synthetic `assistant` line with no
+    // stream_event/tool_use, so before this it fell straight into the
+    // suppression branch above and vanished - the turn just sat on
+    // "thinking..." through every silent retry.
+    #[test]
+    fn live_mode_surfaces_api_retry_as_notification() {
+        let line = r#"{"type":"assistant","timestamp":1,"message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"API Error: 529 Overloaded."}]},"error":"server_error","isApiErrorMessage":true,"apiErrorStatus":529}"#;
+        let mut ctx = ParserContext::new_live();
+        let events = ctx.feed(format!("{line}\n").as_bytes());
+
+        assert_eq!(
+            events,
+            vec![ChatEvent::Notification { kind: "api_retry".into(), body: "529".into() }]
+        );
+    }
+
+    #[test]
+    fn live_mode_ignores_ordinary_assistant_line_for_api_retry() {
+        let line = r#"{"type":"assistant","timestamp":1,"message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}"#;
+        let mut ctx = ParserContext::new_live();
+        let events = ctx.feed(format!("{line}\n").as_bytes());
+
+        assert!(
+            events.iter().all(|e| !matches!(e, ChatEvent::Notification { kind, .. } if kind == "api_retry")),
+            "ordinary assistant line must not be mistaken for a retry notification"
+        );
     }
 
     #[test]
