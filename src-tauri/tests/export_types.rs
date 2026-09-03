@@ -13,12 +13,11 @@ use claude_conductor_lib::ipc::accounts::{
 use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot};
 use claude_conductor_lib::ipc::ai_todos::AiTodoEntry;
 use claude_conductor_lib::ipc::servers::ServerInfo;
-use claude_conductor_lib::ipc::git::{
-    BranchEntry, CommitEntry, CommitHistory, CommitHistoryEntry, CommitSync, GitInfo,
-};
+use claude_conductor_lib::ipc::git::{BranchEntry, GitInfo};
 use claude_conductor_lib::ipc::worktrees::WorktreeDetail;
 use claude_conductor_lib::ipc::claude_scopes::ClaudeMdScope;
 use claude_conductor_lib::ipc::git_diff::PrFileChange;
+use claude_conductor_lib::ipc::git_sync::{CommitEntry, CommitHistory, CommitHistoryEntry, CommitSync};
 use claude_conductor_lib::ipc::files::TextFileData;
 use claude_conductor_lib::ipc::schedule::ExternalScheduledJob;
 use claude_conductor_lib::notifications::piper::{PiperStatus, VoiceEntry};
