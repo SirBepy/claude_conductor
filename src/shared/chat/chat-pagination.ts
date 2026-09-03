@@ -1,6 +1,6 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import type { RenderedMessage } from "./chat-transforms";
-import { eventToRenderedMessage, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, extractAuqExtraText, stripAuqExtraBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
+import { eventToRenderedMessage, originSessionIdOf, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, extractAuqExtraText, stripAuqExtraBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
 import type { SkipMark } from "./skip-marks";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
@@ -383,6 +383,7 @@ export class ChatPaginator {
       }
       const msg = eventToRenderedMessage(ev);
       if (!msg) continue;
+      msg.originSessionId = originSessionIdOf(ev);
       if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
         msg.failed = true;
       }

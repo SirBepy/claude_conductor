@@ -196,6 +196,10 @@ export interface RenderedMessage {
    *  content via `load_event_detail`, keyed on `fullSeq` + `tool_use_id`. */
   outputTruncated?: boolean;
   fullSeq?: number;
+  /** Session id of the `/respawn` predecessor this event was spliced in
+   *  from (event-store.ts loadOlder), so "Load full output" reads that
+   *  transcript instead of the open chat's. Unset for native events. */
+  originSessionId?: string;
   /** Session id of the AI that sent this on Joe's behalf (a Jarvis relay,
    *  todo 682) - set only on kind:"user" rows, null/undefined when Joe typed
    *  it himself. Drives the character+project icon-pair tag. */

@@ -18,7 +18,7 @@ export { isBoundaryMessage, compactionOrdinal, stripStatusToken, detectStatusTok
 // Barrel: eventToRenderedMessage + its extraction helpers moved to
 // chat-event-to-message.ts (see todo 589); re-exported so existing
 // importers keep working unchanged.
-export { eventToRenderedMessage, extractAttachedFilePaths, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, auqAnswerSentinel, isAuqAnswerBlock, AUQ_SKIPPED_TEXT, extractAuqExtraText, stripAuqExtraBlock, AUQ_EXTRA_SENTINEL } from "./chat-event-to-message";
+export { eventToRenderedMessage, originSessionIdOf, extractAttachedFilePaths, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, AUQ_ANSWER_SENTINEL, auqAnswerSentinel, isAuqAnswerBlock, AUQ_SKIPPED_TEXT, extractAuqExtraText, stripAuqExtraBlock, AUQ_EXTRA_SENTINEL } from "./chat-event-to-message";
 // Imported, not re-declared: renderTextBlock strips the sentinel for the chip,
 // and a second copy of the pattern would miss the `id` attribute and leave raw
 // markup in the transcript.
@@ -325,7 +325,7 @@ export function renderMessage(m: RenderedMessage): string {
     case "tool_result": {
       const hasImage = m.output?.type === "image";
       const body = m.outputTruncated
-        ? `<button type="button" class="tool-result-load-full" data-tool-use-id="${escapeHtml(m.tool_use_id ?? "")}" data-seq="${m.fullSeq ?? ""}"><i class="ph ph-arrow-clockwise"></i>Load full output</button><div class="copyable-block code-card"><pre>${m.output?.type === "text" ? escapeHtml(m.output.text) : ""}</pre></div>`
+        ? `<button type="button" class="tool-result-load-full" data-tool-use-id="${escapeHtml(m.tool_use_id ?? "")}" data-seq="${m.fullSeq ?? ""}"${m.originSessionId ? ` data-origin-session="${escapeHtml(m.originSessionId)}"` : ""}><i class="ph ph-arrow-clockwise"></i>Load full output</button><div class="copyable-block code-card"><pre>${m.output?.type === "text" ? escapeHtml(m.output.text) : ""}</pre></div>`
         : (m.output ? renderBlocks([m.output]) : "");
       return `<details class="msg tool-result tool-row${m.is_error ? " error" : ""}"${hasImage ? " open" : ""}><summary class="tool-row-summary"><i class="ph ph-arrow-bend-down-right"></i><span class="tool-row-name">${hasImage ? "screenshot" : "result"}</span></summary>${body}</details>`;
     }

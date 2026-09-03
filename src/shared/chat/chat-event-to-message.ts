@@ -121,6 +121,14 @@ export function stripAuqExtraBlock(blocks: ContentBlock[]): ContentBlock[] {
   return blocks.filter((_, i) => i !== idx);
 }
 
+/** Reads the chain-hop tag event-store.ts's loadOlder stamps onto spliced-in
+ *  predecessor events. Not part of the generated ChatEvent type - those
+ *  events are plain deserialized JSON at runtime, so this casts rather than
+ *  widening the Rust type. */
+export function originSessionIdOf(ev: ChatEvent): string | undefined {
+  return (ev as { originSessionId?: string }).originSessionId;
+}
+
 export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
   const ts = "timestamp" in ev ? Number((ev as { timestamp: bigint }).timestamp) : Date.now();
   switch (ev.type) {

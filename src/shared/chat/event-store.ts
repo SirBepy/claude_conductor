@@ -322,6 +322,13 @@ class SessionEventStore {
         entry.chainNextId = null;
         return null;
       }
+      // Tag events from a predecessor's file so "Load full output" fetches
+      // from that transcript, not the open chat's (todo 861). Not gated on
+      // `hop`: pageSessionId is reassigned unconditionally below, so a
+      // second loadOlder post-hop would otherwise look like the open chat.
+      if (targetId !== sessionId) {
+        for (const ev of page.events) (ev as { originSessionId?: string }).originSessionId = targetId;
+      }
       // Divider goes AFTER the older events - the array is oldest-first.
       const incoming = hop ? [...page.events, chainDividerEvent(targetId)] : page.events;
       entry.events = [...incoming, ...entry.events];

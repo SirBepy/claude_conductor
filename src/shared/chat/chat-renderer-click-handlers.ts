@@ -88,8 +88,10 @@ export function createHandleToolResultLoadFullClick(renderer: ChatRenderer): (e:
     const card = btn.nextElementSibling as HTMLElement | null;
     btn.disabled = true;
     btn.innerHTML = `<i class="ph ph-spinner tool-result-load-spin"></i>Loading…`;
+    // originSession is a chain-hop predecessor id the app already loaded
+    // (event-store.ts loadOlder), never text/model-derived - see todo 861.
     void invoke<ChatEvent>("load_event_detail", {
-      sessionId: renderer.sessionId,
+      sessionId: btn.dataset.originSession || renderer.sessionId,
       cwd: renderer.paginator.cwdHint,
       seq,
       toolUseId,

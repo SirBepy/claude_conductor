@@ -4,7 +4,7 @@
 // need a document-attached host to hydrate; removed right after each page.
 
 import type { RenderedMessage } from "./chat-transforms";
-import { eventToRenderedMessage, renderMessage } from "./chat-transforms";
+import { eventToRenderedMessage, originSessionIdOf, renderMessage } from "./chat-transforms";
 import { sessionEvents } from "./event-store";
 import { hydrateAttachments } from "./attachment-hydrator";
 
@@ -44,6 +44,7 @@ export function startBackgroundImageFill(
         for (const ev of page) {
           const m = eventToRenderedMessage(ev);
           if (!m) continue;
+          m.originSessionId = originSessionIdOf(ev);
           pageMessages.push(m);
           if (m.kind !== "user") continue;
           const el = buildShadowUserEl(m);
