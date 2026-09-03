@@ -314,6 +314,7 @@ pub fn run() {
             ipc::list_project_servers,
             ipc::respond_permission,
             ipc::respond_question,
+            ipc::confirm_question_rendered,
             ipc::get_skipped_question_marks,
             ipc::list_pending_prompts,
             ipc::list_news,

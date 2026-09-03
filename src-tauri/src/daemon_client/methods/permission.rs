@@ -39,6 +39,16 @@ impl PersistentClient {
         Ok(result.get("delivered").and_then(|v| v.as_bool()).unwrap_or(false))
     }
 
+    /// Tells `on_question_request` a client committed to this question's fate,
+    /// so its ack means "reached a client" (todo 735). Fires on a rendered card
+    /// AND on a parked one; `respond_question` above resolves only on a real
+    /// answer, so the two are not interchangeable.
+    pub async fn confirm_question_rendered(&self, id: &str) -> Result<(), ClientError> {
+        self.call("confirm_question_rendered", serde_json::json!({ "id": id }))
+            .await?;
+        Ok(())
+    }
+
     /// Open prompts the app must surface (question cards), fetched over the
     /// reliable RPC channel rather than the lossy notifier broadcast. Polled by
     /// the app so a dropped broadcast frame can't hang an AskUserQuestion turn.

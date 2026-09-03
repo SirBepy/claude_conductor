@@ -244,6 +244,10 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("get_skipped_question_marks", {
           session_id: args.sessionId ?? args.session_id,
         });
+      // Without this case the phone silently degrades: the card renders but no
+      // confirmation reaches on_question_request, so every ask acks false.
+      case "confirm_question_rendered":
+        return this.rpc<T>("confirm_question_rendered", { id: args.id });
       case "send_message":
         return this.sendMessage<T>(args);
       // Cross-surface draft sync (composer/AUQ/held messages): one round trip

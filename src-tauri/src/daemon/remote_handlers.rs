@@ -43,6 +43,11 @@ const SAFE_METHODS: &[&str] = &[
     "cancel_turn",
     "respond_permission",
     "respond_question",
+    // Write: resolves one render-confirmation waiter by client-supplied id.
+    // Strictly weaker than `respond_question` above, which takes the same kind
+    // of id and also delivers an answer. A phone is a legitimate renderer, so
+    // excluding it would ack false for every phone-delivered question (todo 735).
+    "confirm_question_rendered",
     // Read-only: durable Skip marks for one session_id, so a phone reopening
     // a chat sees "Skipped" instead of "awaiting answer" forever (todo 661).
     "get_skipped_question_marks",
@@ -411,6 +416,7 @@ mod tests {
     fn allowlist_includes_core_chat_methods() {
         for m in [
             "list_instances", "send_message", "cancel_turn", "respond_question",
+            "confirm_question_rendered",
             "get_skipped_question_marks",
             "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",
             "register_historical", "read_attachment",

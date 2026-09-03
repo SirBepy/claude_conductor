@@ -279,6 +279,25 @@ pub async fn respond_question(
         .map_err(|e| e.to_string())
 }
 
+/// Fire-and-forget from both AUQ delivery branches (a mounted card and a parked
+/// prompt), so `on_question_request` can stop acking a question no client ever
+/// saw (todo 735). Without this command registered the frontend's invoke
+/// rejects, every ask times out and acks false, so it is load-bearing.
+#[tauri::command]
+pub async fn confirm_question_rendered(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let client_guard = state.daemon_client.lock().await;
+    let client = client_guard
+        .as_ref()
+        .ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .confirm_question_rendered(&id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Durable Skip marks for `session_id` (unix ms, oldest first, todo 661) -
 /// fetched once per session attach/hydrate and folded into scrollback
 /// client-side, since a Skip never reaches Claude's transcript JSONL.
