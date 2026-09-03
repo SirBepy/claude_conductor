@@ -50,14 +50,18 @@ $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
 $stateDir = Join-Path $env:LOCALAPPDATA 'claude-conductor-live-verify'
 $statePath = Join-Path $stateDir 'state.json'
 # `cargo metadata` is the only source that honours ~/.cargo/config.toml's
-# target-dir. This machine redirects builds to D:/cargo-target, which no env
-# var reflects, so the repo-relative guess never finds the exe (todo 795).
+# target-dir, which no env var reflects (todo 795). The try/catch is
+# load-bearing: EAP=Stop turns an unresolvable `cargo` into a TERMINATING
+# error that `2>$null` does not suppress, which would break `down`'s teardown.
 $cargoTargetDir = if ($env:CARGO_TARGET_DIR) {
     $env:CARGO_TARGET_DIR
 } else {
-    $manifest = Join-Path $repoRoot 'src-tauri\Cargo.toml'
-    $meta = & cargo metadata --format-version 1 --no-deps --manifest-path $manifest 2>$null | ConvertFrom-Json
-    if ($meta -and $meta.target_directory) { $meta.target_directory } else { Join-Path $repoRoot 'src-tauri\target' }
+    $fallbackTargetDir = Join-Path $repoRoot 'src-tauri\target'
+    try {
+        $manifest = Join-Path $repoRoot 'src-tauri\Cargo.toml'
+        $meta = & cargo metadata --format-version 1 --no-deps --manifest-path $manifest 2>$null | ConvertFrom-Json
+        if ($meta -and $meta.target_directory) { $meta.target_directory } else { $fallbackTargetDir }
+    } catch { $fallbackTargetDir }
 }
 $exePath = Join-Path $cargoTargetDir 'debug\claude-conductor.exe'
 $vitePort = 1420
