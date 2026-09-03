@@ -19,6 +19,13 @@ let _wasBusy = false;
 let _silenceTick: ReturnType<typeof setInterval> | null = null;
 
 export function initThinkingBar(pane: HTMLElement | null): void {
+  // Teardown passes null while a turn may still be busy. updateThinkingBar
+  // returns early on a missing pane, so it can never disarm the timer itself.
+  if (_silenceTick !== null) {
+    clearInterval(_silenceTick);
+    _silenceTick = null;
+  }
+  _wasBusy = false;
   _pane = pane;
 }
 
