@@ -57,6 +57,15 @@ pub(crate) const PRETRUSTED_TOOLS: &str =
 /// the fleet-orchestration tools (`spawn_worker`/`send_to_session`/
 /// `fleet_status`/`respond_worker_prompt`) in `tools/list`. A normal
 /// session's config is byte-identical to before this var existed.
+/// Monotonic per-turn suffix, so one session's successive turns never share a
+/// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
+/// a counter cannot repeat under a coarse clock.
+pub(crate) fn turn_nonce() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> Option<PathBuf> {
     let mcp_dir = crate::settings::paths::mcp_temp_dir().ok()?;
     let exe = std::env::current_exe().ok()?;

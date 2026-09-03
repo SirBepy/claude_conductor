@@ -96,8 +96,11 @@ pub async fn spawn_session(
     if is_jarvis {
         crate::sessions::chat_config::set_auto_accept(&session_id, true);
     }
-    let mcp_config_path = write_mcp_config(&session_id, &session_id, is_jarvis);
-    let hook_settings_path = write_hook_settings(&session_id, &session_id);
+    // Per-TURN name (todo 867): `run_pump_exit` deletes the previous turn's
+    // path late, so a shared one lands on the new turn's live config.
+    let turn_id = format!("{session_id}-{}", crate::daemon::claude_config::turn_nonce());
+    let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis);
+    let hook_settings_path = write_hook_settings(&turn_id, &session_id);
 
     let mut cmd = Command::new("claude");
     cmd.args(base_claude_args(
@@ -112,7 +115,10 @@ pub async fn spawn_session(
         cmd.arg("--permission-prompt-tool")
            .arg("mcp__cc_conductor__approval_prompt")
            .arg("--mcp-config")
-           .arg(mcp_path);
+           .arg(mcp_path)
+           // todo 867: unmerged from account connectors, whose auth failures
+           // took MCP init down and left the turn with no approval_prompt.
+           .arg("--strict-mcp-config");
     }
     if let Some(ref settings_path) = hook_settings_path {
         cmd.arg("--settings").arg(settings_path);
@@ -312,6 +318,16 @@ mod tests {
         assert_eq!(args.get(m + 1).map(String::as_str), Some("sonnet"));
         let e = args.iter().position(|a| a == "--effort").expect("--effort");
         assert_eq!(args.get(e + 1).map(String::as_str), Some("medium"));
+    }
+
+    #[test]
+    fn turn_nonce_never_repeats_for_one_session() {
+        use crate::daemon::claude_config::turn_nonce;
+        let ids: Vec<String> = (0..64)
+            .map(|_| format!("sess-abc-{}", turn_nonce()))
+            .collect();
+        let unique: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "collision in {ids:?}");
     }
 
     #[test]
