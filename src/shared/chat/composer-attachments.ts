@@ -42,7 +42,7 @@ export interface PastedBlock {
 
 // Paste payloads at or above this many characters become a pasted_log chip
 // rather than landing as a wall of text in the textarea.
-const PASTE_LOG_THRESHOLD = 2000;
+export const PASTE_LOG_THRESHOLD = 2000;
 
 export interface ComposerAttachmentsCallbacks {
   /** Active session id, or null. Attachment metadata is persisted/read keyed
