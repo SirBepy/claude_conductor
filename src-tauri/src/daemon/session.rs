@@ -4,6 +4,7 @@
 use crate::types::chat::ChatEvent;
 use dashmap::DashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use tokio::process::ChildStdin;
 use tokio::sync::{broadcast, Mutex};
@@ -102,6 +103,11 @@ pub struct Session {
     /// In-flight streamed text block accumulator - see [`StreamingText`].
     /// std `Mutex`: only ever held across an append or a `String` clone.
     pub streaming: std::sync::Mutex<StreamingText>,
+    /// Consecutive Stop-hook turns where report_turn_status/send_message were
+    /// both missing (todo 824): the closest live proxy for MCP reachability,
+    /// since the MCP child is a fresh HTTP-only process per turn with no
+    /// attach/detach event. Reset to 0 the moment either tool lands.
+    pub mcp_miss_streak: AtomicU32,
 }
 
 impl Session {
@@ -130,6 +136,7 @@ impl Session {
             account_id,
             last_prompt: std::sync::Mutex::new(String::new()),
             streaming: std::sync::Mutex::new(StreamingText::default()),
+            mcp_miss_streak: AtomicU32::new(0),
         })
     }
 }

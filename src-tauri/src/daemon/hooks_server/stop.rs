@@ -7,6 +7,7 @@ use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, 
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 /// One reason per missing combination: both checks fold into a single block
@@ -22,6 +23,19 @@ const BOTH_MISSING_REASON: &str = "Before ending your turn, call BOTH tools: rep
 /// isn't attached, so report_turn_status/send_message are unreachable and
 /// demanding them would be an unsatisfiable loop.
 const MCP_UNAVAILABLE_REASON: &str = "report_turn_status/send_message weren't called, but this session's MCP transport isn't attached right now, so those tools are unreachable - not blocking on it. Assistant text is a real fallback channel; use it if you need to reach Joe, and the MCP tools again once they reappear.";
+/// todo 824 (remaining half): the MCP child is a fresh, HTTP-only process
+/// per turn with no attach/detach event to observe, so a disconnect can only
+/// be inferred from turns where neither tool call landed. One miss is
+/// tolerated; two straight is treated as the transport being down.
+const MCP_DISCONNECT_STREAK_THRESHOLD: u32 = 2;
+
+/// `mcp_config_written` is the SPAWN-time proxy (still valid on its own: a
+/// session whose .mcp.json write failed never had a working transport at
+/// all). `miss_streak` is the live half: consecutive turns since the last
+/// successful report_turn_status/send_message call.
+fn mcp_is_attached(mcp_config_written: bool, miss_streak: u32) -> bool {
+    mcp_config_written && miss_streak < MCP_DISCONNECT_STREAK_THRESHOLD
+}
 
 /// Verdict from [`missing_requirement_reason`]: `Block` halts the turn end,
 /// `Inform` returns a non-blocking, softened note (MCP transport down),
@@ -140,16 +154,33 @@ pub(super) async fn on_stop(
         let has_current_send = ctx.state.registry.peek_message_sent_gen(&session_id).map(|g| g == gen).unwrap_or(false);
         let status = reported.as_ref().filter(|r| r.turn_gen == gen).map(|r| r.status.as_str());
         let opened_by_wake = ctx.state.registry.is_turn_opened_by_wake(&session_id, gen);
-        // todo 824: mcp_config_path is only set for sessions the daemon
-        // actually wrote a per-session .mcp.json for at spawn - the closest
-        // attachment signal available without a live disconnect feed.
-        let mcp_attached = ctx
+        let mcp_config_written = ctx
             .state
             .sessions
             .get(&session_id)
             .map(|s| s.mcp_config_path.is_some())
             .unwrap_or(false);
-        match missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status, opened_by_wake, mcp_attached) {
+        let miss_streak = ctx
+            .state
+            .sessions
+            .get(&session_id)
+            .map(|s| s.mcp_miss_streak.load(Ordering::Relaxed))
+            .unwrap_or(0);
+        let mcp_attached = mcp_is_attached(mcp_config_written, miss_streak);
+        let verdict = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status, opened_by_wake, mcp_attached);
+        // Never touch the streak on a stop_hook_active retry: it's the same
+        // turn being re-evaluated, not new evidence either way.
+        if payload.stop_hook_active != Some(true) {
+            if let Some(session) = ctx.state.sessions.get(&session_id) {
+                match verdict {
+                    TurnEndVerdict::Ok => session.mcp_miss_streak.store(0, Ordering::Relaxed),
+                    TurnEndVerdict::Block(_) | TurnEndVerdict::Inform(_) => {
+                        session.mcp_miss_streak.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+        match verdict {
             TurnEndVerdict::Ok => {}
             TurnEndVerdict::Block(reason) => {
                 log::info!(
@@ -346,5 +377,26 @@ mod tests {
     #[test]
     fn mcp_not_attached_stop_hook_active_still_never_blocks() {
         assert_eq!(missing_requirement_reason(Some(true), false, false, DONE, false, false), TurnEndVerdict::Ok);
+    }
+
+    // todo 824: `mcp_is_attached` combines the spawn-time proxy with the live
+    // miss-streak signal - a mid-session disconnect (config written fine, but
+    // report_turn_status/send_message stop landing) is the case the earlier
+    // fix in this file could not see.
+    #[test]
+    fn never_configured_is_never_attached_even_with_no_misses_yet() {
+        assert!(!mcp_is_attached(false, 0));
+    }
+
+    #[test]
+    fn configured_session_tolerates_a_single_miss() {
+        assert!(mcp_is_attached(true, 0));
+        assert!(mcp_is_attached(true, 1));
+    }
+
+    #[test]
+    fn mid_session_disconnect_degrades_after_two_straight_misses() {
+        assert!(!mcp_is_attached(true, 2));
+        assert!(!mcp_is_attached(true, 5));
     }
 }
