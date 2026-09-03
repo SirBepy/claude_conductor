@@ -3,7 +3,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
 import type { Account } from "../../shared/api";
-import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
+import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel, registerHostOptions } from "../../shared/modal";
 import { settingsData, projectsListData, accountsListData, projectAccountData } from "./new-session-cache";
 import { resolveModelEffortData } from "./model-effort-data";
 import {
@@ -121,7 +121,7 @@ export async function openModelEffortModal(
               </div>
               ${renderAccountFieldHtml(accountField, { accounts })}
 
-              ${slider.html("model", "Model", modelIdx(), models.map(modelDisplayLabel), probe.state.modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : "")}
+              ${slider.html("model", "Model", modelIdx(), models.map(modelDisplayLabel), true, probe.state.modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : "")}
 
               ${moreOpen ? `<div class="me-more-body">${slider.html("effort", "Effort", effortIdx(), [...EFFORTS])}${checkboxesHtml}</div>` : ""}
 
@@ -151,11 +151,17 @@ export async function openModelEffortModal(
       slider.playFlip(flipFrom);
 
       // innerHTML above destroys whatever was focused, which would strand
-      // arrow-key nav after one press - the slider is the only keyboard path
-      // to a model now that the number badges are gone.
+      // arrow-key nav after one press.
       if (focusedSliderKind) {
         card.querySelector<HTMLElement>(`.me-slider-wrap[data-kind="${focusedSliderKind}"]`)?.focus();
       }
+
+      // Model stops are the only flat, number-selectable list here (todo
+      // 835) - they carry the .me-key-hint badge. Effort/checkboxes aren't an
+      // ordered pick list, so they opt out.
+      registerHostOptions(() =>
+        Array.from(card.querySelectorAll<HTMLElement>('.slider-stop-label[data-kind="model"]')),
+      );
     }
 
     function attachHandlers() {
