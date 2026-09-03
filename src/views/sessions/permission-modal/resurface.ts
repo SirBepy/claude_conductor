@@ -14,6 +14,7 @@ import {
   autoAllowIfRemembered,
   isAutoAccept,
   markLatestQuestion,
+  markQuestionSuperseded,
   storePendingPrompt,
   takePendingPrompt,
   peekPendingPrompt,
@@ -196,6 +197,9 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     const newest = recs ? pickNewestOpenQuestion(recs) : await newestOpenQuestion(sessionId);
     if (newest) {
       markLatestQuestion(sessionId, newest.id, newest.seq);
+      // `cardId` was requested but isn't the daemon's real current prompt -
+      // an explicit ghost, not merely "a newer one exists" (todo 860).
+      if (cardId && cardId !== newest.id) markQuestionSuperseded(sessionId, cardId);
       const draft = await fetchFreshestAuqDraft(sessionId, newest.id);
       pending = { kind: "question", payload: newest, draft: draft ?? undefined };
     }

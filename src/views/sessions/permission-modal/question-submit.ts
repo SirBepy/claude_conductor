@@ -99,7 +99,8 @@ export async function showQuestionCard(
       }
       if (!sid) { clearQuestionDraft(payload.id); return; }
       if (!opts.reopened && !isLatestQuestion(sid, payload.id)) {
-        // A newer question superseded this card - don't inject a reply now.
+        // This id was ITSELF superseded (a ghost swap, todo 833) - not merely
+        // that a sibling card exists (todo 860 fixed that false drop).
         console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
         clearQuestionDraft(payload.id);
         return;
