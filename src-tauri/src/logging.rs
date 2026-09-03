@@ -75,10 +75,37 @@ impl std::io::Write for ReopeningFileWriter {
     }
 }
 
+/// Startup-only cap: past this size, the previous run's log is rolled to
+/// `<name>.1` before a fresh file is opened. Not enforced per-write, so a
+/// single run can still exceed it.
+const MAX_LOG_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Renames `path` to a sibling `.1` file if `path` is over `MAX_LOG_BYTES`,
+/// so a diagnostic session opens a small, recent log instead of a
+/// multi-hundred-MB one. Best-effort: a locked file (still held open by
+/// another process) is logged and left in place rather than treated as fatal.
+fn roll_if_oversized(path: &std::path::Path) {
+    let Ok(meta) = std::fs::metadata(path) else { return };
+    if meta.len() <= MAX_LOG_BYTES {
+        return;
+    }
+    let mut rolled = path.to_path_buf();
+    rolled.set_extension(match path.extension() {
+        Some(ext) => format!("{}.1", ext.to_string_lossy()),
+        None => "1".to_string(),
+    });
+    if let Err(e) = std::fs::rename(path, &rolled) {
+        eprintln!("daemon.log: over {MAX_LOG_BYTES} bytes but rename failed, continuing to append: {e}");
+    }
+}
+
 pub fn init_daemon_file_logger() {
     let log_name = paths::daemon_log_name();
     let log_path = paths::data_dir().ok().map(|dir| dir.join(&log_name));
     install_panic_hook(&log_name, "daemon");
+    if let Some(path) = &log_path {
+        roll_if_oversized(path);
+    }
 
     let file = log_path.and_then(|path| match open_append(&path) {
         Ok(file) => Some(ReopeningFileWriter { path, file, warned: false }),
@@ -128,6 +155,34 @@ mod daemon_file_logger_tests {
         let dir = std::env::temp_dir().join(format!("cc-log-test-dir-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(open_append(&dir).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn roll_if_oversized_rolls_a_file_past_the_cap() {
+        let dir = std::env::temp_dir().join(format!("cc-log-test-roll-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.log");
+        std::fs::write(&path, vec![0u8; (MAX_LOG_BYTES + 1) as usize]).unwrap();
+
+        roll_if_oversized(&path);
+
+        assert!(!path.exists());
+        assert!(dir.join("daemon.log.1").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn roll_if_oversized_leaves_a_small_file_alone() {
+        let dir = std::env::temp_dir().join(format!("cc-log-test-roll-small-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.log");
+        std::fs::write(&path, b"small").unwrap();
+
+        roll_if_oversized(&path);
+
+        assert!(path.exists());
+        assert!(!dir.join("daemon.log.1").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 }
