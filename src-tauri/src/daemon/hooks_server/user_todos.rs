@@ -35,6 +35,8 @@ pub(super) async fn on_write_user_todo(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<WriteTodoBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `write_user_todo` tool.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     match todo_methods::write_user_todo(
         &ctx.state,
         &body.session_id,

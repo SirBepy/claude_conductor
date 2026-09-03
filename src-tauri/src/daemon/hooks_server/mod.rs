@@ -72,6 +72,14 @@ async fn health_endpoint(AxState(_ctx): AxState<Arc<HookCtx>>) -> impl IntoRespo
     (StatusCode::OK, Json(json!({"daemon": "ok"})))
 }
 
+/// Called at the top of every handler reachable ONLY via a relayed
+/// `cc_conductor` MCP tool call (`mcp::dispatch`'s arms) - not `/hooks/preview`,
+/// which a terminal `claude` can also curl directly (todo 824 remaining 1).
+pub(super) fn mark_mcp_tool_used(ctx: &HookCtx, session_id: &str) {
+    let gen = ctx.state.registry.current_turn_gen(session_id);
+    ctx.state.registry.mark_mcp_tool_used(session_id, gen);
+}
+
 /// Fixed port matching the Electron app + README + installer + global hook
 /// scripts at `~/.claude/aiusage-hook.{ps1,sh}`. Pinned; do not change.
 pub const HOOK_PORT: u16 = 27182;

@@ -47,6 +47,34 @@ enum TurnEndVerdict {
     Inform(&'static str),
 }
 
+/// What [`streak_update`] says to do to `mcp_miss_streak` this turn.
+#[derive(Debug, PartialEq, Eq)]
+enum StreakUpdate {
+    Reset,
+    Increment,
+    /// A `stop_hook_active` retry: same turn re-evaluated, not new evidence -
+    /// distinct from `Reset`, which would erase a genuine increment the FIRST
+    /// call on this turn already made.
+    Unchanged,
+}
+
+/// Narrows the streak increment to misses that are plausibly MCP-attributable
+/// (todo 824 remaining 1): a lone `Block`/`Inform` verdict looks identical to
+/// a model that simply forgot both tools, so `mcp_tool_used_this_turn` (a
+/// relayed MCP tool call landing at the daemon) is required as positive proof.
+fn streak_update(stop_hook_active: Option<bool>, verdict: &TurnEndVerdict, mcp_tool_used_this_turn: bool) -> StreakUpdate {
+    if stop_hook_active == Some(true) {
+        return StreakUpdate::Unchanged;
+    }
+    if mcp_tool_used_this_turn {
+        return StreakUpdate::Reset;
+    }
+    match verdict {
+        TurnEndVerdict::Ok => StreakUpdate::Reset,
+        TurnEndVerdict::Block(_) | TurnEndVerdict::Inform(_) => StreakUpdate::Increment,
+    }
+}
+
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
 /// Pure so it stays testable without a live Session/ChildStdin.
 ///
@@ -168,16 +196,15 @@ pub(super) async fn on_stop(
             .unwrap_or(0);
         let mcp_attached = mcp_is_attached(mcp_config_written, miss_streak);
         let verdict = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status, opened_by_wake, mcp_attached);
-        // Never touch the streak on a stop_hook_active retry: it's the same
-        // turn being re-evaluated, not new evidence either way.
-        if payload.stop_hook_active != Some(true) {
-            if let Some(session) = ctx.state.sessions.get(&session_id) {
-                match verdict {
-                    TurnEndVerdict::Ok => session.mcp_miss_streak.store(0, Ordering::Relaxed),
-                    TurnEndVerdict::Block(_) | TurnEndVerdict::Inform(_) => {
-                        session.mcp_miss_streak.fetch_add(1, Ordering::Relaxed);
-                    }
+        let mcp_tool_used_this_turn =
+            ctx.state.registry.peek_mcp_tool_used_gen(&session_id).map(|g| g == gen).unwrap_or(false);
+        if let Some(session) = ctx.state.sessions.get(&session_id) {
+            match streak_update(payload.stop_hook_active, &verdict, mcp_tool_used_this_turn) {
+                StreakUpdate::Reset => session.mcp_miss_streak.store(0, Ordering::Relaxed),
+                StreakUpdate::Increment => {
+                    session.mcp_miss_streak.fetch_add(1, Ordering::Relaxed);
                 }
+                StreakUpdate::Unchanged => {}
             }
         }
         match verdict {
@@ -398,5 +425,68 @@ mod tests {
     fn mid_session_disconnect_degrades_after_two_straight_misses() {
         assert!(!mcp_is_attached(true, 2));
         assert!(!mcp_is_attached(true, 5));
+    }
+
+    // todo 824 remaining 1: the streak must only count misses that are
+    // plausibly MCP-attributable, not any Block/Inform verdict.
+    #[test]
+    fn a_miss_with_no_mcp_tool_used_increments_the_streak() {
+        assert_eq!(streak_update(None, &TurnEndVerdict::Block(SEND_MISSING_REASON), false), StreakUpdate::Increment);
+        assert_eq!(streak_update(None, &TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON), false), StreakUpdate::Increment);
+    }
+
+    #[test]
+    fn a_miss_with_an_mcp_tool_used_resets_instead_of_incrementing() {
+        assert_eq!(streak_update(None, &TurnEndVerdict::Block(SEND_MISSING_REASON), true), StreakUpdate::Reset);
+        assert_eq!(streak_update(None, &TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON), true), StreakUpdate::Reset);
+    }
+
+    #[test]
+    fn a_clean_turn_always_resets_regardless_of_mcp_tool_use() {
+        assert_eq!(streak_update(None, &TurnEndVerdict::Ok, false), StreakUpdate::Reset);
+        assert_eq!(streak_update(None, &TurnEndVerdict::Ok, true), StreakUpdate::Reset);
+    }
+
+    #[test]
+    fn stop_hook_active_retry_never_touches_the_streak_either_way() {
+        // Even a verdict that would otherwise increment/reset must be ignored:
+        // this is the SAME turn being re-evaluated, not new evidence.
+        assert_eq!(streak_update(Some(true), &TurnEndVerdict::Block(SEND_MISSING_REASON), false), StreakUpdate::Unchanged);
+        assert_eq!(streak_update(Some(true), &TurnEndVerdict::Ok, true), StreakUpdate::Unchanged);
+    }
+
+    /// End-to-end (todo 824 remaining 1): two straight no-tool misses still
+    /// cross the threshold and flip `mcp_is_attached` to false - the existing
+    /// behaviour this narrowing must not break.
+    #[test]
+    fn two_straight_no_tool_misses_still_flip_mcp_is_attached_to_false() {
+        let mut streak = 0u32;
+        for _ in 0..2 {
+            let verdict = TurnEndVerdict::Block(SEND_MISSING_REASON);
+            match streak_update(None, &verdict, false) {
+                StreakUpdate::Increment => streak += 1,
+                StreakUpdate::Reset => streak = 0,
+                StreakUpdate::Unchanged => {}
+            }
+        }
+        assert_eq!(streak, 2);
+        assert!(!mcp_is_attached(true, streak));
+    }
+
+    /// A tool-using turn in between resets the count, so an MCP-healthy
+    /// session that occasionally forgets one tool never crosses the threshold.
+    #[test]
+    fn an_mcp_tool_use_in_between_misses_prevents_crossing_the_threshold() {
+        let mut streak = 0u32;
+        let miss = TurnEndVerdict::Block(SEND_MISSING_REASON);
+        for used in [false, true, false] {
+            match streak_update(None, &miss, used) {
+                StreakUpdate::Increment => streak += 1,
+                StreakUpdate::Reset => streak = 0,
+                StreakUpdate::Unchanged => {}
+            }
+        }
+        assert_eq!(streak, 1);
+        assert!(mcp_is_attached(true, streak));
     }
 }

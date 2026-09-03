@@ -59,6 +59,12 @@ pub(super) async fn on_permission_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<PermRequestBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `approval_prompt` tool
+    // (see claude_config.rs's `--permission-prompt-tool` doc), so landing here
+    // proves this session's MCP transport is up this turn.
+    if let Some(sid) = body.session_id.as_deref() {
+        super::mark_mcp_tool_used(&ctx, sid);
+    }
     let auto_accept = body.session_id.as_deref()
         .and_then(crate::sessions::chat_config::get)
         .map(|c| c.auto_accept)

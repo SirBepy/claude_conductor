@@ -46,6 +46,8 @@ pub(super) async fn on_spawn_worker(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SpawnWorkerBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `spawn_worker` tool.
+    super::mark_mcp_tool_used(&ctx, &body.jarvis_session_id);
     let result = jarvis_methods::spawn_worker(
         &ctx.state,
         &body.jarvis_session_id,
@@ -73,6 +75,8 @@ pub(super) async fn on_send_to_session(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SendToSessionBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `send_to_session` tool.
+    super::mark_mcp_tool_used(&ctx, &body.jarvis_session_id);
     let result = jarvis_methods::send_to_session(
         &ctx.state,
         &body.jarvis_session_id,
@@ -95,6 +99,8 @@ pub(super) async fn on_fleet_status(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<FleetStatusBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `fleet_status` tool.
+    super::mark_mcp_tool_used(&ctx, &body.jarvis_session_id);
     let result = jarvis_methods::fleet_status(&ctx.state, &body.jarvis_session_id).await;
     match result {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -117,6 +123,8 @@ pub(super) async fn on_respond_worker_prompt(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<RespondWorkerPromptBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `respond_worker_prompt` tool.
+    super::mark_mcp_tool_used(&ctx, &body.jarvis_session_id);
     let result = jarvis_methods::respond_worker_prompt(
         &ctx.state,
         &body.jarvis_session_id,

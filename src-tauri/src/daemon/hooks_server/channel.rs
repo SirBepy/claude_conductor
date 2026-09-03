@@ -28,6 +28,8 @@ pub(super) async fn on_list_peers(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SessionOnlyBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `list_peers` tool.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     match channel_methods::list_peers(&ctx.state, &body.session_id) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
@@ -38,6 +40,8 @@ pub(super) async fn on_read_messages(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SessionOnlyBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `read_messages` tool.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     match channel_methods::read_messages(&ctx.state, &body.session_id) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
@@ -56,6 +60,8 @@ pub(super) async fn on_post_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<PostMessageBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `post_message` tool.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     match channel_methods::post_message(&ctx.state, &body.session_id, &body.text, body.target.as_deref()) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),

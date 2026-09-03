@@ -152,6 +152,12 @@ pub(super) async fn on_question_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<QuestRequestBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: only the MCP `ask_user_question` tool posts here -
+    // the builtin AskUserQuestion PreToolUse hook curls `on_ask_question_hook`
+    // instead - so landing here proves the MCP transport is up this turn.
+    if let Some(sid) = body.session_id.as_deref() {
+        super::mark_mcp_tool_used(&ctx, sid);
+    }
     let payload = json!({
         "id": body.id,
         "questions": body.questions,

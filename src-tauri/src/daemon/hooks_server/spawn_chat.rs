@@ -33,6 +33,8 @@ pub(super) async fn on_spawn_chat(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SpawnChatBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `spawn_chat`/`respawn` tools.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     let result = spawn_chat_method::spawn_chat(
         &ctx.state,
         &body.session_id,

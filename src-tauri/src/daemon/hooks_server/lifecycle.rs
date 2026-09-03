@@ -47,6 +47,8 @@ pub(super) async fn on_close_confirm(
     Json(payload): Json<CloseConfirmPayload>,
 ) -> impl IntoResponse {
     log::info!("hook /sessions/close-confirm: session={}", payload.session_id);
+    // todo 824 remaining 1: reachable only via the MCP `close_session` tool.
+    super::mark_mcp_tool_used(&ctx, &payload.session_id);
     ctx.state.registry.set_close_requested(&payload.session_id);
     (StatusCode::OK, Json(json!({"ok": true})))
 }

@@ -73,6 +73,11 @@ pub struct Registry {
     /// `take_pending_turn_gen`. Exists so the pump is HANDED the generation it
     /// is watching instead of inferring one from stdout timing (todo 525).
     pub(super) pending_turn_gen: Mutex<HashMap<String, u64>>,
+    /// `session_id` -> `turn_gen` of the last turn a `cc_conductor` MCP tool
+    /// call from THIS session's own MCP child was relayed to the daemon
+    /// (todo 824 remaining 1). Positive proof the MCP transport is alive this
+    /// turn, independent of whether report_turn_status/send_message landed.
+    pub(super) mcp_tool_used_gen: Mutex<HashMap<String, u64>>,
 }
 
 impl Registry {
@@ -88,6 +93,7 @@ impl Registry {
             turn_opened_by_wake: Mutex::new(HashMap::new()),
             builtin_ask_attempts: Mutex::new(HashMap::new()),
             pending_turn_gen: Mutex::new(HashMap::new()),
+            mcp_tool_used_gen: Mutex::new(HashMap::new()),
         }
     }
 

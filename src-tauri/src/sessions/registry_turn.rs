@@ -127,6 +127,17 @@ impl Registry {
         self.message_sent_gen.lock().unwrap().get(session_id).copied()
     }
 
+    /// Record that a `cc_conductor` MCP tool call landed at the daemon during
+    /// `turn_gen` (todo 824 remaining 1) - any tool, not just
+    /// report_turn_status/send_message, since the point is transport liveness.
+    pub fn mark_mcp_tool_used(&self, session_id: &str, turn_gen: u64) {
+        self.mcp_tool_used_gen.lock().unwrap().insert(session_id.to_string(), turn_gen);
+    }
+
+    pub fn peek_mcp_tool_used_gen(&self, session_id: &str) -> Option<u64> {
+        self.mcp_tool_used_gen.lock().unwrap().get(session_id).copied()
+    }
+
     /// Record the outcome of an `ask_user_question` post for this turn.
     /// `surfaced` is whether the session was actually flipped to "awaiting a
     /// question" - false means no window, sidebar row or phone will ever show
@@ -369,6 +380,23 @@ mod tests {
         assert_eq!(registry.peek_message_sent_gen("s"), Some(1));
         registry.mark_message_sent("s", 2);
         assert_eq!(registry.peek_message_sent_gen("s"), Some(2));
+    }
+
+    #[test]
+    fn mcp_tool_used_gen_peek_roundtrip() {
+        let registry = Registry::new();
+        assert!(registry.peek_mcp_tool_used_gen("s").is_none());
+        registry.mark_mcp_tool_used("s", 1);
+        assert_eq!(registry.peek_mcp_tool_used_gen("s"), Some(1));
+        registry.mark_mcp_tool_used("s", 2);
+        assert_eq!(registry.peek_mcp_tool_used_gen("s"), Some(2));
+    }
+
+    #[test]
+    fn mcp_tool_used_gen_stale_mark_does_not_read_as_used_for_a_later_gen() {
+        let registry = Registry::new();
+        registry.mark_mcp_tool_used("s", 1);
+        assert_ne!(registry.peek_mcp_tool_used_gen("s"), Some(2), "a gen-1 mark must not match gen 2");
     }
 
     #[test]

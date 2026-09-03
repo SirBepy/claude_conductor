@@ -23,6 +23,12 @@ pub(super) async fn on_report_status(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     let session_id = body["session_id"].as_str().unwrap_or_default();
+    // todo 824 remaining 1: reachable only via the MCP `report_turn_status`
+    // tool - mark before the validation early-return below, since arrival
+    // alone already proves the transport is up this turn.
+    if !session_id.is_empty() {
+        super::mark_mcp_tool_used(&ctx, session_id);
+    }
     let title = body["title"].as_str();
     let status = match body["status"].as_str() {
         Some(s) => s,

@@ -39,6 +39,9 @@ pub(super) async fn on_send_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SendMessageBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `send_message` tool -
+    // mark even a validation-rejected call, since arrival alone is the proof.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     let trimmed = body.text.trim();
     if trimmed.is_empty() {
         return (StatusCode::OK, Json(json!({"ok": false, "error": "text must not be empty"})));
@@ -59,6 +62,8 @@ pub(super) async fn on_update_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<UpdateMessageBody>,
 ) -> impl IntoResponse {
+    // todo 824 remaining 1: reachable only via the MCP `update_message` tool.
+    super::mark_mcp_tool_used(&ctx, &body.session_id);
     if body.message < 1 || body.message > MAX_ORDINAL {
         return (StatusCode::OK, Json(json!({"ok": false, "error": "message must be 1 or greater"})));
     }
