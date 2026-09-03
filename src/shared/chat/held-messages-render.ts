@@ -14,7 +14,8 @@ export interface HeldRenderHost {
   editItem(id: number, text: string): void;
   /** Bypass the edit's debounced daemon push (row blur). */
   flushEditPush(id: number): void;
-  sendNow(): Promise<void>;
+  /** False when the turn ignored the interrupt and the set stayed held. */
+  sendNow(): Promise<boolean>;
   /** A held row just lost focus - retry a deferred completion auto-flush. */
   onRowBlur(): void;
 }
