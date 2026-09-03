@@ -10,7 +10,7 @@ import type { ChatEvent, ContentBlock, ScheduledItem, ScheduledKind } from "../.
 import { blocksToText } from "../../shared/chat/content-blocks";
 import { formatFireAt } from "../../shared/chat/schedule-picker";
 import { state, setActiveSession } from "./state";
-import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
+import { isCurrentSessionBusy, syncThinkingBar, updateThinkingBar } from "./session-thinking-bar";
 import { projectName, sessionSubtitle } from "./sessions-helpers";
 import { renderSidebar, refreshSessions } from "./sidebar";
 import { characterForSession, characterIconUrl } from "./session-characters";
@@ -61,6 +61,8 @@ export async function renderPendingPane(
     `</div>`,
   ].join("\n");
   pane.insertBefore(_pendingHeader.el, pane.firstChild);
+  // The wipe above ran after setSessionScope, so the FAB host is detached.
+  state.fabDial?.reattach();
 
   pane.querySelector<HTMLButtonElement>(".thinking-pause-btn")?.addEventListener("click", async () => {
     // Same source of truth the established pane's button closes over: the
@@ -111,6 +113,8 @@ export async function renderPendingPane(
   if (messagesEl) {
     const renderer = new ChatRenderer(messagesEl);
     state.renderer = renderer;
+    // A fresh draft owns none of the previous chat's progress/activity.
+    syncThinkingBar(renderer);
     // Let the PR-preview modal's git IPC calls resolve this pending
     // session's working directory.
     setPrReviewCwdProvider(() => project.path || null);

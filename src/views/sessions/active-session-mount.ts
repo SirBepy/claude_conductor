@@ -17,7 +17,7 @@ import { readLastChoice } from "../../shared/effort-presets";
 import { renderSidebar } from "./sidebar";
 import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import type { SessionHeader } from "./session-header";
-import { setThinkingActivity, setThinkingProgress, setThinkingTodoActivity } from "./session-thinking-bar";
+import { noteThinkingEvent, setThinkingActivity, setThinkingProgress, setThinkingTodoActivity, syncThinkingBar } from "./session-thinking-bar";
 import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
 import { flushRenderNow } from "../../shared/chat/flush-scheduler";
 import { isRawViewEnabled } from "../../shared/chat/message-filter-pref";
@@ -125,6 +125,9 @@ export function wireRenderer(
   // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
   // resolve this session's working directory.
   setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));
+  renderer.onLiveEvent = () => {
+    if (state.renderer === renderer) noteThinkingEvent();
+  };
   renderer.onActivityUpdate = (activity, idle) => {
     if (state.renderer === renderer) setThinkingActivity(activity, idle);
   };
@@ -153,6 +156,10 @@ export function wireRenderer(
   // here) so this is safe to wire before mountComposer has run for this
   // session - by the time a CTA is actually clicked, state.composer is current.
   renderer.onSendText = (text) => { void state.composer?.sendText(text); };
+  // Repoint the pane-global thinking bar at THIS chat. Without it a switch
+  // inherited the previous chat's progress/todo label, since those only ever
+  // cleared on an activity-to-null push that a busy chat never sends.
+  syncThinkingBar(renderer);
 }
 
 /** Re-show a cached chat: swap the pane's empty `.session-messages` for the
@@ -182,7 +189,7 @@ function remountRetained(
   const edits = renderer.getFileEdits();
   panel.onUpdate(edits);
   header.setChangesBadge(dedupeByPath(edits).length);
-  setThinkingActivity(renderer.lastActivity, renderer.activityIdle);
+  syncThinkingBar(renderer);
   // Reselecting a chat always lands on the newest message, same as a cold
   // load - it doesn't restore wherever the user had scrolled to before
   // leaving (ai_todo scroll regression: clicking a chat used to always land

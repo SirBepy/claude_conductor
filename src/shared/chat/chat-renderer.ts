@@ -185,6 +185,12 @@ export class ChatRenderer {
   // right now pulses - not every tool that has an in-flight call. Cleared on
   // turn boundary / reset, same lifecycle as lastActivity.
   activityToolCanon: string | null = null;
+  // Latest <cc-progress:N/M> and TodoWrite in_progress label for THIS chat.
+  // Module state in session-thinking-bar.ts is global to the pane, so without
+  // a per-renderer copy a cache-hit switch left the previous chat's "Step 1
+  // of 6" on every other chat's bar. Same lifecycle as lastActivity.
+  lastProgress: { n: number; m: number } | null = null;
+  lastTodoActivity: string | null = null;
   // In-flight tool_use ids from handleToolUseEvent's generic path. Activity
   // clears to null only once this drains empty, so back-to-back tool calls
   // don't blank the bar between one result and the next use. Cleared at
@@ -212,6 +218,10 @@ export class ChatRenderer {
   public onSendText: ((text: string) => void) | null = null;
   /** Fired when a next-ai-prompt skill turn completes. Active-session wires this to show the pickup CTA. */
   public onNextAiPromptDone: (() => void) | null = null;
+  // Fires once per LIVE event of any type, including ones that change nothing
+  // on screen. The thinking bar uses it to tell a working session apart from a
+  // dead one; nothing else should depend on its rate.
+  public onLiveEvent: (() => void) | null = null;
   /** Set by chat-event-handler when a Skill tool_use for "next-ai-prompt" is seen in a live turn. */
   _nextAiPromptPending = false;
   turnStatus: "done" | "question" | "waiting" | "working" | null = null;
@@ -240,6 +250,7 @@ export class ChatRenderer {
     // keepChip skips the highlight clear for the "turn's tools resolved" case
     // (thinking-bar text goes idle, chip keeps pulsing till the turn closes).
     if (a === null && !opts.keepChip) this.activityToolCanon = null;
+    if (a === null) { this.lastProgress = null; this.lastTodoActivity = null; }
     const idle = !!opts.idle;
     if (this.lastActivity === a && this.activityIdle === idle) return;
     this.lastActivity = a;
@@ -341,6 +352,8 @@ export class ChatRenderer {
     this.lastActivity = null;
     this.activityIdle = false;
     this.activityToolCanon = null;
+    this.lastProgress = null;
+    this.lastTodoActivity = null;
     this.outstandingActivityToolIds.clear();
     this.activeToolGroups.clear();
     this.tallyState.reset();

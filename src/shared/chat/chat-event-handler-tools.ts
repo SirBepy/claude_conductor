@@ -115,6 +115,7 @@ export function handleToolUseEvent(
     r.lastTodosSnapshot = todos.map((t) => ({ content: t.content, status: t.status }));
     if (!r.hydrating) {
       const active = todos.find((t) => t.status === "in_progress");
+      r.lastTodoActivity = active?.activeForm ?? null;
       r.onTodoActivityUpdate?.(active?.activeForm ?? null);
     }
     return { touched: true, coalesce: false };

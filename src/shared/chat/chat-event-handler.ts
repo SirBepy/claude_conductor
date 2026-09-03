@@ -318,6 +318,7 @@ function handleAssistantMessageEvent(
       const prog = detectProgressToken(joined);
       if (prog) {
         r.turnFooters.setProgress(r.activeTurnChipKey, prog.n, prog.m);
+        r.lastProgress = prog;
         r.onProgressUpdate?.(prog.n, prog.m);
       }
     }
@@ -442,6 +443,7 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
   // update. Sending a user_message leaves them at the bottom anyway, so the
   // gate naturally re-engages auto-scroll for their own messages.
   const wasAtBottom = isNearBottom(r);
+  if (!opts.silent) r.onLiveEvent?.();
   let outcome: EventOutcome = { touched: false, coalesce: false };
   switch (ev.type) {
     case "session_started": outcome = handleSessionStartedEvent(r, ev, ts); break;

@@ -48,6 +48,7 @@ vi.mock("../src/shared/chat/schedule-picker.ts", () => ({ formatFireAt: vi.fn((x
 vi.mock("../src/views/sessions/session-thinking-bar.ts", () => ({
   isCurrentSessionBusy: vi.fn(() => false),
   updateThinkingBar: vi.fn(),
+  syncThinkingBar: vi.fn(),
 }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   projectName: vi.fn(() => ""),
