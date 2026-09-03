@@ -198,14 +198,20 @@ pub(super) async fn on_stop(
         let verdict = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status, opened_by_wake, mcp_attached);
         let mcp_tool_used_this_turn =
             ctx.state.registry.peek_mcp_tool_used_gen(&session_id).map(|g| g == gen).unwrap_or(false);
+        let update = streak_update(payload.stop_hook_active, &verdict, mcp_tool_used_this_turn);
         if let Some(session) = ctx.state.sessions.get(&session_id) {
-            match streak_update(payload.stop_hook_active, &verdict, mcp_tool_used_this_turn) {
+            match update {
                 StreakUpdate::Reset => session.mcp_miss_streak.store(0, Ordering::Relaxed),
                 StreakUpdate::Increment => {
                     session.mcp_miss_streak.fetch_add(1, Ordering::Relaxed);
                 }
                 StreakUpdate::Unchanged => {}
             }
+        }
+        // todo 824 remaining 2 (optional): one-time note when a streak that had
+        // already crossed the threshold resets - the transport just came back.
+        if !mcp_attached && matches!(update, StreakUpdate::Reset) {
+            log::info!("hook /hooks/stop: MCP transport for {session_id} reconnected after a {miss_streak}-turn miss streak");
         }
         match verdict {
             TurnEndVerdict::Ok => {}
@@ -283,6 +289,20 @@ pub(super) async fn on_stop(
         state.notifier.publish("skill_usage_changed", json!({}));
     });
 
+    (StatusCode::OK, Json(json!({"ok": true})))
+}
+
+/// `/mcp/announce`: `run_stdio` posts here once at startup (todo 824
+/// remaining 2). Reuses `mark_mcp_tool_used` so a live process resets the
+/// miss streak without waiting for a real tool call this turn.
+pub(super) async fn on_mcp_announce(
+    AxState(ctx): AxState<Arc<HookCtx>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let session_id = body["session_id"].as_str().unwrap_or_default();
+    if !session_id.is_empty() {
+        super::mark_mcp_tool_used(&ctx, session_id);
+    }
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
@@ -488,5 +508,33 @@ mod tests {
         }
         assert_eq!(streak, 1);
         assert!(mcp_is_attached(true, streak));
+    }
+
+    // todo 824 remaining 2: `/mcp/announce` route-level coverage.
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::state::DaemonState;
+    use crate::types::Settings;
+
+    fn announce_ctx() -> Arc<HookCtx> {
+        Arc::new(HookCtx { state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())) })
+    }
+
+    #[tokio::test]
+    async fn announce_marks_mcp_tool_used_for_the_current_gen() {
+        let c = announce_ctx();
+        let body = json!({"session_id": "s"});
+        let resp = on_mcp_announce(AxState(c.clone()), Json(body)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let gen = c.state.registry.current_turn_gen("s");
+        assert_eq!(c.state.registry.peek_mcp_tool_used_gen("s"), Some(gen));
+    }
+
+    #[tokio::test]
+    async fn announce_with_no_session_id_does_not_mark_anything() {
+        let c = announce_ctx();
+        let resp = on_mcp_announce(AxState(c.clone()), Json(json!({}))).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(c.state.registry.peek_mcp_tool_used_gen("").is_none());
     }
 }

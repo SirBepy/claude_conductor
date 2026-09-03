@@ -75,6 +75,7 @@ async fn health_endpoint(AxState(_ctx): AxState<Arc<HookCtx>>) -> impl IntoRespo
 /// Called at the top of every handler reachable ONLY via a relayed
 /// `cc_conductor` MCP tool call (`mcp::dispatch`'s arms) - not `/hooks/preview`,
 /// which a terminal `claude` can also curl directly (todo 824 remaining 1).
+/// `/mcp/announce` also calls this - same trust boundary, not a relayed tool.
 pub(super) fn mark_mcp_tool_used(ctx: &HookCtx, session_id: &str) {
     let gen = ctx.state.registry.current_turn_gen(session_id);
     ctx.state.registry.mark_mcp_tool_used(session_id, gen);
@@ -157,6 +158,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/session-end", post(lifecycle::on_session_end))
         .route("/sessions/close-confirm", post(lifecycle::on_close_confirm))
         .route("/hooks/stop", post(stop::on_stop))
+        .route("/mcp/announce", post(stop::on_mcp_announce))
         .route("/hooks/preview", post(preview::on_preview_push))
         .route("/hooks/preview-render", post(preview_render::on_preview_render))
         .route("/hooks/preview-render/:id", get(preview_render::on_preview_render_get))

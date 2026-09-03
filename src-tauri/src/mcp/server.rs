@@ -65,6 +65,31 @@ pub(super) fn tool_error_result(id: &Value, text: &str) -> Value {
     })
 }
 
+/// Tells the daemon this session's MCP transport is live right now (todo 824
+/// remaining 2), instead of waiting for a monitored tool call this turn. Runs
+/// detached with a short timeout so a down daemon never delays stdin.
+fn announce_attached(port: u16, session_id: String) {
+    if port == 0 || session_id.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+            return;
+        };
+        rt.block_on(async {
+            let Ok(client) = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(2))
+                .timeout(std::time::Duration::from_secs(4))
+                .build()
+            else {
+                return;
+            };
+            let url = format!("http://127.0.0.1:{port}/mcp/announce");
+            let _ = client.post(url).json(&json!({"session_id": session_id})).send().await;
+        });
+    });
+}
+
 pub fn run_stdio() {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -92,6 +117,8 @@ pub fn run_stdio() {
     // is fixed for its whole lifetime (one child per turn - see
     // `write_mcp_config`), so there's no need to re-read it per request.
     let is_jarvis = std::env::var("CC_JARVIS").is_ok();
+
+    announce_attached(port, session_id.clone());
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
