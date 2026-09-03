@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
 import { mountView } from "./harness";
+
+const SCREENSHOT_DIR = ".for_bepy/screenshots/32088-134328660195440996";
 
 // Todo 666, the Drafts panel. Drives the REAL panel and editor, not internal
 // state. The harness's invoke map is fixed at mount, so this swaps in a
@@ -64,11 +67,11 @@ const SEED = [
   },
 ];
 
-async function mountPanel(page: Page) {
+async function mountPanel(page: Page, hostCss?: string) {
   await mountView(page, { invoke: { list_slash_commands: [] } });
 
   await page.evaluate(
-    async ({ seed, viewer }) => {
+    async ({ seed, viewer, hostCss }) => {
       const w = window as unknown as Record<string, any>;
       const store = { drafts: JSON.parse(JSON.stringify(seed)) };
       w.__draftStore = store;
@@ -146,6 +149,7 @@ async function mountPanel(page: Page) {
       // Below the harness page's own TEST BUILD banner, which paints above this
       // host and would otherwise sit across the panel header in a capture.
       host.style.cssText =
+        hostCss ??
         "position:fixed;top:40px;left:0;width:400px;height:520px;z-index:1;display:flex;background:var(--color-background)";
       document.body.appendChild(host);
 
@@ -153,7 +157,7 @@ async function mountPanel(page: Page) {
       w.__draftsHandle = mod.mountDraftsPanel(host);
       w.__draftsHandle.setSessionScope(viewer);
     },
-    { seed: SEED, viewer: VIEWER },
+    { seed: SEED, viewer: VIEWER, hostCss },
   );
 
   const panel = page.locator("#drafts-spec-host.drafts-panel");
@@ -270,4 +274,42 @@ test("an empty project explains what the panel is for instead of showing a blank
   const panel = page.locator("#drafts-spec-host.drafts-panel");
   await expect(panel.locator(".dr-empty")).toBeVisible();
   await expect(panel.locator(".dr-card")).toHaveCount(0);
+});
+
+// Todo 803: the FAB card is 400x390 (40px spine + 360x390 body), 130px
+// shorter than every prior render of this panel. Measures the actual card
+// geometry, not the 400x520 the rest of this file uses.
+test("the footer stays inside the card and the toolbar stays reachable at the real 360x390 body size", async ({ page }) => {
+  const hostCss =
+    "position:fixed;top:40px;left:0;width:360px;height:390px;z-index:1;display:flex;background:var(--color-background)";
+  const panel = await mountPanel(page, hostCss);
+  await panel.locator(".dr-card").first().click();
+
+  await page.evaluate(() => {
+    const body = document.querySelector<HTMLElement>(".dr-body")!;
+    body.innerHTML =
+      "<p>Line one of a longer draft.</p><p>Line two follows right after.</p>" +
+      "<p>Line three keeps going.</p><p>Line four is still here.</p>" +
+      "<p>Line five nears the end.</p><p>Line six closes it out.</p>";
+    body.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  const host = page.locator("#drafts-spec-host");
+  const hostBox = (await host.boundingBox())!;
+  const footBox = (await panel.locator(".dr-foot").boundingBox())!;
+  const barBox = (await panel.locator(".dr-bar").boundingBox())!;
+  const bodyBox = (await panel.locator(".dr-body").boundingBox())!;
+
+  const hostBottom = hostBox.y + hostBox.height;
+  // getBoundingClientRect, not offsetHeight: offsetHeight rounds and misreports
+  // clipping at fractional DPI scale.
+  expect(footBox.y + footBox.height).toBeLessThanOrEqual(hostBottom + 0.5);
+  expect(barBox.y).toBeGreaterThanOrEqual(hostBox.y - 0.5);
+  expect(barBox.y + barBox.height).toBeLessThanOrEqual(hostBottom + 0.5);
+  // The body still gets real room between the pinned toolbar and footer -
+  // min-height alone would not prove the flex chrome actually yielded space.
+  expect(bodyBox.height).toBeGreaterThan(60);
+
+  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/drafts-panel-360x390.png`, clip: hostBox });
 });
