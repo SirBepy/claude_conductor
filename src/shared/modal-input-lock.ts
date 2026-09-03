@@ -42,9 +42,10 @@ function ensureGlobalGuard(): void {
     }
   };
   // Keydown half, capture phase so it runs ahead of the default action and
-  // other document dispatchers (global shortcuts). Escape and `allowKey`
-  // matches skip stopPropagation so the modal's own handler still sees them,
-  // but still get preventDefault so they can't also type into the background.
+  // other document dispatchers (global shortcuts). Escape, Enter and
+  // `allowKey` matches skip stopPropagation so the modal's own handler still
+  // sees them, but still get preventDefault so they can't also type into the
+  // background.
   const onKeyDown = (e: KeyboardEvent) => {
     if (lockedHosts.length === 0) return;
     const inside = isInsideLockedHost(e.target);
@@ -65,7 +66,10 @@ function ensureGlobalGuard(): void {
     }
 
     if (inside) return;
-    if (e.key === "Escape") return;
+    // A card that focuses nothing on open (the new-session dialog) leaves
+    // focus on <body>, so its confirm/cancel keys arrive from outside the
+    // host: swallowing them here killed Enter while Escape kept working.
+    if (e.key === "Escape" || e.key === "Enter") return;
     const allowed = lockedHosts.some((h) => keyAllowlists.get(h)?.(e));
     if (allowed) {
       e.preventDefault();

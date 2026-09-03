@@ -60,6 +60,28 @@ describe("lockInputToHost", () => {
     unlock();
   });
 
+  it("lets Enter pass through so a card that focuses nothing can still confirm", () => {
+    // The new-session dialog autofocuses nothing, so its Enter arrives with
+    // <body> as the target - swallowing it here left "Start session"
+    // keyboard-unreachable while Escape kept working.
+    const host = document.createElement("div");
+    const outsideBtn = document.createElement("button");
+    document.body.append(host, outsideBtn);
+    const unlock = lockInputToHost(host);
+
+    let sawEnter = false;
+    const onKeydown = (e) => { if (e.key === "Enter") sawEnter = true; };
+    document.addEventListener("keydown", onKeydown);
+
+    const evt = keydown("Enter");
+    outsideBtn.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+    expect(sawEnter).toBe(true);
+
+    document.removeEventListener("keydown", onKeydown);
+    unlock();
+  });
+
   it("allowKey still blocks the leak but lets the modal's own handler see the key", () => {
     const host = document.createElement("div");
     const outsideBtn = document.createElement("button");
