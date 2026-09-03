@@ -372,11 +372,27 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                     .and_then(|s| s.as_str())
                     .map(|s| !s.is_empty())
                     .unwrap_or(false);
-                evs.push(ChatEvent::AssistantMessage {
-                    content,
-                    streaming: !has_stop_reason,
-                    timestamp: ts,
-                });
+                // todo 858: one bubble per text block, so a reload shows the same
+                // split the live path renders (it finalizes each block separately
+                // since a7aef1f1). Images ride with the text block they follow
+                // rather than becoming bubbles of their own.
+                let mut groups: Vec<Vec<ContentBlock>> = Vec::new();
+                for block in content {
+                    if groups.is_empty() || matches!(block, ContentBlock::Text { .. }) {
+                        groups.push(vec![block]);
+                    } else {
+                        groups.last_mut().expect("just checked non-empty").push(block);
+                    }
+                }
+                let last = groups.len() - 1;
+                for (i, group) in groups.into_iter().enumerate() {
+                    evs.push(ChatEvent::AssistantMessage {
+                        content: group,
+                        // Only the final block of an unfinished line is still growing.
+                        streaming: !has_stop_reason && i == last,
+                        timestamp: ts,
+                    });
+                }
             }
 
             // Emit a ToolUse for each tool_use block so the chat shows tool rows
@@ -545,6 +561,57 @@ mod tests {
             }
             _ => panic!("expected SessionStarted"),
         }
+    }
+
+    // todo 858: a speak / tool-call / speak turn is ONE assistant line carrying
+    // two text blocks. Replay used to concatenate them into a single bubble
+    // while the live path (a7aef1f1) rendered two, so a reload silently
+    // reflowed the transcript.
+    #[test]
+    fn two_text_blocks_on_one_assistant_line_replay_as_two_messages() {
+        let mut ctx = ParserContext::new();
+        let line = r#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Checking the config now."},{"type":"tool_use","id":"tu_1","name":"Grep","input":{}},{"type":"text","text":"Found it."}]}}"#;
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        let msgs: Vec<&Vec<ContentBlock>> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::AssistantMessage { content, streaming, .. } => {
+                    assert!(!streaming, "a stop_reason line is finalized");
+                    Some(content)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(msgs.len(), 2, "one bubble per text block, got {msgs:?}");
+        assert_eq!(msgs[0], &vec![ContentBlock::Text { text: "Checking the config now.".to_string() }]);
+        assert_eq!(msgs[1], &vec![ContentBlock::Text { text: "Found it.".to_string() }]);
+    }
+
+    #[test]
+    fn a_lone_text_block_still_replays_as_exactly_one_message() {
+        let mut ctx = ParserContext::new();
+        let line = r#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Just the one."}]}}"#;
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        let n = events.iter().filter(|e| matches!(e, ChatEvent::AssistantMessage { .. })).count();
+        assert_eq!(n, 1, "the common case must not gain a bubble");
+    }
+
+    // An image belongs with the text it follows, so it must not be split off
+    // into a bubble of its own by the todo 858 grouping.
+    #[test]
+    fn an_image_rides_with_the_text_block_before_it() {
+        let mut ctx = ParserContext::new();
+        let line = r#"{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Here:"},{"type":"image","source":{"media_type":"image/png","data":"iVBOR"}}]}}"#;
+        let events = ctx.feed(format!("{}\n", line).as_bytes());
+        let msgs: Vec<&Vec<ContentBlock>> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::AssistantMessage { content, .. } => Some(content),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(msgs.len(), 1, "text + image is one bubble, got {msgs:?}");
+        assert_eq!(msgs[0].len(), 2, "and it keeps both blocks");
     }
 
     #[test]
