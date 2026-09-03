@@ -286,6 +286,30 @@ impl Registry {
         });
         before - guard.len()
     }
+
+    /// Keep the `keep` most recently ended instances, drop the rest. Live
+    /// instances are never counted or removed. Bounds the registry by volume
+    /// rather than by age, so a chat is only ever evicted once `keep` newer
+    /// ones exist - a clock never retires one the dev might still want.
+    pub fn prune_ended_keeping_newest(&self, keep: usize) -> usize {
+        let mut guard = self.inner.lock().unwrap();
+        let mut ended: Vec<(String, String)> = guard
+            .iter()
+            .filter_map(|(id, i)| i.ended_at.clone().map(|t| (t, id.clone())))
+            .collect();
+        if ended.len() <= keep {
+            return 0;
+        }
+        // Same lexicographic assumption prune_ended_before already relies on:
+        // RFC3339 with a `Z` suffix sorts chronologically as a plain string.
+        ended.sort_unstable();
+        let drop_count = ended.len() - keep;
+        let doomed: std::collections::HashSet<String> =
+            ended.into_iter().take(drop_count).map(|(_, id)| id).collect();
+        let before = guard.len();
+        guard.retain(|id, _| !doomed.contains(id));
+        before - guard.len()
+    }
 }
 
 #[cfg(test)]
@@ -440,6 +464,76 @@ mod tests {
         assert!(!registry.set_kind("ext-1", InstanceKind::Automated, true));
         // Kind must not have been downgraded.
         assert_eq!(registry.get("ext-1").unwrap().kind, InstanceKind::Automated);
+    }
+
+    fn register_ended(registry: &Registry, settings: &Mutex<Settings>, id: &str, ended_at: &str) {
+        registry.register(
+            RegisterInput {
+                session_id: id.into(),
+                cwd: PathBuf::from("/tmp/prune"),
+                pid: 1,
+                kind: InstanceKind::External,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-05-08T00:00:00Z".into(),
+            },
+            settings,
+            "2026-05-08T00:00:00Z",
+        );
+        registry.mark_ended(id, EndReason::Manual, ended_at);
+    }
+
+    #[test]
+    fn prune_ended_keeping_newest_drops_only_the_oldest_over_the_cap() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        register_ended(&registry, &settings, "oldest", "2026-05-08T01:00:00Z");
+        register_ended(&registry, &settings, "middle", "2026-05-08T02:00:00Z");
+        register_ended(&registry, &settings, "newest", "2026-05-08T03:00:00Z");
+
+        assert_eq!(registry.prune_ended_keeping_newest(2), 1);
+        assert!(registry.get("oldest").is_none(), "the oldest ended chat is the one evicted");
+        assert!(registry.get("middle").is_some());
+        assert!(registry.get("newest").is_some());
+    }
+
+    #[test]
+    fn prune_ended_keeping_newest_is_a_noop_under_the_cap() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        register_ended(&registry, &settings, "a", "2026-05-08T01:00:00Z");
+        register_ended(&registry, &settings, "b", "2026-05-08T02:00:00Z");
+
+        // However old they are, volume is what evicts - never elapsed time.
+        assert_eq!(registry.prune_ended_keeping_newest(200), 0);
+        assert!(registry.get("a").is_some());
+        assert!(registry.get("b").is_some());
+    }
+
+    #[test]
+    fn prune_ended_keeping_newest_never_counts_or_removes_a_live_session() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        register_ended(&registry, &settings, "ended-1", "2026-05-08T01:00:00Z");
+        register_ended(&registry, &settings, "ended-2", "2026-05-08T02:00:00Z");
+        registry.register(
+            RegisterInput {
+                session_id: "live".into(),
+                cwd: PathBuf::from("/tmp/prune"),
+                pid: 2,
+                kind: InstanceKind::External,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-05-08T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-05-08T00:00:00Z",
+        );
+
+        assert_eq!(registry.prune_ended_keeping_newest(1), 1);
+        assert!(registry.get("ended-1").is_none());
+        assert!(registry.get("ended-2").is_some());
+        assert!(registry.get("live").is_some(), "a live session is never evicted");
     }
 
     #[test]

@@ -10,9 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-/// How long an ended instance stays in the registry before `prune_ended_before`
-/// is allowed to drop it.
-const RETENTION: chrono::Duration = chrono::Duration::hours(48);
+/// How many ended instances the registry keeps. Bounded by volume, not age:
+/// a finished chat stays in the sidebar's DONE list until this many newer ones
+/// exist, so a chat is never retired just because time passed (todo 866).
+const ENDED_KEPT: usize = 200;
 /// Pruning is a full-registry retain pass, so it doesn't need to run on every
 /// 5s tick - once every 10 minutes is plenty to keep the in-memory registry
 /// from growing unbounded across long daemon uptimes.
@@ -48,10 +49,9 @@ pub fn spawn(state: Arc<DaemonState>) {
             let mut pruned = false;
             if last_prune.elapsed() >= PRUNE_INTERVAL {
                 last_prune = Instant::now();
-                let cutoff = (chrono::Utc::now() - RETENTION).to_rfc3339();
-                let removed = registry.prune_ended_before(&cutoff);
+                let removed = registry.prune_ended_keeping_newest(ENDED_KEPT);
                 if removed > 0 {
-                    log::info!("detector: pruned {removed} ended instance(s) older than 48h");
+                    log::info!("detector: pruned {removed} ended instance(s) past the newest {ENDED_KEPT}");
                     pruned = true;
                 }
             }
