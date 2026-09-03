@@ -325,10 +325,23 @@ mod tests {
             .iter()
             .position(|a| a == "--allowedTools")
             .expect("--allowedTools must be present");
-        assert_eq!(
-            args.get(p + 1).map(String::as_str),
-            Some("mcp__cc_conductor__ask_user_question"),
-        );
+        let tools: Vec<&str> = args.get(p + 1).map(String::as_str).unwrap_or("").split(' ').collect();
+        // Asserted by membership, not equality: adding a third pre-trusted tool
+        // must not silently drop the ask tool's own guarantee.
+        assert!(tools.contains(&"mcp__cc_conductor__ask_user_question"), "got {tools:?}");
+    }
+
+    #[test]
+    fn base_args_pretrust_show_preview() {
+        // todo 815: show_preview only renders HTML into a sandboxed frame, so
+        // the per-session permission card it used to raise bought nothing.
+        let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
+        let p = args
+            .iter()
+            .position(|a| a == "--allowedTools")
+            .expect("--allowedTools must be present");
+        let tools: Vec<&str> = args.get(p + 1).map(String::as_str).unwrap_or("").split(' ').collect();
+        assert!(tools.contains(&"mcp__cc_conductor__show_preview"), "got {tools:?}");
     }
 
     #[test]
