@@ -9,6 +9,7 @@ import { openModelEffortModal, type SessionConfig } from "./model-effort-modal";
 import { savePendingSession, loadPendingSession, clearPendingSession } from "./pending-draft-storage";
 import { renderPendingPane } from "./pending-pane";
 import { paneEmptyStateHtml, ownedScheduledNewChatIds } from "./sessions-helpers";
+import { PENDING_SESSION_ID_PREFIX } from "../../shared/chat/pending-session-id";
 import type { ScheduledItem } from "../../types/ipc.generated";
 
 /**
@@ -23,7 +24,7 @@ export function makePlaceholderId(): string {
   const rnd = Math.floor(Math.random() * 0xffffffff)
     .toString(16)
     .padStart(8, "0");
-  return `pending-${ts}-${rnd}`;
+  return `${PENDING_SESSION_ID_PREFIX}${ts}-${rnd}`;
 }
 
 

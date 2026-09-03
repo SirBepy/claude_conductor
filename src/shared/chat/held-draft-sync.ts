@@ -8,15 +8,9 @@ import { debounce, type Debounced } from "../debounce";
 import {
   addHeldMessage, updateHeldMessage, removeHeldMessage, clearHeldMessages, getSessionDrafts,
 } from "./session-draft-sync";
+import { isPendingSessionId } from "./pending-session-id";
 
 const EDIT_PUSH_DEBOUNCE_MS = 500;
-
-/** Placeholder ids (prefix "pending-", see pending-flow.ts's makePlaceholderId)
- *  have no daemon-side session yet - the daemon rejects get_session_drafts on
- *  one with -32602 unknown session_id. Same check as composer-draft-sync.ts. */
-function isPendingSessionId(sessionId: string): boolean {
-  return sessionId.startsWith("pending-");
-}
 
 export class HeldDraftSync {
   // Per-item debounced `update_held_message` push, keyed by the item's

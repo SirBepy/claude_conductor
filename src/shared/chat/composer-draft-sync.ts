@@ -6,6 +6,7 @@
 import { debounce, type Debounced } from "../debounce";
 import { getSessionDrafts, setComposerDraft, clearComposerDraft } from "./session-draft-sync";
 import { loadSyncBaseline, saveSyncBaseline } from "./composer-persistence";
+import { isPendingSessionId } from "./pending-session-id";
 
 const PUSH_DEBOUNCE_MS = 500;
 
@@ -26,13 +27,6 @@ function getKnownUpdatedAt(sessionId: string): string | undefined {
 function setKnownUpdatedAt(sessionId: string, updatedAt: string): void {
   lastKnownUpdatedAt.set(sessionId, updatedAt);
   saveSyncBaseline(sessionId, updatedAt);
-}
-
-/** Placeholder ids (prefix "pending-", see pending-flow.ts's makePlaceholderId)
- *  have no daemon-side session yet - the daemon rejects any draft RPC on one
- *  with -32602 unknown session_id. Same string check as state.ts/session-statusbar.ts. */
-function isPendingSessionId(sessionId: string): boolean {
-  return sessionId.startsWith("pending-");
 }
 
 export class ComposerDraftSync {

@@ -3,6 +3,7 @@ import type { ChatRenderer } from "../../shared/chat/chat-renderer";
 import type { Composer } from "../../shared/chat/composer";
 import type { HeldMessages } from "../../shared/chat/held-messages";
 import type { ScheduledChip } from "../../shared/chat/scheduled-chip";
+import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import { setSelectedSessionId } from "./permission-modal";
 import type { SessionStatusbar } from "./session-statusbar";
 import type { SessionConfig } from "./model-effort-modal";
@@ -182,7 +183,7 @@ export function setActiveSession(id: string | null): void {
   setSelectedSessionId(id);
   state.previewController?.setSessionScope(id);
   state.fabDial?.setSessionScope(id, cwdForSession(id));
-  if (id && !id.startsWith("pending-")) {
+  if (id && !isPendingSessionId(id)) {
     try {
       localStorage.setItem(LS_LAST_SELECTED, id);
     } catch {

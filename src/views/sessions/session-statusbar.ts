@@ -6,6 +6,7 @@ import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { type ChipType, type StaticChipType, isToolChip, STATIC_CHIPS } from "./statusline-catalog";
 import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
 import { sessionEvents } from "../../shared/chat/event-store";
+import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import {
   formatDuration,
   gitInfoCache,
@@ -319,7 +320,7 @@ export class SessionStatusbar {
     // Fallback for fast turns that complete before the JS event-store listener
     // is set up (the live turn_usage event is dropped). Re-check after 3 s; by
     // then any fast turn is done and the JSONL is definitely flushed.
-    if (this.wantsContext() && id && !id.startsWith("pending-")) {
+    if (this.wantsContext() && id && !isPendingSessionId(id)) {
       setTimeout(() => {
         if (this.sessionId === id && !this.ctxStatus) void this.refreshContextStatus();
       }, 3000);
