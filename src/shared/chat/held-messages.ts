@@ -339,9 +339,12 @@ export class HeldMessages {
       await send(bundle);
     } catch (err) {
       // The set was cleared before the send, so a refusal here would otherwise
-      // eat the messages outright. A mid-turn refusal (todo 873) is exactly the
-      // case they should go back on the queue for - the next idle sweep retries.
-      if (isSessionBusyError(err)) this.stageFor(sid, bundle);
+      // eat the messages outright. A mid-turn refusal (todo 873) is a handled
+      // outcome, not a failure - the next idle sweep sends the re-staged set.
+      if (isSessionBusyError(err)) {
+        this.stageFor(sid, bundle);
+        return;
+      }
       console.error("[held] background flush send failed", err);
     }
   }

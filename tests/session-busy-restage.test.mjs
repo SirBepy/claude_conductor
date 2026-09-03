@@ -80,12 +80,27 @@ describe("sendWithFailureRecovery", () => {
 });
 
 describe("flushBackground", () => {
-  it("puts the bundle back when the refused session is still mid-turn", async () => {
+  it("puts the bundle back when the refused session is still mid-turn, without logging a failure", async () => {
     const held = new HeldMessages();
     held.stageFor(SESSION, BLOCKS);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await held.flushBackground(SESSION, () => Promise.reject(HTTP_BUSY));
 
     expect(held.hasItemsFor(SESSION)).toBe(true);
+    // A handled re-stage, so it must not read as a failed background flush.
+    expect(errorLog).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+  });
+
+  it("still logs a genuine background flush failure", async () => {
+    const held = new HeldMessages();
+    held.stageFor(SESSION, BLOCKS);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await held.flushBackground(SESSION, () => Promise.reject(new Error("boom")));
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    errorLog.mockRestore();
   });
 });
