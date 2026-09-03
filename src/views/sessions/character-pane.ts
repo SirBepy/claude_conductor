@@ -8,24 +8,14 @@ import { escapeHtml } from "../../shared/escape-html";
 import { api } from "../../shared/api";
 import type { Character } from "../../shared/api";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
+import { playCharacterSelectSound, cancelCharacterSelectSound } from "../../shared/character-select-sound";
 import { state } from "./state";
 import { characterForSession } from "./session-characters";
 import { whitelistCharsData } from "./new-session-cache";
 
-// ── Sound debounce ────────────────────────────────────────────────────────────
-// Module-level so multiple rapid picks don't stack timers.
-let _selectTimer: ReturnType<typeof setTimeout> | null = null;
-function playSelect(id: string): void {
-  if (_selectTimer !== null) clearTimeout(_selectTimer);
-  _selectTimer = setTimeout(() => {
-    _selectTimer = null;
-    api.playCharacterSlot(id, "select").catch(() => {});
-  }, 250);
-}
-
 /** Cancel any pending debounced "select" sound - call when the owning modal closes. */
 export function cancelCharacterPaneSound(): void {
-  if (_selectTimer !== null) { clearTimeout(_selectTimer); _selectTimer = null; }
+  cancelCharacterSelectSound();
 }
 
 export interface CharacterPane {
@@ -77,7 +67,7 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
 
     const pick = candidates[Math.floor(Math.random() * candidates.length)]!;
     character = pick;
-    playSelect(pick.id);
+    playCharacterSelectSound(pick.id);
   }
 
   /** Render just the right-side character pane HTML; replaces .me-char-pane in place. */
@@ -169,9 +159,9 @@ export function createCharacterPane(overlay: HTMLElement, projectId: string | nu
           // best-effort; fall back to a stub
         }
       }
+      // No sound here: the picker already played it when the pick was staged.
       // Stub fallback: only id is known; label/game unavailable but pane still works
       character = found ?? { id: picked, label: picked, version: 0, icon: "", slots: {} };
-      playSelect(picked);
       renderCharPane();
     });
   }

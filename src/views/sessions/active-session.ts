@@ -89,10 +89,9 @@ export function updateHeaderAvatarStatus(pane: HTMLElement, sess: Instance): voi
 
 /**
  * Open the Change Character modal for a session and apply the pick: persist the
- * session->character mapping, reload the session-character cache, play the new
- * character's `select` sound (best-effort), and refresh the header face + the
- * sidebar row. Shared by the header face click and the ⋮ "Change character"
- * menu (the latter imports this dynamically to avoid an import cycle).
+ * session->character mapping, reload the session-character cache, and refresh
+ * the header face + the sidebar row. Shared by the header face click and the ⋮
+ * "Change character" menu (imported dynamically there to avoid a cycle).
  */
 export async function changeCharacterForSession(sessionId: string): Promise<void> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
@@ -103,7 +102,6 @@ export async function changeCharacterForSession(sessionId: string): Promise<void
   try {
     await api.setSessionCharacter(sessionId, picked);
     await loadSessionCharacters();
-    void api.playCharacterSlot(picked, "select").catch(() => { /* sound is best-effort */ });
   } catch (e) {
     console.error("[active-session] change character failed", e);
     return;
