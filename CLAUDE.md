@@ -29,6 +29,7 @@ Deploy: GitHub Releases; CI builds Windows (NSIS) and Apple Silicon macOS (DMG, 
 - **Dev daemon serving a phone without bouncing the live app:** build dist, `cargo build --manifest-path src-tauri/Cargo.toml`, then run the daemon binary with `CC_DAEMON_INSTANCE` set (any label) so it binds an ephemeral remote port instead of fighting the production daemon for 27183 - read the actual port from the `remote-access server listening on 127.0.0.1:<port>` log line, or set `CC_REMOTE_PORT` to pin a known one. Point the emulator at `10.0.2.2:<port>`.
 - Live-verify against the real app without touching the dev's installed instance: `scripts/live-verify.ps1 up` / `eval <index> <expr>` / `shot <index> <path>` / `down` - isolated debug build, private WebView2 profile, loopback-only CDP on a random ephemeral port, teardown by PID only.
 - One-off component screenshot via `pnpm run test:view`'s browser harness, no throwaway spec: `scripts/harness-shot.ps1 -Driver <ts-file> -Out <png-path>`.
+- Show Joe an existing PNG in the in-app preview panel: `scripts/show-shot.ps1 -Path <png-path> [-Title <text>] [-Slug <name>]`.
 
 ## Rules
 
