@@ -41,13 +41,25 @@
 /* Generic loading-shell card for a chain step whose data isn't cached yet
  * (project-picker cold-load, new-session data). Morphs into the populated
  * card the same way any other step transition does. */
-.modal-card-loading {
+#modal-host .modal-card.modal-card-loading {
+  /* Same fixed-centre box as .project-picker-modal / .model-effort-modal-card.
+   * #modal-host-card-slot is display:contents, so a static card lands in flow
+   * at ~5px tall behind the z-index 2500 backdrop instead of on top of it. */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2501;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-width: 280px;
   padding: 48px 24px;
+  background: var(--color-surface, #1c1c24);
+  border: 1px solid var(--color-border, #2a2a36);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
   color: var(--color-text-muted, #8a8a96);
   font-size: 0.85rem;
 }
