@@ -5,9 +5,10 @@
 import type { RenderedMessage } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { CUSTOM_VIEW_TOOLS, renderCustomToolView } from "./tool-views";
-import { collectScreenshotShots, mountScreenshotBlock } from "./screenshot-row";
 import { foldAuthoredIntoStrip } from "./author-message-group";
 import { setChipCount } from "./tool-strip-merge";
+import { mountScreenshotsForRange } from "./tool-strip-screenshots";
+import { descOf, buildAgentGroupById, routeIntoSubagent } from "./tool-strip-subagents";
 
 /** Per-tool-type state for one turn's strip. */
 export interface ToolGroup {
@@ -80,8 +81,9 @@ function makeStripPair(anchorEl: HTMLElement, host?: HTMLElement | null): { stri
   return { strip, panel };
 }
 
-/** Append a new ToolGroup (chip + bucket) to an existing strip/panel pair. */
-function addGroupToStrip(
+/** Append a new ToolGroup (chip + bucket) to an existing strip/panel pair.
+ *  Exported so the screenshot and subagent-nesting modules mint groups too. */
+export function addGroupToStrip(
   key: string,
   strip: HTMLElement,
   panel: HTMLElement,
@@ -99,8 +101,9 @@ function addGroupToStrip(
   return { chip, bucket, strip, panel };
 }
 
-/** Increment a chip's displayed count and flash highlight. */
-function bumpChip(chip: HTMLElement): void {
+/** Increment a chip's displayed count and flash highlight. Exported so the
+ *  subagent-nesting module bumps parent/subagent/tool-type chips too. */
+export function bumpChip(chip: HTMLElement): void {
   setChipCount(chip, Number(chip.dataset.count ?? "0") + 1);
   chip.classList.remove("tool-chip--highlight");
   void (chip as HTMLElement & { offsetWidth: number }).offsetWidth;
@@ -116,15 +119,6 @@ function bumpChip(chip: HTMLElement): void {
  */
 function isFoldableToolEl(el: HTMLElement): boolean {
   return el.classList.contains("tool-row") || el.classList.contains("tool-use--file");
-}
-
-/** Human label for a subagent chip: its Task description (or subagent_type), capped. */
-function descOf(input: unknown): string {
-  const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  const d = typeof obj.description === "string" ? obj.description : "";
-  const t = typeof obj.subagent_type === "string" ? obj.subagent_type : "";
-  const label = (d || t || "Subagent").trim();
-  return label.length > 60 ? label.slice(0, 60) + "…" : label;
 }
 
 /** tool_use ids folded into a custom-view bucket. Kept on the element (not in a
@@ -153,47 +147,6 @@ function rebuildCustomBucket(
   end: number,
 ): void {
   bucket.innerHTML = renderCustomToolView(key, messages, start, end, bucketViewIds(bucket)) ?? "";
-}
-
-// ---------------------------------------------------------------------------
-// Nested-strip helpers (child tool calls under a parent Agent/Task chip)
-// ---------------------------------------------------------------------------
-
-/** Lazily creates/gets the nested strip pair inside an Agent chip's bucket.
- *  Uses the same .tool-strip/.tool-strip-panel shape as the main strip, so
- *  the existing delegated handleToolChipClick toggles it identically
- *  without any nested-specific click handling. */
-function getOrCreateNestedStripInBucket(
-  parentBucket: HTMLElement,
-  nestedGroups: Map<string, ToolGroup>,
-): { nestedStrip: HTMLElement; nestedPanel: HTMLElement } {
-  // If we already created the nested strip (recovery or prior flush), reuse it.
-  const existing = parentBucket.querySelector<HTMLElement>(":scope > .tool-strip");
-  if (existing) {
-    const panel = existing.nextElementSibling as HTMLElement | null;
-    if (panel?.classList.contains("tool-strip-panel")) {
-      // Repopulate nestedGroups from DOM if caller passed empty map.
-      if (nestedGroups.size === 0) {
-        for (const chip of existing.querySelectorAll<HTMLElement>(".tool-chip[data-tool]")) {
-          const k = chip.dataset.tool!;
-          if (nestedGroups.has(k)) continue;
-          const bkt = panel.querySelector<HTMLElement>(`.tool-strip-group[data-tool="${k}"]`);
-          if (bkt) nestedGroups.set(k, { chip, bucket: bkt, strip: existing, panel });
-        }
-      }
-      return { nestedStrip: existing, nestedPanel: panel };
-    }
-  }
-  // Create fresh nested strip/panel at the TOP of parentBucket so rows appended
-  // later naturally follow it.
-  const nestedStrip = document.createElement("div");
-  nestedStrip.className = "tool-strip";
-  const nestedPanel = document.createElement("div");
-  nestedPanel.className = "tool-strip-panel";
-  nestedPanel.hidden = true;
-  parentBucket.prepend(nestedPanel);
-  parentBucket.prepend(nestedStrip);
-  return { nestedStrip, nestedPanel };
 }
 
 // ---------------------------------------------------------------------------
@@ -232,19 +185,7 @@ export function groupToolRange(
     }
   }
 
-  // Map from agent tool_use id -> the single main-strip Task/Agent ToolGroup
-  // (the bucket that holds the per-subagent strip). Pre-populated from grouped
-  // Task/Agent rows folded on a prior flush.
-  const agentGroupById = new Map<string, ToolGroup>();
-  for (let i = start; i < end; i++) {
-    const m = messages[i];
-    const el = messageEls[i];
-    if (!m || !el || el.dataset.toolGrouped !== "1") continue;
-    if (m.kind === "tool_use" && m.id && (m.tool === "Task" || m.tool === "Agent")) {
-      const grp = groups.get(canonicalTool(m.tool));
-      if (grp) agentGroupById.set(m.id, grp);
-    }
-  }
+  const agentGroupById = buildAgentGroupById(messages, messageEls, start, end, groups);
 
   // Level-1 (per-subagent) chip groups, keyed by agent tool_use id. All
   // subagents share ONE level-1 strip inside the single Task/Agent bucket.
@@ -295,7 +236,7 @@ export function groupToolRange(
 
     // Screenshots (image tool_results) never stack as raw rows: they're
     // pulled out of the action log entirely and surfaced in the turn-level
-    // screenshot-block/gallery instead (collectScreenshotShots, below),
+    // screenshot-block/gallery instead (mountScreenshotsForRange, below),
     // regardless of whether the call was top-level or a subagent's child.
     // The tool_use action itself still folds normally, just below.
     if (m.kind === "tool_result" && m.output?.type === "image") {
@@ -319,89 +260,12 @@ export function groupToolRange(
     // Route: child (parentId set AND parent agent is in range) vs. main
     // ------------------------------------------------------------------
     if (parentId) {
-      // Look up the parent agent's main-strip ToolGroup.
-      let agentGrp = agentGroupById.get(parentId);
-
-      if (!agentGrp) {
-        // Parent may not be folded yet (edge: parent appears later in range).
-        // Try to resolve it from idTool; if it exists in range it will fold in
-        // a later iteration and we'll update agentGroupById then. For now fall
-        // back to main-strip treatment to avoid crashing.
-        const parentTool = idTool.get(parentId);
-        if (!parentTool) {
-          // Parent outside range or unknown - fall through to main-strip.
-          parentId = null;
-        } else {
-          // Parent is in range but not yet folded. Fold it into main strip now
-          // so we can nest under it. Find the parent element.
-          const parentMsgIdx = Array.from({ length: end - start }, (_, k) => start + k)
-            .find(k => messages[k]?.kind === "tool_use" && messages[k]!.id === parentId);
-          if (parentMsgIdx !== undefined) {
-            const parentEl = messageEls[parentMsgIdx];
-            if (parentEl && parentEl.dataset.toolGrouped !== "1" && parentEl.classList.contains("tool-row")) {
-              const parentKey = canonicalTool(parentTool);
-              let parentGrp = groups.get(parentKey);
-              if (!parentGrp) {
-                parentGrp = addGroupToStrip(parentKey, strip, panel!);
-                groups.set(parentKey, parentGrp);
-              }
-              parentGrp.bucket.appendChild(parentEl);
-              parentEl.dataset.toolGrouped = "1";
-              // parent is a tool_use, bump its chip
-              bumpChip(parentGrp.chip);
-              agentGroupById.set(parentId, parentGrp);
-              agentGrp = parentGrp;
-            } else {
-              // Parent already grouped or not a tool-row - use whatever group exists
-              const parentKey = canonicalTool(parentTool);
-              agentGrp = groups.get(parentKey) ?? null!;
-              if (agentGrp) agentGroupById.set(parentId, agentGrp);
-              else { parentId = null; } // give up, fold into main
-            }
-          } else {
-            parentId = null; // parent not found in range
-          }
-        }
-      }
-
-      if (parentId && agentGrp) {
-        // Level 1: per-subagent chip (labeled by description) inside the single
-        // Task/Agent bucket. All subagents of the turn share this one strip.
-        const { nestedStrip: subStrip, nestedPanel: subPanel } =
-          getOrCreateNestedStripInBucket(agentGrp.bucket, subagentGroups);
-        let subGrp = subagentGroups.get(parentId);
-        if (!subGrp) {
-          subGrp = addGroupToStrip(parentId, subStrip, subPanel, {
-            label: idDescription.get(parentId) ?? "Subagent",
-            icon: "ph-robot",
-            agent: true,
-          });
-          subagentGroups.set(parentId, subGrp);
-        }
-
-        // Level 2: per-tool-type chip inside this subagent's bucket.
-        let toolGroups = toolGroupsBySub.get(parentId);
-        if (!toolGroups) {
-          toolGroups = new Map();
-          toolGroupsBySub.set(parentId, toolGroups);
-        }
-        const { nestedStrip: tStrip, nestedPanel: tPanel } =
-          getOrCreateNestedStripInBucket(subGrp.bucket, toolGroups);
-        let tGrp = toolGroups.get(key);
-        if (!tGrp) {
-          tGrp = addGroupToStrip(key, tStrip, tPanel);
-          toolGroups.set(key, tGrp);
-        }
-
-        tGrp.bucket.appendChild(el);
-        el.dataset.toolGrouped = "1";
-
-        if (isUse) {
-          bumpChip(tGrp.chip);   // tool-type count (Read x4)
-          bumpChip(subGrp.chip); // subagent total-calls count
-        }
-        continue; // done with this child row
-      }
+      const handled = routeIntoSubagent(
+        el, key, isUse, parentId, messages, messageEls, start, end,
+        strip, panel!, groups, agentGroupById, idTool, idDescription,
+        subagentGroups, toolGroupsBySub,
+      );
+      if (handled) continue; // done with this child row
       // Fallthrough: couldn't resolve parent -> fold into main strip below
     }
 
@@ -449,35 +313,10 @@ export function groupToolRange(
     rebuildCustomBucket(bucket, key, messages, start, end);
   }
 
-  // ------------------------------------------------------------------
-  // Screenshot blocks: any canonical key with image tool_results this turn
-  // gets its always-visible thumbnail row (mounted/refreshed above the shared
-  // strip). Computed fresh over the WHOLE [start, end) range, like the
-  // custom-view buckets above, so it stays correct as more calls stream in.
-  // `strip` is guaranteed non-null here whenever a screenshot exists (its
-  // originating tool_use always folds - and thus creates the main strip -
-  // before its tool_result can arrive).
-  // ------------------------------------------------------------------
   if (stripHost) foldAuthoredIntoStrip(messages, messageEls, start, end, stripHost);
 
   if (stripHost && strip) {
-    const shotsByKey = collectScreenshotShots(messages, start, end);
-    for (const [shotKey, shots] of shotsByKey) {
-      if (shots.length === 0) continue;
-      let group = groups.get(shotKey);
-      if (!group) {
-        // Every call for this key was nested under a subagent, so no
-        // top-level chip exists yet. Its bucket stays empty (that tool's raw
-        // action log lives under the subagent's own chip) and its count is the
-        // screenshot count, since no top-level tool_use ever bumps it.
-        group = addGroupToStrip(shotKey, strip, panel!);
-        groups.set(shotKey, group);
-        group.chip.dataset.count = String(shots.length);
-        const countEl = group.chip.querySelector(".tool-chip-count");
-        if (countEl) countEl.textContent = `x${shots.length}`;
-      }
-      mountScreenshotBlock(stripHost, shotKey, shots);
-    }
+    mountScreenshotsForRange(stripHost, messages, start, end, strip, panel!, groups);
   }
 }
 
