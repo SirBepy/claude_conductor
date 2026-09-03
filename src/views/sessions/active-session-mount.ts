@@ -285,6 +285,9 @@ export async function mountRenderer(
       renderer.detach();
       return false;
     }
+    // Cold mount wires the bar before loadFromStore populates lastProgress/
+    // lastTodoActivity, so a busy chat's replayed tail needs a second sync.
+    syncThinkingBar(renderer);
   } catch {
     /* tolerate absence */
   } finally {

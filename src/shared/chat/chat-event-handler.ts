@@ -314,12 +314,14 @@ function handleAssistantMessageEvent(
     // Suppressed once a todo checklist owns this turn's visual progress
     // (the marker is still parsed out of the displayed text elsewhere -
     // only its bar/callback is skipped here to avoid a dual indicator).
-    if (!r.hydrating && r.turnTodosBaseline === null) {
+    if (r.turnTodosBaseline === null) {
       const prog = detectProgressToken(joined);
       if (prog) {
-        r.turnFooters.setProgress(r.activeTurnChipKey, prog.n, prog.m);
         r.lastProgress = prog;
-        r.onProgressUpdate?.(prog.n, prog.m);
+        if (!r.hydrating) {
+          r.turnFooters.setProgress(r.activeTurnChipKey, prog.n, prog.m);
+          r.onProgressUpdate?.(prog.n, prog.m);
+        }
       }
     }
   }
