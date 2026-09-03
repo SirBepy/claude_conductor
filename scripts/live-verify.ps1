@@ -22,7 +22,9 @@
 .EXAMPLE
   scripts\live-verify.ps1 up
   scripts\live-verify.ps1 eval 0 "document.title"
+  scripts\live-verify.ps1 eval 0 -File .for_bepy\probe.js
   scripts\live-verify.ps1 shot 0 .for_bepy\screenshots\795\window.png
+  scripts\live-verify.ps1 shot 0 out.png -File .for_bepy\prep.js
   scripts\live-verify.ps1 down
 #>
 [CmdletBinding()]
@@ -38,7 +40,8 @@ param(
     [string]$Arg2,
 
     [int]$Port = 0,
-    [string]$InstanceLabel = 'live-verify'
+    [string]$InstanceLabel = 'live-verify',
+    [string]$File
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,7 +49,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
 $stateDir = Join-Path $env:LOCALAPPDATA 'claude-conductor-live-verify'
 $statePath = Join-Path $stateDir 'state.json'
-$exePath = 'D:\cargo-target\debug\claude-conductor.exe'
+$cargoTargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot 'src-tauri\target' }
+$exePath = Join-Path $cargoTargetDir 'debug\claude-conductor.exe'
 $vitePort = 1420
 
 function Get-RigState {
@@ -120,15 +124,23 @@ function send(method, params) {
   });
 }
 
+const fs = await import('node:fs');
+
+// '--file <path>' reads the JS from disk instead of the command line, sidestepping
+// PowerShell's own quote tokenization on expressions containing embedded quotes.
 try {
   if (cmd === 'eval') {
-    const expr = rest.join(' ');
+    const expr = rest[0] === '--file' ? fs.readFileSync(rest[1], 'utf8') : rest[0];
     const result = await send('Runtime.evaluate', { expression: expr, returnByValue: true });
     console.log(JSON.stringify(result, null, 2));
   } else if (cmd === 'shot') {
-    const outPath = rest[0];
+    let outPath = rest[0];
+    if (rest[0] === '--file') {
+      const prepExpr = fs.readFileSync(rest[1], 'utf8');
+      await send('Runtime.evaluate', { expression: prepExpr, returnByValue: true });
+      outPath = rest[2];
+    }
     const result = await send('Page.captureScreenshot', { format: 'png' });
-    const fs = await import('node:fs');
     fs.writeFileSync(outPath, Buffer.from(result.data, 'base64'));
     console.log(`Saved screenshot to ${outPath}`);
   } else {
@@ -203,8 +215,11 @@ switch ($Command) {
             Write-Host "Starting vite on $vitePort..."
             $viteOutLog = Join-Path $logDir 'vite.out.log'
             $viteErrLog = Join-Path $logDir 'vite.err.log'
-            $viteProc = Start-Process -FilePath 'pnpm' `
-                -ArgumentList @('exec', 'vite', '--port', "$vitePort", '--strictPort') `
+            # pnpm resolves to a .cmd/.ps1 shim, not a PE exe, so Start-Process -FilePath 'pnpm'
+            # fails with "not a valid Win32 application"; cmd.exe's own PATHEXT lookup finds the
+            # .cmd shim directly.
+            $viteProc = Start-Process -FilePath 'cmd.exe' `
+                -ArgumentList @('/c', 'pnpm', 'exec', 'vite', '--port', "$vitePort", '--strictPort') `
                 -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden `
                 -RedirectStandardOutput $viteOutLog -RedirectStandardError $viteErrLog
             $vitePid = $viteProc.Id
@@ -237,16 +252,22 @@ switch ($Command) {
     }
 
     'eval' {
-        if (-not $Arg1 -or -not $Arg2) { throw 'usage: live-verify.ps1 eval <index> <expr>' }
+        if (-not $Arg1 -or (-not $Arg2 -and -not $File)) {
+            throw 'usage: live-verify.ps1 eval <index> <expr>  OR  eval <index> -File <jsPath>'
+        }
         $state = Get-RigState
         if (-not $state -or -not (Test-ProcAlive $state.AppPid)) {
             throw "No live-verify instance running. Run 'up' first."
         }
-        Invoke-CdpDriver 'eval' $state.Port $Arg1 @($Arg2)
+        if ($File) {
+            Invoke-CdpDriver 'eval' $state.Port $Arg1 @('--file', (Resolve-Path $File).Path)
+        } else {
+            Invoke-CdpDriver 'eval' $state.Port $Arg1 @($Arg2)
+        }
     }
 
     'shot' {
-        if (-not $Arg1 -or -not $Arg2) { throw 'usage: live-verify.ps1 shot <index> <path>' }
+        if (-not $Arg1 -or -not $Arg2) { throw 'usage: live-verify.ps1 shot <index> <path> [-File <jsPath>]' }
         $state = Get-RigState
         if (-not $state -or -not (Test-ProcAlive $state.AppPid)) {
             throw "No live-verify instance running. Run 'up' first."
@@ -255,7 +276,13 @@ switch ($Command) {
         if ($shotDir -and -not (Test-Path $shotDir)) {
             New-Item -ItemType Directory -Path $shotDir -Force | Out-Null
         }
-        Invoke-CdpDriver 'shot' $state.Port $Arg1 @($Arg2)
+        if ($File) {
+            # -File JS runs via Runtime.evaluate right before the capture, e.g. to scroll an
+            # element into view or dismiss an overlay - the expression never touches argv.
+            Invoke-CdpDriver 'shot' $state.Port $Arg1 @('--file', (Resolve-Path $File).Path, $Arg2)
+        } else {
+            Invoke-CdpDriver 'shot' $state.Port $Arg1 @($Arg2)
+        }
     }
 
     'down' {
