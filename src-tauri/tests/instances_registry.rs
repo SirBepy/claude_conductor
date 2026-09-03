@@ -68,16 +68,38 @@ fn prune_removes_ended_older_than_ttl() {
 fn by_project_filters_by_project_id() {
     let r = reg();
     let settings = Mutex::new(Settings::default());
-    // Unlike `list`, `by_project` drops entries whose pid is dead, so an
-    // `External` instance needs a genuinely live one or this asserts nothing
-    // about filtering. Hardcoded 100/200 passed only on a machine that happened
-    // to have those pids.
-    let live = std::process::id();
-    let (proj_a, _) = r.register(input("s1", "C:/a", live), &settings, "now");
-    let (proj_b, _) = r.register(input("s2", "C:/b", live), &settings, "now");
+    let (proj_a, _) = r.register(input("s1", "C:/a", 100), &settings, "now");
+    let (proj_b, _) = r.register(input("s2", "C:/b", 200), &settings, "now");
     let a = r.by_project(&proj_a);
     let b = r.by_project(&proj_b);
     assert_eq!(a.len(), 1);
     assert_eq!(a[0].cwd, PathBuf::from("C:/a"));
     assert_eq!(b[0].cwd, PathBuf::from("C:/b"));
+}
+
+// Todo 856: `by_project` used to also require `pid_is_live(i.pid)`, a raw
+// single-sample check with no hysteresis, unlike the confirmed-dead signal
+// (`end_reason`) it now keys on. These two tests pin both directions so a
+// future change to either signal can't silently regress the other.
+
+#[test]
+fn by_project_keeps_a_live_peer_with_a_dead_looking_pid() {
+    let r = reg();
+    let settings = Mutex::new(Settings::default());
+    // A pid that is almost certainly not a running process on this machine,
+    // standing in for a peer whose per-turn child has already exited or a
+    // flaky liveness sample - not yet confirmed dead by the registry itself.
+    let (proj, _) = r.register(input("s1", "C:/a", 999_999), &settings, "now");
+    let peers = r.by_project(&proj);
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].session_id, "s1");
+}
+
+#[test]
+fn by_project_excludes_a_confirmed_dead_peer() {
+    let r = reg();
+    let settings = Mutex::new(Settings::default());
+    let (proj, _) = r.register(input("s1", "C:/a", 100), &settings, "now");
+    assert!(r.mark_ended("s1", EndReason::ProcessGone, "2026-09-02T17:16:00Z"));
+    assert!(r.by_project(&proj).is_empty());
 }

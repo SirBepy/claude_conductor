@@ -116,21 +116,17 @@ impl Registry {
             .collect()
     }
 
-    /// Also drops entries whose owning process has died (todo 503, guards
-    /// `list_peers`/`post_message`, the only callers). Skips pid=0 and
-    /// `Interactive`, same as `sessions::detector::reconcile`: Path C's pid
-    /// is a short-lived per-turn process, not a liveness signal.
+    /// Also drops entries confirmed dead (todo 503/856, guards `list_peers`/
+    /// `post_message`). Keys on `end_reason.is_some()`, set by the hysteresis
+    /// `detector::reconcile` 2-strikes rule, not a raw `pid_is_live` snapshot
+    /// which false-negatived a live peer between per-turn child processes.
     pub fn by_project(&self, project_id: &str) -> Vec<Instance> {
         self.inner
             .lock()
             .unwrap()
             .values()
             .filter(|i| i.project_id == project_id)
-            .filter(|i| {
-                i.pid == 0
-                    || i.kind == InstanceKind::Interactive
-                    || crate::util::process::pid_is_live(i.pid)
-            })
+            .filter(|i| i.end_reason.is_none())
             .cloned()
             .collect()
     }
