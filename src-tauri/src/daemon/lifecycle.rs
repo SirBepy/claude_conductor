@@ -15,6 +15,25 @@ pub use teardown::*;
 const VALID_MODELS: &[&str] = &["haiku", "sonnet", "opus", "fable"];
 const VALID_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
+/// RPC code for [`LifecycleError::Busy`]. Distinct from `-32004` (NotFound),
+/// which the desktop answers with a respawn-and-retry - a busy session must
+/// not be retried, it must be held.
+pub const SESSION_BUSY_CODE: i32 = -32006;
+
+/// `Err` when the session is mid-turn (todo 873). The daemon has no turn
+/// queue, so a second write into a live child re-opens the cancel-then-send
+/// race that latched `busy`; frontends match `SESSION_BUSY:` on the message
+/// and re-stage into the held queue. Mirrors `schedule_fire.rs`'s refusal.
+pub fn refuse_if_busy(
+    state: &crate::daemon::state::DaemonState,
+    session_id: &str,
+) -> Result<(), LifecycleError> {
+    if state.registry.get(session_id).map(|i| i.busy).unwrap_or(false) {
+        return Err(LifecycleError::Busy(session_id.to_string()));
+    }
+    Ok(())
+}
+
 /// Accept both bare family aliases (`opus`) and full model ids
 /// (`claude-opus-4-8`). The session model picker is now data-driven from
 /// `/v1/models`, which returns full ids; claude's `--model` flag accepts
@@ -82,4 +101,39 @@ pub enum LifecycleError {
     AccountCredentials(String),
     #[error("session {0} is frozen - unfreeze it first")]
     Frozen(String),
+    /// The `SESSION_BUSY:` prefix is load-bearing: it rides `ClientError::Rpc`'s
+    /// Display all the way to the webview, where `isSessionBusyError` keys off it.
+    #[error("SESSION_BUSY: session {0} is mid-turn - hold this message until the turn ends")]
+    Busy(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::state::DaemonState;
+    use crate::types::Settings;
+
+    #[test]
+    fn refuse_if_busy_only_refuses_a_mid_turn_session() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session(
+            "s",
+            std::path::Path::new("/tmp/x"),
+            &settings,
+            "2026-09-03T00:00:00Z",
+        );
+
+        assert!(refuse_if_busy(&state, "s").is_ok(), "an idle session must accept a send");
+        assert!(refuse_if_busy(&state, "ghost").is_ok(), "an unknown session is NotFound's call, not ours");
+
+        state.registry.set_busy("s", true);
+        let err = refuse_if_busy(&state, "s").expect_err("a mid-turn session must be refused");
+        assert!(
+            err.to_string().starts_with("SESSION_BUSY:"),
+            "the frontend re-stage path keys off this prefix: {err}"
+        );
+    }
 }

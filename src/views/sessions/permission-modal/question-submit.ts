@@ -2,6 +2,7 @@
  *  pure move, no behavior change. */
 
 import { invoke } from "../../../shared/ipc";
+import { isSessionBusyError } from "../../../shared/session-busy";
 import { showToast } from "../../../shared/toast";
 import { state } from "../state";
 import { formatAnswersAsMessage, isQuestionAnswered, renderQuestionUI, snapshotActiveCardDraft } from "./question-ui";
@@ -142,6 +143,13 @@ export async function showQuestionCard(
           await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
           clearQuestionDraft(payload.id);
         } catch (e) {
+          // A backgrounded session still mid-turn refuses the write (todo 873).
+          // The answer belongs on its held queue, not in a failure toast: the
+          // idle sweep in sidebar.ts sends it the moment that turn ends.
+          if (isSessionBusyError(e) && state.heldMessages?.stageFor(sid, [...answerBlocks, ...cardExtraBlocks])) {
+            clearQuestionDraft(payload.id);
+            return;
+          }
           console.warn("[perm-relay] send_message (answer delivery) failed:", e);
           showToast(`Answer delivery failed: ${e}`);
         }

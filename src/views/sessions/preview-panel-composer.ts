@@ -4,6 +4,7 @@
 // including its destroy-safe teardown - see project_composer_core_shared_typing.
 
 import { invoke } from "../../shared/ipc";
+import { isSessionBusyError } from "../../shared/session-busy";
 import type { ChatEvent, ContentBlock, PreviewSnapshot } from "../../types/ipc.generated";
 import { ComposerCore } from "../../shared/chat/composer-core/core";
 import { SlashProvider } from "../../shared/chat/caret-popup/providers/slash";
@@ -111,6 +112,12 @@ export async function sendPvReply(
   try {
     await invoke<string>("send_message", { sessionId, cwd: String(inst.cwd ?? "."), blocks });
   } catch (err) {
+    // Refused mid-turn (todo 873): queue it like the busy branch above would
+    // have, instead of pushing the text back into the composer.
+    if (isSessionBusyError(err) && state.heldMessages?.stageFor(sessionId, blocks)) {
+      sessionEvents.removeSynthetic(sessionId, optimisticEvent);
+      return;
+    }
     console.error("[preview-panel] send_message failed", err);
     sessionEvents.removeSynthetic(sessionId, optimisticEvent);
     ta.value = text;

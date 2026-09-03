@@ -593,7 +593,12 @@ export class HttpTransport implements Transport {
       body: JSON.stringify({ text }),
     });
     if (res.status === 401) handleAuthFailure();
-    if (!res.ok) throw new Error(`send failed: ${res.status}`);
+    if (!res.ok) {
+      // The body carries the daemon's own reason - notably the SESSION_BUSY
+      // sentinel a 409 uses, which the held-queue re-stage keys off (todo 873).
+      const detail = await res.text().catch(() => "");
+      throw new Error(detail || `send failed: ${res.status}`);
+    }
     return sessionId as unknown as T;
   }
 

@@ -1,4 +1,5 @@
 import { invoke } from "../../shared/ipc";
+import { isSessionBusyError } from "../../shared/session-busy";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { showToast } from "../../shared/toast";
 import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
@@ -17,6 +18,14 @@ export async function sendWithFailureRecovery(
   try {
     await attempt();
   } catch (err) {
+    // Refused mid-turn (todo 873): the same outcome as the composer's own busy
+    // check, decided one race later. Queue the blocks and drop the optimistic
+    // bubble the held chip now stands for - a failed-send bubble would be a lie.
+    if (isSessionBusyError(err) && state.heldMessages?.stageFor(sessionId, blocks)) {
+      sessionEvents.removeSynthetic(sessionId, optimisticEvent);
+      if (state.renderer?.currentSessionId() === sessionId) void state.renderer.loadFromStore(cwd);
+      return;
+    }
     console.error("[sessions] send_message failed", err);
     const onScreen = state.renderer?.currentSessionId() === sessionId;
     if (onScreen) {

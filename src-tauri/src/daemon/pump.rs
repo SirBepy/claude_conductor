@@ -710,4 +710,43 @@ mod tests {
         );
         assert!(!registry.get("s").unwrap().busy);
     }
+
+    /// The case the post-`fa56550a` design actually rests on: the interrupt is
+    /// cooperative, so a child may simply never emit the result line that ends
+    /// the turn. Busy then stays latched (the 20m watchdog is the only bound),
+    /// and the next send must refuse rather than bump the gen into a live child.
+    #[test]
+    fn a_child_that_ignores_the_interrupt_keeps_busy_and_refuses_the_next_send() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-09-03T15:44:43Z");
+
+        state.registry.set_busy("s", true);
+        let mut turn = TurnBoundary::new(false);
+        let turn_one = state.registry.take_pending_turn_gen("s").expect("turn 1 hands its gen over");
+        assert_eq!(turn.on_stream_event(), TurnAction::TurnStarted);
+        state.registry.mark_turn_live("s");
+
+        // cancel_turn wrote its interrupt and cleared nothing; no result line follows.
+        assert!(state.registry.get("s").unwrap().busy, "an ignored interrupt must leave the turn live");
+
+        let err = crate::daemon::lifecycle::refuse_if_busy(&state, "s")
+            .expect_err("a still-live turn must refuse the next send");
+        assert!(err.to_string().starts_with("SESSION_BUSY:"), "frontends re-stage on this prefix: {err}");
+        assert_eq!(
+            state.registry.current_turn_gen("s"),
+            turn_one,
+            "a refused send must leave the gen alone - bumping it is what stranded the result line"
+        );
+
+        // Whenever the child does come back, its own result line still ends the turn.
+        assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
+        assert!(state.registry.set_busy_false_if_gen("s", turn_one), "the late result line must still clear busy");
+        assert!(!state.registry.get("s").unwrap().busy);
+    }
 }

@@ -267,6 +267,16 @@ pub(super) async fn send_message(
     // -32004 -> start_session(resume) -> retry dance - see
     // `lifecycle::send_message_with_respawn`). Without this a remote send into
     // an idle chat 404'd here instead of resuming it.
+
+    // The phone's half of core.rs's mid-turn refusal (todo 873). Gated on a
+    // live child: a session whose process already exited has a stale `busy` at
+    // worst, and the respawn below is its way out. 409, not 500 - the phone's
+    // transport re-stages that body into the held queue.
+    if ctx.state.sessions.get(&id).is_some() {
+        if let Err(e) = crate::daemon::lifecycle::refuse_if_busy(&ctx.state, &id) {
+            return (StatusCode::CONFLICT, e.to_string()).into_response();
+        }
+    }
     match crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text, false).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(crate::daemon::lifecycle::LifecycleError::NotFound(_)) => {

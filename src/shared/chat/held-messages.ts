@@ -11,6 +11,7 @@
 // docs/superpowers/specs/2026-06-13-held-messages-while-busy-design.md.
 
 import type { ContentBlock } from "../../types/ipc.generated";
+import { isSessionBusyError } from "../session-busy";
 import { blocksToText } from "./content-blocks";
 import { AUQ_EXTRA_SENTINEL, isAuqAnswerBlock } from "./chat-transforms";
 import { loadAllHeld, saveAllHeld } from "./held-messages-persistence";
@@ -204,12 +205,19 @@ export class HeldMessages {
   stage(blocks: ContentBlock[]): boolean {
     const sid = this.sid;
     if (!sid) return false;
+    return this.stageFor(sid, blocks);
+  }
+
+  /** Stage for ANY session, mounted or not - the daemon's held list is keyed
+   *  by session id, so a backgrounded chat queues the same way. Used by the
+   *  callers that re-stage a send the daemon refused as mid-turn (todo 873). */
+  stageFor(sid: string, blocks: ContentBlock[]): boolean {
     const localId = this.nextId++;
     const list = this.map.get(sid) ?? [];
     list.push({ id: localId, blocks });
     this.map.set(sid, list);
     this.persist();
-    this.attached?.onChange();
+    if (this.attached?.sessionId === sid) this.attached.onChange();
     // Swap only fires on success; a failed add leaves localId as the
     // permanent fallback (see HeldDraftSync.add).
     this.sync.add(sid, localId, blocks, (serverId) => {
@@ -330,6 +338,10 @@ export class HeldMessages {
     try {
       await send(bundle);
     } catch (err) {
+      // The set was cleared before the send, so a refusal here would otherwise
+      // eat the messages outright. A mid-turn refusal (todo 873) is exactly the
+      // case they should go back on the queue for - the next idle sweep retries.
+      if (isSessionBusyError(err)) this.stageFor(sid, bundle);
       console.error("[held] background flush send failed", err);
     }
   }

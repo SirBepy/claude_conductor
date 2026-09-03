@@ -48,6 +48,11 @@ pub(super) fn err_to_rpc(e: LifecycleError) -> RpcError {
             message: e.to_string(),
             data: None,
         },
+        Busy(_) => RpcError {
+            code: crate::daemon::lifecycle::SESSION_BUSY_CODE,
+            message: e.to_string(),
+            data: None,
+        },
         MeteredBilling(_) | Io(_) => RpcError::internal(e.to_string()),
     }
 }

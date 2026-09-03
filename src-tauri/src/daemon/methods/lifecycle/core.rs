@@ -93,6 +93,11 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let session = map.get(&p.session_id)
                     .ok_or_else(|| err_to_rpc(LifecycleError::NotFound(p.session_id.clone())))?
                     .clone();
+                // Refusing beats writing into a live child (todo 873): the bump
+                // below would strand the running turn's own result line on the
+                // old gen, latching `busy` until the 20-minute watchdog. After
+                // the map lookup, so a dead child still gets its -32004 respawn.
+                lifecycle::refuse_if_busy(&state, &p.session_id).map_err(err_to_rpc)?;
                 // Bump turn_gen (set_busy) BEFORE the write - a warm child can
                 // emit its first stream_event before this fn resumes past the
                 // write's own .await (todo 525 root cause 1).
@@ -111,12 +116,10 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     return Err(err_to_rpc(e));
                 }
                 state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
-                // Jarvis wake (todo 272 chunk 3): this is the one user-facing send
-                // path both desktop (`ipc/chat/run.rs`) and the remote/phone
-                // cockpit (`http-transport.ts`'s `/api/rpc` "send_message") funnel
-                // through - Jarvis's own `send_to_session` bypasses this RPC
-                // entirely (see `methods::jarvis::send_to_session`), so a hit here
-                // is by construction Joe (or a paired device), never Jarvis itself.
+                // Jarvis wake (todo 272 chunk 3): the desktop's user-facing send
+                // path (`ipc/chat/run.rs`); the phone has its own REST route
+                // (`remote_handlers::send_message`), and Jarvis's `send_to_session`
+                // bypasses this RPC entirely, so a hit here is Joe, never Jarvis.
                 // Tell Jarvis when Joe messages one of its workers directly so it
                 // doesn't keep orchestrating a fleet member Joe just took over.
                 if let Some(inst) = state.registry.get(&p.session_id) {
