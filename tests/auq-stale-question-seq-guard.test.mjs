@@ -1,40 +1,49 @@
 import { describe, it, expect } from "vitest";
-import { isLatestQuestion, markLatestQuestion } from "../src/views/sessions/permission-modal/gating.ts";
+import { isLatestQuestion, markLatestQuestion, markQuestionSuperseded } from "../src/views/sessions/permission-modal/gating.ts";
 
-// Regression for todo 773: `list_pending_prompts` snapshot order is not
-// chronological (a Rust HashMap), so a poll could process a ghost/stale
-// question after a genuinely newer one and mark the OLDER id "latest" -
-// silently failing isLatestQuestion for the real card's answer.
+// Contract: an id is stale only once explicitly passed to markQuestionSuperseded
+// (todo 833's ghost-swap). Recency alone is never supersession, so a sibling
+// card (todo 860) or an out-of-order ghost mark (todo 773) cannot drop a
+// genuinely open card's answer.
 
-describe("stale-question guard - seq ordering", () => {
-  it("keeps the higher-seq id latest even when the lower-seq one is marked afterward", () => {
+describe("stale-question guard - explicit supersession", () => {
+  it("todo 773: an out-of-order ghost mark never drops the genuinely open card", () => {
     markLatestQuestion("s1", "newer", 5);
-    markLatestQuestion("s1", "older-ghost", 2); // arrives out of order, must not win
+    markLatestQuestion("s1", "older-ghost", 2); // arrives out of order
     expect(isLatestQuestion("s1", "newer")).toBe(true);
-    expect(isLatestQuestion("s1", "older-ghost")).toBe(false);
+    expect(isLatestQuestion("s1", "older-ghost")).toBe(true); // not marked superseded, so not dropped
   });
 
-  it("still advances latest when seq increases normally", () => {
-    markLatestQuestion("s2", "first", 1);
-    markLatestQuestion("s2", "second", 2);
-    expect(isLatestQuestion("s2", "second")).toBe(true);
-    expect(isLatestQuestion("s2", "first")).toBe(false);
+  it("todo 860: answering the older of two pending siblings is still allowed", () => {
+    markLatestQuestion("s2", "older", 1);
+    markLatestQuestion("s2", "newer", 2);
+    expect(isLatestQuestion("s2", "older")).toBe(true);
+    expect(isLatestQuestion("s2", "newer")).toBe(true);
   });
 
-  it("falls back to always-overwrite when seq is absent (older daemon payload shape)", () => {
-    markLatestQuestion("s3", "first");
-    markLatestQuestion("s3", "second");
-    expect(isLatestQuestion("s3", "second")).toBe(true);
-    expect(isLatestQuestion("s3", "first")).toBe(false);
+  it("todo 833: markQuestionSuperseded drops only the marked ghost id", () => {
+    markLatestQuestion("s3", "real");
+    markLatestQuestion("s3", "ghost");
+    markQuestionSuperseded("s3", "ghost");
+    expect(isLatestQuestion("s3", "ghost")).toBe(false);
+    expect(isLatestQuestion("s3", "real")).toBe(true);
+    expect(isLatestQuestion("s4", "ghost")).toBe(true); // same id, different session, untouched
   });
 
-  it("an undefined-seq call still overwrites a seq-tracked entry (permissive fallback)", () => {
-    markLatestQuestion("s4", "first", 1);
-    markLatestQuestion("s4", "second"); // no seq - trusted as-is, matches pre-seq behavior
-    expect(isLatestQuestion("s4", "second")).toBe(true);
+  it("markLatestQuestion un-supersedes a previously superseded id", () => {
+    markQuestionSuperseded("s5", "q1");
+    expect(isLatestQuestion("s5", "q1")).toBe(false);
+    markLatestQuestion("s5", "q1");
+    expect(isLatestQuestion("s5", "q1")).toBe(true);
   });
 
   it("no session ever marked treats any id as latest", () => {
     expect(isLatestQuestion("never-seen", "whatever")).toBe(true);
+  });
+
+  it("undefined sessionId is a no-op for both mark functions and never throws", () => {
+    expect(() => markLatestQuestion(undefined, "q")).not.toThrow();
+    expect(() => markQuestionSuperseded(undefined, "q")).not.toThrow();
+    expect(isLatestQuestion(undefined, "q")).toBe(true);
   });
 });
