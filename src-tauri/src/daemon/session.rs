@@ -103,10 +103,10 @@ pub struct Session {
     /// In-flight streamed text block accumulator - see [`StreamingText`].
     /// std `Mutex`: only ever held across an append or a `String` clone.
     pub streaming: std::sync::Mutex<StreamingText>,
-    /// Consecutive Stop-hook turns where report_turn_status/send_message were
-    /// both missing (todo 824): the closest live proxy for MCP reachability,
-    /// since the MCP child is a fresh HTTP-only process per turn with no
-    /// attach/detach event. Reset to 0 the moment either tool lands.
+    /// Consecutive Stop-hook turns ending in Block or Inform, i.e.
+    /// report_turn_status and/or send_message was missing (todo 824): the
+    /// closest live proxy for MCP reachability, since the MCP child is a fresh
+    /// HTTP-only process per turn with no attach/detach event. Reset on Ok.
     pub mcp_miss_streak: AtomicU32,
 }
 
