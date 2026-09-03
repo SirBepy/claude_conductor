@@ -340,6 +340,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // This header is rebuilt per session, so the phone's relocated back / ⋮ have
   // to be re-homed into the fresh one (todo 702).
   applyHeaderMerge();
+  // The wipe above ran after setSessionScope, so the FAB host is detached.
+  state.fabDial?.reattach();
 
   pane.querySelector<HTMLButtonElement>(".thinking-pause-btn")?.addEventListener("click", () => {
     void invoke<void>("cancel_turn", { sessionId: sess.session_id }).catch(err => console.error("[sessions] cancel_turn failed", err));

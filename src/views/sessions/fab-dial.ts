@@ -24,6 +24,8 @@ export interface FabDialDeps {
 
 export interface FabDialHandle {
   setSessionScope(sessionId: string | null, cwd: string | null): void;
+  /** Re-append the host after a pane innerHTML rebuild has detached it. */
+  reattach(): void;
   close(): void;
   destroy(): void;
 }
@@ -77,6 +79,13 @@ class FabDial implements FabDialHandle {
     this.surface = "rest";
     this.attach();
     this.render();
+  }
+
+  /** Callers rebuild the pane AFTER setSessionScope has already attached, so
+   *  the host is orphaned by the time the new DOM lands. The host keeps its own
+   *  subtree while detached, so re-appending restores it without a re-render. */
+  reattach(): void {
+    if (this.sessionId) this.attach();
   }
 
   close(): void {
