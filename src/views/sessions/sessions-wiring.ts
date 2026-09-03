@@ -11,6 +11,7 @@ import { sessionEvents } from "../../shared/chat/event-store";
 import { dropRetainedChat } from "./chat-pane-cache";
 import { getTransport, isRemote } from "../../shared/transport";
 import { findSuccessorToFollow, markFollowed } from "./successor-follow";
+import { freezePane } from "./pane-freeze";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -177,7 +178,14 @@ export async function wireInstancesChangedListener(
     if (predecessorId && successorId) {
       markFollowed(predecessorId);
       carrySessionSettings(predecessorId, successorId);
-      await selectSession(successorId, pane);
+      // selectSession wipes the pane and then awaits two mounts; hold the
+      // outgoing transcript over that gap so the takeover never blinks.
+      const thaw = freezePane(pane);
+      try {
+        await selectSession(successorId, pane);
+      } finally {
+        thaw();
+      }
       if (state.mountId !== myMount) return;
     }
 

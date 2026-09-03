@@ -808,3 +808,21 @@
   background: rgba(255, 255, 255, 0.25);
   color: var(--color-background);
 }
+
+/* Still frame held over the pane while a /respawn successor replaces it
+   (pane-freeze.ts). Opaque, so the empty pane behind it never shows through. */
+.pane-freeze {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.16s ease-out;
+}
+
+.pane-freeze.is-fading {
+  opacity: 0;
+}
