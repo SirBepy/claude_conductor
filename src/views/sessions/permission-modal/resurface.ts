@@ -84,20 +84,26 @@ function surfacePending(pending: PendingPrompt, reopened = false): void {
   })();
 }
 
-/** Ask the DAEMON what it is still waiting on for `sessionId` and re-park it.
- *  The push path sends each id once, so a park lost with its webview is never
- *  re-sent - pull instead. No-op if already parked (may hold a live draft). */
-export async function rehydratePendingPrompts(sessionId: string): Promise<boolean> {
-  if (!sessionId || peekPendingPrompt(sessionId)) return false;
+/** One `list_pending_prompts` round trip, shared by the two selectors below. */
+async function fetchPendingPromptsForSession(sessionId: string): Promise<ReturnType<typeof findPendingPromptsForSession> | null> {
   let prompts: unknown;
   try {
     prompts = await getTransport().call("list_pending_prompts");
   } catch (e) {
-    console.warn("[perm-gate] rehydrate failed:", e);
-    return false;
+    console.warn("[perm-gate] list_pending_prompts fetch failed:", e);
+    return null;
   }
+  return findPendingPromptsForSession(prompts, sessionId);
+}
+
+/** `rehydratePendingPrompts`' park logic, given an already-fetched list. */
+async function applyRehydration(
+  sessionId: string,
+  recs: ReturnType<typeof findPendingPromptsForSession> | null,
+): Promise<boolean> {
+  if (!recs) return false;
   // One park per session, so take the longest-waiting if the daemon holds two.
-  const [rec] = findPendingPromptsForSession(prompts, sessionId);
+  const [rec] = recs;
   if (!rec) return false;
   if (rec.kind !== "question") {
     storePendingPrompt(sessionId, { kind: "permission", payload: rec.payload });
@@ -116,6 +122,15 @@ export async function rehydratePendingPrompts(sessionId: string): Promise<boolea
   return true;
 }
 
+/** Ask the DAEMON what it is still waiting on for `sessionId` and re-park it.
+ *  The push path sends each id once, so a park lost with its webview is never
+ *  re-sent - pull instead. No-op if already parked (may hold a live draft). */
+export async function rehydratePendingPrompts(sessionId: string): Promise<boolean> {
+  if (!sessionId || peekPendingPrompt(sessionId)) return false;
+  const recs = await fetchPendingPromptsForSession(sessionId);
+  return applyRehydration(sessionId, recs);
+}
+
 /** Rebuild an answerable payload from the transcript alone. The daemon's prompt
  *  store is memory-only, but the tool_use `input` is in history and a
  *  fire-and-forget answer travels as an ordinary message, not the dead oneshot.
@@ -130,21 +145,23 @@ function rebuildQuestionFromTranscript(sessionId: string, cardId: string): Quest
   return { id: cardId, questions, session_id: sessionId };
 }
 
-/** The session's newest still-open question in the DAEMON's store, or null.
- *  By `seq`: the snapshot's own order is only incidentally chronological. */
-export async function newestOpenQuestion(sessionId: string): Promise<QuestionRequestedPayload | null> {
-  let prompts: unknown;
-  try {
-    prompts = await getTransport().call("list_pending_prompts");
-  } catch (e) {
-    console.warn("[perm-gate] newest-open-question lookup failed:", e);
-    return null;
-  }
-  const questions = findPendingPromptsForSession(prompts, sessionId)
+/** `newestOpenQuestion`'s pick logic, given an already-fetched list. */
+function pickNewestOpenQuestion(
+  recs: ReturnType<typeof findPendingPromptsForSession> | null,
+): QuestionRequestedPayload | null {
+  if (!recs) return null;
+  const questions = recs
     .filter((r) => r.kind === "question")
     .map((r) => r.payload as QuestionRequestedPayload);
   if (!questions.length) return null;
   return questions.reduce((a, b) => ((b.seq ?? -1) >= (a.seq ?? -1) ? b : a));
+}
+
+/** The session's newest still-open question in the DAEMON's store, or null.
+ *  By `seq`: the snapshot's own order is only incidentally chronological. */
+export async function newestOpenQuestion(sessionId: string): Promise<QuestionRequestedPayload | null> {
+  const recs = await fetchPendingPromptsForSession(sessionId);
+  return pickNewestOpenQuestion(recs);
 }
 
 /** Put the real card back up for a transcript card the user clicked: local
@@ -158,8 +175,14 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     storePendingPrompt(sessionId, pending);
     pending = null;
   }
+  // One fetch shared by both selectors below (todo 849), guarded the same way
+  // rehydratePendingPrompts guards its own fetch.
+  let recs: ReturnType<typeof findPendingPromptsForSession> | null = null;
   if (!pending) {
-    await rehydratePendingPrompts(sessionId);
+    if (!peekPendingPrompt(sessionId)) {
+      recs = await fetchPendingPromptsForSession(sessionId);
+      await applyRehydration(sessionId, recs);
+    }
     const rehydrated = takePendingPrompt(sessionId);
     if (rehydrated && !wanted(rehydrated)) storePendingPrompt(sessionId, rehydrated);
     else pending = rehydrated;
@@ -169,7 +192,7 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   // request_id the daemon never held, stranding the real prompt (todo 833).
   // Newest open question wins instead - resolvePendingQuestionCard's own rule.
   if (!pending) {
-    const newest = await newestOpenQuestion(sessionId);
+    const newest = recs ? pickNewestOpenQuestion(recs) : await newestOpenQuestion(sessionId);
     if (newest) {
       markLatestQuestion(sessionId, newest.id, newest.seq);
       const draft = await fetchFreshestAuqDraft(sessionId, newest.id);
