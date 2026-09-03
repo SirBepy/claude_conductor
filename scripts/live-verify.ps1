@@ -19,8 +19,14 @@
 .PARAMETER Command
   up | eval | shot | down
 
+.PARAMETER Monitor
+  1-based index into [System.Windows.Forms.Screen]::AllScreens. Moves the rig's OWN window
+  there after launch with SWP_NOACTIVATE, so the debug instance stops landing on top of
+  whatever the dev is reading. Never enumerates or touches any other process's windows.
+
 .EXAMPLE
   scripts\live-verify.ps1 up
+  scripts\live-verify.ps1 up -Monitor 2
   scripts\live-verify.ps1 eval 0 "document.title"
   scripts\live-verify.ps1 eval 0 -File .for_bepy\probe.js
   scripts\live-verify.ps1 shot 0 .for_bepy\screenshots\795\window.png
@@ -41,7 +47,11 @@ param(
 
     [int]$Port = 0,
     [string]$InstanceLabel = 'live-verify',
-    [string]$File
+    [string]$File,
+
+    # 1-based index into [System.Windows.Forms.Screen]::AllScreens, or 0 to
+    # leave placement alone. Only ever applied to the PID this script started.
+    [int]$Monitor = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,6 +75,43 @@ $cargoTargetDir = if ($env:CARGO_TARGET_DIR) {
 }
 $exePath = Join-Path $cargoTargetDir 'debug\claude-conductor.exe'
 $vitePort = 1420
+
+# Moves ONLY $procId's own top-level window. SWP_NOACTIVATE keeps focus where
+# it is; the dev's windows are never enumerated, moved or activated. Best
+# effort by design - a placement failure must never fail an `up`.
+function Move-RigWindowToMonitor([int]$procId, [int]$monitorIndex) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $screens = [System.Windows.Forms.Screen]::AllScreens
+        if ($monitorIndex -lt 1 -or $monitorIndex -gt $screens.Count) {
+            Write-Warning "monitor $monitorIndex out of range (1..$($screens.Count)), leaving window where it is"
+            return
+        }
+        Add-Type -Namespace LiveVerify -Name Win32 -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetWindowPos(
+    IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+'@
+        $bounds = $screens[$monitorIndex - 1].WorkingArea
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $h = (Get-Process -Id $procId -ErrorAction SilentlyContinue).MainWindowHandle
+            if ($h -and $h -ne [IntPtr]::Zero) {
+                $w = [Math]::Min(1400, $bounds.Width)
+                $hgt = [Math]::Min(900, $bounds.Height)
+                $x = $bounds.X + [int](($bounds.Width - $w) / 2)
+                $y = $bounds.Y + [int](($bounds.Height - $hgt) / 2)
+                # SWP_NOACTIVATE(0x0010) | SWP_NOZORDER(0x0004)
+                [LiveVerify.Win32]::SetWindowPos($h, [IntPtr]::Zero, $x, $y, $w, $hgt, 0x0014) | Out-Null
+                Write-Host "placed window on monitor $monitorIndex at ${x},${y} (${w}x${hgt})"
+                return
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        Write-Warning "window handle for pid $procId never appeared; placement skipped"
+    } catch {
+        Write-Warning "monitor placement failed (non-fatal): $_"
+    }
+}
 
 function Get-RigState {
     if (Test-Path $statePath) {
@@ -144,13 +191,14 @@ const fs = await import('node:fs');
 try {
   if (cmd === 'eval') {
     const expr = rest[0] === '--file' ? fs.readFileSync(rest[1], 'utf8') : rest[0];
-    const result = await send('Runtime.evaluate', { expression: expr, returnByValue: true });
+    const result = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
     console.log(JSON.stringify(result, null, 2));
   } else if (cmd === 'shot') {
     let outPath = rest[0];
     if (rest[0] === '--file') {
       const prepExpr = fs.readFileSync(rest[1], 'utf8');
-      await send('Runtime.evaluate', { expression: prepExpr, returnByValue: true });
+      // awaitPromise so an async prep step finishes BEFORE the capture, not after.
+      await send('Runtime.evaluate', { expression: prepExpr, returnByValue: true, awaitPromise: true });
       outPath = rest[2];
     }
     const result = await send('Page.captureScreenshot', { format: 'png' });
@@ -250,6 +298,8 @@ switch ($Command) {
         Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
 
         Wait-Http "http://127.0.0.1:$Port/json/list" 30 'CDP endpoint'
+
+        if ($Monitor -gt 0) { Move-RigWindowToMonitor $appProc.Id $Monitor }
 
         Save-RigState @{
             Port           = $Port
