@@ -189,6 +189,25 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    {
+        let state = state.clone();
+        // Resolves the render-confirmation waiter `on_question_request`
+        // races against a timeout (todo 735) - DISTINCT from `respond_question`
+        // below, which only resolves once the user submits a real answer.
+        router.register("confirm_question_rendered", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    id: String,
+                }
+                let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                state.confirm_question_rendered(&b.id).await;
+                Ok(serde_json::json!({"ok": true}))
+            }
+        });
+    }
     router.register("respond_question", move |params, _ctx| {
         let state = state.clone();
         async move {
