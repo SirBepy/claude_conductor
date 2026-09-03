@@ -4,7 +4,7 @@
 // `addKebabButton`, wired only when `Instance.jarvis` is true). Five actions:
 // restart (kill+resume the same session id), clear context (kill+discard,
 // lands on a NEW id), change character (reused verbatim from
-// active-session.ts), open jarvis-home in VS Code/Explorer, and copy PID. No
+// active-session-account.ts), open jarvis-home in VS Code/Explorer, and copy PID. No
 // Auto-accept toggle here - Part A locks it permanently on.
 //
 // `buildChatMenuBlock` (chat-menu.ts) builds a much bigger "This chat" menu
@@ -17,6 +17,7 @@ import { invoke } from "../../shared/ipc";
 import { askConfirm } from "../../shared/confirm";
 import { state, setActiveSession } from "./state";
 import { positionDropdown, positionSubmenu } from "./position-dropdown";
+import { changeCharacterForSession } from "./active-session-account";
 
 let _menu: HTMLElement | null = null;
 let _sub: HTMLElement | null = null;
@@ -97,12 +98,11 @@ async function clearContext(sessionId: string): Promise<void> {
   await invokeAndRemount(sessionId, "clear_jarvis_context", "clear Jarvis's context");
 }
 
-// Dynamic import of active-session.ts (not a static one) avoids a module
-// cycle: active-session.ts statically imports `openJarvisKebabMenu` from
-// this file to wire the header button.
+// headerStatusClass lives in active-session.ts, which statically imports
+// `openJarvisKebabMenu` from this file - a dynamic import here avoids the cycle.
 async function changeCharacter(sessionId: string): Promise<void> {
-  const m = await import("./active-session");
-  await m.changeCharacterForSession(sessionId);
+  const { headerStatusClass } = await import("./active-session");
+  await changeCharacterForSession(sessionId, headerStatusClass);
 }
 
 export function openJarvisKebabMenu(anchor: HTMLElement, sessionId: string): void {

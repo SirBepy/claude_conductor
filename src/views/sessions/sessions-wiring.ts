@@ -1,4 +1,5 @@
-import { selectSession, updateHeaderAvatarStatus, carrySessionSettings, applyAccountMove } from "./active-session";
+import { selectSession, updateHeaderAvatarStatus } from "./active-session";
+import { carrySessionSettings, applyAccountMove } from "./active-session-account";
 import { state, setActiveSession, loadLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle, paneEmptyStateHtml } from "./sessions-helpers";
@@ -63,7 +64,7 @@ export function wireRateLimitBanner(
   rateLimitBanner.setSelectedSessionGetter(() => state.selectedId);
   rateLimitBanner.setOnMoved((newId, oldId) => {
     void (async () => {
-      await applyAccountMove(oldId, newId);
+      await applyAccountMove(oldId, newId, selectSession);
       if (state.mountId !== myMount) return;
       rateLimitBanner.update(state.sessions);
     })();

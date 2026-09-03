@@ -19,6 +19,7 @@ import {
 } from "./sessions-helpers";
 import { isRawViewEnabled, setRawViewEnabled } from "../../shared/chat/message-filter-pref";
 import { state } from "./state";
+import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 
 export interface ChatMenuCtx {
   kind: "live" | "draft";
@@ -276,8 +277,8 @@ export function buildChatMenuBlock(
       run: isDraft || !sessionId
         ? undefined
         : async () => {
-            const m = await import("./active-session");
-            await m.changeCharacterForSession(sessionId);
+            const { headerStatusClass } = await import("./active-session");
+            await changeCharacterForSession(sessionId, headerStatusClass);
           },
       disabledReason: isDraft ? "Available once the chat starts" : (!sessionId ? "No session" : undefined),
     },
@@ -287,8 +288,8 @@ export function buildChatMenuBlock(
       run: isDraft || !sessionId
         ? undefined
         : async () => {
-            const m = await import("./active-session");
-            await m.changeAccountForSession(sessionId);
+            const { selectSession } = await import("./active-session");
+            await changeAccountForSession(sessionId, selectSession);
           },
       disabledReason: isDraft ? "Available once the chat starts" : (!sessionId ? "No session" : undefined),
     },
