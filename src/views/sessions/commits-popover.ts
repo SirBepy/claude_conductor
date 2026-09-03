@@ -11,11 +11,9 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { timeAgo } from "../../shared/time";
 import { PopoverShell } from "./statusbar-popover-shell";
+import type { CommitHistory, CommitHistoryEntry, CommitSync } from "../../types/ipc.generated";
 
-export interface CommitEntry { short_sha: string; message: string; }
-export interface CommitSync { ahead: CommitEntry[]; behind: CommitEntry[]; has_upstream: boolean; }
-export interface HistoryEntry { short_sha: string; message: string; pushed: boolean; timestamp: number; }
-export interface CommitHistory { entries: HistoryEntry[]; has_more: boolean; has_upstream: boolean; }
+export type { CommitSync } from "../../types/ipc.generated";
 
 const PAGE_SIZE = 30;
 /** Distance from the list's bottom edge that triggers the next page. */
@@ -31,7 +29,7 @@ export class CommitsPopover {
   private pushing = false;
   private pushError: string | null = null;
   private popEl: HTMLElement | null = null;
-  private history: HistoryEntry[] = [];
+  private history: CommitHistoryEntry[] = [];
   private historyLoaded = false;
   private historyMore = false;
   private historyLoading = false;
@@ -145,7 +143,7 @@ export class CommitsPopover {
     }
   }
 
-  private appendRows(entries: HistoryEntry[]): void {
+  private appendRows(entries: CommitHistoryEntry[]): void {
     const list = this.popEl?.querySelector<HTMLElement>(".sb-commit-history");
     if (!list) { this.rebuild(); return; }
     list.querySelector(".sb-history-sentinel")?.remove();
@@ -185,10 +183,10 @@ export class CommitsPopover {
     }
   }
 
-  private rowHtml(c: HistoryEntry): string {
+  private rowHtml(c: CommitHistoryEntry): string {
     const state = c.pushed ? "pushed" : "unpushed";
     const icon = c.pushed ? "ph-check" : "ph-arrow-up";
-    const age = c.timestamp ? timeAgo(new Date(c.timestamp * 1000).toISOString()) : "";
+    const age = c.timestamp ? timeAgo(new Date(Number(c.timestamp) * 1000).toISOString()) : "";
     const title = c.pushed ? "Pushed to upstream" : "Not pushed yet";
     return `<div class="sb-git-pop-commit sb-history-row ${state}" title="${title}">`
       + `<i class="ph ${icon} sb-history-mark"></i>`

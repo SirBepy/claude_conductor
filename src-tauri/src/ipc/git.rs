@@ -141,13 +141,15 @@ pub struct BranchEntry {
     pub upstream: Option<String>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitEntry {
     pub short_sha: String,
     pub message: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitSync {
     pub ahead: Vec<CommitEntry>,
     pub behind: Vec<CommitEntry>,
@@ -219,8 +221,9 @@ pub async fn get_commit_sync(cwd: String) -> CommitSync {
     .unwrap_or(empty)
 }
 
-#[derive(serde::Serialize)]
-pub struct HistoryEntry {
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct CommitHistoryEntry {
     pub short_sha: String,
     pub message: String,
     pub pushed: bool,
@@ -228,9 +231,10 @@ pub struct HistoryEntry {
     pub timestamp: i64,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitHistory {
-    pub entries: Vec<HistoryEntry>,
+    pub entries: Vec<CommitHistoryEntry>,
     pub has_more: bool,
     pub has_upstream: bool,
 }
@@ -257,7 +261,7 @@ pub async fn get_commit_history(cwd: String, offset: u32, limit: u32) -> CommitH
             &cwd,
             &["log", "--pretty=format:%H|%h|%ct|%s", "-n", &count, &skip, "HEAD"],
         );
-        let mut entries: Vec<HistoryEntry> = raw
+        let mut entries: Vec<CommitHistoryEntry> = raw
             .unwrap_or_default()
             .lines()
             .filter_map(|l| {
@@ -266,7 +270,7 @@ pub async fn get_commit_history(cwd: String, offset: u32, limit: u32) -> CommitH
                 let short = parts.next()?.trim();
                 let timestamp = parts.next()?.trim().parse::<i64>().unwrap_or(0);
                 let message = parts.next().unwrap_or("").to_string();
-                Some(HistoryEntry {
+                Some(CommitHistoryEntry {
                     short_sha: short.to_string(),
                     message,
                     pushed: has_upstream && !unpushed.contains(full),

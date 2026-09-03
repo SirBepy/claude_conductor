@@ -13,7 +13,9 @@ use claude_conductor_lib::ipc::accounts::{
 use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot};
 use claude_conductor_lib::ipc::ai_todos::AiTodoEntry;
 use claude_conductor_lib::ipc::servers::ServerInfo;
-use claude_conductor_lib::ipc::git::{BranchEntry, GitInfo};
+use claude_conductor_lib::ipc::git::{
+    BranchEntry, CommitEntry, CommitHistory, CommitHistoryEntry, CommitSync, GitInfo,
+};
 use claude_conductor_lib::ipc::worktrees::WorktreeDetail;
 use claude_conductor_lib::ipc::claude_scopes::ClaudeMdScope;
 use claude_conductor_lib::ipc::git_diff::PrFileChange;
@@ -105,6 +107,10 @@ fn emit_ipc_types() {
     // misc IPC
     out.push_str(&decl::<GitInfo>());
     out.push_str(&decl::<BranchEntry>());
+    out.push_str(&decl::<CommitEntry>());
+    out.push_str(&decl::<CommitSync>());
+    out.push_str(&decl::<CommitHistoryEntry>());
+    out.push_str(&decl::<CommitHistory>());
     out.push_str(&decl::<PrFileChange>());
     out.push_str(&decl::<TextFileData>());
     out.push_str(&decl::<AiTodoEntry>());
