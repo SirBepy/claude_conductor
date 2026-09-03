@@ -55,12 +55,14 @@ fn mark_ended_sets_end_reason_idempotently() {
 }
 
 #[test]
-fn prune_removes_ended_older_than_ttl() {
+fn prune_removes_ended_past_the_kept_count() {
     let r = reg();
     let settings = Mutex::new(Settings::default());
     r.register(input("s1", "C:/a", 100), &settings, "now");
     r.mark_ended("s1", EndReason::Manual, "2026-04-21T00:00:00Z");
-    r.prune_ended_before("2026-04-21T00:01:30Z"); // 90s later
+    // Retention is by volume, not age: keeping zero ended entries drops it
+    // however recently it ended.
+    r.prune_ended_keeping_newest(0);
     assert!(r.list().is_empty());
 }
 
