@@ -168,4 +168,10 @@ export function mountComposer(
     }
   }
   updateThinkingBar();
+
+  // Opening a chat should leave you able to paste, not just type: the
+  // type-anywhere relay covers keystrokes, but a real focus is what makes
+  // Ctrl+V, drag-drop and the caret land where you expect. Last, so nothing
+  // wired above takes the focus back.
+  if (!readOnly) composer.focus();
 }
