@@ -181,6 +181,7 @@ pub async fn send_message_with_respawn_meta_and_author(
 /// without respawning - shared by `restart_session` and `freeze_session`.
 pub async fn kill_and_wait_for_teardown(state: &Arc<DaemonState>, session_id: &str) {
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
+        session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
         crate::channels::kill::kill_tree(session.pid);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline && state.sessions.get(session_id).is_some() {
@@ -234,6 +235,7 @@ pub async fn end_session(map: &SessionMap, session_id: &str) -> Result<(), Lifec
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     // Force-kill if still present.
+    session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
     crate::channels::kill::kill_tree(session.pid);
     if let Some(ref p) = session.mcp_config_path {
         let _ = std::fs::remove_file(p);

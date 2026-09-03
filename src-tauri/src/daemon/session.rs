@@ -11,6 +11,11 @@ use tokio::sync::{broadcast, Mutex};
 
 pub const BROADCAST_CAPACITY: usize = 1024;
 
+/// How many trailing stderr lines to keep per session. The CLI's fatal errors
+/// (expired auth, MCP init failure, a panic backtrace) are the last thing it
+/// writes, so a tail is enough and a full transcript would grow unbounded.
+pub const STDERR_TAIL_LINES: usize = 40;
+
 /// Accumulated text of the in-flight streamed text block (ai_todo 186).
 /// Written by the pump on each coalesced delta flush; read by the attach
 /// paths (pipe `attach_session`, remote WS) to synthesize a full-text resync
@@ -108,6 +113,16 @@ pub struct Session {
     /// closest live proxy for MCP reachability, since the MCP child is a fresh
     /// HTTP-only process per turn with no attach/detach event. Reset on Ok.
     pub mcp_miss_streak: AtomicU32,
+    /// Trailing stderr lines from the `claude` child, oldest first, capped at
+    /// [`STDERR_TAIL_LINES`]. Read at pump exit so a non-zero exit can report
+    /// the CLI's own words.
+    pub stderr_tail: std::sync::Mutex<Vec<String>>,
+    /// Awaited before reading `stderr_tail`, so the fatal last line is in it.
+    pub stderr_drain: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Set before any deliberate kill (freeze, restart, end, `/close`). Windows
+    /// `TerminateProcess` stamps exit code 1, indistinguishable from a crash, so
+    /// without this every intentional teardown reports itself as one.
+    pub expected_exit: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
@@ -137,6 +152,9 @@ impl Session {
             last_prompt: std::sync::Mutex::new(String::new()),
             streaming: std::sync::Mutex::new(StreamingText::default()),
             mcp_miss_streak: AtomicU32::new(0),
+            stderr_tail: std::sync::Mutex::new(Vec::new()),
+            stderr_drain: tokio::sync::Mutex::new(None),
+            expected_exit: std::sync::atomic::AtomicBool::new(false),
         })
     }
 }

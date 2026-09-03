@@ -101,7 +101,53 @@ pub(crate) async fn run_pump_exit(
     if let Some(ref p) = pump_session.hook_settings_path {
         let _ = std::fs::remove_file(p);
     }
-    let _ = child.wait().await;
+    report_nonzero_exit(&pump_session, child.wait().await.ok()).await;
+}
+
+/// A `claude -p` turn exits 0. Anything else means the CLI died on us, and its
+/// stdout carried no result line, so without this the chat shows nothing at all.
+/// Replay the stderr tail as a notification so the failure names itself (expired
+/// login, MCP init failure, a panic) instead of reading as a frozen chat.
+async fn report_nonzero_exit(session: &Arc<Session>, status: Option<std::process::ExitStatus>) {
+    let code = match status {
+        Some(s) if s.success() => return,
+        Some(s) => s.code(),
+        None => return,
+    };
+    // A kill we asked for is not a crash worth reporting.
+    if session.expected_exit.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    // The fatal line is the LAST thing the child writes, so the tail is only
+    // trustworthy once the drain task has seen EOF. Bounded: a child that never
+    // closes stderr must not hold teardown open.
+    if let Some(handle) = session.stderr_drain.lock().await.take() {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+    }
+    let tail = session
+        .stderr_tail
+        .lock()
+        .ok()
+        .map(|t| t.join("
+"))
+        .unwrap_or_default();
+    let code_label = code.map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+    log::error!(
+        "daemon: session {} claude exited {code_label}; stderr tail:
+{tail}",
+        session.session_id
+    );
+    let body = if tail.trim().is_empty() {
+        format!("The `claude` process exited with code {code_label} and wrote nothing to stderr.")
+    } else {
+        format!("The `claude` process exited with code {code_label}:
+
+{tail}")
+    };
+    crate::daemon::broadcast::publish(
+        session,
+        crate::types::chat::ChatEvent::Notification { kind: "process_error".into(), body },
+    );
 }
 
 #[cfg(test)]

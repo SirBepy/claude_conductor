@@ -156,7 +156,7 @@ pub async fn spawn_session(
     let pid = child.id().expect("pid");
     let stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
-    let _stderr = child.stderr.take().expect("piped stderr");
+    let stderr = child.stderr.take().expect("piped stderr");
 
     let session = Session::new(
         session_id.clone(),
@@ -170,6 +170,8 @@ pub async fn spawn_session(
         account.id.clone(),
     );
     map.insert(session_id.clone(), Arc::clone(&session));
+    let drain = tokio::spawn(drain_stderr(stderr, Arc::clone(&session)));
+    *session.stderr_drain.lock().await = Some(drain);
     // Every spawn/respawn/restart path funnels through this one insertion
     // point, so bumping the epoch here (not at each of the five daemon-
     // internal respawn callers) covers all of them by construction - see
@@ -192,6 +194,26 @@ pub async fn spawn_session(
     // that is Phase 5b/phone-convergence work and must add uuid-based dedup first.
 
     Ok(session)
+}
+
+/// Read the child's stderr to EOF, logging each line and keeping a tail on the
+/// Session. Draining is not optional: the pipe has a finite OS buffer, so an
+/// unread stderr eventually blocks the child mid-write.
+async fn drain_stderr(stderr: tokio::process::ChildStderr, session: Arc<Session>) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut lines = BufReader::new(stderr).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if line.trim().is_empty() {
+            continue;
+        }
+        log::warn!("claude stderr [{}]: {}", session.session_id, line);
+        if let Ok(mut tail) = session.stderr_tail.lock() {
+            if tail.len() == crate::daemon::session::STDERR_TAIL_LINES {
+                tail.remove(0);
+            }
+            tail.push(line);
+        }
+    }
 }
 
 /// Re-spawn `session_id` from the Registry's recorded cwd/model/effort/
