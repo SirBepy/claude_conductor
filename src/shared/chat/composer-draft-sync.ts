@@ -28,6 +28,13 @@ function setKnownUpdatedAt(sessionId: string, updatedAt: string): void {
   saveSyncBaseline(sessionId, updatedAt);
 }
 
+/** Placeholder ids (prefix "pending-", see pending-flow.ts's makePlaceholderId)
+ *  have no daemon-side session yet - the daemon rejects any draft RPC on one
+ *  with -32602 unknown session_id. Same string check as state.ts/session-statusbar.ts. */
+function isPendingSessionId(sessionId: string): boolean {
+  return sessionId.startsWith("pending-");
+}
+
 export class ComposerDraftSync {
   private push: Debounced<[sessionId: string, text: string]>;
 
@@ -46,8 +53,10 @@ export class ComposerDraftSync {
     this.push.cancel();
   }
 
-  /** Every keystroke: coalesced into one write per 500ms of inactivity. */
+  /** Every keystroke: coalesced into one write per 500ms of inactivity.
+   *  No-ops for a still-pending session (no daemon id to write against). */
   notifyTyped(sessionId: string, text: string): void {
+    if (isPendingSessionId(sessionId)) return;
     this.push(sessionId, text);
   }
 
@@ -63,6 +72,7 @@ export class ComposerDraftSync {
 
   async clear(sessionId: string): Promise<void> {
     this.push.cancel();
+    if (isPendingSessionId(sessionId)) return;
     try {
       const res = await clearComposerDraft(sessionId);
       setKnownUpdatedAt(sessionId, res.updated_at);
@@ -75,6 +85,7 @@ export class ComposerDraftSync {
    *  session last knew about - null otherwise, including on a failed call.
    *  Caller must still check focus before applying the result. */
   async reconcile(sessionId: string): Promise<string | null> {
+    if (isPendingSessionId(sessionId)) return null;
     try {
       const drafts = await getSessionDrafts(sessionId);
       const remote = drafts.composer;

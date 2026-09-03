@@ -238,6 +238,10 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
     const row = await $(`#sessions-list li[data-session-id="${bId}"]`);
     await row.waitForExist({ timeout: 10000 });
     await row.click({ button: "right" });
+    // openCtxMenu's DOM insertion is synchronous JS, but the WebDriver click
+    // action can resolve before the browser dispatches contextmenu - wait for
+    // the first item instead of racing it (todo 842 group 2).
+    await $(".session-ctx-menu .session-ctx-item").waitForExist({ timeout: 5000 }).catch(() => {});
     // The ctx menu's last item is Close.
     const items = await $$(".session-ctx-menu .session-ctx-item");
     const closeItem = items[items.length - 1];

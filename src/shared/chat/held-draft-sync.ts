@@ -11,6 +11,13 @@ import {
 
 const EDIT_PUSH_DEBOUNCE_MS = 500;
 
+/** Placeholder ids (prefix "pending-", see pending-flow.ts's makePlaceholderId)
+ *  have no daemon-side session yet - the daemon rejects get_session_drafts on
+ *  one with -32602 unknown session_id. Same check as composer-draft-sync.ts. */
+function isPendingSessionId(sessionId: string): boolean {
+  return sessionId.startsWith("pending-");
+}
+
 export class HeldDraftSync {
   // Per-item debounced `update_held_message` push, keyed by the item's
   // CURRENT id (local until add_held_message resolves, then server-assigned).
@@ -29,6 +36,7 @@ export class HeldDraftSync {
    *  reorder against stage()'s pendingServerIds swap. Caller reads its own
    *  live item map (not a snapshot passed in here) for the merge. */
   reconcile(sessionId: string, onResolved: (serverItems: { id: number; blocks: ContentBlock[] }[]) => void): Promise<void> {
+    if (isPendingSessionId(sessionId)) return Promise.resolve();
     return getSessionDrafts(sessionId).then(
       (drafts) => {
         onResolved(drafts.held.map((h) => ({ id: h.id, blocks: h.blocks })));
