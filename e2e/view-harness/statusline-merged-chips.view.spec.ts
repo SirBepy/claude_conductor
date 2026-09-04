@@ -31,6 +31,10 @@ async function mount(page: Page, over: Record<string, unknown> = {}): Promise<vo
       list_ai_todos: [{ name: "889-git-card.md", path: `${SPAWN}/.claude/todos/889.md` }],
       get_commit_sync: { ahead: [{ short_sha: "a41c9d20", message: "one" }], behind: [], has_upstream: true },
       get_commit_history: HISTORY,
+      get_recent_branches: [
+        { name: "master", current: true, short_sha: "08828e1c", upstream: "origin/master" },
+        { name: "feat/claim-state", current: false, short_sha: "3f77b021", upstream: null },
+      ],
       ...over,
     },
   });
@@ -94,6 +98,7 @@ test.describe("view-harness / merged statusline chips", () => {
     await page.locator("#session-pane .sb-git-btn").click();
     const card = page.locator(".sb-git-card");
     await expect(card.locator(".gc-branchline .bname")).toHaveText("master");
+    await expect(card.locator(".gc-branchline .up")).toHaveText("origin/master");
     await expect(card.locator(".sb-history-row")).toHaveCount(2);
     await expect(card.locator(".sb-history-row").first()).toHaveClass(/unpushed/);
     // No drift, so the footer stays away.

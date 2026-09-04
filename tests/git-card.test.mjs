@@ -226,6 +226,15 @@ describe("git card branch mode", () => {
     });
   }
 
+  it("prints the current branch's upstream on the branch line", async () => {
+    ipcMock.impl = branchIpc();
+    const p = new GitCard();
+    open(p);
+    await flush();
+    expect(pop().querySelector(".gc-branchline .up").textContent).toBe("origin/master");
+    p.close();
+  });
+
   it("the branch line opens the branch list, and back returns to the history", async () => {
     ipcMock.impl = branchIpc();
     const p = new GitCard();

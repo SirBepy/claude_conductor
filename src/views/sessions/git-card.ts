@@ -109,13 +109,17 @@ export class GitCard {
     if (!cwd) return;
     const gen = this.historyGen;
     try {
-      const [info, sync] = await Promise.all([
+      // Branches ride along with the head load: the branch line prints the
+      // current one's upstream, and branch mode then opens already filled.
+      const [info, sync, branches] = await Promise.all([
         invoke<GitInfo>("get_git_info", { cwd }),
         invoke<CommitSync>("get_commit_sync", { cwd }),
+        invoke<BranchEntry[]>("get_recent_branches", { cwd }).catch(() => [] as BranchEntry[]),
       ]);
       if (this.cwd !== cwd || this.historyGen !== gen) return;
       this.info = info;
       this.sync = sync;
+      this.branches = branches;
       this.rebuild();
     } catch (err) {
       console.error("[git-card] head load failed", err);
@@ -175,24 +179,7 @@ export class GitCard {
   private setMode(mode: Mode): void {
     if (this.mode === mode) return;
     this.mode = mode;
-    if (mode === "branches" && this.branches === null) void this.loadBranches();
     this.rebuild();
-  }
-
-  private async loadBranches(): Promise<void> {
-    const cwd = this.cwd;
-    if (!cwd) return;
-    try {
-      const branches = await invoke<BranchEntry[]>("get_recent_branches", { cwd });
-      if (this.cwd !== cwd) return;
-      this.branches = branches;
-      if (this.mode === "branches") this.rebuild();
-    } catch (err) {
-      console.error("[git-card] get_recent_branches failed", err);
-      if (this.cwd !== cwd) return;
-      this.branches = [];
-      if (this.mode === "branches") this.rebuild();
-    }
   }
 
   /** Filtering repaints only the rows, so the caret position in the search box
@@ -322,9 +309,10 @@ export class GitCard {
   private branchLineHtml(): string {
     const branch = this.info?.branch;
     if (!branch) return "";
+    const upstream = this.branches?.find((b) => b.current)?.upstream ?? null;
     const up = this.sync?.has_upstream === false
       ? `<span class="up no-upstream">no upstream</span>`
-      : "";
+      : upstream ? `<span class="up">${escapeHtml(upstream)}</span>` : "";
     return `<div class="gc-branchline" role="button" tabindex="0" title="Show branches">`
       + `<i class="ph ph-git-branch lead"></i>`
       + `<span class="bname">${escapeHtml(branch)}</span>${up}`
