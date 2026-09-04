@@ -759,11 +759,9 @@
 .sb-chip.sb-git-btn:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--color-border); }
 
 /* -- Overflow chip -----------------------------------------------------------
-   Right-anchored and sticky: it is this row's only entry point to the session
-   panel, and the row scrolls horizontally on a phone, so a plain margin-left
-   would let the one control that matters scroll off the edge. Opaque (the tint
-   as a gradient layer over the bar's own colour) so chips pass underneath it
-   rather than through it. */
+   Sticky at the row's right edge: the row scrolls horizontally on a phone, and a
+   plain margin-left would let the row's only entry point to the session panel
+   scroll out of reach. Opaque so chips pass underneath it, not through it. */
 
 .sb-chip.sb-overflow {
   margin-left: auto;

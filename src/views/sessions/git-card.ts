@@ -1,15 +1,8 @@
 /**
- * The card behind the merged `git` statusline chip. Replaces the two popovers
- * that used to hang off two separate chips (branch list, commits history).
- *
- * The card is always about the CHAT'S OWN repo, never the one the AI wandered
- * into: it fetches against the spawn cwd, and a drift footer names where the AI
- * actually is. The chip above it is the opposite - it follows the live cwd, so
- * the two together read as "here is your repo; Claude is over there".
- *
- * Two modes share one shell: `history` (branch line, push/publish, the merged
- * commit list) and `branches` (a filterable, read-only branch list reached via
- * the branch line's caret).
+ * The card behind the merged `git` chip: what were two popovers (branch list,
+ * commit history) in one shell, plus a `branches` mode behind the branch line.
+ * It fetches against the SPAWN cwd while the chip follows the LIVE one, so the
+ * card is always about the chat's own repo and the drift footer names the other.
  */
 
 import { escapeHtml } from "../../shared/escape-html";
@@ -17,8 +10,6 @@ import { invoke } from "../../shared/ipc";
 import { timeAgo } from "../../shared/time";
 import { PopoverShell } from "./statusbar-popover-shell";
 import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitSync, GitInfo } from "../../types/ipc.generated";
-
-export type { CommitSync } from "../../types/ipc.generated";
 
 const PAGE_SIZE = 30;
 /** Distance from the list's bottom edge that triggers the next page. */
