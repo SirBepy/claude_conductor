@@ -1,11 +1,12 @@
 use super::registry::Registry;
 
 /// What the CLI's own Stop payload says the session is still doing, used to
-/// correct a turn that self-reported `done`. Derived in
+/// correct a turn that self-reported `done` or `working`. Derived in
 /// `daemon::hooks_server::activity` from `background_tasks` + `session_crons`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TurnActivity {
-    #[default]
+    /// No verdict, so it may never contradict a self-report. Not `Idle`.
+    Unknown,
     Idle,
     /// Local compute still running - a build, a subagent fan-out.
     Working,
@@ -25,9 +26,15 @@ impl TurnActivity {
     }
 
     /// Correct a self-report against what the CLI actually still has live.
-    /// Only `done` or a missing report is corrected - a deliberate
-    /// `question`/`waiting`/`working` is the model's call and stands.
+    /// `working` is the one report corrected DOWNWARD, and only against an
+    /// explicit `Idle`. Accepted gap: a `working` that really means "a peer
+    /// will wake me" also reads `Idle` here and gets cleared; that case owes
+    /// `waiting` per the tool schema, and no queue check catches it either.
     pub fn correct(self, reported: Option<String>) -> Option<String> {
+        // Must precede the gate below; `working` never reaches the match.
+        if self == TurnActivity::Idle && reported.as_deref() == Some("working") {
+            return None;
+        }
         if !matches!(reported.as_deref(), None | Some("done")) {
             return reported;
         }
@@ -36,7 +43,7 @@ impl TurnActivity {
             TurnActivity::WaitingOnProcess | TurnActivity::WaitingOnSchedule => {
                 Some("waiting".to_string())
             }
-            TurnActivity::Idle => reported,
+            TurnActivity::Idle | TurnActivity::Unknown => reported,
         }
     }
 }
@@ -161,18 +168,14 @@ impl Registry {
             .unwrap_or(false)
     }
 
-    /// Record what the Stop hook says this session is still doing. `Idle`
-    /// removes the entry so a stale verdict can't outlive the turn. Also
-    /// mirrors the sleep-safety half onto `Instance` - `when_done` only ever
-    /// sees `Instance`, never this side map.
+    /// Record what the Stop hook says this session is still doing. Stores
+    /// `Idle` explicitly so an absent entry can mean `Unknown`; `mark_ended`
+    /// owns eviction. Also mirrors the sleep-safety half onto `Instance` -
+    /// `when_done` only ever sees `Instance`, never this side map.
     pub fn set_turn_activity(&self, session_id: &str, activity: TurnActivity) {
         {
             let mut guard = self.turn_activity.lock().unwrap();
-            if activity == TurnActivity::Idle {
-                guard.remove(session_id);
-            } else {
-                guard.insert(session_id.to_string(), activity);
-            }
+            guard.insert(session_id.to_string(), activity);
         }
         let mut inner = self.inner.lock().unwrap();
         if let Some(i) = inner.get_mut(session_id) {
@@ -180,10 +183,10 @@ impl Registry {
         }
     }
 
-    /// Activity from the session's most recent Stop hook; `Idle` if it never
-    /// reported.
+    /// Activity from the session's most recent Stop hook; `Unknown` if it
+    /// never reported, so a missing hook cannot contradict a self-report.
     pub fn turn_activity(&self, session_id: &str) -> TurnActivity {
-        self.turn_activity.lock().unwrap().get(session_id).copied().unwrap_or_default()
+        self.turn_activity.lock().unwrap().get(session_id).copied().unwrap_or(TurnActivity::Unknown)
     }
 
     /// Record that `turn_gen` was opened by a daemon wake, not a user message.
@@ -257,6 +260,29 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_cli_clears_a_contradicted_working_report() {
+        assert_eq!(corrected(TurnActivity::Idle, Some("working")), None);
+    }
+
+    #[test]
+    fn an_idle_cli_leaves_the_other_deliberate_reports_alone() {
+        for reported in ["question", "waiting", "close_failed"] {
+            assert_eq!(
+                corrected(TurnActivity::Idle, Some(reported)).as_deref(),
+                Some(reported),
+                "{reported} is not contradicted by an empty task list"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_cli_verdict_never_corrects_anything() {
+        assert_eq!(corrected(TurnActivity::Unknown, Some("working")).as_deref(), Some("working"));
+        assert_eq!(corrected(TurnActivity::Unknown, Some("done")).as_deref(), Some("done"));
+        assert_eq!(corrected(TurnActivity::Unknown, None), None);
+    }
+
+    #[test]
     fn idle_activity_leaves_the_report_alone() {
         assert_eq!(corrected(TurnActivity::Idle, Some("done")).as_deref(), Some("done"));
         assert_eq!(corrected(TurnActivity::Idle, None), None);
@@ -270,6 +296,7 @@ mod tests {
         assert!(TurnActivity::WaitingOnProcess.holds_local_process());
         assert!(!TurnActivity::WaitingOnSchedule.holds_local_process());
         assert!(!TurnActivity::Idle.holds_local_process());
+        assert!(!TurnActivity::Unknown.holds_local_process());
     }
 
     #[test]
@@ -295,15 +322,27 @@ mod tests {
     }
 
     #[test]
-    fn turn_activity_roundtrip_and_idle_clears() {
+    fn turn_activity_roundtrip_and_never_reported_is_unknown() {
         let registry = Registry::new();
-        assert_eq!(registry.turn_activity("s"), TurnActivity::Idle);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Unknown);
         registry.set_turn_activity("s", TurnActivity::Working);
         assert_eq!(registry.turn_activity("s"), TurnActivity::Working);
         registry.set_turn_activity("s", TurnActivity::WaitingOnProcess);
         assert_eq!(registry.turn_activity("s"), TurnActivity::WaitingOnProcess);
         registry.set_turn_activity("s", TurnActivity::Idle);
         assert_eq!(registry.turn_activity("s"), TurnActivity::Idle);
+    }
+
+    /// The map's only eviction path now that `Idle` no longer removes.
+    #[test]
+    fn mark_ended_evicts_the_turn_activity_entry() {
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(crate::types::Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-09-04T00:00:00Z");
+        registry.set_turn_activity("s", TurnActivity::Working);
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Working);
+        registry.mark_ended("s", crate::types::EndReason::Manual, "2026-09-04T00:01:00Z");
+        assert_eq!(registry.turn_activity("s"), TurnActivity::Unknown, "the entry must not outlive the session");
     }
 
     #[test]

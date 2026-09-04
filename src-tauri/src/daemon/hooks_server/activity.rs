@@ -50,7 +50,14 @@ fn is_running(task: &Value) -> bool {
 /// `Working` wins over waiting: a local build alongside a CI poll is still
 /// work. A non-`shell` task is a subagent, always local work. The two waiting
 /// kinds differ only in whether a process would die if the machine slept.
-pub(crate) fn classify(background_tasks: &[Value], session_crons: &[Value]) -> TurnActivity {
+///
+/// `background_tasks: None` means the CLI omitted the field, which is not the
+/// same claim as an empty list and must not read as `Idle` - only an explicit
+/// empty list may contradict a self-reported `working` (todo 888).
+pub(crate) fn classify(background_tasks: Option<&[Value]>, session_crons: &[Value]) -> TurnActivity {
+    let Some(background_tasks) = background_tasks else {
+        return TurnActivity::Unknown;
+    };
     let running: Vec<&Value> = background_tasks.iter().filter(|t| is_running(t)).collect();
     for task in &running {
         let is_shell = task.get("type").and_then(Value::as_str) == Some("shell");
@@ -79,78 +86,92 @@ mod tests {
 
     #[test]
     fn no_tasks_and_no_crons_is_idle() {
-        assert_eq!(classify(&[], &[]), TurnActivity::Idle);
+        assert_eq!(classify(Some(&[]), &[]), TurnActivity::Idle);
+    }
+
+    /// todo 888: an omitted field is not a claim that nothing is running, so it
+    /// must not read as `Idle` and contradict a self-reported "working".
+    #[test]
+    fn an_omitted_background_tasks_field_is_unknown_not_idle() {
+        assert_eq!(classify(None, &[]), TurnActivity::Unknown);
+    }
+
+    /// A pending cron cannot upgrade a payload that never listed its tasks:
+    /// the unknown half is what decides.
+    #[test]
+    fn an_omitted_field_stays_unknown_even_with_a_pending_cron() {
+        assert_eq!(classify(None, &[json!({"id": "c1"})]), TurnActivity::Unknown);
     }
 
     #[test]
     fn a_build_is_working() {
-        assert_eq!(classify(&[shell("cargo build --release")], &[]), TurnActivity::Working);
-        assert_eq!(classify(&[shell("pnpm vitest run")], &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[shell("cargo build --release")]), &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[shell("pnpm vitest run")]), &[]), TurnActivity::Working);
     }
 
     #[test]
     fn a_ci_poll_is_waiting() {
-        assert_eq!(classify(&[shell("gh run watch 123 --exit-status")], &[]), TurnActivity::WaitingOnProcess);
-        assert_eq!(classify(&[shell("gh pr checks 45 --watch")], &[]), TurnActivity::WaitingOnProcess);
+        assert_eq!(classify(Some(&[shell("gh run watch 123 --exit-status")]), &[]), TurnActivity::WaitingOnProcess);
+        assert_eq!(classify(Some(&[shell("gh pr checks 45 --watch")]), &[]), TurnActivity::WaitingOnProcess);
     }
 
     #[test]
     fn a_bare_sleep_loop_is_waiting() {
-        assert_eq!(classify(&[shell("sleep 40")], &[]), TurnActivity::WaitingOnProcess);
+        assert_eq!(classify(Some(&[shell("sleep 40")]), &[]), TurnActivity::WaitingOnProcess);
     }
 
     #[test]
     fn wait_subcommands_are_waiting_without_naming_each_vendor() {
         for cmd in ["kubectl wait --for=condition=ready pod/x", "docker wait c1", "aws cloudformation wait stack-create-complete"] {
-            assert_eq!(classify(&[shell(cmd)], &[]), TurnActivity::WaitingOnProcess, "{cmd}");
+            assert_eq!(classify(Some(&[shell(cmd)]), &[]), TurnActivity::WaitingOnProcess, "{cmd}");
         }
     }
 
     /// The misfire I'd otherwise have shipped: a delay in front of real work.
     #[test]
     fn a_sleep_chained_into_a_build_is_working() {
-        assert_eq!(classify(&[shell("sleep 5 && cargo build")], &[]), TurnActivity::Working);
-        assert_eq!(classify(&[shell("gh run watch; npm test")], &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[shell("sleep 5 && cargo build")]), &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[shell("gh run watch; npm test")]), &[]), TurnActivity::Working);
     }
 
     #[test]
     fn a_subagent_task_is_always_working() {
         let task = json!({"id": "t1", "type": "task", "status": "running", "description": "review"});
-        assert_eq!(classify(&[task], &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[task]), &[]), TurnActivity::Working);
     }
 
     #[test]
     fn working_beats_waiting_when_both_are_live() {
-        assert_eq!(classify(&[shell("gh run watch"), shell("cargo build")], &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[shell("gh run watch"), shell("cargo build")]), &[]), TurnActivity::Working);
     }
 
     #[test]
     fn finished_tasks_do_not_count() {
         let done = json!({"id": "t1", "type": "shell", "status": "completed", "command": "cargo build"});
-        assert_eq!(classify(&[done], &[]), TurnActivity::Idle);
+        assert_eq!(classify(Some(&[done]), &[]), TurnActivity::Idle);
     }
 
     #[test]
     fn a_task_with_no_status_field_still_counts_as_running() {
         let legacy = json!({"id": "t1", "type": "shell", "command": "cargo build"});
-        assert_eq!(classify(&[legacy], &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[legacy]), &[]), TurnActivity::Working);
     }
 
     /// A scheduled wake is the certain half of this: no command matching, the
     /// session is parked by construction.
     #[test]
     fn a_pending_cron_alone_is_waiting() {
-        assert_eq!(classify(&[], &[json!({"id": "c1"})]), TurnActivity::WaitingOnSchedule);
+        assert_eq!(classify(Some(&[]), &[json!({"id": "c1"})]), TurnActivity::WaitingOnSchedule);
     }
 
     #[test]
     fn local_work_outranks_a_pending_cron() {
-        assert_eq!(classify(&[shell("cargo build")], &[json!({"id": "c1"})]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[shell("cargo build")]), &[json!({"id": "c1"})]), TurnActivity::Working);
     }
 
     #[test]
     fn a_shell_with_no_command_field_reads_as_work() {
         let odd = json!({"id": "t1", "type": "shell", "status": "running"});
-        assert_eq!(classify(&[odd], &[]), TurnActivity::Working);
+        assert_eq!(classify(Some(&[odd]), &[]), TurnActivity::Working);
     }
 }

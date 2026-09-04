@@ -156,7 +156,7 @@ pub(super) async fn on_stop(
         // hook responds, so the pump's result-line handler always reads a
         // fresh verdict (see `daemon::lifecycle`'s awaiting override).
         let activity = super::activity::classify(
-            payload.background_tasks.as_deref().unwrap_or(&[]),
+            payload.background_tasks.as_deref(),
             payload.session_crons.as_deref().unwrap_or(&[]),
         );
         ctx.state.registry.set_turn_activity(&session_id, activity);

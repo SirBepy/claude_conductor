@@ -213,6 +213,9 @@ impl Registry {
         // so a session-end sweep here is the only cleanup they get.
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
         self.pending_turn_gen.lock().unwrap().remove(session_id);
+        // Since todo 888 `set_turn_activity` inserts `Idle` instead of
+        // removing, so this is the map's only eviction path.
+        self.turn_activity.lock().unwrap().remove(session_id);
         crate::sessions::repo_channel::forget_session(session_id);
         true
     }

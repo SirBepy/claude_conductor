@@ -335,10 +335,19 @@ pub(crate) async fn run_stdout_pump(
                                     // The Stop hook fired just before this line, so the verdict
                                     // is fresh. Self-correcting: the finishing task re-invokes
                                     // the session and its own Stop refreshes it.
-                                    let awaiting = state_for_pump
+                                    let activity = state_for_pump
                                         .registry
-                                        .turn_activity(&pump_session.session_id)
-                                        .correct(awaiting);
+                                        .turn_activity(&pump_session.session_id);
+                                    let reported = awaiting.clone();
+                                    let awaiting = activity.correct(awaiting);
+                                    if reported != awaiting {
+                                        log::info!(
+                                            "daemon: session {} status corrected: reported={:?} activity={activity:?} -> {:?}",
+                                            pump_session.session_id,
+                                            reported.as_deref(),
+                                            awaiting.as_deref(),
+                                        );
+                                    }
                                     state_for_pump.registry.set_awaiting_if_gen(
                                         &pump_session.session_id,
                                         awaiting.clone(),

@@ -199,7 +199,10 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if let Some(account_id) = &s.account_id {
             registry.set_account(&s.session_id, account_id);
         }
-        if s.awaiting.is_some() {
+        // "working" means a process is running RIGHT NOW, so it is false by
+        // construction after a restart - restoring it strands the row as
+        // in-progress and blocks when-done forever (todo 888).
+        if s.awaiting.is_some() && s.awaiting.as_deref() != Some("working") {
             registry.set_awaiting(&s.session_id, s.awaiting.clone());
         }
         if s.jarvis {
