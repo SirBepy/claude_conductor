@@ -190,7 +190,8 @@ mod tests {
         TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SHOW_PREVIEW,
-        TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_USER_TODO,
+        TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_PLAN,
+        TOOL_WRITE_USER_TODO,
     };
 
     thread_local! {
@@ -368,6 +369,7 @@ mod tests {
             (TOOL_SEND_MESSAGE, "/messages/send"),
             (TOOL_UPDATE_MESSAGE, "/messages/update"),
             (TOOL_WRITE_USER_TODO, "/todos/write"),
+            (TOOL_WRITE_PLAN, "/plan/write"),
             (TOOL_SHOW_PREVIEW, "/hooks/preview"),
             (TOOL_SPAWN_WORKER, "/jarvis/spawn-worker"),
             (TOOL_SEND_TO_SESSION, "/jarvis/send-to-session"),

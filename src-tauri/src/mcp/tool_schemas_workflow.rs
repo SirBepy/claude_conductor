@@ -118,7 +118,7 @@ pub fn workflow_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_WRITE_PLAN,
-            "description": "Declare the steps of a multi-step response BEFORE you start, then update their status as you go; they render as a live checklist in the turn footer. Call it once up front with every step `pending`, so the user can object to step 4 while you are still on step 1 - that is the whole point, and a plan that appears one step at a time is worth much less than one he can read ahead in. Send the WHOLE plan every call, not a delta; each call replaces the last. A step is identified by its `text`, so keep the wording stable across calls or the row is treated as a new step. Exactly one step should be `active`. Use it for any response with 3+ real steps, including non-coding work. The user can attach a note to a step (\"skip this\", \"is this needed?\"); it reaches you when that step goes active.",
+            "description": "Declare the steps of a multi-step response BEFORE you start, then update their status as you go; they render as a live checklist in the turn footer. Call it once up front with every step `pending`, so the user can object to step 4 while you are still on step 1 - that is the whole point, and a plan that appears one step at a time is worth much less than one he can read ahead in. Send the WHOLE plan every call, not a delta; each call replaces the last. A step is identified by its `text`, so keep the wording stable across calls or the row is treated as a new step. Exactly one step should be `active`. Use it for any response with 3+ real steps, including non-coding work.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
