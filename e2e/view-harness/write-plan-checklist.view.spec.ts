@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, fireEvent } from "./harness";
 
 // The `write_plan` half of the checklist seam (todo 662: a fully built renderer
 // went unseen for weeks with nothing covering event-to-DOM), so these drive the
@@ -161,4 +161,68 @@ test("removing a detail removes the caret with it", async ({ page }) => {
   await drive([{ label: "Commit", status: "pending" }]);
   await expect(row.locator(".todo-step-caret")).toHaveCount(0);
   await expect(row).not.toHaveClass(/todo-step--has-detail/);
+});
+
+// The cancel and dual-indicator gates below both used to read
+// `turnTodosBaseline`, which only the TodoWrite branch sets (todo 902). Live
+// events, not a transcript: the progress path is skipped while hydrating, so a
+// history-driven spec would pass against the broken gate too.
+const LIVE_SESSION = sessionInstance({ busy: true, awaiting: null });
+const LIVE_CHANNEL = `chat:${LIVE_SESSION.session_id}`;
+const LIVE_ROWS = "#session-pane .session-messages .turn-footer .todo-checklist .todo-checklist-steps > li";
+
+async function mountLiveChat(page: Page): Promise<void> {
+  await mountView(page, {
+    view: "sessions",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [LIVE_SESSION],
+      get_active_sessions: [LIVE_SESSION],
+      load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+    },
+  });
+  await page.locator(`#sessions-list li[data-session-id="${LIVE_SESSION.session_id}"]`).click();
+  await page.waitForFunction((name) => {
+    const w = window as unknown as { __ccListeners?: Map<string, Set<unknown>> };
+    return (w.__ccListeners?.get(name)?.size ?? 0) > 0;
+  }, LIVE_CHANNEL);
+}
+
+function planTurn(steps: unknown[]): unknown[] {
+  return [
+    // remote_echo, or event-store.ts:484 drops it as a `--resume` replay and
+    // no turn footer is ever opened for the plan to land in.
+    { type: "user_message", content: [{ type: "text", text: "Do the things." }], timestamp: 0, remote_echo: true, is_meta: false },
+    { type: "tool_use", tool_name: "mcp__cc_conductor__write_plan", input: { steps }, id: "tu-live-1", timestamp: 0, parent_tool_use_id: null },
+  ];
+}
+
+test("cancelling a write_plan turn marks its active step interrupted", async ({ page }) => {
+  await mountLiveChat(page);
+  await fireEvent(page, LIVE_CHANNEL, planTurn([
+    { text: "Read the spec", status: "done" },
+    { text: "Wire the feed", status: "active" },
+    { text: "Commit", status: "pending" },
+  ]));
+
+  const rows = page.locator(LIVE_ROWS);
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1)).toHaveClass(/todo-step--active/);
+
+  await fireEvent(page, LIVE_CHANNEL, [
+    { type: "assistant_message", content: [{ type: "text", text: "[Request interrupted]" }], streaming: false, timestamp: 0 },
+  ]);
+  await expect(rows.nth(1)).toHaveClass(/todo-step--interrupted/);
+  await expect(rows.nth(1)).not.toHaveClass(/todo-step--active/);
+});
+
+test("a cc-progress token during a write_plan turn does not add a second indicator", async ({ page }) => {
+  await mountLiveChat(page);
+  await fireEvent(page, LIVE_CHANNEL, planTurn([{ text: "Wire the feed", status: "active" }]));
+  await fireEvent(page, LIVE_CHANNEL, [
+    { type: "assistant_message", content: [{ type: "text", text: "<cc-progress:2/5>" }], streaming: false, timestamp: 0 },
+  ]);
+
+  await expect(page.locator(LIVE_ROWS)).toHaveCount(1);
+  await expect(page.locator("#session-pane .session-messages .turn-footer .turn-progress")).toHaveCount(0);
 });

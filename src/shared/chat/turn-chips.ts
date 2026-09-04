@@ -388,6 +388,14 @@ export class TurnFooterRegistry {
     (chip.children[2] as HTMLElement).textContent = meta.streakCount > 1 ? `×${meta.streakCount}` : "";
   }
 
+  /** Whether this turn already owns a step checklist, whichever tool drove it.
+   *  Tool-agnostic on purpose: `turnTodosBaseline` is TodoWrite's diffing
+   *  state, and `write_plan` has no baseline semantics at all (todo 902).
+   *  Never creates a footer - a bare read must not mint a turn. */
+  hasTodoChecklist(key: TurnChipKey): boolean {
+    return this.turns.get(key)?.todoChecklist != null;
+  }
+
   /** Create the TodoWrite-driven step checklist DOM. See turn-todo-checklist.ts. */
   ensureTodoChecklist(key: TurnChipKey): void {
     this.getOrCreateFooter(key);

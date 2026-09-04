@@ -155,9 +155,9 @@
   color: var(--color-text);
 }
 
-/* TodoWrite-driven step checklist: replaces the visual role of .turn-progress
-   for a turn that emits TodoWrite calls (chat-event-handler.ts suppresses the
-   progress bar/callback once turnTodosBaseline is set). Pending circle ->
+/* Step checklist, driven by write_plan or TodoWrite: replaces the visual role
+   of .turn-progress for a turn that has one (chat-event-handler.ts suppresses
+   the progress bar/callback once hasTodoChecklist). Pending circle ->
    active spinner -> done checkmark-pop, connector line between rows filling
    as they complete, collapsing to a summary .turn-chip once settled. */
 .todo-checklist {

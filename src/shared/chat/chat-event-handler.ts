@@ -226,7 +226,8 @@ function handleAssistantMessageEvent(
       // closest thing to a "settle" step in this branch), so the
       // checklist visually reflects the cancel rather than being frozen
       // mid-spin.
-      if (noiseLabel === "Request interrupted by user" && r.activeTurnChipKey !== null && r.turnTodosBaseline !== null) {
+      if (noiseLabel === "Request interrupted by user" && r.activeTurnChipKey !== null
+        && r.turnFooters.hasTodoChecklist(r.activeTurnChipKey)) {
         r.turnFooters.interruptTodoChecklist(r.activeTurnChipKey);
       }
       // Finalize any in-progress streaming bubble first.
@@ -314,7 +315,7 @@ function handleAssistantMessageEvent(
     // Suppressed once a todo checklist owns this turn's visual progress
     // (the marker is still parsed out of the displayed text elsewhere -
     // only its bar/callback is skipped here to avoid a dual indicator).
-    if (r.turnTodosBaseline === null) {
+    if (!r.turnFooters.hasTodoChecklist(r.activeTurnChipKey)) {
       const prog = detectProgressToken(joined);
       if (prog) {
         r.lastProgress = prog;
