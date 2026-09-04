@@ -17,5 +17,6 @@ fn e(name: &str, args: Option<&str>, desc: &str) -> SlashEntry {
         args: args.map(str::to_string),
         description: desc.to_string(),
         source: SlashSource::Builtin,
+        path: None,
     }
 }

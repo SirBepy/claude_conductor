@@ -4,6 +4,7 @@ use ts_rs::TS;
 pub mod parse;
 pub mod builtins;
 pub mod enumerate;
+pub mod mentions;
 pub mod watcher;
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -12,6 +13,10 @@ pub struct SlashEntry {
     pub args: Option<String>,
     pub description: String,
     pub source: SlashSource,
+    /// Absolute path to the defining `SKILL.md` / command `.md`. `None` for
+    /// builtins, which have no file. `mentions` hands this to the model so it
+    /// can load a mid-message command it decides to run.
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
