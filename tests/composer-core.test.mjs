@@ -49,6 +49,20 @@ describe("ComposerCore highlight", () => {
     expect(highlightEl.innerHTML).toBe('<span class="custom">x</span>');
   });
 
+  it("drops the emptied backdrop out of the render tree", () => {
+    const { core, ta, highlightEl } = mount();
+    ta.value = "hello";
+    core.updateHighlight();
+    expect(highlightEl.style.display).toBe("");
+    ta.value = "";
+    core.updateHighlight();
+    expect(highlightEl.innerHTML).toBe("");
+    expect(highlightEl.style.display).toBe("none");
+    ta.value = "again";
+    core.updateHighlight();
+    expect(highlightEl.style.display).toBe("");
+  });
+
   it("no-ops when no highlightEl was supplied", () => {
     const ta = document.createElement("textarea");
     document.body.appendChild(ta);
