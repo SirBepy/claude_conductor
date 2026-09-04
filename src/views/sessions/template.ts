@@ -82,8 +82,6 @@ export function template() {
         </main>
         <div id="preview-panel-host" hidden></div>
       </div>
-      <!-- Phone Chat/Preview/Todos bar; CSS keeps it out of the desktop layout. -->
-      <div id="mobile-tabbar-host"></div>
     </div>
   `;
 }

@@ -210,10 +210,10 @@ export async function mountSessionsList(
 export interface SessionsLayoutOptions {
   /** Add the `.view-header` band (back button, title, dial host, kebab). */
   header?: boolean;
-  /** Mount the mobile pager over the layout. Implies `header`. */
-  pager?: boolean;
   /** Open the docked preview panel instead of leaving it closed. */
   openPanel?: boolean;
+  /** Mount the chat pane's FAB dial, wired to the docked preview controller. */
+  fab?: boolean;
 }
 
 /** Rebuilds `.sessions-layout` from template.ts markup and docks a preview panel
@@ -222,9 +222,9 @@ export interface SessionsLayoutOptions {
  *  Call {@link mountView} (with `list_previews` mocked) first. */
 export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOptions = {}): Promise<void> {
   const cfg = {
-    header: (opts.header ?? false) || (opts.pager ?? false),
-    pager: opts.pager ?? false,
+    header: opts.header ?? false,
     openPanel: opts.openPanel ?? false,
+    fab: opts.fab ?? false,
   };
   await page.evaluate(async (o) => {
     const pv = await import("/views/sessions/preview-panel.ts");
@@ -247,18 +247,20 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
         <aside class="sessions-sidebar"></aside>
         <main class="session-pane" id="session-pane"></main>
         <div id="preview-panel-host" hidden></div>
-      </div>
-      ${o.pager ? `<div id="mobile-tabbar-host"></div>` : ""}`;
+      </div>`;
     document.body.appendChild(view);
 
     const host = view.querySelector<HTMLElement>("#preview-panel-host")!;
     const controller = pv.renderPreview(host, { mode: "panel" });
     controller.setSessionScope("sess-1");
     if (o.openPanel) controller.open();
-    if (o.pager) {
-      const pager = await import("/views/sessions/mobile-pager.ts");
-      const layout = view.querySelector<HTMLElement>(".sessions-layout")!;
-      pager.mountMobilePager(view.querySelector<HTMLElement>("#mobile-tabbar-host")!, layout);
+    if (o.fab) {
+      const { mountFabDial } = await import("/views/sessions/fab-dial.ts");
+      const fab = mountFabDial(view.querySelector<HTMLElement>("#session-pane")!, {
+        onDraft: () => {},
+        preview: controller,
+      });
+      fab.setSessionScope("sess-1", "/proj");
     }
   }, cfg);
 }

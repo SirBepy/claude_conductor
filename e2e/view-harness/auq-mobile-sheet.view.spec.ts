@@ -101,7 +101,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
   // Supersedes the 2026-08-14 "project name never covered" call: the old
   // ~80px-tall sliver above the composer was unreadable, so the sheet now
   // goes truly fullscreen and the header unmounts with it (Joe, 2026-08-20).
-  test("fullscreen: card covers the whole viewport and the header/statusbar/tab bar unmount", async ({ page }) => {
+  test("fullscreen: card covers the whole viewport and the header/statusbar unmount", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, TALL_QUESTIONS);
     await page.waitForTimeout(200); // settle the entrance animation (translateY 6px -> 0)
@@ -111,7 +111,6 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     expect(cardBox.height).toBe(PHONE.height);
     await expect(page.locator(".session-header")).toBeHidden();
     await expect(page.locator(".session-statusbar")).toBeHidden();
-    await expect(page.locator(".mobile-tabbar")).toBeHidden();
   });
 
   // Permission cards have no `.prompt-pager` and keep the pre-fullscreen,

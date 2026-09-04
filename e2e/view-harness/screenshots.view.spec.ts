@@ -38,18 +38,15 @@ test.describe("@shot", () => {
     await capture(page, "sessions-desktop-panel");
   });
 
-  test("sessions phone pager", async ({ page }) => {
+  test("sessions phone chat and preview cover", async ({ page }) => {
     await page.setViewportSize(PHONE);
     await mountView(page, { invoke: { list_previews: [] } });
-    await mountSessionsLayout(page, { pager: true });
+    await mountSessionsLayout(page, { header: true, fab: true });
     await capture(page, "sessions-phone-chat");
 
-    await page.locator('.mtab[data-target="preview"]').click();
-    // The pager scroll-snaps over a frame or two, so shooting straight after the
-    // click still lands on the chat page.
-    await expect
-      .poll(() => page.evaluate(() => document.querySelector<HTMLElement>(".sessions-layout")!.scrollLeft))
-      .toBeGreaterThan(PHONE.width / 2);
+    await page.locator(".fab-dial-fab").click();
+    await page.locator('[data-dial="preview"]').click();
+    await expect(page.locator('[data-tab-body="preview"]')).toBeVisible();
     await capture(page, "sessions-phone-preview");
   });
 

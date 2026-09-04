@@ -28,16 +28,14 @@ async function mountPhoneSession(page: Page): Promise<void> {
 }
 
 test.describe("view-harness / mobile keyboard chrome-unmount", () => {
-  test("shrinking the viewport (keyboard open) hides the header/statusbar/tab bar", async ({ page }) => {
+  test("shrinking the viewport (keyboard open) hides the header and statusbar", async ({ page }) => {
     await mountPhoneSession(page);
     await expect(page.locator(".session-header")).toBeVisible();
-    await expect(page.locator(".mobile-tabbar")).toBeVisible();
 
     await page.setViewportSize({ width: PHONE.width, height: PHONE.height - KEYBOARD_HEIGHT });
     await expect(page.locator(".view-sessions")).toHaveAttribute("data-mobile-keyboard", "");
     await expect(page.locator(".session-header")).toBeHidden();
     await expect(page.locator(".session-statusbar")).toBeHidden();
-    await expect(page.locator(".mobile-tabbar")).toBeHidden();
   });
 
   test("restoring the viewport (keyboard closed) brings the chrome back", async ({ page }) => {
@@ -48,7 +46,6 @@ test.describe("view-harness / mobile keyboard chrome-unmount", () => {
     await page.setViewportSize(PHONE);
     await expect(page.locator(".view-sessions")).not.toHaveAttribute("data-mobile-keyboard", "");
     await expect(page.locator(".session-header")).toBeVisible();
-    await expect(page.locator(".mobile-tabbar")).toBeVisible();
   });
 
   test("desktop width never sets the keyboard attribute", async ({ page }) => {

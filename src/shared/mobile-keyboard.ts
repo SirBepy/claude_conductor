@@ -36,7 +36,7 @@ function apply(): void {
 }
 
 /** Wires the `.view-sessions` root to `visualViewport`; returns a detach
- *  function. Idempotent, mirrors initHeaderMerge/mountMobilePager. */
+ *  function. Idempotent, mirrors initHeaderMerge. */
 export function initMobileKeyboard(root: HTMLElement): () => void {
   _root = root;
   _closedBaseline = window.innerHeight;

@@ -14,11 +14,6 @@
   display: none;
 }
 
-/* Same mobile-only pattern as .sessions-back: the query below turns it on. */
-.mobile-tabbar {
-  display: none;
-}
-
 @media (max-width: 768px) {
   .view-sessions .view-body.sessions-layout {
     position: relative;
@@ -51,41 +46,25 @@
     display: none;
   }
 
-  /* ── Chat / rail pager (Joe, 2026-08-19) ──────────────────────────────
-     Two snap pages side by side. Scroll-snap rather than a JS gesture: the
-     preview is an iframe and eats touch before it reaches us, and native
-     scrolling needs no arbitration with the chat scroller or the chip row's
-     own overflow-x. The bottom bar is the guaranteed way off a rail page. */
-  .view-sessions[data-mobile-pane="chat"] .view-body.sessions-layout {
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-  }
-  .view-sessions[data-mobile-pane="chat"] .view-body.sessions-layout::-webkit-scrollbar {
-    display: none;
-  }
-  .view-sessions[data-mobile-pane="chat"] .session-pane,
-  .view-sessions[data-mobile-pane="chat"] #preview-panel-host {
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-    /* Beats PreviewPanel.applyWidth's inline `flex`, which is a desktop
-       split-pane width and meaningless once each page is a full screen. */
-    flex: 0 0 100% !important;
-    min-width: 100%;
-  }
-
-  /* The rail is always a page here, even with nothing pushed yet - the empty
-     state is what tells you previews land there. Overrides both the base
-     [hidden] guard and the >860px hide in preview-panel.css. */
-  .view-sessions[data-mobile-pane="chat"] #preview-panel-host,
-  .view-sessions[data-mobile-pane="chat"] #preview-panel-host[hidden] {
+  /* ── Preview: a full-screen cover, not a second page (Joe, 2026-09-04) ──
+     Covers rather than replaces, so the transcript keeps its scroll position.
+     `!important` beats applyWidth's inline width and preview-panel.css's
+     `display: none !important` under 860px; z-index clears .fab-dial-host's 30. */
+  .view-sessions[data-mobile-pane="chat"] #preview-panel-host:not([hidden]) {
     display: flex !important;
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    flex: 1 1 100% !important;
+    min-width: 100%;
+    border-left: none;
   }
 
-  /* The bottom bar replaces the rail's own strip and its close button; on a
-     phone you leave a page by swiping or tapping, never by closing it. */
-  .view-sessions[data-mobile-pane="chat"] .rail-strip,
-  .view-sessions[data-mobile-pane="chat"] .pv-resize-handle {
+  /* Nothing to drag against once the rail owns the whole screen, and pop-out
+     would open an OS window on the desktop the phone is driving. The strip
+     itself stays: its X is now the only way back to the chat. */
+  .view-sessions[data-mobile-pane="chat"] .pv-resize-handle,
+  .view-sessions[data-mobile-pane="chat"] .rail-strip [data-act="popout"] {
     display: none;
   }
 
@@ -126,86 +105,28 @@
 
   /* ── Fullscreen question sheet: replace the chrome, don't sit under it ──
      A pending AUQ question (permission-modal-shell.css's fullscreen block)
-     covers the whole pane - the header/statusbar/tab bar painting underneath
+     covers the whole pane - the header and statusbar painting underneath
      it would be dead weight (and still tab-orderable/screen-reader-reachable
      behind the sheet), so they unmount instead (Joe, 2026-08-20). Permission
      cards have no `.prompt-pager` and keep the old anchored-above-composer
      behavior untouched. */
   .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-header,
-  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-statusbar,
-  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .mobile-tabbar {
+  .view-sessions[data-mobile-pane="chat"]:has(#prompt-card-host .prompt-card__header .prompt-pager) .session-statusbar {
     display: none;
   }
 
   /* ── Soft keyboard open: same chrome-unmount, driven by mobile-keyboard.ts ──
-     Reclaims the header/statusbar/tab bar's real estate the moment the
+     Reclaims the header and statusbar's real estate the moment the
      keyboard shows, rather than shrinking everything to fit alongside it
      (Joe, 2026-08-20). --keyboard-inset (set alongside the attribute) is only
      non-zero when the native layout viewport didn't already resize itself -
      see mobile-keyboard.ts's doc comment. */
   .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-header,
-  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-statusbar,
-  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .mobile-tabbar {
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-statusbar {
     display: none;
   }
   .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-pane {
     padding-bottom: var(--keyboard-inset, 0px);
-  }
-
-  /* ── Bottom tab bar (V3: 30px paint, 44px tap) ────────────────────────── */
-  /* Chat mode only - the sessions LIST has nothing to page between. */
-  .view-sessions[data-mobile-pane="chat"] .mobile-tabbar {
-    display: flex;
-    flex-shrink: 0;
-    border-top: 1px solid var(--color-border);
-    background: var(--color-surface);
-    padding-bottom: env(safe-area-inset-bottom);
-    /* The bar is the one swipe surface that always works, so the browser must
-       hand us the horizontal gesture rather than claiming it. There is nothing
-       to scroll on the bar itself, so nothing is given up. */
-    touch-action: none;
-    user-select: none;
-  }
-  .mtab {
-    flex: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    padding: 7px 0;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-muted);
-    font: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    cursor: pointer;
-    position: relative;
-  }
-  .mtab i {
-    font-size: 15px;
-  }
-  /* Only the active tab spends width on its label, so it doubles as the
-     you-are-here marker and the other two stay pure icon. */
-  .mtab .mtab-lbl {
-    display: none;
-  }
-  .mtab.on .mtab-lbl {
-    display: inline;
-  }
-  .mtab.on {
-    background: var(--color-surface-alt);
-    color: var(--color-primary);
-  }
-  /* Paints 30px but taps 44px, clearing base.css's touch-target floor without
-     spending the height: the extra reaches up over the composer's margin. */
-  .mtab::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 44px;
   }
 
   /* Phone bubbles: the desktop 32px side margins waste a third of a narrow
@@ -239,11 +160,12 @@
     border-right: none;
     border-radius: 0;
   }
-  /* Tab bar already reserves env(safe-area-inset-bottom) in its own padding,
-     so the shell's copy just stacked blank space above it. Scoped out of the
-     keyboard-open state, which unmounts the bar and needs the clearance. */
+  /* The composer is the bottom-most chrome now that the tab bar is gone, so
+     it inherits the home-indicator clearance the bar used to reserve. The
+     keyboard-open state drops it: the keyboard already covers that strip. */
   .view-sessions[data-mobile-pane="chat"]:not([data-mobile-keyboard]) .composer-shell {
     margin-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
   }
   /* Corners follow the removed side borders; the fused thinking-bar/input
      boundary is the shared border, not the radius, so the merge survives. */

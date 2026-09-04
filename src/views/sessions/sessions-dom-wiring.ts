@@ -5,7 +5,6 @@
 import { invoke } from "../../shared/ipc";
 import * as shortcuts from "../../shared/shortcuts";
 import { renderPreview, type PreviewController } from "./preview-panel";
-import { mountMobilePager } from "./mobile-pager";
 import { mountFabDial } from "./fab-dial";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft } from "./pending-flow";
@@ -54,13 +53,6 @@ export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewC
     previewRoot ? renderPreview(previewRoot, { mode: "panel" }) : null;
   state.previewController = previewController;
   previewController?.setSessionScope(state.selectedId);
-  // Phone pager over the same two panes (Joe, 2026-08-19). Mounted alongside
-  // the rail because it drives the rail's tab; CSS keeps it off desktop.
-  const tabbarHost = root.querySelector<HTMLElement>("#mobile-tabbar-host");
-  const layout = root.querySelector<HTMLElement>(".sessions-layout");
-  if (tabbarHost && layout && previewController) {
-    mountMobilePager(tabbarHost, layout);
-  }
 
   // Ask / Todos / Preview, summoned from the chat pane rather than docked
   // (Joe, 2026-08-24). Owns its own host element because active-session.ts

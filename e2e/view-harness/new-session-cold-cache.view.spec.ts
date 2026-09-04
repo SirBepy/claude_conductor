@@ -64,8 +64,8 @@ async function mountColdSessions(page: Page): Promise<void> {
 }
 
 // .sessions-fab is display:none above 640px (session-list.css) - it's the
-// mobile-pager entry point to the same startNewSession() the desktop kebab's
-// "+ New session" item calls, so a mobile viewport is required to reach it.
+// phone session list's entry point to the same startNewSession() the desktop
+// kebab's "+ New session" item calls, so a mobile viewport is required.
 test.describe("view-harness / new-session cold cache", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
