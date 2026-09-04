@@ -49,6 +49,7 @@ export {
 } from "./session-statusbar-helpers";
 
 const EMPTY_META: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
+const EMPTY_GIT_INFO: GitInfo = { branch: null, repo: null, ahead: null, behind: null, sha: null, insertions: null, deletions: null };
 
 // Chip HTML builders live in statusbar-chips.ts (todo 748): a per-render
 // ChipRenderCtx snapshot plus callback params replace the `this` reads that
@@ -57,7 +58,7 @@ export class SessionStatusbar {
   private container: HTMLElement;
   private rows: ChipType[][];
   private meta: SessionMeta = EMPTY_META;
-  private gitInfo: GitInfo = { branch: null, repo: null, ahead: null, behind: null, sha: null, insertions: null, deletions: null };
+  private gitInfo: GitInfo = EMPTY_GIT_INFO;
   private gitInfoLoaded = false;
   private metaLoaded = false;
   private counts: SessionCounts | null = null;
@@ -276,7 +277,9 @@ export class SessionStatusbar {
   }
 
   updateGitInfo(info: GitInfo): void {
-    this.gitInfo = info;
+    // A transport that silently degrades an unwired command answers null, and
+    // one null here takes the whole bar's render down with it.
+    this.gitInfo = info ?? EMPTY_GIT_INFO;
     this.gitInfoLoaded = true;
     if (this.gitCwd) gitInfoCache.set(this.gitCwd, info);
     this.render();
