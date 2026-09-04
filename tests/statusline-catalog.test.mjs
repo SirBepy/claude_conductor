@@ -5,8 +5,8 @@ import {
 import { migrateLegacyFields } from "../src/views/sessions/session-statusbar-helpers.ts";
 
 describe("statusline catalog", () => {
-  it("DEFAULT_ROWS has 2 rows within the cap", () => {
-    expect(DEFAULT_ROWS.length).toBe(2);
+  it("DEFAULT_ROWS is one row within the cap", () => {
+    expect(DEFAULT_ROWS.length).toBe(1);
     expect(DEFAULT_ROWS.length).toBeLessThanOrEqual(MAX_ROWS);
   });
   it("every DEFAULT_ROWS chip is known", () => {

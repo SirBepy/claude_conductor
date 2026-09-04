@@ -102,6 +102,9 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
     case "context_tokens": return renderContext(true, ctx);
     case "thinking":
       return ctx.meta.hasThinking ? `<span class="sb-chip sb-thinking active${ac("thinking")}"><i class="ph ph-brain"></i>thinking</span>` : "";
+    case "git": return renderGitChip(ctx);
+    case "overflow":
+      return `<span class="sb-chip sb-overflow sb-overflow-btn${ac("overflow")}" role="button" tabindex="0" title="Session stats, drain and tool mix"><i class="ph ph-dots-three"></i></span>`;
     case "branch": {
       if (ctx.gitInfo.branch) return `<span class="sb-chip sb-branch sb-branch-btn${ac("branch")}" role="button" tabindex="0"><i class="ph ph-git-branch"></i>${escapeHtml(ctx.gitInfo.branch)}</span>`;
       if (!ctx.gitInfoLoaded) return skeletonChip("branch", "sb-branch", "ph-git-branch", "60px");
@@ -162,6 +165,46 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       return `<span class="sb-flex-sep" aria-hidden="true"></span>`;
     default: return "";
   }
+}
+
+/** Names the repo the AI has moved into, or "" while it is still in the chat's
+ *  own repo. Shared by the git chip (which prints it as a segment) and the git
+ *  card (which prints it as the drift footer), so the two can never disagree
+ *  about whether drift is happening. */
+export function driftLabel(spawnCwd: string | null, gitCwd: string | null, repo: string | null): string {
+  if (isAtSpawnLocation(spawnCwd, gitCwd)) return "";
+  if (repo) return repo;
+  return gitCwd ? gitCwd.split(/[\\/]+/).filter(Boolean).pop() ?? "" : "";
+}
+
+/** Prints only what the reader cannot already assume: the branch always,
+ *  ahead/behind only when non-zero, a struck-out cloud when there is no upstream
+ *  to be ahead or behind OF, and the repo name only once the AI has left the
+ *  chat's own repo - that name's presence IS the drift signal. */
+export function renderGitChip(ctx: ChipRenderCtx): string {
+  const g = ctx.gitInfo;
+  if (!g.branch) {
+    return ctx.gitInfoLoaded ? "" : skeletonChip("git", "sb-git", "ph-git-branch", "77px");
+  }
+  const segs: string[] = [];
+  const title: string[] = [];
+  const away = driftLabel(ctx.cwd, ctx.gitCwd, g.repo);
+  if (away) {
+    segs.push(`<span class="sb-git-seg sb-git-away"><i class="ph ph-arrow-bend-up-right"></i>${escapeHtml(away)}</span>`);
+    title.push(`Claude is in ${away}`);
+  }
+  segs.push(`<span class="sb-git-seg sb-git-branch-seg"><i class="ph ph-git-branch"></i>${escapeHtml(g.branch)}</span>`);
+  title.push(`on ${g.branch}`);
+  const ahead = g.ahead ?? 0, behind = g.behind ?? 0;
+  if (g.ahead === null && g.behind === null) {
+    segs.push(`<span class="sb-git-seg sb-git-noup"><i class="ph ph-cloud-slash"></i></span>`);
+    title.push("no upstream branch");
+  } else {
+    if (ahead > 0) { segs.push(`<span class="sb-git-seg sb-git-ahead">↑${ahead}</span>`); title.push(`${ahead} unpushed`); }
+    if (behind > 0) { segs.push(`<span class="sb-git-seg sb-git-behind">↓${behind}</span>`); title.push(`${behind} incoming`); }
+  }
+  const body = segs.join(`<span class="sb-git-rule"></span>`);
+  return `<span class="sb-chip sb-git sb-git-btn${animClass(ctx.animatedKeys, "git")}" role="button" tabindex="0" title="${escapeHtml(title.join(", "))}">${body}</span>`;
 }
 
 export function renderContext(asTokens: boolean, ctx: ChipRenderCtx): string {

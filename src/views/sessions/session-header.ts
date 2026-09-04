@@ -1,4 +1,5 @@
 import { escapeHtml } from "../../shared/escape-html";
+import { modelLabel as shortModelName } from "../../shared/model-name";
 import { projBadgeHtml } from "./sidebar-row-visuals";
 
 export interface SessionHeaderBindOpts {
@@ -21,7 +22,8 @@ export class SessionHeader {
 
   private readonly _wrap: HTMLElement;
   private readonly _titleEl: HTMLElement;
-  private readonly _metaEl: HTMLElement;
+  private readonly _projEl: HTMLElement;
+  private readonly _cfgEl: HTMLElement;
 
   private readonly _onDiscard: (() => void) | undefined;
 
@@ -43,7 +45,10 @@ export class SessionHeader {
       `</span>`,
       `<div class="session-header-text">`,
       `  <span class="title">${escapeHtml(opts.title)}</span>`,
-      `  <span class="meta">${escapeHtml(opts.meta)}</span>`,
+      `  <span class="meta">`,
+      `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
+      `    <span class="meta-cfg"></span>`,
+      `  </span>`,
       `</div>`,
       `<button class="icon-btn discard-btn" title="Discard draft">`,
       `  <i class="ph ph-x-circle"></i>`,
@@ -54,7 +59,8 @@ export class SessionHeader {
     this.el = el;
     this._wrap = el.querySelector(".session-header-avatar-wrap")!;
     this._titleEl = el.querySelector(".title")!;
-    this._metaEl = el.querySelector(".meta")!;
+    this._projEl = el.querySelector(".meta-proj")!;
+    this._cfgEl = el.querySelector(".meta-cfg")!;
 
     el.querySelector<HTMLButtonElement>(".discard-btn")?.addEventListener("click", () => {
       this._onDiscard?.();
@@ -68,7 +74,15 @@ export class SessionHeader {
   }
 
   setTitle(text: string): void { this._titleEl.textContent = text; }
-  setMeta(text: string): void { this._metaEl.textContent = text; }
+  setMeta(text: string): void { this._projEl.textContent = text; }
+
+  /** Model and effort as text at the far right of the meta line. Both are fixed
+   *  for the session's life, so they read as labels; the statusline's own
+   *  model/effort chips stay the place to change them. */
+  setConfig(model: string | null, effort: string): void {
+    const parts = [model ? shortModelName(model) : "", effort].filter(Boolean);
+    this._cfgEl.textContent = parts.join(" · ");
+  }
 
   setRemote(isRemote: boolean): void {
     const existing = this.el.querySelector(".session-header-remote-badge");

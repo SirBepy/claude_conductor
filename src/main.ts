@@ -283,6 +283,8 @@ if (!await ensureRemoteToken()) {
 // reload on every single load - an inescapable reload loop (the "page
 // refreshing constantly" bug).
 installPermissionModalListener();
+// One-time statusline rows rewrite; a no-op on every boot after the first.
+void import("./views/sessions/session-statusbar-helpers").then((m) => m.migrateStatuslineToV2());
 // Let the permission relay re-render the sidebar when it parks/clears a
 // backgrounded chat's prompt (injected to avoid a static import cycle).
 setSidebarRerenderHook(() => {

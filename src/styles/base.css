@@ -1,3 +1,10 @@
+/* The themes' own --color-text-muted measures 3.53:1 on a chip background, under
+   the 4.5:1 floor for text that size. Mixing it toward --color-text clears the
+   floor in every theme and both modes, which a hardcoded hex could not. */
+:root {
+    --sb-muted: color-mix(in srgb, var(--color-text-muted) 62%, var(--color-text));
+}
+
 *, *::before, *::after {
     box-sizing: border-box;
     margin: 0;

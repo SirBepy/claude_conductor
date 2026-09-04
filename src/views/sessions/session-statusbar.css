@@ -103,7 +103,7 @@
   border-radius: 4px;
   font-size: 0.73rem;
   font-family: 'Fira Code', monospace;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
   white-space: nowrap;
@@ -553,9 +553,8 @@
 
 .sb-git-pop-sha {
   flex-shrink: 0;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   font-size: 0.7rem;
-  opacity: 0.7;
 }
 
 .sb-git-pop-upstream {
@@ -607,8 +606,7 @@
 .sb-git-pop-commit .sb-git-pop-sha {
   flex-shrink: 0;
   font-size: 0.7rem;
-  color: var(--color-text-muted);
-  opacity: 0.75;
+  color: var(--sb-muted);
 }
 
 .sb-git-pop-msg {
@@ -648,8 +646,7 @@
 .sb-history-age {
   flex-shrink: 0;
   font-size: 0.68rem;
-  color: var(--color-text-muted);
-  opacity: 0.7;
+  color: var(--sb-muted);
 }
 
 .sb-history-sentinel {
@@ -725,3 +722,241 @@
 /* Images chip rules live in session-statusbar-images.css, imported by each TS
    call site right after this sheet. A mid-file @import is invalid CSS and Vite
    drops it silently, taking every .sb-images rule with it. */
+
+/* -- Merged git chip ---------------------------------------------------------
+   Segments sit inside one chip and are divided by a hairline, so branch,
+   drift and counts read as one fact about one repo rather than three chips. */
+
+.sb-chip.sb-git {
+  gap: 0;
+  padding: 2px 3px 2px 7px;
+  border-color: rgba(74, 222, 128, 0.18);
+}
+
+.sb-git-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+}
+
+.sb-git-seg:first-child { padding-left: 0; }
+
+.sb-git-rule {
+  width: 1px;
+  height: 12px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.sb-git-branch-seg { color: #4ade80; }
+.sb-git-ahead { color: #4ade80; }
+.sb-git-behind { color: #fbbf24; }
+.sb-git-noup { color: var(--sb-muted); }
+.sb-git-away { color: var(--sb-muted); }
+
+.sb-chip.sb-git-btn { cursor: pointer; }
+.sb-chip.sb-git-btn:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--color-border); }
+
+/* -- Overflow chip -----------------------------------------------------------
+   Anchored to the right end of its row: it is the row's terminator, so it must
+   not drift left as the chips before it change width. */
+
+.sb-chip.sb-overflow {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.sb-chip.sb-overflow:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--color-border); }
+.sb-chip.sb-overflow i { opacity: 0.9; }
+
+/* -- Git card ------------------------------------------------------------- */
+
+.sb-git-card { width: 340px; }
+
+.gc-branchline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.gc-branchline:hover { background: rgba(255, 255, 255, 0.05); }
+
+.gc-branchline .bname {
+  color: #4ade80;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gc-branchline i.lead { color: #4ade80; font-size: 0.85rem; }
+.gc-branchline i.caret { color: var(--sb-muted); font-size: 0.8rem; }
+.gc-branchline .up { color: var(--sb-muted); font-size: 0.68rem; flex-shrink: 0; }
+
+.sb-git-pop-header.gc-back { cursor: pointer; }
+.sb-git-pop-header.gc-back:hover { background: rgba(255, 255, 255, 0.05); }
+
+.gc-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.gc-search i { color: var(--sb-muted); font-size: 0.85rem; }
+
+/* Specificity beats widgets.css's bare `input` rules, which otherwise win on
+   source order at equal weight. */
+.sb-git-popover .gc-search input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  color: var(--color-text);
+  font-family: 'Fira Code', monospace;
+  font-size: 0.72rem;
+  outline: none;
+}
+
+.gc-hint {
+  padding: 6px 12px 8px;
+  color: var(--sb-muted);
+  font-size: 0.66rem;
+}
+
+/* Drift footer: the card is always about the chat's own repo, so this line is
+   the only place the repo the AI moved into is named, and it reads last. */
+.gc-away-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--color-border);
+  color: var(--sb-muted);
+  font-size: 0.67rem;
+}
+
+.gc-away-foot i { color: #fbbf24; font-size: 0.82rem; flex-shrink: 0; }
+
+/* -- Overflow panel ------------------------------------------------------- */
+
+.sb-overflow-popover {
+  width: 320px;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.71rem;
+  color: var(--sb-muted);
+  padding: 11px 12px 12px;
+}
+
+.ov-head {
+  color: var(--sb-muted);
+  font-size: 0.6rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.ov-meters + .ov-head,
+.ov-mixrow + .ov-head { margin-top: 14px; }
+
+.ov-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.ov-tile {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+
+.ov-tile-v { color: var(--color-text); font-size: 1.05rem; line-height: 1.15; }
+.ov-tile-k { color: var(--sb-muted); font-size: 0.6rem; letter-spacing: 0.04em; margin-top: 2px; }
+
+.ov-meters { margin-top: 11px; }
+
+.ov-meter-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 9px 0 4px;
+}
+
+.ov-meter-label b { color: var(--color-text); font-weight: 400; }
+
+.ov-meter-track {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.ov-meter-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 0 3px 3px 0;
+}
+
+.ov-meter-fill.warn { background: #fbbf24; }
+.ov-meter-fill.danger { background: #f87171; }
+
+.ov-mix-lede { color: var(--sb-muted); font-size: 0.69rem; margin-bottom: 5px; }
+.ov-mix-lede b { color: var(--color-text); font-weight: 400; }
+
+/* 22px, not the 10px a bare ratio bar wants: at 10px the strip is unhoverable,
+   and hover is what links a segment to its key row. */
+.ov-mix {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 3px 0 10px;
+}
+
+.ov-mix span {
+  display: block;
+  background: var(--color-primary);
+  transition: filter 120ms ease;
+}
+
+.ov-mixrow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px 14px;
+}
+
+.ov-mixrow div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.ov-sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.ov-nm { flex: 1; min-width: 0; }
+.ov-mixrow b { color: var(--color-text); font-weight: 400; }
+.ov-mixrow div.zero .ov-sw { background: rgba(255, 255, 255, 0.16); }
+.ov-mixrow div.zero b { color: var(--sb-muted); }
+
+.sb-overflow-popover:hover .ov-mix span { filter: brightness(0.55) saturate(0.5); }
+.sb-overflow-popover .ov-mix span:hover { filter: none; }
+.sb-overflow-popover .ov-mixrow div:hover { color: var(--color-text); }

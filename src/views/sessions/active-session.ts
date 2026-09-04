@@ -238,7 +238,12 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   mountComposer(pane, sess, sessionId, readOnly);
 
   // Mount statusbar.
-  await mountStatusbar(pane, sess, () => { void changeAccountForSession(sess.session_id, selectSession); });
+  await mountStatusbar(
+    pane,
+    sess,
+    () => { void changeAccountForSession(sess.session_id, selectSession); },
+    (model, effort) => header.setConfig(model, effort),
+  );
 
   // Attach renderer + changes panel; bail out if a newer mount/selectSession
   // superseded us mid-await (same bail-out the inline code used to do).

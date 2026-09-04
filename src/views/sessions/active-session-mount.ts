@@ -37,6 +37,7 @@ export async function mountStatusbar(
   pane: HTMLElement,
   sess: Instance,
   onAccountClick: () => void,
+  onConfig?: (model: string | null, effort: string) => void,
 ): Promise<SessionStatusbar | null> {
   const myMount = state.mountId;
   const sessionId = sess.session_id;
@@ -66,6 +67,7 @@ export async function mountStatusbar(
     hideZero,
     accountId: sess.account_id ?? null,
     onAccountClick,
+    onConfig,
   });
   state.statusbar = sb;
   // Git info is owned by the statusbar itself: it resolves the session's live

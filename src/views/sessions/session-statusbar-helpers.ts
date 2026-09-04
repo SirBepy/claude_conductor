@@ -67,6 +67,32 @@ function sanitizeRows(raw: unknown, maxRows: number): ChipType[][] | null {
   return trimmed.length ? trimmed : null;
 }
 
+/** Set once the saved rows have been replaced by the merged-chip layout. */
+const V2_FLAG = "statuslineRowsV2Applied";
+
+/**
+ * Replaces both profiles' saved rows with the current defaults, once per
+ * install: the merged `git` and `overflow` chips subsume six chips a saved
+ * layout still lists individually. Lives here rather than in loadStatuslineRows
+ * so that a load stays a pure read.
+ */
+export async function migrateStatuslineToV2(): Promise<void> {
+  try {
+    const s = await invoke<Record<string, unknown>>("get_settings");
+    if (s[V2_FLAG] === true) return;
+    await invoke("save_settings", {
+      updated: {
+        ...s,
+        statuslineRows: profileDefaultRows("desktop"),
+        statuslineRowsMobile: profileDefaultRows("mobile"),
+        [V2_FLAG]: true,
+      },
+    });
+  } catch (e) {
+    console.error("[statusbar] statusline v2 migration failed", e);
+  }
+}
+
 export async function loadStatuslineRows(profile: StatuslineProfile = activeProfile()): Promise<ChipType[][]> {
   try {
     const s = await invoke<Record<string, unknown>>("get_settings");
@@ -185,4 +211,7 @@ export interface StatusbarOptions {
   accountId?: string | null;
   /** Called when the `account` chip is clicked, to open the change-account picker. */
   onAccountClick?: () => void;
+  /** Fired per render with the live model + effort. The statusbar owns both (the
+   *  popovers commit into it), so pushing keeps the header from going stale. */
+  onConfig?: (model: string | null, effort: string) => void;
 }

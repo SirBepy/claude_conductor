@@ -31,6 +31,7 @@ export const STATIC_CHIPS = {
   context_tokens: { section: "model",   icon: "ph-stack",            sample: "90k / 200k", tooltip: "Context window used, raw tokens / window size." },
   thinking:       { section: "model",   icon: "ph-brain",            sample: "thinking",   tooltip: "Shows while extended thinking is active." },
 
+  git:            { section: "git",     icon: "ph-git-branch",       sample: "main",       tooltip: "Branch, plus anything unpushed or incoming. The repo name appears only once the AI has moved into a different repo. Click for commits and branches." },
   branch:         { section: "git",     icon: "ph-git-branch",       sample: "main",       tooltip: "Current git branch." },
   repo:           { section: "git",     icon: "ph-folder-simple",    sample: "my-project", tooltip: "Repository name (from origin). Hidden while the chat is still in the folder it was opened in." },
   folder:         { section: "git",     icon: "ph-folder-open",      sample: "my-project", tooltip: "Working directory. Hidden while the chat is still in the folder it was opened in; appears once the AI moves elsewhere. Click to open in your file explorer." },
@@ -50,6 +51,7 @@ export const STATIC_CHIPS = {
   drain:          { section: "session", icon: "ph-drop",             sample: "50% · 12%w", tooltip: "Share of a 5h session this chat has drained (and weekly). Click for a per-message rundown." },
   servers:        { section: "session", icon: "ph-broadcast",        sample: "1 live",     tooltip: "Dev servers running for this project via server_supervisor. Click to list them and open each in the browser.", countLike: true },
   images:         { section: "session", icon: "ph-image",           sample: "12 imgs",    tooltip: "Every image in this chat (attachments + tool screenshots). Click to view the list.", countLike: true },
+  overflow:       { section: "session", icon: "ph-dots-three",       sample: "···",        tooltip: "Message/turn/duration counts, the two drain meters and the tool mix, in one panel. Sits at the right end of its row." },
 
   separator:      { section: "layout",  icon: "ph-minus",            sample: "|",          tooltip: "Vertical divider line between chips." },
   flex_separator: { section: "layout",  icon: "ph-arrows-left-right", sample: "· · ·",    tooltip: "Flexible spacer: pushes chips after it to the right end." },
@@ -65,6 +67,11 @@ export const TOOL_CHIP_TOOLS = [
   "Task", "TodoWrite", "AskUserQuestion", "Skill", "Search",
 ] as const;
 
+/** The tools the overflow panel's mix strip and key always account for, in
+ *  canonical order. Zeroes stay in the key at low emphasis, so a tool that was
+ *  never called is visibly zero rather than silently missing. */
+export const PANEL_TOOLS = ["Read", "Edit", "Grep", "Bash", "Task", "Skill", "Search"] as const;
+
 export type StaticChipType = keyof typeof STATIC_CHIPS;
 export type ToolChipType = `tool:${string}`;
 export type ChipType = StaticChipType | ToolChipType;
@@ -77,20 +84,19 @@ export function chipToolName(t: ToolChipType): string {
   return t.slice("tool:".length);
 }
 
-/** Default 2-row layout for fresh users: row 1 = the classic field set, row 2 =
- *  the default-visible tool chips (AskUserQuestion + TodoWrite stay off). */
+/** One row: the merged git chip, context, todos, and the overflow panel that
+ *  carries counts, drain and the tool mix. Model, effort and account are absent
+ *  by design - the header prints the first two, and there is only one account. */
 export const DEFAULT_ROWS: ChipType[][] = [
-  ["model", "account", "effort", "branch", "repo", "context_pct", "thinking", "messages", "turns"],
-  ["tool:Read", "tool:Edit", "tool:Grep", "tool:Bash", "tool:Task", "tool:Skill", "tool:Search"],
+  ["git", "context_pct", "ai_todos", "overflow"],
 ];
 
 export const MAX_ROWS = 5;
 
-/** Phone default (Joe, 2026-08-19: the desktop set wrapped to two rows AND
- *  still clipped). Drops account/repo/branch, which the chat header already
- *  shows, and keeps the two tool chips worth glancing at. */
+/** Phone default. Identical to the desktop set: at four chips it already fits
+ *  one row, which is what the separate mobile profile existed to guarantee. */
 export const DEFAULT_MOBILE_ROWS: ChipType[][] = [
-  ["model", "context_pct", "effort", "commits", "tool:Read", "tool:Edit"],
+  ["git", "context_pct", "ai_todos", "overflow"],
 ];
 
 /** One row on a phone, so the bar can never wrap and eat the conversation. */

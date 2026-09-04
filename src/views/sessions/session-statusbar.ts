@@ -17,7 +17,7 @@ import {
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
-import { renderChip as renderChipHtml, type ChipRenderCtx } from "./statusbar-chips";
+import { renderChip as renderChipHtml, driftLabel, type ChipRenderCtx } from "./statusbar-chips";
 import {
   refreshCounts as fetchCounts,
   refreshContextStatus as fetchContextStatus,
@@ -32,8 +32,8 @@ import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
 import { EffortPopover } from "./effort-popover";
 import { ModelPopover } from "./model-popover";
-import { BranchPopover, type BranchEntry } from "./branch-popover";
-import { CommitsPopover, type CommitSync } from "./commits-popover";
+import { GitCard } from "./git-card";
+import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
 import { onMobileViewportChange } from "../../shared/mobile-viewport";
 export {
@@ -85,6 +85,7 @@ export class SessionStatusbar {
   private onModelChange: ((model: string) => void) | null;
   private accountId: string | null;
   private onAccountClick: (() => void) | null;
+  private onConfig: ((model: string | null, effort: string) => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
   private hideZero: boolean;
   private durationTimer: ReturnType<typeof setInterval> | null = null;
@@ -102,8 +103,8 @@ export class SessionStatusbar {
   private imagesPopover = new ImagesPopover();
   private effortPopover = new EffortPopover();
   private modelPopover = new ModelPopover();
-  private branchPopover = new BranchPopover();
-  private commitsPopover = new CommitsPopover();
+  private gitCard = new GitCard();
+  private overflowPopover = new OverflowPopover();
   private mobileUnsub: (() => void) | null = null;
 
   constructor(container: HTMLElement, startedAt: string | null, rows: ChipType[][], opts: StatusbarOptions = {}) {
@@ -120,6 +121,7 @@ export class SessionStatusbar {
     this.onModelChange = opts.onModelChange ?? null;
     this.accountId = opts.accountId ?? null;
     this.onAccountClick = opts.onAccountClick ?? null;
+    this.onConfig = opts.onConfig ?? null;
     this.hideZero = opts.hideZero ?? true;
     this.container.className = "session-statusbar";
     this.tally = new ToolTallyRow(this.container);
@@ -168,10 +170,10 @@ export class SessionStatusbar {
   private hasChip(type: string): boolean {
     return this.rows.some((r) => r.includes(type as ChipType));
   }
-  private wantsCounts(): boolean { return this.hasChip("messages") || this.hasChip("turns"); }
+  private wantsCounts(): boolean { return this.hasChip("messages") || this.hasChip("turns") || this.hasChip("overflow"); }
   private wantsContext(): boolean { return this.hasChip("context_pct") || this.hasChip("context_tokens"); }
   private wantsTimer(): boolean { return this.hasChip("duration") || this.hasChip("clock"); }
-  private wantsDrain(): boolean { return this.hasChip("drain"); }
+  private wantsDrain(): boolean { return this.hasChip("drain") || this.hasChip("overflow"); }
   /** True when any git-section chip is present, so it's worth resolving the
    *  live git cwd and fetching git info. */
   private wantsGit(): boolean {
@@ -417,6 +419,17 @@ export class SessionStatusbar {
     };
   }
 
+  /** Snapshot for the overflow panel. Rebuilt per open (and per re-anchor) so a
+   *  panel left open through a turn keeps counting up with the bar. */
+  private overflowData(): OverflowPanelData {
+    return {
+      counts: this.counts,
+      startedAt: this.startedAt,
+      drain: this.drainPopover.drain,
+      toolTally: this.toolTally,
+    };
+  }
+
   private renderChip(type: ChipType, ctx: ChipRenderCtx): string {
     return renderChipHtml(type, ctx);
   }
@@ -526,37 +539,29 @@ export class SessionStatusbar {
       if (!wasOpen) this.imagesPopover.open(anchor);
     });
 
-    this.container.querySelector<HTMLElement>(".sb-branch-btn")?.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.branchPopover.isOpen;
-      this.closeChipPopovers();
-      if (wasOpen || !this.gitCwd) return;
-      try {
-        const branches = await invoke<BranchEntry[]>("get_recent_branches", { cwd: this.gitCwd });
-        this.branchPopover.open(anchor, branches);
-      } catch (err) {
-        console.error("[session-statusbar] get_recent_branches failed", err);
-      }
-    });
+    // The card is pinned to the SPAWN cwd, not the live one: it is always about
+    // the chat's own repo, and the drift footer names wherever the AI went.
+    for (const sel of [".sb-git-btn", ".sb-branch-btn", ".sb-commits-btn"]) {
+      this.container.querySelector<HTMLElement>(sel)?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const anchor = e.currentTarget as HTMLElement;
+        const wasOpen = this.gitCard.isOpen;
+        this.closeChipPopovers();
+        if (wasOpen || !this.cwd) return;
+        this.gitCard.open(anchor, {
+          cwd: this.cwd,
+          awayLabel: driftLabel(this.cwd, this.gitCwd, this.gitInfo.repo) || null,
+          onPushed: () => void this.refreshGitInfo(),
+        });
+      });
+    }
 
-    this.container.querySelector<HTMLElement>(".sb-commits-btn")?.addEventListener("click", async (e) => {
+    this.container.querySelector<HTMLElement>(".sb-overflow-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
       const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.commitsPopover.isOpen;
+      const wasOpen = this.overflowPopover.isOpen;
       this.closeChipPopovers();
-      if (wasOpen || !this.gitCwd) return;
-      const cwd = this.gitCwd;
-      try {
-        const sync = await invoke<CommitSync>("get_commit_sync", { cwd });
-        // A session switch mid-flight rewrites the pane (anchor detaches) and
-        // may leave this.gitCwd unchanged, so both checks are needed - mirrors
-        // refreshGitInfo's cwd guard plus a liveness check on the DOM node.
-        if (this.gitCwd !== cwd || !anchor.isConnected) return;
-        this.commitsPopover.open(anchor, cwd, sync, this.gitInfo.branch, () => void this.refreshGitInfo());
-      } catch (err) {
-        console.error("[session-statusbar] get_commit_sync failed", err);
-      }
+      if (!wasOpen) this.overflowPopover.open(anchor, this.overflowData());
     });
 
     // All popovers are body-appended and survive re-renders, but their anchor
@@ -567,12 +572,13 @@ export class SessionStatusbar {
     this.reanchorIfOpen(this.aiTodosPopover, ".sb-ai-todos-btn", (a) => this.aiTodosPopover.open(a));
     this.reanchorIfOpen(this.serversPopover, ".sb-servers-btn", (a) => this.serversPopover.open(a));
     this.reanchorIfOpen(this.imagesPopover, ".sb-images-btn", (a) => this.imagesPopover.open(a));
-    this.reanchorIfOpen(this.branchPopover, ".sb-branch-btn", (a) => this.branchPopover.reanchor(a));
-    this.reanchorIfOpen(this.commitsPopover, ".sb-commits-btn", (a) => this.commitsPopover.reanchor(a));
+    this.reanchorIfOpen(this.gitCard, ".sb-git-btn, .sb-branch-btn, .sb-commits-btn", (a) => this.gitCard.reanchor(a));
+    this.reanchorIfOpen(this.overflowPopover, ".sb-overflow-btn", (a) => this.overflowPopover.open(a, this.overflowData()));
     this.reanchorIfOpen(this.effortPopover, ".sb-effort-btn", (a) => this.effortPopover.reanchor(a));
     this.reanchorIfOpen(this.modelPopover, ".sb-model-btn", (a) => this.modelPopover.reanchor(a));
 
     this.updateRowFades();
+    this.onConfig?.(this.sessionModel ?? this.meta.model, this.effort);
   }
 
   /** Toggle scroll-edge fade classes per row (rows rebuild on every render(),
@@ -607,8 +613,8 @@ export class SessionStatusbar {
     this.imagesPopover.close();
     this.effortPopover.close();
     this.modelPopover.close();
-    this.branchPopover.close();
-    this.commitsPopover.close();
+    this.gitCard.close();
+    this.overflowPopover.close();
     this.tally.closePopover();
   }
 }

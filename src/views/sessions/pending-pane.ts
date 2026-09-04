@@ -98,6 +98,7 @@ export async function renderPendingPane(
       accountId: config.accountId ?? null,
       onEffortChange: (e) => { config.effort = e; },
       onModelChange: (m) => { config.model = m; },
+      onConfig: (model, effort) => _pendingHeader?.setConfig(model, effort),
     });
     state.statusbar = sb;
     fetchGitInfo(project.path)

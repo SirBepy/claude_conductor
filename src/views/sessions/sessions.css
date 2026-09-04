@@ -253,13 +253,30 @@
   vertical-align: middle;
 }
 
+/* M2: the project anchors left, model+effort sit at the far right edge. The
+   split is positional, so neither side is dimmed to separate them - dimming
+   only costs legibility once position has already done the work. */
 .session-header .meta {
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sb-muted);
+  font-size: 0.72rem;
   font-family: 'Fira Code', monospace;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.session-header .meta-proj {
+  color: var(--color-text);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.session-header .meta-cfg {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .session-header .icon-btn {

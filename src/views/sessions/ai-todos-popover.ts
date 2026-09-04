@@ -18,7 +18,9 @@ export class AiTodosPopover {
   async refresh(cwd: string, rerender: () => void): Promise<void> {
     try {
       const files = await invoke<AiTodoEntry[]>("list_ai_todos", { cwd });
-      this.files = files;
+      // A null/absent list means "none", not "crash the whole bar" - the chip
+      // ships in the default rows now, so every render path reaches this.
+      this.files = files ?? [];
       this.loaded = true;
       rerender();
     } catch { /* transient */ }

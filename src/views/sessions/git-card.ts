@@ -1,17 +1,22 @@
 /**
- * Ahead/behind commits statusline chip + popover. Split out of
- * statusbar-popovers.ts (ai_todo 528) - pure move, no behavior change.
+ * The card behind the merged `git` statusline chip. Replaces the two popovers
+ * that used to hang off two separate chips (branch list, commits history).
  *
- * The body is one merged branch history: unpushed commits carry an accent bar,
- * pushed ones a muted check. Pages append into the live list, since a shell
- * rebuild would reset the scroll position that asked for them.
+ * The card is always about the CHAT'S OWN repo, never the one the AI wandered
+ * into: it fetches against the spawn cwd, and a drift footer names where the AI
+ * actually is. The chip above it is the opposite - it follows the live cwd, so
+ * the two together read as "here is your repo; Claude is over there".
+ *
+ * Two modes share one shell: `history` (branch line, push/publish, the merged
+ * commit list) and `branches` (a filterable, read-only branch list reached via
+ * the branch line's caret).
  */
 
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { timeAgo } from "../../shared/time";
 import { PopoverShell } from "./statusbar-popover-shell";
-import type { CommitHistory, CommitHistoryEntry, CommitSync } from "../../types/ipc.generated";
+import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitSync, GitInfo } from "../../types/ipc.generated";
 
 export type { CommitSync } from "../../types/ipc.generated";
 
@@ -19,16 +24,31 @@ const PAGE_SIZE = 30;
 /** Distance from the list's bottom edge that triggers the next page. */
 const LOAD_MARGIN_PX = 48;
 
-export class CommitsPopover {
+export interface GitCardOpenOpts {
+  /** The chat's own working dir. Everything in the card is about this repo. */
+  cwd: string;
+  /** Repo the AI has moved into, or null while it is still in `cwd`'s repo. */
+  awayLabel: string | null;
+  /** Refresh the chip's own counts once a push lands. */
+  onPushed: () => void;
+}
+
+type Mode = "history" | "branches";
+
+export class GitCard {
   private shell = new PopoverShell();
   private anchor: HTMLElement | null = null;
   private cwd: string | null = null;
-  private sync: CommitSync | null = null;
-  private branch: string | null = null;
+  private awayLabel: string | null = null;
   private onPushed: (() => void) | null = null;
+  private mode: Mode = "history";
+
+  private info: GitInfo | null = null;
+  private sync: CommitSync | null = null;
   private pushing = false;
   private pushError: string | null = null;
   private popEl: HTMLElement | null = null;
+
   private history: CommitHistoryEntry[] = [];
   private historyLoaded = false;
   private historyMore = false;
@@ -36,20 +56,26 @@ export class CommitsPopover {
   /** Increments each resetHistory() call; a page from a superseded open() can't append. */
   private historyGen = 0;
 
+  private branches: BranchEntry[] | null = null;
+  private branchFilter = "";
+
   get isOpen(): boolean { return this.shell.isOpen; }
 
-  /** `branch` labels the publish action; `onPushed` lets the statusbar refresh
-   *  the chip's own ahead/behind counts once a push lands. */
-  open(anchor: HTMLElement, cwd: string, sync: CommitSync, branch: string | null, onPushed: () => void): void {
+  open(anchor: HTMLElement, opts: GitCardOpenOpts): void {
     this.anchor = anchor;
-    this.cwd = cwd;
-    this.sync = sync;
-    this.branch = branch;
-    this.onPushed = onPushed;
+    this.cwd = opts.cwd;
+    this.awayLabel = opts.awayLabel;
+    this.onPushed = opts.onPushed;
+    this.mode = "history";
     this.pushing = false;
     this.pushError = null;
+    this.info = null;
+    this.sync = null;
+    this.branches = null;
+    this.branchFilter = "";
     this.resetHistory();
     this.rebuild();
+    void this.loadHead();
     void this.loadPage();
   }
 
@@ -57,7 +83,6 @@ export class CommitsPopover {
     this.shell.close();
     this.anchor = null;
     this.cwd = null;
-    this.sync = null;
     this.onPushed = null;
     this.popEl = null;
     this.resetHistory();
@@ -76,16 +101,50 @@ export class CommitsPopover {
     this.historyGen++;
   }
 
+  /** Branch, upstream and ahead/behind for the chat's OWN repo. The statusbar's
+   *  cached GitInfo tracks the live cwd instead, so it is unusable here the
+   *  moment the AI has moved. */
+  private async loadHead(): Promise<void> {
+    const cwd = this.cwd;
+    if (!cwd) return;
+    const gen = this.historyGen;
+    try {
+      const [info, sync] = await Promise.all([
+        invoke<GitInfo>("get_git_info", { cwd }),
+        invoke<CommitSync>("get_commit_sync", { cwd }),
+      ]);
+      if (this.cwd !== cwd || this.historyGen !== gen) return;
+      this.info = info;
+      this.sync = sync;
+      this.rebuild();
+    } catch (err) {
+      console.error("[git-card] head load failed", err);
+    }
+  }
+
   private rebuild(): void {
     if (!this.anchor) return;
+    // A session switch rewrites the pane's innerHTML, detaching the chip this
+    // card is anchored to while an in-flight fetch is still pending. Placing
+    // against a detached node measures all-zero and parks the card in the
+    // window's top-left corner, so close instead.
+    if (!this.anchor.isConnected) { this.close(); return; }
     this.shell.open(this.anchor, this.buildHtml(), {
-      className: "sb-git-popover sb-commits-popover",
+      className: "sb-git-popover sb-git-card",
       wire: (el) => this.wire(el),
     });
   }
 
   private wire(el: HTMLElement): void {
     this.popEl = el;
+    el.querySelector<HTMLElement>(".gc-branchline")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.setMode("branches");
+    });
+    el.querySelector<HTMLElement>(".gc-back")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.setMode("history");
+    });
     el.querySelector<HTMLElement>(".sb-git-pop-push-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
       void this.doPush(false);
@@ -94,12 +153,53 @@ export class CommitsPopover {
       e.stopPropagation();
       void this.doPush(true);
     });
+    const search = el.querySelector<HTMLInputElement>(".gc-search input");
+    if (search) {
+      search.addEventListener("input", () => {
+        this.branchFilter = search.value;
+        this.paintBranchList();
+      });
+      search.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.stopPropagation(); this.setMode("history"); }
+      });
+      search.focus();
+    }
     const list = el.querySelector<HTMLElement>(".sb-commit-history");
     if (!list) return;
     list.addEventListener("scroll", () => {
       if (list.scrollTop + list.clientHeight >= list.scrollHeight - LOAD_MARGIN_PX) void this.loadPage();
     });
     this.fillViewport(list);
+  }
+
+  private setMode(mode: Mode): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    if (mode === "branches" && this.branches === null) void this.loadBranches();
+    this.rebuild();
+  }
+
+  private async loadBranches(): Promise<void> {
+    const cwd = this.cwd;
+    if (!cwd) return;
+    try {
+      const branches = await invoke<BranchEntry[]>("get_recent_branches", { cwd });
+      if (this.cwd !== cwd) return;
+      this.branches = branches;
+      if (this.mode === "branches") this.rebuild();
+    } catch (err) {
+      console.error("[git-card] get_recent_branches failed", err);
+      if (this.cwd !== cwd) return;
+      this.branches = [];
+      if (this.mode === "branches") this.rebuild();
+    }
+  }
+
+  /** Filtering repaints only the rows, so the caret position in the search box
+   *  survives every keystroke. */
+  private paintBranchList(): void {
+    const host = this.popEl?.querySelector<HTMLElement>(".sb-git-pop-list");
+    if (host) host.innerHTML = this.branchRowsHtml();
   }
 
   /** A page that doesn't overflow the list can never emit a scroll event, so
@@ -123,7 +223,7 @@ export class CommitsPopover {
     this.paintSentinel();
     try {
       const page = await invoke<CommitHistory>("get_commit_history", { cwd, offset, limit: PAGE_SIZE });
-      if (this.cwd !== cwd || this.historyGen !== gen) return; // popover moved on (session switch, or reopened) mid-fetch
+      if (this.cwd !== cwd || this.historyGen !== gen) return; // card moved on (session switch, or reopened) mid-fetch
       this.historyLoading = false;
       this.historyMore = page.has_more;
       this.history = this.history.concat(page.entries);
@@ -138,7 +238,7 @@ export class CommitsPopover {
       this.historyLoading = false;
       this.historyLoaded = true;
       this.historyMore = false;
-      console.error("[commits-popover] get_commit_history failed", err);
+      console.error("[git-card] get_commit_history failed", err);
       this.rebuild();
     }
   }
@@ -167,10 +267,11 @@ export class CommitsPopover {
     try {
       await invoke<void>("push_commits", { cwd, publish });
       const fresh = await invoke<CommitSync>("get_commit_sync", { cwd });
-      if (this.cwd !== cwd) return; // popover moved on (session switch) mid-push
+      if (this.cwd !== cwd) return; // card moved on (session switch) mid-push
       this.sync = fresh;
       this.pushing = false;
       this.onPushed?.();
+      void this.loadHead();
       // Every row that was unpushed is now pushed - refetch instead of patching.
       this.resetHistory();
       this.rebuild();
@@ -181,6 +282,10 @@ export class CommitsPopover {
       this.pushError = e instanceof Error ? e.message : String(e);
       this.rebuild();
     }
+  }
+
+  private repoLabel(): string {
+    return this.info?.repo ?? (this.cwd ? this.cwd.split(/[\\/]+/).filter(Boolean).pop() ?? "" : "");
   }
 
   private rowHtml(c: CommitHistoryEntry): string {
@@ -214,24 +319,41 @@ export class CommitsPopover {
     return `<div class="sb-git-pop-list sb-commit-history">${rows}${this.sentinelHtml()}</div>`;
   }
 
-  private buildHtml(): string {
-    const sync = this.sync;
-    if (!sync) return `<div class="sb-git-pop-empty">Loading&hellip;</div>`;
-    const errorHtml = this.pushError
-      ? `<div class="sb-git-pop-error"><i class="ph ph-warning"></i>${escapeHtml(this.pushError)}</div>`
+  private branchLineHtml(): string {
+    const branch = this.info?.branch;
+    if (!branch) return "";
+    const up = this.sync?.has_upstream === false
+      ? `<span class="up no-upstream">no upstream</span>`
       : "";
+    return `<div class="gc-branchline" role="button" tabindex="0" title="Show branches">`
+      + `<i class="ph ph-git-branch lead"></i>`
+      + `<span class="bname">${escapeHtml(branch)}</span>${up}`
+      + `<i class="ph ph-caret-down caret"></i></div>`;
+  }
+
+  /** Only appears while the AI is somewhere else. The card above it has already
+   *  said everything about the chat's own repo, so the caveat reads last. */
+  private driftFootHtml(): string {
+    if (!this.awayLabel) return "";
+    return `<div class="gc-away-foot"><i class="ph ph-arrow-bend-up-right"></i>`
+      + `<span>Claude is in ${escapeHtml(this.awayLabel)}</span></div>`;
+  }
+
+  private syncSectionsHtml(): string {
+    const sync = this.sync;
+    if (!sync) return "";
     const parts: string[] = [];
     if (!sync.has_upstream) {
       const spin = this.pushing
         ? `<i class="ph ph-spinner-gap sb-git-pop-spin"></i> Publishing&hellip;`
-        : `<i class="ph ph-cloud-arrow-up"></i> Publish${this.branch ? ` "${escapeHtml(this.branch)}"` : " branch"}`;
+        : `<i class="ph ph-cloud-arrow-up"></i> Publish${this.info?.branch ? ` "${escapeHtml(this.info.branch)}"` : " branch"}`;
       parts.push(`<div class="sb-git-pop-empty">No upstream configured for this branch</div>
         <div class="sb-git-pop-publish"><button class="sb-git-pop-publish-btn"${this.pushing ? " disabled" : ""}>${spin}</button></div>`);
     } else if (sync.ahead.length > 0) {
       const pushBtn = this.pushing
         ? `<button class="sb-git-pop-push-btn" disabled><i class="ph ph-spinner-gap sb-git-pop-spin"></i></button>`
         : `<button class="sb-git-pop-push-btn"><i class="ph ph-cloud-arrow-up"></i> Push</button>`;
-      parts.push(`<div class="sb-git-pop-section ahead"><i class="ph ph-arrow-up"></i>Unpushed <span class="sb-git-pop-count">${sync.ahead.length}</span>${pushBtn}</div>`);
+      parts.push(`<div class="sb-git-pop-section ahead"><i class="ph ph-arrow-up"></i>Yours, not pushed <span class="sb-git-pop-count">${sync.ahead.length}</span>${pushBtn}</div>`);
     } else if (sync.behind.length === 0) {
       parts.push(`<div class="sb-git-pop-section synced"><i class="ph ph-check-circle"></i>Up to date with upstream</div>`);
     }
@@ -241,7 +363,41 @@ export class CommitsPopover {
       ).join("");
       parts.push(`<div class="sb-git-pop-section behind"><i class="ph ph-arrow-down"></i>Incoming <span class="sb-git-pop-count">${sync.behind.length}</span></div><div class="sb-git-pop-list">${rows}</div>`);
     }
-    parts.push(this.historyHtml());
-    return parts.join("") + errorHtml;
+    return parts.join("");
+  }
+
+  private branchRowsHtml(): string {
+    const all = this.branches;
+    if (all === null) return `<div class="sb-git-pop-empty"><i class="ph ph-spinner-gap sb-git-pop-spin"></i> Loading branches&hellip;</div>`;
+    const q = this.branchFilter.trim().toLowerCase();
+    const shown = q ? all.filter((b) => b.name.toLowerCase().includes(q)) : all;
+    if (shown.length === 0) {
+      return `<div class="sb-git-pop-empty">${all.length === 0 ? "No branches found" : "No branch matches that"}</div>`;
+    }
+    return shown.map((b) => {
+      const check = b.current ? `<i class="ph ph-check sb-git-pop-check"></i>` : `<span class="sb-git-pop-check-pad"></span>`;
+      const sha = b.short_sha ? `<span class="sb-git-pop-sha">${escapeHtml(b.short_sha)}</span>` : "";
+      const up = b.upstream ? `<span class="sb-git-pop-upstream">${escapeHtml(b.upstream)}</span>` : "";
+      return `<div class="sb-git-pop-row${b.current ? " current" : ""}">${check}<span class="sb-git-pop-name">${escapeHtml(b.name)}</span>${sha}${up}</div>`;
+    }).join("");
+  }
+
+  private buildHtml(): string {
+    const repo = escapeHtml(this.repoLabel());
+    if (this.mode === "branches") {
+      return `<div class="sb-git-pop-header gc-back" role="button" tabindex="0"><i class="ph ph-arrow-left"></i>Branches${repo ? ` &mdash; ${repo}` : ""}</div>`
+        + `<div class="gc-search"><i class="ph ph-magnifying-glass"></i><input value="${escapeHtml(this.branchFilter)}" spellcheck="false" placeholder="Filter branches" aria-label="Filter branches"></div>`
+        + `<div class="sb-git-pop-list">${this.branchRowsHtml()}</div>`
+        + `<div class="gc-hint">Esc to go back</div>`;
+    }
+    const errorHtml = this.pushError
+      ? `<div class="sb-git-pop-error"><i class="ph ph-warning"></i>${escapeHtml(this.pushError)}</div>`
+      : "";
+    return `<div class="sb-git-pop-header"><i class="ph ph-folder"></i>${repo || "This repo"}</div>`
+      + this.branchLineHtml()
+      + this.syncSectionsHtml()
+      + this.historyHtml()
+      + errorHtml
+      + this.driftFootHtml();
   }
 }
