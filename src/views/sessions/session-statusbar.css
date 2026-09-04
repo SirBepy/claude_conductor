@@ -759,15 +759,26 @@
 .sb-chip.sb-git-btn:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--color-border); }
 
 /* -- Overflow chip -----------------------------------------------------------
-   Anchored to the right end of its row: it is the row's terminator, so it must
-   not drift left as the chips before it change width. */
+   Right-anchored and sticky: it is this row's only entry point to the session
+   panel, and the row scrolls horizontally on a phone, so a plain margin-left
+   would let the one control that matters scroll off the edge. Opaque (the tint
+   as a gradient layer over the bar's own colour) so chips pass underneath it
+   rather than through it. */
 
 .sb-chip.sb-overflow {
   margin-left: auto;
+  position: sticky;
+  right: 0;
   cursor: pointer;
+  background: linear-gradient(rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04)), var(--color-surface-alt);
+  box-shadow: -10px 0 9px -6px var(--color-surface-alt);
 }
 
-.sb-chip.sb-overflow:hover { background: rgba(255, 255, 255, 0.09); border-color: var(--color-border); }
+.sb-chip.sb-overflow:hover {
+  background: linear-gradient(rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.09)), var(--color-surface-alt);
+  border-color: var(--color-border);
+}
+
 .sb-chip.sb-overflow i { opacity: 0.9; }
 
 /* -- Git card ------------------------------------------------------------- */
