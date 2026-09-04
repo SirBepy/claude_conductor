@@ -5,7 +5,10 @@ export async function selectProjectRow(name) {
   await search.waitForExist({ timeout: 10000 });
   await search.setValue(name);
 
-  const rows = await $$(".project-picker-row");
+  // Spread first: wdio v9's element array has its own chainable `map`, which
+  // returns a thenable Promise.all cannot iterate. Same pattern as
+  // multi-account.e2e.js:149.
+  const rows = [...(await $$(".project-picker-row"))];
   const names = await Promise.all(
     rows.map((row) => row.$(".project-picker-name").then((el) => el.getText()))
   );

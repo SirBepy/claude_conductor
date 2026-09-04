@@ -127,15 +127,17 @@ async function startHaikuChat() {
 
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
 
-  // Read back the started session's real cwd instead of trusting the click
-  // (todo 865): a picker mis-selection must fail loudly here, not surface
-  // later as a stray transcript in the wrong project.
-  const startedId = await activeSessionId();
+}
+
+// Read back the session's real cwd instead of trusting the picker click (todo
+// 865). Only callable after the first message spawns the session: before that
+// the pane is pending and its sidebar row carries no id at all.
+async function assertSessionCwd(sessionId) {
   const instances = await browser.execute(() => window.__TAURI__.core.invoke("list_instances"));
-  const started = instances.find((i) => i.session_id === startedId);
+  const started = instances.find((i) => i.session_id === sessionId);
   if (!started || normPath(started.cwd) !== normPath(REPO_ROOT)) {
     throw new Error(
-      `startHaikuChat: session cwd "${started?.cwd}" does not match expected repo root "${REPO_ROOT}"`
+      `session ${sessionId} cwd "${started?.cwd}" does not match expected repo root "${REPO_ROOT}"`
     );
   }
 }
@@ -183,6 +185,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
 
     aId = await activeSessionId();
     if (!aId) note("bug", "chat A: no active session id after first reply");
+    await assertSessionCwd(aId);
     expect(c.user).toBe(1);
   });
 
@@ -206,6 +209,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
 
     bId = await activeSessionId();
     if (!bId) note("bug", "chat B: no active session id after first reply");
+    await assertSessionCwd(bId);
     if (bId && aId && bId === aId) note("bug", "chat B reused chat A's session id", { aId, bId });
 
     const c = await msgCounts();
