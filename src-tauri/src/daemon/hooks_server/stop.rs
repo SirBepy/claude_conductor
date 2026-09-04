@@ -160,6 +160,13 @@ pub(super) async fn on_stop(
             payload.session_crons.as_deref().unwrap_or(&[]),
         );
         ctx.state.registry.set_turn_activity(&session_id, activity);
+        // The verdict that can override a self-reported status, so a row stuck
+        // reading in-progress is diagnosable from the log alone.
+        log::info!(
+            "hook /hooks/stop: {session_id} activity={activity:?} background_tasks={} session_crons={}",
+            payload.background_tasks.as_ref().map_or("absent".to_string(), |t| t.len().to_string()),
+            payload.session_crons.as_ref().map_or("absent".to_string(), |c| c.len().to_string()),
+        );
 
         // Enforcement (todo 435 + quiet-mode fix): block once (stop_hook_active
         // caps the retry) if report_turn_status and/or send_message weren't

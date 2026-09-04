@@ -142,7 +142,11 @@ export function updateThinkingBar(): void {
   bar.removeAttribute("hidden");
   if (textEl) {
     const frozen = !!state.sessions.find((s) => s.session_id === state.selectedId)?.frozen;
-    if (!busy && hasHeld && frozen) textEl.textContent = "Frozen - will send once unfrozen";
+    // Reaching here while idle means the bar is up only to host the held chip
+    // (the early return above covers idle-and-empty), so every label below it
+    // describes a turn that is not running - `_activity` especially, which
+    // keeps the last tool name and reads as "<tool>... - thinking…".
+    if (!busy) textEl.textContent = frozen ? "Frozen - will send once unfrozen" : "Waiting to send";
     else if (_todoActivity !== null) textEl.textContent = _todoActivity;
     else if (_progressN !== null) textEl.textContent = `Step ${_progressN} of ${_progressM}`;
     else if (_activity) textEl.textContent = _activityIdle ? `${_activity} - thinking…` : _activity;
