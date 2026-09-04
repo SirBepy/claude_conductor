@@ -17,10 +17,13 @@
 /* ── The button ──────────────────────────────────────────────────────────── */
 /* Not `+`: that glyph already means "new chat" on .sessions-fab, and this
    button opens things that already exist. */
+/* --fab-lift is the composer's own height, written by syncLift() only when the
+ * FAB's resting box actually intersects it. Without it the 40px circle lands
+ * on the composer's Send split and wins the hit test at z-index 30. */
 .fab-dial-fab {
   position: absolute;
   right: 14px;
-  bottom: 14px;
+  bottom: calc(var(--fab-lift, 0px) + 14px);
   width: 40px;
   height: 40px;
   border-radius: 50%;
@@ -58,7 +61,7 @@
 .fab-dial {
   position: absolute;
   right: 14px;
-  bottom: 62px;
+  bottom: calc(var(--fab-lift, 0px) + 62px);
   display: none;
   flex-direction: column-reverse;
   gap: 9px;
@@ -207,11 +210,18 @@
    card and FAB clear the bottom tab bar rather than sitting under it. */
 @media (max-width: 768px) {
   .fab-dial-fab {
-    bottom: 12px;
+    bottom: calc(var(--fab-lift, 0px) + 12px);
   }
 
   .fab-dial {
-    bottom: 60px;
+    bottom: calc(var(--fab-lift, 0px) + 60px);
+  }
+
+  /* A phone question card is fullscreen and outranked by this host's z-index
+   * 30, so the FAB painted on top of its Submit button. Nothing in the dial is
+   * reachable while a card is waiting for an answer anyway. */
+  .session-pane:has(#prompt-card-host .prompt-card) .fab-dial-host {
+    display: none;
   }
 
   .fab-card {

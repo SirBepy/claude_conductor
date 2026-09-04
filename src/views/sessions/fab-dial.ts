@@ -47,6 +47,7 @@ class FabDial implements FabDialHandle {
   private ask: AskPanelHandle | null = null;
   private todos: TodosPanelHandle | null = null;
   private drafts: DraftsPanelHandle | null = null;
+  private liftObs: ResizeObserver | null = null;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
     this.pane = pane;
@@ -61,6 +62,40 @@ class FabDial implements FabDialHandle {
    *  which detaches this host - so re-attach instead of caching an element. */
   private attach(): void {
     if (this.host.parentElement !== this.pane) this.pane.appendChild(this.host);
+    this.watchLift();
+  }
+
+  /** The FAB rests at the pane's bottom-right, which is the composer's Send
+   *  split at phone width and on any pane under ~924px. --fab-lift raises it
+   *  and the dial to the shell's top edge, set only on a real intersection so
+   *  a wide pane's gutter-parked FAB stays put. */
+  private syncLift = (): void => {
+    const shell = this.pane.querySelector<HTMLElement>(".composer-shell");
+    if (!shell) {
+      this.host.style.setProperty("--fab-lift", "0px");
+      return;
+    }
+    // Absent while the card surface hides it; keep the last measurement so the
+    // dial does not drop onto the composer for a frame.
+    const fab = this.host.querySelector<HTMLElement>(".fab-dial-fab");
+    if (!fab) return;
+    const paneBox = this.pane.getBoundingClientRect();
+    const shellBox = shell.getBoundingClientRect();
+    const fabBox = fab.getBoundingClientRect();
+    const overlapsX = fabBox.right > shellBox.left && fabBox.left < shellBox.right;
+    const lift = overlapsX ? Math.max(0, paneBox.bottom - shellBox.top) : 0;
+    this.host.style.setProperty("--fab-lift", `${Math.round(lift)}px`);
+  };
+
+  /** Re-observed on every attach: the pane's innerHTML rebuild replaces the
+   *  shell, so a cached observation would be measuring a detached node. */
+  private watchLift(): void {
+    this.liftObs?.disconnect();
+    if (typeof ResizeObserver === "undefined") return;
+    this.liftObs = new ResizeObserver(this.syncLift);
+    this.liftObs.observe(this.pane);
+    const shell = this.pane.querySelector<HTMLElement>(".composer-shell");
+    if (shell) this.liftObs.observe(shell);
   }
 
   setSessionScope(sessionId: string | null, cwd: string | null): void {
@@ -71,6 +106,8 @@ class FabDial implements FabDialHandle {
     if (!sessionId) {
       this.surface = "rest";
       this.disposeBodies();
+      this.liftObs?.disconnect();
+      this.liftObs = null;
       this.host.remove();
       return;
     }
@@ -160,6 +197,8 @@ class FabDial implements FabDialHandle {
 
     this.disposeBodies();
     if (this.surface === "card") this.mountBody();
+    // The FAB node above is brand new, so the last measurement is stale.
+    this.syncLift();
   }
 
   private cardHtml(): string {
@@ -206,6 +245,8 @@ class FabDial implements FabDialHandle {
 
   destroy(): void {
     this.disposeBodies();
+    this.liftObs?.disconnect();
+    this.liftObs = null;
     this.host.removeEventListener("click", this.onClick);
     document.removeEventListener("keydown", this.onKeydown);
     this.host.remove();

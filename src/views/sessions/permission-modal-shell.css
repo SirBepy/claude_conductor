@@ -276,6 +276,25 @@
   font-size: 0.95rem;
 }
 
+/* 768 mirrors MOBILE_BREAKPOINT in permission-modal/host.ts - keep both in sync.
+ * Must sit AFTER the base .prompt-card__answer-bar rule: same specificity, so
+ * source order decides, and the early mobile block above would lose. */
+@media (max-width: 768px) {
+  /* A 200px basis plus Skip plus Submit plus two gaps overruns a 384px content
+   * box, and flex-wrap resolved that by stranding Submit alone on line two
+   * (Joe, 2026-09-04). A 100% basis makes the same two rows deliberate: input
+   * owns row one, both buttons share row two. */
+  .prompt-card__answer-bar {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  /* Only when the bar is actually rendered - a permission card's bare
+   * Deny/Allow pair keeps its natural widths. */
+  .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) .btn-primary {
+    flex: 1;
+  }
+}
+
 /* Permission details disclosure (raw tool input JSON, hidden by default). */
 .prompt-card__details summary {
   cursor: pointer;
