@@ -25,14 +25,10 @@ export function isShowPreviewTool(tool: string): boolean {
 
 // Turn-footer step checklist. Two wire names for one concept: our own tool,
 // always in a session's list, and TodoWrite, which the harness hands out only
-// sometimes (4 of 188 transcripts, 2026-09-04). The input shapes differ, so
-// read them apart; "does this drive the checklist" stays one question.
+// sometimes (4 of 188 transcripts, 2026-09-04). No merged predicate: the input
+// shapes differ enough that every call site has to read them apart anyway.
 export const MCP_WRITE_PLAN_TOOL = "mcp__cc_conductor__write_plan";
 export const BUILTIN_TODO_WRITE_TOOL = "TodoWrite";
-
-export function isPlanTool(tool: string): boolean {
-  return tool === MCP_WRITE_PLAN_TOOL || tool === BUILTIN_TODO_WRITE_TOOL;
-}
 
 /** Lowercased file extension (including the dot), or "" if none. */
 function extOf(path: string): string {

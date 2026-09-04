@@ -6,7 +6,12 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
-import { canonicalTool, isShowPreviewTool, MCP_WRITE_PLAN_TOOL } from "./tool-meta";
+import {
+  BUILTIN_TODO_WRITE_TOOL,
+  canonicalTool,
+  isShowPreviewTool,
+  MCP_WRITE_PLAN_TOOL,
+} from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
 import {
   tryHandleQuestionToolUse,
@@ -93,7 +98,7 @@ export function handleToolUseEvent(
   // the <cc-progress:N/M> marker bar (chat-tools.css .todo-checklist).
   // Renders straight into the turn footer via turnFooters - never a
   // message row.
-  if (ev.tool_name === "TodoWrite" && !ev.parent_tool_use_id) {
+  if (ev.tool_name === BUILTIN_TODO_WRITE_TOOL && !ev.parent_tool_use_id) {
     r._todoWriteToolUseIds.add(ev.id);
     const rawTodos = (ev.input as { todos?: { content: string; status: string; activeForm?: string }[] } | null)?.todos;
     const todos = Array.isArray(rawTodos) ? rawTodos : [];
