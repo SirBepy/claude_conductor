@@ -60,8 +60,10 @@ test.describe("view-harness / phone footer + FAB clearance", () => {
     expect(submit.y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
     // Row two holds both, level with each other.
     expect(Math.abs(skip.y - submit.y)).toBeLessThanOrEqual(1);
-    // Submit is the primary, so it takes the width Skip does not.
-    expect(submit.width).toBeGreaterThan(skip.width);
+    // 1:2, Joe's pick over 50/50: a chosen proportion rather than the rendered
+    // width of the word "Skip", with Submit still visibly the primary.
+    expect(submit.width / skip.width).toBeGreaterThan(1.9);
+    expect(submit.width / skip.width).toBeLessThan(2.1);
   });
 
   test("the bar spans the footer's full inner width", async ({ page }) => {

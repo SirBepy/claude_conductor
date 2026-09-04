@@ -288,10 +288,16 @@
     flex: 1 1 100%;
     min-width: 0;
   }
-  /* Only when the bar is actually rendered - a permission card's bare
-   * Deny/Allow pair keeps its natural widths. */
+  /* A third of the row after the gap, 119px here, so Skip is a chosen size
+   * and not the rendered width of its own label. Basis, not a 1:2 grow: a
+   * border-box button floors at its 30px of padding + border, which skews
+   * grow to 1.75:1. Bar-only, so Deny/Allow keeps its natural widths. */
+  .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) [data-act="cancel"] {
+    flex: 0 0 calc((100% - 8px) / 3);
+  }
   .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) .btn-primary {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
   }
 }
 
