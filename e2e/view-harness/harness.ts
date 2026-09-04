@@ -57,6 +57,8 @@ const BOOT_SEED: Record<Entry, InvokeMap> = {
     get_hook_registration_state: { registered: true, declined: false, port: 0 },
     // null => the legacy-obsidian import banner is skipped.
     import_legacy_obsidian_config: null,
+    // Boot writes settings once, for the one-time statusline rows migration.
+    save_settings: null,
   },
   overlay: {
     frontend_ready: null,

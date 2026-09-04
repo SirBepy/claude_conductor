@@ -25,6 +25,7 @@ vi.mock("../src/shared/mobile-viewport.ts", () => ({
 
 const {
   loadStatuslineRows, saveStatuslineRows, activeProfile, profileMaxRows, profileDefaultRows,
+  migrateStatuslineToV2,
 } = await import("../src/views/sessions/session-statusbar-helpers.ts");
 const { DEFAULT_ROWS, DEFAULT_MOBILE_ROWS, MOBILE_MAX_ROWS } = await import("../src/views/sessions/statusline-catalog.ts");
 
@@ -82,10 +83,37 @@ describe("statusline desktop/mobile profiles", () => {
     expect(await loadStatuslineRows("mobile")).toEqual(DEFAULT_MOBILE_ROWS);
   });
 
-  it("defaults differ per profile and mobile drops what the header already shows", () => {
+  // The merged git + overflow chips subsume six chips a saved layout still lists
+  // individually, so a default-only change would leave both halves rendering for
+  // anyone who had ever opened the builder.
+  it("rewrites both saved profiles once, then never again", async () => {
+    store.settings = { statuslineRows: [["model", "branch", "repo", "commits"]], statuslineRowsMobile: [["model"]] };
+
+    await migrateStatuslineToV2();
+    expect(store.settings.statuslineRows).toEqual(DEFAULT_ROWS);
+    expect(store.settings.statuslineRowsMobile).toEqual(DEFAULT_MOBILE_ROWS);
+    expect(store.settings.statuslineRowsV2Applied).toBe(true);
+
+    // A layout picked AFTER the migration survives the next boot.
+    await saveStatuslineRows([["model", "turns"]], "desktop");
+    await migrateStatuslineToV2();
+    expect(store.settings.statuslineRows).toEqual([["model", "turns"]]);
+  });
+
+  it("leaves every other setting alone while rewriting the rows", async () => {
+    store.settings = { theme: "glacier", statuslineHideZero: false, statuslineRows: [["model"]] };
+    await migrateStatuslineToV2();
+    expect(store.settings.theme).toBe("glacier");
+    expect(store.settings.statuslineHideZero).toBe(false);
+  });
+
+  it("keeps the two defaults to a single row that can never wrap on a phone", () => {
     expect(profileDefaultRows("desktop")).toEqual(DEFAULT_ROWS);
+    expect(profileDefaultRows("mobile")).toHaveLength(1);
     const mobileRow = profileDefaultRows("mobile")[0];
-    for (const redundant of ["account", "repo", "branch"]) {
+    // The header prints the project and the model/effort pair, and there is one
+    // account - none of them earns a chip here.
+    for (const redundant of ["account", "repo", "branch", "model", "effort"]) {
       expect(mobileRow).not.toContain(redundant);
     }
   });

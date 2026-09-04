@@ -3,8 +3,8 @@ import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./har
 
 // Two statusline changes driven in a real browser: repo + folder are location
 // chips now (silent until the AI leaves the folder the chat was opened in), and
-// the commits popover lists branch history as one scrolling list with the
-// unpushed rows marked apart from the pushed ones.
+// the git card lists branch history as one scrolling list with the unpushed rows
+// marked apart from the pushed ones.
 
 const DESKTOP = { width: 1400, height: 900 };
 const SPAWN = "C:/Projects/alpha";
@@ -97,12 +97,12 @@ test.describe("statusline location chips", () => {
   });
 });
 
-test.describe("commits popover history", () => {
+test.describe("git card history", () => {
   test("lists pushed and unpushed commits in one scrolling list", async ({ page }) => {
     await mountStatusbar(page, SPAWN);
 
     await page.locator("#session-pane .sb-commits-btn").click();
-    const popover = page.locator(".sb-commits-popover");
+    const popover = page.locator(".sb-git-card");
     await expect(popover).toBeVisible();
     await expect(popover.locator(".sb-git-pop-push-btn")).toBeVisible();
     await expect(popover.locator(".sb-git-pop-section.behind")).toContainText("Incoming");
@@ -116,6 +116,6 @@ test.describe("commits popover history", () => {
     const scrollable = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
     expect(scrollable, "history list should scroll rather than grow the popover").toBe(true);
 
-    await shot(popover, "commits-popover-pushed-history");
+    await shot(popover, "git-card-pushed-history");
   });
 });
