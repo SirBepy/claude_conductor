@@ -46,11 +46,14 @@ export class OverflowPopover {
   private statsHtml(d: OverflowPanelData): string {
     const tile = (v: string, k: string): string =>
       `<div class="ov-tile"><div class="ov-tile-v">${escapeHtml(v)}</div><div class="ov-tile-k">${k}</div></div>`;
+    // A dash, not a 0: null counts mean "not loaded", and a confident zero
+    // there reads as a real measurement.
+    const n = (v: number | undefined): string => (v === undefined ? "-" : String(v));
     const dur = d.startedAt ? formatDuration(d.startedAt) : "-";
     return `<div class="ov-head">This Session</div>`
       + `<div class="ov-kpi">`
-      + tile(String(d.counts?.prompts ?? 0), "MESSAGES")
-      + tile(String(d.counts?.turns ?? 0), "TURNS")
+      + tile(n(d.counts?.prompts), "MESSAGES")
+      + tile(n(d.counts?.turns), "TURNS")
       + tile(dur, "DURATION")
       + `</div>`;
   }
@@ -60,9 +63,8 @@ export class OverflowPopover {
       const v = pct ?? null;
       const shown = v === null ? "-" : `${Math.round(v)}%`;
       const width = v === null ? 0 : Math.max(0, Math.min(100, v));
-      const cls = v !== null && v >= 80 ? " danger" : v !== null && v >= 50 ? " warn" : "";
       return `<div class="ov-meter-label"><span>${label}</span><b>${shown}</b></div>`
-        + `<div class="ov-meter-track"><div class="ov-meter-fill${cls}" style="width:${width}%"></div></div>`;
+        + `<div class="ov-meter-track"><div class="ov-meter-fill" style="width:${width}%"></div></div>`;
     };
     return `<div class="ov-meters">`
       + meter("5h Session Drained", d.drain?.fiveHourPct)

@@ -907,9 +907,6 @@
   border-radius: 0 3px 3px 0;
 }
 
-.ov-meter-fill.warn { background: #fbbf24; }
-.ov-meter-fill.danger { background: #f87171; }
-
 .ov-mix-lede { color: var(--sb-muted); font-size: 0.69rem; margin-bottom: 5px; }
 .ov-mix-lede b { color: var(--color-text); font-weight: 400; }
 
