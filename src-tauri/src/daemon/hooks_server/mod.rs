@@ -19,6 +19,7 @@ mod jarvis;
 mod lifecycle;
 mod messages;
 mod permission;
+mod plan;
 mod preview;
 pub(crate) mod preview_render;
 mod question;
@@ -179,6 +180,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/messages/send", post(messages::on_send_message))
         .route("/messages/update", post(messages::on_update_message))
         .route("/todos/write", post(user_todos::on_write_user_todo))
+        .route("/plan/write", post(plan::on_write_plan))
         .route("/drafts/write", post(drafts::on_write_draft))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .with_state(ctx);

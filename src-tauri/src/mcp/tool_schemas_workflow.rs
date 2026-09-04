@@ -23,6 +23,11 @@ pub const TOOL_WRITE_DRAFT: &str = "write_draft";
 // is the failure mode the status/title markers already hit; a tool call cannot
 // be half-emitted. Unconditional, same as send_message.
 pub const TOOL_SHOW_PREVIEW: &str = "show_preview";
+// Turn-footer step checklist. A tool we serve ourselves is always in the list,
+// unlike `TodoWrite`, which the harness withholds often enough that the
+// checklist rendered in 4 of 188 transcripts (2026-09-04). Unconditional, and
+// `TodoWrite` still feeds the same checklist wherever it does exist.
+pub const TOOL_WRITE_PLAN: &str = "write_plan";
 
 pub fn workflow_schemas() -> Vec<Value> {
     vec![
@@ -109,6 +114,29 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "title": {"type": "string", "description": "Short human label for the card header. Derived from the slug if omitted."}
                 },
                 "required": ["slug", "html"]
+            }
+        }),
+        json!({
+            "name": TOOL_WRITE_PLAN,
+            "description": "Declare the steps of a multi-step response BEFORE you start, then update their status as you go; they render as a live checklist in the turn footer. Call it once up front with every step `pending`, so the user can object to step 4 while you are still on step 1 - that is the whole point, and a plan that appears one step at a time is worth much less than one he can read ahead in. Send the WHOLE plan every call, not a delta; each call replaces the last. A step is identified by its `text`, so keep the wording stable across calls or the row is treated as a new step. Exactly one step should be `active`. Use it for any response with 3+ real steps, including non-coding work. The user can attach a note to a step (\"skip this\", \"is this needed?\"); it reaches you when that step goes active.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "Every step, in order. Resend the full list on each call.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string", "description": "The step, a few words, imperative. This is its identity - keep it byte-stable across calls."},
+                                "status": {"type": "string", "enum": ["pending", "active", "done", "skipped"]},
+                                "detail": {"type": "string", "description": "Optional one line on what this step actually involves, shown when the user expands the step. Write it so he can judge whether the step is worth doing."}
+                            },
+                            "required": ["text", "status"]
+                        }
+                    }
+                },
+                "required": ["steps"]
             }
         }),
     ]

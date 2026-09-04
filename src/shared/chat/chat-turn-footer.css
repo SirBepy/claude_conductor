@@ -177,6 +177,36 @@
   gap: 8px;
   padding: 3px 2px;
   position: relative;
+  /* So .todo-step-detail can take a full-width line of its own below the
+     label instead of becoming a third column in this row. */
+  flex-wrap: wrap;
+}
+.todo-step--has-detail {
+  cursor: pointer;
+}
+.todo-step-caret {
+  font-size: 0.66rem;
+  opacity: 0.4;
+  margin-left: 1px;
+  padding-top: 3px;
+  transition: transform 0.18s ease;
+}
+.todo-step--has-detail:hover .todo-step-caret {
+  opacity: 0.75;
+}
+.todo-step--open .todo-step-caret {
+  transform: rotate(180deg);
+}
+.todo-step-detail {
+  flex-basis: 100%;
+  margin: 3px 0 2px 24px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  display: none;
+}
+.todo-step--open > .todo-step-detail {
+  display: block;
 }
 .todo-step-connector {
   position: absolute;

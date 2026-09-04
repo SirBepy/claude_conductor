@@ -12,7 +12,8 @@ use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_RESPOND_WORKER_PROMPT,
     TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT,
-    TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_USER_TODO,
+    TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN,
+    TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -253,6 +254,17 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "session_id": ctx.session_id,
             });
             Some(ctx.relay("/hooks/preview", body, None, Some("preview shown in chat")))
+        }
+        TOOL_WRITE_PLAN => {
+            // The checklist renders off this call's own `tool_use` event in the
+            // transcript, the same path `TodoWrite` takes, so the route only
+            // validates the shape - a duplicate step text silently collapses
+            // two rows in the renderer's keyed map.
+            let body = json!({
+                "session_id": ctx.session_id,
+                "steps": ctx.args["steps"],
+            });
+            Some(ctx.relay("/plan/write", body, Some("invalid plan"), None))
         }
         _ => None,
     }

@@ -276,7 +276,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 15);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -294,6 +294,7 @@ mod tests {
         assert!(names.contains(&"write_user_todo"));
         assert!(names.contains(&"write_draft"));
         assert!(names.contains(&"show_preview"));
+        assert!(names.contains(&"write_plan"));
     }
 
     #[test]
@@ -305,7 +306,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 18, "14 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 19, "15 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();

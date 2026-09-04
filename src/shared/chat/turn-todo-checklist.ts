@@ -15,6 +15,10 @@ interface TodoStepRow {
   icon: HTMLElement;
   connectorFill: HTMLElement | null;
   status: TodoStepStatus;
+  /** The step's own one-line description, revealed on click. Only `write_plan`
+   *  supplies one; TodoWrite's `activeForm` is read for the thinking bar and
+   *  never reaches a row, so a TodoWrite-driven checklist has no detail at all. */
+  detailEl: HTMLElement | null;
 }
 
 export interface TodoChecklistState {
@@ -36,7 +40,15 @@ export interface TodoChecklistState {
 /** Set a row's icon + status class (and connector fill, when present). */
 function applyTodoStepStatus(entry: TodoStepRow, status: TodoStepStatus): void {
   entry.status = status;
+  // Rebuilt, not blindly reassigned: the two detail classes are owned by
+  // setTodoStepDetail, and a plain className write drops them, so a step
+  // would stop expanding the instant it changed status.
+  const wasOpen = entry.row.classList.contains("todo-step--open");
   entry.row.className = `todo-step todo-step--${status}`;
+  if (entry.detailEl) {
+    entry.row.classList.add("todo-step--has-detail");
+    if (wasOpen) entry.row.classList.add("todo-step--open");
+  }
   let iconClass = "ph ph-circle";
   if (status === "active") iconClass = "ph ph-spinner-gap";
   else if (status === "done") iconClass = "ph-fill ph-check-circle";
@@ -45,6 +57,28 @@ function applyTodoStepStatus(entry: TodoStepRow, status: TodoStepStatus): void {
   if (entry.connectorFill) {
     entry.connectorFill.style.height = status === "done" ? "100%" : "0%";
   }
+}
+
+/** Attach, update or drop a row's expandable detail line. */
+function setTodoStepDetail(entry: TodoStepRow, detail: string | undefined): void {
+  if (!detail) {
+    entry.detailEl?.remove();
+    entry.row.querySelector(".todo-step-caret")?.remove();
+    entry.detailEl = null;
+    entry.row.classList.remove("todo-step--has-detail", "todo-step--open");
+    return;
+  }
+  if (!entry.detailEl) {
+    const caret = document.createElement("i");
+    caret.className = "ph ph-caret-down todo-step-caret";
+    entry.row.appendChild(caret);
+    const el = document.createElement("span");
+    el.className = "todo-step-detail";
+    entry.row.appendChild(el);
+    entry.detailEl = el;
+    entry.row.classList.add("todo-step--has-detail");
+  }
+  entry.detailEl.textContent = detail;
 }
 
 /**
@@ -58,6 +92,12 @@ export function ensureTodoChecklist(st: TurnFooterState | undefined): void {
   el.className = "todo-checklist";
   const stepsEl = document.createElement("ul");
   stepsEl.className = "todo-checklist-steps";
+  // Delegated once on the list, not per row: rows are created and removed as
+  // the plan changes, and a per-row listener would leak with them.
+  stepsEl.addEventListener("click", (e) => {
+    const row = (e.target as HTMLElement | null)?.closest?.(".todo-step--has-detail");
+    if (row) row.classList.toggle("todo-step--open");
+  });
   el.appendChild(stepsEl);
   if (st.metaRow) {
     st.metaRow.insertAdjacentElement("afterend", el);
@@ -76,7 +116,7 @@ export function ensureTodoChecklist(st: TurnFooterState | undefined): void {
  */
 export function updateTodoSteps(
   st: TurnFooterState | undefined,
-  steps: { label: string; status: TodoStepStatus }[],
+  steps: { label: string; status: TodoStepStatus; detail?: string }[],
 ): void {
   if (!st || st.settled) return;
   if (!st.todoChecklist) ensureTodoChecklist(st);
@@ -104,10 +144,11 @@ export function updateTodoSteps(
       label.textContent = step.label;
       row.appendChild(label);
       tc.stepsEl.appendChild(row);
-      entry = { row, icon, connectorFill, status: "pending" };
+      entry = { row, icon, connectorFill, status: "pending", detailEl: null };
       tc.rows.set(step.label, entry);
       tc.order.push(step.label);
     }
+    setTodoStepDetail(entry, step.detail);
     if (isNewRow || entry.status !== step.status) applyTodoStepStatus(entry, step.status);
   }
   // Remove rows for steps no longer present (rare, but don't crash if it happens).

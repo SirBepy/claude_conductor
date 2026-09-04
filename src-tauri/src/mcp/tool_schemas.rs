@@ -19,7 +19,8 @@ pub use super::tool_schemas_jarvis::{
     TOOL_FLEET_STATUS, TOOL_RESPOND_WORKER_PROMPT, TOOL_SEND_TO_SESSION, TOOL_SPAWN_WORKER,
 };
 pub use super::tool_schemas_workflow::{
-    TOOL_RESPAWN, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_WRITE_DRAFT, TOOL_WRITE_USER_TODO,
+    TOOL_RESPAWN, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN,
+    TOOL_WRITE_USER_TODO,
 };
 
 /// `is_jarvis` gates the four fleet-orchestration tools at the bottom - they're

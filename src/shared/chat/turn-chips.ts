@@ -395,7 +395,10 @@ export class TurnFooterRegistry {
   }
 
   /** Re-render the checklist's steps. See turn-todo-checklist.ts. */
-  updateTodoSteps(key: TurnChipKey, steps: { label: string; status: TodoStepStatus }[]): void {
+  updateTodoSteps(
+    key: TurnChipKey,
+    steps: { label: string; status: TodoStepStatus; detail?: string }[],
+  ): void {
     this.getOrCreateFooter(key);
     updateTodoStepsImpl(this.turns.get(key), steps);
   }

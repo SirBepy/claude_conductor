@@ -6,7 +6,7 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
-import { canonicalTool, isShowPreviewTool } from "./tool-meta";
+import { canonicalTool, isShowPreviewTool, MCP_WRITE_PLAN_TOOL } from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
 import {
   tryHandleQuestionToolUse,
@@ -23,6 +23,11 @@ interface EventOutcome {
   touched: boolean;
   coalesce: boolean;
 }
+
+/** write_plan's step vocabulary. Narrower than TodoStepStatus: "interrupted"
+ *  is set by the renderer on cancel, never declared by the model. */
+const PLAN_STATUSES = ["pending", "active", "done", "skipped"] as const;
+type PlanStatus = (typeof PLAN_STATUSES)[number];
 
 export function handleToolUseEvent(
   r: ChatRenderer,
@@ -59,6 +64,29 @@ export function handleToolUseEvent(
         : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, dimmed: false };
       r.dirtyIndices.add(idx);
     }
+    return { touched: true, coalesce: false };
+  }
+  // write_plan drives the same checklist as TodoWrite below, with one
+  // difference: EVERY step renders on every call instead of being diffed
+  // against a baseline, so step 4 can be objected to while step 1 runs.
+  if (ev.tool_name === MCP_WRITE_PLAN_TOOL && !ev.parent_tool_use_id) {
+    r._todoWriteToolUseIds.add(ev.id);
+    const rawSteps = (ev.input as { steps?: { text?: unknown; status?: unknown; detail?: unknown }[] } | null)?.steps;
+    const steps = (Array.isArray(rawSteps) ? rawSteps : [])
+      .filter((s) => typeof s?.text === "string" && s.text.trim() !== "")
+      .map((s) => ({
+        label: s.text as string,
+        // An unknown status renders pending rather than dropping the row: a
+        // step the user cannot see is worse than one shown as not-started.
+        status: PLAN_STATUSES.includes(s.status as PlanStatus) ? (s.status as PlanStatus) : "pending",
+        detail: typeof s.detail === "string" && s.detail.trim() !== "" ? s.detail : undefined,
+      }));
+    if (r.activeTurnChipKey !== null && steps.length > 0) {
+      r.turnFooters.ensureTodoChecklist(r.activeTurnChipKey);
+      r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
+    }
+    r.lastTodoActivity = steps.find((s) => s.status === "active")?.label ?? null;
+    if (!r.hydrating) r.onTodoActivityUpdate?.(r.lastTodoActivity);
     return { touched: true, coalesce: false };
   }
   // TodoWrite drives the step-checklist that replaces the visual role of
