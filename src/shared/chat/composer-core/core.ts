@@ -174,6 +174,11 @@ export class ComposerCore {
     const { highlightEl, textarea } = this.opts;
     if (!highlightEl) return;
     highlightEl.innerHTML = html;
+    // Emptying the backdrop leaves its glyphs on screen in WKWebView (macOS)
+    // until something else dirties the layer - a send clears the box but the
+    // old text stays painted under the placeholder until the next keystroke.
+    // Dropping the box out of the render tree forces that invalidation.
+    highlightEl.style.display = html ? "" : "none";
     highlightEl.scrollTop = textarea.scrollTop;
   }
 }
