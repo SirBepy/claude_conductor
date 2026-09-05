@@ -30,6 +30,13 @@ pub struct ChannelMessage {
     pub author: String,
     pub text: String,
     pub posted_at: String,
+    /// `post_message`'s optional `to`: a direct message, invisible to every
+    /// OTHER project member's `read_messages` (see `list_unread_at`'s
+    /// filter). `None` (the default, and every message posted before this
+    /// field existed - `#[serde(default)]` so an old on-disk channel file
+    /// still deserializes) is today's broadcast-to-all behaviour, unchanged.
+    #[serde(default)]
+    pub to_session_id: Option<String>,
 }
 
 /// Retained message cap per project. A coordination log, not an archive -
@@ -106,7 +113,13 @@ pub fn list_unread(project_id: &str, session_id: &str) -> Vec<ChannelMessage> {
 /// `pub(crate)`: the tempdir-injectable form real unit tests use, same
 /// rationale as `post_at`/`list_at`.
 pub(crate) fn list_unread_at(path: &Path, session_id: &str) -> Vec<ChannelMessage> {
-    let all = list_at(path);
+    // Filtered BEFORE the cursor math below: a direct message addressed to
+    // someone else must never count as "seen" by this reader, and must never
+    // occupy a slot the cursor could otherwise skip past.
+    let all: Vec<ChannelMessage> = list_at(path)
+        .into_iter()
+        .filter(|m| m.to_session_id.is_none() || m.to_session_id.as_deref() == Some(session_id))
+        .collect();
     let key = (path.to_path_buf(), session_id.to_string());
     let mut cursors = cursors().lock().unwrap_or_else(|e| e.into_inner());
     // No cursor, or the cursor's message aged out of MAX_MESSAGES retention:
@@ -130,11 +143,13 @@ pub(crate) fn list_unread_at(path: &Path, session_id: &str) -> Vec<ChannelMessag
 /// failure the message is still returned to the caller (so the poster's own
 /// `post_message` response and the wake line it hands to peers stay
 /// consistent) even though it never made it to disk.
-pub fn post(project_id: &str, session_id: &str, author: &str, text: &str) -> ChannelMessage {
+/// `to_session_id: None` is today's broadcast; `Some(id)` is `post_message`'s
+/// `to` - a direct message only its addressee's `read_messages` returns.
+pub fn post(project_id: &str, session_id: &str, author: &str, text: &str, to_session_id: Option<&str>) -> ChannelMessage {
     let Some(path) = store_path_for(project_id) else {
-        return post_at(None, session_id, author, text);
+        return post_at(None, session_id, author, text, to_session_id);
     };
-    post_at(Some(&path), session_id, author, text)
+    post_at(Some(&path), session_id, author, text, to_session_id)
 }
 
 /// `path: None` skips the disk write entirely (mirrors `post`'s own
@@ -143,13 +158,20 @@ pub fn post(project_id: &str, session_id: &str, author: &str, text: &str) -> Cha
 /// through the actual function instead of duplicated inline (the
 /// `scheduled_items.rs` `_at(path, ...)` pattern this module was already
 /// documented as following, but hadn't actually applied before this pass).
-pub(crate) fn post_at(path: Option<&Path>, session_id: &str, author: &str, text: &str) -> ChannelMessage {
+pub(crate) fn post_at(
+    path: Option<&Path>,
+    session_id: &str,
+    author: &str,
+    text: &str,
+    to_session_id: Option<&str>,
+) -> ChannelMessage {
     let msg = ChannelMessage {
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),
         author: author.to_string(),
         text: text.chars().take(MAX_TEXT_LEN).collect(),
         posted_at: chrono::Utc::now().to_rfc3339(),
+        to_session_id: to_session_id.map(str::to_string),
     };
     if let Some(path) = path {
         let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -180,7 +202,7 @@ mod tests {
     fn post_and_load_roundtrip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-1.json");
-        let msg = post_at(Some(&path), "s1", "Alice", "hello");
+        let msg = post_at(Some(&path), "s1", "Alice", "hello", None);
         assert_eq!(msg.text, "hello");
         let loaded = list_at(&path);
         assert_eq!(loaded.len(), 1);
@@ -193,7 +215,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-1.json");
         for i in 0..MAX_MESSAGES + 5 {
-            post_at(Some(&path), "s1", "Alice", &format!("msg {i}"));
+            post_at(Some(&path), "s1", "Alice", &format!("msg {i}"), None);
         }
         let loaded = list_at(&path);
         assert_eq!(loaded.len(), MAX_MESSAGES);
@@ -206,7 +228,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-1.json");
         let long = "x".repeat(MAX_TEXT_LEN + 500);
-        let msg = post_at(Some(&path), "s1", "Alice", &long);
+        let msg = post_at(Some(&path), "s1", "Alice", &long, None);
         assert_eq!(msg.text.chars().count(), MAX_TEXT_LEN);
         // Persisted copy must match the truncated returned copy - this is the
         // exact invariant `daemon::methods::channel::post_message` relies on
@@ -222,7 +244,7 @@ mod tests {
         // unavailable) - the caller must still get a usable, correctly
         // truncated message back even though nothing was written to disk.
         let long = "x".repeat(MAX_TEXT_LEN + 500);
-        let msg = post_at(None, "s1", "Alice", &long);
+        let msg = post_at(None, "s1", "Alice", &long, None);
         assert_eq!(msg.text.chars().count(), MAX_TEXT_LEN);
     }
 
@@ -230,8 +252,8 @@ mod tests {
     fn list_unread_returns_the_full_backlog_on_a_sessions_first_call() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-cursor-1.json");
-        post_at(Some(&path), "s1", "Alice", "one");
-        post_at(Some(&path), "s1", "Alice", "two");
+        post_at(Some(&path), "s1", "Alice", "one", None);
+        post_at(Some(&path), "s1", "Alice", "two", None);
 
         let unread = list_unread_at(&path, "reader-a");
         assert_eq!(unread.len(), 2);
@@ -241,13 +263,13 @@ mod tests {
     fn list_unread_advances_the_cursor_and_excludes_already_seen_messages() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-cursor-2.json");
-        post_at(Some(&path), "s1", "Alice", "one");
+        post_at(Some(&path), "s1", "Alice", "one", None);
 
         let first = list_unread_at(&path, "reader-b");
         assert_eq!(first.len(), 1);
         assert_eq!(list_unread_at(&path, "reader-b").len(), 0, "no new messages since last read");
 
-        post_at(Some(&path), "s1", "Alice", "two");
+        post_at(Some(&path), "s1", "Alice", "two", None);
         let second = list_unread_at(&path, "reader-b");
         assert_eq!(second.len(), 1);
         assert_eq!(second[0].text, "two");
@@ -257,7 +279,7 @@ mod tests {
     fn list_unread_tracks_cursors_independently_per_session() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-cursor-3.json");
-        post_at(Some(&path), "s1", "Alice", "one");
+        post_at(Some(&path), "s1", "Alice", "one", None);
 
         assert_eq!(list_unread_at(&path, "reader-c").len(), 1);
         // A different reader against the same channel has never read anything yet.
@@ -269,7 +291,7 @@ mod tests {
     fn forget_session_drops_its_cursor_so_the_next_read_sees_the_full_backlog_again() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-cursor-4.json");
-        post_at(Some(&path), "s1", "Alice", "one");
+        post_at(Some(&path), "s1", "Alice", "one", None);
 
         assert_eq!(list_unread_at(&path, "reader-e").len(), 1);
         assert_eq!(list_unread_at(&path, "reader-e").len(), 0, "cursor now set, nothing new");
@@ -280,5 +302,49 @@ mod tests {
             1,
             "cursor entry gone, so this reads like a first-ever call again"
         );
+    }
+
+    #[test]
+    fn direct_message_is_invisible_to_a_different_reader() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-direct-1.json");
+        post_at(Some(&path), "s1", "Alice", "broadcast to all", None);
+        post_at(Some(&path), "s1", "Alice", "just for bob", Some("bob"));
+
+        let for_bob = list_unread_at(&path, "bob");
+        assert_eq!(for_bob.len(), 2, "bob sees the broadcast AND his own direct message");
+
+        let for_carol = list_unread_at(&path, "carol");
+        assert_eq!(for_carol.len(), 1, "carol must not see bob's direct message");
+        assert_eq!(for_carol[0].text, "broadcast to all");
+    }
+
+    #[test]
+    fn direct_message_survives_a_prior_broadcast_cursor() {
+        // A reader who already advanced their cursor past the broadcast must
+        // still pick up a direct message posted afterwards.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-direct-2.json");
+        post_at(Some(&path), "s1", "Alice", "broadcast", None);
+        assert_eq!(list_unread_at(&path, "bob").len(), 1);
+
+        post_at(Some(&path), "s1", "Alice", "direct follow-up", Some("bob"));
+        let unread = list_unread_at(&path, "bob");
+        assert_eq!(unread.len(), 1);
+        assert_eq!(unread[0].text, "direct follow-up");
+    }
+
+    #[test]
+    fn old_on_disk_messages_without_to_session_id_still_deserialize() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-legacy.json");
+        std::fs::write(
+            &path,
+            r#"[{"id":"m1","session_id":"s1","author":"Alice","text":"hi","posted_at":"2026-01-01T00:00:00Z"}]"#,
+        )
+        .unwrap();
+        let loaded = list_at(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].to_session_id, None);
     }
 }

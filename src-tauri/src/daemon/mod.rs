@@ -155,6 +155,11 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_drafts_store(&mut router, state.clone());
     methods::register_ask(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());
+    // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
+    // `to` (multi-machine chat parity): reached only via a paired peer's
+    // forwarded call, gated `M`-only in `remote_handlers::TRANSPORT_TABLE`.
+    methods::spawn_chat::register_spawn_chat_rpc(&mut router, state.clone());
+    methods::channel::register_channel_rpc(&mut router, state.clone());
     // Mirrored-session forwarding seam (multi-machine federation): must run
     // after every register_* call above so it can consult the fully-built
     // TRANSPORT_TABLE-backed `allowed` check, though ordering doesn't

@@ -253,6 +253,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),
+    // Machine-only: the peer-facing half of `spawn_chat`'s `machine` param
+    // (multi-machine chat parity) - a phone has its own `start_session`
+    // already and never relays a chat spawn between two OTHER machines.
+    // Registered by `methods::spawn_chat::register_spawn_chat_rpc`.
+    ("spawn_chat", M),
+    // Machine-only: the peer-facing half of `post_message`'s `to` param when
+    // it addresses a session mirrored from a paired peer - a phone never
+    // relays a repo-channel post between two OTHER machines either.
+    // Registered by `methods::channel::register_channel_rpc`.
+    ("peer_channel_post", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)
@@ -529,7 +539,7 @@ mod tests {
     /// exception like `peer_unpaired`, never an unreviewed superset.
     #[test]
     fn peer_machine_mask_is_phone_subset_or_a_named_machine_only_exception() {
-        const MACHINE_ONLY_EXCEPTIONS: &[&str] = &["peer_unpaired"];
+        const MACHINE_ONLY_EXCEPTIONS: &[&str] = &["peer_unpaired", "spawn_chat", "peer_channel_post"];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
                 assert!(
@@ -554,6 +564,16 @@ mod tests {
     fn peer_unpaired_is_machine_only() {
         assert!(allowed("peer_unpaired", &Transport::PeerMachine("x".into())));
         assert!(!allowed("peer_unpaired", &Transport::Phone));
+    }
+
+    /// The multi-machine chat-parity methods (`spawn_chat`/`peer_channel_post`
+    /// forwarded FROM a peer) are machine-only, same as `peer_unpaired` above.
+    #[test]
+    fn chat_parity_methods_are_machine_only() {
+        for m in ["spawn_chat", "peer_channel_post"] {
+            assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m} must be callable by a peer machine");
+            assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
+        }
     }
 
     /// `pair_machine`/`unpair_machine`/`set_machine_label` are desktop-pipe-only:

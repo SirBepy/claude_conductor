@@ -9,7 +9,6 @@ use super::HookCtx;
 use crate::daemon::methods::spawn_chat as spawn_chat_method;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -27,6 +26,10 @@ pub(super) struct SpawnChatBody {
     /// caller and close the caller at its turn end.
     #[serde(default)]
     respawn: bool,
+    /// Label or id of a paired peer machine to start the chat on instead of
+    /// here; omitted/self spawns locally (today's behaviour, unchanged).
+    #[serde(default)]
+    machine: Option<String>,
 }
 
 pub(super) async fn on_spawn_chat(
@@ -35,7 +38,7 @@ pub(super) async fn on_spawn_chat(
 ) -> impl IntoResponse {
     // todo 824 remaining 1: reachable only via the MCP `spawn_chat`/`respawn` tools.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
-    let result = spawn_chat_method::spawn_chat(
+    let result = spawn_chat_method::spawn_chat_or_forward(
         &ctx.state,
         &body.session_id,
         &body.cwd,
@@ -44,12 +47,10 @@ pub(super) async fn on_spawn_chat(
         body.effort.as_deref(),
         body.name.as_deref(),
         body.respawn,
+        body.machine.as_deref(),
     )
     .await;
-    match result {
-        Ok(session_id) => (StatusCode::OK, Json(json!({"ok": true, "session_id": session_id}))),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
-    }
+    (StatusCode::OK, Json(result))
 }
 
 #[cfg(test)]
@@ -79,6 +80,7 @@ mod tests {
             effort: None,
             name: None,
             respawn: false,
+            machine: None,
         };
         let resp = on_spawn_chat(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);

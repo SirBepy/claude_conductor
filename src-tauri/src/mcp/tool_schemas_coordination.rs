@@ -29,7 +29,9 @@ pub fn coordination_schemas() -> Vec<Value> {
             "description": "Call this BEFORE editing any file another Conductor session might also be touching, and before running `git commit` - other concurrent sessions in this same project can silently sweep your uncommitted edits into their own commit. Lists other Claude Conductor sessions currently active in this same project (repo), with their busy/awaiting state. If it returns any peers, call post_message before proceeding. A peer with `busy: false` and `awaiting: null` is genuinely idle right now - trust that instead of broadcasting a \"are you working on this?\" check.",
             "inputSchema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "scope": {"type": "string", "description": "Widen the listing past this project. Omit for today's default (just this project, here). \"all\" lists every session across every one of the user's paired machines too - use it when the user asks what's running anywhere, or which machine something is on. \"machine:<label>\" (a label from an \"all\" listing) narrows to just that one machine."}
+                }
             }
         }),
         json!({
@@ -39,7 +41,8 @@ pub fn coordination_schemas() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "The note to post."},
-                    "target": {"type": "string", "description": "Session id (from list_peers) to address this to - use it for any reply within an established back-and-forth. Omit ONLY for something every peer in the project needs to see; each omission wakes and costs a full turn for every other live session."}
+                    "target": {"type": "string", "description": "Session id (from list_peers) to address this to - use it for any reply within an established back-and-forth. Omit ONLY for something every peer in the project needs to see; each omission wakes and costs a full turn for every other live session."},
+                    "to": {"type": "string", "description": "Session id (from a scope:\"all\"/\"machine:<label>\" list_peers call) to send this as a PRIVATE direct message instead of a project-wide note - use it for a session on ANOTHER machine, or any time the rest of the project must not see it. Unlike `target`, a `to` message never shows up in anyone else's read_messages, even a peer in the same project."}
                 },
                 "required": ["text"]
             }

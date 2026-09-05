@@ -22,6 +22,11 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 pub(super) struct SessionOnlyBody {
     session_id: String,
+    /// `list_peers`'s optional `scope` ("project"/"all"/"machine:<label>",
+    /// see `channel_methods::list_peers`) - unused by `on_read_messages`,
+    /// which shares this body shape and never receives the key.
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 pub(super) async fn on_list_peers(
@@ -30,7 +35,7 @@ pub(super) async fn on_list_peers(
 ) -> impl IntoResponse {
     // todo 824 remaining 1: reachable only via the MCP `list_peers` tool.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
-    match channel_methods::list_peers(&ctx.state, &body.session_id) {
+    match channel_methods::list_peers(&ctx.state, &body.session_id, body.scope.as_deref()) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
     }
@@ -54,6 +59,10 @@ pub(super) struct PostMessageBody {
     text: String,
     #[serde(default)]
     target: Option<Vec<String>>,
+    /// A session id to address this as a direct message instead of a
+    /// broadcast/`target`-woken note - see `channel_methods::post_message_or_forward`.
+    #[serde(default)]
+    to: Option<String>,
 }
 
 pub(super) async fn on_post_message(
@@ -62,10 +71,15 @@ pub(super) async fn on_post_message(
 ) -> impl IntoResponse {
     // todo 824 remaining 1: reachable only via the MCP `post_message` tool.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
-    match channel_methods::post_message(&ctx.state, &body.session_id, &body.text, body.target.as_deref()) {
-        Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
-    }
+    let result = channel_methods::post_message_or_forward(
+        &ctx.state,
+        &body.session_id,
+        &body.text,
+        body.target.as_deref(),
+        body.to.as_deref(),
+    )
+    .await;
+    (StatusCode::OK, Json(result))
 }
 
 #[cfg(test)]
@@ -89,7 +103,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_peers_route_errors_for_unregistered_session() {
-        let body = SessionOnlyBody { session_id: "ghost".to_string() };
+        let body = SessionOnlyBody { session_id: "ghost".to_string(), scope: None };
         let resp = on_list_peers(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
@@ -100,9 +114,26 @@ mod tests {
     async fn post_message_route_errors_for_empty_text() {
         let c = ctx();
         c.state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
-        let body = PostMessageBody { session_id: "s1".to_string(), text: "".to_string(), target: None };
+        let body = PostMessageBody { session_id: "s1".to_string(), text: "".to_string(), target: None, to: None };
         let resp = on_post_message(AxState(c), ValidatedJson(body)).await.into_response();
         let v = body_json(resp).await;
         assert_eq!(v["ok"], false);
+    }
+
+    #[tokio::test]
+    async fn post_message_route_with_a_to_delivers_a_direct_message() {
+        let c = ctx();
+        c.state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        c.state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        let body = PostMessageBody {
+            session_id: "s1".to_string(),
+            text: "hi".to_string(),
+            target: None,
+            to: Some("s2".to_string()),
+        };
+        let resp = on_post_message(AxState(c), ValidatedJson(body)).await.into_response();
+        let v = body_json(resp).await;
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["notified"], 1);
     }
 }

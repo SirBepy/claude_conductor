@@ -111,6 +111,9 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
         TOOL_SPAWN_CHAT | TOOL_RESPAWN => {
             // One endpoint, one flag: respawn IS spawn_chat plus the successor
             // link and the caller's close, both of which the daemon applies.
+            // `machine` only ever comes from `spawn_chat`'s own schema (`respawn`
+            // has no such property) - the daemon still rejects it defensively
+            // if it somehow arrives on a respawn call.
             let body = json!({
                 "session_id": ctx.session_id,
                 "cwd": ctx.args["cwd"],
@@ -119,6 +122,7 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "effort": ctx.args.get("effort"),
                 "name": ctx.args.get("name"),
                 "respawn": name == TOOL_RESPAWN,
+                "machine": ctx.args.get("machine"),
             });
             Some(ctx.relay("/chat/spawn", body, None, None))
         }
@@ -151,7 +155,10 @@ fn normalize_targets(raw: Option<&Value>) -> Value {
 fn channel_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     match name {
         TOOL_LIST_PEERS => {
-            let body = json!({ "session_id": ctx.session_id });
+            let body = json!({
+                "session_id": ctx.session_id,
+                "scope": ctx.args.get("scope"),
+            });
             Some(ctx.relay("/channel/list-peers", body, None, None))
         }
         TOOL_POST_MESSAGE => {
@@ -159,6 +166,7 @@ fn channel_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "session_id": ctx.session_id,
                 "text": ctx.args["text"],
                 "target": normalize_targets(ctx.args.get("target")),
+                "to": ctx.args.get("to"),
             });
             Some(ctx.relay("/channel/post-message", body, None, None))
         }

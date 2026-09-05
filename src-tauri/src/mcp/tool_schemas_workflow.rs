@@ -41,7 +41,8 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "prompt": {"type": "string", "description": "The new chat's first message. Carry the full handoff context here - it is what the user reads."},
                     "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
-                    "name": {"type": "string", "description": "Optional short label for the new chat."}
+                    "name": {"type": "string", "description": "Optional short label for the new chat."},
+                    "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. Omit to spawn locally, the default."}
                 },
                 "required": ["cwd", "prompt"]
             }
