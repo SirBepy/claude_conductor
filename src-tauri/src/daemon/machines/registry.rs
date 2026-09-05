@@ -46,6 +46,24 @@ pub struct PeerMachineView {
     pub direct_url: Option<String>,
     pub reverse_device_id: Option<String>,
     pub added_at: u64,
+    /// How `peer_client::reach_url` would resolve this peer right now, for
+    /// the machines list UI to show at a glance: `"direct"` (has a
+    /// `direct_url`), `"iroh"` (no direct url but a known iroh id, so the
+    /// dial-and-proxy path applies), or `"none"` (neither - unreachable).
+    pub reach: &'static str,
+}
+
+/// Pure mirror of `peer_client::reach_url`'s branch order (direct wins,
+/// iroh is the fallback), kept here rather than in `peer_client` so this view
+/// type doesn't need to depend on the async, `DaemonState`-threading module.
+pub fn reach_kind(peer: &PeerMachine) -> &'static str {
+    if peer.direct_url.is_some() {
+        "direct"
+    } else if peer.iroh_id.is_some() {
+        "iroh"
+    } else {
+        "none"
+    }
 }
 
 impl From<&PeerMachine> for PeerMachineView {
@@ -58,6 +76,7 @@ impl From<&PeerMachine> for PeerMachineView {
             direct_url: p.direct_url.clone(),
             reverse_device_id: p.reverse_device_id.clone(),
             added_at: p.added_at,
+            reach: reach_kind(p),
         }
     }
 }
@@ -268,6 +287,28 @@ mod tests {
         assert_eq!(removed.machine_id, "id1");
         assert!(reg.peers().is_empty());
         assert!(reg.remove_peer("id1").is_none());
+    }
+
+    #[test]
+    fn reach_kind_prefers_direct_over_iroh() {
+        let mut p = mk_peer("id1", "Mac");
+        p.direct_url = Some("http://127.0.0.1:9999".into());
+        p.iroh_id = Some("deadbeef".into());
+        assert_eq!(reach_kind(&p), "direct");
+    }
+
+    #[test]
+    fn reach_kind_falls_back_to_iroh() {
+        let mut p = mk_peer("id1", "Mac");
+        p.direct_url = None;
+        p.iroh_id = Some("deadbeef".into());
+        assert_eq!(reach_kind(&p), "iroh");
+    }
+
+    #[test]
+    fn reach_kind_none_when_neither_is_set() {
+        let p = mk_peer("id1", "Mac");
+        assert_eq!(reach_kind(&p), "none");
     }
 
     #[test]

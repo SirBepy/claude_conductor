@@ -105,7 +105,7 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
                         data: None,
                     });
                 }
-                let client = peer_client::client_for(&peer).map_err(map_peer_err)?;
+                let client = peer_client::client_for(&state, &peer).await.map_err(map_peer_err)?;
                 client.call("list_projects", Value::Null).await.map_err(map_peer_err)
             }
         }
@@ -145,6 +145,28 @@ pub(crate) struct ParsedPairing {
     pub direct_url: Option<String>,
 }
 
+/// How `pair_machine` will physically reach the peer it just parsed a
+/// pairing URL for - decided before any network call, so it's unit-testable
+/// on its own. Mirrors `peer_client::reach_url`'s branch order (direct wins,
+/// iroh is the fallback), but works off `ParsedPairing` since pairing hasn't
+/// stored a `PeerMachine` yet.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ReachDecision {
+    Direct(String),
+    Iroh(String),
+    Neither,
+}
+
+pub(crate) fn decide_reach(parsed: &ParsedPairing) -> ReachDecision {
+    if let Some(direct) = &parsed.direct_url {
+        ReachDecision::Direct(direct.clone())
+    } else if let Some(id) = &parsed.iroh_id {
+        ReachDecision::Iroh(id.clone())
+    } else {
+        ReachDecision::Neither
+    }
+}
+
 /// Pure URL parsing so this is unit-testable without a network or a daemon.
 pub(crate) fn parse_pairing_url(raw: &str) -> Result<ParsedPairing, String> {
     let parsed = url::Url::parse(raw).map_err(|e| format!("invalid pairing url: {e}"))?;
@@ -177,13 +199,23 @@ async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParams) -> Resul
     let app_data = registry.app_data().to_path_buf();
 
     let parsed = parse_pairing_url(&req.url).map_err(RpcError::invalid_params)?;
-    let Some(direct_url) = parsed.direct_url else {
-        return Err(RpcError::invalid_params(
-            "iroh-only pairing arrives in a later chunk; use a URL with a host",
-        ));
+    // The URL a `conductor://` (iroh-only) link resolves to today is a
+    // loopback proxy port that only lives for this process - never persisted,
+    // unlike `parsed.direct_url` below, which IS what gets stored (`None` for
+    // a conductor:// link, so a future reach still goes through iroh).
+    let reach = match decide_reach(&parsed) {
+        ReachDecision::Direct(url) => url,
+        ReachDecision::Iroh(iroh_id) => {
+            let dialer = state.iroh_dialer().await.map_err(RpcError::internal)?;
+            let port = dialer.proxy_port(&iroh_id).await.map_err(RpcError::internal)?;
+            format!("http://127.0.0.1:{port}")
+        }
+        ReachDecision::Neither => {
+            return Err(RpcError::invalid_params("pairing url has neither a host nor an iroh id"))
+        }
     };
 
-    let health = peer_client::PeerClient::new(&direct_url, "")
+    let health = peer_client::PeerClient::new(&reach, "")
         .health()
         .await
         .map_err(|e| RpcError::internal(format!("could not reach that machine: {e}")))?;
@@ -215,7 +247,7 @@ async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParams) -> Resul
         }
     });
 
-    let resp = match peer_client::post_pairing_request(&direct_url, body).await {
+    let resp = match peer_client::post_pairing_request(&reach, body).await {
         Ok(v) => v,
         Err(e) => {
             let _ = DeviceRegistry::revoke_device(&minted_device_id, &app_data);
@@ -249,7 +281,7 @@ async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParams) -> Resul
         label: their_label,
         os: their_os,
         iroh_id: their_iroh_id,
-        direct_url: Some(direct_url),
+        direct_url: parsed.direct_url,
         token: device_token,
         reverse_device_id: Some(minted_device_id),
         added_at: machines::now_secs(),
@@ -272,7 +304,7 @@ async fn unpair_machine(state: &Arc<DaemonState>, machine_id: &str) -> Result<Va
     }
     // Best-effort: tell the peer to drop its copy too. An unreachable or
     // already-unpaired peer is not this call's problem to report.
-    if let Ok(client) = peer_client::client_for(&removed) {
+    if let Ok(client) = peer_client::client_for(state, &removed).await {
         let _ = client.call("peer_unpaired", json!({ "machine_id": mine.machine_id })).await;
     }
     crate::daemon::machines::MachineHub::sync_links(state);
@@ -359,6 +391,26 @@ mod tests {
     fn rejects_garbage_urls() {
         assert!(parse_pairing_url("not a url").is_err());
         assert!(parse_pairing_url("https://box.tailnet.ts.net/").is_err(), "no pair= code");
+    }
+
+    // ── decide_reach ────────────────────────────────────────────────────
+
+    #[test]
+    fn decide_reach_prefers_direct_url() {
+        let parsed = parse_pairing_url("https://box.tailnet.ts.net/?pair=abc123&iroh=deadbeef").unwrap();
+        assert_eq!(decide_reach(&parsed), ReachDecision::Direct("https://box.tailnet.ts.net".into()));
+    }
+
+    #[test]
+    fn decide_reach_falls_back_to_iroh_for_a_conductor_scheme_link() {
+        let parsed = parse_pairing_url("conductor://pair?iroh=deadbeef&pair=abc123").unwrap();
+        assert_eq!(decide_reach(&parsed), ReachDecision::Iroh("deadbeef".into()));
+    }
+
+    #[test]
+    fn decide_reach_neither_when_a_plain_conductor_link_carries_no_iroh_id() {
+        let parsed = ParsedPairing { code: "abc123".into(), iroh_id: None, direct_url: None };
+        assert_eq!(decide_reach(&parsed), ReachDecision::Neither);
     }
 
     // ── RPC-level ────────────────────────────────────────────────────────

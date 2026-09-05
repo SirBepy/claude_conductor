@@ -118,6 +118,13 @@ pub struct DaemonState {
     /// `machines::relay::AbortOnDrop`, and `detach_session` needs `state` to
     /// reach it, which the per-connection subscriptions map doesn't carry.
     pub relays: Arc<Mutex<HashMap<(u64, String), tokio::task::JoinHandle<()>>>>,
+    /// Lazily-bound iroh dial endpoint (`daemon::machines::iroh_dial`), used
+    /// by `peer_client::reach_url` to proxy an iroh-only peer as a loopback
+    /// URL. A `tokio::sync::OnceCell` rather than a plain field constructed
+    /// up front: a daemon with only `direct_url` peers (or none at all)
+    /// should never bind the extra endpoint. Access via
+    /// [`DaemonState::iroh_dialer`], never this field directly.
+    iroh_dialer: tokio::sync::OnceCell<Arc<crate::daemon::machines::IrohDialer>>,
 }
 
 impl DaemonState {
@@ -158,6 +165,7 @@ impl DaemonState {
             mirror: Arc::new(crate::daemon::machines::MirrorState::new()),
             hub: Arc::new(crate::daemon::machines::MachineHub::new()),
             relays: Arc::new(Mutex::new(HashMap::new())),
+            iroh_dialer: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -170,6 +178,25 @@ impl DaemonState {
     /// Next value in the `question-requested` ordering sequence (see `prompt_seq`).
     pub fn next_prompt_seq(&self) -> u64 {
         self.prompt_seq.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Lazily binds and returns the shared iroh dial endpoint (see
+    /// `iroh_dialer`'s field doc). Fails only if the bind itself fails; a
+    /// caller that never needs iroh (no peer lacks a `direct_url`) never
+    /// triggers this at all.
+    pub async fn iroh_dialer(&self) -> Result<Arc<crate::daemon::machines::IrohDialer>, String> {
+        self.iroh_dialer
+            .get_or_try_init(|| async { crate::daemon::machines::IrohDialer::new().await.map(Arc::new) })
+            .await
+            .cloned()
+    }
+
+    /// Test seam: pre-seeds the dialer so `peer_client::reach_url`'s iroh
+    /// branch can be exercised against an offline `presets::Minimal` endpoint
+    /// instead of `iroh_dialer()`'s real (network-touching) `presets::N0` one.
+    #[cfg(test)]
+    pub fn set_iroh_dialer_for_test(&self, dialer: Arc<crate::daemon::machines::IrohDialer>) {
+        let _ = self.iroh_dialer.set(dialer);
     }
 
     /// Register a fresh render-confirmation waiter `on_question_request` holds

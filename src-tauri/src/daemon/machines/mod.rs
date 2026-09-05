@@ -6,10 +6,13 @@
 //! `/api/global/stream` WS; `hub.rs` owns the set of live links. `forward.rs`
 //! is the RPC-level counterpart (forwards a call for a session `mirror`
 //! already knows is mirrored); `relay.rs` is the chat-event-stream
-//! counterpart (relays a mirrored session's live turn output).
+//! counterpart (relays a mirrored session's live turn output). `iroh_dial.rs`
+//! is `peer_client::reach_url`'s fallback when a peer has no `direct_url`:
+//! dials its iroh id and exposes the tunnel as a local loopback proxy port.
 
 pub mod forward;
 pub mod hub;
+pub mod iroh_dial;
 pub mod mirror;
 pub mod peer_client;
 pub mod peer_link;
@@ -17,6 +20,7 @@ pub mod registry;
 pub mod relay;
 
 pub use hub::MachineHub;
+pub use iroh_dial::IrohDialer;
 pub use mirror::MirrorState;
 pub use peer_client::{client_for, reach_url, PeerClient, PeerError};
 pub use registry::{MachineRegistry, MachinesFile, PeerMachine, PeerMachineView, SelfMachine};

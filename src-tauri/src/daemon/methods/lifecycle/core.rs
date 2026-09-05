@@ -37,7 +37,7 @@ async fn forward_start_session(
     if let Some(obj) = params_value.as_object_mut() {
         obj.remove("machine_id");
     }
-    let client = crate::daemon::machines::client_for(&peer).map_err(map_peer_err)?;
+    let client = crate::daemon::machines::client_for(state, &peer).await.map_err(map_peer_err)?;
     client.call("start_session", params_value).await.map_err(map_peer_err)
 }
 

@@ -117,7 +117,7 @@ async fn forward_one(
     if !state.mirror.is_online(&machine_id) {
         return Some(Err(RpcError { code: ERR_MACHINE_OFFLINE, message: format!("{} is offline", peer.label), data: None }));
     }
-    let client = match client_for(&peer) {
+    let client = match client_for(state, &peer).await {
         Ok(c) => c,
         Err(e) => return Some(Err(map_peer_err(e))),
     };

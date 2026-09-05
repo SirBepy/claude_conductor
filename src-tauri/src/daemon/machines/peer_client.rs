@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crate::daemon::state::DaemonState;
+
 use super::registry::PeerMachine;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -115,16 +117,23 @@ pub async fn post_pairing_request(base_url: &str, body: Value) -> Result<Value, 
     serde_json::from_str(&text).map_err(|e| PeerError::Protocol(format!("invalid pair response: {e}")))
 }
 
-/// How to physically reach `peer` today: `direct_url` if set, else an error -
-/// a later chunk adds the iroh proxy dial here.
-pub fn reach_url(peer: &PeerMachine) -> Result<String, PeerError> {
-    peer.direct_url
-        .clone()
-        .ok_or_else(|| PeerError::Unreachable("iroh dial not available yet".to_string()))
+/// How to physically reach `peer`: `direct_url` if set (same-LAN/Tailscale
+/// pairing); else, if an `iroh_id` is known, dial it and proxy through a
+/// loopback port (`state.iroh_dialer`); else there's no way to reach it at all.
+pub async fn reach_url(state: &DaemonState, peer: &PeerMachine) -> Result<String, PeerError> {
+    if let Some(direct) = &peer.direct_url {
+        return Ok(direct.clone());
+    }
+    let Some(iroh_id) = &peer.iroh_id else {
+        return Err(PeerError::Unreachable("no direct URL and no iroh id".to_string()));
+    };
+    let dialer = state.iroh_dialer().await.map_err(PeerError::Unreachable)?;
+    let port = dialer.proxy_port(iroh_id).await.map_err(PeerError::Unreachable)?;
+    Ok(format!("http://127.0.0.1:{port}"))
 }
 
-pub fn client_for(peer: &PeerMachine) -> Result<PeerClient, PeerError> {
-    let url = reach_url(peer)?;
+pub async fn client_for(state: &DaemonState, peer: &PeerMachine) -> Result<PeerClient, PeerError> {
+    let url = reach_url(state, peer).await?;
     Ok(PeerClient::new(&url, &peer.token))
 }
 
@@ -198,18 +207,54 @@ mod tests {
         handle.abort();
     }
 
-    #[test]
-    fn reach_url_errs_without_direct_url() {
-        let peer = PeerMachine {
+    fn state_fixture() -> std::sync::Arc<DaemonState> {
+        DaemonState::new(crate::daemon::session::new_session_map(), crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()))
+    }
+
+    fn peer_with(iroh_id: Option<&str>, direct_url: Option<&str>) -> PeerMachine {
+        PeerMachine {
             machine_id: "id".into(),
             label: "Mac".into(),
             os: "macos".into(),
-            iroh_id: Some("id".into()),
-            direct_url: None,
+            iroh_id: iroh_id.map(str::to_string),
+            direct_url: direct_url.map(str::to_string),
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
-        };
-        assert!(matches!(reach_url(&peer), Err(PeerError::Unreachable(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn reach_url_errs_with_neither_direct_url_nor_iroh_id() {
+        let state = state_fixture();
+        let peer = peer_with(None, None);
+        assert!(matches!(reach_url(&state, &peer).await, Err(PeerError::Unreachable(_))));
+    }
+
+    #[tokio::test]
+    async fn reach_url_prefers_direct_url_over_iroh() {
+        let state = state_fixture();
+        let peer = peer_with(Some("deadbeef"), Some("http://127.0.0.1:9999"));
+        // direct_url must win without ever touching the iroh dialer (which
+        // would hang trying to resolve a fake id if this fell through).
+        let url = reach_url(&state, &peer).await.expect("direct_url path must not error");
+        assert_eq!(url, "http://127.0.0.1:9999");
+    }
+
+    /// `presets::Minimal`, no discovery: proves `reach_url`'s iroh-only
+    /// branch resolves to a loopback proxy url without ever needing a real
+    /// (network-touching) `presets::N0` bind.
+    #[tokio::test]
+    async fn reach_url_iroh_only_yields_a_loopback_url() {
+        let state = state_fixture();
+        let dial_endpoint =
+            iroh::Endpoint::builder(iroh::endpoint::presets::Minimal).bind().await.expect("dial bind");
+        state.set_iroh_dialer_for_test(std::sync::Arc::new(
+            crate::daemon::machines::IrohDialer::with_endpoint(dial_endpoint),
+        ));
+        let fake_id = iroh::SecretKey::generate().public().to_string();
+        let peer = peer_with(Some(&fake_id), None);
+        let url = reach_url(&state, &peer).await.expect("iroh-only path must yield a loopback url");
+        assert!(url.starts_with("http://127.0.0.1:"), "got {url}");
     }
 }

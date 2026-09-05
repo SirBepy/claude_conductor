@@ -51,7 +51,7 @@ pub async fn relay_session_frames(state: Arc<DaemonState>, peer: PeerMachine, se
         if !still_paired || tx.is_closed() {
             return;
         }
-        let base_url = match peer_client::reach_url(&peer) {
+        let base_url = match peer_client::reach_url(&state, &peer).await {
             Ok(u) => u,
             Err(_) => {
                 tokio::time::sleep(RELAY_RETRY).await;

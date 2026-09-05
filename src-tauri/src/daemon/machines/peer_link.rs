@@ -20,8 +20,9 @@ use super::{peer_client, publish_instances_changed};
 /// blipping should recover fast, not leave a stale mirrored row lingering.
 const RECONNECT_MIN: Duration = Duration::from_secs(2);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
-/// `reach_url` has no route yet (iroh dial not wired in this chunk) - retry
-/// on this cadence rather than hot-looping a guaranteed-`Err` call.
+/// `reach_url` errs for a peer with neither a `direct_url` nor an `iroh_id`,
+/// or when the iroh dial endpoint itself fails to bind - retry on this
+/// cadence rather than hot-looping a guaranteed-`Err` call.
 const UNREACHABLE_RETRY: Duration = Duration::from_secs(30);
 /// A revoked token means re-pairing fixes it, not a fast retry - back off
 /// harder than a plain network blip (step 2).
@@ -41,7 +42,7 @@ async fn run_link(state: Arc<DaemonState>, peer: PeerMachine) {
     let machine_id = peer.machine_id.clone();
     let mut backoff = RECONNECT_MIN;
     loop {
-        let base_url = match peer_client::reach_url(&peer) {
+        let base_url = match peer_client::reach_url(&state, &peer).await {
             Ok(u) => u,
             Err(_) => {
                 mark_offline(&state, &machine_id);
