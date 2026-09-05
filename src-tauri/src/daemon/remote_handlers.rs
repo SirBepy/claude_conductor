@@ -37,9 +37,8 @@ pub(crate) struct TransportMask {
 }
 const P: TransportMask = TransportMask { phone: true, machine: false };
 const PM: TransportMask = TransportMask { phone: true, machine: true };
-// Reserved for a later chunk's machine-only methods (session mirroring
-// control-plane RPCs a phone has no business calling).
-#[allow(dead_code)]
+// Machine-only: session mirroring control-plane RPCs a phone has no
+// business calling. First user: `peer_unpaired` below.
 const M: TransportMask = TransportMask { phone: false, machine: true };
 
 /// Daemon RPC methods a remote client (phone or peer machine) may invoke via
@@ -242,6 +241,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // against the session's OWN registered cwd at the point the daemon
     // actually opens the file (methods/registry/waiting_tail.rs).
     ("tail_waiting_log", P),
+    // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
+    // own entry, never a params-supplied id (see methods/machines.rs).
+    ("peer_unpaired", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)
@@ -495,14 +497,17 @@ mod tests {
         }
     }
 
-    /// Every `machine:true` entry in this chunk is also `phone:true` (all `PM`,
-    /// no `M`-only entries added yet) - a peer machine's surface is a subset
-    /// of the phone's, never a superset.
+    /// Every `machine:true` entry is `PM` (phone subset) or a named `M`-only
+    /// exception like `peer_unpaired`, never an unreviewed superset.
     #[test]
-    fn peer_machine_mask_is_a_strict_subset_of_phone() {
+    fn peer_machine_mask_is_phone_subset_or_a_named_machine_only_exception() {
+        const MACHINE_ONLY_EXCEPTIONS: &[&str] = &["peer_unpaired"];
         for (m, mask) in TRANSPORT_TABLE {
-            if mask.machine {
-                assert!(mask.phone, "{m} is machine-allowed but not phone-allowed");
+            if mask.machine && !mask.phone {
+                assert!(
+                    MACHINE_ONLY_EXCEPTIONS.contains(m),
+                    "{m} is machine-only but not in MACHINE_ONLY_EXCEPTIONS"
+                );
             }
         }
     }
@@ -512,6 +517,28 @@ mod tests {
         let peer = Transport::PeerMachine("x".into());
         for m in ["push_commits", "get_settings", "schedule_create", "list_accounts"] {
             assert!(!allowed(m, &peer), "{m} must not be callable by a peer machine");
+        }
+    }
+
+    /// `peer_unpaired` is the one machine-only method: callable by a peer,
+    /// never by a phone.
+    #[test]
+    fn peer_unpaired_is_machine_only() {
+        assert!(allowed("peer_unpaired", &Transport::PeerMachine("x".into())));
+        assert!(!allowed("peer_unpaired", &Transport::Phone));
+    }
+
+    /// `pair_machine`/`unpair_machine`/`set_machine_label` are desktop-pipe-only:
+    /// absent from `TRANSPORT_TABLE`, so neither remote transport can call them.
+    #[test]
+    fn machine_identity_mutators_are_desktop_pipe_only() {
+        for m in ["pair_machine", "unpair_machine", "set_machine_label"] {
+            assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
+            assert!(
+                !allowed(m, &Transport::PeerMachine("x".into())),
+                "{m} must not be callable by a peer machine"
+            );
+            assert!(allowed(m, &Transport::Local), "{m} must stay callable over the desktop pipe");
         }
     }
 

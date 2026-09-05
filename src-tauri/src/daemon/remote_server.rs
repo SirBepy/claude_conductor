@@ -150,7 +150,7 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
     // The fallback only fires when no named route matches, so /api/* and the
     // WS routes above are never shadowed by it.
     let public = Router::new()
-        .route("/api/health", get(|| async { "ok" }))
+        .route("/api/health", get(health))
         .route("/api/pair", post(pair_device))
         .route("/api/sessions/:id/stream", get(stream_ws))
         .route("/api/preview-render/:id", get(on_preview_render_get))
@@ -165,6 +165,15 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
         .merge(public)
         .fallback(spa_fallback)
         .with_state(ctx)
+}
+
+/// Connectivity probe, unauthenticated. Advertises this daemon's machine
+/// identity (multi-machine federation) so a pairing peer's `pair_machine`
+/// RPC can learn our `machine_id`/`label`/`os` before any token exists -
+/// `null` until `DaemonState::init_machines` has run (see `spawn` above).
+async fn health(State(ctx): State<Arc<RemoteCtx>>) -> Response {
+    let machine = ctx.state.machines.get().and_then(|r| r.self_machine());
+    axum::Json(serde_json::json!({ "ok": true, "machine": machine })).into_response()
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -256,6 +265,49 @@ mod tests {
             stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
         });
         let _app = build_router(ctx);
+    }
+
+    #[tokio::test]
+    async fn health_includes_machine_identity_when_registry_initialised() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::types::Settings;
+
+        let dir = tempdir().unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.init_machines(dir.path().to_path_buf());
+        let mine = state.machines.get().unwrap().ensure_self();
+        let ctx = Arc::new(RemoteCtx {
+            state,
+            app_data: dir.path().to_path_buf(),
+            router: crate::daemon::rpc::Router::new(),
+            stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
+        });
+        let resp = health(State(ctx)).await;
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["machine"]["machine_id"].as_str().unwrap(), mine.machine_id);
+        assert_eq!(v["ok"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn health_machine_is_null_without_a_registry() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::types::Settings;
+
+        let ctx = Arc::new(RemoteCtx {
+            state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())),
+            app_data: std::env::temp_dir(),
+            router: crate::daemon::rpc::Router::new(),
+            stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
+        });
+        let resp = health(State(ctx)).await;
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(v["machine"].is_null());
     }
 
     #[test]

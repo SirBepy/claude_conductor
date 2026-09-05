@@ -75,10 +75,9 @@ fn registry_path(app_data: &Path) -> PathBuf {
     app_data.join(format!("machines{suffix}.json"))
 }
 
-/// Only the test-only `mk_peer` fixture stamps `added_at` right now; a real
-/// pairing flow (later chunk) will call this from production code too.
-#[cfg(test)]
-fn now_secs() -> u64 {
+/// Used by the pairing flow (`daemon::methods::machines`) to stamp
+/// `PeerMachine::added_at`, and by the `mk_peer` test fixture below.
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -136,6 +135,13 @@ impl MachineRegistry {
 
     pub fn self_machine(&self) -> Option<SelfMachine> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).self_.clone()
+    }
+
+    /// The `app_data` dir this registry was loaded from, so a pairing RPC
+    /// handler can reach `DeviceRegistry` without threading a second
+    /// `app_data` param through every `register_*` call site.
+    pub fn app_data(&self) -> &Path {
+        &self.app_data
     }
 
     pub fn set_label(&self, label: &str) {

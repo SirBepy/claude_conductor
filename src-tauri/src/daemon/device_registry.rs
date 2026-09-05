@@ -160,12 +160,16 @@ impl DeviceRegistry {
 
     /// Mint a token for a paired peer daemon (kind Machine). This is the
     /// bearer THEY present to US; the caller separately records the token
-    /// WE present to THEM in `MachineRegistry::PeerMachine::token`.
-    pub fn add_machine_device(name: &str, machine_id: &str, app_data: &Path) -> Result<String, String> {
+    /// WE present to THEM in `MachineRegistry::PeerMachine::token`. Returns
+    /// `(plaintext_token, device_id)` - the id is needed by the pairing flow
+    /// to stamp `PeerMachine::reverse_device_id` so an unpair/re-pair can
+    /// revoke exactly this entry later.
+    pub fn add_machine_device(name: &str, machine_id: &str, app_data: &Path) -> Result<(String, String), String> {
         let mut reg = load(app_data);
         let token = mint_token();
+        let id = mint_id();
         reg.devices.push(DeviceEntry {
-            id: mint_id(),
+            id: id.clone(),
             name: name.to_string(),
             token_hash: sha256_hex(&token),
             created_at: now_secs(),
@@ -173,7 +177,7 @@ impl DeviceRegistry {
             machine_id: Some(machine_id.to_string()),
         });
         save(&reg, app_data)?;
-        Ok(token)
+        Ok((token, id))
     }
 
     /// Remove a device by id. Returns true if found and removed.
@@ -288,9 +292,10 @@ mod tests {
     #[test]
     fn machine_device_resolves_kind_and_machine_id() {
         let dir = tempdir().unwrap();
-        let token = DeviceRegistry::add_machine_device("Mac Mini", "mach-123", dir.path()).unwrap();
+        let (token, id) = DeviceRegistry::add_machine_device("Mac Mini", "mach-123", dir.path()).unwrap();
         let (kind, machine_id) = DeviceRegistry::resolve_token(&token, dir.path()).unwrap();
         assert_eq!(kind, DeviceKind::Machine);
         assert_eq!(machine_id.as_deref(), Some("mach-123"));
+        assert!(DeviceRegistry::revoke_device(&id, dir.path()).unwrap());
     }
 }
