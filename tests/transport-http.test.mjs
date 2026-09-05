@@ -166,6 +166,15 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "cancel_turn", params: { session_id: "sess-3" } });
   });
 
+  // Phone Unfreeze used to throw RemoteUnavailableError here (no case), so
+  // the chat-menu item and the composer's "Send now" both dead-ended.
+  it("freeze_session / unfreeze_session map sessionId -> session_id", async () => {
+    await new HttpTransport().call("freeze_session", { sessionId: "sess-f" });
+    expect(body()).toEqual({ method: "freeze_session", params: { session_id: "sess-f" } });
+    await new HttpTransport().call("unfreeze_session", { sessionId: "sess-f" });
+    expect(body(1)).toEqual({ method: "unfreeze_session", params: { session_id: "sess-f" } });
+  });
+
   it("maps load_history_page to the rpc with reshaped (snake_case) params", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,

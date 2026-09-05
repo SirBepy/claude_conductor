@@ -220,6 +220,14 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("cancel_turn", {
           session_id: args.sessionId ?? args.session_id,
         });
+      // Chat menu Freeze/Unfreeze + the composer's "Send now (unfreezes
+      // chat)" path. The daemon answers `{ok}`; the Tauri command is
+      // `Result<()>`, so callers ignore the value either way.
+      case "freeze_session":
+      case "unfreeze_session":
+        return this.rpc<T>(command, {
+          session_id: args.sessionId ?? args.session_id,
+        });
       case "respond_permission":
         return this.rpc<T>("respond_permission", {
           request_id: args.id,

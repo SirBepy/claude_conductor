@@ -60,6 +60,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Write: session_id is looked up in the live session map, not a path.
     ("send_message", PM),
     ("cancel_turn", PM),
+    // Write: Chat menu's Freeze/Unfreeze and the composer's "Send now
+    // (unfreezes chat)" choice. Freeze is `cancel_turn` plus a registry flag
+    // on a session_id the caller already knows; unfreeze clears that flag and
+    // at most re-sends "continue" - both strictly weaker than send_message.
+    ("freeze_session", P),
+    ("unfreeze_session", P),
     ("respond_permission", PM),
     ("respond_question", PM),
     // Write: resolves one render-confirmation waiter by client-supplied id.
@@ -470,6 +476,7 @@ mod tests {
     fn allowlist_includes_core_chat_methods() {
         for m in [
             "list_instances", "send_message", "cancel_turn", "respond_question",
+            "freeze_session", "unfreeze_session",
             "confirm_question_rendered",
             "get_skipped_question_marks",
             "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",
