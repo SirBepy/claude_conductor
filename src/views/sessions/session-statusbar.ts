@@ -631,9 +631,15 @@ export class SessionStatusbar {
   }
 
   /** Reanchor variant for the two popovers a non-chip surface can also open.
-   *  An anchor outside this container (the pane header's config text) is not
-   *  rebuilt by render(), so it only needs repositioning - running the chip
-   *  selector against it would miss and close a popover still in use. */
+   *  A LIVE anchor outside this container (the pane header's config text) is
+   *  not rebuilt by render(), so it only needs repositioning - running the chip
+   *  selector against it would miss and close a popover still in use.
+   *
+   *  `isConnected` is the half that must be checked first. render() has already
+   *  reset container.innerHTML by the time this runs, so a chip-opened popover's
+   *  remembered anchor is detached and `contains()` reports it as external too -
+   *  treating that as the header case would close the popover on every
+   *  background refresh instead of re-binding it to the rebuilt chip. */
   private reanchorConfigPopover(
     pop: { isOpen: boolean; close: () => void },
     anchor: HTMLElement | null,
@@ -641,9 +647,8 @@ export class SessionStatusbar {
     rebind: (anchor: HTMLElement) => void,
   ): void {
     if (!pop.isOpen) return;
-    if (anchor && !this.container.contains(anchor)) {
-      if (anchor.isConnected) rebind(anchor);
-      else pop.close();
+    if (anchor?.isConnected && !this.container.contains(anchor)) {
+      rebind(anchor);
       return;
     }
     this.reanchorIfOpen(pop, sel, rebind);
