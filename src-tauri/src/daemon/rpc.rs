@@ -232,9 +232,20 @@ impl ConnectionContext {
 pub type HandlerFuture = Pin<Box<dyn Future<Output = Result<Value, RpcError>> + Send>>;
 pub type Handler = Arc<dyn Fn(Option<Value>, ConnectionContext) -> HandlerFuture + Send + Sync>;
 
+/// A forwarder's per-call verdict future: `Some(_)` short-circuits dispatch
+/// (the method was forwarded, successfully or not); `None` means "not mine to
+/// forward" - fall through to the normal local handler. See `Router::set_forwarder`.
+pub type ForwardFuture = Pin<Box<dyn Future<Output = Option<Result<Value, RpcError>>> + Send>>;
+pub type Forwarder = Arc<dyn Fn(&str, Option<Value>, &ConnectionContext) -> ForwardFuture + Send + Sync>;
+
 #[derive(Default, Clone)]
 pub struct Router {
     handlers: HashMap<String, Handler>,
+    /// Installed once at daemon startup by `machines::forward::install` - see
+    /// its doc for the mirrored-session forwarding decision. `None` (the
+    /// default, and every test router) means dispatch behaves exactly as
+    /// before this field existed.
+    forwarder: Option<Forwarder>,
 }
 
 impl Router {
@@ -251,8 +262,33 @@ impl Router {
         self.handlers.insert(method.to_string(), arc);
     }
 
+    /// A later call replaces the previous forwarder wholesale (single-slot,
+    /// like `register` for a given method) - this daemon only ever installs
+    /// one (the machine-mirroring forwarder), so overwrite semantics are fine.
+    pub fn set_forwarder(&mut self, f: Forwarder) {
+        self.forwarder = Some(f);
+    }
+
     pub async fn dispatch(&self, req: Request, ctx: ConnectionContext) -> Response {
         log::debug!("rpc dispatch: {}", req.method);
+        if let Some(fwd) = &self.forwarder {
+            if let Some(result) = fwd(&req.method, req.params.clone(), &ctx).await {
+                return match result {
+                    Ok(v) => Response {
+                        jsonrpc: "2.0".into(),
+                        id: req.id,
+                        result: Some(v),
+                        error: None,
+                    },
+                    Err(e) => Response {
+                        jsonrpc: "2.0".into(),
+                        id: req.id,
+                        result: None,
+                        error: Some(e),
+                    },
+                };
+            }
+        }
         match self.handlers.get(&req.method) {
             None => Response {
                 jsonrpc: "2.0".into(),
@@ -324,5 +360,66 @@ mod router_tests {
         assert!(resp.result.is_none());
         let err = resp.error.expect("error");
         assert_eq!(err.code, -32601);
+    }
+
+    #[tokio::test]
+    async fn dispatch_with_no_forwarder_is_unchanged() {
+        let r = echo_router();
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(3),
+            method: "echo".into(),
+            params: Some(json!("hi")),
+        };
+        let resp = r.dispatch(req, dummy_ctx()).await;
+        assert_eq!(resp.result, Some(json!("hi")));
+    }
+
+    #[tokio::test]
+    async fn dispatch_forwarder_returning_none_falls_through_to_local_handler() {
+        let mut r = echo_router();
+        let fwd: Forwarder = Arc::new(|_method, _params, _ctx| Box::pin(async { None }));
+        r.set_forwarder(fwd);
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(4),
+            method: "echo".into(),
+            params: Some(json!("still local")),
+        };
+        let resp = r.dispatch(req, dummy_ctx()).await;
+        assert_eq!(resp.result, Some(json!("still local")));
+        assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatch_forwarder_returning_some_short_circuits_the_local_handler() {
+        let mut r = echo_router();
+        let fwd: Forwarder = Arc::new(|_method, _params, _ctx| Box::pin(async { Some(Ok(json!("forwarded"))) }));
+        r.set_forwarder(fwd);
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(5),
+            method: "echo".into(),
+            params: Some(json!("ignored")),
+        };
+        let resp = r.dispatch(req, dummy_ctx()).await;
+        assert_eq!(resp.result, Some(json!("forwarded")));
+    }
+
+    #[tokio::test]
+    async fn dispatch_forwarder_returning_some_err_short_circuits_too() {
+        let mut r = echo_router();
+        let fwd: Forwarder =
+            Arc::new(|_method, _params, _ctx| Box::pin(async { Some(Err(RpcError::internal("nope"))) }));
+        r.set_forwarder(fwd);
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(6),
+            method: "echo".into(),
+            params: None,
+        };
+        let resp = r.dispatch(req, dummy_ctx()).await;
+        assert!(resp.result.is_none());
+        assert_eq!(resp.error.unwrap().code, -32603);
     }
 }

@@ -155,6 +155,11 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_drafts_store(&mut router, state.clone());
     methods::register_ask(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());
+    // Mirrored-session forwarding seam (multi-machine federation): must run
+    // after every register_* call above so it can consult the fully-built
+    // TRANSPORT_TABLE-backed `allowed` check, though ordering doesn't
+    // actually matter here (it only sets a field, doesn't read the map).
+    machines::forward::install(state.clone(), &mut router);
 
     // Bind hook server BEFORE the RPC accept loop so in-flight claude
     // processes can re-discover the port the moment we're up.

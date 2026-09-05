@@ -20,11 +20,11 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::daemon::device_registry::DeviceRegistry;
+use crate::daemon::device_registry::{DeviceKind, DeviceRegistry};
 use crate::daemon::rpc::Transport;
 
 use super::remote_server::RemoteCtx;
-use super::remote_ws_pump::{pump_events, pump_global_events};
+use super::remote_ws_pump::{pump_events, pump_global_events, pump_relayed_session_events};
 
 /// Which transports may invoke one daemon RPC method. `phone` is the
 /// original (and only, pre-federation) remote surface; `machine` is a
@@ -123,7 +123,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Only mutates `session_characters` for the given session_id via
     // whitelist pick_random; cannot touch any other settings field.
     ("ensure_session_character", P),
-    ("list_projects", P),
+    // Read-only project list. PM (not just P): a peer daemon needs this too -
+    // `list_machine_projects`'s RPC forwards this SAME method name to
+    // whichever machine the desktop's new-chat picker asked about, verbatim.
+    ("list_projects", PM),
     // Read-only, gated by reject_unknown(cwd) in registry.rs (todo 656).
     ("project_last_activity_at", P),
     // Read-only account-pin resolution, gated by reject_unknown(cwd) in the
@@ -409,14 +412,32 @@ pub(super) async fn stream_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !DeviceRegistry::validate_token(&q.token, &ctx.app_data) {
+    let Some((kind, _machine_id)) = DeviceRegistry::resolve_token(&q.token, &ctx.app_data) else {
         return StatusCode::UNAUTHORIZED.into_response();
+    };
+    if let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) {
+        let state = ctx.state.clone();
+        return ws.on_upgrade(move |socket| pump_events(socket, state, id, session));
     }
-    let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) else {
+    // Not a local session - maybe one mirrored in from a paired peer.
+    let Some(owner) = ctx.state.mirror.owner_of(&id) else {
+        return (StatusCode::NOT_FOUND, "no such session").into_response();
+    };
+    // Refuse a peer-to-peer relay chain: only a phone/browser or the desktop
+    // app may ride a relay, never another peer daemon (see `machines::relay`'s
+    // doc) - a peer already gets this session's events over its OWN mirror
+    // link, forwarding them back out would loop.
+    if matches!(kind, DeviceKind::Machine) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(registry) = ctx.state.machines.get() else {
+        return (StatusCode::NOT_FOUND, "no such session").into_response();
+    };
+    let Some(peer) = registry.peer(&owner) else {
         return (StatusCode::NOT_FOUND, "no such session").into_response();
     };
     let state = ctx.state.clone();
-    ws.on_upgrade(move |socket| pump_events(socket, state, id, session))
+    ws.on_upgrade(move |socket| pump_relayed_session_events(socket, state, peer, id))
 }
 
 /// Not session-scoped: the remote (browser) equivalent of the internal

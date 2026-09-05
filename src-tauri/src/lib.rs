@@ -372,6 +372,7 @@ pub fn run() {
             ipc::unpair_machine,
             ipc::set_machine_label,
             ipc::list_machines,
+            ipc::list_machine_projects,
             ipc::push_preview,
             ipc::list_previews,
             ipc::get_preview,

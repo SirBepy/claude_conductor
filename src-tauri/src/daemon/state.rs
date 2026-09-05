@@ -110,6 +110,14 @@ pub struct DaemonState {
     /// Owns the live per-peer link tasks (`daemon::machines::peer_link`),
     /// keyed by `machine_id` - see `MachineHub::sync_links`.
     pub hub: Arc<crate::daemon::machines::MachineHub>,
+    /// Live desktop-pipe relay tasks forwarding a mirrored session's chat
+    /// events in from its owning peer (`machines::relay`), keyed by
+    /// `(ConnectionContext::conn_id, session_id)`. Distinct from
+    /// `ConnectionContext::subscriptions` (a bare local `AbortHandle`): a
+    /// relay's real cleanup unit is two nested tasks wrapped by
+    /// `machines::relay::AbortOnDrop`, and `detach_session` needs `state` to
+    /// reach it, which the per-connection subscriptions map doesn't carry.
+    pub relays: Arc<Mutex<HashMap<(u64, String), tokio::task::JoinHandle<()>>>>,
 }
 
 impl DaemonState {
@@ -149,6 +157,7 @@ impl DaemonState {
             machines: OnceLock::new(),
             mirror: Arc::new(crate::daemon::machines::MirrorState::new()),
             hub: Arc::new(crate::daemon::machines::MachineHub::new()),
+            relays: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 

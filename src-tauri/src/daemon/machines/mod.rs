@@ -3,13 +3,18 @@
 //! client for actually talking to a paired peer daemon lives in
 //! `peer_client.rs`. `mirror.rs` caches every peer's instance list;
 //! `peer_link.rs` keeps one peer's cache entry current over its
-//! `/api/global/stream` WS; `hub.rs` owns the set of live links.
+//! `/api/global/stream` WS; `hub.rs` owns the set of live links. `forward.rs`
+//! is the RPC-level counterpart (forwards a call for a session `mirror`
+//! already knows is mirrored); `relay.rs` is the chat-event-stream
+//! counterpart (relays a mirrored session's live turn output).
 
+pub mod forward;
 pub mod hub;
 pub mod mirror;
 pub mod peer_client;
 pub mod peer_link;
 pub mod registry;
+pub mod relay;
 
 pub use hub::MachineHub;
 pub use mirror::MirrorState;

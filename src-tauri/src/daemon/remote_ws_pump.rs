@@ -9,6 +9,7 @@ use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::daemon::machines::registry::PeerMachine;
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
 
@@ -238,6 +239,40 @@ pub(super) async fn pump_events(mut socket: WebSocket, state: Arc<DaemonState>, 
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(_)) => {}      // ignore client->server frames for now
+                _ => break,            // client closed or errored
+            },
+        }
+    }
+}
+
+/// Forwards a MIRRORED session's live events to a phone/browser WS client:
+/// `machines::relay::relay_session_frames` reads the owning peer's own
+/// `pump_events` stream (same raw `ChatEvent` JSON this fn's `Ok(ev)` arm
+/// serializes above), so every frame is forwarded verbatim - no reshaping,
+/// unlike `attach_session`'s desktop-pipe relay which wraps each frame in the
+/// `chat_event` notification envelope for that transport instead.
+pub(super) async fn pump_relayed_session_events(
+    mut socket: WebSocket,
+    state: Arc<DaemonState>,
+    peer: PeerMachine,
+    session_id: String,
+) {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+    let _producer_guard = crate::daemon::machines::relay::AbortOnDrop(tokio::spawn(
+        crate::daemon::machines::relay::relay_session_frames(state, peer, session_id, tx),
+    ));
+    loop {
+        tokio::select! {
+            frame = rx.recv() => match frame {
+                Some(txt) => {
+                    if socket.send(Message::Text(txt)).await.is_err() {
+                        break; // client gone
+                    }
+                }
+                None => break, // relay gave up (peer unpaired, or unreachable for good)
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(_)) => {}      // ignore client->server frames
                 _ => break,            // client closed or errored
             },
         }

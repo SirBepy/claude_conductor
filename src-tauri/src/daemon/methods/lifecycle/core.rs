@@ -2,12 +2,44 @@
 
 use super::{err_to_rpc, SessionIdOnly};
 use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
+use crate::daemon::machines::forward::map_peer_err;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::types::EndReason;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+/// `start_session`'s `machine_id` branch (D3): forwards to that peer's own
+/// `start_session` with `machine_id` stripped (the peer has no use for it -
+/// it always spawns locally) and returns its result verbatim. The mirror
+/// delivers the new row via the peer's own `instances_changed` broadcast, so
+/// no local publish is needed here.
+async fn forward_start_session(
+    state: &Arc<DaemonState>,
+    machine_id: &str,
+    mut params_value: Value,
+) -> Result<Value, RpcError> {
+    let registry = state
+        .machines
+        .get()
+        .ok_or_else(|| RpcError::invalid_params("machine registry not initialised"))?;
+    let peer = registry
+        .peer(machine_id)
+        .ok_or_else(|| RpcError::invalid_params(format!("unknown machine: {machine_id}")))?;
+    if !state.mirror.is_online(machine_id) {
+        return Err(RpcError {
+            code: crate::daemon::machines::forward::ERR_MACHINE_OFFLINE,
+            message: format!("{} is offline", peer.label),
+            data: None,
+        });
+    }
+    if let Some(obj) = params_value.as_object_mut() {
+        obj.remove("machine_id");
+    }
+    let client = crate::daemon::machines::client_for(&peer).map_err(map_peer_err)?;
+    client.call("start_session", params_value).await.map_err(map_peer_err)
+}
 
 #[derive(Debug, Deserialize)]
 struct SendMessageParams {
@@ -23,6 +55,21 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 let params_value = params.unwrap_or(Value::Null);
+                // Multi-machine federation: a `machine_id` naming a DIFFERENT
+                // machine than us means "spawn this chat over there" - forward
+                // whole-cloth rather than falling through to the local spawn
+                // path below. Absent, or naming ourselves (no registry, or a
+                // registry that just hasn't minted a self id yet, both count
+                // as "must be us" since a real peer id can never match None),
+                // means the existing local behavior, unchanged.
+                let requested_machine =
+                    params_value.get("machine_id").and_then(Value::as_str).map(str::to_string);
+                if let Some(target) = requested_machine {
+                    let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
+                    if self_id.as_deref() != Some(target.as_str()) {
+                        return forward_start_session(&state, &target, params_value).await;
+                    }
+                }
                 // Persist before the RPC returns, not via a client follow-up call -
                 // a network-latency caller's own send_message can otherwise race
                 // ahead of it (same pattern move_session_to_account guards against).
@@ -187,5 +234,122 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 Ok(json!({"ok": true}))
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod machine_target_tests {
+    use super::*;
+    use crate::daemon::device_registry::DeviceRegistry;
+    use crate::daemon::machines::registry::PeerMachine;
+    use crate::daemon::rpc::{ConnectionContext, Request};
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn dummy_ctx() -> ConnectionContext {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        ConnectionContext::new(tx)
+    }
+
+    fn start_session_params(extra: serde_json::Value) -> Value {
+        let mut base = json!({
+            "cwd": "Z:\\does\\not\\exist",
+            "model": "opus",
+            "effort": "high",
+            "resume_id": null,
+        });
+        if let (Some(base_obj), Some(extra_obj)) = (base.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra_obj {
+                base_obj.insert(k.clone(), v.clone());
+            }
+        }
+        base
+    }
+
+    #[tokio::test]
+    async fn start_session_with_machine_id_equal_to_self_runs_locally() {
+        let dir = tempdir().unwrap();
+        let state = DaemonState::new(new_session_map(), crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()));
+        state.init_machines(dir.path().to_path_buf());
+        let mine = state.machines.get().unwrap().ensure_self();
+
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "start_session".into(),
+                    params: Some(start_session_params(json!({"machine_id": mine.machine_id}))),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        // Reaches spawn_session's own validation (CwdMissing -> invalid_params),
+        // proving this ran the LOCAL spawn path rather than forwarding.
+        assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn start_session_with_a_different_machine_id_forwards_and_strips_it() {
+        use crate::daemon::rpc::RpcError as RE;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        // Peer daemon's stub start_session: records whether `machine_id` made
+        // it through (it must not) and returns a fake session id.
+        let mut b_router = Router::new();
+        b_router.register("start_session", |params, _ctx| async move {
+            let has_machine_id = params.as_ref().and_then(|p| p.get("machine_id")).is_some();
+            if has_machine_id {
+                return Err::<Value, RE>(RE::invalid_params("machine_id must not be forwarded"));
+            }
+            Ok(json!({"session_id": "peer-spawned-1"}))
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let (_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.init_machines(dir.path().to_path_buf());
+        state.machines.get().unwrap().ensure_self();
+        let (token, _device_id) = DeviceRegistry::add_machine_device("A", "mach-a", peer_dir.path()).unwrap();
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mach-b".into(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token,
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        // set_online only flips an EXISTING entry's flag - set_instances
+        // creates it first.
+        state.mirror.set_instances("mach-b", "B", vec![]);
+        state.mirror.set_online("mach-b", true);
+
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "start_session".into(),
+                    params: Some(start_session_params(json!({"machine_id": "mach-b"}))),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        assert!(resp.error.is_none(), "expected the peer's result, got {:?}", resp.error);
+        assert_eq!(resp.result.unwrap()["session_id"], json!("peer-spawned-1"));
+        assert_eq!(state.sessions.len(), 0, "must not have spawned anything locally");
+
+        b_serve.kill();
     }
 }
