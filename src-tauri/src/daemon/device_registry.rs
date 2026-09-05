@@ -22,12 +22,28 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+/// Which side of the federation boundary a device is: a phone/browser
+/// client, or a peer daemon (multi-machine mirroring). Old registries never
+/// wrote this field, so `#[serde(default)]` on `DeviceEntry::kind` resolves
+/// them to `Phone` - the only kind that existed before this.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceKind {
+    #[default]
+    Phone,
+    Machine,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct DeviceEntry {
     id: String,
     name: String,
     token_hash: String,
     created_at: u64,
+    #[serde(default)]
+    kind: DeviceKind,
+    #[serde(default)]
+    machine_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -39,12 +55,13 @@ struct RegistryFile {
 
 fn bool_true() -> bool { true }
 
-/// Phone device summary exposed via IPC. token_hash is never included.
+/// Device summary exposed via IPC. token_hash is never included.
 #[derive(Serialize, Clone)]
 pub struct RemoteDevice {
     pub id: String,
     pub name: String,
     pub created_at: u64,
+    pub kind: DeviceKind,
 }
 
 fn registry_path(app_data: &Path) -> PathBuf {
@@ -84,6 +101,8 @@ impl DeviceRegistry {
             name: "Desktop (this PC)".to_string(),
             token_hash: sha256_hex(&token),
             created_at: now_secs(),
+            kind: DeviceKind::Phone,
+            machine_id: None,
         });
         reg.enabled = true;
         if let Err(e) = save(&reg, app_data) {
@@ -108,8 +127,19 @@ impl DeviceRegistry {
     /// True when the presented bearer token matches any registered device.
     /// Fail-closed: returns false when registry is missing or unreadable.
     pub fn validate_token(token: &str, app_data: &Path) -> bool {
+        Self::resolve_token(token, app_data).is_some()
+    }
+
+    /// Resolve a bearer token to its device kind + machine id (Machine
+    /// devices only). Fail-closed: `None` when the registry is missing,
+    /// unreadable, or no entry's token hash matches.
+    pub fn resolve_token(token: &str, app_data: &Path) -> Option<(DeviceKind, Option<String>)> {
         let hash = sha256_hex(token);
-        load(app_data).devices.iter().any(|d| d.token_hash == hash)
+        load(app_data)
+            .devices
+            .iter()
+            .find(|d| d.token_hash == hash)
+            .map(|d| (d.kind, d.machine_id.clone()))
     }
 
     /// Mint a new device token, append to the registry, return plaintext token.
@@ -121,6 +151,26 @@ impl DeviceRegistry {
             name: name.to_string(),
             token_hash: sha256_hex(&token),
             created_at: now_secs(),
+            kind: DeviceKind::Phone,
+            machine_id: None,
+        });
+        save(&reg, app_data)?;
+        Ok(token)
+    }
+
+    /// Mint a token for a paired peer daemon (kind Machine). This is the
+    /// bearer THEY present to US; the caller separately records the token
+    /// WE present to THEM in `MachineRegistry::PeerMachine::token`.
+    pub fn add_machine_device(name: &str, machine_id: &str, app_data: &Path) -> Result<String, String> {
+        let mut reg = load(app_data);
+        let token = mint_token();
+        reg.devices.push(DeviceEntry {
+            id: mint_id(),
+            name: name.to_string(),
+            token_hash: sha256_hex(&token),
+            created_at: now_secs(),
+            kind: DeviceKind::Machine,
+            machine_id: Some(machine_id.to_string()),
         });
         save(&reg, app_data)?;
         Ok(token)
@@ -152,6 +202,7 @@ impl DeviceRegistry {
             id: d.id.clone(),
             name: d.name.clone(),
             created_at: d.created_at,
+            kind: d.kind,
         }).collect()
     }
 }
@@ -219,5 +270,27 @@ mod tests {
         let token = v["token"].as_str().unwrap();
         assert!(!token.is_empty());
         assert!(DeviceRegistry::validate_token(token, dir.path()));
+    }
+
+    #[test]
+    fn old_registry_without_kind_field_defaults_to_phone() {
+        let dir = tempdir().unwrap();
+        let body = serde_json::json!({
+            "devices": [{"id": "d1", "name": "Old Phone", "token_hash": sha256_hex("tok"), "created_at": 0}],
+            "enabled": true
+        });
+        std::fs::write(registry_path(dir.path()), body.to_string()).unwrap();
+        let devices = DeviceRegistry::list_devices(dir.path());
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].kind, DeviceKind::Phone);
+    }
+
+    #[test]
+    fn machine_device_resolves_kind_and_machine_id() {
+        let dir = tempdir().unwrap();
+        let token = DeviceRegistry::add_machine_device("Mac Mini", "mach-123", dir.path()).unwrap();
+        let (kind, machine_id) = DeviceRegistry::resolve_token(&token, dir.path()).unwrap();
+        assert_eq!(kind, DeviceKind::Machine);
+        assert_eq!(machine_id.as_deref(), Some("mach-123"));
     }
 }

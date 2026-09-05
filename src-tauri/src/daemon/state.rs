@@ -97,6 +97,11 @@ pub struct DaemonState {
     /// so this lets callers tell a genuinely newer question apart from a
     /// stale/ghost one for the same session.
     prompt_seq: AtomicU64,
+    /// This daemon's machine identity + paired peers (multi-machine
+    /// federation). `None` until [`DaemonState::init_machines`] runs at
+    /// daemon startup (needs `app_data`, unknown at construction) - mirrors
+    /// `push`'s OnceLock above.
+    pub machines: OnceLock<Arc<crate::daemon::machines::MachineRegistry>>,
 }
 
 impl DaemonState {
@@ -133,7 +138,14 @@ impl DaemonState {
             draft_store: DraftStore::new(),
             start_tokens: crate::daemon::start_tokens::StartTokens::new(),
             prompt_seq: AtomicU64::new(0),
+            machines: OnceLock::new(),
         })
+    }
+
+    /// Loads (or mints) this daemon's machine registry from `app_data`.
+    /// Idempotent: a second call is ignored, same contract as `init_push`.
+    pub fn init_machines(&self, app_data: std::path::PathBuf) {
+        let _ = self.machines.set(Arc::new(crate::daemon::machines::MachineRegistry::load(&app_data)));
     }
 
     /// Next value in the `question-requested` ordering sequence (see `prompt_seq`).

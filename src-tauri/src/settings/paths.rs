@@ -3,12 +3,25 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
-/// Returns the directory where we store everything: settings, history, session.
-/// On Windows this is `%APPDATA%\claude-conductor`.
-pub fn data_dir() -> Result<PathBuf> {
+/// Resolves the data dir given an optional `CC_DATA_DIR` override value.
+/// Pure so it's testable without touching process env state.
+fn resolve_data_dir(override_: Option<&str>) -> Result<PathBuf> {
+    if let Some(v) = override_ {
+        if !v.is_empty() {
+            return Ok(PathBuf::from(v));
+        }
+    }
     let base = dirs::config_dir()
         .ok_or_else(|| anyhow!("could not resolve user config dir"))?;
     Ok(base.join("claude-conductor"))
+}
+
+/// Returns the directory where we store everything: settings, history, session.
+/// On Windows this is `%APPDATA%\claude-conductor`, unless `CC_DATA_DIR` is
+/// set: a second daemon instance (test, or a peer machine's dev run) uses it
+/// to keep a fully separate app-data tree.
+pub fn data_dir() -> Result<PathBuf> {
+    resolve_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref())
 }
 
 /// Pre-rename data directory (`%APPDATA%\claude-usage-tauri`). The app shipped
@@ -275,4 +288,27 @@ pub fn account_chrome_profile_dir(account_id: &str) -> Result<PathBuf> {
 /// single-account callers keep using `session_capacity_file()` unchanged.
 pub fn account_session_capacity_file(account_id: &str) -> Result<PathBuf> {
     Ok(data_dir()?.join(format!("session-capacity-{account_id}.json")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_data_dir_override_wins() {
+        let d = resolve_data_dir(Some("C:/tmp/cc-test-data-dir")).unwrap();
+        assert_eq!(d, PathBuf::from("C:/tmp/cc-test-data-dir"));
+    }
+
+    #[test]
+    fn resolve_data_dir_empty_override_falls_back_to_default() {
+        let d = resolve_data_dir(Some("")).unwrap();
+        assert!(d.ends_with("claude-conductor"));
+    }
+
+    #[test]
+    fn resolve_data_dir_none_falls_back_to_default() {
+        let d = resolve_data_dir(None).unwrap();
+        assert!(d.ends_with("claude-conductor"));
+    }
 }

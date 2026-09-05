@@ -17,8 +17,16 @@ use crate::util::to_hex;
 /// change so an old phone build fails the handshake instead of misparsing.
 pub const ALPN: &[u8] = b"conductor/remote/0";
 
+/// Instance-scoped like `interactive_sessions_file`: a non-default instance
+/// (test daemon, or a dev daemon serving a phone directly) must mint its own
+/// endpoint identity, never share the production daemon's key file.
 fn key_file(app_data: &Path) -> PathBuf {
-    app_data.join("iroh-endpoint-key.txt")
+    let suffix = crate::daemon::instance::instance_suffix();
+    if suffix.is_empty() {
+        app_data.join("iroh-endpoint-key.txt")
+    } else {
+        app_data.join(format!("iroh-endpoint-key{suffix}.txt"))
+    }
 }
 
 /// Read and parse the persisted secret without ever creating or writing one.
@@ -40,7 +48,7 @@ pub fn endpoint_id_from_disk(app_data: &Path) -> Option<EndpointId> {
 /// Load the persisted endpoint secret, minting one on first run. The key is
 /// what keeps the EndpointId stable across restarts; without it every daemon
 /// launch would strand already-paired phones on a dead id.
-fn load_or_create_secret(app_data: &Path) -> SecretKey {
+pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
     let path = key_file(app_data);
     if let Some(key) = read_secret(&path) {
         return key;

@@ -35,7 +35,8 @@ use axum::{
 use crate::util::sha256_hex;
 use tokio::net::TcpListener;
 
-use crate::daemon::device_registry::DeviceRegistry;
+use crate::daemon::device_registry::{DeviceKind, DeviceRegistry};
+use crate::daemon::rpc::Transport;
 use crate::daemon::state::DaemonState;
 
 use super::remote_handlers::*;
@@ -82,6 +83,13 @@ pub fn spawn(
     router: crate::daemon::rpc::Router,
 ) -> Arc<crate::daemon::stt::SttSupervisor> {
     DeviceRegistry::ensure_desktop_device(&app_data);
+    // Machine identity (multi-machine federation foundation). Best-effort:
+    // `MachineRegistry::load`/`ensure_self` never panic, so a failure here
+    // just leaves `list_machines` reporting an unminted self.
+    state.init_machines(app_data.clone());
+    if let Some(reg) = state.machines.get() {
+        reg.ensure_self();
+    }
     let stt = crate::daemon::stt::SttSupervisor::new(app_data.clone());
     let stt_for_task = stt.clone();
     tokio::spawn(async move {
@@ -175,17 +183,19 @@ async fn auth_mw(State(ctx): State<Arc<RemoteCtx>>, req: Request, next: Next) ->
     if !DeviceRegistry::is_enabled(&ctx.app_data) {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
-    let ok = bearer_token(req.headers())
-        .map(|t| DeviceRegistry::validate_token(&t, &ctx.app_data))
-        .unwrap_or(false);
-    if ok {
-        // Scopes REMOTE_TRANSPORT so any ConnectionContext built while
-        // handling this request (e.g. rpc_dispatch's start_session) tags
-        // is_remote correctly - see `sessions::registry`.
-        crate::daemon::rpc::REMOTE_TRANSPORT.scope(true, next.run(req)).await
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
+    let resolved = bearer_token(req.headers())
+        .and_then(|t| DeviceRegistry::resolve_token(&t, &ctx.app_data));
+    let Some((kind, machine_id)) = resolved else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let transport = match kind {
+        DeviceKind::Phone => Transport::Phone,
+        DeviceKind::Machine => Transport::PeerMachine(machine_id.unwrap_or_default()),
+    };
+    // Scopes TRANSPORT so any ConnectionContext built while handling this
+    // request (e.g. rpc_dispatch's start_session) tags is_remote correctly -
+    // see `sessions::registry`.
+    crate::daemon::rpc::TRANSPORT.scope(transport, next.run(req)).await
 }
 
 fn pairing_file(app_data: &Path) -> PathBuf {

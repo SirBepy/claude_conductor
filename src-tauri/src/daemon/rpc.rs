@@ -20,11 +20,28 @@ pub fn log_if_slow(started: Instant, label: &str, extra: impl std::fmt::Display)
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Which surface a connection's request arrived over. `Local` is the desktop
+/// pipe; `Phone`/`PeerMachine` are the remote-access HTTP server's two device
+/// kinds (`device_registry::DeviceKind`), set by `remote_server.rs`'s auth
+/// middleware. `PeerMachine`'s `String` is the peer's `machine_id`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Transport {
+    Local,
+    Phone,
+    PeerMachine(String),
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Transport::Local
+    }
+}
+
 tokio::task_local! {
-    /// True only inside requests `remote_server.rs`'s auth middleware lets
-    /// through (phone/tailnet HTTP). Desktop pipe connections never enter
-    /// this scope, so `ConnectionContext::new()` reads the default `false`.
-    pub static REMOTE_TRANSPORT: bool;
+    /// Set only inside requests `remote_server.rs`'s auth middleware lets
+    /// through (phone/machine HTTP). Desktop pipe connections never enter
+    /// this scope, so `ConnectionContext::new()` reads the default `Local`.
+    pub static TRANSPORT: Transport;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -177,20 +194,26 @@ pub struct ConnectionContext {
     /// `subscribe_global`; the previous handle (if any) is aborted when a
     /// fresh subscribe is issued.
     pub global_sub: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>,
-    /// True when this connection's request arrived over the remote/phone
-    /// HTTP surface rather than the local desktop pipe - see `REMOTE_TRANSPORT`.
+    /// Which surface this connection's request arrived over - see `Transport`.
+    pub transport: Transport,
+    /// True only for `Transport::Phone`. Kept alongside `transport` so every
+    /// existing call site meaning "phone" (its only prior meaning) needs no
+    /// edit now that a third transport exists.
     pub remote: bool,
 }
 
 impl ConnectionContext {
     pub fn new(outbound: tokio::sync::mpsc::Sender<Value>) -> Self {
+        let transport = TRANSPORT.try_with(|t| t.clone()).unwrap_or(Transport::Local);
+        let remote = matches!(transport, Transport::Phone);
         Self {
             outbound,
             outbound_depth: Arc::new(AtomicUsize::new(0)),
             conn_id: NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed),
             subscriptions: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             global_sub: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-            remote: REMOTE_TRANSPORT.try_with(|v| *v).unwrap_or(false),
+            transport,
+            remote,
         }
     }
 
