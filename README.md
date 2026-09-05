@@ -132,3 +132,43 @@ While it connects, the phone shows "Reaching your PC…" and keeps retrying on i
 countdown - tap **Edit connection** to go back and change the address.
 
 Paired devices can be revoked any time from Settings > Remote access on the desktop.
+
+## Multi-machine
+
+Run Conductor on two machines (say a Windows PC and a Mac), pair them once, and each app's chat
+list shows both machines' chats together. A chat hosted on the other machine gets a small machine
+glyph next to it (dimmed when that machine is offline) and opens, streams, and accepts messages
+exactly like a local one.
+
+**Pair them.** On machine A, open Settings > Remote access - it shows the same pairing URL/QR a
+phone uses. On machine B, go to Settings > Remote access > Paired machines, paste that URL into
+"Paste the other machine's pairing URL", and click **Pair**. The optional "URL that machine can
+use to reach this one" field is how A can reach back to B directly; it's prefilled with B's own
+Tailscale URL when Tailscale serve is running, and can be left empty when both sides only have
+iroh. One paste pairs both directions - there's no separate step to run on A. Unpair from either
+side at any time.
+
+**Transport.** Conductor reaches a paired machine over a direct URL (Tailscale or LAN) when one is
+known, and falls back to iroh (the same peer-to-peer tunnel the phone uses) otherwise - no port
+forwarding needed either way. Both daemons need to be running for the pairing to work; if the
+other machine goes down, its chats stay in the list but dim out until it's reachable again.
+
+**Starting a chat on the other machine.** New chat's project picker shows a row of machine chips
+whenever at least one peer is paired. Pick a machine, then one of its projects, and the chat runs
+there - it shows up in your list tagged with that machine.
+
+**Chat-to-chat across machines.** Inside a chat, the same MCP tools that coordinate sessions in one
+project now reach across machines: `spawn_chat` takes an optional `machine` to start the new chat
+on a paired machine instead of locally; `list_peers` takes a `scope` of `"all"` (every session on
+every paired machine) or `"machine:<label>"` (just one machine) instead of just this project;
+`post_message` takes a `to` (a session id, local or on another machine) to send a private direct
+message instead of a project-wide note; `read_messages` is unchanged. Example: from a chat on the
+PC, spawn a chat on the Mac with `spawn_chat(machine: "Mac Mini", prompt: "...")`, tell it what to
+run, then `post_message(to: <its session id>, text: "...")` and read its reply with
+`read_messages`.
+
+**Limits.** Requires a macOS build on the Mac side (see the platform notes above). Pairing state
+lives in a `machines.json` file in the app data dir, separate from phone pairing. A peer's own
+mirrored copies of a THIRD machine are never re-mirrored, so chats never chain through more than
+one hop. The other machine's project list in the picker is name/path only - no avatar, worktree, or
+CLAUDE.md-scope data.
