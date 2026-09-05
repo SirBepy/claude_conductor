@@ -290,7 +290,7 @@ pub(super) fn strip_hidden_instances_json(arr: &mut Vec<serde_json::Value>) {
 }
 
 pub(super) async fn list_sessions(State(ctx): State<Arc<RemoteCtx>>) -> Response {
-    Json(strip_hidden_instances(ctx.state.registry.list())).into_response()
+    Json(strip_hidden_instances(crate::daemon::machines::all_instances(&ctx.state))).into_response()
 }
 
 #[derive(Deserialize)]

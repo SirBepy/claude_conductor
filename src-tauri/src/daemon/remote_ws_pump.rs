@@ -34,7 +34,7 @@ fn instances_changed_frame(state: &DaemonState) -> String {
     serde_json::json!({
         "jsonrpc": "2.0",
         "method": "instances_changed",
-        "params": {"instances": strip_hidden_instances(state.registry.list())},
+        "params": {"instances": strip_hidden_instances(crate::daemon::machines::all_instances(state))},
     })
     .to_string()
 }

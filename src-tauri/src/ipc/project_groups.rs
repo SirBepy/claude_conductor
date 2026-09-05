@@ -424,6 +424,7 @@ mod build_groups_tests {
             held_count: 0,
             local_task_running: false,
             successor_of: None,
+            machine: None,
         };
         let groups = build_groups(&[], &[], &[inst], 1714389600000);
         assert_eq!(groups.len(), 1);
@@ -468,6 +469,7 @@ mod build_groups_tests {
             held_count: 0,
             local_task_running: false,
             successor_of: None,
+            machine: None,
         };
         let groups = build_groups(&[], &[], &[inst], 0);
         assert_eq!(groups.len(), 0, "ended instances must not appear");

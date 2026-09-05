@@ -78,7 +78,7 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     ).await;
                 }
 
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"session_id": p.session_id}))
             }

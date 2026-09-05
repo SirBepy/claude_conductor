@@ -121,7 +121,7 @@ async fn fire_message(
     state.registry.set_awaiting(session_id, None);
     state.registry.set_busy_from_wake(session_id);
     crate::sessions::chat_state::set_busy(session_id, true);
-    state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
+    crate::daemon::machines::publish_instances_changed(&state);
     Ok(())
 }
 
@@ -203,7 +203,7 @@ async fn fire_new_chat(
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy_from_wake(&sid);
     crate::sessions::chat_state::set_busy(&sid, true);
-    state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
+    crate::daemon::machines::publish_instances_changed(&state);
     Ok(Some(sid))
 }
 

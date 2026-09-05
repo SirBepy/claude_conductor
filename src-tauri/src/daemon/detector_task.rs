@@ -4,7 +4,6 @@
 
 use crate::daemon::state::DaemonState;
 use crate::sessions::registry::Registry;
-use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,7 +20,7 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 pub fn spawn(state: Arc<DaemonState>) {
     let registry = state.registry.clone();
-    let notifier = state.notifier.clone();
+    let publish_state = state.clone();
     // Task-local (no mutex) cache of each session's last-seen transcript mtime,
     // so we only re-read the file when it actually grew.
     let mut mtimes: HashMap<String, SystemTime> = HashMap::new();
@@ -57,7 +56,7 @@ pub fn spawn(state: Arc<DaemonState>) {
             }
 
             if ended || renamed || pruned {
-                notifier.publish("instances_changed", json!({"instances": registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&publish_state);
             }
         }
     });

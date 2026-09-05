@@ -6,7 +6,6 @@
 
 use crate::daemon::lifecycle::{self, StartSessionParams};
 use crate::daemon::state::DaemonState;
-use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -139,7 +138,7 @@ pub(crate) async fn spawn_chat(
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
     crate::sessions::chat_state::set_busy(&sid, true);
-    state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+    crate::daemon::machines::publish_instances_changed(&state);
     Ok(sid)
 }
 

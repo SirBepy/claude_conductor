@@ -75,7 +75,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // it at spawn left a started-but-never-messaged session busy
                 // forever, deferring scheduled messages into it until they went
                 // Missed and spinning the sidebar indefinitely (ai_todo 212).
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"session_id": sid}))
             }
@@ -115,7 +115,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     crate::sessions::chat_state::set_busy(&p.session_id, false);
                     return Err(err_to_rpc(e));
                 }
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 // Jarvis wake (todo 272 chunk 3): the desktop's user-facing send
                 // path (`ipc/chat/run.rs`); the phone has its own REST route
                 // (`remote_handlers::send_message`), and Jarvis's `send_to_session`
@@ -165,7 +165,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // prompt" cleanup in `lifecycle.rs`'s pump loop; a no-op when
                 // nothing is open for this session (the common Stop-turn case).
                 state.expire_prompts_for_session(&p.session_id).await;
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 Ok(json!({"ok": true}))
             }
         });
@@ -182,7 +182,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 lifecycle::end_session(&map, &p.session_id).await.map_err(err_to_rpc)?;
                 let now = chrono::Utc::now().to_rfc3339();
                 state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))
             }

@@ -55,6 +55,7 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         held_count: 0,
         local_task_running: false,
         successor_of: None,
+        machine: None,
     }
 }
 

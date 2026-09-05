@@ -244,7 +244,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         );
         if restored > 0 {
             log::info!("restored {restored} interactive session(s) from snapshot");
-            state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
+            crate::daemon::machines::publish_instances_changed(&state);
         }
     }
 

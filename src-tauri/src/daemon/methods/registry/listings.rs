@@ -67,7 +67,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                 // reasoning as chat::takeover::takeover.
                 state.registry.set_account(&p.session_id, &p.account_id);
                 crate::sessions::chat_config::set_account(&p.session_id, &p.account_id);
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))
             }
@@ -85,7 +85,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                 let shim = std::sync::Mutex::new(state.settings.snapshot());
                 let sid = crate::chat::takeover::takeover(p.manual_pid, &p.model, &p.effort, &p.account_id, &state.registry, &shim)
                     .map_err(|e| RpcError::internal(e.to_string()))?;
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"session_id": sid}))
             }
@@ -97,7 +97,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
         let state = state.clone();
         router.register("list_instances", move |_params, _ctx| {
             let state = state.clone();
-            async move { Ok(json!(state.registry.list())) }
+            async move { Ok(json!(crate::daemon::machines::all_instances(&state))) }
         });
     }
     // Read-only account list, exposed over the remote-access API so the phone's

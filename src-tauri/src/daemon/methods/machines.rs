@@ -213,6 +213,7 @@ async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParams) -> Resul
         added_at: machines::now_secs(),
     };
     registry.upsert_peer(peer.clone());
+    crate::daemon::machines::MachineHub::sync_links(state);
     serde_json::to_value(PeerMachineView::from(&peer)).map_err(|e| RpcError::internal(e.to_string()))
 }
 
@@ -232,6 +233,7 @@ async fn unpair_machine(state: &Arc<DaemonState>, machine_id: &str) -> Result<Va
     if let Ok(client) = peer_client::client_for(&removed) {
         let _ = client.call("peer_unpaired", json!({ "machine_id": mine.machine_id })).await;
     }
+    crate::daemon::machines::MachineHub::sync_links(state);
     Ok(json!({ "removed": true }))
 }
 
@@ -262,6 +264,7 @@ async fn peer_unpaired(state: &Arc<DaemonState>, ctx: &ConnectionContext) -> Res
             if let Some(device_id) = removed.reverse_device_id {
                 let _ = DeviceRegistry::revoke_device(&device_id, &app_data);
             }
+            crate::daemon::machines::MachineHub::sync_links(state);
             Ok(json!({ "removed": true }))
         }
         None => Ok(json!({ "removed": false })),

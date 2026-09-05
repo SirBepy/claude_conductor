@@ -76,7 +76,7 @@ fn sweep(state: &Arc<DaemonState>, now: chrono::DateTime<chrono::Utc>) {
         state.registry.set_busy(session_id, false);
         crate::sessions::chat_state::set_busy(session_id, false);
     }
-    state.notifier.publish("instances_changed", serde_json::json!({"instances": state.registry.list()}));
+    crate::daemon::machines::publish_instances_changed(&state);
 }
 
 /// True if `last_event_at` is unset (untrustworthy - e.g. a session

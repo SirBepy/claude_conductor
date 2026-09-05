@@ -60,7 +60,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 // Fallback close path (External sessions, or end_session already
                 // gone) - drop here too so it isn't the only route that leaks.
                 crate::ask::store::drop_for_chat(&p.session_id);
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))
             }
@@ -74,7 +74,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 state.registry.externalize_session(&p.session_id);
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 // Now External: drop it from the Interactive snapshot so a daemon
                 // restart doesn't resurrect it as a ghost Interactive entry.
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
@@ -96,7 +96,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 // applies instead of silently no-op'ing on a live session.
                 let restarted = restart_live_session(&state, "set_session_effort", &p.session_id).await;
 
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true, "restarted": restarted}))
             }
@@ -114,7 +114,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
 
                 let restarted = restart_live_session(&state, "set_session_model", &p.session_id).await;
 
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true, "restarted": restarted}))
             }
@@ -150,7 +150,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 crate::daemon::lifecycle::kill_and_wait_for_teardown(&state, &p.session_id).await;
                 state.registry.set_frozen(&p.session_id, true);
                 state.registry.set_frozen_needs_continue(&p.session_id, was_busy || was_asked);
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))
             }
@@ -183,7 +183,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                         log::warn!("unfreeze_session: auto-continue failed for {}: {}", p.session_id, e);
                     }
                 }
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))
             }

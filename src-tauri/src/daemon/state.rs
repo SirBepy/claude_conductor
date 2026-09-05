@@ -102,6 +102,14 @@ pub struct DaemonState {
     /// daemon startup (needs `app_data`, unknown at construction) - mirrors
     /// `push`'s OnceLock above.
     pub machines: OnceLock<Arc<crate::daemon::machines::MachineRegistry>>,
+    /// Cached instance lists mirrored in from every paired peer machine,
+    /// kept current by `daemon::machines::peer_link` - see `all_instances`.
+    /// Always constructed (unlike `machines` above): a daemon with no peers
+    /// yet still needs an empty cache to merge against.
+    pub mirror: Arc<crate::daemon::machines::MirrorState>,
+    /// Owns the live per-peer link tasks (`daemon::machines::peer_link`),
+    /// keyed by `machine_id` - see `MachineHub::sync_links`.
+    pub hub: Arc<crate::daemon::machines::MachineHub>,
 }
 
 impl DaemonState {
@@ -139,6 +147,8 @@ impl DaemonState {
             start_tokens: crate::daemon::start_tokens::StartTokens::new(),
             prompt_seq: AtomicU64::new(0),
             machines: OnceLock::new(),
+            mirror: Arc::new(crate::daemon::machines::MirrorState::new()),
+            hub: Arc::new(crate::daemon::machines::MachineHub::new()),
         })
     }
 

@@ -181,7 +181,7 @@ async fn spawn_fresh_jarvis(state: &Arc<DaemonState>) -> Result<String, RpcError
     // `SettingsCache`'s module header).
     state.settings.set_jarvis_session_id(&sid);
     state.notifier.publish("jarvis_session_created", json!({"session_id": sid}));
-    state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+    crate::daemon::machines::publish_instances_changed(&state);
 
     Ok(sid)
 }
@@ -232,7 +232,7 @@ pub fn register_jarvis(router: &mut Router, state: Arc<DaemonState>) {
                     )));
                 }
                 let new_id = lifecycle::restart_session(&state, &p.session_id).await.map_err(err_to_rpc)?;
-                state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+                crate::daemon::machines::publish_instances_changed(&state);
                 Ok(json!({"session_id": new_id}))
             }
         });

@@ -90,6 +90,10 @@ pub fn spawn(
     if let Some(reg) = state.machines.get() {
         reg.ensure_self();
     }
+    // Reconnect every already-paired peer's mirror link on startup - without
+    // this a daemon restart would leave every mirrored row gone until the
+    // next pairing mutation happened to call sync_links again.
+    crate::daemon::machines::MachineHub::sync_links(&state);
     let stt = crate::daemon::stt::SttSupervisor::new(app_data.clone());
     let stt_for_task = stt.clone();
     tokio::spawn(async move {
@@ -120,6 +124,67 @@ pub fn spawn(
         }
     });
     stt
+}
+
+/// Test-only handle for a server started via `spawn_on`. Runs the server on
+/// its OWN dedicated multi-thread runtime rather than a task on the test's
+/// runtime, because `axum::serve` (see `axum::serve::Serve`'s `IntoFuture`)
+/// spawns each accepted connection as its OWN detached `tokio::spawn` task -
+/// aborting only the outer accept-loop task (a plain `JoinHandle`) leaves
+/// already-established WebSocket connections running untouched, which a
+/// "peer goes offline" test needs to actually kill. Dropping/shutting down
+/// this dedicated runtime aborts every task on it, connections included.
+#[cfg(test)]
+pub(crate) struct TestServerHandle {
+    runtime: Option<tokio::runtime::Runtime>,
+}
+
+#[cfg(test)]
+impl TestServerHandle {
+    /// Immediately tears down the dedicated runtime (and with it, every live
+    /// connection) - simulates the peer process dying outright, unlike a
+    /// graceful shutdown which would let in-flight connections finish.
+    pub(crate) fn kill(mut self) {
+        if let Some(rt) = self.runtime.take() {
+            rt.shutdown_background();
+        }
+    }
+}
+
+/// Test-only sibling of `spawn`: binds synchronously (so the caller learns
+/// the real port immediately - `spawn` only logs it, from inside its own
+/// spawned task) and skips `sync_links` (a federation integration test
+/// drives pairing/linking itself). Used by the two-daemon mirroring test in
+/// `daemon::machines::peer_link`.
+#[cfg(test)]
+pub(crate) fn spawn_on(
+    state: Arc<DaemonState>,
+    app_data: PathBuf,
+    router: crate::daemon::rpc::Router,
+    port: u16,
+) -> (Arc<crate::daemon::stt::SttSupervisor>, u16, TestServerHandle) {
+    DeviceRegistry::ensure_desktop_device(&app_data);
+    state.init_machines(app_data.clone());
+    if let Some(reg) = state.machines.get() {
+        reg.ensure_self();
+    }
+    let stt = crate::daemon::stt::SttSupervisor::new(app_data.clone());
+    let stt_for_task = stt.clone();
+    let std_listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("bind ephemeral port for test");
+    std_listener.set_nonblocking(true).expect("set listener nonblocking for tokio adoption");
+    let bound_port = std_listener.local_addr().map(|a| a.port()).unwrap_or(port);
+    let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task });
+    let app = build_router(ctx);
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("build dedicated test runtime");
+    rt.spawn(async move {
+        let listener = tokio::net::TcpListener::from_std(std_listener).expect("adopt std listener into tokio");
+        crate::util::process::mark_listener_non_inheritable(&listener);
+        let _ = axum::serve(listener, app).await;
+    });
+    (stt, bound_port, TestServerHandle { runtime: Some(rt) })
 }
 
 fn build_router(ctx: Arc<RemoteCtx>) -> Router {

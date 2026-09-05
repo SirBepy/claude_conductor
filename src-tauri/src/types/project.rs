@@ -77,6 +77,18 @@ pub struct ProjectConfig {
     pub last_start_folder_rel: Option<String>,
 }
 
+/// Which paired peer machine an `Instance` row is mirrored from, and
+/// whether that peer's link is currently live. `online: false` means the
+/// row is stale (last known state before the link dropped), kept visible
+/// rather than vanished so a sidebar entry doesn't flicker out on a blip.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct MachineRef {
+    pub id: String,
+    pub label: String,
+    pub online: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct Instance {
@@ -211,6 +223,12 @@ pub struct Instance {
     /// sidebar moves the user onto the successor instead of stranding them.
     #[serde(default)]
     pub successor_of: Option<String>,
+    /// Set only for a row mirrored in from a paired peer machine (multi-
+    /// machine federation) - `None` means this session lives on THIS
+    /// daemon. Stamped by `daemon::machines::all_instances`, never by the
+    /// registry itself (a registry row is always locally hosted).
+    #[serde(default)]
+    pub machine: Option<MachineRef>,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -372,6 +390,7 @@ mod tests {
             held_count: 0,
             local_task_running: false,
             successor_of: None,
+            machine: None,
         };
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();

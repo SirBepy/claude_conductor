@@ -164,11 +164,11 @@ pub(super) async fn on_session_start(
             }
         }
         if changed {
-            state.notifier.publish("instances_changed", json!({"instances": state.registry.list()}));
+            crate::daemon::machines::publish_instances_changed(&state);
         }
     });
 
-    ctx.state.notifier.publish("instances_changed", json!({"instances": ctx.state.registry.list()}));
+    crate::daemon::machines::publish_instances_changed(&ctx.state);
     (StatusCode::NO_CONTENT, Json(json!({})))
 }
 
@@ -206,7 +206,7 @@ pub(super) async fn on_session_end(
         return StatusCode::NO_CONTENT;
     }
     if ctx.state.registry.mark_ended(&payload.session_id, crate::types::EndReason::HookSessionEnd, &now) {
-        ctx.state.notifier.publish("instances_changed", json!({"instances": ctx.state.registry.list()}));
+        crate::daemon::machines::publish_instances_changed(&ctx.state);
     }
     StatusCode::NO_CONTENT
 }
