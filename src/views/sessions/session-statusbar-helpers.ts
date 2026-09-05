@@ -212,6 +212,8 @@ export interface StatusbarOptions {
   /** Called when the `account` chip is clicked, to open the change-account picker. */
   onAccountClick?: () => void;
   /** Fired per render with the live model + effort. The statusbar owns both (the
-   *  popovers commit into it), so pushing keeps the header from going stale. */
-  onConfig?: (model: string | null, effort: string) => void;
+   *  popovers commit into it), so pushing keeps the header from going stale.
+   *  `effortEditable` is false for a read-only (external) session, so the header
+   *  can print effort without offering to change it. */
+  onConfig?: (model: string | null, effort: string, effortEditable: boolean) => void;
 }

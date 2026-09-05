@@ -238,12 +238,18 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   mountComposer(pane, sess, sessionId, readOnly);
 
   // Mount statusbar.
-  await mountStatusbar(
+  const statusbar = await mountStatusbar(
     pane,
     sess,
     () => { void changeAccountForSession(sess.session_id, selectSession); },
-    (model, effort) => header.setConfig(model, effort),
+    (model, effort, effortEditable) => header.setConfig(model, effort, effortEditable),
   );
+  // The header prints model/effort, so its text is also where they get changed;
+  // the statusbar still owns the popovers and the set_session_* commit path.
+  header.onConfigClick = (which, anchor) => {
+    if (which === "model") statusbar?.toggleModelPopover(anchor);
+    else statusbar?.toggleEffortPopover(anchor);
+  };
 
   // Attach renderer + changes panel; bail out if a newer mount/selectSession
   // superseded us mid-await (same bail-out the inline code used to do).

@@ -37,7 +37,7 @@ export async function mountStatusbar(
   pane: HTMLElement,
   sess: Instance,
   onAccountClick: () => void,
-  onConfig?: (model: string | null, effort: string) => void,
+  onConfig?: (model: string | null, effort: string, effortEditable: boolean) => void,
 ): Promise<SessionStatusbar | null> {
   const myMount = state.mountId;
   const sessionId = sess.session_id;

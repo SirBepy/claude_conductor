@@ -277,6 +277,26 @@
 .session-header .meta-cfg {
   margin-left: auto;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Both are editable mid-run, so each is its own hit target. The affordance stays
+   at hover-only: a permanent underline on two always-present labels would read
+   as noise on every chat header. */
+.session-header .meta-cfg-btn {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: -1px -3px;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.session-header .meta-cfg-btn:hover,
+.session-header .meta-cfg-btn:focus-visible {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .session-header .icon-btn {

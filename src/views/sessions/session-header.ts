@@ -23,12 +23,18 @@ export class SessionHeader {
   private readonly _wrap: HTMLElement;
   private readonly _titleEl: HTMLElement;
   private readonly _projEl: HTMLElement;
-  private readonly _cfgEl: HTMLElement;
+  private readonly _cfgModelEl: HTMLElement;
+  private readonly _cfgSepEl: HTMLElement;
+  private readonly _cfgEffortEl: HTMLElement;
 
   private readonly _onDiscard: (() => void) | undefined;
 
   onChangesClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
+  /** Opens the statusbar's model / effort slider popover on the header's own
+   *  text. The statusbar owns both popovers and the commit path, so the header
+   *  only hands it which one and where to anchor. */
+  onConfigClick: ((which: "model" | "effort", anchor: HTMLElement) => void) | null = null;
 
   constructor(opts: { title: string; meta: string; onDiscard?: () => void }) {
     this._onDiscard = opts.onDiscard;
@@ -47,7 +53,11 @@ export class SessionHeader {
       `  <span class="title">${escapeHtml(opts.title)}</span>`,
       `  <span class="meta">`,
       `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
-      `    <span class="meta-cfg"></span>`,
+      `    <span class="meta-cfg">`,
+      `      <span class="meta-cfg-model"></span>`,
+      `      <span class="meta-cfg-sep" hidden>·</span>`,
+      `      <span class="meta-cfg-effort"></span>`,
+      `    </span>`,
       `  </span>`,
       `</div>`,
       `<button class="icon-btn discard-btn" title="Discard draft">`,
@@ -60,7 +70,9 @@ export class SessionHeader {
     this._wrap = el.querySelector(".session-header-avatar-wrap")!;
     this._titleEl = el.querySelector(".title")!;
     this._projEl = el.querySelector(".meta-proj")!;
-    this._cfgEl = el.querySelector(".meta-cfg")!;
+    this._cfgModelEl = el.querySelector(".meta-cfg-model")!;
+    this._cfgSepEl = el.querySelector(".meta-cfg-sep")!;
+    this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
 
     el.querySelector<HTMLButtonElement>(".discard-btn")?.addEventListener("click", () => {
       this._onDiscard?.();
@@ -68,20 +80,53 @@ export class SessionHeader {
 
     // Char-click delegate on the header element so it survives avatar swaps.
     el.addEventListener("click", (e) => {
+      const cfg = (e.target as Element).closest<HTMLElement>(".meta-cfg-btn");
+      if (cfg) {
+        // Same stop as the statusline chips: the popover shell closes on a
+        // document-level click, which would fight the toggle below.
+        e.stopPropagation();
+        this.onConfigClick?.(cfg === this._cfgModelEl ? "model" : "effort", cfg);
+        return;
+      }
       if (!(e.target as Element).closest(".header-char-clickable")) return;
       this.onCharClick?.();
+    });
+
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const cfg = (e.target as Element).closest<HTMLElement>(".meta-cfg-btn");
+      if (!cfg) return;
+      e.preventDefault();
+      this.onConfigClick?.(cfg === this._cfgModelEl ? "model" : "effort", cfg);
     });
   }
 
   setTitle(text: string): void { this._titleEl.textContent = text; }
   setMeta(text: string): void { this._projEl.textContent = text; }
 
-  /** Model and effort as text at the far right of the meta line. Both are fixed
-   *  for the session's life, so they read as labels; the statusline's own
-   *  model/effort chips stay the place to change them. */
-  setConfig(model: string | null, effort: string): void {
-    const parts = [model ? shortModelName(model) : "", effort].filter(Boolean);
-    this._cfgEl.textContent = parts.join(" · ");
+  /** Model and effort as text at the far right of the meta line, each its own
+   *  hit target opening the statusbar's slider popover. The three spans are
+   *  built once in the constructor and only ever have their text swapped: the
+   *  statusbar re-emits config on every render, and replacing the nodes would
+   *  detach a popover the user still has open. */
+  setConfig(model: string | null, effort: string, effortEditable = true): void {
+    const modelText = model ? shortModelName(model) : "";
+    this.setConfigPart(this._cfgModelEl, modelText, !!modelText, "Change model");
+    this.setConfigPart(this._cfgEffortEl, effort, !!effort && effortEditable, "Change effort");
+    this._cfgSepEl.hidden = !(modelText && effort);
+  }
+
+  private setConfigPart(el: HTMLElement, text: string, clickable: boolean, title: string): void {
+    el.textContent = text;
+    el.classList.toggle("meta-cfg-btn", clickable);
+    el.title = clickable ? title : "";
+    if (clickable) {
+      el.setAttribute("role", "button");
+      el.setAttribute("tabindex", "0");
+    } else {
+      el.removeAttribute("role");
+      el.removeAttribute("tabindex");
+    }
   }
 
   setRemote(isRemote: boolean): void {

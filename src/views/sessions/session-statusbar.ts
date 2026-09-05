@@ -86,7 +86,7 @@ export class SessionStatusbar {
   private onModelChange: ((model: string) => void) | null;
   private accountId: string | null;
   private onAccountClick: (() => void) | null;
-  private onConfig: ((model: string | null, effort: string) => void) | null;
+  private onConfig: ((model: string | null, effort: string, effortEditable: boolean) => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
   private hideZero: boolean;
   private durationTimer: ReturnType<typeof setInterval> | null = null;
@@ -104,6 +104,11 @@ export class SessionStatusbar {
   private imagesPopover = new ImagesPopover();
   private effortPopover = new EffortPopover();
   private modelPopover = new ModelPopover();
+  /** Whatever last opened the model/effort popover - a statusline chip, or the
+   *  pane header's config text. Which one it was decides whether a re-render
+   *  has to re-bind the anchor; see `reanchorConfigPopover`. */
+  private modelAnchor: HTMLElement | null = null;
+  private effortAnchor: HTMLElement | null = null;
   private gitCard = new GitCard();
   private overflowPopover = new OverflowPopover();
   private mobileUnsub: (() => void) | null = null;
@@ -357,6 +362,44 @@ export class SessionStatusbar {
     this.render();
   }
 
+  /** Open (or dismiss) the model slider on `anchor`. Public because the pane
+   *  header prints model/effort too and routes its own clicks here, so both
+   *  surfaces share one popover and one commit path. `anchor` may sit outside
+   *  this statusbar's container. */
+  toggleModelPopover(anchor: HTMLElement): void {
+    const wasOpen = this.modelPopover.isOpen;
+    this.closeChipPopovers();
+    if (wasOpen) return;
+    this.modelAnchor = anchor;
+    this.modelPopover.open(anchor, {
+      model: this.sessionModel ?? this.meta.model ?? "",
+      sessionId: this.sessionId,
+      onModelChange: this.onModelChange ?? undefined,
+      onCommit: (next) => {
+        this.sessionModel = next;
+        this.modelPopover.close();
+        this.render();
+      },
+    });
+  }
+
+  /** Effort's counterpart to `toggleModelPopover`. A read-only (external)
+   *  session has no effort to set, so the click is swallowed here rather than
+   *  in each caller. */
+  toggleEffortPopover(anchor: HTMLElement): void {
+    if (this.readOnlyEffort) return;
+    const wasOpen = this.effortPopover.isOpen;
+    this.closeChipPopovers();
+    if (wasOpen) return;
+    this.effortAnchor = anchor;
+    this.effortPopover.open(anchor, {
+      effort: this.effort,
+      sessionId: this.sessionId,
+      onEffortChange: this.onEffortChange,
+      onCommit: (next) => { this.effort = next; this.effortPopover.close(); this.render(); },
+    });
+  }
+
   destroy(): void {
     if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null; }
     if (this.serversTimer) { clearInterval(this.serversTimer); this.serversTimer = null; }
@@ -481,33 +524,12 @@ export class SessionStatusbar {
 
     this.container.querySelector<HTMLElement>(".sb-model-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.modelPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.modelPopover.open(anchor, {
-        model: this.sessionModel ?? this.meta.model ?? "",
-        sessionId: this.sessionId,
-        onModelChange: this.onModelChange ?? undefined,
-        onCommit: (next) => {
-          this.sessionModel = next;
-          this.modelPopover.close();
-          this.render();
-        },
-      });
+      this.toggleModelPopover(e.currentTarget as HTMLElement);
     });
 
     this.container.querySelector<HTMLElement>(".sb-effort-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (this.readOnlyEffort) return;
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.effortPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.effortPopover.open(anchor, {
-        effort: this.effort,
-        sessionId: this.sessionId,
-        onEffortChange: this.onEffortChange,
-        onCommit: (next) => { this.effort = next; this.effortPopover.close(); this.render(); },
-      });
+      this.toggleEffortPopover(e.currentTarget as HTMLElement);
     });
 
     this.container.querySelector<HTMLElement>(".sb-ai-todos-btn")?.addEventListener("click", (e) => {
@@ -577,11 +599,11 @@ export class SessionStatusbar {
     this.reanchorIfOpen(this.imagesPopover, ".sb-images-btn", (a) => this.imagesPopover.open(a));
     this.reanchorIfOpen(this.gitCard, ".sb-git-btn, .sb-branch-btn, .sb-commits-btn", (a) => this.gitCard.reanchor(a));
     this.reanchorIfOpen(this.overflowPopover, ".sb-overflow-btn", (a) => this.overflowPopover.open(a, this.overflowData()));
-    this.reanchorIfOpen(this.effortPopover, ".sb-effort-btn", (a) => this.effortPopover.reanchor(a));
-    this.reanchorIfOpen(this.modelPopover, ".sb-model-btn", (a) => this.modelPopover.reanchor(a));
+    this.reanchorConfigPopover(this.effortPopover, this.effortAnchor, ".sb-effort-btn", (a) => this.effortPopover.reanchor(a));
+    this.reanchorConfigPopover(this.modelPopover, this.modelAnchor, ".sb-model-btn", (a) => this.modelPopover.reanchor(a));
 
     this.updateRowFades();
-    this.onConfig?.(this.sessionModel ?? this.meta.model, this.effort);
+    this.onConfig?.(this.sessionModel ?? this.meta.model, this.effort, !this.readOnlyEffort);
   }
 
   /** Toggle scroll-edge fade classes per row (rows rebuild on every render(),
@@ -606,6 +628,25 @@ export class SessionStatusbar {
     const anchor = this.container.querySelector<HTMLElement>(sel);
     if (anchor) rebind(anchor);
     else pop.close();
+  }
+
+  /** Reanchor variant for the two popovers a non-chip surface can also open.
+   *  An anchor outside this container (the pane header's config text) is not
+   *  rebuilt by render(), so it only needs repositioning - running the chip
+   *  selector against it would miss and close a popover still in use. */
+  private reanchorConfigPopover(
+    pop: { isOpen: boolean; close: () => void },
+    anchor: HTMLElement | null,
+    sel: string,
+    rebind: (anchor: HTMLElement) => void,
+  ): void {
+    if (!pop.isOpen) return;
+    if (anchor && !this.container.contains(anchor)) {
+      if (anchor.isConnected) rebind(anchor);
+      else pop.close();
+      return;
+    }
+    this.reanchorIfOpen(pop, sel, rebind);
   }
 
   /** Dismiss every chip popover (both statusbar-owned and the tool-tally one). */
