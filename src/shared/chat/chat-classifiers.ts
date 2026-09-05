@@ -275,6 +275,12 @@ const COMPACT_COMMAND_RE = /<command-name>compact<\/command-name>/i;
 // XML-ish block; strip the whole thing including contents.
 const TASK_NOTIFICATION_RE = /<task-notification[\s\S]*?<\/task-notification>/gi;
 
+// Appended by the daemon when the user writes a known slash command
+// mid-sentence, where the CLI would not expand it (slash/mentions.rs).
+// Stripped from the bubble and from the dedup sig, which the raw typed
+// text on the synthetic-echo side would otherwise never match.
+const SLASH_CONTEXT_RE = /\n*<conductor-slash-context>[\s\S]*?<\/conductor-slash-context>/gi;
+
 // When the user invokes a skill, Claude Code appends the entire SKILL.md
 // body to the same user message AFTER `</command-args>`, followed by an
 // `ARGUMENTS: ...` line repeating what the user typed. Strip from the
@@ -292,6 +298,7 @@ export function normalizeUserMessageText(text: string): string {
   const body = text
     .replace(COMMAND_BLOCK_RE, "")
     .replace(COMMAND_ARGS_TAG_RE, "")
+    .replace(SLASH_CONTEXT_RE, "")
     .replace(SKILL_BODY_RE, "")
     .replace(TASK_NOTIFICATION_RE, "")
     .trim();

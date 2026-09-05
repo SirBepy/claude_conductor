@@ -58,6 +58,7 @@ fn scan_commands(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
             args: extract_args(&body),
             description,
             source: src.clone(),
+            path: Some(p.to_string_lossy().into_owned()),
         });
     }
 }
@@ -84,6 +85,7 @@ fn scan_skills(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
             args: extract_args(&body),
             description: fm.description.unwrap_or_default(),
             source: src.clone(),
+            path: Some(skill_file.to_string_lossy().into_owned()),
         });
     }
 }

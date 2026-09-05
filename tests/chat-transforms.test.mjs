@@ -518,6 +518,15 @@ describe("eventToRenderedMessage — isMeta user turns", () => {
     expect(normalizeUserMessageText(jsonl)).toBe("/pickup");
     expect(normalizeUserMessageText(jsonl)).toBe(normalizeUserMessageText("/pickup"));
   });
+
+  it("strips the daemon's mid-message slash-context block back to the typed text", () => {
+    const typed = "when thats done, /close up";
+    const jsonl = typed
+      + "\n\n<conductor-slash-context>\nThe user's message mentions the slash commands below.\n\n"
+      + "- /close (user skill): wrap up\n  /home/u/.claude/skills/close/SKILL.md\n</conductor-slash-context>";
+    expect(normalizeUserMessageText(jsonl)).toBe(typed);
+    expect(normalizeUserMessageText(jsonl)).toBe(normalizeUserMessageText(typed));
+  });
 });
 
 describe("renderBlocks — AUQ answer chip", () => {

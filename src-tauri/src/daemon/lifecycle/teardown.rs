@@ -71,7 +71,15 @@ async fn send_message_inner(
         wire_text.push_str(author);
         wire_text.push_str(crate::types::chat::DAEMON_AUTHOR_SENTINEL_SUFFIX);
     }
-    wire_text.push_str(text);
+    // A slash command the user wrote mid-sentence is never expanded by the CLI,
+    // so append its instructions-pointer block and let the model judge intent.
+    // Appended, never prepended: `chat::parser`/`tokens::title` match sentinels
+    // at the front, and the frontend strips the block from the bubble.
+    if is_meta {
+        wire_text.push_str(text);
+    } else {
+        wire_text.push_str(&crate::slash::mentions::augment(text, Some(&session.cwd)));
+    }
     let msg = serde_json::json!({
         "type": "user",
         "message": {

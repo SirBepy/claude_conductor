@@ -340,6 +340,9 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
     let trimmed = text.trim();
     if trimmed.is_empty() { return None }
     if trimmed.starts_with("<local-command-caveat>") { return None }
+    let trimmed = crate::slash::mentions::strip_block(trimmed);
+    let trimmed = trimmed.as_ref();
+    if trimmed.is_empty() { return None }
     let label = command_label(trimmed).map(std::borrow::Cow::Owned)
         .unwrap_or(std::borrow::Cow::Borrowed(trimmed));
     normalise_and_truncate(&label, max_chars)
