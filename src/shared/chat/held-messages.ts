@@ -198,6 +198,15 @@ export class HeldMessages {
     return (this.map.get(sid) ?? []).length > 0;
   }
 
+  /** Whether the held set already carries a question card's own answer. The
+   *  "awaiting question" hold exists so prose waits for the answer; once the
+   *  answer itself is what's queued (it was refused as SESSION_BUSY while the
+   *  asking turn was still finishing, and that turn's own `question` report
+   *  then re-armed the flag), holding it would strand it forever. */
+  hasAuqAnswerFor(sid: string): boolean {
+    return (this.map.get(sid) ?? []).some((i) => isAuqAnswerBlock(i.blocks[0]));
+  }
+
   /** Stage a message for the active session (composer calls this while busy).
    *  The id is local until add_held_message resolves and swaps it for the
    *  server-assigned one, so two surfaces staging independently can't
@@ -357,7 +366,7 @@ export class HeldMessages {
   onCompletion(sid: string, isQuestion: boolean): void {
     if (sid !== this.sid) return;
     if (this.itemsForActive().length === 0) return;
-    if (isQuestion) return;
+    if (isQuestion && !this.hasAuqAnswerFor(sid)) return;
     if (this.attached?.isComposing() || this.render.isEditingRow()) {
       this.deferredSid = sid;
       this.scheduleDeferRetry();

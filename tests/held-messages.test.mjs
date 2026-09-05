@@ -117,6 +117,28 @@ describe("HeldMessages — flush triggers", () => {
     expect(held.hasItemsForActive()).toBe(true);
   });
 
+  // An answer submitted while the asking turn was still finishing is refused
+  // as SESSION_BUSY and staged; the turn's own `question` report then re-arms
+  // the flag. The answer IS what the hold was waiting for, so it must go out.
+  it("DOES auto-flush a held question answer even while flagged as asking", () => {
+    const { held, send } = makeHarness();
+    const answer = [{ type: "text", text: '<auq-answer id="card-1"/>Q: pick\nA: yes' }];
+    held.stage(answer);
+    expect(held.hasAuqAnswerFor("sess-A")).toBe(true);
+
+    held.onCompletion("sess-A", /* isQuestion */ true);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(answer);
+    expect(held.hasItemsForActive()).toBe(false);
+  });
+
+  it("hasAuqAnswerFor is false for plain prose", () => {
+    const { held } = makeHarness();
+    held.stage(textBlocks("just a note"));
+    expect(held.hasAuqAnswerFor("sess-A")).toBe(false);
+  });
+
   it("defers auto-flush while the user is composing, then fires when idle", () => {
     const { held, send, state } = makeHarness();
     held.stage(textBlocks("alpha"));

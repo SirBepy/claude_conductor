@@ -230,7 +230,7 @@ export async function refreshSessions(): Promise<boolean> {
       if (s.session_id === state.selectedId || s.busy || s.frozen) continue;
       if (!state.heldMessages?.hasItemsFor(s.session_id)) continue;
       const isQuestion = s.awaiting === "question";
-      if (isQuestion) continue;
+      if (isQuestion && !state.heldMessages.hasAuqAnswerFor(s.session_id)) continue;
       const sid = s.session_id;
       const cwd = s.cwd;
       void state.heldMessages.flushBackground(sid, (blocks) =>
