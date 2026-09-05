@@ -218,6 +218,33 @@ export interface RemoteDevice {
   created_at: number; // unix timestamp seconds
 }
 
+// Machine federation (Settings > Remote access > Paired machines). Loose local
+// interfaces mirroring the app-process commands' return shapes, like
+// RemoteAccessStatus above - not ts-rs generated types.
+export interface SelfMachine {
+  machine_id: string;
+  label: string;
+  os: string;
+}
+
+export interface PeerMachineView {
+  machine_id: string;
+  label: string;
+  os: string;
+  iroh_id: string | null;
+  direct_url: string | null;
+  reverse_device_id: string | null;
+  added_at: number;
+  /** Absent until the parallel Rust builder lands live reachability; treat
+   *  a missing value as "unknown", never as offline. */
+  reach?: "direct" | "iroh" | "none";
+}
+
+export interface ListMachinesResult {
+  self: SelfMachine | null;
+  peers: PeerMachineView[];
+}
+
 // ── Public API ────────────────────────────────────────────────────────────
 
 export const api = {
@@ -520,6 +547,19 @@ export const api = {
   setRemoteKillSwitch: (enabled: boolean): Promise<void> =>
     invoke("set_remote_kill_switch", { enabled }),
   getRemoteKillSwitch: (): Promise<boolean> => invoke("get_remote_kill_switch"),
+
+  // --- Machines (multi-machine federation, Settings > Remote access) ---
+  // Desktop-pipe only; HttpTransport (phone) rejects all five with
+  // RemoteUnavailableError, so callers must catch and hide the machine UI.
+  listMachines: (): Promise<ListMachinesResult> => invoke("list_machines"),
+  pairMachine: (url: string, myUrl: string | null): Promise<PeerMachineView> =>
+    invoke("pair_machine", { url, myUrl }),
+  unpairMachine: (machineId: string): Promise<{ removed: boolean }> =>
+    invoke("unpair_machine", { machineId }),
+  setMachineLabel: (label: string): Promise<SelfMachine> =>
+    invoke("set_machine_label", { label }),
+  listMachineProjects: (machineId: string): Promise<ProjectConfig[]> =>
+    invoke("list_machine_projects", { machineId }),
 
   // --- Hook registration ---
   getHookRegistrationState: async (): Promise<HookRegistrationState> => {

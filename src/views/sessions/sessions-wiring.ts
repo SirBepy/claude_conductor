@@ -231,6 +231,7 @@ export async function wireInstancesChangedListener(
         updateHeaderAvatarStatus(pane, sess);
         pane.classList.toggle("is-rate-limited", isBlocked(sess));
         state.composer?.refreshBlockedState();
+        state.composer?.refreshOfflineState();
       }
     }
     // If the previously-selected session vanished (e.g. takeover renamed it,

@@ -230,6 +230,30 @@
   flex-shrink: 0;
 }
 
+/* Machine mark (multi-machine federation): a small glyph, never a pill -
+   the row's own opacity (below) already carries the offline signal, so the
+   badge itself only dims a little further, matching the row it sits in. */
+.session-machine-badge {
+  font-size: 0.75rem;
+  color: var(--sb-muted);
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.session-machine-badge--offline {
+  opacity: 0.7;
+}
+
+/* Grey out, never hide (project convention) - readable again on hover/active
+   so the row stays clickable-looking under the cursor or when selected. */
+.sessions-list li.is-machine-offline {
+  opacity: 0.55;
+}
+.sessions-list li.is-machine-offline:hover,
+.sessions-list li.is-machine-offline.active {
+  opacity: 1;
+}
+
 .autopilot-badge {
   display: inline-block;
   margin-left: 5px;

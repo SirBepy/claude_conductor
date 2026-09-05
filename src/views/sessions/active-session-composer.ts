@@ -92,6 +92,10 @@ export function mountComposer(
       const inst = state.sessions.find((s) => s.session_id === sessionId);
       return !!inst?.frozen;
     },
+    isOffline: () => {
+      const inst = state.sessions.find((s) => s.session_id === sessionId);
+      return inst?.machine && inst.machine.online === false ? inst.machine.label : null;
+    },
     onStage: (blocks) => state.heldMessages?.stage(blocks) ?? false,
     hasHeld: () => !!state.heldMessages?.hasItemsForActive(),
     popLastHeld: () => state.heldMessages?.popLastForActive() ?? null,

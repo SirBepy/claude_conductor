@@ -17,6 +17,9 @@ export interface SessionConfig {
    * `null`/undefined means no accounts are registered yet or the resolver
    * found none - the spawn falls back to daemon-side default resolution. */
   accountId?: string | null;
+  /** Peer machine this session spawns on (multi-machine federation). `null`/
+   * undefined means this (the local) machine - the default for every new chat. */
+  machineId?: string | null;
 }
 
 export const MODELS = ["haiku", "sonnet", "opus", "fable"] as const;

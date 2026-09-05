@@ -186,6 +186,9 @@ export class HttpTransport implements Transport {
           remote: args.remote,
           placeholder_id: args.placeholderId ?? args.placeholder_id,
           account_id: args.accountId ?? args.account_id ?? null,
+          // Machine federation (todo: multi-machine milestone) - null spawns on
+          // this (the daemon's own) machine, same as omitting it entirely.
+          machine_id: args.machineId ?? args.machine_id ?? null,
           // Must land in this same RPC (not a follow-up set_auto_accept call):
           // the send_message below fires immediately after this resolves, with
           // no wait for the "session_started" WS event that would otherwise

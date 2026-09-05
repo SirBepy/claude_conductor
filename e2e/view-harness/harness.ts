@@ -180,7 +180,7 @@ const SESSION_DEFAULTS: Instance = {
   autopilot: false, jarvis: false, worker_of: null, closing: false,
   account_id: null, rate_limited_resets_at: null, rate_limited_type: null,
   frozen: false, auto_frozen: false, held_count: 0, local_task_running: false,
-  successor_of: null,
+  successor_of: null, machine: null,
 };
 
 /** Typed against the real `Instance` (src/types/ipc.generated.ts), so a field

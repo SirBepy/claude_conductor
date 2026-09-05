@@ -1,5 +1,5 @@
 import { escapeHtml } from "../../shared/escape-html";
-import type { Instance } from "../../types/ipc.generated";
+import type { Instance, MachineRef } from "../../types/ipc.generated";
 import { markerToStatusClass } from "../../shared/status-icons";
 import { characterForSession } from "./session-characters";
 import { projectName, sessionSubtitle, statusDotClass, stateTooltip } from "./sessions-helpers";
@@ -88,9 +88,16 @@ function buildRowOptions(args: {
   heldCount: number | undefined;
   model: string;
   drainChip: string;
+  /** Set only for a session mirrored in from a paired peer machine (multi-
+   *  machine federation); undefined/null for every locally-hosted row. */
+  machine?: MachineRef | null;
 }): RowOptions {
   const tipAttr = "data-tip";
-  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}`;
+  const machineOffline = args.machine?.online === false;
+  const machineBadge = args.machine
+    ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>`
+    : "";
+  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}${machineBadge}`;
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
@@ -144,7 +151,7 @@ export function sessionRowOptions(
     identity: {
       idAttr: "session-id",
       id: s.session_id,
-      liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} row-portrait`,
+      liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} ${s.machine?.online === false ? "is-machine-offline" : ""} row-portrait`,
       // Explicit key so a /respawn successor lands in its predecessor's own
       // row (keyOf prefers data-row-key over data-session-id).
       liExtraAttrs: `${ctx.kbdHint} data-row-key="${chainRowKey(s.session_id)}"`,
@@ -164,6 +171,7 @@ export function sessionRowOptions(
     heldCount: s.held_count || undefined,
     model: s.model,
     drainChip,
+    machine: s.machine,
   });
 }
 

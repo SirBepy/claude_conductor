@@ -47,6 +47,11 @@ export interface ComposerOptions {
   /** True while the active session is frozen (`Instance.frozen`). A send
    * opens a hold-vs-send-now popover instead of sending directly. */
   isFrozen?: () => boolean;
+  /** Non-null (the host machine's label) while the active session is mirrored
+   * in from a paired peer machine that has gone offline (multi-machine
+   * federation). Disables the composer like a read-only session, but with its
+   * own placeholder text instead of the "Take over" copy. */
+  isOffline?: () => string | null;
   /** Stage the built blocks as a held message (while busy, or frozen-hold). */
   onStage?: (blocks: ContentBlock[]) => boolean | void;
   /** True when a held set exists for the active session. When not busy but
@@ -79,6 +84,10 @@ export class Composer {
   private opts: ComposerOptions;
   private sessionId: string | null = null;
   private disabled = false;
+  // The readOnly this session was mounted with (external/automated). Kept
+  // separate from `disabled` so a live isOffline() flip can be layered on top
+  // and later removed without forgetting the underlying read-only state.
+  private baseReadOnly = false;
   private textarea: HTMLTextAreaElement | null = null;
   private highlightEl: HTMLElement | null = null;
   private noticeEl: HTMLElement | null = null;
@@ -275,7 +284,8 @@ export class Composer {
       moveSentOutbox(prevId!, id);
     }
     this.sessionId = id;
-    this.disabled = !!opts.readOnly;
+    this.baseReadOnly = !!opts.readOnly;
+    this.disabled = this.baseReadOnly || !!this.opts.isOffline?.();
     this.draftSync.setSession();
     this.render();
     const stored = loadDraft(id);
@@ -317,11 +327,15 @@ export class Composer {
     this.updateHighlight();
   }
 
-  /** Idle placeholder text. Blocked (rate-limited but still enabled) beats the
-   * default copy; read-only beats blocked (a read-only pane can't be blocked
-   * in a way that matters to the user). */
+  /** Idle placeholder text. Offline (mirrored session's host machine dropped)
+   * beats every other state - it's the only one that isn't a fact about THIS
+   * session's own turn, so it must survive even a read-only/blocked overlap.
+   * Read-only beats blocked (a read-only pane can't be blocked in a way that
+   * matters to the user). */
   private computePlaceholder(): string {
-    if (this.disabled) return "Read-only - click Take over to interact";
+    const offlineLabel = this.opts.isOffline?.();
+    if (offlineLabel) return `${offlineLabel} is offline`;
+    if (this.baseReadOnly) return "Read-only - click Take over to interact";
     const blocked = this.opts.isBlocked?.();
     if (blocked?.placeholder) return blocked.placeholder;
     return isMobileViewport()
@@ -334,6 +348,23 @@ export class Composer {
    * the composer reflects a block/reset that happened while it was mounted. */
   refreshBlockedState(): void {
     if (this.textarea) this.textarea.placeholder = this.computePlaceholder();
+  }
+
+  /** Re-check isOffline() (the mirrored session's host machine went offline/
+   * back online) and toggle the composer's disabled state + placeholder
+   * without a full re-render, so a draft in progress survives the flip.
+   * Called by the chat pane on instances-changed, same trigger as
+   * refreshBlockedState. */
+  refreshOfflineState(): void {
+    const next = this.baseReadOnly || !!this.opts.isOffline?.();
+    if (next !== this.disabled) {
+      this.disabled = next;
+      if (this.textarea) this.textarea.disabled = next;
+      if (this.sendBtn) this.sendBtn.disabled = next;
+      if (this.scheduleBtn) this.scheduleBtn.disabled = next;
+      if (this.micBtn) this.micBtn.disabled = next;
+    }
+    this.refreshBlockedState();
   }
 
   private showNotice(text: string): void {

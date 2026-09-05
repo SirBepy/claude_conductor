@@ -98,9 +98,15 @@ export async function renderPendingPane(
       accountId: config.accountId ?? null,
       onEffortChange: (e) => { config.effort = e; },
       onModelChange: (m) => { config.model = m; },
-      onConfig: (model, effort) => _pendingHeader?.setConfig(model, effort),
+      onConfig: (model, effort, effortEditable) => _pendingHeader?.setConfig(model, effort, effortEditable),
     });
     state.statusbar = sb;
+    if (_pendingHeader) {
+      _pendingHeader.onConfigClick = (which, anchor) => {
+        if (which === "model") sb.toggleModelPopover(anchor);
+        else sb.toggleEffortPopover(anchor);
+      };
+    }
     fetchGitInfo(project.path)
       // Object identity alone isn't enough: sb.gitCwd may have moved (worktree
       // resolution) since this fetch started, and updateGitInfo caches under
@@ -279,6 +285,9 @@ export async function renderPendingPane(
               remote: config.remote !== false,
               placeholderId,
               accountId: config.accountId ?? null,
+              // Machine federation (H4): spawns on a peer instead of this
+              // machine when the new-chat picker's machine chip picked one.
+              machineId: config.machineId ?? null,
               // Persisted server-side in the SAME registration call the daemon
               // makes before this RPC returns (not just the setAutoAccept
               // follow-up below), so a remote/phone caller's first-turn tool

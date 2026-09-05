@@ -165,6 +165,9 @@ export async function startNewSession(pane: HTMLElement): Promise<void> {
     const config = await openModelEffortModal(project.path, project.name);
     if (!config) return;
     if (state.mountId !== myMount) return;
+    // The picker's own machine chip (H4), not anything openModelEffortModal
+    // resolves - it never sees the machine dimension.
+    config.machineId = project.machineId ?? null;
     await launchNewSession(pane, project, config);
   } finally {
     inFlight = false;

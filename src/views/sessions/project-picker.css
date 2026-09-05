@@ -212,6 +212,37 @@
   font-style: italic;
   list-style: none;
 }
+.project-picker-error {
+  color: var(--color-warning, #e5a040);
+}
+
+/* Machine chip row (multi-machine federation, H4) - reuses .account-chip's
+   pill shape (shared/account-chip.css) with symmetric padding since a
+   machine has no icon badge to make room for. */
+.machine-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.machine-field-label {
+  font-size: 0.68rem;
+  color: var(--sb-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.machine-field-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.machine-chip {
+  padding: 5px 12px;
+}
+.machine-chip--offline {
+  cursor: default;
+  opacity: 0.5;
+}
 .project-picker-todo-badge {
   flex-shrink: 0;
   font-size: 0.7rem;

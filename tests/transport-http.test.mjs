@@ -277,6 +277,51 @@ describe("HttpTransport.call mapping", () => {
     await new HttpTransport().call("list_claude_md_scopes", { worktreePath: "/repo/wt" });
     expect(body()).toEqual({ method: "list_claude_md_scopes", params: { worktree_path: "/repo/wt" } });
   });
+
+  // Multi-machine federation (H1): start_session forwards the picker's chosen
+  // machineId (null = spawn on this/the daemon's own machine, same as omitting it).
+  it("forwards start_session's machineId as machine_id, and a follow-up send_message for the prompt", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ session_id: "new-1" }) });
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    const out = await new HttpTransport().call("start_session", {
+      cwd: "/proj",
+      prompt: "hi",
+      model: "opus",
+      effort: "high",
+      remote: true,
+      placeholderId: "pending-1",
+      accountId: null,
+      machineId: "peer-1",
+      autoAccept: true,
+    });
+    expect(body(0)).toEqual({
+      method: "start_session",
+      params: {
+        cwd: "/proj", model: "opus", effort: "high", remote: true,
+        placeholder_id: "pending-1", account_id: null, machine_id: "peer-1",
+        auto_accept: true,
+      },
+    });
+    expect(out).toBe("new-1");
+  });
+
+  it("defaults start_session's machine_id to null when machineId is omitted (local machine)", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ session_id: "new-2" }) });
+    await new HttpTransport().call("start_session", {
+      cwd: "/proj", model: "opus", effort: "high", remote: true,
+      placeholderId: "pending-2", accountId: null, autoAccept: true,
+    });
+    expect(body().params.machine_id).toBeNull();
+  });
+
+  // The five machine-federation commands are desktop-pipe only (Tauri app-
+  // process wrappers) - the phone/HttpTransport has no route to them.
+  it.each(["list_machines", "pair_machine", "unpair_machine", "set_machine_label", "list_machine_projects"])(
+    "throws RemoteUnavailableError for %s (desktop-pipe only)",
+    async (cmd) => {
+      await expect(new HttpTransport().call(cmd, {})).rejects.toBeInstanceOf(RemoteUnavailableError);
+    },
+  );
 });
 
 describe("HttpTransport.listen", () => {

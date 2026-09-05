@@ -8,6 +8,12 @@ import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal"
 import { openLocationModal } from "./location-picker";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
+import { api, type ProjectConfig } from "../../shared/api";
+import {
+  renderMachineFieldHtml,
+  attachMachineFieldHandlers,
+  type MachineFieldState,
+} from "./machine-field";
 
 export type SortChoice = "name" | "recent" | "todos";
 export const SORT_STORAGE_KEY = "claude_companion_sessions_modal_sort";
@@ -54,20 +60,57 @@ function warmProjectStats(projects: ProjectGroup[], onSettle: () => void): void 
   }
 }
 
-export async function pickProject(): Promise<{ path: string; name: string } | null> {
+/** The picker's resolved value. `machineId` is null/undefined for the local
+ * machine (the overwhelmingly common case) - only set when the dev picked a
+ * peer machine's chip (multi-machine federation, H4). */
+export interface PickedProject {
+  path: string;
+  name: string;
+  machineId?: string | null;
+}
+
+export async function pickProject(): Promise<PickedProject | null> {
   const { cached, ready } = projectGroupsData();
   return openProjectPickerModal(cached, ready);
+}
+
+/** Maps a peer machine's bare `ProjectConfig` (no avatar/todo/worktree data -
+ * that's all local-only enrichment) into the row shape the picker already
+ * renders. `avatar` deliberately isn't {kind:"none"}: that renders a
+ * hydratable `.proj-face` placeholder, and hydrateProjectTechIcons would then
+ * probe THIS machine's filesystem for a path that only exists on the peer. */
+function projectConfigToGroup(pc: ProjectConfig): ProjectGroup {
+  const path = String(pc.path);
+  const rawName = (pc as { name?: unknown }).name;
+  const name = typeof rawName === "string" && rawName
+    ? rawName
+    : path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
+  return {
+    id: pc.id, path, name,
+    parent_segment: null,
+    avatar: { kind: "emoji", value: "📁" },
+    automation_enabled: false,
+    tokens_7d: 0n,
+    live: 0,
+    any_remote: false,
+    any_automated: false,
+    last_active_at: null,
+    path_exists: true, // can't stat a peer's filesystem from here
+    worktrees: [],
+    last_worktree_path: null,
+    last_start_folder_rel: null,
+  };
 }
 
 export function openProjectPickerModal(
   cachedProjects: ProjectGroup[] | undefined,
   projectsReady: Promise<ProjectGroup[]>,
-): Promise<{ path: string; name: string } | null> {
+): Promise<PickedProject | null> {
   return new Promise((resolve) => {
     const host = ensureModalHost();
     const slot = modalCardSlot();
     let resolved = false;
-    const finish = (val: { path: string; name: string } | null) => {
+    const finish = (val: PickedProject | null) => {
       if (resolved) return;
       resolved = true;
       closeHostCard();
@@ -75,8 +118,57 @@ export function openProjectPickerModal(
     };
 
     // undefined = still loading (cold cache; renderModal() shows a spinner
-    // shell instead of the list until this resolves).
-    let projects: ProjectGroup[] | undefined = cachedProjects;
+    // shell instead of the list until this resolves). Always the LOCAL
+    // machine's list - a machine switch (below) never touches this.
+    let localProjects: ProjectGroup[] | undefined = cachedProjects;
+
+    // ── Machine picker (multi-machine federation, H4) ───────────────────────
+    // In-memory only for this one modal open, per the dev's call - no
+    // persistence of the last-picked machine.
+    const machineField: MachineFieldState = { machineId: null };
+    let selfMachine: import("../../shared/api").SelfMachine | null = null;
+    let peerMachines: import("../../shared/api").PeerMachineView[] = [];
+    let remoteProjects: ProjectGroup[] | undefined;
+    let remoteProjectsLoading = false;
+    let remoteProjectsError: string | null = null;
+
+    const currentProjects = (): ProjectGroup[] | undefined =>
+      machineField.machineId === null ? localProjects : remoteProjects;
+
+    const pickMachine = (machineId: string | null): void => {
+      if (machineId === null) {
+        renderModal();
+        return;
+      }
+      remoteProjects = undefined;
+      remoteProjectsLoading = true;
+      remoteProjectsError = null;
+      selectedIdx = 0;
+      renderModal();
+      void api.listMachineProjects(machineId).then((list) => {
+        if (resolved || machineField.machineId !== machineId) return;
+        remoteProjects = list.map(projectConfigToGroup);
+        remoteProjectsLoading = false;
+        renderModal();
+      }).catch((err: unknown) => {
+        if (resolved || machineField.machineId !== machineId) return;
+        console.error("[sessions] list_machine_projects failed", err);
+        remoteProjectsError = err instanceof Error ? err.message : "Failed to load projects";
+        remoteProjectsLoading = false;
+        renderModal();
+      });
+    };
+
+    // Desktop only (H4); a phone caller degrades with RemoteUnavailableError,
+    // caught here so the picker just never grows the chip row.
+    if (!isRemote()) {
+      void api.listMachines().then((res) => {
+        if (resolved) return;
+        selfMachine = res.self;
+        peerMachines = res.peers;
+        if (peerMachines.length > 0) renderModal();
+      }).catch(() => { /* machine federation unavailable - no chip row, same as zero peers */ });
+    }
 
     let sort: SortChoice = readStoredSort();
     let showTodos: boolean = readShowTodos();
@@ -96,11 +188,14 @@ export function openProjectPickerModal(
       return 3;
     };
 
-    // Only ever called once `projects` is populated - the search input (the
-    // only thing that can trigger computeRows()) doesn't exist in the DOM
-    // during the loading-shell render below.
+    // Only ever called once `localProjects` is populated - the search input
+    // (the only thing that can trigger computeRows()) doesn't exist in the DOM
+    // during the loading-shell render below. Empty while a machine switch's
+    // list_machine_projects fetch is still in flight (or failed) - the rows
+    // section renders its own loading/error line instead in that case.
     const computeRows = (): ProjectGroup[] => {
-      const list = projects!;
+      const list = currentProjects();
+      if (!list) return [];
       const f = filter.trim().toLowerCase();
       let rows = list.filter((p) =>
         !f
@@ -138,17 +233,24 @@ export function openProjectPickerModal(
     // on a result or restore + re-render on cancel.
     const selectProjectRow = async (p: ProjectGroup): Promise<void> => {
       if (p.path_exists === false) return;
+      if (machineField.machineId !== null) {
+        // A peer machine's project has no worktree/CLAUDE.md-scope data
+        // (list_machine_projects returns a bare ProjectConfig) - resolve
+        // directly instead of opening the location sub-modal.
+        finish({ path: p.path, name: p.name, machineId: machineField.machineId });
+        return;
+      }
       const result = await openLocationModal(p);
       if (!result) {
         setBackdropCancel(() => finish(null));
         await presentHostCard(renderModal);
         return;
       }
-      finish(result);
+      finish({ ...result, machineId: null });
     };
 
     const renderModal = () => {
-      if (!projects) {
+      if (!localProjects) {
         render(
           html`<div class="modal-card modal-card-loading" role="dialog" aria-modal="true" aria-label="Pick project">
             <i class="ph ph-circle-notch" aria-hidden="true"></i> Loading projects&hellip;
@@ -193,6 +295,7 @@ export function openProjectPickerModal(
             </div>
           </header>
           <div class="modal-body project-picker-body">
+            ${unsafeHTML(renderMachineFieldHtml(machineField, { self: selfMachine, peers: peerMachines }))}
             <input
               id="project-picker-search"
               class="project-picker-search"
@@ -254,6 +357,12 @@ export function openProjectPickerModal(
             />
             <ul class="project-picker-list">
               ${(() => {
+                if (machineField.machineId !== null && remoteProjectsLoading) {
+                  return html`<li class="project-picker-empty"><i class="ph ph-circle-notch"></i> Loading&hellip;</li>`;
+                }
+                if (machineField.machineId !== null && remoteProjectsError) {
+                  return html`<li class="project-picker-empty project-picker-error">${remoteProjectsError}</li>`;
+                }
                 if (rows.length === 0) return html`<li class="project-picker-empty">No matches</li>`;
                 return rows.map((p, i) => {
                   const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
@@ -286,7 +395,7 @@ export function openProjectPickerModal(
             </ul>
           </div>
           <footer class="modal-footer">
-            ${isRemote() ? "" : html`
+            ${isRemote() || machineField.machineId !== null ? "" : html`
             <button
               class="btn btn-secondary btn-new-folder"
               @click=${async () => {
@@ -298,7 +407,7 @@ export function openProjectPickerModal(
                   renderModal();
                   return;
                 }
-                finish(result);
+                finish({ ...result, machineId: null });
               }}
             >
               <i class="ph ph-folder-plus"></i> New project&hellip;
@@ -309,7 +418,7 @@ export function openProjectPickerModal(
                 const picked = await invoke<string | null>("pick_folder");
                 if (!picked) return;
                 const name = picked.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? picked;
-                finish({ path: picked, name });
+                finish({ path: picked, name, machineId: null });
               }}
             >
               <i class="ph ph-folder-open"></i> Open in new folder&hellip;
@@ -320,6 +429,7 @@ export function openProjectPickerModal(
         </div>
       `;
       render(tpl, slot);
+      attachMachineFieldHandlers(host, machineField, pickMachine);
       hydrateProjectTechIcons(host).catch(() => {});
       hydrateCharacterAvatars(host).catch(() => {});
       // Autofocus the search input on first render. Re-focus on subsequent
@@ -347,25 +457,26 @@ export function openProjectPickerModal(
     // place, same as a sort/filter change.
     const applyGroups = (groups: ProjectGroup[]): void => {
       if (resolved) return;
-      const wasLoading = !projects;
-      projects = groups;
+      const wasLoading = !localProjects;
+      localProjects = groups;
       if (wasLoading) void presentHostCard(renderModal);
       else renderModal();
       warmProjectStats(groups, () => { if (!resolved) renderModal(); });
     };
 
-    if (projects) warmProjectStats(projects, () => { if (!resolved) renderModal(); });
+    if (localProjects) warmProjectStats(localProjects, () => { if (!resolved) renderModal(); });
 
     setBackdropCancel(() => finish(null));
     void presentHostCard(renderModal);
 
-    // Cold cache: projects is undefined and the shell above shows a spinner
-    // until this resolves. Warm cache: this still runs, silently revalidating
-    // the list (and stats) in the background per the stale-while-revalidate
-    // policy - a project added/removed elsewhere shows up on next render.
+    // Cold cache: localProjects is undefined and the shell above shows a
+    // spinner until this resolves. Warm cache: this still runs, silently
+    // revalidating the list (and stats) in the background per the
+    // stale-while-revalidate policy - a project added/removed elsewhere shows
+    // up on next render.
     void projectsReady.then((groups) => {
       if (!groups.length) {
-        if (!projects) {
+        if (!localProjects) {
           alert("No projects detected yet. Run claude in a folder first or add a project.");
           finish(null);
         }
@@ -374,7 +485,7 @@ export function openProjectPickerModal(
       applyGroups(groups);
     }).catch((err) => {
       console.error("[sessions] list_project_groups failed", err);
-      if (!projects) {
+      if (!localProjects) {
         alert("No projects detected yet. Run claude in a folder first or add a project.");
         finish(null);
       }

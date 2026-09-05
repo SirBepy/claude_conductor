@@ -112,6 +112,34 @@
   color: var(--color-text-muted);
 }
 
+.ra-machine-label-input {
+  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  width: 200px;
+  max-width: 50%;
+}
+
+.ra-machine-pair-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ra-machine-pair-btn {
+  align-self: flex-start;
+}
+
+.ra-machine-pair-error {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-warning, #e5a040);
+}
+
 .btn-danger-sm {
   padding: 4px 10px;
   font-size: .8rem;
