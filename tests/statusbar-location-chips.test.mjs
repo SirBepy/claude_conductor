@@ -89,6 +89,27 @@ describe("repo + folder chips", () => {
     expect(el.querySelector(".sb-repo")?.textContent).toContain("claude_conductor");
   });
 
+  it("git chip survives a live cwd that is not a repo at all", async () => {
+    const OFF_REPO = "C:\\Users\\joe\\AppData\\Local\\Claude Conductor";
+    const NO_REPO = { branch: null, repo: null, ahead: null, behind: null, sha: null, insertions: null, deletions: null };
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const asked = [];
+    ipcMock.impl = async (cmd, args) => {
+      if (cmd === "session_live_cwd") return OFF_REPO;
+      if (cmd === "get_git_info") { asked.push(args.cwd); return args.cwd === SPAWN ? GIT_INFO : NO_REPO; }
+      if (cmd === "get_git_dirty") return [];
+      return null;
+    };
+    new SessionStatusbar(el, null, [["git"]], { sessionId: "sess-offrepo", cwd: SPAWN });
+    await flush();
+    await flush();
+    // Retried against the spawn repo exactly once - no vanished chip, no loop.
+    expect(asked).toEqual([OFF_REPO, SPAWN]);
+    expect(el.querySelector(".sb-git")?.textContent).toContain("master");
+    expect(el.querySelector(".sb-git-ahead")?.textContent).toContain("6");
+  });
+
   it("no skeleton flashes for either chip before git info lands", async () => {
     const el = document.createElement("div");
     document.body.appendChild(el);

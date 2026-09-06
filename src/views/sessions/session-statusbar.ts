@@ -233,15 +233,29 @@ export class SessionStatusbar {
     });
   }
 
+  /** A live cwd outside any repo answers with a null branch, and renderGitChip
+   *  prints NOTHING without one - so one `cd` into an install or temp dir takes
+   *  the whole chip down, ahead count included. The chat's own repo beats an
+   *  empty statusbar, so retry there once (bounded: cwd === this.cwd). */
   private async refreshGitInfo(): Promise<void> {
     const cwd = this.gitCwd;
     if (!cwd) return;
+    let offRepo = false;
     await fetchGitInfoData({
       cwd,
       isCurrent: () => this.gitCwd === cwd,
-      onSuccess: (info) => this.updateGitInfo(info),
+      onSuccess: (info) => {
+        // `info` is null from a transport that degrades an unwired command;
+        // that is not an off-repo cwd and retrying elsewhere can't fix it.
+        if (info && !info.branch && this.cwd && cwd !== this.cwd) { offRepo = true; return; }
+        this.updateGitInfo(info);
+      },
       onUnavailable: () => { this.gitInfoLoaded = true; this.render(); },
     });
+    if (offRepo) {
+      this.gitCwd = this.cwd;
+      await this.refreshGitInfo();
+    }
   }
 
   private async refreshDirty(): Promise<void> {
