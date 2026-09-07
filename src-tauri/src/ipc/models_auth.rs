@@ -148,7 +148,7 @@ pub(super) async fn recover_from_401(config_dir: &Path) -> RecoverResult {
 /// part of answering, which is the side effect we actually want.
 async fn run_claude_auth_status(config_dir: &Path) -> bool {
     let spawn_env = SpawnEnv::for_account(config_dir);
-    let mut cmd = tokio::process::Command::new("claude");
+    let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
     cmd.arg("auth")
         .arg("status")
         .arg("--json")

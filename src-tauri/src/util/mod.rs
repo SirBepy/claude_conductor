@@ -1,3 +1,4 @@
+pub mod claude_bin;
 pub mod process;
 
 use sha2::{Digest, Sha256};

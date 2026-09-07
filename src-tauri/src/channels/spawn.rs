@@ -3,6 +3,10 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub enum SpawnError {
     Io(std::io::Error),
+    /// Distinct from `Io`: a GUI-launched app inherits no shell PATH, so a
+    /// missing CLI used to read as a bare `os error 2`. See
+    /// `crate::util::claude_bin`.
+    ClaudeNotFound(String),
     NonWindows,
 }
 
@@ -10,6 +14,7 @@ impl std::fmt::Display for SpawnError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SpawnError::Io(e) => write!(f, "io: {e}"),
+            SpawnError::ClaudeNotFound(msg) => write!(f, "{msg}"),
             SpawnError::NonWindows => write!(f, "channel spawning is Windows-only"),
         }
     }
@@ -139,7 +144,9 @@ pub fn spawn_child(input: SpawnInput) -> Result<SpawnOutput, SpawnError> {
     use std::os::unix::process::CommandExt;
     use std::process::Command;
 
-    let mut cmd = Command::new("claude");
+    let claude = crate::util::claude_bin::resolve()
+        .map_err(|e| SpawnError::ClaudeNotFound(e.to_string()))?;
+    let mut cmd = Command::new(&claude);
     cmd.arg("--remote-control")
         .arg("--remote-control-session-name-prefix")
         .arg(&input.session_name_prefix)

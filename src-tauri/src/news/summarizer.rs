@@ -76,7 +76,7 @@ pub async fn generate_summary_streaming<F: FnMut(&str)>(
     let cwd = paths::ensure_data_dir().context("resolve app-data dir")?;
     let prompt = build_prompt(title, article_text);
 
-    let mut cmd = tokio::process::Command::new("claude");
+    let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
     cmd.arg("-p")
         .arg(&prompt)
         .arg("--model")

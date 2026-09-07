@@ -79,7 +79,7 @@ pub async fn ask(
     let run_dir = crate::settings::paths::ensure_data_dir().context("resolve app-data dir")?;
     let prompt = build_prompt(question, transcript, cwd);
 
-    let mut cmd = tokio::process::Command::new("claude");
+    let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
     cmd.arg("-p")
         .arg(&prompt)
         .arg("--model")

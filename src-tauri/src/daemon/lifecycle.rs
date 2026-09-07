@@ -87,6 +87,11 @@ pub enum LifecycleError {
     NotFound(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    /// Distinct from `Io` on purpose: a GUI-launched app inherits no shell
+    /// PATH, so this used to surface as a bare `os error 2` with nothing to
+    /// act on. See `crate::util::claude_bin`.
+    #[error("{0}")]
+    ClaudeNotFound(String),
     #[error("cwd does not exist: {0}")]
     CwdMissing(PathBuf),
     #[error("no accounts registered - add an account before starting a chat")]

@@ -102,7 +102,9 @@ pub async fn spawn_session(
     let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis);
     let hook_settings_path = write_hook_settings(&turn_id, &session_id);
 
-    let mut cmd = Command::new("claude");
+    let claude = crate::util::claude_bin::resolve()
+        .map_err(|e| LifecycleError::ClaudeNotFound(e.to_string()))?;
+    let mut cmd = Command::new(&claude);
     cmd.args(base_claude_args(
         params.resume_id.as_deref(),
         &session_id,
