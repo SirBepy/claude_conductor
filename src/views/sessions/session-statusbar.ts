@@ -3,12 +3,19 @@ import { type ToolTally } from "../../shared/chat/tool-meta";
 import { ToolTallyRow } from "./session-tally";
 import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
-import { type ChipType, type StaticChipType, isToolChip, STATIC_CHIPS } from "./statusline-catalog";
+import { type ChipType } from "./statusline-catalog";
 import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import {
-  formatDuration,
+  tickTimer,
+  updateRowFades,
+  hasChip,
+  wantsCounts,
+  wantsContext,
+  wantsTimer,
+  wantsDrain,
+  wantsGit,
   gitInfoCache,
   metaCache,
   countsCache,
@@ -17,7 +24,7 @@ import {
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
-import { renderChip as renderChipHtml, driftLabel, type ChipRenderCtx } from "./statusbar-chips";
+import { renderChip as renderChipHtml, type ChipRenderCtx } from "./statusbar-chips";
 import {
   refreshCounts as fetchCounts,
   refreshContextStatus as fetchContextStatus,
@@ -26,6 +33,12 @@ import {
   resolveLiveCwd,
   startServersPoll as startServersPollData,
 } from "./statusbar-data";
+import {
+  closeChipPopovers as closeAllChipPopovers,
+  wireChipPopovers,
+  type StatusbarPopovers,
+  type ChipPopoverWireCtx,
+} from "./session-statusbar-popovers";
 import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
@@ -151,26 +164,34 @@ export class SessionStatusbar {
       this.gitInfoLoaded = true;
     }
     if (this.sessionId) {
-      const cached = metaCache.get(this.sessionId);
-      if (cached) { this.meta = cached; this.metaLoaded = true; }
-      const cachedCounts = countsCache.get(this.sessionId);
-      if (cachedCounts) { this.counts = cachedCounts; this.countsLoaded = true; }
-      const cachedCtx = ctxStatusCache.get(this.sessionId);
-      if (cachedCtx) this.ctxStatus = cachedCtx;
-      const cachedDrain = drainCache.get(this.sessionId);
-      if (cachedDrain) this.drainPopover.drain = cachedDrain;
+      const cachedMeta = metaCache.get(this.sessionId);
+      if (cachedMeta) { this.meta = cachedMeta; this.metaLoaded = true; }
+      this.seedSessionCaches(this.sessionId);
     }
 
     this.render();
-    if (this.wantsTimer()) this.startTimer();
-    if (this.wantsCounts()) void this.refreshCounts();
-    if (this.wantsContext()) void this.refreshContextStatus();
+    if (wantsTimer(this.rows)) this.startTimer();
+    if (wantsCounts(this.rows)) void this.refreshCounts();
+    if (wantsContext(this.rows)) void this.refreshContextStatus();
     // Resolve the live git cwd (may follow the AI into a worktree), then fetch
     // git info + dirty against it. Owns all git fetching for live sessions.
-    if (this.wantsGit()) void this.resolveGitCwd();
-    if (this.hasChip("ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
-    if (this.wantsDrain()) void this.refreshDrain();
-    if (this.hasChip("servers") && this.cwd) this.startServersPoll();
+    if (wantsGit(this.rows)) void this.resolveGitCwd();
+    if (hasChip(this.rows, "ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
+    if (wantsDrain(this.rows)) void this.refreshDrain();
+    if (hasChip(this.rows, "servers") && this.cwd) this.startServersPoll();
+  }
+
+  /** Seed counts/ctxStatus/drain from cache for `id`. Meta is constructor-only
+   *  (see the constructor's own cache block): setSessionId intentionally
+   *  leaves it, since the session's own model/usage meta arrives via
+   *  updateMeta as soon as the chat mounts, not from this cache. */
+  private seedSessionCaches(id: string): void {
+    const cachedCounts = countsCache.get(id);
+    if (cachedCounts) { this.counts = cachedCounts; this.countsLoaded = true; }
+    const cachedCtx = ctxStatusCache.get(id);
+    if (cachedCtx) this.ctxStatus = cachedCtx;
+    const cachedDrain = drainCache.get(id);
+    if (cachedDrain) this.drainPopover.drain = cachedDrain;
   }
 
   /** Servers are external processes with no event stream, so poll on a light
@@ -179,21 +200,6 @@ export class SessionStatusbar {
     const cwd = this.cwd;
     if (!cwd) return;
     this.serversTimer = startServersPollData(() => void this.serversPopover.refresh(cwd, () => this.render()));
-  }
-
-  private hasChip(type: string): boolean {
-    return this.rows.some((r) => r.includes(type as ChipType));
-  }
-  private wantsCounts(): boolean { return this.hasChip("messages") || this.hasChip("turns") || this.hasChip("overflow"); }
-  private wantsContext(): boolean { return this.hasChip("context_pct") || this.hasChip("context_tokens"); }
-  private wantsTimer(): boolean { return this.hasChip("duration") || this.hasChip("clock"); }
-  private wantsDrain(): boolean { return this.hasChip("drain") || this.hasChip("overflow"); }
-  /** True when any git-section chip is present, so it's worth resolving the
-   *  live git cwd and fetching git info. */
-  private wantsGit(): boolean {
-    return this.rows.some((r) =>
-      r.some((c) => !isToolChip(c) && STATIC_CHIPS[c as StaticChipType]?.section === "git"),
-    );
   }
 
   /** Resolve the session's live working dir (the AI may have moved into a
@@ -212,7 +218,7 @@ export class SessionStatusbar {
       if (cached) { this.gitInfo = cached; this.gitInfoLoaded = true; this.render(); }
     }
     await this.refreshGitInfo();
-    if (this.hasChip("dirty")) await this.refreshDirty();
+    if (hasChip(this.rows, "dirty")) await this.refreshDirty();
     // Folder chip renders from gitCwd; repaint if it moved off the spawn dir.
     if (changed) this.render();
   }
@@ -296,13 +302,13 @@ export class SessionStatusbar {
     this.metaLoaded = true;
     if (this.sessionId) metaCache.set(this.sessionId, meta);
     this.render();
-    if (this.wantsCounts()) void this.refreshCounts();
-    if (this.wantsContext()) void this.refreshContextStatus();
-    if (this.wantsDrain()) void this.refreshDrain();
+    if (wantsCounts(this.rows)) void this.refreshCounts();
+    if (wantsContext(this.rows)) void this.refreshContextStatus();
+    if (wantsDrain(this.rows)) void this.refreshDrain();
     // Re-resolve the live cwd too: the completed turn may have moved the AI
     // into (or out of) a worktree.
     if (turnJustCompleted && this.cwd) {
-      if (this.wantsGit()) void this.resolveGitCwd();
+      if (wantsGit(this.rows)) void this.resolveGitCwd();
       else void this.refreshGitInfo();
     }
   }
@@ -314,7 +320,7 @@ export class SessionStatusbar {
     this.gitInfoLoaded = true;
     if (this.gitCwd) gitInfoCache.set(this.gitCwd, info);
     this.render();
-    if (this.hasChip("dirty")) void this.refreshDirty();
+    if (hasChip(this.rows, "dirty")) void this.refreshDirty();
   }
 
   updateToolTally(t: ToolTally): void {
@@ -343,20 +349,15 @@ export class SessionStatusbar {
     this.ctxStatus = null;
     this.drainPopover.drain = null;
     this.drainPopover.close();
-    const cached = countsCache.get(id);
-    if (cached) { this.counts = cached; this.countsLoaded = true; }
-    const cachedCtx = ctxStatusCache.get(id);
-    if (cachedCtx) this.ctxStatus = cachedCtx;
-    const cachedDrain = drainCache.get(id);
-    if (cachedDrain) this.drainPopover.drain = cachedDrain;
+    this.seedSessionCaches(id);
     this.render();
-    if (this.wantsCounts()) void this.refreshCounts();
-    if (this.wantsContext()) void this.refreshContextStatus();
-    if (this.wantsDrain()) void this.refreshDrain();
+    if (wantsCounts(this.rows)) void this.refreshCounts();
+    if (wantsContext(this.rows)) void this.refreshContextStatus();
+    if (wantsDrain(this.rows)) void this.refreshDrain();
     // Fallback for fast turns that complete before the JS event-store listener
     // is set up (the live turn_usage event is dropped). Re-check after 3 s; by
     // then any fast turn is done and the JSONL is definitely flushed.
-    if (this.wantsContext() && id && !isPendingSessionId(id)) {
+    if (wantsContext(this.rows) && id && !isPendingSessionId(id)) {
       setTimeout(() => {
         if (this.sessionId === id && !this.ctxStatus) void this.refreshContextStatus();
       }, 3000);
@@ -441,22 +442,8 @@ export class SessionStatusbar {
     this.render();
   }
 
-  private tickTimer(): void {
-    if (this.startedAt) {
-      const el = this.container.querySelector<HTMLElement>(".sb-duration .sb-duration-text");
-      if (el) el.textContent = formatDuration(this.startedAt);
-    }
-    const clock = this.container.querySelector<HTMLElement>(".sb-clock .sb-clock-text");
-    if (clock) clock.textContent = this.clockText();
-  }
-
   private startTimer(): void {
-    this.durationTimer = setInterval(() => this.tickTimer(), 1000);
-  }
-
-  private clockText(): string {
-    const d = new Date();
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    this.durationTimer = setInterval(() => tickTimer(this.container, this.startedAt), 1000);
   }
 
   /** Assemble the read-only snapshot + callback params statusbar-chips.ts's
@@ -512,7 +499,7 @@ export class SessionStatusbar {
    *  the images chip stays in sync with mid-turn attachment/screenshot arrivals
    *  without a dedicated refresh trigger. */
   private refreshImages(): void {
-    if (!this.hasChip("images")) return;
+    if (!hasChip(this.rows, "images")) return;
     const snapshot = getChatRendererSnapshot();
     if (!snapshot) return;
     const hasMore = snapshot.sessionId ? sessionEvents.hasMore(snapshot.sessionId) : false;
@@ -549,151 +536,48 @@ export class SessionStatusbar {
 
     this.tally.wireChips();
 
-    this.container.querySelector<HTMLElement>(".sb-model-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.toggleModelPopover(e.currentTarget as HTMLElement);
-    });
+    wireChipPopovers(this.container, this.popoverWireCtx());
 
-    this.container.querySelector<HTMLElement>(".sb-effort-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.toggleEffortPopover(e.currentTarget as HTMLElement);
-    });
-
-    this.container.querySelector<HTMLElement>(".sb-ai-todos-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.aiTodosPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.aiTodosPopover.open(anchor);
-    });
-
-    this.container.querySelector<HTMLElement>(".sb-drain-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.drainPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.drainPopover.open(anchor);
-    });
-
-    this.container.querySelector<HTMLElement>(".sb-servers-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.serversPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.serversPopover.open(anchor);
-    });
-
-    this.container.querySelector<HTMLElement>(".sb-images-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.imagesPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.imagesPopover.open(anchor);
-    });
-
-    // The card is pinned to the SPAWN cwd, not the live one: it is always about
-    // the chat's own repo, and the drift footer names wherever the AI went.
-    for (const sel of [".sb-git-btn", ".sb-branch-btn", ".sb-commits-btn"]) {
-      this.container.querySelector<HTMLElement>(sel)?.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const anchor = e.currentTarget as HTMLElement;
-        const wasOpen = this.gitCard.isOpen;
-        this.closeChipPopovers();
-        if (wasOpen || !this.cwd) return;
-        this.gitCard.open(anchor, {
-          cwd: this.cwd,
-          // Only attribute gitInfo.repo to the live location when the fetch
-          // actually ran there - the off-repo fallback (gitCwd back on the
-          // spawn cwd) would otherwise misname a non-repo folder (todo 921).
-          awayLabel: driftLabel(this.cwd, this.liveCwd, this.gitCwd === this.liveCwd ? this.gitInfo.repo : null) || null,
-          onPushed: () => void this.refreshGitInfo(),
-        });
-      });
-    }
-
-    this.container.querySelector<HTMLElement>(".sb-overflow-btn")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = this.overflowPopover.isOpen;
-      this.closeChipPopovers();
-      if (!wasOpen) this.overflowPopover.open(anchor, this.overflowData());
-    });
-
-    // All popovers are body-appended and survive re-renders, but their anchor
-    // chip was just replaced. Re-anchor if open so a background refresh doesn't
-    // leave one bound to a detached node. Content that streams (drain, ai_todos)
-    // rebuilds in place; static content just repositions.
-    this.reanchorIfOpen(this.drainPopover, ".sb-drain-btn", (a) => this.drainPopover.open(a));
-    this.reanchorIfOpen(this.aiTodosPopover, ".sb-ai-todos-btn", (a) => this.aiTodosPopover.open(a));
-    this.reanchorIfOpen(this.serversPopover, ".sb-servers-btn", (a) => this.serversPopover.open(a));
-    this.reanchorIfOpen(this.imagesPopover, ".sb-images-btn", (a) => this.imagesPopover.open(a));
-    this.reanchorIfOpen(this.gitCard, ".sb-git-btn, .sb-branch-btn, .sb-commits-btn", (a) => this.gitCard.reanchor(a));
-    this.reanchorIfOpen(this.overflowPopover, ".sb-overflow-btn", (a) => this.overflowPopover.open(a, this.overflowData()));
-    this.reanchorConfigPopover(this.effortPopover, this.effortAnchor, ".sb-effort-btn", (a) => this.effortPopover.reanchor(a));
-    this.reanchorConfigPopover(this.modelPopover, this.modelAnchor, ".sb-model-btn", (a) => this.modelPopover.reanchor(a));
-
-    this.updateRowFades();
+    updateRowFades(this.container);
     this.onConfig?.(this.sessionModel ?? this.meta.model, this.effort, !this.readOnlyEffort);
   }
 
-  /** Toggle scroll-edge fade classes per row (rows rebuild on every render(),
-   *  so listeners are re-wired each time). sb-row-scroll gates the CSS fade on
-   *  actual overflow; at-start/at-end suppress it at the ends of the scroll. */
-  private updateRowFades(): void {
-    this.container.querySelectorAll<HTMLElement>(".sb-row").forEach((row) => {
-      const sync = () => {
-        row.classList.toggle("sb-row-scroll", row.scrollWidth > row.clientWidth + 1);
-        row.classList.toggle("sb-row-at-start", row.scrollLeft <= 1);
-        row.classList.toggle("sb-row-at-end", row.scrollLeft >= row.scrollWidth - row.clientWidth - 1);
-      };
-      sync();
-      row.addEventListener("scroll", sync, { passive: true });
-    });
+  /** The popovers a closeChipPopovers() sweep dismisses, bundled for reuse by
+   *  both the wiring ctx below and this class's own closeChipPopovers(). */
+  private popoverBundle(): StatusbarPopovers {
+    return {
+      drainPopover: this.drainPopover,
+      aiTodosPopover: this.aiTodosPopover,
+      serversPopover: this.serversPopover,
+      imagesPopover: this.imagesPopover,
+      effortPopover: this.effortPopover,
+      modelPopover: this.modelPopover,
+      gitCard: this.gitCard,
+      overflowPopover: this.overflowPopover,
+      tally: this.tally,
+    };
   }
 
-  /** Re-anchor an open popover to its freshly-rendered chip, or close it if the
-   *  chip vanished. */
-  private reanchorIfOpen(pop: { isOpen: boolean; close: () => void }, sel: string, rebind: (anchor: HTMLElement) => void): void {
-    if (!pop.isOpen) return;
-    const anchor = this.container.querySelector<HTMLElement>(sel);
-    if (anchor) rebind(anchor);
-    else pop.close();
-  }
-
-  /** Reanchor variant for the two popovers a non-chip surface can also open.
-   *  A LIVE anchor outside this container (the pane header's config text) is
-   *  not rebuilt by render(), so it only needs repositioning - running the chip
-   *  selector against it would miss and close a popover still in use.
-   *
-   *  `isConnected` is the half that must be checked first. render() has already
-   *  reset container.innerHTML by the time this runs, so a chip-opened popover's
-   *  remembered anchor is detached and `contains()` reports it as external too -
-   *  treating that as the header case would close the popover on every
-   *  background refresh instead of re-binding it to the rebuilt chip. */
-  private reanchorConfigPopover(
-    pop: { isOpen: boolean; close: () => void },
-    anchor: HTMLElement | null,
-    sel: string,
-    rebind: (anchor: HTMLElement) => void,
-  ): void {
-    if (!pop.isOpen) return;
-    if (anchor?.isConnected && !this.container.contains(anchor)) {
-      rebind(anchor);
-      return;
-    }
-    this.reanchorIfOpen(pop, sel, rebind);
+  /** Snapshot session-statusbar-popovers.ts's wireChipPopovers needs, once per
+   *  render() rather than per handler (same pattern as chipRenderCtx()). */
+  private popoverWireCtx(): ChipPopoverWireCtx {
+    return {
+      ...this.popoverBundle(),
+      cwd: this.cwd,
+      liveCwd: this.liveCwd,
+      gitInfo: this.gitInfo,
+      gitCwd: this.gitCwd,
+      effortAnchor: this.effortAnchor,
+      modelAnchor: this.modelAnchor,
+      toggleModelPopover: (anchor) => this.toggleModelPopover(anchor),
+      toggleEffortPopover: (anchor) => this.toggleEffortPopover(anchor),
+      refreshGitInfo: () => void this.refreshGitInfo(),
+      overflowData: () => this.overflowData(),
+    };
   }
 
   /** Dismiss every chip popover (both statusbar-owned and the tool-tally one). */
   private closeChipPopovers(): void {
-    this.drainPopover.close();
-    this.aiTodosPopover.close();
-    this.serversPopover.close();
-    this.imagesPopover.close();
-    this.effortPopover.close();
-    this.modelPopover.close();
-    this.gitCard.close();
-    this.overflowPopover.close();
-    this.tally.closePopover();
+    closeAllChipPopovers(this.popoverBundle());
   }
 }

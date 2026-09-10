@@ -3,8 +3,8 @@ import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus, ChatDrain } from "../../types/ipc.generated";
 import { modelLabel } from "../../shared/model-name";
 import {
-  type ChipType, DEFAULT_ROWS, DEFAULT_MOBILE_ROWS, MAX_ROWS, MOBILE_MAX_ROWS,
-  isKnownChip, TOOL_CHIP_TOOLS,
+  type ChipType, type StaticChipType, DEFAULT_ROWS, DEFAULT_MOBILE_ROWS, MAX_ROWS, MOBILE_MAX_ROWS,
+  isKnownChip, isToolChip, STATIC_CHIPS, TOOL_CHIP_TOOLS,
 } from "./statusline-catalog";
 import { isMobileViewport } from "../../shared/mobile-viewport";
 
@@ -155,6 +155,64 @@ export function formatDuration(startedAt: string): string {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+function clockText(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Tick the duration/clock chip text in place, once a second - cheaper than a
+ *  full render() for a value that changes every tick. */
+export function tickTimer(container: HTMLElement, startedAt: string | null): void {
+  if (startedAt) {
+    const el = container.querySelector<HTMLElement>(".sb-duration .sb-duration-text");
+    if (el) el.textContent = formatDuration(startedAt);
+  }
+  const clock = container.querySelector<HTMLElement>(".sb-clock .sb-clock-text");
+  if (clock) clock.textContent = clockText();
+}
+
+/** Toggle scroll-edge fade classes per row (rows rebuild on every render(),
+ *  so listeners are re-wired each time). sb-row-scroll gates the CSS fade on
+ *  actual overflow; at-start/at-end suppress it at the ends of the scroll. */
+export function updateRowFades(container: HTMLElement): void {
+  container.querySelectorAll<HTMLElement>(".sb-row").forEach((row) => {
+    const sync = () => {
+      row.classList.toggle("sb-row-scroll", row.scrollWidth > row.clientWidth + 1);
+      row.classList.toggle("sb-row-at-start", row.scrollLeft <= 1);
+      row.classList.toggle("sb-row-at-end", row.scrollLeft >= row.scrollWidth - row.clientWidth - 1);
+    };
+    sync();
+    row.addEventListener("scroll", sync, { passive: true });
+  });
+}
+
+// ── Chip-row gates ──────────────────────────────────────────────────────────
+// Whether a rows layout carries a given chip decides whether SessionStatusbar
+// bothers fetching/polling the data behind it at all.
+
+export function hasChip(rows: ChipType[][], type: ChipType | string): boolean {
+  return rows.some((r) => r.includes(type as ChipType));
+}
+export function wantsCounts(rows: ChipType[][]): boolean {
+  return hasChip(rows, "messages") || hasChip(rows, "turns") || hasChip(rows, "overflow");
+}
+export function wantsContext(rows: ChipType[][]): boolean {
+  return hasChip(rows, "context_pct") || hasChip(rows, "context_tokens");
+}
+export function wantsTimer(rows: ChipType[][]): boolean {
+  return hasChip(rows, "duration") || hasChip(rows, "clock");
+}
+export function wantsDrain(rows: ChipType[][]): boolean {
+  return hasChip(rows, "drain") || hasChip(rows, "overflow");
+}
+/** True when any git-section chip is present, so it's worth resolving the
+ *  live git cwd and fetching git info. */
+export function wantsGit(rows: ChipType[][]): boolean {
+  return rows.some((r) =>
+    r.some((c) => !isToolChip(c) && STATIC_CHIPS[c as StaticChipType]?.section === "git"),
+  );
 }
 
 // Switching between chats re-creates the statusbar each time. These caches
