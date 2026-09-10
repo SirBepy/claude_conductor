@@ -1,6 +1,8 @@
 import { html, render } from "lit-html";
 import { api, type RemoteAccessStatus } from "../../../../shared/api";
 import { settingsHeader } from "../../ui";
+import { renderMachinesSection, wireMachinePairForm, machinesSectionTemplate } from "./machines-section";
+import { renderEntityList } from "./entity-list";
 import "./remote-access.css";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
@@ -48,142 +50,35 @@ async function refreshQr(root: HTMLElement): Promise<void> {
 }
 
 async function renderDeviceList(root: HTMLElement): Promise<void> {
-  const list = $(root, "#ra-device-list");
-  if (!list) return;
+  if (!$(root, "#ra-device-list")) return;
   try {
     const devices = await api.listRemoteDevices();
     const phone_devices = devices.filter(d => d.id !== "desktop");
     const section = $(root, "#ra-devices-section");
     if (section) section.style.display = phone_devices.length > 0 ? "" : "none";
-    if (phone_devices.length === 0) { list.innerHTML = ""; return; }
-    list.innerHTML = phone_devices.map(d => `
-      <div class="ra-device-row" data-id="${escapeHtml(d.id)}">
-        <div class="ra-device-info">
-          <span class="ra-device-name">${escapeHtml(d.name)}</span>
-          <span class="ra-device-date">Paired ${new Date(d.created_at * 1000).toLocaleDateString()}</span>
+    renderEntityList(
+      root,
+      "#ra-device-list",
+      phone_devices,
+      (d) => `
+        <div class="ra-device-row" data-id="${escapeHtml(d.id)}">
+          <div class="ra-device-info">
+            <span class="ra-device-name">${escapeHtml(d.name)}</span>
+            <span class="ra-device-date">Paired ${new Date(d.created_at * 1000).toLocaleDateString()}</span>
+          </div>
+          <button class="btn-danger-sm ra-revoke-btn" data-id="${escapeHtml(d.id)}">Revoke</button>
         </div>
-        <button class="btn-danger-sm ra-revoke-btn" data-id="${escapeHtml(d.id)}">Revoke</button>
-      </div>
-    `).join("");
-    list.querySelectorAll<HTMLButtonElement>(".ra-revoke-btn").forEach(btn => {
-      btn.onclick = () => {
-        const id = btn.dataset.id ?? "";
-        void (async () => {
-          btn.disabled = true;
-          try {
-            await api.revokeRemoteDevice(id);
-            await renderDeviceList(root);
-          } catch (e) {
-            console.error("[remote-access] revoke failed", e);
-            btn.disabled = false;
-          }
-        })();
-      };
-    });
+      `,
+      ".ra-revoke-btn",
+      async (id) => {
+        await api.revokeRemoteDevice(id);
+        await renderDeviceList(root);
+      },
+      { errorLabel: "revoke" },
+    );
   } catch (e) {
     console.error("[remote-access] listRemoteDevices failed", e);
   }
-}
-
-/** Commits the "This machine" label field on blur/Enter - empty/whitespace
- *  is never sent (there's nothing sane to rename to), the field just
- *  reverts to the last-known label on the next renderMachinesSection call. */
-async function commitMachineLabel(root: HTMLElement, input: HTMLInputElement): Promise<void> {
-  const trimmed = input.value.trim().slice(0, 40);
-  if (!trimmed) { await renderMachinesSection(root); return; }
-  try { await api.setMachineLabel(trimmed); }
-  catch (e) { console.error("[remote-access] set_machine_label failed", e); }
-}
-
-/** Paired-machines section: self label editor + peer list + pairing form.
- *  Hidden entirely when list_machines() fails - the phone (RemoteUnavailableError)
- *  and any desktop build without the federation backend yet both degrade the
- *  same way, rather than showing a form that can never do anything. */
-async function renderMachinesSection(root: HTMLElement, myUrlSeed?: string | null): Promise<void> {
-  const section = $(root, "#ra-machines-section");
-  if (!section) return;
-  try {
-    const { self, peers } = await api.listMachines();
-
-    const labelInput = $(root, "#ra-machine-label") as HTMLInputElement | null;
-    if (labelInput && document.activeElement !== labelInput) {
-      labelInput.value = self?.label ?? "";
-      labelInput.onblur = () => { void commitMachineLabel(root, labelInput); };
-      labelInput.onkeydown = (e) => { if (e.key === "Enter") labelInput.blur(); };
-    }
-
-    const list = $(root, "#ra-machine-list");
-    if (list) {
-      if (peers.length === 0) {
-        list.innerHTML = `<p class="ra-caption">No paired machines yet.</p>`;
-      } else {
-        list.innerHTML = peers.map((p) => `
-          <div class="ra-device-row" data-id="${escapeHtml(p.machine_id)}">
-            <div class="ra-device-info">
-              <span class="ra-device-name">${escapeHtml(p.label)}</span>
-              <span class="ra-device-date">${escapeHtml(p.os)}${p.reach ? ` &middot; ${escapeHtml(p.reach)}` : ""}</span>
-            </div>
-            <button class="btn-danger-sm ra-unpair-btn" data-id="${escapeHtml(p.machine_id)}">Unpair</button>
-          </div>
-        `).join("");
-        list.querySelectorAll<HTMLButtonElement>(".ra-unpair-btn").forEach((btn) => {
-          btn.onclick = () => {
-            const id = btn.dataset.id ?? "";
-            void (async () => {
-              btn.disabled = true;
-              try {
-                await api.unpairMachine(id);
-                await renderMachinesSection(root);
-              } catch (e) {
-                console.error("[remote-access] unpair_machine failed", e);
-                btn.disabled = false;
-              }
-            })();
-          };
-        });
-      }
-    }
-
-    // Prefill only once (empty + untouched) - never stomp a value the dev is
-    // mid-typing on a later refresh.
-    const myUrlInput = $(root, "#ra-machine-my-url") as HTMLInputElement | null;
-    if (myUrlInput && myUrlSeed && !myUrlInput.value && document.activeElement !== myUrlInput) {
-      myUrlInput.value = myUrlSeed;
-    }
-
-    section.style.display = "";
-  } catch (e) {
-    console.error("[remote-access] list_machines unavailable", e);
-    section.style.display = "none";
-  }
-}
-
-function wireMachinePairForm(root: HTMLElement): void {
-  const btn = $(root, "#ra-machine-pair-btn") as HTMLButtonElement | null;
-  const urlInput = $(root, "#ra-machine-pair-url") as HTMLInputElement | null;
-  const myUrlInput = $(root, "#ra-machine-my-url") as HTMLInputElement | null;
-  const errEl = $(root, "#ra-machine-pair-error");
-  if (!btn || !urlInput) return;
-  btn.onclick = () => {
-    void (async () => {
-      const url = urlInput.value.trim();
-      if (!url) return;
-      btn.disabled = true;
-      if (errEl) { errEl.hidden = true; errEl.textContent = ""; }
-      try {
-        await api.pairMachine(url, myUrlInput?.value.trim() || null);
-        urlInput.value = "";
-        await renderMachinesSection(root);
-      } catch (e) {
-        if (errEl) {
-          errEl.textContent = e instanceof Error ? e.message : "Failed to pair - check the URL and try again";
-          errEl.hidden = false;
-        }
-      } finally {
-        btn.disabled = false;
-      }
-    })();
-  };
 }
 
 async function hydrate(root: HTMLElement): Promise<void> {
@@ -314,20 +209,7 @@ function template() {
           </p>
         </div>
 
-        <div class="kit-section" id="ra-machines-section" style="display:none">
-          <div class="kit-section-title">Paired machines</div>
-          <div class="kit-row">
-            <span class="kit-row-label">This machine</span>
-            <input type="text" id="ra-machine-label" class="ra-machine-label-input" maxlength="40" placeholder="Label">
-          </div>
-          <div id="ra-machine-list" class="ra-device-list"></div>
-          <div class="ra-machine-pair-form">
-            <input type="text" id="ra-machine-pair-url" class="ra-token-field" placeholder="Paste the other machine's pairing URL">
-            <input type="text" id="ra-machine-my-url" class="ra-token-field" placeholder="URL that machine can use to reach this one (optional)">
-            <button class="btn-secondary ra-machine-pair-btn" id="ra-machine-pair-btn">Pair</button>
-            <p id="ra-machine-pair-error" class="ra-machine-pair-error" hidden></p>
-          </div>
-        </div>
+        ${machinesSectionTemplate()}
 
         <div class="kit-section" id="ra-devices-section" style="display:none">
           <div class="kit-section-title">Paired devices</div>
