@@ -6,15 +6,20 @@ import {
   type TodoChecklistState,
   type TodoStepStatus,
 } from "./turn-todo-checklist";
-import { ensureMainStrip } from "./tool-strip";
 import { absorbFooterContents } from "./tool-strip-merge";
-import { META_KIND_ICONS, type MetaTurnKind } from "./chat-classifiers";
+import { type MetaTurnKind } from "./chat-classifiers";
+import { formatTurnDuration, formatTokenCount, estimateTokensFromText } from "./turn-footer-format";
 import {
-  formatTurnDuration,
-  formatTokenCount,
-  estimateTokensFromText,
-} from "./turn-footer-format";
-import { renderStatusChip } from "./turn-status-chip";
+  buildMetaRow,
+  ensureLiveMetaRow as ensureLiveMetaRowImpl,
+  primeReplayedLiveRow as primeReplayedLiveRowImpl,
+  syncLiveTick as syncLiveTickImpl,
+  updateLiveTokenEstimate as updateLiveTokenEstimateImpl,
+  settleMetaRow as settleMetaRowImpl,
+  cancelMetaRow as cancelMetaRowImpl,
+} from "./turn-meta-row";
+import { ensureProgressBar as ensureProgressBarImpl, setProgress as setProgressImpl } from "./turn-progress-bar";
+import { ensureMetaChip as ensureMetaChipImpl } from "./turn-meta-chip";
 import { renderWaitingChip, type WaitingOnTarget } from "./turn-waiting-chip";
 
 export { formatTurnDuration, formatTokenCount, estimateTokensFromText };
@@ -100,18 +105,6 @@ export interface TurnFooterState {
   lastTotals: TurnUsageTotals | null;
 }
 
-/** Build tooltip text for the settled token breakdown. */
-function buildTooltip(totals: TurnUsageTotals): string {
-  const parts: string[] = [
-    `Input: ${totals.inputTokens.toLocaleString()} tok`,
-    `Output: ${totals.outputTokens.toLocaleString()} tok`,
-  ];
-  if (totals.cacheCreate > 0) parts.push(`Cache write: ${totals.cacheCreate.toLocaleString()} tok`);
-  if (totals.cacheRead > 0) parts.push(`Cache read: ${totals.cacheRead.toLocaleString()} tok`);
-  if (totals.costUsd > 0) parts.push(`Cost: $${totals.costUsd.toFixed(4)}`);
-  return parts.join(" | ");
-}
-
 /**
  * Per-renderer registry of turn footers. MUST be instance state, not module
  * state: chip keys are a per-renderer sequence (1, 2, 3...), so a shared map
@@ -174,118 +167,41 @@ export class TurnFooterRegistry {
     return true;
   }
 
-  /** Meta row (tokens + time) as the FIRST child of the footer. */
-  private buildMetaRow(st: TurnFooterState): void {
-    if (st.metaRow) return;
-    const row = document.createElement("div");
-    row.className = "turn-meta-chips";
-
-    // Tokens first, time second (the user-specified order).
-    const tokenChip = document.createElement("span");
-    tokenChip.className = "turn-chip turn-chip--tokens";
-    const tokenIcon = document.createElement("i");
-    tokenIcon.className = "ph ph-arrow-up";
-    const tokenTextNode = document.createTextNode("~0 tok");
-    tokenChip.appendChild(tokenIcon);
-    tokenChip.appendChild(tokenTextNode);
-
-    const timeChip = document.createElement("span");
-    timeChip.className = "turn-chip turn-chip--time";
-    const timeIcon = document.createElement("i");
-    timeIcon.className = "ph ph-timer";
-    const timeTextNode = document.createTextNode("0s");
-    timeChip.appendChild(timeIcon);
-    timeChip.appendChild(timeTextNode);
-
-    row.appendChild(tokenChip);
-    row.appendChild(timeChip);
-    st.footer.prepend(row);
-
-    st.metaRow = row;
-    st.tokenChip = tokenChip;
-    st.tokenTextNode = tokenTextNode;
-    st.timeChip = timeChip;
-    st.timeTextNode = timeTextNode;
-  }
-
-  /**
-   * Ensure a LIVE (ticking) meta row exists for the turn. `turnStartMs` must
-   * be the wall-clock time the turn started - the elapsed display is computed
-   * from it, never from the key.
-   */
+  /** Ensure a LIVE (ticking) meta row exists for the turn. See turn-meta-row.ts. */
   ensureLiveMetaRow(key: TurnChipKey, turnStartMs: number): void {
     const st = this.turns.get(key);
-    if (!st || st.settled) return;
-    if (st.metaRow) return;
-    this.buildMetaRow(st);
-    st.turnStartMs = turnStartMs;
-    st.timeTextNode!.nodeValue = formatTurnDuration(Date.now() - turnStartMs);
-    st.tickTimer = setInterval(() => {
-      const cur = this.turns.get(key);
-      if (!cur || cur.settled || !cur.timeTextNode) return;
-      cur.timeTextNode.nodeValue = formatTurnDuration(Date.now() - cur.turnStartMs);
-    }, 1000);
+    if (!st) return;
+    ensureLiveMetaRowImpl(st, turnStartMs, () => this.turns.get(key));
   }
 
-  /** Primes a still-open turn after a reload with a live (non-settled) tick,
-   *  seeded from the totals-so-far, so later events keep it ticking. */
+  /** Primes a still-open turn after a reload with a live (non-settled) tick.
+   *  See turn-meta-row.ts. */
   primeReplayedLiveRow(key: TurnChipKey, turnStartMs: number, totals: TurnUsageTotals): void {
-    this.ensureLiveMetaRow(key, turnStartMs);
     const st = this.turns.get(key);
-    if (!st || st.settled || !st.tokenTextNode) return;
-    st.tokenTextNode.nodeValue = `${formatTokenCount(totals.outputTokens)} tok`;
-    st.metaRow!.title = buildTooltip(totals);
+    if (!st) return;
+    primeReplayedLiveRowImpl(st, turnStartMs, totals, () => this.turns.get(key));
   }
 
-  /** Re-syncs the ticking row's elapsed text on every flush, since a
-   *  minimized window can throttle setInterval. No-op once settled. */
+  /** Re-syncs the ticking row's elapsed text on every flush. See turn-meta-row.ts. */
   syncLiveTick(key: TurnChipKey): void {
     const st = this.turns.get(key);
-    if (!st || st.settled || !st.timeTextNode || st.turnStartMs <= 0) return;
-    st.timeTextNode.nodeValue = formatTurnDuration(Date.now() - st.turnStartMs);
+    if (!st) return;
+    syncLiveTickImpl(st);
   }
 
-  /**
-   * Update the live token estimate as assistant text streams in.
-   * `text` is the full accumulated assistant text for this turn.
-   */
+  /** Update the live token estimate as assistant text streams in. See turn-meta-row.ts. */
   updateLiveTokenEstimate(key: TurnChipKey, text: string): void {
     const st = this.turns.get(key);
-    if (!st || st.settled || !st.tokenTextNode) return;
-    st.tokenTextNode.nodeValue = `~${formatTokenCount(estimateTokensFromText(text))} tok`;
+    if (!st) return;
+    updateLiveTokenEstimateImpl(st, text);
   }
 
-  /**
-   * Settle the meta row to the turn's COMBINED totals. Creates the row if it
-   * does not exist yet (history path). Stops the tick timer. Re-settleable:
-   * each call overwrites the displayed totals with the latest (bigger) sums.
-   * If durationMs is 0 the time chip is hidden rather than showing a lie.
-   */
+  /** Settle the meta row to the turn's COMBINED totals. See turn-meta-row.ts. */
   settleMetaRow(key: TurnChipKey, totals: TurnUsageTotals): void {
     this.settleTodoChecklist(key);
     const st = this.turns.get(key);
     if (!st) return;
-    this.buildMetaRow(st);
-    st.settled = true;
-    st.lastTotals = totals;
-    if (st.tickTimer !== null) {
-      clearInterval(st.tickTimer);
-      st.tickTimer = null;
-    }
-    if (totals.durationMs > 0) {
-      st.timeTextNode!.nodeValue = formatTurnDuration(totals.durationMs);
-      st.timeChip!.classList.remove("turn-chip--hidden");
-    } else {
-      st.timeChip!.classList.add("turn-chip--hidden");
-    }
-    st.tokenTextNode!.nodeValue = `${formatTokenCount(totals.outputTokens)} tok`;
-    st.metaRow!.title = buildTooltip(totals);
-    renderStatusChip(st, totals.awaiting);
-    if (st.progressBar) {
-      st.progressBar.remove();
-      st.progressBar = null;
-      st.progressFill = null;
-    }
+    settleMetaRowImpl(st, totals);
   }
 
   /** Waiting-on chip (todo 675): what a `waiting` turn is blocked on. Creates
@@ -294,98 +210,44 @@ export class TurnFooterRegistry {
   setWaitingOn(key: TurnChipKey, target: WaitingOnTarget): void {
     this.getOrCreateFooter(key);
     const st = this.turns.get(key)!;
-    this.buildMetaRow(st);
+    buildMetaRow(st);
     renderWaitingChip(st, target);
   }
 
-  /**
-   * Freeze a live meta row at its last elapsed/estimate values (turn was
-   * interrupted or cancelled - no usage ever arrived). No-op when no meta row
-   * exists or real totals already settled it.
-   */
+  /** Freeze a live meta row at its last elapsed/estimate values. See turn-meta-row.ts. */
   cancelMetaRow(key: TurnChipKey): void {
     this.settleTodoChecklist(key);
     const st = this.turns.get(key);
-    if (!st || st.settled || !st.metaRow) return;
-    st.settled = true;
-    if (st.tickTimer !== null) {
-      clearInterval(st.tickTimer);
-      st.tickTimer = null;
-    }
-    if (st.turnStartMs > 0) {
-      st.timeTextNode!.nodeValue = formatTurnDuration(Date.now() - st.turnStartMs);
-    }
-    if (st.progressBar) {
-      st.progressBar.remove();
-      st.progressBar = null;
-      st.progressFill = null;
-    }
+    if (!st) return;
+    cancelMetaRowImpl(st);
   }
 
-  /**
-   * Show an indeterminate progress bar at the top of the turn footer. Called
-   * on the first tool_use of a turn so it only appears for multi-step work.
-   * No-op if already created or if the turn has already settled.
-   */
+  /** Show an indeterminate progress bar at the top of the turn footer. See
+   *  turn-progress-bar.ts. */
   ensureProgressBar(key: TurnChipKey): void {
     this.getOrCreateFooter(key);
     const st = this.turns.get(key);
-    if (!st || st.settled || st.progressBar) return;
-    const bar = document.createElement("div");
-    bar.className = "turn-progress turn-progress--indeterminate";
-    const fill = document.createElement("div");
-    fill.className = "turn-progress-fill";
-    bar.appendChild(fill);
-    if (st.metaRow) {
-      st.metaRow.insertAdjacentElement("afterend", bar);
-    } else {
-      st.footer.prepend(bar);
-    }
-    st.progressBar = bar;
-    st.progressFill = fill;
+    if (!st) return;
+    ensureProgressBarImpl(st);
   }
 
-  /**
-   * Update the progress bar to a deterministic N/M state. Creates the bar if
-   * it doesn't exist. No-op when the turn has already settled.
-   */
+  /** Update the progress bar to a deterministic N/M state. See
+   *  turn-progress-bar.ts. */
   setProgress(key: TurnChipKey, n: number, m: number): void {
     this.getOrCreateFooter(key);
     const st = this.turns.get(key);
-    if (!st || st.settled) return;
-    if (!st.progressBar) this.ensureProgressBar(key);
-    if (!st.progressBar || !st.progressFill) return;
-    const pct = m > 0 ? Math.min(100, Math.round((n / m) * 100)) : 0;
-    st.progressFill.style.width = `${pct}%`;
-    st.progressBar.classList.remove("turn-progress--indeterminate");
+    if (!st) return;
+    setProgressImpl(st, n, m);
   }
 
   /** Calls getOrCreateFooter itself (not a bare `.get()`): chat-event-handler.ts
    *  mints this in the SAME event as the turn's chip key, before any flush
    *  creates footer state - skipping this made the first chip of every meta
-   *  streak silently never render. Shares its strip via ensureMainStrip. */
+   *  streak silently never render. See turn-meta-chip.ts. */
   ensureMetaChip(key: TurnChipKey, meta: { kind: MetaTurnKind; label: string; detail: string; streakCount: number }): void {
     this.getOrCreateFooter(key);
     const st = this.turns.get(key)!;
-    const { strip } = ensureMainStrip(st.footer);
-    let chip = st.metaChip;
-    if (!chip || chip.parentElement !== strip) {
-      chip = document.createElement("span");
-      chip.appendChild(document.createElement("i"));
-      const label = document.createElement("span");
-      label.className = "tool-chip-label";
-      chip.appendChild(label);
-      const count = document.createElement("span");
-      count.className = "tool-chip-count";
-      chip.appendChild(count);
-      strip.prepend(chip);
-      st.metaChip = chip;
-    }
-    chip.className = `tool-chip tool-chip--meta tool-chip--meta-${meta.kind}`;
-    chip.title = meta.detail;
-    (chip.children[0] as HTMLElement).className = `ph ${META_KIND_ICONS[meta.kind]}`;
-    (chip.children[1] as HTMLElement).textContent = meta.label;
-    (chip.children[2] as HTMLElement).textContent = meta.streakCount > 1 ? `×${meta.streakCount}` : "";
+    ensureMetaChipImpl(st, meta);
   }
 
   /** Whether this turn already owns a step checklist, whichever tool drove it.
