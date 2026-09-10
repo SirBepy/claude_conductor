@@ -26,6 +26,7 @@ mod question;
 mod relay;
 mod spawn_chat;
 mod stop;
+mod stop_verdict;
 mod turn_status;
 mod user_todos;
 mod validated_json;
