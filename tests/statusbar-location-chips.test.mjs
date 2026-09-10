@@ -110,6 +110,32 @@ describe("repo + folder chips", () => {
     expect(el.querySelector(".sb-git-ahead")?.textContent).toContain("6");
   });
 
+  it("folder chip and the git chip's away segment still show the off-repo location, even though git DATA falls back to the spawn repo (todo 921)", async () => {
+    const OFF_REPO = "C:\\Users\\joe\\AppData\\Local\\Claude Conductor";
+    const NO_REPO = { branch: null, repo: null, ahead: null, behind: null, sha: null, insertions: null, deletions: null };
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    ipcMock.impl = async (cmd, args) => {
+      if (cmd === "session_live_cwd") return OFF_REPO;
+      if (cmd === "get_git_info") return args.cwd === SPAWN ? GIT_INFO : NO_REPO;
+      if (cmd === "get_git_dirty") return [];
+      return null;
+    };
+    new SessionStatusbar(el, null, [["git", "repo", "folder"]], { sessionId: "sess-offrepo-loc", cwd: SPAWN });
+    await flush();
+    await flush();
+    // The git chip's branch/ahead data still comes from the fallback (spawn) repo.
+    expect(el.querySelector(".sb-git")?.textContent).toContain("master");
+    // But the location chips must not claim the AI is sitting in the spawn
+    // repo - before the fix, gitCwd itself got reassigned to the spawn cwd,
+    // so isAtSpawnLocation(cwd, gitCwd) read true and both of these went dark.
+    expect(el.querySelector(".sb-folder")?.textContent).toContain("Claude Conductor");
+    expect(el.querySelector(".sb-git-away")?.textContent).toContain("Claude Conductor");
+    // The repo chip must not misattribute the spawn repo's name to the
+    // (non-repo) off-repo folder either.
+    expect(el.querySelector(".sb-repo")).toBeNull();
+  });
+
   it("no skeleton flashes for either chip before git info lands", async () => {
     const el = document.createElement("div");
     document.body.appendChild(el);

@@ -73,11 +73,18 @@ export class SessionStatusbar {
   private dirtyLoaded = false;
   private startedAt: string | null;
   private cwd: string | null;
-  // Live working dir the git-section chips resolve against. Starts at the spawn
-  // `cwd`, then follows the AI into a worktree via `session_live_cwd` (last cwd
-  // recorded in the transcript). Kept separate from `cwd` so session-scoped
-  // chips (ai_todos, servers) stay pinned to the spawn dir.
+  // Live working dir the git DATA chips (branch/sha/commits) resolve against.
+  // Starts at the spawn `cwd`, then follows the AI into a worktree via
+  // `session_live_cwd` (last cwd recorded in the transcript). refreshGitInfo
+  // may reassign this back to the spawn `cwd` when the live location has no
+  // repo at all, so the git chip still has something to show (ab23f6b3) -
+  // which makes it unfit as "where is the AI actually sitting" (todo 921).
   private gitCwd: string | null;
+  // True live location, untouched by refreshGitInfo's off-repo fallback.
+  // folder/repo chips and driftLabel's "away" segment read this one instead
+  // of gitCwd, so an off-repo cwd stays visible even while gitCwd (and the
+  // git chip's branch/sha data) fall back to the chat's own repo.
+  private liveCwd: string | null;
   private effort: string;
   private sessionId: string | null;
   private sessionModel: string | null;
@@ -119,6 +126,7 @@ export class SessionStatusbar {
     this.rows = rows;
     this.cwd = opts.cwd ?? null;
     this.gitCwd = this.cwd;
+    this.liveCwd = this.cwd;
     this.effort = opts.effort ?? "";
     this.sessionId = opts.sessionId ?? null;
     this.sessionModel = opts.sessionModel ?? null;
@@ -197,6 +205,7 @@ export class SessionStatusbar {
     const effective = this.sessionId ? await resolveLiveCwd(this.sessionId, spawn) : spawn;
     const changed = effective !== this.gitCwd;
     this.gitCwd = effective;
+    this.liveCwd = effective;
     // Seed instantly from cache for the new dir (a revisit paints without flicker).
     if (changed) {
       const cached = gitInfoCache.get(effective);
@@ -253,6 +262,9 @@ export class SessionStatusbar {
       onUnavailable: () => { this.gitInfoLoaded = true; this.render(); },
     });
     if (offRepo) {
+      // Only gitCwd (the git-DATA source) falls back here - liveCwd stays at
+      // the AI's true off-repo location so folder/repo/driftLabel don't lie
+      // about where it actually is (todo 921).
       this.gitCwd = this.cwd;
       await this.refreshGitInfo();
     }
@@ -461,6 +473,7 @@ export class SessionStatusbar {
       gitInfo: this.gitInfo,
       gitInfoLoaded: this.gitInfoLoaded,
       gitCwd: this.gitCwd,
+      liveCwd: this.liveCwd,
       counts: this.counts,
       countsLoaded: this.countsLoaded,
       ctxStatus: this.ctxStatus,
@@ -526,7 +539,7 @@ export class SessionStatusbar {
     });
 
     this.container.querySelector<HTMLElement>(".sb-folder-btn")?.addEventListener("click", () => {
-      if (this.gitCwd) void invoke<void>("open_in_explorer", { path: this.gitCwd });
+      if (this.liveCwd) void invoke<void>("open_in_explorer", { path: this.liveCwd });
     });
 
     this.container.querySelector<HTMLElement>(".sb-account-btn")?.addEventListener("click", (e) => {
@@ -589,7 +602,10 @@ export class SessionStatusbar {
         if (wasOpen || !this.cwd) return;
         this.gitCard.open(anchor, {
           cwd: this.cwd,
-          awayLabel: driftLabel(this.cwd, this.gitCwd, this.gitInfo.repo) || null,
+          // Only attribute gitInfo.repo to the live location when the fetch
+          // actually ran there - the off-repo fallback (gitCwd back on the
+          // spawn cwd) would otherwise misname a non-repo folder (todo 921).
+          awayLabel: driftLabel(this.cwd, this.liveCwd, this.gitCwd === this.liveCwd ? this.gitInfo.repo : null) || null,
           onPushed: () => void this.refreshGitInfo(),
         });
       });

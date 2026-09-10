@@ -20,7 +20,11 @@ export interface ChipRenderCtx {
   hasAccountClick: boolean;
   gitInfo: GitInfo;
   gitInfoLoaded: boolean;
+  // What git DATA was fetched against; falls back to the spawn repo when the
+  // live cwd has no repo of its own.
   gitCwd: string | null;
+  // Where the AI actually is. Every location chip reads this, never gitCwd.
+  liveCwd: string | null;
   counts: SessionCounts | null;
   countsLoaded: boolean;
   ctxStatus: ContextStatus | null;
@@ -51,6 +55,12 @@ export function isAtSpawnLocation(spawnCwd: string | null, gitCwd: string | null
   const spawn = normalizePath(spawnCwd);
   const live = normalizePath(gitCwd);
   return live === spawn || live.startsWith(`${spawn}/`);
+}
+
+/** False while refreshGitInfo's off-repo fallback has gitCwd pointing at the
+ *  spawn repo, so `gitInfo.repo` names that repo rather than where the AI is. */
+function gitInfoIsForLiveLocation(ctx: ChipRenderCtx): boolean {
+  return ctx.gitCwd === ctx.liveCwd;
 }
 
 export function animClass(animatedKeys: Set<string>, key: string): string {
@@ -114,15 +124,16 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       return "";
     }
     case "repo": {
-      if (isAtSpawnLocation(ctx.cwd, ctx.gitCwd)) return "";
-      if (ctx.gitInfo.repo) return `<span class="sb-chip sb-repo${ac("repo")}"><i class="ph ph-folder-simple"></i>${escapeHtml(ctx.gitInfo.repo)}</span>`;
+      if (isAtSpawnLocation(ctx.cwd, ctx.liveCwd)) return "";
+      if (ctx.gitInfo.repo && gitInfoIsForLiveLocation(ctx)) return `<span class="sb-chip sb-repo${ac("repo")}"><i class="ph ph-folder-simple"></i>${escapeHtml(ctx.gitInfo.repo)}</span>`;
       if (!ctx.gitInfoLoaded) return skeletonChip("repo", "sb-repo", "ph-folder-simple", "80px");
       return "";
     }
     case "folder": {
-      // Git-section chip: follow the live git cwd so it stays coherent with
-      // the branch/repo chips when the AI is working in a worktree.
-      const dir = ctx.gitCwd;
+      // Follows the true live cwd (not gitCwd, which can fall back to the
+      // spawn repo off-repo - todo 921), so it stays coherent with the
+      // branch/repo chips when the AI is working in a worktree.
+      const dir = ctx.liveCwd;
       if (!dir || isAtSpawnLocation(ctx.cwd, dir)) return "";
       const folderName = dir.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? dir;
       const cwdEsc = escapeHtml(dir);
@@ -191,7 +202,7 @@ export function renderGitChip(ctx: ChipRenderCtx): string {
   }
   const segs: string[] = [];
   const title: string[] = [];
-  const away = driftLabel(ctx.cwd, ctx.gitCwd, g.repo);
+  const away = driftLabel(ctx.cwd, ctx.liveCwd, gitInfoIsForLiveLocation(ctx) ? g.repo : null);
   if (away) {
     segs.push(`<span class="sb-git-seg sb-git-away"><i class="ph ph-arrow-bend-up-right"></i>${escapeHtml(away)}</span>`);
     title.push(`Claude is in ${away}`);
