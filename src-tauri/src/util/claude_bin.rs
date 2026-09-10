@@ -124,14 +124,34 @@ fn login_shell_probe() -> Option<PathBuf> {
 /// line that names an existing file: an interactive rc is free to print its
 /// own banner before our output.
 fn run_shell(shell: &str, flags: &str) -> Option<PathBuf> {
+    run_shell_command(shell, &[flags, "command -v claude"])
+}
+
+/// Core spawn/wait/read logic, parameterized on the full arg list so a test
+/// can drive it with a synthetic command instead of a real login shell.
+fn run_shell_command(shell: &str, args: &[&str]) -> Option<PathBuf> {
+    use std::fs::OpenOptions;
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicU64, Ordering};
     const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+    // A pipe has a finite OS buffer (typically 64KB); nothing reads it until
+    // this loop's try_wait already sees the child as exited, so an rc that
+    // prints more than that before returning would block the child on
+    // write() forever (the same hazard daemon/lifecycle/spawn.rs's
+    // drain_stderr comment describes). Redirect to a file instead: a file
+    // has no such ceiling, so the deadlock is gone by construction.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let out_path = std::env::temp_dir()
+        .join(format!("cc-claude-bin-probe-{}-{unique}.out", std::process::id()));
+    let out_file =
+        OpenOptions::new().create(true).truncate(true).write(true).open(&out_path).ok()?;
+
     let mut child = Command::new(shell)
-        .arg(flags)
-        .arg("command -v claude")
+        .args(args)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(out_file))
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
@@ -142,19 +162,24 @@ fn run_shell(shell: &str, flags: &str) -> Option<PathBuf> {
             Ok(Some(_)) => break,
             Ok(None) => {
                 if std::time::Instant::now() >= deadline {
-                    log::warn!("claude_bin: `{shell} {flags}` timed out, killing it");
+                    log::warn!("claude_bin: `{shell} {}` timed out, killing it", args.join(" "));
                     let _ = child.kill();
                     let _ = child.wait();
+                    let _ = std::fs::remove_file(&out_path);
                     return None;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
-            Err(_) => return None,
+            Err(_) => {
+                let _ = std::fs::remove_file(&out_path);
+                return None;
+            }
         }
     }
 
-    let out = child.wait_with_output().ok()?;
-    parse_shell_output(&String::from_utf8_lossy(&out.stdout))
+    let stdout = std::fs::read_to_string(&out_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&out_path);
+    parse_shell_output(&stdout)
 }
 
 /// Split out from `run_shell` so the banner-noise handling is testable without
@@ -286,6 +311,55 @@ mod tests {
         assert_eq!(parse_shell_output(&stdout), Some(real));
         assert_eq!(parse_shell_output("claude not found\n"), None, "a relative word is not a path");
         assert_eq!(parse_shell_output(""), None);
+    }
+
+    /// A real POSIX shell on this machine, or `None` if none is reachable
+    /// (this test is skipped rather than failed in that case, since some
+    /// dev/CI boxes may lack one).
+    fn locate_posix_shell_for_test() -> Option<&'static str> {
+        #[cfg(not(windows))]
+        {
+            for candidate in ["/bin/sh", "/bin/bash"] {
+                if Path::new(candidate).is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            // Git for Windows ships a real POSIX sh/bash at this fixed path
+            // on both dev boxes and GitHub's windows-latest runners.
+            for candidate in [
+                r"C:\Program Files\Git\bin\sh.exe",
+                r"C:\Program Files\Git\bin\bash.exe",
+            ] {
+                if Path::new(candidate).is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn run_shell_command_survives_output_over_the_pipe_buffer_before_the_real_path() {
+        let Some(shell) = locate_posix_shell_for_test() else {
+            eprintln!("no posix shell found on this machine, skipping");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("claude");
+        std::fs::write(&real, b"#!/bin/sh\n").unwrap();
+
+        // ~2000 lines of ~35 bytes each is well over the ~64KB default pipe
+        // buffer, the way a chatty rc file (set -x tracing, a banner) would
+        // print before the actual `command -v claude` output.
+        let noisy = format!(
+            "for i in $(seq 1 2000); do echo 'noise line filling the pipe buffer'; done; printf '%s\\n' '{}'",
+            real.display()
+        );
+        let got = run_shell_command(shell, &["-c", &noisy]);
+        assert_eq!(got, Some(real), "output past the OS pipe buffer must not deadlock the probe");
     }
 
     #[test]
