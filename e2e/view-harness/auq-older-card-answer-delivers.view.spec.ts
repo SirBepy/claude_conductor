@@ -6,9 +6,13 @@ import { mountView } from "./harness";
 // moved to a newer sibling and dropped the answer before send_message ever
 // saw it. Fixed: staleness is now tracked per prompt id, not per session.
 
+// Named distinctly from the sibling specs' `window.__sendMessageCalls` (a
+// plain counter there): this spec needs the full call payload, not a count,
+// and a shared property name across files with two different types is a
+// TS2717 "subsequent declarations must have the same type" error (todo 887).
 declare global {
   interface Window {
-    __sendMessageCalls?: Array<{ sessionId?: string; blocks?: Array<{ type: string; text?: string }> }>;
+    __sendMessageCallArgs?: Array<{ sessionId?: string; blocks?: Array<{ type: string; text?: string }> }>;
     __resolveOldSettle?: () => void;
   }
 }
@@ -33,7 +37,7 @@ test.describe("view-harness / answering a still-pending OLDER card still deliver
       pane.innerHTML = '<div class="session-composer"></div>';
       document.body.appendChild(pane);
 
-      window.__sendMessageCalls = [];
+      window.__sendMessageCallArgs = [];
       const w = window as unknown as {
         __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
       };
@@ -49,7 +53,7 @@ test.describe("view-harness / answering a still-pending OLDER card still deliver
           return new Promise((resolve) => { window.__resolveOldSettle = () => resolve(false); });
         }
         if (cmd === "send_message") {
-          window.__sendMessageCalls!.push(args as { sessionId?: string; blocks?: Array<{ type: string; text?: string }> });
+          window.__sendMessageCallArgs!.push(args as { sessionId?: string; blocks?: Array<{ type: string; text?: string }> });
           return Promise.resolve(null);
         }
         return realInvoke(cmd, args);
@@ -85,8 +89,8 @@ test.describe("view-harness / answering a still-pending OLDER card still deliver
     // Let the older card's settle resolve now that the sibling has landed.
     await page.evaluate(() => window.__resolveOldSettle!());
 
-    await expect.poll(() => page.evaluate(() => window.__sendMessageCalls!.length)).toBe(1);
-    const sent = await page.evaluate(() => window.__sendMessageCalls![0]);
+    await expect.poll(() => page.evaluate(() => window.__sendMessageCallArgs!.length)).toBe(1);
+    const sent = await page.evaluate(() => window.__sendMessageCallArgs![0]);
     const text = sent?.blocks?.[0]?.text ?? "";
     // (b) delivery is keyed to the OLDER card's own id, not the sibling's.
     expect(text).toContain('id="q-old"');
