@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(machine_id.as_deref(), Some("mach-1"));
 
         let stored = ctx.state.machines.get().unwrap().peer("mach-1").unwrap();
-        assert_eq!(stored.token, "reverse-tok");
+        assert_eq!(stored.token, "dummy-reverse");
         assert!(stored.reverse_device_id.is_some());
 
         assert!(!dir.path().join("remote-pairing.json").exists());
