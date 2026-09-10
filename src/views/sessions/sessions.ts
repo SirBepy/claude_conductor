@@ -15,6 +15,8 @@ import "./session-ctx-menu.css";
 import "./session-avatar.css";
 import "./session-statusbar.css";
 import "./session-statusbar-images.css";
+import "./git-card.css";
+import "./overflow-panel.css";
 import "./project-picker.css";
 import "./worktree-picker.css";
 import "./model-effort-modal.css";

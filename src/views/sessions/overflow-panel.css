@@ -1,0 +1,115 @@
+/* Overflow-panel popover styles for overflow-popover.ts, split out of
+   session-statusbar.css (todo 892) - pure move, no rule changes. The overflow
+   CHIP itself (.sb-chip.sb-overflow) stays in session-statusbar.css: it's
+   rendered by the statusbar, not this popover. Imported directly by each
+   consuming view right after session-statusbar.css, same pattern as
+   session-statusbar-images.css. */
+
+.sb-overflow-popover {
+  width: 320px;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.71rem;
+  color: var(--sb-muted);
+  padding: 11px 12px 12px;
+}
+
+.ov-head {
+  color: var(--sb-muted);
+  font-size: 0.6rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.ov-meters + .ov-head,
+.ov-mixrow + .ov-head { margin-top: 14px; }
+
+.ov-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.ov-tile {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 7px 8px;
+}
+
+.ov-tile-v { color: var(--color-text); font-size: 1.05rem; line-height: 1.15; }
+.ov-tile-k { color: var(--sb-muted); font-size: 0.6rem; letter-spacing: 0.04em; margin-top: 2px; }
+
+.ov-meters { margin-top: 11px; }
+
+.ov-meter-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 9px 0 4px;
+}
+
+.ov-meter-label b { color: var(--color-text); font-weight: 400; }
+
+.ov-meter-track {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.ov-meter-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 0 3px 3px 0;
+}
+
+.ov-mix-lede { color: var(--sb-muted); font-size: 0.69rem; margin-bottom: 5px; }
+.ov-mix-lede b { color: var(--color-text); font-weight: 400; }
+
+/* 22px, not the 10px a bare ratio bar wants: at 10px the strip is unhoverable,
+   and hover is what links a segment to its key row. */
+.ov-mix {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 3px 0 10px;
+}
+
+.ov-mix span {
+  display: block;
+  background: var(--color-primary);
+  transition: filter 120ms ease;
+}
+
+.ov-mixrow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px 14px;
+}
+
+.ov-mixrow div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.ov-sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.ov-nm { flex: 1; min-width: 0; }
+.ov-mixrow b { color: var(--color-text); font-weight: 400; }
+.ov-mixrow div.zero .ov-sw { background: rgba(255, 255, 255, 0.16); }
+.ov-mixrow div.zero b { color: var(--sb-muted); }
+
+.sb-overflow-popover:hover .ov-mix span { filter: brightness(0.55) saturate(0.5); }
+.sb-overflow-popover .ov-mix span:hover { filter: none; }
+.sb-overflow-popover .ov-mixrow div:hover { color: var(--color-text); }

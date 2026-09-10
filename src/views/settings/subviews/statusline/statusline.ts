@@ -21,6 +21,8 @@ import "../../settings.css";
 import "./statusline.css";
 import "../../../sessions/session-statusbar.css";
 import "../../../sessions/session-statusbar-images.css";
+import "../../../sessions/git-card.css";
+import "../../../sessions/overflow-panel.css";
 
 interface ChipDisplay { icon: string; sample: string; tooltip: string; }
 
