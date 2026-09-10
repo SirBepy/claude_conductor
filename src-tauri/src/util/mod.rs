@@ -1,6 +1,15 @@
 pub mod claude_bin;
 pub mod process;
 
+/// Shared lock for any test in this crate that mutates a process-global env
+/// var (`CC_DATA_DIR`, `CC_DAEMON_INSTANCE`, ...). The default `--lib` run
+/// uses 4 threads (`src-tauri/.cargo/config.toml`'s `RUST_TEST_THREADS`), so
+/// two such tests in DIFFERENT modules, each with its own local mutex, can
+/// still stomp each other's value mid-test - this one lock is what actually
+/// serializes them, since a per-module mutex only guards within that module.
+#[cfg(test)]
+pub(crate) static ENV_MUTATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use sha2::{Digest, Sha256};
 
 /// Lowercase hex encoding, byte order preserved. Shared by device
