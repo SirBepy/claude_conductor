@@ -328,6 +328,15 @@ function openPreviewIfSupported(a: Attachment): void {
   }
 }
 
+/** True when a clipboard event's DataTransfer carries at least one file item.
+ *  Shared by the composer's stray-paste relay (which only needs the boolean
+ *  to decide routing) and `resolveClipboardAttachments` below (which needs
+ *  the same filter to build the actual blob list) - one predicate, two
+ *  different consumption shapes (ai_todo 877). */
+export function clipboardHasFile(dt: DataTransfer | null): boolean {
+  return Array.from(dt?.items ?? []).some((it) => it.kind === "file");
+}
+
 /** A clipboard file item, resolved to either a native OS path (Explorer
  *  copy, read via the clipboard plugin) or a raw blob (e.g. a Win+Shift+S
  *  snip, which has no CF_HDROP path). */
@@ -349,13 +358,15 @@ export async function resolveClipboardAttachments(
   e: ClipboardEvent,
 ): Promise<ResolvedClipboardAttachment[] | null> {
   if (!e.clipboardData) return null;
+  if (!clipboardHasFile(e.clipboardData)) return null;
   // Snapshot the browser blobs SYNCHRONOUSLY, before any await: WebView2
   // neuters e.clipboardData the moment this handler yields, so getAsFile()
   // returns null afterwards. This is the fallback for pastes with no native
   // file list (e.g. a Win+Shift+S snip, which lands as a raw bitmap on the
   // clipboard with no CF_HDROP paths). Capturing here keeps that path alive.
+  // No separate file-kind filter needed: a non-file item's getAsFile()
+  // already returns null per spec, so the blob !== null filter below covers it.
   const blobs = Array.from(e.clipboardData.items)
-    .filter((item) => item.kind === "file")
     .map((item) => ({ blob: item.getAsFile(), type: item.type }))
     .filter((b): b is { blob: File; type: string } => b.blob !== null);
   if (blobs.length === 0) return null;
