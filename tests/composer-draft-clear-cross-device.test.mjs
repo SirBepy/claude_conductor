@@ -6,44 +6,27 @@
 // localStorage copy.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mountComposer as mountComposerBase, destroyMounted, tauriMock } from "./helpers/composer-mount.mjs";
 
 let invokeMock;
-let mounted = [];
 let remoteDrafts;
 
 beforeEach(() => {
   remoteDrafts = { composer: null, auq: null, held: [], held_updated_at: null };
-  invokeMock = vi.fn(async (cmd) => {
-    if (cmd === "list_slash_commands") return [];
-    if (cmd === "list_project_files") return [];
-    if (cmd === "get_session_drafts") return remoteDrafts;
-    return {};
-  });
-  globalThis.window.__TAURI__ = {
-    core: { invoke: invokeMock },
-    event: { listen: async () => () => {} },
-  };
+  invokeMock = tauriMock((cmd) => (cmd === "get_session_drafts" ? remoteDrafts : undefined));
   localStorage.clear();
 });
 
 afterEach(() => {
-  for (const composer of mounted) composer.destroy();
-  mounted = [];
+  destroyMounted();
   delete globalThis.window.__TAURI__;
   localStorage.clear();
 });
 
 async function mountComposer(sessionId) {
-  const { resetTransportForTests } = await import("../src/shared/transport.ts");
-  resetTransportForTests();
-  const { Composer } = await import("../src/shared/chat/composer.ts");
-  const root = document.createElement("div");
-  document.body.appendChild(root);
-  const composer = new Composer(root, { onSend: vi.fn(async () => {}) });
-  mounted.push(composer);
-  composer.setSessionId(sessionId);
+  const { composer, textarea } = await mountComposerBase({}, sessionId);
   await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith("get_session_drafts", expect.anything()));
-  return { composer, textarea: root.querySelector(".composer-textarea") };
+  return { composer, textarea };
 }
 
 const draftKey = (id) => `chat-draft:v1:${id}`;
@@ -115,19 +98,9 @@ describe("cross-device composer clear", () => {
 
     // Simulate a reload: fresh module graph, so composer-draft-sync's
     // in-memory baseline Map is gone and must reseed from localStorage.
-    for (const composer of mounted) composer.destroy();
-    mounted = [];
+    destroyMounted();
     vi.resetModules();
-    invokeMock = vi.fn(async (cmd) => {
-      if (cmd === "list_slash_commands") return [];
-      if (cmd === "list_project_files") return [];
-      if (cmd === "get_session_drafts") return remoteDrafts; // unchanged: the push never landed
-      return {};
-    });
-    globalThis.window.__TAURI__ = {
-      core: { invoke: invokeMock },
-      event: { listen: async () => () => {} },
-    };
+    invokeMock = tauriMock((cmd) => (cmd === "get_session_drafts" ? remoteDrafts : undefined)); // unchanged: the push never landed
 
     const second = await mountComposer(sid);
     await new Promise((r) => setTimeout(r, 20));

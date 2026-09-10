@@ -5,45 +5,27 @@
 // so a paste on a freshly-opened chat used to be swallowed by the browser.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mountComposer, destroyMounted, tauriMock } from "./helpers/composer-mount.mjs";
 
 // Mounting a real Composer pulls its whole module graph plus the slash/file
 // command fetch, which runs well past the 5s default on a cold transform.
 vi.setConfig({ testTimeout: 30000 });
 
-let mounted = [];
-
 beforeEach(() => {
   localStorage.clear();
-  globalThis.window.__TAURI__ = {
-    core: {
-      invoke: vi.fn(async (cmd) => {
-        if (cmd === "list_slash_commands") return [];
-        if (cmd === "list_project_files") return [];
-        return {};
-      }),
-    },
-    event: { listen: async () => () => {} },
-  };
+  tauriMock();
 });
 
 afterEach(() => {
-  for (const composer of mounted) composer.destroy();
-  mounted = [];
+  destroyMounted();
   document.body.innerHTML = "";
   delete globalThis.window.__TAURI__;
   localStorage.clear();
 });
 
 async function mount(sessionId = "sess-paste") {
-  const { resetTransportForTests } = await import("../src/shared/transport.ts");
-  resetTransportForTests();
-  const { Composer } = await import("../src/shared/chat/composer.ts");
-  const root = document.createElement("div");
-  document.body.appendChild(root);
-  const composer = new Composer(root, { onSend: vi.fn(async () => {}) });
-  mounted.push(composer);
-  composer.setSessionId(sessionId);
-  return { composer, root, ta: root.querySelector(".composer-textarea") };
+  const { composer, root, textarea } = await mountComposer({}, sessionId);
+  return { composer, root, ta: textarea };
 }
 
 // jsdom has no ClipboardEvent, and the handler only reads getData/items.

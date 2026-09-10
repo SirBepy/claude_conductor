@@ -6,45 +6,28 @@
 // held controller in either onStage or flushHeldWithDraft.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mountComposer as mountComposerBase, destroyMounted, tauriMock } from "./helpers/composer-mount.mjs";
 
 // Each case mounts a real Composer, whose first-time module graph + slash/file
 // command fetch runs well past the 5s default on a cold transform.
 vi.setConfig({ testTimeout: 30000 });
 
 let invokeMock;
-let mounted = [];
 
 beforeEach(() => {
   localStorage.clear();
-  invokeMock = vi.fn(async (cmd) => {
-    if (cmd === "list_slash_commands") return [];
-    if (cmd === "list_project_files") return [];
-    return {};
-  });
-  globalThis.window.__TAURI__ = {
-    core: { invoke: invokeMock },
-    event: { listen: async () => () => {} },
-  };
+  invokeMock = tauriMock();
 });
 
 afterEach(() => {
-  for (const composer of mounted) composer.destroy();
-  mounted = [];
+  destroyMounted();
   delete globalThis.window.__TAURI__;
   localStorage.clear();
 });
 
 async function mountComposer(opts = {}, sessionId = "sess-1") {
-  const { resetTransportForTests } = await import("../src/shared/transport.ts");
-  resetTransportForTests();
-  const { Composer } = await import("../src/shared/chat/composer.ts");
-  const root = document.createElement("div");
-  document.body.appendChild(root);
-  const composer = new Composer(root, { onSend: vi.fn(async () => {}), ...opts });
-  mounted.push(composer);
-  composer.setSessionId(sessionId);
+  const { composer, textarea, root } = await mountComposerBase(opts, sessionId);
   await vi.waitFor(() => expect(invokeMock).toHaveBeenCalled());
-  const textarea = root.querySelector(".composer-textarea");
   return { composer, textarea, root };
 }
 
