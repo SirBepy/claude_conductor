@@ -1,19 +1,22 @@
 //! `tools/call` dispatch for the stdio MCP server. Every arm has the same shape:
 //! build a hooks-server URL, build a JSON body from `arguments`, hand off to
 //! `relay`. Arms are grouped by domain so a new tool has an obvious home.
+//!
+//! The Jarvis fleet arms live in the sibling `dispatch_jarvis.rs` (todo 901):
+//! that group already matched a `tool_schemas_jarvis.rs` domain 1:1, so it
+//! was the split with no re-litigated seam.
 
 use serde_json::{json, Value};
 
 use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
 
+use super::dispatch_jarvis::jarvis_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, waiting_target};
 use super::tool_schemas::{
-    TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
-    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_RESPOND_WORKER_PROMPT,
-    TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT,
-    TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN,
-    TOOL_WRITE_USER_TODO,
+    TOOL_APPROVAL, TOOL_CLOSE, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
+    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW,
+    TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -273,50 +276,6 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "steps": ctx.args["steps"],
             });
             Some(ctx.relay("/plan/write", body, Some("invalid plan"), None))
-        }
-        _ => None,
-    }
-}
-
-/// Only advertised to a Jarvis child's `tools/list` (see `is_jarvis` in
-/// `server`), but a `tools/call` for a never-shown tool still lands here, so
-/// every daemon route re-validates that `session_id` (this child's own
-/// CC_SESSION_ID) is the registry's Jarvis session before doing anything.
-fn jarvis_tools(ctx: &Ctx, name: &str) -> Option<Value> {
-    match name {
-        TOOL_SPAWN_WORKER => {
-            let body = json!({
-                "jarvis_session_id": ctx.session_id,
-                "cwd": ctx.args["cwd"],
-                "task": ctx.args["task"],
-                "name": ctx.args.get("name"),
-                "model": ctx.args.get("model"),
-                "account": ctx.args.get("account"),
-            });
-            Some(ctx.relay("/jarvis/spawn-worker", body, None, None))
-        }
-        TOOL_SEND_TO_SESSION => {
-            let body = json!({
-                "jarvis_session_id": ctx.session_id,
-                "session_id": ctx.args["session_id"],
-                "text": ctx.args["text"],
-            });
-            Some(ctx.relay("/jarvis/send-to-session", body, None, None))
-        }
-        TOOL_FLEET_STATUS => {
-            let body = json!({ "jarvis_session_id": ctx.session_id });
-            Some(ctx.relay("/jarvis/fleet-status", body, None, None))
-        }
-        TOOL_RESPOND_WORKER_PROMPT => {
-            let body = json!({
-                "jarvis_session_id": ctx.session_id,
-                "request_id": ctx.args["request_id"],
-                "allow": ctx.args["allow"],
-                "message": ctx.args.get("message"),
-                "answers": ctx.args.get("answers"),
-                "updated_input": ctx.args.get("updated_input"),
-            });
-            Some(ctx.relay("/jarvis/respond-worker-prompt", body, None, None))
         }
         _ => None,
     }

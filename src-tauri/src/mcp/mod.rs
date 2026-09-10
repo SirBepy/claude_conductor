@@ -1,4 +1,5 @@
 mod dispatch;
+mod dispatch_jarvis;
 mod relay;
 pub mod server;
 mod tool_schemas;
