@@ -1,7 +1,13 @@
-// BILLED e2e proof (ai_todo 16, 681), two real haiku turns each on a fresh
-// session: 1) builtin AskUserQuestion -> PreToolUse hook fallback card.
-// 2) our pre-trusted MCP tool (c306a4b4) -> the real fire-and-forget path
-// CLAUDE.md calls "the one ask channel". npm run test:e2e -- --spec e2e/specs/question-card-live.e2e.js
+// BILLED e2e proof (ai_todo 16, 681, 905), two real haiku turns each on a
+// fresh session: 1) a canary that the builtin AskUserQuestion tool is still
+// disallowed at spawn (`--disallowedTools AskUserQuestion`, claude_config.rs)
+// - it must resolve in plain text, never a card, since the model can never
+// even emit that call. The PreToolUse hook's own fallback-card behaviour for
+// a builtin call (redirect x2, degrade on the 3rd) is unreachable from a live
+// turn for the same reason and is fully covered by question.rs's own Rust
+// unit tests instead. 2) our pre-trusted MCP tool (c306a4b4) -> the real
+// fire-and-forget path CLAUDE.md calls "the one ask channel".
+// npm run test:e2e -- --spec e2e/specs/question-card-live.e2e.js
 
 import assert from "node:assert";
 import path from "node:path";
@@ -76,38 +82,34 @@ describe("AskUserQuestion full real-path (BILLED)", () => {
       async () => browser.execute(() => typeof window.showView === "function"),
       { timeout: 30000, interval: 500, timeoutMsg: "app never finished loading (window.showView)" }
     );
+  });
+
+  // Independent starting state per case (todo 905): a prior case's leftover
+  // modal/pane state must never cascade into the next case's selectors - this
+  // is what let case 1's old failure strand case 2 on an unclickable
+  // #viewMoreBtn before the fix.
+  beforeEach(async () => {
     await browser.execute(() => window.showView("sessions"));
   });
 
-  it("real claude turn surfaces an answerable card and resolves on answer", async () => {
+  it("real claude turn cannot call the disallowed builtin AskUserQuestion tool - canary that the app-wide disallow is still enforced (todo 905)", async () => {
     await startHaikuChat();
     await installConsoleHook();
-    const activeBefore = await browser.execute(() => document.querySelector("#sessions-list li.active")?.getAttribute("data-session-id"));
     await sendMessage("Use the AskUserQuestion tool to ask me whether I prefer tabs or spaces. Do nothing else but call that tool.");
 
-    const card = await $(".prompt-card");
-    try {
-      await card.waitForExist({ timeout: 60000 });
-    } catch (e) {
-      const logs = await drainLogs();
-      const diag = await browser.execute(() => ({
-        active: document.querySelector("#sessions-list li.active")?.getAttribute("data-session-id"),
-        cards: document.querySelectorAll(".prompt-card").length,
-      }));
-      const relevant = logs.filter((l) => /perm-relay|perm-gate/.test(l));
-      throw new Error(`CARD NEVER APPEARED.\nactiveBefore=${activeBefore}\ndiag=${JSON.stringify(diag)}\nperm logs:\n${relevant.join("\n") || "<none>"}\nall logs tail:\n${logs.slice(-15).join("\n")}`);
-    }
-
-    const cardText = await card.getText();
-    assert.ok(/tabs/i.test(cardText) && /spaces/i.test(cardText), `card missing options: ${cardText}`);
-
-    await answerSingleQuestion("tabs", "Answer");
-
-    await card.waitForExist({ reverse: true, timeout: 15000, timeoutMsg: "card did not clear after answering" });
+    // `--disallowedTools AskUserQuestion` (claude_config.rs) means the model
+    // can never emit this call at all - it must resolve entirely in text.
+    // This exists to catch a REGRESSION where the disallow silently stops
+    // being passed at spawn; the PreToolUse hook's own fallback-card
+    // behaviour for a builtin call that DID get through is already fully
+    // covered by question.rs's own Rust unit tests and needs no live turn.
     await browser.waitUntil(
       async () => browser.execute(() => document.querySelectorAll(".msg.assistant:not(.streaming)").length >= 1),
-      { timeout: 60000, interval: 1000, timeoutMsg: "turn never resolved after answering (still hung?)" }
+      { timeout: 60000, interval: 1000, timeoutMsg: "turn never resolved (hung as if waiting for a tool call that can't happen)" }
     );
+
+    const cardCount = await browser.execute(() => document.querySelectorAll(".prompt-card").length);
+    assert.strictEqual(cardCount, 0, "no prompt-card should ever appear - AskUserQuestion is disallowed at spawn");
   });
 
   // Closes todo 681: the only other real-process spec exercises the builtin
