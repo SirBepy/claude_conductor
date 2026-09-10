@@ -66,9 +66,35 @@ pub(crate) fn turn_nonce() -> u64 {
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Writes this turn's `.mcp.json` and logs the outcome either way (todo 907):
+/// a chat spawned with a `None` here still gets `--permission-prompt-tool`/
+/// `--mcp-config` omitted from its `claude` invocation, which means `claude`
+/// registers ZERO MCP tools for the whole turn - it then dies as soon as
+/// anything needs `approval_prompt`, and until this log line the only trace
+/// of why was `claude stderr` naming a tool that was never wired up.
 pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> Option<PathBuf> {
-    let mcp_dir = crate::settings::paths::mcp_temp_dir().ok()?;
-    let exe = std::env::current_exe().ok()?;
+    match write_mcp_config_inner(turn_id, tracking_id, is_jarvis) {
+        Ok(path) => {
+            log::info!(
+                "daemon: turn {turn_id} (session {tracking_id}) wrote mcp config to {}",
+                path.display()
+            );
+            Some(path)
+        }
+        Err(reason) => {
+            log::warn!(
+                "daemon: turn {turn_id} (session {tracking_id}) could not write mcp config: \
+                 {reason}; claude will register zero MCP tools this turn (todo 907)"
+            );
+            None
+        }
+    }
+}
+
+fn write_mcp_config_inner(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> Result<PathBuf, String> {
+    let mcp_dir = crate::settings::paths::mcp_temp_dir()
+        .map_err(|e| format!("mcp_temp_dir unavailable: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe unavailable: {e}"))?;
     let mut env = serde_json::json!({"CC_SESSION_ID": tracking_id});
     if is_jarvis {
         env["CC_JARVIS"] = serde_json::json!("1");
@@ -88,8 +114,9 @@ pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool
         }
     });
     let path = mcp_dir.join(format!("{turn_id}.json"));
-    std::fs::write(&path, serde_json::to_string(&config).ok()?).ok()?;
-    Some(path)
+    let body = serde_json::to_string(&config).map_err(|e| format!("serialize failed: {e}"))?;
+    std::fs::write(&path, &body).map_err(|e| format!("write to {} failed: {e}", path.display()))?;
+    Ok(path)
 }
 
 /// Write a per-session settings.json that registers: a `UserPromptSubmit` hook
@@ -297,4 +324,48 @@ pub(crate) fn base_claude_args(resume_id: Option<&str>, session_id: &str, model:
         args.push("--remote-control".to_string());
     }
     args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Todo 907: this is the write whose silent failure meant `claude` was
+    /// spawned with `--permission-prompt-tool` naming a tool no MCP server
+    /// ever registered, dying on the first permission check with only a
+    /// `claude stderr` line to explain why. Proves the happy path produces a
+    /// well-formed, parseable config with the fields `claude` actually reads
+    /// (`command`/`args`/`env`) - a regression here would reproduce exactly
+    /// that failure shape.
+    #[test]
+    fn write_mcp_config_produces_a_parseable_server_entry() {
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+
+        let path = write_mcp_config("turn-1", "sess-1", false).expect("write must succeed");
+        std::env::remove_var("CC_DATA_DIR");
+
+        let raw = std::fs::read_to_string(&path).expect("config file must exist on disk");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("must be valid JSON");
+        let server = &parsed["mcpServers"]["cc_conductor"];
+        assert!(server["command"].as_str().unwrap_or("").len() > 0, "command must be set");
+        assert_eq!(server["args"], serde_json::json!(["--mcp-permission"]));
+        assert_eq!(server["env"]["CC_SESSION_ID"], serde_json::json!("sess-1"));
+        assert!(server["env"].get("CC_JARVIS").is_none(), "non-jarvis session must not set CC_JARVIS");
+    }
+
+    #[test]
+    fn write_mcp_config_sets_cc_jarvis_for_the_jarvis_session() {
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+
+        let path = write_mcp_config("turn-2", "sess-2", true).expect("write must succeed");
+        std::env::remove_var("CC_DATA_DIR");
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["mcpServers"]["cc_conductor"]["env"]["CC_JARVIS"], serde_json::json!("1"));
+    }
 }
