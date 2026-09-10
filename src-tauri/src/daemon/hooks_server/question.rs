@@ -29,7 +29,7 @@ use tokio::sync::oneshot;
 /// Returns whether the registry was actually written. On the `asking` side a
 /// `false` means the card surfaces nowhere, which is what the Stop hook's
 /// undelivered-question block keys off (todo 818).
-pub(super) fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option<&str>, asking: bool) -> bool {
+pub(super) async fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option<&str>, asking: bool) -> bool {
     let Some(sid) = session_id else { return false };
     let changed = if asking {
         // Publish only for sessions the registry actually tracks - hook tests
@@ -40,10 +40,12 @@ pub(super) fn set_question_awaiting(state: &Arc<DaemonState>, session_id: Option
         state.registry.set_awaiting(sid, Some("question".into()));
         true
     } else {
-        // Only clear a "question" value: a newer turn's real end-of-turn
-        // status (done/working/waiting) must not be stomped by a late-resuming
-        // prompt handler.
-        state.registry.clear_awaiting_if_question(sid)
+        // Only clear a "question" value, and only if no OTHER question prompt
+        // is still open for this session (todo 897): a newer turn's real
+        // end-of-turn status (done/working/waiting) must not be stomped by a
+        // late-resuming prompt handler, and a SIBLING prompt still open must
+        // not read as "settled" just because this one resolved first.
+        state.clear_question_awaiting_if_no_others_pending(sid).await
     };
     if changed {
         state.notifier.publish(
@@ -110,7 +112,7 @@ async fn post_fire_and_forget_question(
     ctx.state.add_prompt(id, "question-requested", payload.clone(), true).await;
     ctx.state.fire_blocked_prompt(session_id, id);
     crate::daemon::jarvis_wake::wake_on_worker_blocked(&ctx.state, session_id, id, Some(wake_label)).await;
-    let surfaced = set_question_awaiting(&ctx.state, session_id, true);
+    let surfaced = set_question_awaiting(&ctx.state, session_id, true).await;
     if let Some(sid) = session_id {
         let gen = ctx.state.registry.current_turn_gen(sid);
         ctx.state.registry.mark_question_posted(sid, gen, surfaced);

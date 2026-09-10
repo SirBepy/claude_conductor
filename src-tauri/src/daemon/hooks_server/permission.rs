@@ -95,7 +95,7 @@ pub(super) async fn on_permission_request(
     // Daemon-authoritative "needs input", same as the question path: without
     // it the only record of this prompt is a window-local JS Map, so any
     // surface that didn't receive the broadcast keeps rendering In Progress.
-    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), true);
+    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), true).await;
     let subs = ctx.state.notifier.publish("permission_request", payload);
     log::info!(
         "[perm-relay] published permission_request id={} tool={} session={:?} -> {} subscriber(s)",
@@ -112,9 +112,11 @@ pub(super) async fn on_permission_request(
         }
     };
     // Answered or timed out - claude resumes the same turn, so the row goes
-    // back to In Progress. `clear_awaiting_if_question` inside makes this safe
-    // against a newer turn that already wrote a real end-of-turn status.
-    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), false);
+    // back to In Progress. The gated clear inside makes this safe against a
+    // newer turn that already wrote a real end-of-turn status, AND against a
+    // coincident AskUserQuestion card that is still genuinely open (todo 897)
+    // - this plain tool-permission prompt resolving must not hide that.
+    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), false).await;
     ctx.state.remove_prompt(&body.id).await;
     result
 }

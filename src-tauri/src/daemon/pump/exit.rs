@@ -45,9 +45,14 @@ pub(crate) async fn run_pump_exit(
             .expire_prompts_for_session(&pump_session.session_id)
             .await;
         if expired > 0 {
+            // Gated on no OTHER open question for this session (todo 897):
+            // `expire_prompts_for_session` only ever expires non-durable
+            // (permission) prompts - a durable AskUserQuestion card for this
+            // same session survives on purpose - so a blind clear here used
+            // to hide that still-open card behind a falsely-settled row.
             let _ = state_for_pump
-                .registry
-                .clear_awaiting_if_question(&pump_session.session_id);
+                .clear_question_awaiting_if_no_others_pending(&pump_session.session_id)
+                .await;
             log::info!(
                 "daemon: session {} expired {} orphaned prompt(s) on EOF",
                 pump_session.session_id, expired

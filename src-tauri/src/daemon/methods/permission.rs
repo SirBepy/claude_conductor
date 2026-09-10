@@ -28,7 +28,10 @@ async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaitin
         return;
     }
     if let Some(sid) = session_id.as_deref() {
-        if state.registry.clear_awaiting_if_question(sid) {
+        // Gated on no OTHER open question for this session (todo 897): the
+        // record for `request_id` was already removed above, so this check
+        // only sees genuine siblings, not itself.
+        if state.clear_question_awaiting_if_no_others_pending(sid).await {
             state.notifier.publish(
                 "instances_changed",
                 serde_json::json!({"instances": state.registry.list()}),

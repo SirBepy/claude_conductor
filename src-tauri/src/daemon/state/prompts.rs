@@ -22,6 +22,34 @@ impl DaemonState {
         self.pending_prompts.lock().await.remove(id);
     }
 
+    /// True if `session_id` still has an open `"question-requested"` prompt
+    /// (todo 897). A session can have more than one open at once - asked out
+    /// of order across turns, answered out of order - so this is the check
+    /// every "a prompt just resolved, should `awaiting` clear now" call site
+    /// must make before clearing, instead of assuming the one that just
+    /// resolved was the only one open.
+    pub async fn session_has_pending_question(&self, session_id: &str) -> bool {
+        self.pending_prompts.lock().await.values().any(|v| {
+            v["event"].as_str() == Some("question-requested")
+                && v["payload"]["session_id"].as_str() == Some(session_id)
+        })
+    }
+
+    /// Clears `awaiting == "question"` for `session_id` ONLY IF no other
+    /// question prompt is still open for it (todo 897 - a session sat in
+    /// "input needed" for ~90 minutes; three call sites blindly cleared
+    /// `awaiting` on ANY one prompt resolving, so answering one of several
+    /// open questions could desync the registry's "needs input" flag from
+    /// `list_pending_prompts`' actual open set in either direction). Callers
+    /// must remove/settle the JUST-resolved prompt's own record before
+    /// calling this, so the check above doesn't count it as its own sibling.
+    pub async fn clear_question_awaiting_if_no_others_pending(&self, session_id: &str) -> bool {
+        if self.session_has_pending_question(session_id).await {
+            return false;
+        }
+        self.registry.clear_awaiting_if_question(session_id)
+    }
+
     /// Snapshot of all open prompts, for the app's `list_pending_prompts` poll.
     /// Sorted by `seq` (oldest first) - `pending_prompts` is a `HashMap`, whose
     /// own iteration order is not chronological.
@@ -125,5 +153,59 @@ mod tests {
         let prompts = st.list_prompts().await;
         let ids: Vec<&str> = prompts.iter().map(|p| p["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["has-seq", "no-seq"]);
+    }
+
+    /// Todo 897: with two question prompts open on one session, resolving the
+    /// FIRST one to answer must not clear `awaiting` while its sibling is
+    /// still genuinely open - only the last one resolving may clear it. The
+    /// pre-fix code called `registry.clear_awaiting_if_question` directly at
+    /// every resolve site with no sibling check, so the first answer (in
+    /// either order) always cleared the flag regardless of what remained open.
+    #[tokio::test]
+    async fn clear_question_awaiting_is_gated_on_sibling_prompts() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        st.registry.record_interactive_session(
+            "s1", std::path::Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z",
+        );
+        st.registry.set_awaiting("s1", Some("question".into()));
+
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
+        st.add_prompt("q2", "question-requested", serde_json::json!({"session_id": "s1", "seq": 2}), true).await;
+
+        // Resolve q1 first: its own record is removed BEFORE the clear check,
+        // mirroring the real call order at every settle site.
+        st.remove_prompt("q1").await;
+        let cleared_after_first = st.clear_question_awaiting_if_no_others_pending("s1").await;
+        assert!(!cleared_after_first, "q2 is still open - awaiting must not clear yet");
+        assert_eq!(
+            st.registry.get("s1").unwrap().awaiting.as_deref(),
+            Some("question"),
+            "a sibling question is still unanswered"
+        );
+
+        // Resolve q2: no siblings remain, so the clear now goes through.
+        st.remove_prompt("q2").await;
+        let cleared_after_second = st.clear_question_awaiting_if_no_others_pending("s1").await;
+        assert!(cleared_after_second, "the last open question resolving must clear awaiting");
+        assert!(st.registry.get("s1").unwrap().awaiting.is_none());
+    }
+
+    /// A permission-requested prompt must never count as a sibling question -
+    /// it never sets `awaiting` in the first place (see `settle_prompt`'s
+    /// `clear_awaiting: false` for permission answers), so it must not be
+    /// able to BLOCK a genuine question's clear either.
+    #[tokio::test]
+    async fn permission_prompts_are_not_sibling_questions() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        st.registry.record_interactive_session(
+            "s1", std::path::Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z",
+        );
+        st.registry.set_awaiting("s1", Some("question".into()));
+        st.add_prompt("perm1", "permission-requested", serde_json::json!({"session_id": "s1"}), false).await;
+
+        assert!(!st.session_has_pending_question("s1").await);
+        assert!(st.clear_question_awaiting_if_no_others_pending("s1").await);
     }
 }
