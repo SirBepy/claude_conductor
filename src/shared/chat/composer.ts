@@ -18,17 +18,16 @@ import "./composer-core/core.css";
 import "./voice/voice.css";
 import "./builtins/register";
 import "./caret-popup/popup.css";
-import { ComposerAttachments, PASTE_LOG_THRESHOLD, type Attachment, type PastedBlock } from "./composer-attachments";
+import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
 import { recordSent, moveSentOutbox } from "./sent-outbox";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
 import { ComposerHighlight } from "./composer-highlight";
+import { ComposerStrayInput } from "./composer-stray-input";
 import { isMobileViewport } from "../mobile-viewport";
-import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
 import * as shortcuts from "../shortcuts";
-import { isAnyModalOpen } from "../modal-input-lock";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
@@ -106,6 +105,7 @@ export class Composer {
   private cv: ComposerVoice;
   private ptt: ComposerPtt;
   private att: ComposerAttachments;
+  private strayInput: ComposerStrayInput;
   private micBtn: HTMLButtonElement | null = null;
   // Cross-surface sync: debounced push + reconcile-on-open/regain-visibility.
   // One instance per Composer, itself created fresh per window/pane.
@@ -121,66 +121,6 @@ export class Composer {
   // the phone meanwhile should disappear from an already-open chat.
   private _windowFocusHandler = (): void => {
     void this.reconcileFromDaemon();
-  };
-
-  /** Where input that landed on no editable element belongs, or null to leave
-   * the event alone. An open question card owns its own free-text field and
-   * floats over the composer, so it wins; the composer is the fallback. */
-  private _strayInputTarget(): HTMLTextAreaElement | null {
-    if (this.disabled || !this.textarea || this.textarea.disabled) return null;
-    // A modal's focused control (e.g. askConfirm's Cancel button) is
-    // non-editable, so modal-input-lock lets the event bubble here - this
-    // must not hijack it just because activeElement isn't a field.
-    if (isAnyModalOpen()) return null;
-    const active = document.activeElement;
-    if (
-      active instanceof HTMLTextAreaElement ||
-      active instanceof HTMLInputElement ||
-      active instanceof HTMLSelectElement ||
-      (active instanceof HTMLElement && active.isContentEditable)
-    ) return null;
-    const cardInput = document.querySelector<HTMLTextAreaElement>(
-      `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`,
-    );
-    return cardInput ?? this.textarea;
-  }
-
-  private _insertStray(target: HTMLTextAreaElement, text: string): void {
-    const start = target.selectionStart ?? target.value.length;
-    const end = target.selectionEnd ?? target.value.length;
-    target.value = target.value.slice(0, start) + text + target.value.slice(end);
-    target.selectionStart = target.selectionEnd = start + text.length;
-    target.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  private _globalKeydown = (e: KeyboardEvent): void => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key.length !== 1) return;
-    const target = this._strayInputTarget();
-    if (!target) return;
-    target.focus();
-    this._insertStray(target, e.key);
-    e.preventDefault();
-  };
-
-  // Paste half of _globalKeydown's type-anywhere behaviour: that handler skips
-  // modifier chords, and the browser drops a paste with no editable focused.
-  private _globalPaste = (e: ClipboardEvent): void => {
-    const target = this._strayInputTarget();
-    if (!target) return;
-    const text = e.clipboardData?.getData("text/plain") ?? "";
-    const hasFile = Array.from(e.clipboardData?.items ?? []).some((it) => it.kind === "file");
-    // Focusing mid-event doesn't redirect the default action (it was already
-    // bound to <body>), so this handler has to place the payload itself.
-    e.preventDefault();
-    target.focus();
-    // Images and oversized logs are the attachment layer's job, but only for
-    // the composer - the AUQ card keeps its own separate attachment store.
-    if (target === this.textarea && (hasFile || text.length >= PASTE_LOG_THRESHOLD)) {
-      void this.att.handlePaste(e);
-      return;
-    }
-    if (text) this._insertStray(target, text);
   };
 
   constructor(root: HTMLElement, opts: ComposerOptions) {
@@ -222,6 +162,11 @@ export class Composer {
       getSessionId: () => this.sessionId,
       onChange: () => this.updateScheduleBtnState(),
     });
+    this.strayInput = new ComposerStrayInput({
+      getTextarea: () => this.textarea,
+      isDisabled: () => this.disabled,
+      handlePaste: (e) => { void this.att.handlePaste(e); },
+    });
     // Establish positioning context so the absolute-anchored popup lands
     // above the composer instead of falling back to a distant ancestor.
     if (getComputedStyle(this.root).position === "static") {
@@ -233,8 +178,7 @@ export class Composer {
     this.file = new FileProvider();
     this.file.start(opts.projectDir ?? null);
     this.render();
-    document.addEventListener("keydown", this._globalKeydown);
-    document.addEventListener("paste", this._globalPaste);
+    this.strayInput.mount();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     window.addEventListener("focus", this._windowFocusHandler);
     shortcuts.register("blur-composer", () => { this.textarea?.blur(); });
@@ -248,8 +192,7 @@ export class Composer {
   }
 
   destroy(): void {
-    document.removeEventListener("keydown", this._globalKeydown);
-    document.removeEventListener("paste", this._globalPaste);
+    this.strayInput.destroy();
     document.removeEventListener("visibilitychange", this._visibilityHandler);
     window.removeEventListener("focus", this._windowFocusHandler);
     shortcuts.unregister("blur-composer");
