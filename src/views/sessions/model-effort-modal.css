@@ -146,6 +146,11 @@
   flex-wrap: wrap;
 }
 
+/* Single-account field (todo 883): same chip look, but nothing to click. */
+.model-effort-modal-card .me-acc-static {
+  cursor: default;
+}
+
 .model-effort-modal-card .me-acc-empty-msg {
   display: flex;
   align-items: center;

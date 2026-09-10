@@ -7,7 +7,7 @@ import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { type ChipType, isToolChip, chipToolName } from "./statusline-catalog";
-import { getCachedAccount, capitalize } from "../../shared/accounts-cache";
+import { getCachedAccount, listCachedAccounts, capitalize } from "../../shared/accounts-cache";
 import { formatDuration, shortModelName, type SessionCounts } from "./session-statusbar-helpers";
 
 export interface ChipRenderCtx {
@@ -88,6 +88,9 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       return "";
     }
     case "account": {
+      // Naming the only account is zero information (todo 883) - the chip
+      // only earns its pixels once there's a second one to distinguish from.
+      if (listCachedAccounts().length <= 1) return "";
       const acc = getCachedAccount(ctx.accountId);
       if (!acc) return "";
       const clickable = ctx.hasAccountClick ? " sb-account-btn" : "";

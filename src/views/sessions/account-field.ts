@@ -7,7 +7,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import type { Account } from "../../shared/api";
-import { accountChipHtml } from "../../shared/account-chip";
+import { accountChipHtml, accountIconBadgeHtml } from "../../shared/account-chip";
 import "../../shared/account-chip.css";
 
 /** Mutable account-picker state, owned by the modal's closure. `accountId`
@@ -40,6 +40,23 @@ export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFie
         <div class="me-acc-empty-msg">
           <i class="ph ph-warning-circle"></i> No Claude accounts yet.
           <button type="button" class="me-acc-add-link">Add one in Settings</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Exactly one account: nothing to pick (todo 883 - a single-option picker
+  // is a confirmation, not a choice), but the field stays on screen so Joe
+  // still sees which account this session spawns under. No data-acc-id/role
+  // "button": attachAccountFieldHandlers only wires elements with an id to
+  // pick, and this one has nothing to switch to.
+  if (accounts.length === 1) {
+    const a = accounts[0]!;
+    return `
+      <div class="me-acc-field">
+        <label class="me-label">Account</label>
+        <div class="me-acc-edit">
+          <span class="account-chip sel me-acc-static" style="--acc:${escapeHtml(a.colour)}">${accountIconBadgeHtml(a)}${escapeHtml(a.label)}</span>
         </div>
       </div>
     `;
