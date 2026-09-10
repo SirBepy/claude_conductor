@@ -30,9 +30,17 @@ pub mod waiting_target;
 /// same reason.
 pub mod question_args;
 
-/// Read the hooks port from <app-data>/hooks_port.txt.
+/// Read the hooks port from <app-data>/hooks_port[suffix].txt. Instance-aware
+/// like `daemon::claude_config::daemon_hook_port()`: `claude` inherits this
+/// process's ambient env (including `CC_DAEMON_INSTANCE`, if the daemon that
+/// spawned it was itself isolated) and the MCP config's own `env` block never
+/// clears it, so `instance_suffix()` resolves the same suffix here as it does
+/// daemon-side. Reading the unsuffixed default here unconditionally (as
+/// before todo 906) silently cross-wired an isolated instance's MCP tools
+/// into the production daemon's hooks port instead.
 fn read_port() -> Option<u16> {
-    crate::settings::paths::read_hook_port("")
+    let suffix = crate::daemon::instance::instance_suffix();
+    crate::settings::paths::read_hook_port(&suffix)
 }
 
 pub(super) fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
@@ -249,6 +257,34 @@ mod tests {
             }
             _ => mcp_error(&id, -32601, "method not found"),
         }
+    }
+
+    /// Todo 906: `read_port()` used to always read the unsuffixed
+    /// `hooks_port.txt` regardless of `CC_DAEMON_INSTANCE`, so an isolated
+    /// instance's MCP tools silently cross-wired into the production
+    /// daemon's port. It must resolve the SAME suffix `daemon_hook_port()`
+    /// does, per-instance.
+    #[test]
+    fn read_port_honours_the_instance_suffix() {
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("hooks_port-alpha.txt"), "40001").unwrap();
+        std::fs::write(dir.path().join("hooks_port-beta.txt"), "40002").unwrap();
+        // Deliberately no unsuffixed hooks_port.txt: before the fix,
+        // read_port() always looked for that file and this would assert
+        // None for both, which is exactly the cross-wiring bug this
+        // proves - it never even reached the daemon meant for that instance.
+
+        std::env::set_var("CC_DATA_DIR", dir.path());
+        std::env::set_var("CC_DAEMON_INSTANCE", "alpha");
+        let alpha = read_port();
+        std::env::set_var("CC_DAEMON_INSTANCE", "beta");
+        let beta = read_port();
+        std::env::remove_var("CC_DAEMON_INSTANCE");
+        std::env::remove_var("CC_DATA_DIR");
+
+        assert_eq!(alpha, Some(40001), "must read this instance's own suffixed port file, not the default's");
+        assert_eq!(beta, Some(40002), "a different instance must read its own file too");
     }
 
     #[test]
