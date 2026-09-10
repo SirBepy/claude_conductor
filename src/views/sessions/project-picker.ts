@@ -8,12 +8,16 @@ import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal"
 import { openLocationModal } from "./location-picker";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
-import { api, type ProjectConfig } from "../../shared/api";
+import { api } from "../../shared/api";
 import {
   renderMachineFieldHtml,
   attachMachineFieldHandlers,
   type MachineFieldState,
 } from "./machine-field";
+import {
+  createMachineProjectsState,
+  fetchMachineProjects,
+} from "./components/machine-projects";
 
 export type SortChoice = "name" | "recent" | "todos";
 export const SORT_STORAGE_KEY = "claude_companion_sessions_modal_sort";
@@ -74,34 +78,6 @@ export async function pickProject(): Promise<PickedProject | null> {
   return openProjectPickerModal(cached, ready);
 }
 
-/** Maps a peer machine's bare `ProjectConfig` (no avatar/todo/worktree data -
- * that's all local-only enrichment) into the row shape the picker already
- * renders. `avatar` deliberately isn't {kind:"none"}: that renders a
- * hydratable `.proj-face` placeholder, and hydrateProjectTechIcons would then
- * probe THIS machine's filesystem for a path that only exists on the peer. */
-function projectConfigToGroup(pc: ProjectConfig): ProjectGroup {
-  const path = String(pc.path);
-  const rawName = (pc as { name?: unknown }).name;
-  const name = typeof rawName === "string" && rawName
-    ? rawName
-    : path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
-  return {
-    id: pc.id, path, name,
-    parent_segment: null,
-    avatar: { kind: "emoji", value: "📁" },
-    automation_enabled: false,
-    tokens_7d: 0n,
-    live: 0,
-    any_remote: false,
-    any_automated: false,
-    last_active_at: null,
-    path_exists: true, // can't stat a peer's filesystem from here
-    worktrees: [],
-    last_worktree_path: null,
-    last_start_folder_rel: null,
-  };
-}
-
 export function openProjectPickerModal(
   cachedProjects: ProjectGroup[] | undefined,
   projectsReady: Promise<ProjectGroup[]>,
@@ -128,35 +104,24 @@ export function openProjectPickerModal(
     const machineField: MachineFieldState = { machineId: null };
     let selfMachine: import("../../shared/api").SelfMachine | null = null;
     let peerMachines: import("../../shared/api").PeerMachineView[] = [];
-    let remoteProjects: ProjectGroup[] | undefined;
-    let remoteProjectsLoading = false;
-    let remoteProjectsError: string | null = null;
+    const remoteProjectsState = createMachineProjectsState();
 
     const currentProjects = (): ProjectGroup[] | undefined =>
-      machineField.machineId === null ? localProjects : remoteProjects;
+      machineField.machineId === null ? localProjects : remoteProjectsState.projects;
 
     const pickMachine = (machineId: string | null): void => {
       if (machineId === null) {
         renderModal();
         return;
       }
-      remoteProjects = undefined;
-      remoteProjectsLoading = true;
-      remoteProjectsError = null;
       selectedIdx = 0;
       renderModal();
-      void api.listMachineProjects(machineId).then((list) => {
-        if (resolved || machineField.machineId !== machineId) return;
-        remoteProjects = list.map(projectConfigToGroup);
-        remoteProjectsLoading = false;
-        renderModal();
-      }).catch((err: unknown) => {
-        if (resolved || machineField.machineId !== machineId) return;
-        console.error("[sessions] list_machine_projects failed", err);
-        remoteProjectsError = err instanceof Error ? err.message : "Failed to load projects";
-        remoteProjectsLoading = false;
-        renderModal();
-      });
+      fetchMachineProjects(
+        remoteProjectsState,
+        machineId,
+        () => resolved || machineField.machineId !== machineId,
+        renderModal,
+      );
     };
 
     // Desktop only (H4); a phone caller degrades with RemoteUnavailableError,
@@ -357,11 +322,11 @@ export function openProjectPickerModal(
             />
             <ul class="project-picker-list">
               ${(() => {
-                if (machineField.machineId !== null && remoteProjectsLoading) {
+                if (machineField.machineId !== null && remoteProjectsState.loading) {
                   return html`<li class="project-picker-empty"><i class="ph ph-circle-notch"></i> Loading&hellip;</li>`;
                 }
-                if (machineField.machineId !== null && remoteProjectsError) {
-                  return html`<li class="project-picker-empty project-picker-error">${remoteProjectsError}</li>`;
+                if (machineField.machineId !== null && remoteProjectsState.error) {
+                  return html`<li class="project-picker-empty project-picker-error">${remoteProjectsState.error}</li>`;
                 }
                 if (rows.length === 0) return html`<li class="project-picker-empty">No matches</li>`;
                 return rows.map((p, i) => {
