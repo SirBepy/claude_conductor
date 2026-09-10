@@ -17,6 +17,11 @@ const ENDED_KEPT: usize = 200;
 /// 5s tick - once every 10 minutes is plenty to keep the in-memory registry
 /// from growing unbounded across long daemon uptimes.
 const PRUNE_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// Same cadence as `PRUNE_INTERVAL` (todo 881): a `TRUNCATE` checkpoint is
+/// cheap and side-effect-free when it can't fully complete (see
+/// `storage::db::checkpoint_truncate`'s doc), so there's no reason to run it
+/// on a different schedule than the other periodic housekeeping here.
+const WAL_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 pub fn spawn(state: Arc<DaemonState>) {
     let registry = state.registry.clone();
@@ -25,6 +30,7 @@ pub fn spawn(state: Arc<DaemonState>) {
     // so we only re-read the file when it actually grew.
     let mut mtimes: HashMap<String, SystemTime> = HashMap::new();
     let mut last_prune = Instant::now();
+    let mut last_checkpoint = Instant::now();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(5));
         loop {
@@ -52,6 +58,29 @@ pub fn spawn(state: Arc<DaemonState>) {
                 if removed > 0 {
                     log::info!("detector: pruned {removed} ended instance(s) past the newest {ENDED_KEPT}");
                     pruned = true;
+                }
+            }
+
+            // Todo 881: companion.db-wal measured at 58MB (larger than the
+            // 35MB main db) and still growing after 15+ hours with zero
+            // truncation - the default wal_autocheckpoint threshold alone
+            // isn't enough while the app's own long-lived connection to the
+            // same file keeps a TRUNCATE-eligible instant from ever landing.
+            // See `storage::db::checkpoint_truncate`'s doc for why this is
+            // safe to call on a plain interval.
+            if last_checkpoint.elapsed() >= WAL_CHECKPOINT_INTERVAL {
+                last_checkpoint = Instant::now();
+                if let Some(db) = &publish_state.db {
+                    if let Ok(mgr) = db.lock() {
+                        match crate::storage::db::checkpoint_truncate(mgr.conn()) {
+                            Ok((busy, log_frames, checkpointed_frames)) => {
+                                log::info!(
+                                    "detector: wal_checkpoint(TRUNCATE) busy={busy} log_frames={log_frames} checkpointed_frames={checkpointed_frames}"
+                                );
+                            }
+                            Err(e) => log::warn!("detector: wal_checkpoint(TRUNCATE) failed: {e:#}"),
+                        }
+                    }
                 }
             }
 

@@ -70,6 +70,31 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Runs a `TRUNCATE`-mode WAL checkpoint, returning SQLite's own
+/// `(busy, log_frames, checkpointed_frames)` triple (see
+/// https://www.sqlite.org/pragma.html#pragma_wal_checkpoint).
+///
+/// Todo 881: `journal_mode=WAL`'s default `wal_autocheckpoint` (1000 pages,
+/// ~4MB) only runs a PASSIVE checkpoint opportunistically after a commit, and
+/// PASSIVE can never truncate the WAL file back down - only TRUNCATE can, and
+/// only when it can momentarily see no other connection's snapshot still
+/// pinned to an older WAL position. The app and the daemon each hold their
+/// own long-lived connection to the same `companion.db` (`state.db` here,
+/// `AppState`'s own on the app side), so with both routinely mid-read/write
+/// there was rarely a truncation-eligible instant - measured on Joe's machine
+/// 2026-09-10: `companion.db` 35MB, `companion.db-wal` 58MB and still growing
+/// after 15+ hours with zero truncation. `TRUNCATE` never errors when it
+/// can't get that exclusive instant - it silently degrades to a PASSIVE
+/// checkpoint (`busy=1` in the return triple) - so callers can run this on a
+/// plain interval with no risk of failing a call or blocking a concurrent
+/// writer past `busy_timeout`.
+pub fn checkpoint_truncate(conn: &Connection) -> Result<(i64, i64, i64)> {
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })
+    .map_err(Into::into)
+}
+
 /// Reads back the stored schema version.
 pub fn schema_version(conn: &Connection) -> Result<i64> {
     let v: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -178,5 +203,41 @@ mod tests {
         let conn = open_db(&path).unwrap();
         run_migrations(&conn).unwrap();
         assert!(has_column(&conn, "usage_snapshots", "account_id").unwrap());
+    }
+
+    // Todo 881: proves checkpoint_truncate actually shrinks a real WAL file
+    // (an in-memory connection never grows one, so this needs a real path,
+    // same as open_db_end_to_end_via_public_api above).
+    #[test]
+    fn checkpoint_truncate_shrinks_the_wal_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.db");
+        let wal_path = dir.path().join("test.db-wal");
+        let conn = open_db(&path).unwrap();
+        run_migrations(&conn).unwrap();
+
+        for i in 0..500 {
+            conn.execute(
+                "INSERT INTO token_records (timestamp, data) VALUES (?1, ?2)",
+                rusqlite::params![i, "{\"padding\":\"0123456789abcdef0123456789abcdef\"}"],
+            )
+            .unwrap();
+        }
+        let wal_size_before = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+        assert!(wal_size_before > 0, "the inserts above must have grown a real WAL file");
+
+        // Not asserting on `checkpointed_frames` here: with no other connection
+        // contending, SQLite's own default `wal_autocheckpoint` (1000 pages) may
+        // already have passively flushed everything into the main db file by the
+        // time this explicit call runs, leaving 0 frames still pending - that is
+        // exactly the passive-checkpoint behavior this fix works around, since a
+        // PASSIVE checkpoint never shrinks the WAL FILE's on-disk size, only
+        // TRUNCATE does (see checkpoint_truncate's doc). The property that
+        // actually matters is asserted below: the file shrinks.
+        let (busy, _log_frames, _checkpointed_frames) = checkpoint_truncate(&conn).unwrap();
+        assert_eq!(busy, 0, "no other connection is open, so TRUNCATE must fully complete");
+
+        let wal_size_after = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+        assert_eq!(wal_size_after, 0, "a fully-completed TRUNCATE resets the WAL file to zero bytes");
     }
 }
