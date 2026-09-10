@@ -36,6 +36,9 @@ pub fn refuse_if_busy(
     session_id: &str,
 ) -> Result<(), LifecycleError> {
     if is_busy(state, session_id) {
+        // Todo 926: this used to log nothing, so the one occurrence that
+        // matters - a `busy` that never clears - left no trail to learn from.
+        log::warn!("daemon: refuse_if_busy refused a mid-turn send for session {session_id}");
         return Err(LifecycleError::Busy(session_id.to_string()));
     }
     Ok(())
