@@ -15,6 +15,15 @@ test("composer highlight backdrop and textarea share one content box", async ({ 
   await page.locator("#sessions-list li[data-session-id]").first().click();
   await page.locator("#session-pane .session-composer").first().waitFor();
 
+  // ComposerCore.setHighlightHtml (composer-core/core.ts) sets the backdrop's
+  // `display: none` whenever its computed html is empty - a deliberate
+  // WKWebView workaround, not a bug (stale glyphs otherwise persist onscreen
+  // after a clear). An idle, never-typed-in textarea leaves `.composer-
+  // highlight` display:none, so its rect collapses to 0x0 and this assertion
+  // compares real geometry against a hidden element's default. Typing first
+  // is what makes the two boxes comparable at all.
+  await page.locator("#session-pane .composer-textarea").fill("Which monitor should I use?");
+
   const geo = await page.evaluate(() => {
     const pane = document.querySelector("#session-pane")!;
     const box = (sel: string) => {
