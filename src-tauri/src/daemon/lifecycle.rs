@@ -20,6 +20,13 @@ const VALID_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 /// not be retried, it must be held.
 pub const SESSION_BUSY_CODE: i32 = -32006;
 
+/// Is this session mid-turn right now. The one predicate every busy-refusal
+/// site shares (todo 886) - `refuse_if_busy` below and `schedule_fire.rs`'s
+/// own guard used to carry byte-identical copies of this same registry read.
+pub(crate) fn is_busy(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    state.registry.get(session_id).map(|i| i.busy).unwrap_or(false)
+}
+
 /// `Err` when the session is mid-turn (todo 873). The daemon has no turn
 /// queue, so a second write into a live child re-opens the cancel-then-send
 /// race that latched `busy`; frontends match `SESSION_BUSY:` on the message
@@ -28,7 +35,7 @@ pub fn refuse_if_busy(
     state: &crate::daemon::state::DaemonState,
     session_id: &str,
 ) -> Result<(), LifecycleError> {
-    if state.registry.get(session_id).map(|i| i.busy).unwrap_or(false) {
+    if is_busy(state, session_id) {
         return Err(LifecycleError::Busy(session_id.to_string()));
     }
     Ok(())

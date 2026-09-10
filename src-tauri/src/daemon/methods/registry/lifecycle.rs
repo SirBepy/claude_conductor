@@ -19,7 +19,7 @@ pub(crate) async fn restart_live_session(state: &Arc<DaemonState>, caller: &str,
     if state.sessions.get(session_id).is_none() {
         return false;
     }
-    let was_busy = state.registry.get(session_id).map(|i| i.busy).unwrap_or(false);
+    let was_busy = crate::daemon::lifecycle::is_busy(state, session_id);
     let was_asked = state.list_prompts().await.iter()
         .any(|v| v["payload"]["session_id"].as_str() == Some(session_id));
     match crate::daemon::lifecycle::restart_session(state, session_id).await {

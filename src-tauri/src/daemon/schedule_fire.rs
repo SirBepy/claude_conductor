@@ -106,7 +106,7 @@ async fn fire_message(
     }
     // Mirror jarvis_fleet::send_to_session's guard: the daemon has no turn
     // queue, so writing into a mid-turn child's stdin is undefined behavior.
-    if state.registry.get(session_id).map(|i| i.busy).unwrap_or(false) {
+    if lifecycle::is_busy(state, session_id) {
         return Err(
             "target session is still mid-turn; the daemon has no turn queue so sending now \
              would be undefined behavior - wait until it goes idle and retry"
