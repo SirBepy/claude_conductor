@@ -102,6 +102,14 @@ export function isCurrentSessionBusy(): boolean {
     // First message not yet sent = draft, no work in flight.
     if (!pending.firstMessageSent) return false;
     // First message sent, awaiting realId: show busy if placeholder active.
+    // A spawn that rejects, or resolves with no id, is rolled back to a draft
+    // at the send site in pending-pane.ts. This bound is the remaining case
+    // that site cannot see: an invoke that never settles at all. Same
+    // NOT_RESPONDING_MS the established-session path below uses, so a pending
+    // row goes quiet on the same silence budget as any other.
+    if (pending.firstMessageSentAt !== null && Date.now() - pending.firstMessageSentAt > NOT_RESPONDING_MS) {
+      return false;
+    }
     return true;
   }
   return isSessionActive(state.selectedId);

@@ -315,6 +315,12 @@ export async function renderPendingPane(
               if (state.mountId !== myMount) return;
               rebuildSidebar();
               if (isStillActive) rebindPaneHeader(pane, sessionId);
+            } else {
+              // A resolve with no id runs none of the branch above and never
+              // reaches the catch, so nothing clears the pending row and it
+              // holds "starting..." indefinitely. Throwing routes it through
+              // the same rollback a rejected spawn already gets.
+              throw new Error("start_session resolved without a session id");
             }
           } catch (err) {
             console.error("[sessions] start_session failed", err);
