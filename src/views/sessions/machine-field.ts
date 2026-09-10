@@ -1,10 +1,11 @@
 // Machine-picker chip row for the new-chat project picker (multi-machine
 // federation). Copies account-field.ts's chip pattern (render + attach split,
 // state owned by the caller) - project-picker.ts is the only caller; it
-// re-renders via lit-html, so handlers are re-attached after every render
-// rather than delegated once (see attachMachineFieldHandlers below).
+// re-renders via lit-html, so click handlers are re-attached to the fresh
+// chip nodes after every render (see attachMachineFieldHandlers below).
 
 import { escapeHtml } from "../../shared/escape-html";
+import { attachChipKeyboardActivation } from "../../shared/account-chip";
 import type { SelfMachine, PeerMachineView } from "../../shared/api";
 import "../../shared/account-chip.css";
 
@@ -50,12 +51,19 @@ export function renderMachineFieldHtml(state: MachineFieldState, ctx: MachineFie
   `;
 }
 
+// Containers already wired for delegated Enter/Space activation - `overlay`
+// is project-picker.ts's modal host, which outlives every re-render (and,
+// since ensureModalHost() is a session-lifetime singleton, every future
+// picker open too), so attachChipKeyboardActivation must bind at most once
+// per container rather than once per attachMachineFieldHandlers() call.
+const chipKeyboardBound = new WeakSet<HTMLElement>();
+
 /**
  * Wire up the machine-field's DOM handlers after `renderMachineFieldHtml`'s
  * output is in the overlay. Called after EVERY render (the chip markup is
- * re-created each time via lit-html's unsafeHTML, so old listeners already
- * went with the old nodes) - mutates `state` and invokes `onChange` with the
- * newly picked id (null for "this machine"); the caller re-renders.
+ * re-created each time via lit-html's unsafeHTML, so old click listeners
+ * already went with the old nodes) - mutates `state` and invokes `onChange`
+ * with the newly picked id (null for "this machine"); the caller re-renders.
  */
 export function attachMachineFieldHandlers(
   overlay: HTMLElement,
@@ -64,17 +72,15 @@ export function attachMachineFieldHandlers(
 ): void {
   overlay.querySelectorAll<HTMLElement>(".machine-field-chips .machine-chip").forEach((chip) => {
     if (chip.getAttribute("aria-disabled") === "true") return;
-    const pick = (): void => {
+    chip.addEventListener("click", () => {
       const id = chip.dataset.machineId || null;
       if (state.machineId === id) return;
       state.machineId = id;
       onChange(id);
-    };
-    chip.addEventListener("click", pick);
-    chip.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      e.preventDefault();
-      pick();
     });
   });
+  if (!chipKeyboardBound.has(overlay)) {
+    chipKeyboardBound.add(overlay);
+    attachChipKeyboardActivation(overlay);
+  }
 }
