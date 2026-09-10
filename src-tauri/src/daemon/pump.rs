@@ -638,6 +638,55 @@ mod tests {
         assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "no-bump turn must still clear");
     }
 
+    /// Todo 885: `remote_handlers::send_message` (the phone's send path) used
+    /// to write into the child's stdin without ever bumping `busy`/`turn_gen`
+    /// first, so `refuse_if_busy`'s guard read a flag nothing on that path
+    /// set - a second phone send arriving before the pump's own
+    /// `mark_turn_live` fired off the first live stdout line slipped through,
+    /// the same race todo 873 closed for the desktop RPC. The fix mirrors
+    /// `core.rs`'s `send_message`: `set_awaiting(None)` + `set_busy(true)`
+    /// before the write. This pins that, once fixed, a phone-shaped turn
+    /// behaves exactly like a desktop turn - busy is true (and a second send
+    /// refused) the instant the handler returns, well before any stdout line
+    /// exists, and still clears normally at turn end.
+    #[test]
+    fn phone_send_pre_bump_closes_the_race_and_clears_at_turn_end() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-09-10T00:00:00Z");
+
+        // remote_handlers::send_message's pre-write bump.
+        registry.set_awaiting("s", None);
+        registry.set_busy("s", true);
+
+        // The race window todo 873/885 closes: a second send arriving here,
+        // before the child has emitted a single byte, must already see busy.
+        assert!(registry.get("s").unwrap().busy, "busy must be true before the stdin write, not after the first stream_event");
+
+        let mut ctx = ParserContext::new_live();
+        let mut saw_stream_turn = false;
+        let mut pump_turn_gen: u64 = 0;
+        for line in [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+        ] {
+            ctx.feed(format!("{line}\n").as_bytes());
+            if let Some(gen) = registry.take_pending_turn_gen("s") {
+                pump_turn_gen = gen;
+            }
+            if !saw_stream_turn && ctx.take_stream_event_seen() {
+                saw_stream_turn = true;
+            }
+        }
+        assert!(saw_stream_turn, "the turn must still be recognised as live");
+        assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "the turn's result line must still clear busy");
+        assert!(!registry.get("s").unwrap().busy);
+    }
+
     /// The observed failure (daemon.log 2026-08-26, session b20747fe): the CLI's
     /// spawn banner reached the pump while `turn_gen` was still 0, so every later
     /// turn captured one generation behind and `busy` never cleared again.

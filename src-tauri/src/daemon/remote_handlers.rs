@@ -337,12 +337,28 @@ pub(super) async fn send_message(
             return (StatusCode::CONFLICT, e.to_string()).into_response();
         }
     }
+    // Set busy BEFORE the write, mirroring core.rs's desktop `send_message` RPC
+    // (todo 525 root cause 1: a warm child can emit its first `stream_event`
+    // before this fn resumes past the write's own `.await`). Without this the
+    // guard above refused nothing that mattered: `busy` only became true once
+    // the pump's `mark_turn_live` fired off the CLI's first live stdout line,
+    // leaving the exact race todo 873 closed for desktop still open on the
+    // phone's send path (todo 885).
+    ctx.state.registry.set_awaiting(&id, None);
+    ctx.state.registry.set_busy(&id, true);
+    crate::sessions::chat_state::set_busy(&id, true);
     match crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text, false).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(crate::daemon::lifecycle::LifecycleError::NotFound(_)) => {
+            ctx.state.registry.set_busy(&id, false);
+            crate::sessions::chat_state::set_busy(&id, false);
             (StatusCode::NOT_FOUND, "no such session").into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => {
+            ctx.state.registry.set_busy(&id, false);
+            crate::sessions::chat_state::set_busy(&id, false);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
     }
 }
 
