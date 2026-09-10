@@ -122,11 +122,26 @@ export async function presentHostCard(renderFn: () => void): Promise<void> {
 
 /** Closes the whole chain. Only the outermost function (pickProject(),
  *  openModelEffortModal) calls this - nested steps just resolve. Debounced
- *  by COLLAPSE_MS so a presentHostCard() arriving first cancels the teardown. */
+ *  by COLLAPSE_MS so a presentHostCard() arriving first cancels the teardown.
+ *
+ *  The focus guard is released HERE, synchronously, not inside the COLLAPSE_MS
+ *  teardown below (todo 879). A caller awaiting the resolved modal promise
+ *  (pending-flow.ts's startNewSession -> renderPendingPane) can focus a
+ *  brand-new element - the composer textarea - well inside that 150ms window;
+ *  while the guard was still armed, modal-input-lock's global `focusin`
+ *  listener blurred anything outside every locked host, undoing that focus in
+ *  the same tick the moment it happened (reproduced: focus() immediately
+ *  followed by a same-tick blur() on the same node). The backdrop's own
+ *  z-index (not this guard) is what keeps the still-collapsing card from
+ *  taking stray clicks during the animation, so releasing the guard early
+ *  doesn't reopen that hole - a re-opened presentHostCard() before the timer
+ *  fires still re-locks via its own lockBackgroundInput() call. */
 export function closeHostCard(): void {
   const myGen = ++hostGeneration;
   const host = document.getElementById("modal-host");
   setBackdropCancel(null);
+  focusGuardDisposer?.();
+  focusGuardDisposer = null;
   if (!host) return;
   const card = modalCardSlot().querySelector<HTMLElement>(".modal-card");
   if (card) card.classList.add("modal-card-collapsing", "modal-card-morph-hidden");
@@ -136,8 +151,6 @@ export function closeHostCard(): void {
     render(html``, modalCardSlot());
     backDisposer?.();
     backDisposer = null;
-    focusGuardDisposer?.();
-    focusGuardDisposer = null;
     closeTimer = null;
   }, COLLAPSE_MS);
 }
