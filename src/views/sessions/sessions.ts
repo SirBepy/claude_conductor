@@ -357,6 +357,13 @@ function teardownState(): void {
   }
   state.composer?.destroy();
   state.composer = null;
+  // The held-messages controller is a per-window singleton that otherwise
+  // survives this teardown (its map/deferRetryTimer are meant to), but a
+  // pending auto-rescue fuse (todo 926) is tied to the pane's own
+  // interrupt()/getIsBusy() closures - safe to leave armed only while that
+  // pane exists. Disarm rather than let it fire against a session whose
+  // "current" busy state can no longer be read correctly.
+  state.heldMessages?.cancelPendingRescue();
   setActiveSession(null);
 }
 

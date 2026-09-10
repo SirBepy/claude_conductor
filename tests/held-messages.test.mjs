@@ -250,6 +250,114 @@ describe("HeldMessages — flush triggers", () => {
   });
 });
 
+describe("HeldMessages - 60s auto-rescue fuse (todo 926)", () => {
+  it("rescues a stuck AUQ answer: interrupts, waits for busy to clear, then delivers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, send, interrupt, state } = makeHarness();
+      // busy stays stuck (the deadlock this fuse exists for) - only the
+      // interrupt clears it, same as the manual "Send now" path.
+      state.busy = true;
+      interrupt.mockImplementation(async () => {
+        state.busy = false;
+      });
+      const answer = [{ type: "text", text: '<auq-answer id="card-1"/>Q: pick\nA: yes' }];
+      held.stage(answer);
+      expect(held.hasAuqAnswerFor("sess-A")).toBe(true);
+
+      // The healthy case resolves within ~15s on its own; the fuse must not
+      // have fired by then.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(interrupt).not.toHaveBeenCalled();
+      expect(held.hasItemsForActive()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(45_000); // total 60s
+      expect(interrupt).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(answer);
+      expect(held.hasItemsForActive()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the fuse when the answer flushes normally before 60s - cancel_turn never fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, send, interrupt, state } = makeHarness();
+      const answer = [{ type: "text", text: '<auq-answer id="card-2"/>Q: pick\nA: no' }];
+      held.stage(answer);
+
+      // Healthy case: busy clears well inside the fuse window and the
+      // existing completion path (unrelated to this fuse) flushes on its own.
+      vi.advanceTimersByTime(15_000);
+      state.busy = false;
+      held.onCompletion("sess-A", /* isQuestion */ true);
+      expect(send).toHaveBeenCalledWith(answer);
+      expect(held.hasItemsForActive()).toBe(false);
+
+      // Even once the ORIGINAL fuse's deadline passes, nothing more happens -
+      // proving it was disarmed by the flush, not merely outrun by it.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not arm the fuse for an ordinary (non-answer) staged message", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, interrupt, state } = makeHarness();
+      state.busy = true;
+      held.stage(textBlocks("just a note"));
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).not.toHaveBeenCalled();
+      expect(held.hasItemsForActive()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disarms when the session is switched away from before the fuse fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, attach, interrupt, state } = makeHarness();
+      state.busy = true;
+      const answer = [{ type: "text", text: '<auq-answer id="card-3"/>Q: pick\nA: maybe' }];
+      held.stage(answer);
+
+      held.attach({ ...attach, sessionId: "sess-B" });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).not.toHaveBeenCalled();
+      // sess-A's answer is still sitting there, untouched - background sweep
+      // (unchanged by this fuse) still owns delivering it once busy clears.
+      expect(held.hasItemsFor("sess-A")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancelPendingRescue disarms the fuse (full pane/view teardown)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, interrupt, state } = makeHarness();
+      state.busy = true;
+      const answer = [{ type: "text", text: '<auq-answer id="card-4"/>Q: pick\nA: idk' }];
+      held.stage(answer);
+
+      held.cancelPendingRescue();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("HeldMessages — background flush (non-attached session)", () => {
   it("flushes a backgrounded session's held set via the injected sender", async () => {
     const { held, attach, send } = makeHarness();
