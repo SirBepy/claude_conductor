@@ -41,9 +41,12 @@ export interface PendingNewSession {
   // IPC captures the real session_id). Pre-existing rows in the same cwd
   // stay visible.
   preExistingSessionIds: Set<string>;
-  // Wall-clock ms when firstMessageSent flipped to true. Used at restore
-  // time to auto-discard pending entries whose start_session RPC died with
-  // the previous app instance (firstMessageSent && !realId && stale).
+  // Wall-clock ms when firstMessageSent flipped to true. Read by
+  // session-thinking-bar.ts as the NOT_RESPONDING_MS bound for the pending
+  // pane's thinking indicator. Restore always discards a pending entry with
+  // firstMessageSent === true regardless of this timestamp: a page reload
+  // kills the IPC promise that would resolve the session id no matter how
+  // recent the send was, so there is no age past which restoring it helps.
   firstMessageSentAt: number | null;
 }
 
