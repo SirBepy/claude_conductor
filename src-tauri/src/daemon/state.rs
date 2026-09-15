@@ -19,6 +19,7 @@ use tokio::sync::{oneshot, Mutex, Notify};
 
 mod commit_lock;
 mod prompts;
+mod step_comments;
 
 use commit_lock::CommitLock;
 
@@ -125,6 +126,14 @@ pub struct DaemonState {
     /// should never bind the extra endpoint. Access via
     /// [`DaemonState::iroh_dialer`], never this field directly.
     iroh_dialer: tokio::sync::OnceCell<Arc<crate::daemon::machines::IrohDialer>>,
+    /// Comments Joe leaves on a still-`pending` `write_plan` step (todo 898),
+    /// keyed by `session_id` -> step `text` (the same identity key
+    /// `plan.rs::validate_steps` and the checklist renderer's row map use) ->
+    /// the comment. `hooks_server::plan::on_write_plan` takes (removes) one
+    /// the moment that call sees the step go `active`, so the comment rides
+    /// back in THAT call's own tool response and never touches the session's
+    /// stdin (todo 743). See `state::step_comments` for the full lifecycle.
+    pub step_comments: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
 }
 
 impl DaemonState {
@@ -166,6 +175,7 @@ impl DaemonState {
             hub: Arc::new(crate::daemon::machines::MachineHub::new()),
             relays: Arc::new(Mutex::new(HashMap::new())),
             iroh_dialer: tokio::sync::OnceCell::new(),
+            step_comments: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 

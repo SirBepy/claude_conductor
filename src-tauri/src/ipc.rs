@@ -39,6 +39,7 @@ pub mod user_todos;
 pub mod worktrees;
 pub mod claude_scopes;
 pub mod drafts;
+pub mod step_comments;
 pub mod waiting_tail;
 pub mod ready;
 
@@ -80,6 +81,7 @@ pub use user_todos::*;
 pub use worktrees::*;
 pub use claude_scopes::*;
 pub use drafts::*;
+pub use step_comments::*;
 pub use waiting_tail::*;
 pub use ready::*;
 

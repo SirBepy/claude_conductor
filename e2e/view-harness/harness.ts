@@ -169,6 +169,7 @@ export const SESSIONS_BASE_INVOKE: InvokeMap = {
   get_session_drain: null,
   list_pending_prompts: [],
   get_chat_config: null,
+  add_step_comment: { ok: true },
 };
 
 const SESSION_DEFAULTS: Instance = {

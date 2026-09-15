@@ -35,6 +35,20 @@ interface EventOutcome {
 const PLAN_STATUSES = ["pending", "active", "done", "skipped"] as const;
 type PlanStatus = (typeof PLAN_STATUSES)[number];
 
+// RULE (raised by /code-check on 9a510e3b, still not enforced in code): a
+// session must call EITHER write_plan OR TodoWrite for its checklist in a
+// given turn, never both. They share the rendered checklist but not their
+// keying - write_plan replaces the whole row set on every call, TodoWrite
+// diffs against `turnTodosBaseline`, which write_plan never seeds - so both
+// firing in one turn would key rows off two different label sets and render
+// a mixed/duplicated list. Doubly true once a row carries a step comment
+// (todo 898): the affordance only exists on a write_plan row
+// (`footer.dataset.planCommentable`), so a step re-declared through
+// TodoWrite would silently lose it. Unreachable in practice today (a session
+// rarely has both tools available at once) - documented here rather than
+// enforced, since the enforcement point (rejecting/coalescing the second
+// tool's call) has no natural owner yet.
+
 export function handleToolUseEvent(
   r: ChatRenderer,
   ev: Extract<ChatEvent, { type: "tool_use" }>,
@@ -88,6 +102,17 @@ export function handleToolUseEvent(
         detail: typeof s.detail === "string" && s.detail.trim() !== "" ? s.detail : undefined,
       }));
     if (r.activeTurnChipKey !== null && steps.length > 0) {
+      // Tag the footer BEFORE ensureTodoChecklist creates the checklist off
+      // it (todo 898): turn-todo-checklist.ts reads these two attributes at
+      // creation to decide whether a row gets the comment affordance and,
+      // if so, which session `add_step_comment` targets. A plain `data-*`
+      // attribute on the shared footer element, not a TurnFooterState field
+      // or a TurnFooterRegistry method - this file can touch the footer's
+      // own DOM, but turn-chips.ts (owns TurnFooterState/the registry) is a
+      // different lane's file this cycle.
+      const footer = r.turnFooters.getOrCreateFooter(r.activeTurnChipKey);
+      footer.dataset.planCommentable = "1";
+      footer.dataset.planSessionId = r.sessionId ?? "";
       r.turnFooters.ensureTodoChecklist(r.activeTurnChipKey);
       r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
     }

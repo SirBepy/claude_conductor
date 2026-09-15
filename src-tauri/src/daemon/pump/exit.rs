@@ -58,6 +58,14 @@ pub(crate) async fn run_pump_exit(
                 pump_session.session_id, expired
             );
         }
+        // A `write_plan` step comment (todo 898) still unclaimed when the
+        // turn's process exits belongs to a plan that is over - its step-text
+        // key is only meaningful within the turn that declared it, so leaving
+        // it would risk a stale cross-turn delivery if a FUTURE turn happens
+        // to reuse the same step text. The checklist row is where an
+        // undelivered comment stays visibly parked; this just stops the
+        // backend store from leaking it into an unrelated later turn.
+        state_for_pump.clear_step_comments(&pump_session.session_id).await;
         // /close's Phase 6 script also kills the `claude -p` child, which can
         // take the process down BEFORE its result line flushes - so a close the
         // `close_session` MCP tool confirmed must also be honored on EOF, not

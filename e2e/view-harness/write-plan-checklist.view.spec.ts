@@ -226,3 +226,73 @@ test("a cc-progress token during a write_plan turn does not add a second indicat
   await expect(page.locator(LIVE_ROWS)).toHaveCount(1);
   await expect(page.locator("#session-pane .session-messages .turn-footer .turn-progress")).toHaveCount(0);
 });
+
+// --- Step comments (todo 898): click-to-comment on a pending write_plan row,
+// and the daemon call it fires. Delivery timing itself (held until the step's
+// own write_plan call marks it active) is a backend property, covered by
+// src-tauri/src/daemon/hooks_server/plan.rs's own tests - this only proves
+// the click drives the real pipeline into the right IPC call.
+
+async function invokeCallsFor(page: Page, cmd: string): Promise<{ cmd: string; args: Record<string, unknown> }[]> {
+  return page.evaluate(
+    (c) => (window as unknown as { __ccInvokeCalls: { cmd: string; args: Record<string, unknown> }[] })
+      .__ccInvokeCalls.filter((call) => call.cmd === c),
+    cmd,
+  );
+}
+
+test("only a pending step gets a comment affordance; TodoWrite steps never do", async ({ page }) => {
+  await mountPlanChat(page);
+  const rows = page.locator(ROWS);
+  // STEPS: done, done, active, pending, pending(detail) - only the two
+  // pending rows (index 3, 4) get the affordance.
+  await expect(rows.nth(0).locator(".todo-step-comment-btn")).toHaveCount(0);
+  await expect(rows.nth(2).locator(".todo-step-comment-btn")).toHaveCount(0);
+  await expect(rows.nth(3).locator(".todo-step-comment-btn")).toHaveCount(1);
+  await expect(rows.nth(4).locator(".todo-step-comment-btn")).toHaveCount(1);
+});
+
+test("leaving a note on a pending step opens the editor and calls add_step_comment", async ({ page }) => {
+  await mountPlanChat(page, [
+    { text: "Read the spec", status: "active" },
+    { text: "Wire the feed", status: "pending" },
+  ]);
+  const row = page.locator(ROWS).nth(1);
+  await row.locator(".todo-step-comment-btn").click();
+
+  const textarea = row.locator(".todo-step-comment-textarea");
+  await expect(textarea).toBeVisible();
+  await textarea.fill("do we really need this step?");
+  await row.locator(".todo-step-comment-send").click();
+
+  await expect(textarea).toHaveCount(0);
+  const noted = row.locator(".todo-step-comment-btn--noted");
+  await expect(noted).toHaveCount(1);
+  await expect(noted).toHaveAttribute("title", "do we really need this step?");
+
+  const calls = await invokeCallsFor(page, "add_step_comment");
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.args).toMatchObject({
+    stepText: "Wire the feed",
+    comment: "do we really need this step?",
+  });
+});
+
+test("a live step activating with no comment ever left drops the affordance", async ({ page }) => {
+  await mountLiveChat(page);
+  await fireEvent(page, LIVE_CHANNEL, planTurn([{ text: "Wire the feed", status: "pending" }]));
+  const row = page.locator(LIVE_ROWS).first();
+  await expect(row.locator(".todo-step-comment-btn")).toHaveCount(1);
+
+  await fireEvent(page, LIVE_CHANNEL, [
+    {
+      type: "tool_use",
+      tool_name: "mcp__cc_conductor__write_plan",
+      input: { steps: [{ text: "Wire the feed", status: "active" }] },
+      id: "tu-live-2",
+      timestamp: 0,
+      parent_tool_use_id: null,
+    },
+  ]);
+  await expect(row.locator(".todo-step-comment-btn")).toHaveCount(0);
+});

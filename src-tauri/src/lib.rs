@@ -401,6 +401,7 @@ pub fn run() {
             ipc::update_held_message,
             ipc::remove_held_message,
             ipc::clear_held_messages,
+            ipc::add_step_comment,
             when_done::arm_when_done,
             when_done::cancel_when_done,
             when_done::get_when_done_state,

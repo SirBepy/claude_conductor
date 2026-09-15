@@ -151,6 +151,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_pr_review(&mut router, state.clone());
     methods::register_statusbar(&mut router, state.clone());
     methods::register_drafts(&mut router, state.clone());
+    methods::register_step_comments(&mut router, state.clone());
     methods::register_user_todos(&mut router, state.clone());
     methods::register_drafts_store(&mut router, state.clone());
     methods::register_ask(&mut router, state.clone());
