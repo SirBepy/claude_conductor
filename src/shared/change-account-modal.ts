@@ -14,8 +14,25 @@ import "./modal.css";
 import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
-import { accountChipHtml, attachChipKeyboardActivation } from "./account-chip";
+import { accountChipHtml, accountIconBadgeHtml, attachChipKeyboardActivation } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
+
+/** The `.cc-modal-body` contents for the account list, split out so the
+ * single-vs-multi-account branching is unit-testable without the modal's
+ * DOM/IPC wiring. Exactly one account: nothing to pick (todo 883 - a
+ * single-option picker is a confirmation, not a choice). Render it as a
+ * static display, not a chip: no data-acc-id/role="button", so there is
+ * nothing for the click handler in `openChangeAccountModal` to wire up. */
+export function renderAccountListBodyHtml(accounts: Account[], currentId: string | null): string {
+  if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
+  if (accounts.length === 1) {
+    const a = accounts[0]!;
+    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}">${accountIconBadgeHtml(a)}${escapeHtml(a.label)}</span></div>`;
+  }
+  return `<div class="cam-account-list">${accounts
+    .map((a: Account) => accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"`))
+    .join("")}</div>`;
+}
 
 export async function openChangeAccountModal(opts: {
   currentId: string | null;
@@ -38,11 +55,7 @@ export async function openChangeAccountModal(opts: {
     }
 
     function render() {
-      const bodyHtml = accounts.length === 0
-        ? `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`
-        : `<div class="cam-account-list">${accounts
-            .map((a: Account) => accountChipHtml(a, a.id === opts.currentId, `data-acc-id="${escapeHtml(a.id)}"`))
-            .join("")}</div>`;
+      const bodyHtml = renderAccountListBodyHtml(accounts, opts.currentId);
 
       overlay.innerHTML = `
         <div class="cc-modal-card cam-modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
@@ -55,7 +68,9 @@ export async function openChangeAccountModal(opts: {
       `;
 
       overlay.querySelector<HTMLButtonElement>(".cc-modal-close")?.addEventListener("click", () => close(null));
-      const chips = overlay.querySelectorAll<HTMLElement>(".cam-account-list .account-chip");
+      // [data-acc-id] excludes the single-account static span above: nothing
+      // to wire a click/number-key/keyboard handler to when there's no pick.
+      const chips = overlay.querySelectorAll<HTMLElement>(".cam-account-list .account-chip[data-acc-id]");
       chips.forEach((chip, i) => {
         chip.addEventListener("click", () => {
           const id = chip.dataset.accId;

@@ -14,3 +14,8 @@
   width: 100%;
   box-sizing: border-box;
 }
+
+/* Single-account display (todo 883): same chip look, but nothing to click. */
+.cam-account-list .cam-acc-static {
+  cursor: default;
+}
