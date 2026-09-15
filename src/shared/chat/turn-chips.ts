@@ -21,6 +21,13 @@ import {
 import { ensureProgressBar as ensureProgressBarImpl, setProgress as setProgressImpl } from "./turn-progress-bar";
 import { ensureMetaChip as ensureMetaChipImpl } from "./turn-meta-chip";
 import { renderWaitingChip, type WaitingOnTarget } from "./turn-waiting-chip";
+import {
+  addAgentDot as addAgentDotImpl,
+  updateAgentDotActivity as updateAgentDotActivityImpl,
+  finishAgentDot as finishAgentDotImpl,
+  settleAgentRail as settleAgentRailImpl,
+  type AgentRailState,
+} from "./turn-agent-rail";
 
 export { formatTurnDuration, formatTokenCount, estimateTokensFromText };
 export { applyWaitingOnNotification, onWaitingChipClick } from "./turn-waiting-chip";
@@ -103,6 +110,9 @@ export interface TurnFooterState {
   /** Totals the row last settled from, so a silent wake turn folding into
    *  this one (absorb) can add to them instead of overwriting. */
   lastTotals: TurnUsageTotals | null;
+  /** Live-subagent avatar row (todo 899). Null until the turn's first
+   *  Task/Agent tool_use creates it. */
+  agentRail: AgentRailState | null;
 }
 
 /**
@@ -141,6 +151,7 @@ export class TurnFooterRegistry {
       metaChip: null,
       waitingChip: null,
       lastTotals: null,
+      agentRail: null,
     });
     return footer;
   }
@@ -163,6 +174,7 @@ export class TurnFooterRegistry {
     absorbFooterContents(src.footer, dest.footer);
     if (!dest.metaChip && src.metaChip) dest.metaChip = src.metaChip;
     if (!dest.todoChecklist && src.todoChecklist) dest.todoChecklist = src.todoChecklist;
+    if (!dest.agentRail && src.agentRail) dest.agentRail = src.agentRail;
     this.turns.delete(srcKey);
     return true;
   }
@@ -201,6 +213,7 @@ export class TurnFooterRegistry {
     this.settleTodoChecklist(key);
     const st = this.turns.get(key);
     if (!st) return;
+    settleAgentRailImpl(st);
     settleMetaRowImpl(st, totals);
   }
 
@@ -219,6 +232,7 @@ export class TurnFooterRegistry {
     this.settleTodoChecklist(key);
     const st = this.turns.get(key);
     if (!st) return;
+    settleAgentRailImpl(st);
     cancelMetaRowImpl(st);
   }
 
@@ -283,6 +297,29 @@ export class TurnFooterRegistry {
   settleTodoChecklist(key: TurnChipKey): void {
     this.getOrCreateFooter(key);
     settleTodoChecklistImpl(this.turns.get(key));
+  }
+
+  /** Add a live agent-rail dot for a newly-spawned top-level Task/Agent call.
+   *  See turn-agent-rail.ts. */
+  addAgentDot(key: TurnChipKey, id: string, label: string, spawnedDuring: string | null): void {
+    this.getOrCreateFooter(key);
+    addAgentDotImpl(this.turns.get(key)!, id, label, spawnedDuring);
+  }
+
+  /** Update a live dot's current-activity line from a routed child tool_use.
+   *  See turn-agent-rail.ts. */
+  updateAgentDotActivity(key: TurnChipKey, parentId: string, activity: string): void {
+    const st = this.turns.get(key);
+    if (!st) return;
+    updateAgentDotActivityImpl(st, parentId, activity);
+  }
+
+  /** Play the death animation and fold a finished dot into the ghost pill.
+   *  See turn-agent-rail.ts. */
+  finishAgentDot(key: TurnChipKey, id: string): void {
+    const st = this.turns.get(key);
+    if (!st) return;
+    finishAgentDotImpl(st, id);
   }
 
   /** Remove every footer and clear all timers (renderer detach / bulk reset). */

@@ -18,7 +18,8 @@
 .turn-footer > .tool-strip-panel,
 .turn-footer > .screenshot-block,
 .turn-footer > .turn-progress,
-.turn-footer > .todo-checklist {
+.turn-footer > .todo-checklist,
+.turn-footer > .agent-rail {
   flex-basis: 100%;
   width: 100%;
 }
@@ -283,4 +284,88 @@
 
 .todo-checklist-collapsed {
   padding: 0;
+}
+
+/* ── Agent rail (todo 899): live Task/Agent subagent avatars ───────────────
+   One dot per running subagent, no click needed to see the count. A dead
+   dot plays a shrink/fade death animation, then folds into the dashed
+   "N done" ghost pill (Variant B) - "dead ones should actually die", not
+   silently vanish (Variant A) or nest under a checklist step it doesn't
+   actually belong to (Variant C, rejected on correctness). */
+.agent-rail {
+  margin: 0;
+}
+.agent-rail .tool-strip {
+  margin: 0;
+  padding: 0;
+}
+.tool-chip--agent-dot {
+  padding: 3px;
+  border-radius: 50%;
+  border-color: transparent;
+  background: transparent;
+}
+.tool-chip--agent-dot:hover {
+  background: var(--color-surface-alt);
+}
+.agent-dot-avatar {
+  width: 22px;
+  height: 22px;
+}
+@keyframes agent-dot-death {
+  0%   { transform: scale(1); opacity: 1; }
+  60%  { transform: scale(1.15); opacity: 0.7; }
+  100% { transform: scale(0); opacity: 0; }
+}
+.tool-chip--agent-dot-dying {
+  animation: agent-dot-death 0.5s ease-in forwards;
+  pointer-events: none;
+}
+/* Dashed border is the ghost pill's whole visual vocabulary - no color, no
+   badge, just a quieter outline than the solid tool chips around it. */
+.tool-chip--agent-ghost {
+  border-style: dashed;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+.tool-chip--agent-ghost i {
+  opacity: 0.7;
+}
+
+/* :not([hidden]) - the createHandleToolChipClick delegate toggles the
+   `hidden` attribute to switch panels; an unconditional `display: flex` here
+   is an AUTHOR rule and beats the UA stylesheet's `[hidden] { display: none }`
+   at equal specificity, showing every group at once (same trap
+   .author-group-panel:not([hidden]) already works around). */
+.agent-rail-detail:not([hidden]) {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-rail-detail-label {
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.agent-rail-detail-activity {
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}
+.agent-rail-detail-spawned {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  opacity: 0.75;
+}
+.agent-rail-finished:not([hidden]) {
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-rail-finished-row {
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}
+.agent-rail-finished-spawned {
+  opacity: 0.7;
 }

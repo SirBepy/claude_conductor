@@ -19,6 +19,7 @@ import {
 } from "./chat-question-card";
 import { describeActivity } from "./chat-dom-renderer";
 import { resolveOrdinalIn } from "./chat-pagination";
+import { descOf } from "./tool-strip-subagents";
 import type { ChatRenderer } from "./chat-renderer";
 
 // Structurally identical to chat-event-handler.ts's own (unexported)
@@ -163,6 +164,19 @@ export function handleToolUseEvent(
     ts,
     parentToolUseId: ev.parent_tool_use_id ?? null,
   });
+  // Agent rail (todo 899): a live dot per top-level Task/Agent spawn, and the
+  // dot's own "what it's doing right now" line from its children. Scoped to
+  // ONE level - a nested Task (a subagent spawning another) just becomes a
+  // generic activity line on its parent's dot rather than a second dot, the
+  // same "in-turn, no containment invented" boundary the todo draws for the
+  // checklist relationship.
+  if (r.activeTurnChipKey !== null) {
+    if ((ev.tool_name === "Task" || ev.tool_name === "Agent") && !ev.parent_tool_use_id) {
+      r.turnFooters.addAgentDot(r.activeTurnChipKey, ev.id, descOf(ev.input), r.lastTodoActivity);
+    } else if (ev.parent_tool_use_id) {
+      r.turnFooters.updateAgentDotActivity(r.activeTurnChipKey, ev.parent_tool_use_id, describeActivity(ev.tool_name, ev.input));
+    }
+  }
   const view = parseFileEdit(ev.tool_name, ev.input);
   if (view) {
     r.fileEdits.push(view);
@@ -196,6 +210,9 @@ export function handleToolResultEvent(
   if (r._todoWriteToolUseIds.delete(ev.tool_use_id)) return { touched: true, coalesce: false };
   if (r._updateMsgToolUseIds.delete(ev.tool_use_id)) return { touched: true, coalesce: false };
   if (tryHandleQuestionResult(r, ev)) return { touched: true, coalesce: false };
+  // Agent rail (todo 899): a Task/Agent's own result finishes its dot. A
+  // no-op for every other tool_use_id (not a live dot at all).
+  if (r.activeTurnChipKey !== null) r.turnFooters.finishAgentDot(r.activeTurnChipKey, ev.tool_use_id);
   // Ack for a send_message call: text already came from the tool_use
   // input, so absorb silently - no visible tool_result row. A REJECTED send
   // must also drop the bubble: the row is built from the tool_use input, so

@@ -325,9 +325,10 @@ describe("ChatRenderer — per-type tool chips (inline strip)", () => {
     r.handleEvent(turnUsage());
 
     // --- main strip assertions ---
-    // Exactly one main .tool-strip (not inside a .tool-strip-group)
+    // Exactly one main .tool-strip (not inside a .tool-strip-group, and not
+    // the agent rail's own strip - todo 899 added that as a sibling row).
     const allStrips = Array.from(container.querySelectorAll(".tool-strip"));
-    const mainStrips = allStrips.filter(s => !s.closest(".tool-strip-group"));
+    const mainStrips = allStrips.filter(s => !s.closest(".tool-strip-group") && !s.closest(".agent-rail"));
     expect(mainStrips.length).toBe(1);
     const mainStrip = mainStrips[0];
 
@@ -403,7 +404,8 @@ describe("ChatRenderer — per-type tool chips (inline strip)", () => {
     r.handleEvent(finalEvent("done"));
     r.handleEvent(turnUsage());
 
-    const mainStrips = Array.from(container.querySelectorAll(".tool-strip")).filter(s => !s.closest(".tool-strip-group"));
+    const mainStrips = Array.from(container.querySelectorAll(".tool-strip"))
+      .filter(s => !s.closest(".tool-strip-group") && !s.closest(".agent-rail"));
     expect(mainStrips.length).toBe(1);
     const mainStrip = mainStrips[0];
 
