@@ -23,6 +23,7 @@
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod activation;
 pub mod chats;
 pub mod jarvis;
 pub mod preview;
@@ -49,6 +50,7 @@ pub(crate) fn test_title(base: &str) -> String {
 
 /// Show + focus an already-built main window.
 pub fn surface_main(w: &tauri::WebviewWindow) {
+    activation::before_show(w.app_handle(), w.label());
     let _ = w.show();
     let _ = w.unminimize();
     let _ = w.set_focus();
@@ -96,6 +98,7 @@ fn attach_hide_to_tray(window: &tauri::WebviewWindow) {
             }
             api.prevent_close();
             let _ = w.hide();
+            activation::sync(w.app_handle());
         }
     });
 }
