@@ -3,7 +3,10 @@
 //! while the UI still paints it as a pill. Each mentioned command is appended
 //! as a pointer block, and the model judges whether the user meant to run it.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use super::{enumerate, SlashEntry, SlashSource};
 
@@ -133,14 +136,55 @@ pub fn strip_block(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out.trim().to_string())
 }
 
+/// `enumerate::scan_all` reads every `SKILL.md` body under `~/.claude`, and
+/// `scan_tokens` fires on any `/word`, so a burst of sends would repeat that
+/// walk for an identical answer. Short enough that a skill edited mid-chat is
+/// picked up by the next message.
+const REGISTRY_TTL: Duration = Duration::from_secs(5);
+
+/// Keyed by project dir, not a single slot: the registry differs per project
+/// and sessions in several projects send interleaved, which would make one
+/// slot evict itself every call. Expired keys are dropped on each lookup, so
+/// this holds only the projects that sent inside the last `REGISTRY_TTL`.
+static REGISTRY_CACHE: Mutex<Option<HashMap<Option<PathBuf>, (Instant, Vec<SlashEntry>)>>> =
+    Mutex::new(None);
+
+#[cfg(test)]
+static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Blocking - the lock is deliberately held across the walk so concurrent
+/// sends for one project collapse into a single scan instead of racing.
+fn cached_scan(project_dir: Option<&Path>) -> Vec<SlashEntry> {
+    let mut guard = REGISTRY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = guard.get_or_insert_with(HashMap::new);
+    cache.retain(|_, (at, _)| at.elapsed() < REGISTRY_TTL);
+    let key = project_dir.map(Path::to_path_buf);
+    if let Some((_, entries)) = cache.get(&key) {
+        return entries.clone();
+    }
+    #[cfg(test)]
+    SCANS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let entries = enumerate::scan_all(project_dir);
+    cache.insert(key, (Instant::now(), entries.clone()));
+    entries
+}
+
 /// `text` with the context block appended, or unchanged when nothing matched.
 /// Scans the command registry only when the text holds a candidate token, so
-/// an ordinary message costs one byte-scan and no filesystem work.
-pub fn augment(text: &str, project_dir: Option<&Path>) -> String {
+/// an ordinary message costs one byte-scan and no filesystem work. The scan
+/// itself goes to the blocking pool: this sits on the interactive send path.
+pub async fn augment(text: &str, project_dir: Option<&Path>) -> String {
     if scan_tokens(text).is_empty() {
         return text.to_string();
     }
-    let entries = enumerate::scan_all(project_dir);
+    let dir = project_dir.map(Path::to_path_buf);
+    let entries = match tokio::task::spawn_blocking(move || cached_scan(dir.as_deref())).await {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::warn!("[slash::mentions] registry scan failed: {e}");
+            return text.to_string();
+        }
+    };
     match build_block(text, &entries) {
         Some(block) => format!("{text}\n\n{block}"),
         None => text.to_string(),
@@ -210,8 +254,20 @@ mod tests {
         assert_eq!(strip_block("plain text"), "plain text");
     }
 
-    #[test]
-    fn augment_is_identity_without_mentions() {
-        assert_eq!(augment("just some prose", None), "just some prose");
+    #[tokio::test]
+    async fn augment_is_identity_without_mentions() {
+        assert_eq!(augment("just some prose", None).await, "just some prose");
+    }
+
+    /// The `/token` matches no command, so the answer is unchanged text either
+    /// way - what is asserted is that repeated sends cost one registry walk.
+    #[tokio::test]
+    async fn repeated_sends_walk_the_registry_once() {
+        use std::sync::atomic::Ordering;
+        let before = SCANS.load(Ordering::SeqCst);
+        for _ in 0..3 {
+            assert_eq!(augment("B, /or C", None).await, "B, /or C");
+        }
+        assert_eq!(SCANS.load(Ordering::SeqCst) - before, 1);
     }
 }
