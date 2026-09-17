@@ -371,12 +371,23 @@ mod build_groups_tests {
         assert!(matches!(groups[0].avatar, Avatar::Emoji(_)));
     }
 
+    /// Native-separator absolute path. `empty_group` derives the group name via
+    /// `Path::file_name`, which sees a whole `C:\a\b` string as one component
+    /// off Windows - a hardcoded literal here only collides on Windows.
+    fn abs(segments: &[&str]) -> String {
+        let mut p = std::path::PathBuf::from(if cfg!(windows) { "C:\\Projects" } else { "/Projects" });
+        for s in segments {
+            p.push(s);
+        }
+        p.to_string_lossy().into_owned()
+    }
+
     #[test]
     fn parent_segment_set_only_on_basename_collision() {
         let history = vec![
-            token("C:\\Projects\\zng-app", 1, 1, "2026-04-29T10:00:00Z"),
-            token("C:\\Projects\\Cinnamon\\zirtue\\zng-app", 1, 1, "2026-04-29T10:00:00Z"),
-            token("C:\\Projects\\unique-name", 1, 1, "2026-04-29T10:00:00Z"),
+            token(&abs(&["zng-app"]), 1, 1, "2026-04-29T10:00:00Z"),
+            token(&abs(&["Cinnamon", "zirtue", "zng-app"]), 1, 1, "2026-04-29T10:00:00Z"),
+            token(&abs(&["unique-name"]), 1, 1, "2026-04-29T10:00:00Z"),
         ];
         let groups = build_groups(&[], &history, &[], 0);
         let zng: Vec<_> = groups.iter().filter(|g| g.name == "zng-app").collect();

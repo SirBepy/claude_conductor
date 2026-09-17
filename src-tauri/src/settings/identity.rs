@@ -221,11 +221,17 @@ pub(crate) fn dedupe_projects_by_path_key(projects: &mut Vec<crate::types::Proje
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    /// Rooted beside the test binary, not `tempfile::tempdir()`'s OS-temp
-    /// default - avoids tripping `is_ephemeral_root_path` or this repo's own `.git`.
+    /// A scratch root that is neither under the OS temp dir (which
+    /// `is_ephemeral_root_path` rejects) nor inside any git repo (which
+    /// `find_repo_root` would roll every path up to). Beside the test binary
+    /// satisfies neither when `target/` sits in the repo, as it does without a
+    /// global cargo `target-dir` override.
     pub(crate) fn non_ephemeral_tempdir() -> tempfile::TempDir {
-        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-        tempfile::Builder::new().prefix("cc-test-").tempdir_in(exe_dir).unwrap()
+        let root = dirs::cache_dir()
+            .map(|c| c.join("claude-conductor-tests"))
+            .unwrap_or_else(|| std::env::current_exe().unwrap().parent().unwrap().to_path_buf());
+        std::fs::create_dir_all(&root).unwrap();
+        tempfile::Builder::new().prefix("cc-test-").tempdir_in(root).unwrap()
     }
 }
 
