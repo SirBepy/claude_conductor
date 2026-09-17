@@ -15,6 +15,11 @@ test("composer highlight backdrop and textarea share one content box", async ({ 
   await page.locator("#sessions-list li[data-session-id]").first().click();
   await page.locator("#session-pane .session-composer").first().waitFor();
 
+  // The backdrop is `display: none` while empty (2d514fee, WKWebView ghost
+  // text), and a hidden box measures as all zeros. Geometry only means
+  // anything once there is something to paint.
+  await page.locator("#session-pane .session-composer .composer-textarea").first().fill("hello");
+
   const geo = await page.evaluate(() => {
     const pane = document.querySelector("#session-pane")!;
     const box = (sel: string) => {
@@ -25,12 +30,16 @@ test("composer highlight backdrop and textarea share one content box", async ({ 
         textLeft: r.left + parseFloat(s.borderLeftWidth) + parseFloat(s.paddingLeft),
         textTop: r.top + parseFloat(s.borderTopWidth) + parseFloat(s.paddingTop),
         lineWidth: el.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight),
+        display: s.display,
         type: `${s.fontSize}/${s.lineHeight} ${s.fontFamily} ${s.letterSpacing} ${s.whiteSpace} ${s.overflowWrap}`,
       };
     };
     return { ta: box(".composer-textarea"), hl: box(".composer-highlight") };
   });
 
+  // Guards the setup above: a hidden backdrop would pass every geometry
+  // assertion below as a pile of zeros rather than failing loudly.
+  expect(geo.hl.display).not.toBe("none");
   expect(geo.hl.textLeft).toBeCloseTo(geo.ta.textLeft, 2);
   expect(geo.hl.textTop).toBeCloseTo(geo.ta.textTop, 2);
   expect(geo.hl.lineWidth).toBeCloseTo(geo.ta.lineWidth, 2);
