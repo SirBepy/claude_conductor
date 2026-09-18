@@ -11,7 +11,7 @@
   min-height: 170px;
 }
 .view-dashboard .home-card .label {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--sb-muted);
@@ -21,12 +21,12 @@
   margin: 4px 0;
 }
 .view-dashboard .home-card .pct {
-  font-size: 1.75rem;
+  font-size: var(--fs-display);
   font-weight: 600;
   align-self: center;
 }
 .view-dashboard .home-card .sub {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   text-align: center;
 }
@@ -40,19 +40,19 @@
   transition: opacity 0.3s ease;
 }
 .view-dashboard .home-card .reset-label {
-  font-size: 0.62rem;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   opacity: 0.7;
 }
 .view-dashboard .home-card .reset-absolute {
-  font-size: 0.9rem;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--color-text, #e8e8f0);
   letter-spacing: 0.01em;
 }
 .view-dashboard .home-card .reset-relative {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   font-variant-numeric: tabular-nums;
 }
 
@@ -66,7 +66,7 @@
   border-radius: 10px;
   padding: 10px 12px;
   margin-bottom: 14px;
-  font-size: 0.8rem;
+  font-size: var(--fs-body);
 }
 .view-dashboard .dash-setup-banner > i.ph {
   font-size: 1.2rem;
@@ -99,7 +99,7 @@
   background: color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 10%, var(--color-surface, #1f1f2c));
 }
 .view-dashboard .dash-ah { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.view-dashboard .dash-who { font-weight: 700; font-size: 0.92rem; }
+.view-dashboard .dash-who { font-weight: 700; font-size: var(--fs-title); }
 
 /* ── Ring duo (pace-brightness rings, replacing the old bar rows) ────────── */
 .view-dashboard .dash-ring-row { display: flex; justify-content: center; gap: 18px; }
@@ -129,17 +129,17 @@
   50% { filter: drop-shadow(0 0 8px #e05252); }
 }
 .view-dashboard .dash-ring-pcts { display: flex; flex-direction: column; align-items: center; }
-.view-dashboard .dash-ring-pcts .dash-ring-cur { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.88rem; line-height: 1.1; }
+.view-dashboard .dash-ring-pcts .dash-ring-cur { font-weight: 700; font-variant-numeric: tabular-nums; font-size: var(--fs-title); line-height: 1.1; }
 .view-dashboard .dash-ring-pcts .dash-ring-cur-dim { color: var(--sb-muted); }
 .view-dashboard .dash-ring-pcts .dash-ring-safe { color: var(--sb-muted); opacity: 0.65; font-size: 0.62rem; }
 .view-dashboard .dash-ring-time { display: flex; flex-direction: column; align-items: center; font-variant-numeric: tabular-nums; }
-.view-dashboard .dash-ring-time .dash-ring-time-big { font-size: 0.8rem; font-weight: 700; line-height: 1.2; }
+.view-dashboard .dash-ring-time .dash-ring-time-big { font-size: var(--fs-body); font-weight: 700; line-height: 1.2; }
 .view-dashboard .dash-ring-time .dash-ring-time-near { color: #e6a23c; }
 .view-dashboard .dash-ring-time .dash-ring-time-hot { color: #e05252; }
 .view-dashboard .dash-ring-time .dash-ring-time-dim { font-size: 0.64rem; color: var(--sb-muted); opacity: 0.65; }
 .view-dashboard .dash-ring-empty { font-size: 0.66rem; color: var(--sb-muted); margin-top: 8px; min-height: 1.1em; text-align: center; }
 /* Same red/icon language as accounts.css's .acc-drift-warning. */
-.view-dashboard .dash-acard-warning { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 600; color: var(--color-danger, #f87171); margin-top: 6px; }
+.view-dashboard .dash-acard-warning { display: flex; align-items: center; gap: 4px; font-size: var(--fs-micro); font-weight: 600; color: var(--color-danger, #f87171); margin-top: 6px; }
 
 /* ── Widget shell ──────────────────────────────────────────────────────── */
 .view-dashboard .dash-widgets { display: flex; flex-direction: column; gap: 12px; }
@@ -157,7 +157,7 @@
   border-bottom: 1px solid var(--color-border, #2e2e40);
 }
 .view-dashboard .dash-widget-icon { font-size: 15px; color: var(--color-text-muted, #8a8aa0); flex-shrink: 0; }
-.view-dashboard .dash-widget-title { font-weight: 700; font-size: 12.5px; }
+.view-dashboard .dash-widget-title { font-weight: 700; font-size: var(--fs-body); }
 .view-dashboard .dash-widget-header .grow { flex: 1; }
 /* Edit controls live in the DOM always; only shown in edit mode so toggling
  * editing never re-renders (and blanks) the widget bodies. */

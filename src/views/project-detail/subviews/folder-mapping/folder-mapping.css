@@ -9,7 +9,7 @@
 
 .merged-path-text {
   flex: 1;
-  font-size: 0.68rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   font-family: 'Fira Code', monospace;
   overflow: hidden;

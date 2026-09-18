@@ -7,7 +7,7 @@
 .appearance-picker .field { margin: 12px 0; }
 .appearance-picker .field label {
   display: block;
-  font-size: 11.5px;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   margin-bottom: 5px;
 }
@@ -57,7 +57,7 @@
   place-items: center;
   position: relative;
   overflow: hidden;
-  font-size: 14px;
+  font-size: var(--fs-title);
   color: var(--color-text-muted, #8a8a96);
   background: var(--color-surface-alt, #24242e);
 }

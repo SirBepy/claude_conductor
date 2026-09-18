@@ -31,10 +31,10 @@ export function renderMergedPathsSection(cwd: string): void {
   const rows = mergedPaths.map((p) => `
     <div class="merged-path-row">
       <span class="merged-path-text" title="${p}">${p}</span>
-      <button class="btn-secondary unmerge-btn" data-path="${p}" style="padding:2px 8px;font-size:0.7rem;flex-shrink:0">Unmerge</button>
+      <button class="btn-secondary unmerge-btn" data-path="${p}" style="padding:2px 8px;font-size: var(--fs-micro);flex-shrink:0">Unmerge</button>
     </div>`).join("");
   el.innerHTML = `<div class="section" style="padding:8px 14px;margin-top:0">
-    <div class="section-title" style="font-size:0.72rem;margin-bottom:6px">Merged Paths</div>
+    <div class="section-title" style="font-size: var(--fs-micro);margin-bottom:6px">Merged Paths</div>
     ${rows}
   </div>`;
   el.querySelectorAll<HTMLButtonElement>(".unmerge-btn").forEach((btn) => {
@@ -170,13 +170,13 @@ function template(avatar: Avatar, title: string, projectPath?: string) {
       <div class="view-body">
         <div class="section" style="margin-top:12px">
           <div class="section-title">Current folder</div>
-          <div id="projectDetailPath" class="v-focusable" role="button" tabindex="0" style="padding:6px 0;font-size:0.72rem;color:var(--sb-muted);font-family:'Fira Code',monospace;word-break:break-all;cursor:pointer" title="Click to repoint to a different folder"></div>
-          <input id="projectDetailPathInput" type="text" style="display:none;width:100%;font-size:0.72rem;font-family:'Fira Code',monospace;margin:4px 0;padding:4px 6px">
-          <div id="projectDetailPathError" style="display:none;font-size:0.68rem;color:var(--color-danger);margin:2px 0 6px"></div>
+          <div id="projectDetailPath" class="v-focusable" role="button" tabindex="0" style="padding:6px 0;font-size: var(--fs-micro);color:var(--sb-muted);font-family:'Fira Code',monospace;word-break:break-all;cursor:pointer" title="Click to repoint to a different folder"></div>
+          <input id="projectDetailPathInput" type="text" style="display:none;width:100%;font-size: var(--fs-micro);font-family:'Fira Code',monospace;margin:4px 0;padding:4px 6px">
+          <div id="projectDetailPathError" style="display:none;font-size: var(--fs-micro);color:var(--color-danger);margin:2px 0 6px"></div>
         </div>
         <div id="project-merged-paths"></div>
         <div class="section" style="margin-top:12px">
-          <button class="btn-danger" id="hideProjectBtn" style="width:100%;font-size:0.8rem">Hide from list</button>
+          <button class="btn-danger" id="hideProjectBtn" style="width:100%;font-size: var(--fs-body)">Hide from list</button>
         </div>
       </div>
     </div>

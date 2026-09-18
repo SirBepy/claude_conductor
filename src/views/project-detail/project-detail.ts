@@ -439,8 +439,8 @@ function template() {
         <div class="project-detail-heading">
           <div class="avatar-mini" id="projectDetailAvatar">?</div>
           <div class="project-detail-titles">
-            <h2 id="projectDetailTitle" class="v-focusable" tabindex="0" style="font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to rename" aria-label="Rename project">Project</h2>
-            <input id="projectDetailTitleInput" type="text" style="display:none;flex:1;font-weight:600;font-size:0.88rem">
+            <h2 id="projectDetailTitle" class="v-focusable" tabindex="0" style="font-size: var(--fs-title);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to rename" aria-label="Rename project">Project</h2>
+            <input id="projectDetailTitleInput" type="text" style="display:none;flex:1;font-weight:600;font-size: var(--fs-title)">
           </div>
         </div>
         <div class="menu-anchor">
@@ -483,10 +483,10 @@ function template() {
         <div id="project-chart-container"></div>
         <div id="project-sessions-list" style="margin-top:12px"></div>
         <div style="padding:4px 0 8px">
-          <div class="section-title" style="margin-bottom:8px;font-size:0.72rem">Open project</div>
+          <div class="section-title" style="margin-bottom:8px;font-size: var(--fs-micro)">Open project</div>
           <div style="display:flex;gap:8px">
-            <button class="btn-secondary" id="openExplorerBtn" style="flex:1;font-size:0.8rem">File Explorer</button>
-            <button class="btn-secondary" id="openVSCodeBtn" style="flex:1;font-size:0.8rem">VSCode</button>
+            <button class="btn-secondary" id="openExplorerBtn" style="flex:1;font-size: var(--fs-body)">File Explorer</button>
+            <button class="btn-secondary" id="openVSCodeBtn" style="flex:1;font-size: var(--fs-body)">VSCode</button>
           </div>
         </div>
       </div>

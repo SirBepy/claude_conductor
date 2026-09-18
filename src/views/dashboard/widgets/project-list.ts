@@ -111,12 +111,12 @@ export function buildProjectListHTML(opts: BuildListOpts): string {
   const remaining = sorted.length - visible.length;
   const showMoreBtn = capped
     ? `<div style="display:flex;justify-content:center;padding-top:8px">
-         <button class="btn-secondary show-more-btn" data-list-id="${containerId}" style="font-size:0.72rem;padding:2px 10px">Show ${remaining} more</button>
+         <button class="btn-secondary show-more-btn" data-list-id="${containerId}" style="font-size: var(--fs-micro);padding:2px 10px">Show ${remaining} more</button>
        </div>`
     : "";
 
   return `<div class="today-section" ${style ? `style="${style}"` : ""}>
-    ${title ? `<div style="font-size:0.92rem;font-weight:700;margin-bottom:10px">${title}</div>` : ""}
+    ${title ? `<div style="font-size: var(--fs-title);font-weight:700;margin-bottom:10px">${title}</div>` : ""}
     <table class="stats-table">
       ${headerRow}
       <tbody>${visibleRows}</tbody>

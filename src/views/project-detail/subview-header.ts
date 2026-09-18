@@ -30,7 +30,7 @@ export function subviewHeaderTemplate(
     <div class="project-detail-heading">
       <div class="avatar-mini">${unsafeHTML(renderAvatar(avatar, projectPath))}</div>
       <div class="project-detail-titles">
-        <h2 style="font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</h2>
+        <h2 style="font-size: var(--fs-title);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</h2>
       </div>
     </div>
     <div class="subview-header-spacer"></div>

@@ -7,16 +7,16 @@
 
 .view-project-character-pick .view-body label {
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }
 
 .view-project-character-pick .view-body select {
   width: 100%;
   padding: 8px;
-  font-size: 0.95rem;
+  font-size: var(--fs-body);
 }
 
 .view-project-character-pick .muted {
   color: var(--sb-muted);
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }

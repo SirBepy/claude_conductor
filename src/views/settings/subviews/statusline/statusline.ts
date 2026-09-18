@@ -96,8 +96,8 @@ const shell = (profile: StatuslineProfile) => html`
       </div>
 
       <div class="kit-section" style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn-secondary" id="slClearBtn" style="font-size:0.8rem;">Clear all</button>
-        <button class="btn-secondary" id="slResetBtn" style="font-size:0.8rem;">Reset to defaults</button>
+        <button class="btn-secondary" id="slClearBtn" style="font-size: var(--fs-body);">Clear all</button>
+        <button class="btn-secondary" id="slResetBtn" style="font-size: var(--fs-body);">Reset to defaults</button>
       </div>
     </div>
   </div>

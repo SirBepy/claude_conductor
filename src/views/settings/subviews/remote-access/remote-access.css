@@ -3,7 +3,7 @@
 
 .ra-explainer {
   margin: 0 0 4px;
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
   line-height: 1.45;
   color: var(--sb-muted);
 }
@@ -13,7 +13,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }
 
 .ra-status {
@@ -28,7 +28,7 @@
 
 .ra-url {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--color-text);
   word-break: break-all;
 }
@@ -52,12 +52,12 @@
 
 .ra-qr-fallback {
   color: var(--sb-muted);
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }
 
 .ra-caption {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   line-height: 1.4;
   color: var(--sb-muted);
 }
@@ -71,7 +71,7 @@
   border-radius: 6px;
   color: var(--color-text);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.8rem;
+  font-size: var(--fs-body);
 }
 
 .ra-qr-actions {
@@ -102,13 +102,13 @@
 }
 
 .ra-device-name {
-  font-size: .9rem;
+  font-size: var(--fs-title);
   font-weight: 500;
   color: var(--color-text);
 }
 
 .ra-device-date {
-  font-size: .78rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 
@@ -118,7 +118,7 @@
   border: 1px solid var(--color-border);
   border-radius: 6px;
   color: var(--color-text);
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
   width: 200px;
   max-width: 50%;
 }
@@ -136,13 +136,13 @@
 
 .ra-machine-pair-error {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: var(--color-warning, #e5a040);
 }
 
 .btn-danger-sm {
   padding: 4px 10px;
-  font-size: .8rem;
+  font-size: var(--fs-body);
   background: transparent;
   color: #f87171;
   border: 1px solid #f87171;

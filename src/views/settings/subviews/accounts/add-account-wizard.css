@@ -38,7 +38,7 @@
 
 .aaw-overlay .wz-head .t {
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--fs-heading);
 }
 
 .aaw-overlay .wz-close {
@@ -59,7 +59,7 @@
   align-items: center;
   gap: 6px;
   color: var(--sb-muted);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -109,7 +109,7 @@
 .aaw-overlay .field { margin: 12px 0; }
 .aaw-overlay .field label {
   display: block;
-  font-size: 11.5px;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   margin-bottom: 5px;
 }
@@ -122,7 +122,7 @@
   border: 1px solid var(--color-border, #2a2a36);
   border-radius: 8px;
   color: var(--color-text, #e8e8ee);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font: inherit;
 }
 
@@ -155,11 +155,11 @@
 .aaw-overlay .detected .info .nm { font-weight: 700; }
 .aaw-overlay .detected .info .em {
   color: var(--sb-muted);
-  font-size: 11.5px;
+  font-size: var(--fs-micro);
 }
 .aaw-overlay .detected .ok {
   color: var(--color-success, #7af0c0);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -186,7 +186,7 @@
   cursor: pointer;
   font: inherit;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   border: 1px solid var(--color-border, #2a2a36);
   background: var(--color-surface-alt, #24242e);
   color: var(--color-text, #e8e8ee);
@@ -211,7 +211,7 @@
   gap: 7px;
   padding: 9px 11px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--fs-micro);
   color: var(--color-danger, #ff6b6b);
   background: color-mix(in srgb, var(--color-danger, #ff6b6b) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-danger, #ff6b6b) 35%, transparent);
@@ -224,7 +224,7 @@
   gap: 7px;
   padding: 9px 11px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   background: var(--color-surface-alt, #24242e);
   border: 1px dashed var(--color-border, #2a2a36);
@@ -239,7 +239,7 @@
   gap: 7px;
   padding: 9px 11px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--fs-micro);
   color: var(--color-warning, #f5a623);
   background: color-mix(in srgb, var(--color-warning, #f5a623) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-warning, #f5a623) 35%, transparent);
@@ -247,7 +247,7 @@
 }
 
 .aaw-overlay .aaw-explain {
-  font-size: 12px;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   line-height: 1.5;
   margin: 0 0 4px;
@@ -260,7 +260,7 @@
   text-align: center;
   gap: 8px;
   padding: 22px 10px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .aaw-overlay .aaw-waiting code {

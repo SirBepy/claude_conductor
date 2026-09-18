@@ -30,7 +30,7 @@
   gap: 10px;
   padding: 15px 16px 0;
 }
-.aem-overlay .aem-head .t { flex: 1; font-weight: 700; font-size: 15px; }
+.aem-overlay .aem-head .t { flex: 1; font-weight: 700; font-size: var(--fs-heading); }
 .aem-overlay .aem-close {
   width: 28px;
   height: 28px;
@@ -51,7 +51,7 @@
   border-bottom: 2px solid transparent;
   color: var(--sb-muted);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
 }
@@ -66,7 +66,7 @@
 .aem-overlay .field:last-child { margin-bottom: 0; }
 .aem-overlay .field label {
   display: block;
-  font-size: 11.5px;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   margin-bottom: 6px;
 }
@@ -78,7 +78,7 @@
   border: 1px solid var(--color-border, #2a2a36);
   border-radius: 8px;
   color: var(--color-text, #e8e8ee);
-  font-size: 13px;
+  font-size: var(--fs-body);
   font: inherit;
 }
 
@@ -119,7 +119,7 @@
   gap: 7px;
   padding: 9px 11px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--fs-micro);
   color: var(--color-danger, #ff6b6b);
   background: color-mix(in srgb, var(--color-danger, #ff6b6b) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-danger, #ff6b6b) 35%, transparent);
@@ -142,14 +142,14 @@
   gap: 9px;
   padding: 8px 6px;
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
 }
 .aem-overlay .rev-item:hover { background: var(--color-background, #0e0e14); }
 .aem-overlay .rev-item .f { color: var(--color-text-muted, #8a8a96); }
 .aem-overlay .rev-item .p {
   flex: 1;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11.5px;
+  font-size: var(--fs-micro);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -157,7 +157,7 @@
 .aem-overlay .rev-item .x { color: var(--color-text-muted, #8a8a96); cursor: pointer; }
 .aem-overlay .rev-item .x:hover { color: var(--color-danger, #ff6b6b); }
 .aem-overlay .rev-empty {
-  font-size: 12px;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   margin: 4px 0 10px;
 }
@@ -171,7 +171,7 @@
   background: transparent;
   color: var(--sb-muted);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--fs-micro);
   cursor: pointer;
   display: flex;
   align-items: center;

@@ -1,12 +1,12 @@
 .view-skill-detail .view-body { padding: 16px 24px; max-width: 900px; margin: 0 auto; }
 
 .counters { display: flex; gap: 32px; margin: 16px 0; }
-.counter .value { font-size: 28px; font-weight: 600; color: var(--color-text); }
-.counter .label { font-size: 11px; color: var(--sb-muted); text-transform: uppercase; }
+.counter .value { font-size: var(--fs-display); font-weight: 600; color: var(--color-text); }
+.counter .label { font-size: var(--fs-micro); color: var(--sb-muted); text-transform: uppercase; }
 
 .source-pie { margin: 8px 0 24px 0; }
 
-.invocations { width: 100%; border-collapse: collapse; font-size: 12px; }
+.invocations { width: 100%; border-collapse: collapse; font-size: var(--fs-micro); }
 .invocations th, .invocations td {
   padding: 8px 12px;
   text-align: left;

@@ -115,46 +115,46 @@
                     <div class="option">
                         <span class="option-label">Server URL</span>
                         <input type="text" id="syncServerUrl" placeholder="https://your-server.onrender.com"
-                            style="width:180px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size:0.82rem;font-family:inherit;">
+                            style="width:180px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size: var(--fs-body);font-family:inherit;">
                     </div>
                     <div class="option">
                         <span class="option-label">API Key</span>
                         <input type="password" id="syncApiKey" placeholder="cus_..."
-                            style="width:180px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size:0.82rem;font-family:monospace;">
+                            style="width:180px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size: var(--fs-body);font-family:monospace;">
                     </div>
                     <div class="option">
                         <span class="option-label">Device Name</span>
                         <input type="text" id="syncDeviceName" placeholder="My PC"
-                            style="width:180px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size:0.82rem;font-family:inherit;">
+                            style="width:180px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size: var(--fs-body);font-family:inherit;">
                     </div>
                 </div>
 
                 <div class="section">
                     <div class="section-title">SETUP</div>
                     <div style="display:flex;gap:8px;margin-bottom:10px">
-                        <button class="btn-primary" id="syncRegisterBtn" style="flex:1;font-size:0.8rem;padding:6px 10px">New Account</button>
-                        <button class="btn-secondary" id="syncLinkBtn" style="flex:1;font-size:0.8rem;padding:6px 10px">Link Device</button>
+                        <button class="btn-primary" id="syncRegisterBtn" style="flex:1;font-size: var(--fs-body);padding:6px 10px">New Account</button>
+                        <button class="btn-secondary" id="syncLinkBtn" style="flex:1;font-size: var(--fs-body);padding:6px 10px">Link Device</button>
                     </div>
                     <div id="syncLinkCodeSection" style="display:none">
                         <div class="option">
-                            <span class="option-label" style="font-size:0.82rem;color:var(--color-text-muted)">Link Code</span>
+                            <span class="option-label" style="font-size: var(--fs-body);color:var(--color-text-muted)">Link Code</span>
                             <input type="text" id="syncLinkCode" placeholder="Enter code"
-                                style="width:120px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size:0.82rem;font-family:monospace;text-align:center">
+                                style="width:120px;background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);padding:4px 8px;border-radius:6px;font-size: var(--fs-body);font-family:monospace;text-align:center">
                         </div>
-                        <button class="btn-primary" id="syncLinkSubmitBtn" style="width:100%;font-size:0.8rem;padding:6px 10px;margin-top:6px">Connect</button>
+                        <button class="btn-primary" id="syncLinkSubmitBtn" style="width:100%;font-size: var(--fs-body);padding:6px 10px;margin-top:6px">Connect</button>
                     </div>
-                    <div id="syncStatusMsg" style="font-size:0.78rem;color:var(--color-text-muted);margin-top:8px;min-height:1.2em"></div>
+                    <div id="syncStatusMsg" style="font-size: var(--fs-body);color:var(--color-text-muted);margin-top:8px;min-height:1.2em"></div>
                 </div>
 
                 <div class="section" id="syncDevicesSection" style="display:none">
                     <div class="section-title">LINKED DEVICES</div>
-                    <button class="btn-secondary" id="syncGetLinkCodeBtn" style="width:100%;font-size:0.8rem;padding:6px 10px;margin-bottom:8px">Generate Link Code</button>
+                    <button class="btn-secondary" id="syncGetLinkCodeBtn" style="width:100%;font-size: var(--fs-body);padding:6px 10px;margin-bottom:8px">Generate Link Code</button>
                     <div id="syncLinkCodeDisplay" style="display:none;text-align:center;padding:10px;background:var(--color-surface-alt);border-radius:8px;margin-bottom:10px">
-                        <div style="font-size:1.4rem;font-weight:700;letter-spacing:3px;font-family:monospace" id="syncLinkCodeValue"></div>
-                        <div style="font-size:0.72rem;color:var(--color-text-muted);margin-top:4px">Expires in 15 minutes</div>
+                        <div style="font-size: var(--fs-display);font-weight:700;letter-spacing:3px;font-family:monospace" id="syncLinkCodeValue"></div>
+                        <div style="font-size: var(--fs-micro);color:var(--color-text-muted);margin-top:4px">Expires in 15 minutes</div>
                     </div>
                     <div id="syncDevicesList"></div>
-                    <button class="btn-secondary" id="syncPushNowBtn" style="width:100%;font-size:0.8rem;padding:6px 10px;margin-top:8px">Push Now</button>
+                    <button class="btn-secondary" id="syncPushNowBtn" style="width:100%;font-size: var(--fs-body);padding:6px 10px;margin-top:8px">Push Now</button>
                 </div>
             </div>
         </div>

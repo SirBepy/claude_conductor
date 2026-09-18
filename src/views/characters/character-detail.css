@@ -61,7 +61,7 @@
 }
 
 .char-detail-sub {
-  font-size: 0.68rem;
+  font-size: var(--fs-micro);
   font-family: var(--font-mono, ui-monospace, Consolas, monospace);
   color: var(--sb-muted);
 }
@@ -98,7 +98,7 @@
 .char-slot-name {
   width: 130px;
   flex-shrink: 0;
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--color-text);
 }
 
@@ -114,7 +114,7 @@
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  font-size: 0.76rem;
+  font-size: var(--fs-micro);
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -131,7 +131,7 @@
 }
 
 .char-slot-empty {
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
   font-style: italic;
 }

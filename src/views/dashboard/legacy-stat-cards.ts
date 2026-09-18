@@ -9,7 +9,7 @@ import type { UsageRecord } from "../../shared/api";
 
 export function legacyStatCardsHtml(history: UsageRecord[]): string {
   if (!history.length) {
-    return `<div class="no-data">No history recorded yet.<br><small style="font-size:0.8rem">Data appears after the first successful refresh.</small></div>`;
+    return `<div class="no-data">No history recorded yet.<br><small style="font-size: var(--fs-body)">Data appears after the first successful refresh.</small></div>`;
   }
   const latest = history[history.length - 1]!;
   const settings = getSettings();

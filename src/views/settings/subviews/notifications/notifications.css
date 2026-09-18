@@ -17,25 +17,25 @@
 
 .push-status-caption {
   margin-top: 4px;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 
 .coming-soon-label {
   color: var(--sb-muted);
-  font-size: 0.75rem;
+  font-size: var(--fs-micro);
 }
 
 /* Shared dim caption line used under a control row (audio device pickers,
  * character sounds, pause-in-meeting). */
 .settings-caption {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   padding: 2px 0 4px;
 }
 
 .notif-dim-label {
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 
@@ -48,7 +48,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }
 
 .notif-sound-controls {
@@ -61,7 +61,7 @@
 
 .notif-preview-btn {
   padding: 3px 10px;
-  font-size: 0.8rem;
+  font-size: var(--fs-body);
 }
 
 .notif-voice-rows {
@@ -102,16 +102,16 @@
   border: 1px solid var(--color-border);
   border-radius: 4px;
   color: var(--color-text);
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }
 
 .notif-template-label {
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 
 .notif-template-hint {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
 }
 

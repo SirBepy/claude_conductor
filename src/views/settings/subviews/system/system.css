@@ -31,13 +31,13 @@
 }
 
 .shortcut-row-label {
-  font-size: 0.88rem;
+  font-size: var(--fs-title);
   color: var(--color-text);
   font-weight: 500;
 }
 
 .shortcut-row-desc {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
 }
 
@@ -62,7 +62,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 0.75rem;
+  font-size: var(--fs-micro);
   color: var(--color-text);
 }
 
@@ -72,13 +72,13 @@
   border-radius: 4px;
   padding: 2px 6px;
   font-family: inherit;
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--color-text);
   box-shadow: 0 1px 0 var(--color-border);
 }
 
 .shortcut-capture-input {
-  font-size: 0.75rem;
+  font-size: var(--fs-micro);
   color: var(--color-primary);
   font-style: italic;
   padding: 2px 6px;
@@ -87,7 +87,7 @@
 }
 
 .shortcut-conflict-msg {
-  font-size: 0.7rem;
+  font-size: var(--fs-micro);
   color: #e74c3c;
   margin-top: 2px;
 }
@@ -97,7 +97,7 @@
   border: 1px solid var(--color-border);
   border-radius: 5px;
   color: var(--sb-muted);
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   padding: 3px 8px;
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s;
@@ -112,7 +112,7 @@
   background: none;
   border: none;
   color: var(--sb-muted);
-  font-size: 0.8rem;
+  font-size: var(--fs-body);
   cursor: pointer;
   padding: 2px 4px;
   line-height: 1;
@@ -124,7 +124,7 @@
 }
 
 .shortcut-group-header {
-  font-size: 0.68rem;
+  font-size: var(--fs-micro);
   font-weight: 700;
   color: var(--sb-muted);
   text-transform: uppercase;
@@ -145,7 +145,7 @@
  * checkbox+label combo folded the description into the same <label>; the
  * kit-toggle row is now its own element, so the description renders below it). */
 .shortcut-slot-mode-desc-standalone {
-  font-size: 0.74rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   padding: 0 0 8px;
   margin-top: -4px;
@@ -173,7 +173,7 @@
 }
 
 .data-card-sub {
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 
@@ -182,7 +182,7 @@
 }
 
 .data-control-label {
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 
@@ -200,12 +200,12 @@
 
 .data-card .btn-danger.data-clear {
   padding: 4px 12px;
-  font-size: 0.8rem;
+  font-size: var(--fs-body);
   width: auto;
 }
 
 .data-total {
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
   padding: 8px 2px 2px;
 }

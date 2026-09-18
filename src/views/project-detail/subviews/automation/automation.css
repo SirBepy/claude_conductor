@@ -6,7 +6,7 @@
   border: 0;
   border-radius: 6px;
   padding: 6px 12px;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   cursor: pointer;
   font-weight: 500;
 }
@@ -22,7 +22,7 @@
   color: var(--color-text, #e4e4ee);
   padding: 5px 8px;
   border-radius: 5px;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   width: 160px;
 }
 
@@ -39,9 +39,9 @@
   color: var(--color-text, #e4e4ee);
   padding: 5px 8px;
   border-radius: 5px;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
 }
 .acc-row-empty-hint {
   color: var(--sb-muted);
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
 }

@@ -21,23 +21,23 @@
   position: absolute;
   left: 10px;
   color: var(--sb-muted);
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   pointer-events: none;
 }
 .projects-search input[type="search"] {
   width: 100%;
   padding: 7px 10px 7px 30px;
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
 }
 
 .projects-count {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   margin-bottom: 10px;
 }
 
 .projects-backfill-status {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   margin-bottom: 12px;
 }

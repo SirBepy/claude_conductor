@@ -266,11 +266,11 @@ function template() {
             <span class="kit-row-label"><span class="info-wrap">Overlay Opacity<i class="ph ph-info info-icon"></i><span class="info-tooltip">How opaque each account card's background becomes when you hover it - off-hover the overlay is fully transparent to the desktop</span></span></span>
             <div style="display:flex;align-items:center;gap:8px;flex:1;max-width:220px">
               <input type="range" id="overlayOpacity" min="0" max="100" step="5" style="flex:1">
-              <span id="overlayOpacityValue" style="font-size:0.78rem;color:var(--sb-muted);width:36px;text-align:right">72%</span>
+              <span id="overlayOpacityValue" style="font-size: var(--fs-body);color:var(--sb-muted);width:36px;text-align:right">72%</span>
             </div>
           </div>
           ${toggleRow({ label: "Hide from screen capture", inputId: "hideInMeetingSwitch", checked: false })}
-          <div style="font-size:0.72rem;color:var(--sb-muted);padding:2px 0 4px">Hides app windows from screen shares and recordings during meetings. Windows only.</div>
+          <div style="font-size: var(--fs-micro);color:var(--sb-muted);padding:2px 0 4px">Hides app windows from screen shares and recordings during meetings. Windows only.</div>
         </div>
 
         <div class="kit-section">

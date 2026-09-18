@@ -100,12 +100,12 @@
   opacity: 0.7;
 }
 .v-empty .v-empty-title {
-  font-size: 0.95rem;
+  font-size: var(--fs-heading);
   font-weight: 600;
   color: var(--color-text);
 }
 .v-empty .v-empty-hint {
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
 }
 

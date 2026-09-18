@@ -19,10 +19,10 @@
 .instance-row .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .instance-row .meta .top {
   display: flex; align-items: center; gap: 6px;
-  font-size: 0.78rem; font-weight: 500;
+  font-size: var(--fs-body); font-weight: 500;
 }
 .instance-row .meta .sub {
-  font-size: 0.68rem; color: var(--sb-muted);
+  font-size: var(--fs-micro); color: var(--sb-muted);
   font-family: 'Fira Code', monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -42,7 +42,7 @@
 }
 .instance-row .actions { display: flex; gap: 4px; }
 .instance-row .actions .act-btn {
-  padding: 4px 8px; font-size: 0.7rem;
+  padding: 4px 8px; font-size: var(--fs-micro);
   background: var(--color-surface-alt, #2a2a3a);
   border: 0; border-radius: 4px;
   color: var(--color-text, #c5c5d6);
@@ -56,7 +56,7 @@
 .instance-row .row-line {
   flex: 1; min-width: 0;
   font-family: 'Fira Code', monospace;
-  font-size: 0.74rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -65,7 +65,7 @@
   display: flex; flex-direction: column; gap: 3px;
 }
 .instance-row .instance-name {
-  font-size: 0.82rem;
+  font-size: var(--fs-title);
   font-weight: 500;
   color: var(--color-text, #d8d8e8);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

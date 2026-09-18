@@ -3,14 +3,14 @@
 
 .acc-explainer {
   margin: 0 0 10px;
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   line-height: 1.45;
   color: var(--sb-muted);
 }
 
 .acc-explainer code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
 }
 
 .acc-list {
@@ -48,7 +48,7 @@
 }
 
 .acc-label {
-  font-size: 0.9rem;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--color-text, #e8e8ee);
   display: flex;
@@ -68,7 +68,7 @@
 }
 
 .acc-sub {
-  font-size: 0.76rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -76,7 +76,7 @@
 }
 
 .acc-sub-expiry {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   opacity: 0.85;
 }
 
@@ -84,7 +84,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.74rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--color-danger, #f87171);
   white-space: normal;
@@ -109,13 +109,13 @@
 }
 
 .acc-empty {
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   color: var(--sb-muted);
   margin: 4px 0 10px;
 }
 
 .acc-terminal-identity {
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
   color: var(--color-text, #e8e8ee);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
