@@ -1,11 +1,8 @@
 .view-skill-detail .view-body { padding: 16px 24px; max-width: 900px; margin: 0 auto; }
-.skill-detail-back { margin-bottom: 12px; }
-.skill-detail-back a { opacity: 0.7; text-decoration: none; }
-.skill-detail-back a:hover { opacity: 1; }
 
 .counters { display: flex; gap: 32px; margin: 16px 0; }
-.counter .value { font-size: 28px; font-weight: 600; }
-.counter .label { font-size: 11px; opacity: 0.6; text-transform: uppercase; }
+.counter .value { font-size: 28px; font-weight: 600; color: var(--color-text); }
+.counter .label { font-size: 11px; color: var(--sb-muted); text-transform: uppercase; }
 
 .source-pie { margin: 8px 0 24px 0; }
 
@@ -13,19 +10,31 @@
 .invocations th, .invocations td {
   padding: 8px 12px;
   text-align: left;
-  border-bottom: 1px solid #1f1f1f;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
 }
-.invocations th { opacity: 0.7; font-weight: normal; }
+.invocations th { color: var(--sb-muted); font-weight: normal; }
 
 .skill-detail.empty,
 .view-skill-detail .empty {
-  opacity: 0.6;
+  color: var(--sb-muted);
   font-style: italic;
   padding: 16px;
 }
-.skill-detail.loading { opacity: 0.6; padding: 16px; }
+.skill-detail.loading { color: var(--sb-muted); padding: 16px; }
 
 .badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; }
-.badge-manual { background: rgba(91, 141, 239, 0.2); color: #5b8def; }
-.badge-skill { background: rgba(140, 91, 239, 0.2); color: #8c5bef; }
-.badge-auto { background: rgba(136, 136, 136, 0.2); color: #aaa; }
+/* Text mixed 50% into --color-text (not the raw accent) keeps contrast at or
+   above 4.5:1 against the 20%-tinted background - see skills.css. */
+.badge-manual {
+  background: color-mix(in srgb, var(--color-info) 20%, var(--color-surface-alt));
+  color: color-mix(in srgb, var(--color-info) 50%, var(--color-text));
+}
+.badge-skill {
+  background: color-mix(in srgb, var(--color-primary) 20%, var(--color-surface-alt));
+  color: color-mix(in srgb, var(--color-primary) 50%, var(--color-text));
+}
+.badge-auto {
+  background: color-mix(in srgb, var(--sb-muted) 20%, var(--color-surface-alt));
+  color: var(--sb-muted);
+}

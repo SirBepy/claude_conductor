@@ -2,15 +2,14 @@ import { html, render, type TemplateResult } from "lit-html";
 import { api } from "../../shared/api";
 import type { SkillDetail, SkillUsageEvent } from "../../types/ipc.generated";
 import { showView } from "../../shared/navigation";
-import { openSidemenu } from "../../shared/sidemenu";
 import { tokensAllIn } from "../../shared/tokens";
 import { buildPieSvg } from "../../shared/pie";
 import "./skill-detail.css";
 
 const SOURCE_COLORS = {
-  manual: "#5b8def",
-  skill: "#8c5bef",
-  auto: "#888",
+  manual: "var(--color-info)",
+  skill: "var(--color-primary)",
+  auto: "var(--sb-muted)",
 } as const;
 
 function targetSkill(): string {
@@ -34,7 +33,23 @@ function formatTime(ts: string): string {
 export async function renderSkillDetailView(root: HTMLElement): Promise<() => void> {
   const skill = targetSkill();
   if (!skill) {
-    render(html`<div class="skill-detail empty">No skill selected. <a href="#" @click=${(e: Event) => { e.preventDefault(); showView("dashboard"); }}>Back to Dashboard</a></div>`, root);
+    render(
+      html`
+        <div class="view view-skill-detail">
+          <div class="view-header">
+            <button class="icon-btn" title="Back" @click=${() => showView("skills")}>
+              <i class="ph ph-arrow-left"></i>
+            </button>
+            <h2>Skill</h2>
+            <div style="width:32px"></div>
+          </div>
+          <div class="view-body">
+            <div class="skill-detail empty">No skill selected.</div>
+          </div>
+        </div>
+      `,
+      root,
+    );
     return () => { /* noop */ };
   }
 
@@ -63,16 +78,13 @@ function buildView(d: SkillDetail): TemplateResult {
   return html`
     <div class="view view-skill-detail">
       <div class="view-header">
-        <button class="icon-btn burger" title="Menu" data-burger="true" @click=${openSidemenu}>
-          <i class="ph ph-list"></i>
+        <button class="icon-btn" title="Back" @click=${() => showView("skills")}>
+          <i class="ph ph-arrow-left"></i>
         </button>
         <h2>${d.skill}</h2>
         <div style="width:32px"></div>
       </div>
       <div class="view-body">
-        <div class="skill-detail-back">
-          <a href="#" @click=${(e: Event) => { e.preventDefault(); showView("dashboard"); }}>&larr; Dashboard</a>
-        </div>
         <div class="counters">
           ${counter("Total", d.invocations.total)}
           ${counter("Manual", d.invocations.manual)}
