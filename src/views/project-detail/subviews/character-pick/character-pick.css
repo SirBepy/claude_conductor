@@ -20,13 +20,3 @@
   color: var(--sb-muted);
   font-size: 0.85rem;
 }
-
-.view-project-character-pick .avatar-mini {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface-alt);
-  border-radius: 6px;
-}

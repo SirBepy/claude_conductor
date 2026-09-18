@@ -176,11 +176,12 @@ describe("Project-detail DOM (unrelated views, unchanged by the projects revamp)
   });
 
   it("each project subview has a back button", () => {
-    // character-pick still owns its own back button
-    expect(characterPickTs).toMatch(/id="characterPickBackBtn"/);
-    // remaining subviews delegate to the shared subview-header component
+    // all four sibling subviews (character-pick included, since todo 15
+    // found no functional reason it was left out of the original extraction)
+    // delegate to the shared subview-header component
     expect(subviewHeaderTs).toMatch(/ph-arrow-left/);
     expect(subviewHeaderTs).toMatch(/icon-btn/);
+    expect(characterPickTs).toMatch(/subview-header/);
     expect(automationTs).toMatch(/subview-header/);
     expect(folderMappingTs).toMatch(/subview-header/);
     expect(sessionsListTs).toMatch(/subview-header/);
