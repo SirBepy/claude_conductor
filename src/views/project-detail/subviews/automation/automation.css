@@ -2,7 +2,7 @@
 
 .automate-cta {
   background: var(--color-primary, #2c5fd6);
-  color: #fff;
+  color: var(--color-background);
   border: 0;
   border-radius: 6px;
   padding: 6px 12px;
@@ -42,6 +42,6 @@
   font-size: 0.78rem;
 }
 .acc-row-empty-hint {
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   font-size: 0.78rem;
 }

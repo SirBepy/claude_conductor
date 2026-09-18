@@ -15,6 +15,7 @@ function template() {
           <div class="avatar-mini" id="characterPickAvatar">?</div>
           <h2 id="characterPickTitle" style="font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Character whitelist</h2>
         </div>
+        <div class="subview-header-spacer"></div>
       </div>
       <div class="view-body">
         <p class="muted">Which characters can be randomly assigned to this project's sessions. Each session gets one, and you can change it per session. "Use default" inherits the global default from Settings.</p>

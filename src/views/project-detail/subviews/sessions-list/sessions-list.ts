@@ -17,7 +17,7 @@ export function renderAllSessionsList(cwd: string): void {
   const allCwds = new Set([cwd, ...mergedPaths]);
   const records = history.filter((r) => r.cwd && allCwds.has(r.cwd) && totalTok(r) > 0);
   if (!records.length) {
-    list.innerHTML = `<div class="no-data">No sessions.</div>`;
+    list.innerHTML = `<div class="v-empty"><i class="ph ph-chat-circle v-empty-icon"></i><div class="v-empty-title">No sessions</div></div>`;
     return;
   }
   const sorted = [...records].sort((a, b) =>
@@ -28,7 +28,7 @@ export function renderAllSessionsList(cwd: string): void {
     const when = timeAgo(rec.lastActiveAt || rec.recordedAt || rec.date);
     const name = (rec.sessionId || "").slice(0, 8) || "—";
     const tok = formatMillions(totalTok(r));
-    return `<tr class="session-row" data-session-idx="${i}" style="cursor:pointer">
+    return `<tr class="session-row v-row v-focusable" data-session-idx="${i}" role="button" tabindex="0" style="cursor:pointer">
       <td class="col-when">${when}</td>
       <td class="col-tokens">${tok}</td>
       <td class="col-name">${name}</td>
@@ -38,9 +38,16 @@ export function renderAllSessionsList(cwd: string): void {
     <th>when</th><th>tokens</th><th>session</th>
   </tr></thead><tbody>${rowsHTML}</tbody></table>`;
   list.querySelectorAll<HTMLTableRowElement>(".session-row").forEach((el) => {
-    el.onclick = () => {
+    const open = () => {
       const idx = Number(el.dataset.sessionIdx);
       openSessionDetail(sorted[idx], "project-sessions");
+    };
+    el.onclick = open;
+    el.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        open();
+      }
     };
   });
 }

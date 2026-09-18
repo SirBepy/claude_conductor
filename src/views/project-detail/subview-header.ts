@@ -33,7 +33,7 @@ export function subviewHeaderTemplate(
         <h2 style="font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title}</h2>
       </div>
     </div>
-    <div style="width:32px"></div>
+    <div class="subview-header-spacer"></div>
   `;
 }
 

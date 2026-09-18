@@ -10,7 +10,7 @@
 .merged-path-text {
   flex: 1;
   font-size: 0.68rem;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   font-family: 'Fira Code', monospace;
   overflow: hidden;
   text-overflow: ellipsis;

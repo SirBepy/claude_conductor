@@ -1018,7 +1018,7 @@ input:checked + .slider:before {
   margin: 0 0 8px;
 }
 .modal-body .muted {
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
   font-size: 0.75rem;
 }
 .modal-preview {
@@ -1029,7 +1029,7 @@ input:checked + .slider:before {
   padding: 8px 10px;
   font-family: "Fira Code", monospace;
   font-size: 0.68rem;
-  color: var(--color-text-muted, #9a9ab0);
+  color: var(--sb-muted);
   white-space: pre-wrap;
   max-height: 140px;
   overflow: auto;
@@ -1093,16 +1093,16 @@ input:checked + .slider:before {
   margin-left: 2px;
 }
 .card-tag.live {
-  background: #1d3a2a;
-  color: #6ad98a;
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+  color: var(--color-success);
 }
 .card-tag.remote {
-  background: #2a2845;
-  color: #8a9eff;
+  background: color-mix(in srgb, var(--color-info, #6e8fff) 15%, transparent);
+  color: var(--color-info, #6e8fff);
 }
 .card-tag.automated {
-  background: #3a2a1d;
-  color: #f2b457;
+  background: color-mix(in srgb, var(--color-warning, #e5a040) 15%, transparent);
+  color: var(--color-warning, #e5a040);
 }
 
 /* Automation-section rules moved to

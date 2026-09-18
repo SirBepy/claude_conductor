@@ -11,18 +11,18 @@
 }
 .instance-row .status-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: #6ad98a;
+  background: var(--color-success);
   flex-shrink: 0;
 }
-.instance-row.external .status-dot { background: #8a9eff; }
-.instance-row.ending .status-dot { background: var(--color-text-muted, #8a8aa0); }
+.instance-row.external .status-dot { background: var(--color-info, #6e8fff); }
+.instance-row.ending .status-dot { background: var(--sb-muted); }
 .instance-row .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .instance-row .meta .top {
   display: flex; align-items: center; gap: 6px;
   font-size: 0.78rem; font-weight: 500;
 }
 .instance-row .meta .sub {
-  font-size: 0.68rem; color: var(--color-text-muted, #8a8aa0);
+  font-size: 0.68rem; color: var(--sb-muted);
   font-family: 'Fira Code', monospace;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -30,10 +30,16 @@
   background: var(--color-surface-alt, #2a2a3a);
   padding: 1px 6px; border-radius: 3px;
   font-size: 0.64rem; font-weight: 500;
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
 }
-.instance-row .tag.automated { background: #3a2a1d; color: #f2b457; }
-.instance-row .tag.remote { background: #2a2845; color: #8a9eff; }
+.instance-row .tag.automated {
+  background: color-mix(in srgb, var(--color-warning, #e5a040) 15%, transparent);
+  color: var(--color-warning, #e5a040);
+}
+.instance-row .tag.remote {
+  background: color-mix(in srgb, var(--color-info, #6e8fff) 15%, transparent);
+  color: var(--color-info, #6e8fff);
+}
 .instance-row .actions { display: flex; gap: 4px; }
 .instance-row .actions .act-btn {
   padding: 4px 8px; font-size: 0.7rem;
@@ -51,7 +57,7 @@
   flex: 1; min-width: 0;
   font-family: 'Fira Code', monospace;
   font-size: 0.74rem;
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .instance-row .instance-row-text {
@@ -65,7 +71,7 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .instance-row .chev {
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
   font-size: 0.9rem;
   flex-shrink: 0;
 }

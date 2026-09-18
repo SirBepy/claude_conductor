@@ -64,13 +64,20 @@ export function wireFolderMappingSubview(cwd: string): void {
   if (pathError) { pathError.style.display = "none"; pathError.textContent = ""; }
 
   if (pathEl && pathInput) {
-    pathEl.onclick = () => {
+    const enterRepointMode = () => {
       pathInput.value = cwd || "";
       pathEl.style.display = "none";
       pathInput.style.display = "";
       if (pathError) { pathError.style.display = "none"; pathError.textContent = ""; }
       pathInput.focus();
       pathInput.select();
+    };
+    pathEl.onclick = enterRepointMode;
+    pathEl.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        enterRepointMode();
+      }
     };
     const cancelRepoint = () => {
       pathInput.style.display = "none";
@@ -163,9 +170,9 @@ function template(avatar: Avatar, title: string, projectPath?: string) {
       <div class="view-body">
         <div class="section" style="margin-top:12px">
           <div class="section-title">Current folder</div>
-          <div id="projectDetailPath" style="padding:6px 0;font-size:0.72rem;color:var(--text-dim);font-family:'Fira Code',monospace;word-break:break-all;cursor:pointer" title="Click to repoint to a different folder"></div>
+          <div id="projectDetailPath" class="v-focusable" role="button" tabindex="0" style="padding:6px 0;font-size:0.72rem;color:var(--sb-muted);font-family:'Fira Code',monospace;word-break:break-all;cursor:pointer" title="Click to repoint to a different folder"></div>
           <input id="projectDetailPathInput" type="text" style="display:none;width:100%;font-size:0.72rem;font-family:'Fira Code',monospace;margin:4px 0;padding:4px 6px">
-          <div id="projectDetailPathError" style="display:none;font-size:0.68rem;color:var(--danger, #e74c3c);margin:2px 0 6px"></div>
+          <div id="projectDetailPathError" style="display:none;font-size:0.68rem;color:var(--color-danger);margin:2px 0 6px"></div>
         </div>
         <div id="project-merged-paths"></div>
         <div class="section" style="margin-top:12px">

@@ -36,13 +36,13 @@ function instanceRowHtml(i: Instance, stats: InstanceStats | undefined): string 
   const modelEffort = [i.model, i.effort].filter((v) => v && v.trim()).join(" ");
   const meTag = modelEffort ? ` · ${escapeHtml(modelEffort)}` : "";
   return `
-    <div class="instance-row clickable" data-session-id="${i.session_id}">
+    <div class="instance-row clickable v-row v-focusable" data-session-id="${i.session_id}" role="button" tabindex="0">
       <div class="status-dot"></div>
       <div class="instance-row-text">
         <div class="instance-name" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
         <div class="row-line">up ${uptime} · ${prompts} ${prompts === 1 ? "msg" : "msgs"} · ${formatTokens(tokens)} tokens · ${turns} ${turns === 1 ? "turn" : "turns"}${meTag}</div>
       </div>
-      <span class="chev">›</span>
+      <i class="ph ph-caret-right chev"></i>
     </div>
   `;
 }
@@ -53,7 +53,8 @@ function setRunningInstancesEmpty(count: number): void {
   const emptyEl = document.getElementById("runningInstancesEmpty");
   if (c) c.textContent = String(count);
   if (listEl) listEl.style.display = "none";
-  if (emptyEl) emptyEl.style.display = "block";
+  // .v-empty (motion.css) lays itself out as flex, not block.
+  if (emptyEl) emptyEl.style.display = "flex";
 }
 
 export async function renderRunningInstances(): Promise<void> {
@@ -76,7 +77,7 @@ export async function renderRunningInstances(): Promise<void> {
   if (!listEl || !emptyEl) return;
   if (count === 0) {
     listEl.style.display = "none";
-    emptyEl.style.display = "block";
+    emptyEl.style.display = "flex";
     return;
   }
   emptyEl.style.display = "none";
@@ -90,8 +91,15 @@ export async function renderRunningInstances(): Promise<void> {
     const sid = row.dataset.sessionId;
     const inst = instances.find((x) => x.session_id === sid);
     if (!inst) return;
-    row.onclick = () => {
+    const open = () => {
       openSessionDetail(inst, "project-detail");
+    };
+    row.onclick = open;
+    row.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        open();
+      }
     };
   });
 }
