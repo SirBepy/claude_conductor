@@ -142,6 +142,12 @@ test.describe("view-harness / characters", () => {
       await expect(box.locator(".char-avatar-fallback")).toBeVisible();
     }
 
+    // The 7-line Illidan name is clamped to 2 lines, so its card matches
+    // Jaina's height in the same group instead of ballooning past it.
+    const illidanHeight = await page.locator('.char-card:has-text("Illidan")').evaluate((el) => el.getBoundingClientRect().height);
+    const jainaHeight = await page.locator('.char-card:has-text("Jaina")').evaluate((el) => el.getBoundingClientRect().height);
+    expect(Math.abs(illidanHeight - jainaHeight)).toBeLessThanOrEqual(1);
+
     await shotBothViewports(page, "characters-after-populated");
   });
 

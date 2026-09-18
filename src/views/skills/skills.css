@@ -11,20 +11,39 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
+  padding: 8px 12px;
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
   border-radius: 6px;
+}
+/* :focus-within moves the global input focus recipe (widgets.css's
+   input[type="search"]:focus) onto the container, since the inner input's
+   own chrome is stripped below - otherwise both boxes glow independently. */
+.skills-search-field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow:
+    inset 0 3px 10px rgba(0, 0, 0, 0.5),
+    inset 0 1px 2px 0 rgba(0, 0, 0, 0.3),
+    inset 0 -1px 1px 0 rgba(255, 255, 255, 0.07),
+    0 0 0 3px rgba(157, 125, 252, 0.15),
+    0 0 16px rgba(157, 125, 252, 0.08);
 }
 .skills-search-field i { color: var(--sb-muted); font-size: 13px; }
 .skills-search-field input {
   flex: 1;
   min-width: 0;
-  padding: 8px 0;
+  padding: 0;
   font-size: 13px;
   background: transparent;
   border: none;
+  box-shadow: none;
+  outline: none;
   color: var(--color-text);
+}
+.skills-search-field input:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
 }
 .skills-count { font-size: 11px; color: var(--sb-muted); white-space: nowrap; }
 

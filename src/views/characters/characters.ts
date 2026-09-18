@@ -63,7 +63,7 @@ function cardTemplate(c: Character): TemplateResult {
       }}
     >
       ${characterAvatarBox(c, "char-card-avatar-box", "char-avatar char-card-avatar")}
-      <div class="char-card-name">${c.label}</div>
+      <div class="char-card-name" title="${c.label}">${c.label}</div>
       ${slotDotsTemplate(c)}
     </div>
   `;
