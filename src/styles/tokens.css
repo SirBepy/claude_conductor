@@ -1,5 +1,9 @@
-/* Global design tokens (spacing scales, radii, z-index tiers).
- * Currently empty: the legacy dashboard.css relies only on theme-scoped
- * variables declared in themes.css. Adding shared tokens here is a
- * Phase 4 concern.
+/* Global design tokens (spacing scales, radii, z-index tiers, motion curves).
+ * The legacy dashboard.css still relies only on theme-scoped variables
+ * declared in themes.css; motion is the first shared token set to land here.
  */
+:root {
+    --motion-fast: 150ms;
+    --motion-base: 200ms;
+    --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}

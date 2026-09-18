@@ -1,0 +1,127 @@
+/* Shared motion + unification layer (v-* utilities). Views opt in per class;
+ * nothing here is applied automatically except .v-enter, which router.ts
+ * toggles on the view container on every navigation. */
+
+@keyframes v-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* View-mount fade + rise, retriggered by the router on every swap. */
+.v-enter {
+  animation: v-enter var(--motion-base) var(--motion-ease);
+}
+
+/* Interactive card: hover lifts + deepens shadow, press compresses it back. */
+.v-card {
+  transition: border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+.v-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
+}
+.v-card:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+.v-card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* List-row hover tint, for rows that aren't full cards. */
+.v-row {
+  transition: background-color var(--motion-fast) var(--motion-ease);
+}
+.v-row:hover {
+  background-color: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+/* Native <details> groups: chevron rotates open, revealed content fades in. */
+.v-details summary {
+  cursor: pointer;
+}
+.v-details summary .ph {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.v-details[open] summary .ph {
+  transform: rotate(90deg);
+}
+@keyframes v-details-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.v-details[open] > *:not(summary) {
+  animation: v-details-fade var(--motion-base) var(--motion-ease);
+}
+
+/* Gentle looping pulse for an active/playing state (e.g. audio preview). */
+@keyframes v-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb), 0.35); }
+  50% { opacity: 0.75; box-shadow: 0 0 0 6px rgba(var(--color-primary-rgb), 0); }
+}
+.v-pulse {
+  animation: v-pulse 1.8s ease-in-out infinite;
+}
+
+/* Loading placeholder: a light sweep across a muted block. */
+@keyframes v-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.v-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-alt) 25%,
+    var(--color-surface) 50%,
+    var(--color-surface-alt) 75%
+  );
+  background-size: 200% 100%;
+  animation: v-shimmer 1.6s ease-in-out infinite;
+  border-radius: var(--radius-card, 8px);
+}
+
+/* Standardized empty state: icon slot + primary line + hint line. */
+.v-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 48px 16px;
+  text-align: center;
+}
+.v-empty .v-empty-icon {
+  font-size: 2rem;
+  color: var(--sb-muted);
+  opacity: 0.7;
+}
+.v-empty .v-empty-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.v-empty .v-empty-hint {
+  font-size: 0.82rem;
+  color: var(--sb-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v-enter,
+  .v-card,
+  .v-row,
+  .v-pulse,
+  .v-skeleton,
+  .v-details summary .ph,
+  .v-details[open] > *:not(summary) {
+    animation: none !important;
+    transition: none !important;
+  }
+  .v-card:hover,
+  .v-card:active {
+    transform: none !important;
+  }
+}

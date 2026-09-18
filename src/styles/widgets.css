@@ -398,7 +398,8 @@ input[type="text"] {
 }
 
 input[type="number"]:focus,
-input[type="text"]:focus {
+input[type="text"]:focus,
+input[type="search"]:focus {
   border-color: var(--color-primary);
   box-shadow:
     inset 0 3px 10px rgba(0, 0, 0, 0.5),
@@ -406,6 +407,20 @@ input[type="text"]:focus {
     inset 0 -1px 1px 0 rgba(255, 255, 255, 0.07),
     0 0 0 3px rgba(157, 125, 252, 0.15),
     0 0 16px rgba(157, 125, 252, 0.08);
+}
+
+/* Chrome/Safari's native search-clear x is unstyleable and clashes with any
+   view-supplied clear affordance, so it never renders. */
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Shared focus-visible ring, consistent with the input recipe above - use on
+   any keyboard-focusable non-input element (role="button", summary, etc). */
+.v-focusable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 input[type="number"]::-webkit-inner-spin-button,
@@ -857,10 +872,26 @@ input:checked + .slider:before {
   display: flex;
   gap: 10px;
   cursor: pointer;
-  transition: border-color 120ms;
+  transition: border-color var(--motion-fast, 120ms) var(--motion-ease, ease-out),
+    box-shadow var(--motion-fast, 120ms) var(--motion-ease, ease-out),
+    transform var(--motion-fast, 120ms) var(--motion-ease, ease-out);
 }
 .project-card:hover {
   border-color: var(--color-primary, #4c9eff);
+}
+.project-card:active {
+  transform: scale(0.99);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+.project-card:focus-visible {
+  outline: 2px solid var(--color-primary, #4c9eff);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-card:active {
+    transform: none;
+  }
 }
 
 .project-card .avatar {
@@ -915,11 +946,11 @@ input:checked + .slider:before {
   gap: 4px;
   align-items: center;
   font-size: 0.7rem;
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
 }
 .project-card .tokens {
   font-size: 0.72rem;
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
 }
 
 /* Rules for .project-detail-header, .project-detail-heading,

@@ -46,6 +46,15 @@ function showLegacyView(name: string): void {
   if (el) el.classList.remove("hidden");
 }
 
+// Restarts the .v-enter fade/rise on a freshly-shown view container: removing
+// then re-adding a running CSS animation's class is a no-op without a reflow
+// in between to flush the "removed" state to the render tree first.
+function retriggerEnter(el: HTMLElement): void {
+  el.classList.remove("v-enter");
+  void el.offsetWidth;
+  el.classList.add("v-enter");
+}
+
 export async function navigateTo(name: string): Promise<void> {
   if (!currentRoot) return;
   setActiveView(name);
@@ -63,11 +72,14 @@ export async function navigateTo(name: string): Promise<void> {
     // own render() call reconciles the DOM in place once it resolves.
     const result = await view(currentRoot);
     if (typeof result === "function") currentTeardown = result;
+    retriggerEnter(currentRoot);
   } else {
     render(html``, currentRoot);
     currentRoot.style.display = "none";
     hideAllLegacyViews();
     showLegacyView(name);
+    const legacyEl = document.getElementById(`view-${name}`);
+    if (legacyEl) retriggerEnter(legacyEl);
   }
   const updateActive = (window as unknown as {
     updateSidemenuActive?: (n: string) => void;
