@@ -1,6 +1,6 @@
 .view-settings-characters .characters-hint {
   font-size: 0.8rem;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   margin: 0 0 12px;
   line-height: 1.4;
 }

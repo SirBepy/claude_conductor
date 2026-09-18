@@ -94,9 +94,9 @@ export function buildProjectBarsView(
     const pct = totalPct !== null ? Math.round((otherTokens / totalTokens) * totalPct) : null;
     const barWidth = Math.max(2, Math.round((otherTokens / maxTokens) * 100));
     rows.push(`<div class="project-bar-row">
-      <span class="project-bar-label" style="color:var(--text-dim)">Other</span>
+      <span class="project-bar-label" style="color:var(--sb-muted)">Other</span>
       <div class="project-bar-track">
-        <div class="project-bar-fill" style="width:${barWidth}%;background:var(--text-dim)"></div>
+        <div class="project-bar-fill" style="width:${barWidth}%;background:var(--sb-muted)"></div>
       </div>
       <span class="project-bar-value">${pct !== null ? pct + "%" : formatTokens(otherTokens)}</span>
     </div>`);

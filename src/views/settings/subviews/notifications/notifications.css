@@ -18,11 +18,11 @@
 .push-status-caption {
   margin-top: 4px;
   font-size: 0.78rem;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .coming-soon-label {
-  color: var(--text-dim);
+  color: var(--sb-muted);
   font-size: 0.75rem;
 }
 
@@ -30,13 +30,13 @@
  * character sounds, pause-in-meeting). */
 .settings-caption {
   font-size: 0.72rem;
-  color: var(--text-dim);
+  color: var(--sb-muted);
   padding: 2px 0 4px;
 }
 
 .notif-dim-label {
   font-size: 0.82rem;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .notif-mode-options {
@@ -98,21 +98,21 @@
 .notif-template {
   flex: 1;
   padding: 4px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: var(--text);
+  color: var(--color-text);
   font-size: 0.85rem;
 }
 
 .notif-template-label {
   font-size: 0.82rem;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .notif-template-hint {
   font-size: 0.72rem;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .notif-preview-project-select {

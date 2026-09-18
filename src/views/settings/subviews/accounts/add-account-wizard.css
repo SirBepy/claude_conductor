@@ -58,7 +58,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
@@ -110,7 +110,7 @@
 .aaw-overlay .field label {
   display: block;
   font-size: 11.5px;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   margin-bottom: 5px;
 }
 
@@ -154,7 +154,7 @@
 .aaw-overlay .detected .info { flex: 1; min-width: 0; }
 .aaw-overlay .detected .info .nm { font-weight: 700; }
 .aaw-overlay .detected .info .em {
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   font-size: 11.5px;
 }
 .aaw-overlay .detected .ok {
@@ -203,7 +203,7 @@
   border-color: var(--acc, var(--color-primary, #6e8fff));
 }
 
-.aaw-overlay .muted { color: var(--color-text-muted, #8a8a96); }
+.aaw-overlay .muted { color: var(--sb-muted); }
 
 .aaw-overlay .aaw-error {
   display: flex;
@@ -225,7 +225,7 @@
   padding: 9px 11px;
   border-radius: 8px;
   font-size: 12px;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   background: var(--color-surface-alt, #24242e);
   border: 1px dashed var(--color-border, #2a2a36);
   margin: 0 0 12px;
@@ -248,7 +248,7 @@
 
 .aaw-overlay .aaw-explain {
   font-size: 12px;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   line-height: 1.5;
   margin: 0 0 4px;
 }

@@ -8,7 +8,7 @@
 .appearance-picker .field label {
   display: block;
   font-size: 11.5px;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   margin-bottom: 5px;
 }
 

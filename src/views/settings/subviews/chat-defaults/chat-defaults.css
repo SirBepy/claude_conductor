@@ -5,7 +5,7 @@
 
 .view-settings-chat-defaults .cd-hint {
   font-size: 0.82rem;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   margin: 0 0 12px;
 }
 

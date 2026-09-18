@@ -147,7 +147,7 @@ export function resetUrgency(isoStr: string | null | undefined): ResetUrgency | 
 }
 
 export function pctColor(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "var(--text-dim)";
+  if (v === null || v === undefined) return "var(--sb-muted)";
   if (v >= 80) return "#e74c3c";
   if (v >= 50) return "#e67e22";
   return "#27ae60";
@@ -195,7 +195,7 @@ export function valueColor(
   settings: ValueColorSettings,
   target: string = "dashboard",
 ): string {
-  if (settings.colorApplyTo?.[target] === false) return "var(--text)";
+  if (settings.colorApplyTo?.[target] === false) return "var(--color-text)";
   if (safePace != null) {
     return getPaceColor(pct, safePace, settings);
   }

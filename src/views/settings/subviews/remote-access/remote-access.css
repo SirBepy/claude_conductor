@@ -5,7 +5,7 @@
   margin: 0 0 4px;
   font-size: 0.85rem;
   line-height: 1.45;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .ra-statusline {
@@ -22,14 +22,14 @@
   gap: 4px;
 }
 
-.ra-status-warn { color: var(--warning, #e0a83a); }
-.ra-status-ok { color: var(--primary); }
-.ra-status-dim { color: var(--text-dim); }
+.ra-status-warn { color: var(--color-warning, #e0a83a); }
+.ra-status-ok { color: var(--color-primary); }
+.ra-status-dim { color: var(--sb-muted); }
 
 .ra-url {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.82rem;
-  color: var(--text);
+  color: var(--color-text);
   word-break: break-all;
 }
 
@@ -51,7 +51,7 @@
 }
 
 .ra-qr-fallback {
-  color: var(--text-dim);
+  color: var(--sb-muted);
   font-size: 0.85rem;
 }
 
@@ -59,17 +59,17 @@
   margin: 0;
   font-size: 0.78rem;
   line-height: 1.4;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .ra-token-field {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: var(--text);
+  color: var(--color-text);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8rem;
 }
@@ -109,15 +109,15 @@
 
 .ra-device-date {
   font-size: .78rem;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
 }
 
 .ra-machine-label-input {
   padding: 5px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: var(--text);
+  color: var(--color-text);
   font-size: 0.85rem;
   width: 200px;
   max-width: 50%;

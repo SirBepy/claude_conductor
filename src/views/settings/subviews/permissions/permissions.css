@@ -1,7 +1,7 @@
 .view-settings-permissions .perm-empty {
   padding: 24px 12px;
   text-align: center;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   font-size: 0.86rem;
 }
 
@@ -17,7 +17,7 @@
   display: block;
   font-family: var(--font-mono, ui-monospace, Consolas, monospace);
   font-size: 0.78rem;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   word-break: break-all;
   margin-bottom: 8px;
 }
@@ -72,7 +72,7 @@
   font-size: 0.76rem;
   background: transparent;
   border: none;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   cursor: pointer;
   padding: 4px 6px;
 }
@@ -82,7 +82,7 @@
 
 .view-settings-permissions .perm-hint {
   font-size: 0.8rem;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   margin-bottom: 12px;
   line-height: 1.45;
 }

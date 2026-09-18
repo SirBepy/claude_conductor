@@ -27,7 +27,7 @@ function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
   if (state.state === "downloaded") {
     return {
       statusText: "Ready to install",
-      statusColor: "var(--primary)",
+      statusColor: "var(--color-primary)",
       actionLabel: state.version ? `Install v${state.version}` : "Install & Restart",
       onAction: () => { void api.installUpdate(); },
     };
@@ -40,7 +40,7 @@ function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
     };
   }
   if (state.state === "downloading") {
-    return { statusText: "Downloading...", statusColor: "var(--text-dim)" };
+    return { statusText: "Downloading...", statusColor: "var(--sb-muted)" };
   }
   if (state.state === "error") {
     return {

@@ -5,7 +5,7 @@
   margin: 0 0 10px;
   font-size: 0.82rem;
   line-height: 1.45;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
 }
 
 .acc-explainer code {
@@ -69,7 +69,7 @@
 
 .acc-sub {
   font-size: 0.76rem;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -110,7 +110,7 @@
 
 .acc-empty {
   font-size: 0.82rem;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
   margin: 4px 0 10px;
 }
 
