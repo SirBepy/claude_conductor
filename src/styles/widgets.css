@@ -1168,7 +1168,7 @@ input:checked + .slider:before {
 }
 .session-table thead th {
   text-align: left;
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1181,19 +1181,23 @@ input:checked + .slider:before {
   vertical-align: middle;
 }
 /* Column widths drive off the header row under table-layout: fixed, so pin
-   them on the th cells. When + Tokens stay just wide enough; Title (last)
-   gets all the slack. */
-.session-table th:nth-child(1) { width: 44px; }
-.session-table th:nth-child(2) { width: 56px; }
+   them on the th cells. When + Tokens stay just wide enough for their widest
+   real value ("just now", "999.9M"); Title (last) gets all the slack. */
+.session-table th:nth-child(1) { width: 70px; }
+.session-table th:nth-child(2) { width: 60px; }
 .session-table th:nth-child(3) { width: auto; }
 .session-table .col-when {
-  color: var(--color-text-muted, #8a8aa0);
+  color: var(--sb-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: "Fira Code", monospace;
 }
 .session-table .col-tokens {
   font-family: "Fira Code", monospace;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .session-table .col-name {
   font-family: "Fira Code", monospace;

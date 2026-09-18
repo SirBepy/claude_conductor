@@ -1,5 +1,5 @@
 import { html, render, type TemplateResult } from "lit-html";
-import { invoke } from "../../shared/ipc";
+import { api } from "../../shared/api";
 import type { InstalledSkill } from "../../types/ipc.generated";
 import { showView } from "../../shared/navigation";
 import { openSidemenu } from "../../shared/sidemenu";
@@ -170,7 +170,7 @@ async function load(): Promise<void> {
   hasError = false;
   draw();
   try {
-    allSkills = await invoke<InstalledSkill[]>("list_installed_skills");
+    allSkills = await api.listInstalledSkills();
   } catch (err) {
     console.error("list_installed_skills failed", err);
     allSkills = [];
