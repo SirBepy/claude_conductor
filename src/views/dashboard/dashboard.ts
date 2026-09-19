@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { openSidemenu } from "../../shared/sidemenu";
 import "./dashboard.css";
 import "../../shared/account-chip.css";
+import "../../shared/kebab-menu.css";
 import { getSettings, setSettings, setUsageHistory, getUsageHistory } from "../../shared/state";
 import { api } from "../../shared/api";
 import type { AuthState, UsageRecord } from "../../shared/api";
@@ -9,6 +10,8 @@ import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cac
 import { loadTokenHistory } from "../../shared/token-history";
 import { navigateTo } from "../../router";
 import { escapeHtml } from "../../shared/escape-html";
+import { timeAgo } from "../../shared/time";
+import { showToast } from "../../shared/toast";
 import {
   buildAccountCardsHTML,
   wireAccountCardClicks,
@@ -23,10 +26,7 @@ import {
   widgetsNeedingAccountRerender,
 } from "./widget-registry";
 import type { DashboardWidgetEntry, WidgetContext } from "./widget-registry";
-import {
-  closeDashMenu,
-  onDashMoreClick as onDashMoreClickImpl,
-} from "./dashboard-more-menu";
+import { wireDashMoreMenu, closeDashMenu } from "./dashboard-more-menu";
 import type { DashMoreMenuDeps } from "./dashboard-more-menu";
 import { legacyStatCardsHtml } from "./legacy-stat-cards";
 
@@ -49,6 +49,16 @@ const widgetTeardowns = new Map<string, () => void>();
 // Multi-account milestone 08: one-time "set up your accounts" migration
 // prompt. Fetched once per mount (not on every refresh) - see renderDashboard.
 let showSetupBanner = false;
+
+// P0-2: last-successful-refresh tracking so a fetch failure is visible
+// instead of only reaching console.error. Dismissing re-arms on the next
+// failed fullRefresh so a fresh failure is never silently suppressed by an
+// old dismissal.
+let lastRefreshOk = true;
+let lastSuccessfulRefreshAt: string | null = null;
+let refreshErrorDismissed = false;
+
+let disposeDashMoreMenu: (() => void) | null = null;
 
 async function tickAiPoll(): Promise<void> {
   try {
@@ -93,6 +103,13 @@ async function maybeAutoPoll(reason: "crossover" | "focus"): Promise<void> {
     await api.pollNow();
   } catch (err) {
     console.error("[dashboard] auto pollNow failed", err);
+    // Unlike listAccounts/getUsageMap/getAuthStateMap (which self-catch in
+    // shared/api.ts and resolve with an empty fallback, never reaching
+    // fullRefresh's own catch), pollNow rejects for real - this is the
+    // failure that actually reaches the user in practice.
+    lastRefreshOk = false;
+    refreshErrorDismissed = false;
+    if (mountedContainer) renderShell(mountedContainer);
   }
 }
 
@@ -102,6 +119,7 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
   render(template(), root);
   const content = root.querySelector<HTMLElement>("#stats-content");
   mountedContainer = content;
+  disposeDashMoreMenu = wireDashMoreMenu(root, dashMenuDeps());
 
   try {
     const promptState = await api.getAccountsSetupPromptState();
@@ -168,6 +186,8 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
     window.clearInterval(ringTickTimer);
     if (aiPollTimer !== null) { window.clearInterval(aiPollTimer); aiPollTimer = null; }
     closeDashMenu();
+    disposeDashMoreMenu?.();
+    disposeDashMoreMenu = null;
     teardownAllWidgets();
     mountedContainer = null;
   };
@@ -205,18 +225,25 @@ function template() {
           <i class="ph ph-list"></i>
         </button>
         <h2>Claude Conductor</h2>
-        <button
-          class="icon-btn"
-          id="dashMoreBtn"
-          title="More options"
-          @click=${onDashMoreClick}
-        >
-          <i class="ph ph-dots-three-vertical"></i>
-        </button>
+        <div class="menu-anchor">
+          <button class="icon-btn" id="dashMoreBtn" title="More options">
+            <i class="ph ph-dots-three-vertical"></i>
+          </button>
+          <div class="menu-popover hidden" id="dashMoreMenu"></div>
+        </div>
       </div>
       <div class="view-body">
         <div id="stats-content">
-          <div class="no-data">Loading...</div>
+          <div class="dash-skeleton">
+            <div class="dash-sel-row">
+              <div class="v-skeleton dash-acard-skeleton"></div>
+              <div class="v-skeleton dash-acard-skeleton"></div>
+            </div>
+            <div class="dash-widgets">
+              <div class="v-skeleton dash-widget-skeleton"></div>
+              <div class="v-skeleton dash-widget-skeleton"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -239,6 +266,7 @@ async function triggerRefresh(): Promise<void> {
     await api.pollNow();
   } catch (err) {
     console.error("pollNow failed", err);
+    showToast("Refresh failed - check your connection and try again.");
   } finally {
     btn?.classList.remove("spinning");
     refreshBusy = false;
@@ -246,7 +274,7 @@ async function triggerRefresh(): Promise<void> {
 }
 
 // ── "More options" kebab menu delegation ────────────────────────────────────
-// The menu itself (build/position/close) lives in dashboard-more-menu.ts;
+// The menu itself (build/wire/close) lives in dashboard-more-menu.ts;
 // dashboard.ts only supplies the small dependency bag it needs.
 
 function dashMenuDeps(): DashMoreMenuDeps {
@@ -261,10 +289,6 @@ function dashMenuDeps(): DashMoreMenuDeps {
       if (mountedContainer) renderShell(mountedContainer);
     },
   };
-}
-
-function onDashMoreClick(e: Event): void {
-  onDashMoreClickImpl(e, dashMenuDeps());
 }
 
 // ── Settings persistence for the widget layout ──────────────────────────────
@@ -299,7 +323,7 @@ function widgetShellHtml(entry: DashboardWidgetEntry, index: number, total: numb
     `<button class="icon-btn dash-widget-up" data-widget-id="${escapeHtml(entry.id)}" title="Move up" ${index === 0 ? "disabled" : ""}><i class="ph ph-caret-up"></i></button>
      <button class="icon-btn dash-widget-down" data-widget-id="${escapeHtml(entry.id)}" title="Move down" ${index === total - 1 ? "disabled" : ""}><i class="ph ph-caret-down"></i></button>
      <button class="icon-btn dash-widget-remove" data-widget-id="${escapeHtml(entry.id)}" title="Remove"><i class="ph ph-x"></i></button>`;
-  return `<div class="dash-widget" data-widget-id="${escapeHtml(entry.id)}">
+  return `<div class="dash-widget v-card" data-widget-id="${escapeHtml(entry.id)}">
     <div class="dash-widget-header">
       <i class="ph ${escapeHtml(widget.icon)} dash-widget-icon"></i>
       <span class="dash-widget-title">${escapeHtml(widget.title)}</span>
@@ -325,6 +349,7 @@ function renderShell(container: HTMLElement): void {
   const widgetsHtml = enabled.map((e, i) => widgetShellHtml(e, i, enabled.length)).join("");
 
   container.innerHTML = `
+    ${refreshErrorBannerHtml()}
     ${setupBannerHtml()}
     ${cardsHtml}
     <div class="dash-widgets">${widgetsHtml}</div>
@@ -335,9 +360,39 @@ function renderShell(container: HTMLElement): void {
   if (accountsCache.length > 0) {
     wireAccountCardClicks(container, (id) => onSelectAccount(container, id));
   }
+  wireRefreshErrorBanner(container);
   wireSetupBanner(container);
   wireEditControls(container);
   mountWidgets(container);
+}
+
+// ── Fetch-failure banner (P0-2) ─────────────────────────────────────────────
+// console.error alone never told Joe a refresh silently failed - this makes
+// it visible and tells him how stale the shown numbers are.
+
+function refreshErrorBannerHtml(): string {
+  if (lastRefreshOk || refreshErrorDismissed) return "";
+  const since = lastSuccessfulRefreshAt ? timeAgo(lastSuccessfulRefreshAt) : null;
+  const whenText = since === null ? "no earlier data" : since === "just now" ? "just now" : `${since} ago`;
+  const text = `Couldn't refresh - showing data from ${whenText}.`;
+  return `
+    <div class="dash-refresh-error-banner" id="dashRefreshErrorBanner" role="status" aria-live="polite">
+      <i class="ph ph-warning"></i>
+      <span class="dash-refresh-error-text">${escapeHtml(text)}</span>
+      <button class="icon-btn dash-refresh-error-dismiss" id="dashRefreshErrorDismiss" title="Dismiss">
+        <i class="ph ph-x"></i>
+      </button>
+    </div>`;
+}
+
+function wireRefreshErrorBanner(container: HTMLElement): void {
+  const dismiss = container.querySelector<HTMLButtonElement>("#dashRefreshErrorDismiss");
+  if (dismiss) {
+    dismiss.onclick = () => {
+      refreshErrorDismissed = true;
+      renderShell(container);
+    };
+  }
 }
 
 // ── "Set up your accounts" migration prompt (multi-account milestone 08) ───
@@ -475,8 +530,13 @@ async function fullRefresh(container: HTMLElement): Promise<void> {
     setCachedAccounts(accounts);
     usageMapCache = usageMap;
     authStateMapCache = authStateMap;
+    lastRefreshOk = true;
+    lastSuccessfulRefreshAt = new Date().toISOString();
+    refreshErrorDismissed = false;
   } catch (e) {
     console.error("[dashboard] account/usage fetch failed", e);
+    lastRefreshOk = false;
+    refreshErrorDismissed = false;
   }
 
   const defaultAccountId = (getSettings()["default_account_id"] as string | null | undefined) ?? null;

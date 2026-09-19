@@ -621,7 +621,7 @@ input:checked + .slider:before {
 }
 .stats-table th {
   text-align: left;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   font-size: var(--fs-micro);
   font-weight: 700;
   text-transform: uppercase;

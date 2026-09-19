@@ -136,7 +136,11 @@ function mountUsageWidget(
     const history = await fetchHistory(ctx.accountId);
     if (disposed) return;
     if (!history.length) {
-      root.innerHTML = `<div class="no-data">No history recorded yet.</div>`;
+      root.innerHTML = `<div class="v-empty">
+        <i class="ph ph-chart-line v-empty-icon"></i>
+        <div class="v-empty-title">No history recorded yet</div>
+        <div class="v-empty-hint">Data appears after the first successful refresh.</div>
+      </div>`;
       return;
     }
     const win = metric === "session" ? sessionWindow(history) : weeklyWindow(history);

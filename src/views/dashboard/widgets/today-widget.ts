@@ -11,12 +11,20 @@ import type { Widget } from "./types";
 function buildTodayHTML(): string {
   const tokenHistory = getTokenHistory();
   if (!tokenHistory || !tokenHistory.length) {
-    return `<div class="no-data">No activity recorded yet today.</div>`;
+    return `<div class="v-empty">
+      <i class="ph ph-calendar-dot v-empty-icon"></i>
+      <div class="v-empty-title">No activity yet today</div>
+      <div class="v-empty-hint">Token usage appears here once you work in a project today.</div>
+    </div>`;
   }
   const today = new Date().toISOString().slice(0, 10);
   const todayRecords = tokenHistory.filter((r) => r.date === today);
   if (!todayRecords.length) {
-    return `<div class="no-data">No activity recorded yet today.</div>`;
+    return `<div class="v-empty">
+      <i class="ph ph-calendar-dot v-empty-icon"></i>
+      <div class="v-empty-title">No activity yet today</div>
+      <div class="v-empty-hint">Token usage appears here once you work in a project today.</div>
+    </div>`;
   }
 
   const byProject = new Map<string, ListProject>();
@@ -38,7 +46,11 @@ function buildTodayHTML(): string {
     sortable: true,
     defaultSort: "lastActiveAt",
     id: "today-projects",
-  }) || `<div class="no-data">No activity recorded yet today.</div>`;
+  }) || `<div class="v-empty">
+    <i class="ph ph-calendar-dot v-empty-icon"></i>
+    <div class="v-empty-title">No activity yet today</div>
+    <div class="v-empty-hint">Token usage appears here once you work in a project today.</div>
+  </div>`;
 }
 
 export const todayWidget: Widget = {

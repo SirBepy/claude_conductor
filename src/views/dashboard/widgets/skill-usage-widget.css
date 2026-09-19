@@ -1,12 +1,5 @@
 .skill-usage-widget { margin-top: 0; }
 .skill-usage-widget h3 { margin: 0 0 12px 0; font-size: var(--fs-title); opacity: 0.85; }
-.skill-usage-widget .empty {
-  opacity: 0.6;
-  font-style: italic;
-  padding: 16px;
-  border: 1px dashed #333;
-  border-radius: 6px;
-}
 .skill-usage-widget .loading { opacity: 0.6; }
 
 .skill-usage-body {

@@ -23,7 +23,11 @@ export function buildProjectBarsView(
 ): string {
   const tokenHistory = getTokenHistory();
   if (!tokenHistory || !tokenHistory.length) {
-    return '<div class="no-data" style="padding:24px 0">No project data</div>';
+    return `<div class="v-empty">
+      <i class="ph ph-chart-bar-horizontal v-empty-icon"></i>
+      <div class="v-empty-title">No project data yet</div>
+      <div class="v-empty-hint">Bars appear once token history is recorded.</div>
+    </div>`;
   }
 
   const byProject = new Map<string, ListProject>();
@@ -51,7 +55,11 @@ export function buildProjectBarsView(
 
   const projects = Array.from(byProject.values()).sort((a, b) => b.tokens - a.tokens);
   if (!projects.length) {
-    return '<div class="no-data" style="padding:24px 0">No projects in this window</div>';
+    return `<div class="v-empty">
+      <i class="ph ph-chart-bar-horizontal v-empty-icon"></i>
+      <div class="v-empty-title">No projects in this window</div>
+      <div class="v-empty-hint">Try paging to a different session or week.</div>
+    </div>`;
   }
 
   const pctField = pctKey === "w" ? "weekly_pct" : "session_pct";

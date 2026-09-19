@@ -122,7 +122,7 @@ export function buildChart(
   const gridLines = [0, 25, 50, 75, 100].map((v) => {
     const y = py(v);
     return `<line x1="${ML}" x2="${W - MR}" y1="${y}" y2="${y}" stroke="#2d2c44" stroke-width="1"/>
-            <text x="${ML - 4}" y="${y + 3.5}" text-anchor="end" fill="#6b6990" font-size="10" font-family="Fira Code, monospace">${v}</text>`;
+            <text x="${ML - 4}" y="${y + 3.5}" text-anchor="end" fill="#6b6990" font-size="11" font-family="Fira Code, monospace">${v}</text>`;
   }).join("");
 
   const tickItems: string[] = [];
@@ -137,7 +137,7 @@ export function buildChart(
       const mm = d.getMinutes().toString().padStart(2, "0");
       tickItems.push(
         `<line x1="${x}" x2="${x}" y1="${MT + PH}" y2="${MT + PH + 4}" stroke="#2d2c44" stroke-width="1"/>` +
-        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="#6b6990" font-size="10" font-family="DM Sans, system-ui">${hh}:${mm}</text>`,
+        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="#6b6990" font-size="11" font-family="DM Sans, system-ui">${hh}:${mm}</text>`,
       );
     }
   } else {
@@ -149,8 +149,8 @@ export function buildChart(
       const dateStr = (cursor.getMonth() + 1) + "/" + cursor.getDate();
       tickItems.push(
         `<line x1="${x}" x2="${x}" y1="${MT + PH}" y2="${MT + PH + 4}" stroke="#2d2c44" stroke-width="1"/>` +
-        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="#6b6990" font-size="10" font-family="DM Sans, system-ui">${dayName}</text>` +
-        `<text x="${x}" y="${H - MB + 26}" text-anchor="middle" fill="#4a4870" font-size="9" font-family="DM Sans, system-ui">${dateStr}</text>`,
+        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="#6b6990" font-size="11" font-family="DM Sans, system-ui">${dayName}</text>` +
+        `<text x="${x}" y="${H - MB + 26}" text-anchor="middle" fill="#4a4870" font-size="11" font-family="DM Sans, system-ui">${dateStr}</text>`,
       );
       cursor.setDate(cursor.getDate() + 1);
     }
