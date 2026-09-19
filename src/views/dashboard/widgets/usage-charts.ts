@@ -95,7 +95,7 @@ export function sessionWindow(history: UsageRecord[]): WindowState {
     startMs, endMs, hasPrev,
     pageLabel: sessionPageOffset === 0 ? "This session" : `${sessionPageOffset} session${sessionPageOffset > 1 ? "s" : ""} ago`,
     pageOffset: sessionPageOffset,
-    legends: [legendItem("legend-session", "#9d7dfc", false, "Session"), legendItem("legend-expected", "#6b6990", true, "Expected")],
+    legends: [legendItem("legend-session", "var(--color-primary)", false, "Session"), legendItem("legend-expected", "var(--color-text-muted)", true, "Expected")],
     lineKey: "s", pctKey: "s",
   };
 }
@@ -117,7 +117,7 @@ export function weeklyWindow(history: UsageRecord[]): WindowState {
     startMs, endMs, hasPrev,
     pageLabel: weeklyPageOffset === 0 ? "This week" : `${weeklyPageOffset}w ago`,
     pageOffset: weeklyPageOffset,
-    legends: [legendItem("legend-weekly", "#6e8fff", false, "Weekly"), legendItem("legend-expected", "#6b6990", true, "Expected")],
+    legends: [legendItem("legend-weekly", "var(--color-secondary)", false, "Weekly"), legendItem("legend-expected", "var(--color-text-muted)", true, "Expected")],
     lineKey: "w", pctKey: "w",
   };
 }

@@ -405,8 +405,8 @@ input[type="search"]:focus {
     inset 0 3px 10px rgba(0, 0, 0, 0.5),
     inset 0 1px 2px 0 rgba(0, 0, 0, 0.3),
     inset 0 -1px 1px 0 rgba(255, 255, 255, 0.07),
-    0 0 0 3px rgba(157, 125, 252, 0.15),
-    0 0 16px rgba(157, 125, 252, 0.08);
+    0 0 0 3px rgba(var(--color-primary-rgb), 0.15),
+    0 0 16px rgba(var(--color-primary-rgb), 0.08);
 }
 
 /* Chrome/Safari's native search-clear x is unstyleable and clashes with any
@@ -467,8 +467,8 @@ select:focus {
     inset 0 3px 10px rgba(0, 0, 0, 0.5),
     inset 0 1px 2px 0 rgba(0, 0, 0, 0.3),
     inset 0 -1px 1px 0 rgba(255, 255, 255, 0.07),
-    0 0 0 3px rgba(157, 125, 252, 0.15),
-    0 0 16px rgba(157, 125, 252, 0.08);
+    0 0 0 3px rgba(var(--color-primary-rgb), 0.15),
+    0 0 16px rgba(var(--color-primary-rgb), 0.08);
 }
 
 /* ── Color picker ── */
