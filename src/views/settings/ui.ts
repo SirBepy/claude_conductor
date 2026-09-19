@@ -57,7 +57,18 @@ export function settingsHeader(title: string, opts?: SettingsHeaderOpts): Templa
 /** A tappable settings row that drills into another page, with a leading Phosphor icon. */
 export function navRow(label: string, phIcon: string, onClick: () => void): TemplateResult {
   return html`
-    <div class="kit-row kit-nav-row" @click=${onClick}>
+    <div
+      class="kit-row kit-nav-row v-focusable"
+      role="button"
+      tabindex="0"
+      @click=${onClick}
+      @keydown=${(e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
       <i class="ph ${phIcon}"></i>
       <span class="kit-row-label">${label}</span>
       <span class="kit-nav-arrow">›</span>

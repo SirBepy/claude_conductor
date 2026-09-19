@@ -115,7 +115,13 @@ async function renderMachinesSection(root: HTMLElement, myUrlSeed?: string | nul
     const list = $(root, "#ra-machine-list");
     if (list) {
       if (peers.length === 0) {
-        list.innerHTML = `<p class="ra-caption">No paired machines yet.</p>`;
+        list.innerHTML = `
+          <div class="v-empty">
+            <i class="ph ph-devices v-empty-icon"></i>
+            <div class="v-empty-title">No paired machines yet</div>
+            <div class="v-empty-hint">Paste another machine's pairing URL below to pair it.</div>
+          </div>
+        `;
       } else {
         list.innerHTML = peers.map((p) => `
           <div class="ra-device-row" data-id="${escapeHtml(p.machine_id)}">

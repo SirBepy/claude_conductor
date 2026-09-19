@@ -156,10 +156,9 @@
 }
 .aem-overlay .rev-item .x { color: var(--color-text-muted, #8a8a96); cursor: pointer; }
 .aem-overlay .rev-item .x:hover { color: var(--color-danger, #ff6b6b); }
-.aem-overlay .rev-empty {
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-  margin: 4px 0 10px;
+.aem-overlay .aem-row-skeleton {
+  height: 34px;
+  margin-bottom: 6px;
 }
 .aem-overlay .rev-add-btn {
   margin-top: 6px;

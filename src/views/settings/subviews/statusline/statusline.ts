@@ -16,6 +16,7 @@ import {
 import { toolLabel, toolSummary } from "../../../../shared/chat/tool-meta";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { type Pos, insertChip, moveChip, removeAt, addRow, trimRows, moveRow } from "./statusline-dnd";
+import { askConfirm } from "../../../../shared/confirm";
 import { settingsHeader } from "../../ui";
 import "../../settings.css";
 import "./statusline.css";
@@ -289,9 +290,12 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   });
 
   root.querySelector<HTMLButtonElement>("#slClearBtn")?.addEventListener("click", () => {
-    rows = [[]];
-    paint();
-    persist();
+    void (async () => {
+      if (!(await askConfirm("Clear the whole layout?", { confirmLabel: "Clear" }))) return;
+      rows = [[]];
+      paint();
+      persist();
+    })();
   });
 
   root.querySelector<HTMLButtonElement>("#slResetBtn")?.addEventListener("click", () => {

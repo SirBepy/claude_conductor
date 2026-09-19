@@ -11,17 +11,22 @@ import { accountIconBadgeHtml } from "../../../../shared/account-chip";
 import { openAddAccountWizard } from "./add-account-wizard";
 import { openEditAccountModal } from "./edit-account-modal";
 import { askConfirm } from "../../../../shared/confirm";
+import { showToast } from "../../../../shared/toast";
+import { wireKebabMenu, closeKebabMenu } from "../../../../shared/kebab-menu";
 import { buildIdentitySurface } from "./wizard-logic";
+import { settingsHeader } from "../../ui";
 import "../../../../shared/account-chip.css";
 import "../../../../shared/kebab-menu.css";
 import "./accounts.css";
 
-interface LegacyGlobals {
-  navigateTo(name: string): Promise<void>;
-}
-function g(): LegacyGlobals {
-  return window as unknown as LegacyGlobals;
-}
+// Per-row kebab wiring (ARIA/Escape/arrows via wireKebabMenu) is rebuilt on
+// every refreshList() innerHTML rebuild, so prior disposers must run first or
+// each refresh leaks a document-level listener.
+let kebabDisposers: (() => void)[] = [];
+// Only a refresh after the list has already loaded once (a user-triggered
+// action) gets a toast on failure - the very first load shows the inline
+// error card instead, so a broken backend doesn't double-surface.
+let hasLoadedOnce = false;
 
 function accountRowHtml(account: Account, defaultAccountId: string | null, identity: AccountIdentity | null): string {
   const isDefault = account.id === defaultAccountId;
@@ -42,8 +47,8 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, ident
       </span>
       <span class="acc-actions">
         <div class="menu-anchor">
-          <button class="icon-btn acc-btn-kebab" data-id="${id}" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
-          <div class="menu-popover" data-id="${id}" hidden>
+          <button class="icon-btn acc-btn-kebab" data-id="${id}" title="More options" aria-label="More options"><i class="ph ph-dots-three-vertical"></i></button>
+          <div class="menu-popover hidden" data-id="${id}">
             <button class="menu-item acc-menu-edit" data-id="${id}"><i class="ph ph-pencil-simple"></i> Edit</button>
             ${!isDefault ? `<button class="menu-item acc-menu-default" data-id="${id}"><i class="ph ph-star"></i> Set as default</button>` : ""}
             <button class="menu-item acc-menu-reauth" data-id="${id}"><i class="ph ph-arrow-clockwise"></i> Reauth</button>
@@ -58,14 +63,38 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, ident
   `;
 }
 
+function emptyStateHtml(): string {
+  return `
+    <div class="v-empty">
+      <i class="ph ph-user-circle v-empty-icon"></i>
+      <div class="v-empty-title">No accounts added yet</div>
+      <div class="v-empty-hint">Click "Add account" below to connect your first Claude account.</div>
+    </div>
+  `;
+}
+
+function errorStateHtml(): string {
+  return `
+    <div class="v-empty">
+      <i class="ph ph-warning v-empty-icon"></i>
+      <div class="v-empty-title">Couldn't load accounts</div>
+      <div class="v-empty-hint">Something went wrong talking to the backend.</div>
+      <button class="btn-secondary" id="acc-retry-btn">Retry</button>
+    </div>
+  `;
+}
+
 async function refreshList(root: HTMLElement): Promise<void> {
   const list = root.querySelector<HTMLElement>("#acc-list");
-  const empty = root.querySelector<HTMLElement>("#acc-empty");
   if (!list) return;
+
+  kebabDisposers.forEach((dispose) => dispose());
+  kebabDisposers = [];
 
   let accounts: Account[] = [];
   let defaultAccountId: string | null = null;
   let identities: Record<string, AccountIdentity | null> = {};
+  let loadError = false;
   try {
     accounts = await api.listAccounts();
     const settings = await api.getSettings();
@@ -74,24 +103,28 @@ async function refreshList(root: HTMLElement): Promise<void> {
     identities = Object.fromEntries(accounts.map((a, i) => [a.id, fetched[i] ?? null]));
   } catch (e) {
     console.error("[settings-accounts] refreshList failed", e);
+    loadError = true;
+    if (hasLoadedOnce) showToast("Couldn't refresh accounts - see the console.");
   }
 
-  if (empty) empty.style.display = accounts.length === 0 ? "" : "none";
-  list.innerHTML = accounts.map((a) => accountRowHtml(a, defaultAccountId, identities[a.id] ?? null)).join("");
+  if (loadError) {
+    list.innerHTML = errorStateHtml();
+    list.querySelector<HTMLButtonElement>("#acc-retry-btn")?.addEventListener("click", () => void refreshList(root));
+    return;
+  }
+  hasLoadedOnce = true;
 
-  // Kebab menu: one popover open at a time, closed by the document-level
-  // listener registered once in renderAccountsSettingsView (outside click) or
-  // right here after any menu action runs.
-  list.querySelectorAll<HTMLButtonElement>(".acc-btn-kebab").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.id;
-      const popover = list.querySelector<HTMLElement>(`.menu-popover[data-id="${CSS.escape(id ?? "")}"]`);
-      if (!popover) return;
-      const wasHidden = popover.hidden;
-      list.querySelectorAll<HTMLElement>(".menu-popover").forEach((p) => { p.hidden = true; });
-      popover.hidden = !wasHidden;
-    });
+  list.innerHTML = accounts.length === 0
+    ? emptyStateHtml()
+    : accounts.map((a) => accountRowHtml(a, defaultAccountId, identities[a.id] ?? null)).join("");
+
+  // Each row's kebab gets its own ARIA/Escape/arrow-key wiring; the capture
+  // listener registered once in renderAccountsSettingsView enforces
+  // one-open-at-a-time across rows before this per-row handler runs.
+  list.querySelectorAll<HTMLElement>(".menu-anchor").forEach((anchor) => {
+    const btn = anchor.querySelector<HTMLButtonElement>(".acc-btn-kebab");
+    const popover = anchor.querySelector<HTMLElement>(".menu-popover");
+    if (btn && popover) kebabDisposers.push(wireKebabMenu(btn, popover));
   });
 
   list.querySelectorAll<HTMLButtonElement>(".acc-menu-default").forEach((btn) => {
@@ -123,7 +156,7 @@ async function refreshList(root: HTMLElement): Promise<void> {
       void (async () => {
         try {
           await api.reauthAccount(id);
-          alert("A terminal opened for /login. Run it, then reopen this screen to see the refreshed identity.");
+          showToast("A terminal opened for /login. Run it, then reopen this screen to see the refreshed identity.");
         } catch (e) {
           console.error("[settings-accounts] reauthAccount failed", e);
         }
@@ -139,7 +172,7 @@ async function refreshList(root: HTMLElement): Promise<void> {
         try { await api.recaptureAccountCookie(id); await refreshList(root); }
         catch (e) {
           console.error("[settings-accounts] recaptureAccountCookie failed", e);
-          alert(e instanceof Error ? e.message : "Connecting usage tracking failed - see the console.");
+          showToast(e instanceof Error ? e.message : "Connecting usage tracking failed - see the console.");
         }
       })();
     });
@@ -156,7 +189,7 @@ async function refreshList(root: HTMLElement): Promise<void> {
         try { await api.removeAccount(id); await refreshList(root); }
         catch (e) {
           console.error("[settings-accounts] removeAccount failed", e);
-          alert(e instanceof Error ? e.message : "Removing the account failed - see the console.");
+          showToast(e instanceof Error ? e.message : "Removing the account failed - see the console.");
         }
       })();
     });
@@ -169,7 +202,7 @@ async function refreshList(root: HTMLElement): Promise<void> {
     btn.addEventListener("click", () => {
       const id = btn.dataset.id;
       if (!id) return;
-      list.querySelectorAll<HTMLElement>(".menu-popover").forEach((p) => { p.hidden = true; });
+      list.querySelectorAll<HTMLElement>(".menu-popover:not(.hidden)").forEach((p) => closeKebabMenu(p));
       const account = accounts.find((a) => a.id === id);
       if (!account) return;
       void openEditAccountModal(account).then((updated) => { if (updated) void refreshList(root); });
@@ -191,9 +224,6 @@ async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
 export async function renderAccountsSettingsView(root: HTMLElement): Promise<() => void> {
   render(template(), root);
 
-  const backBtn = root.querySelector<HTMLButtonElement>(".back-to-settings");
-  if (backBtn) backBtn.onclick = () => g().navigateTo("settings");
-
   const addBtn = root.querySelector<HTMLButtonElement>("#acc-add-btn");
   if (addBtn) {
     addBtn.onclick = () => {
@@ -210,39 +240,37 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
     };
   }
 
-  // Close any open kebab popover on an outside click. Registered once for the
-  // view's lifetime (refreshList re-renders the list body on every action, so
-  // this can't live inside it without leaking a listener per refresh).
-  const onDocClick = (e: MouseEvent) => {
-    const list = root.querySelector<HTMLElement>("#acc-list");
-    if (!list) return;
-    const target = e.target as Node;
-    list.querySelectorAll<HTMLElement>(".menu-popover:not([hidden])").forEach((popover) => {
-      if (!popover.contains(target) && !popover.previousElementSibling?.contains(target)) {
-        popover.hidden = true;
-      }
+  // Outside-click/Escape/arrow-key handling is each row's own wireKebabMenu
+  // instance (wired per refreshList() call); this capture listener only adds
+  // one-open-at-a-time - it closes every other row's popover before a
+  // kebab's own bubble-phase click handler (set by wireKebabMenu) toggles it.
+  const list = root.querySelector<HTMLElement>("#acc-list");
+  const onKebabClickCapture = (e: MouseEvent) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>(".acc-btn-kebab");
+    if (!btn || !list) return;
+    const thisMenu = btn.nextElementSibling as HTMLElement | null;
+    list.querySelectorAll<HTMLElement>(".menu-popover:not(.hidden)").forEach((menu) => {
+      if (menu !== thisMenu) closeKebabMenu(menu);
     });
   };
-  document.addEventListener("click", onDocClick);
+  list?.addEventListener("click", onKebabClickCapture, true);
 
   try { await refreshList(root); }
   catch (e) { console.error("[settings-accounts] initial render failed", e); }
   try { await refreshTerminalIdentity(root); }
   catch (e) { console.error("[settings-accounts] terminal identity failed", e); }
 
-  return () => { document.removeEventListener("click", onDocClick); };
+  return () => {
+    list?.removeEventListener("click", onKebabClickCapture, true);
+    kebabDisposers.forEach((dispose) => dispose());
+    kebabDisposers = [];
+  };
 }
 
 function template() {
   return html`
     <div class="view view-settings-accounts">
-      <div class="view-header">
-        <button class="icon-btn back-to-settings" title="Back">
-          <i class="ph ph-arrow-left"></i>
-        </button>
-        <h2>Accounts</h2>
-        <div style="width:32px"></div>
-      </div>
+      ${settingsHeader("Accounts")}
       <div class="view-body">
 
         <div class="kit-section">
@@ -252,7 +280,6 @@ function template() {
             other account and from your terminal's <code>~/.claude</code>.
           </p>
           <div id="acc-list" class="acc-list"></div>
-          <p id="acc-empty" class="acc-empty">No accounts added yet.</p>
           <button class="btn-secondary" id="acc-add-btn"><i class="ph ph-plus"></i> Add account</button>
         </div>
 

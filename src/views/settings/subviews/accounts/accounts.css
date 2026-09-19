@@ -24,10 +24,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 10px 9px 12px;
+  padding: 9px 10px;
   background: var(--color-surface-alt, #1a1d27);
   border-radius: 8px;
-  border-left: 3px solid var(--acc, var(--color-primary, #6e8fff));
+  border: 1px solid color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 30%, var(--color-border, #2d2c44));
 }
 
 /* Size override for the shared icon badge (src/shared/account-chip.css) in
@@ -106,12 +106,6 @@
   height: 1px;
   background: var(--color-border, #2d2c44);
   margin: 4px 2px;
-}
-
-.acc-empty {
-  font-size: var(--fs-body);
-  color: var(--sb-muted);
-  margin: 4px 0 10px;
 }
 
 .acc-terminal-identity {

@@ -56,9 +56,12 @@ function renderThemeCards(activeTheme: string): void {
   const colorKey: "darkColors" | "lightColors" = isLight ? "lightColors" : "darkColors";
   themeGrid.innerHTML = "";
   for (const t of THEMES) {
-    const card = document.createElement("div");
-    card.className = "kit-palette-card" + (t.id === activeBase ? " kit-palette-card--active" : "");
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "kit-palette-card v-focusable" + (t.id === activeBase ? " kit-palette-card--active" : "");
     card.dataset.palette = t.id;
+    card.setAttribute("aria-label", `${t.label} theme`);
+    card.setAttribute("aria-pressed", String(t.id === activeBase));
     card.innerHTML = `
       <span class="kit-palette-swatch">${t[colorKey].map((c) => `<span style="background:${c}"></span>`).join("")}</span>
       <span class="kit-palette-label">${t.label}</span>
@@ -84,7 +87,9 @@ function applyTheme(baseId: string): void {
   const themeGrid = $("themeGrid");
   if (themeGrid) {
     for (const card of themeGrid.querySelectorAll<HTMLElement>(".kit-palette-card")) {
-      card.classList.toggle("kit-palette-card--active", card.dataset.palette === baseId);
+      const isActive = card.dataset.palette === baseId;
+      card.classList.toggle("kit-palette-card--active", isActive);
+      card.setAttribute("aria-pressed", String(isActive));
     }
   }
   const modeLabelDark = $("modeLabelDark");
