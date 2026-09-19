@@ -50,9 +50,23 @@ let activeFile: string | null = null;
 let activeRoot: HTMLElement | null = null;
 let activeChar: Character | null = null;
 
+// One-shot "pop" settle when playback ends on its own (not on manual stop) -
+// the peak-moment reward, cleared after the CSS animation finishes.
+let justEnded = false;
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSettleTimer(): void {
+  if (settleTimer) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+}
+
 export function openCharacterDetail(id: string): void {
   void api.stopCharacterPreview();
   activeFile = null;
+  justEnded = false;
+  clearSettleTimer();
   currentCharacterId = id;
   showView("character-detail");
 }
@@ -70,6 +84,8 @@ function togglePlay(file: string, charId: string): void {
     void api.stopCharacterPreview();
     return;
   }
+  clearSettleTimer();
+  justEnded = false;
   activeFile = file;
   rerender();
   void api.previewCharacterFile(charId, file).catch((e) => {
@@ -85,6 +101,8 @@ function formatSlot(slot: string): string {
 }
 
 function detailTemplate(c: Character): TemplateResult {
+  const isPlaying = activeFile !== null;
+  const avatarBoxClass = `char-detail-avatar-box${isPlaying ? " playing" : ""}${justEnded ? " pop-settle" : ""}`;
   return html`
     <div class="view view-character-detail">
       <div class="view-header">
@@ -104,7 +122,7 @@ function detailTemplate(c: Character): TemplateResult {
       </div>
       <div class="view-body">
         <div class="char-detail-hero">
-          ${characterAvatarBox(c, "char-detail-avatar-box", "char-avatar char-detail-avatar")}
+          ${characterAvatarBox(c, avatarBoxClass, "char-avatar char-detail-avatar")}
           ${c.game_label || c.game
             ? html`<div class="char-detail-game-chip">${c.game_label ?? c.game}</div>`
             : ""}
@@ -191,12 +209,21 @@ export async function renderCharacterDetailView(root: HTMLElement): Promise<() =
 
   const unlisten = api.onCharacterPreviewEnded(() => {
     activeFile = null;
+    justEnded = true;
     rerender();
+    clearSettleTimer();
+    settleTimer = setTimeout(() => {
+      justEnded = false;
+      settleTimer = null;
+      rerender();
+    }, 200);
   });
 
   return () => {
     void api.stopCharacterPreview();
     activeFile = null;
+    justEnded = false;
+    clearSettleTimer();
     activeRoot = null;
     activeChar = null;
     unlisten();

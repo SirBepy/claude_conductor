@@ -215,4 +215,61 @@ test.describe("view-harness / characters", () => {
     await page.keyboard.press("Escape");
     await expect(modal).toBeHidden();
   });
+
+  test("delight: card hover-lift rule exists in a loaded stylesheet", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountCharacters(page);
+    await page.locator(".char-card").first().waitFor();
+
+    // Hover on :hover pseudo-class is flaky to read back as computed style;
+    // asserting the rule is actually in a loaded stylesheet is not.
+    const hoverRuleExists = await page.evaluate(() => {
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules: CSSRuleList;
+        try {
+          rules = sheet.cssRules;
+        } catch {
+          continue;
+        }
+        for (const rule of Array.from(rules)) {
+          const text = rule.cssText ?? "";
+          if (text.includes(".char-card:hover .char-card-avatar-box") && text.includes("rotate")) {
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+    expect(hoverRuleExists).toBe(true);
+
+    await page.screenshot({ path: path.join(SHOT_DIR, "characters-delight-populated-1280.png") });
+  });
+
+  test("delight: reduced motion disables the empty-icon idle float", async ({ page }) => {
+    // Own page/fresh navigation, not a second mountView() on a page already at
+    // the same hash - a same-URL goto() can no-op and serve the stale module cache.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await mountCharacters(page, []);
+    await page.locator(".v-empty-icon").waitFor();
+    // A real keyframe animation (animation-name), so this is a clean
+    // computed-style read unlike a hover transform.
+    const reducedName = await page.locator(".v-empty-icon").evaluate((el) => getComputedStyle(el).animationName);
+    expect(reducedName).toBe("none");
+  });
+
+  test("delight: preview reward bobs the hero avatar while playing", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountCharacters(page);
+    await page.locator('.char-card:has-text("Diablo")').click();
+    await page.locator(".char-slot-row").first().waitFor();
+
+    const heroBox = page.locator(".char-detail-avatar-box");
+    const playBtn = page.locator(".char-play-btn").first();
+    await playBtn.click();
+    await expect(heroBox).toHaveClass(/playing/);
+    const animName = await heroBox.evaluate((el) => getComputedStyle(el).animationName);
+    expect(animName).toBe("char-preview-bob");
+
+    await page.screenshot({ path: path.join(SHOT_DIR, "character-detail-delight-1280.png") });
+  });
 });

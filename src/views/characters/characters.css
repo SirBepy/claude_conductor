@@ -76,6 +76,13 @@
   border-radius: 6px;
   overflow: hidden;
   background: var(--color-surface-alt);
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+/* Sprite responds to attention: a tiny lift-and-tilt, like it noticed you. */
+.char-card:hover .char-card-avatar-box,
+.char-card:focus-visible .char-card-avatar-box {
+  transform: translateY(-2px) rotate(-3deg);
 }
 
 .char-card-avatar-box .char-avatar-fallback {
@@ -137,6 +144,47 @@
 .char-card-skeleton {
   height: 106px;
   border-radius: 8px;
+}
+
+/* Filled dots scale in staggered when their group opens, echoing v-details'
+ * own fade - a 20ms step per dot stays well under the 60ms/dot ceiling. */
+@keyframes char-dot-pop {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.v-details[open] .char-dot.filled {
+  animation: char-dot-pop var(--motion-fast) var(--motion-ease) backwards;
+}
+.v-details[open] .char-dot.filled:nth-child(1) { animation-delay: 0ms; }
+.v-details[open] .char-dot.filled:nth-child(2) { animation-delay: 20ms; }
+.v-details[open] .char-dot.filled:nth-child(3) { animation-delay: 40ms; }
+.v-details[open] .char-dot.filled:nth-child(4) { animation-delay: 60ms; }
+.v-details[open] .char-dot.filled:nth-child(5) { animation-delay: 80ms; }
+.v-details[open] .char-dot.filled:nth-child(6) { animation-delay: 100ms; }
+
+/* Scoped to this view only - .v-empty-icon is shared by 12+ other views. */
+@keyframes char-empty-icon-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.view-characters .v-empty-icon {
+  animation: char-empty-icon-float 6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .char-card-avatar-box {
+    transition: none;
+  }
+  .char-card:hover .char-card-avatar-box,
+  .char-card:focus-visible .char-card-avatar-box {
+    transform: none;
+  }
+  .v-details[open] .char-dot.filled {
+    animation: none;
+  }
+  .view-characters .v-empty-icon {
+    animation: none;
+  }
 }
 
 .sr-only {

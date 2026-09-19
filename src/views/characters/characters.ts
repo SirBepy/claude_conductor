@@ -97,7 +97,7 @@ function emptyTemplate(): TemplateResult {
     <div class="v-empty">
       <i class="ph ph-game-controller v-empty-icon"></i>
       <div class="v-empty-title">No characters yet</div>
-      <div class="v-empty-hint">Run <code>/character-creator &lt;name&gt;</code> in Claude Code to make one.</div>
+      <div class="v-empty-hint">This corner's empty for now, run <code>/character-creator &lt;name&gt;</code> in Claude Code to give one a sprite and a voice.</div>
     </div>
   `;
 }

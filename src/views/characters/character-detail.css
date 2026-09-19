@@ -49,6 +49,25 @@
   opacity: 1;
 }
 
+/* Peak moment: hero avatar bobs in sync with .char-play-btn's v-pulse (same
+ * 1.8s), then pops to a quick settle when playback ends on its own. */
+@keyframes char-preview-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+.char-detail-avatar-box.playing {
+  animation: char-preview-bob 1.8s ease-in-out infinite;
+}
+
+@keyframes char-preview-pop {
+  0% { transform: scale(0.94); }
+  60% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.char-detail-avatar-box.pop-settle {
+  animation: char-preview-pop 200ms var(--motion-ease);
+}
+
 .char-detail-game-chip {
   background: var(--color-surface-alt);
   color: var(--sb-muted);
@@ -134,4 +153,25 @@
   font-size: var(--fs-body);
   color: var(--sb-muted);
   font-style: italic;
+}
+
+/* One glyph, one row: the death slot winks on hover, nowhere else. */
+.char-slot-icon.ph-skull {
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+.char-slot-row:hover .char-slot-icon.ph-skull {
+  transform: rotate(12deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .char-detail-avatar-box.playing,
+  .char-detail-avatar-box.pop-settle {
+    animation: none;
+  }
+  .char-slot-icon.ph-skull {
+    transition: none;
+  }
+  .char-slot-row:hover .char-slot-icon.ph-skull {
+    transform: none;
+  }
 }
