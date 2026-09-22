@@ -399,31 +399,42 @@ pub(crate) fn stats_transcript_path(
     if own.exists() { Some(own) } else { None }
 }
 
+/// Token/turn/prompt totals for one session's transcript.
+///
+/// `async` is load-bearing, not stylistic: a sync `#[tauri::command]` runs on
+/// the main thread, and `parse_transcript` walks the whole JSONL file. On a
+/// tens-of-megabytes transcript that froze the window outright, and the
+/// statusbar re-fires this on mount and after every completed turn.
 #[tauri::command]
-pub fn instance_token_stats(session_id: String, state: State<AppState>) -> serde_json::Value {
+pub async fn instance_token_stats(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let empty = serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 });
-    let Some(inst) = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|i| i.session_id == session_id)
-        .cloned()
-    else { return empty };
-    let Some(projects) = crate::tokens::claude_projects_dir() else { return empty };
+    let inst = {
+        let instances = state.cached_instances.lock().unwrap();
+        instances.iter().find(|i| i.session_id == session_id).cloned()
+    };
+    let Some(inst) = inst else { return Ok(empty) };
+    let Some(projects) = crate::tokens::claude_projects_dir() else { return Ok(empty) };
     let project_dir = projects.join(crate::tokens::encode_cwd_as_project_dir(&inst.cwd));
     let Some(path) = stats_transcript_path(
         inst.transcript_path.as_deref(),
         &project_dir,
         &inst.session_id,
-    ) else { return empty };
-    let t = crate::tokens::parse_transcript(&path);
-    let total = t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens;
-    serde_json::json!({
-        "tokens": total,
-        "turns": t.turns,
-        "prompts": t.user_prompts,
+    ) else { return Ok(empty) };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let t = crate::tokens::parse_transcript(&path);
+        let total = t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens;
+        serde_json::json!({
+            "tokens": total,
+            "turns": t.turns,
+            "prompts": t.user_prompts,
+        })
     })
+    .await
+    .map_err(|e| format!("instance_token_stats join error: {e}"))
 }
 
 // --- Hook registration ---

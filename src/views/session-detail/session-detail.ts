@@ -6,7 +6,13 @@ import { backFromSubview } from "../../shared/navigation";
 import { getCurrentSessionRecord } from "../../shared/state";
 import { api } from "../../shared/api";
 import { invoke } from "../../shared/ipc";
-import type { ChatEvent, HistoryEntry } from "../../types/ipc.generated";
+import type { HistoryEntry } from "../../types/ipc.generated";
+
+/** Return shape of the `transcript_stats` command (src-tauri/src/chat/history.rs). */
+interface TranscriptStats {
+  messages: number;
+  model: string;
+}
 import { renderAvatar } from "../../shared/projects";
 import { projectSubviewHeaderData, hydrateSubviewHeader } from "../project-detail/subview-header";
 import type { Avatar } from "../project-detail/subview-header";
@@ -134,14 +140,9 @@ async function enrichHistorical(r: SessionRecord, sid: string, ctx: CardCtx): Pr
 
   let transcriptModel = "";
   try {
-    const events = await invoke<ChatEvent[]>("load_history", { sessionId: sid, cwd: null });
-    ctx.messages = (events || []).filter((e) => e.type === "user_message").length;
-    let startModel = "";
-    for (const e of events || []) {
-      if (e.type === "turn_usage" && e.model) transcriptModel = e.model;
-      else if (e.type === "session_started" && e.model) startModel = e.model;
-    }
-    if (!transcriptModel) transcriptModel = startModel;
+    const stats = await invoke<TranscriptStats>("transcript_stats", { sessionId: sid, cwd: null });
+    ctx.messages = stats?.messages ?? 0;
+    transcriptModel = stats?.model || "";
   } catch {
     ctx.messages = 0;
   }

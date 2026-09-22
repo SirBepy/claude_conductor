@@ -163,7 +163,7 @@ fn usage_from_line(v: &serde_json::Value) -> Option<(u64, Option<String>)> {
 /// no usage lines at all. Never panics.
 pub fn compute_context_status(transcript_path: &Path) -> Option<ContextStatus> {
     let file = std::fs::File::open(transcript_path).ok()?;
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::new(file);
 
     let mut occupancies: Vec<u64> = Vec::new();
     // model = the model from the LAST usage line that has one (avoids the
@@ -171,11 +171,23 @@ pub fn compute_context_status(transcript_path: &Path) -> Option<ContextStatus> {
     // line may omit the model).
     let mut model: Option<String> = None;
 
-    for line in reader.lines().map_while(|r| r.ok()) {
-        if line.trim().is_empty() {
+    // One reused buffer and a substring prefilter instead of a String per line
+    // and a serde_json::Value per line. `usage_from_line` can only match a line
+    // containing "input_tokens", so skipping the rest unparsed is exact, not an
+    // approximation. It matters because a tool-heavy transcript runs to tens of
+    // megabytes of tool output, and this recomputes on every turn.
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        if !line.contains("input_tokens") {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
             continue;
         };
         let Some((occ, line_model)) = usage_from_line(&v) else {

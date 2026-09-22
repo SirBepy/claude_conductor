@@ -36,6 +36,25 @@ pub async fn load_history(session_id: String, cwd: Option<String>) -> Result<Vec
     .map_err(|e| format!("join: {}", e))?
 }
 
+/// User-message count and model for a past session's detail cards, without
+/// shipping the transcript itself. `load_history` used to serve this, which put
+/// the whole file through the webview's main-thread JSON.parse and froze the
+/// window on a large chat.
+#[tauri::command]
+pub async fn transcript_stats(
+    session_id: String,
+    cwd: Option<String>,
+) -> Result<crate::chat::history::TranscriptStats, String> {
+    validate_session_id(&session_id)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::chat::history::locate_transcript(&session_id, cwd.as_deref())?;
+        crate::chat::history::stats(&path)
+    })
+    .await
+    .map_err(|e| format!("join: {}", e))?
+}
+
 /// Paginated transcript reader. Returns the last `message_limit` message
 /// bubbles (UserMessage / AssistantMessage), plus all surrounding tool calls
 /// and metadata events. Pass `before_seq = Some(oldestSeq)` to fetch the

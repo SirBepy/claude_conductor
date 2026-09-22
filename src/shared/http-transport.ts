@@ -325,6 +325,11 @@ export class HttpTransport implements Transport {
           session_id: args.sessionId ?? args.session_id,
           cwd: args.cwd ?? null,
         });
+      case "transcript_stats":
+        return this.rpc<T>("transcript_stats", {
+          session_id: args.sessionId ?? args.session_id,
+          cwd: args.cwd ?? null,
+        });
       // History view's "Continue this chat": re-registers an ended session as
       // Interactive so Sessions can find it (mirrors desktop's
       // `register_historical_session` Tauri command / daemon RPC

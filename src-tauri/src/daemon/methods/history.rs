@@ -85,4 +85,26 @@ pub fn register_history(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!(events))
         }
     });
+    router.register("transcript_stats", move |params, _ctx| {
+        async move {
+            #[derive(serde::Deserialize)]
+            struct P {
+                session_id: String,
+                #[serde(default)]
+                cwd: Option<String>,
+            }
+            let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            crate::ipc::chat::attachments::validate_session_id(&p.session_id)
+                .map_err(RpcError::invalid_params)?;
+            let stats = tokio::task::spawn_blocking(move || {
+                let path = crate::chat::history::locate_transcript(&p.session_id, p.cwd.as_deref())?;
+                crate::chat::history::stats(&path)
+            })
+            .await
+            .map_err(|e| RpcError::internal(format!("join: {e}")))?
+            .map_err(RpcError::internal)?;
+            Ok(json!(stats))
+        }
+    });
 }

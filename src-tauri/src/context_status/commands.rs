@@ -79,10 +79,46 @@ pub async fn context_status(
 /// line (`last-prompt`/`mode` rows omit it); this differs from the
 /// daemon-recorded spawn dir once inside a worktree.
 fn last_transcript_cwd(path: &std::path::Path) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    for line in content.lines().rev() {
+    // Widening tail scan rather than one whole-file read: transcripts reach tens
+    // of megabytes and this runs on statusbar mount and again on every turn, so
+    // slurping the file churned 30MB per call for a value that sits in its last
+    // few lines. A single line can itself exceed 64KB, hence the widening.
+    const WINDOWS: [u64; 3] = [64 * 1024, 1024 * 1024, u64::MAX];
+    let len = std::fs::metadata(path).ok()?.len();
+    for window in WINDOWS {
+        let start = len.saturating_sub(window);
+        if let Some(cwd) = cwd_in_tail(path, start) {
+            return Some(cwd);
+        }
+        if start == 0 {
+            break;
+        }
+    }
+    None
+}
+
+/// Scan the transcript from byte `start` to EOF for the last non-empty `cwd`.
+/// A non-zero `start` lands mid-line, so the first (partial) line is dropped.
+fn cwd_in_tail(path: &std::path::Path, start: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    // from_utf8_lossy, not read_to_string: a mid-codepoint seek is not an error
+    // to report, just a partial first line that gets discarded anyway.
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if start > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
+    for line in lines.into_iter().rev() {
         let line = line.trim();
         if line.is_empty() {
+            continue;
+        }
+        if !line.contains("\"cwd\"") {
             continue;
         }
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
@@ -120,7 +156,7 @@ pub async fn session_live_cwd(
 
 #[cfg(test)]
 mod live_cwd_tests {
-    use super::last_transcript_cwd;
+    use super::{cwd_in_tail, last_transcript_cwd};
     use std::io::Write;
 
     fn write_tmp(name: &str, body: &str) -> std::path::PathBuf {
@@ -170,6 +206,28 @@ mod live_cwd_tests {
             "{\"type\":\"user\",\"cwd\":\"C:\\\\repo\"}\n\n{\"type\":\"assistant\",\"cwd\":\"\"}\n",
         );
         assert_eq!(last_transcript_cwd(&path).as_deref(), Some("C:\\repo"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn widens_past_the_first_tail_window() {
+        // The cwd sits behind a single tool-result line far larger than the 64KB
+        // first window, so only the widening pass can reach it.
+        let filler = "x".repeat(300 * 1024);
+        let body = format!(
+            "{{\"type\":\"user\",\"cwd\":\"C:\\\\repo\"}}\n{{\"type\":\"tool\",\"out\":\"{filler}\"}}\n"
+        );
+        let path = write_tmp("widen", &body);
+        assert_eq!(last_transcript_cwd(&path).as_deref(), Some("C:\\repo"));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn partial_first_line_in_the_tail_window_is_discarded() {
+        // Seeking mid-line must not yield a truncated parse that happens to
+        // still contain a `"cwd"` substring.
+        let path = write_tmp("partial", "{\"type\":\"user\",\"cwd\":\"C:\\\\repo\"}\n");
+        assert_eq!(cwd_in_tail(&path, 5), None);
         std::fs::remove_file(&path).ok();
     }
 }

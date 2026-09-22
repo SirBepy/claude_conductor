@@ -86,6 +86,51 @@ pub fn replay(path: &Path) -> Result<Vec<ChatEvent>, String> {
     Ok(events)
 }
 
+/// Summary of a transcript for the session-detail cards.
+#[derive(serde::Serialize)]
+pub struct TranscriptStats {
+    pub messages: u32,
+    /// Model from the last `TurnUsage` carrying one, else the `SessionStarted`
+    /// model, else empty.
+    pub model: String,
+}
+
+/// Fold a transcript into a [`TranscriptStats`] without materialising its
+/// events. Goes through the same `parse_line` as [`replay`], so the count can
+/// never drift from what the transcript renders as, but a 30MB transcript costs
+/// one streaming pass instead of a multi-megabyte JSON payload over IPC.
+pub fn stats(path: &Path) -> Result<TranscriptStats, String> {
+    let f = File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
+    let reader = BufReader::new(f);
+    let mut messages: u32 = 0;
+    let mut turn_model: Option<String> = None;
+    let mut start_model: Option<String> = None;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        for ev in crate::chat::parser::parse_line(&line) {
+            match ev {
+                ChatEvent::UserMessage { .. } => messages += 1,
+                ChatEvent::TurnUsage { model: Some(m), .. } if !m.is_empty() => {
+                    turn_model = Some(m);
+                }
+                ChatEvent::SessionStarted { model, .. } if !model.is_empty() => {
+                    start_model = Some(model);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(TranscriptStats {
+        messages,
+        model: turn_model.or(start_model).unwrap_or_default(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +256,50 @@ mod tests {
     fn replay_returns_err_on_missing_file() {
         let r = replay(Path::new("/this/file/does/not/exist.jsonl"));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn stats_counts_user_messages_without_materialising_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("stats.jsonl");
+        let mut f = File::create(&p).unwrap();
+        for _ in 0..3 {
+            writeln!(
+                f,
+                r#"{{"type":"user","message":{{"role":"user","content":"hi"}},"timestamp":1}}"#
+            )
+            .unwrap();
+        }
+        writeln!(
+            f,
+            r#"{{"type":"assistant","message":{{"role":"assistant","content":"yo"}},"timestamp":2}}"#
+        )
+        .unwrap();
+        let s = stats(&p).unwrap();
+        assert_eq!(s.messages, 3);
+    }
+
+    #[test]
+    fn stats_agrees_with_replay_on_the_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("agree.jsonl");
+        let mut f = File::create(&p).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","message":{{"role":"user","content":"a"}},"timestamp":1}}"#
+        )
+        .unwrap();
+        writeln!(f, "not json at all").unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","message":{{"role":"user","content":"b"}},"timestamp":3}}"#
+        )
+        .unwrap();
+        let from_replay = replay(&p)
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, ChatEvent::UserMessage { .. }))
+            .count() as u32;
+        assert_eq!(stats(&p).unwrap().messages, from_replay);
     }
 }

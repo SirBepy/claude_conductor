@@ -93,6 +93,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // rendered empty.
     ("list_history", P),
     ("load_history", P),
+    // Read-only: the same transcript as load_history, folded to a message count
+    // and a model name so the session-detail cards never ship the file itself.
+    ("transcript_stats", P),
     // Write: re-registers an ended session as Interactive (History's "Continue
     // this chat"). Narrow mutation, strictly weaker than start_session
     // (already remote-callable). Without this the button silently no-op'd on
@@ -527,6 +530,7 @@ mod tests {
             "confirm_question_rendered",
             "get_skipped_question_marks",
             "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",
+            "transcript_stats",
             "register_historical", "read_attachment",
             "paste_attachment", "list_characters", "list_project_groups",
             "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
