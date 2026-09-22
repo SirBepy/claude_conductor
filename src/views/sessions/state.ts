@@ -160,10 +160,11 @@ const LS_LAST_SELECTED = "cc_last_selected_session";
  * silently gate-out modals for the new session. Always go through this
  * helper.
  *
- * Side-effect: persists the id to localStorage so the next mount can
- * restore the last-viewed chat after a reload / app restart. Pending
- * placeholder ids (prefix "pending-") are not persisted - they are tracked
- * via the separate pending-session storage in pending-flow.ts.
+ * Side-effect: persists the id to localStorage so a later mount in the same
+ * app run can restore the last-viewed chat. A cold launch deliberately does
+ * not restore it - see loadLastSelectedSession. Pending placeholder ids
+ * (prefix "pending-") are not persisted - they are tracked via the separate
+ * pending-session storage in pending-flow.ts.
  *
  * Deselecting (`id === null`) does NOT erase the persisted id. A daemon
  * restart (dev rebuild, crash, app update) transiently empties the session
@@ -187,6 +188,7 @@ export function setActiveSession(id: string | null): void {
   state.previewController?.setSessionScope(id);
   state.fabDial?.setSessionScope(id, cwdForSession(id));
   if (id && !isPendingSessionId(id)) {
+    selectedThisRun = true;
     try {
       localStorage.setItem(LS_LAST_SELECTED, id);
     } catch {
@@ -195,7 +197,18 @@ export function setActiveSession(id: string | null): void {
   }
 }
 
+/**
+ * True once this window realm has opened a chat. Survives a view remount and a
+ * daemon reconnect (module scope, not `state`), but never a fresh app launch.
+ */
+let selectedThisRun = false;
+
 export function loadLastSelectedSession(): string | null {
+  // Gate on selectedThisRun so the persisted id serves recovery, not startup: a
+  // daemon restart or view remount re-opens the chat the user was already in,
+  // while a cold launch lands on the empty pane and waits to be told what to
+  // open. Opening a huge transcript unasked froze the window on boot.
+  if (!selectedThisRun) return null;
   try {
     return localStorage.getItem(LS_LAST_SELECTED);
   } catch {

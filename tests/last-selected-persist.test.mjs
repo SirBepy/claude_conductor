@@ -7,6 +7,9 @@
 // persisted last-viewed chat id, so the restore-on-reconnect found nothing and
 // the user landed on a blank app. The persisted id must survive a transient
 // deselect and only be cleared by an explicit close.
+//
+// The id serves in-run recovery only. A cold launch must NOT reopen it: doing
+// so froze the window whenever the last chat was a huge transcript.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -42,5 +45,14 @@ describe("last-selected chat persistence (survives an app restart)", () => {
     setActiveSession("chat-1");
     setActiveSession("pending-abc");
     expect(loadLastSelectedSession()).toBe("chat-1");
+  });
+
+  it("a cold launch does not offer the stored id (no chat auto-opens on boot)", async () => {
+    localStorage.setItem("cc_last_selected_session", "chat-1");
+    vi.resetModules();
+    const fresh = await import("../src/views/sessions/state.ts");
+    expect(fresh.loadLastSelectedSession()).toBeNull();
+    fresh.setActiveSession("chat-2");
+    expect(fresh.loadLastSelectedSession()).toBe("chat-2");
   });
 });
