@@ -51,12 +51,21 @@ function wireTitleRename(cwd: string): void {
   const titleInput = document.getElementById("projectDetailTitleInput") as HTMLInputElement | null;
   if (!title || !titleInput) return;
 
-  title.onclick = () => {
+  const enterRenameMode = () => {
     titleInput.value = projectLabel(cwd, getSettings().projectAliases || {});
     title.style.display = "none";
     titleInput.style.display = "";
     titleInput.focus();
     titleInput.select();
+  };
+  title.onclick = enterRenameMode;
+  // Keeps the heading's semantic role (no role="button") while still giving
+  // keyboard users a way to trigger the same click-to-rename affordance.
+  title.onkeydown = (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      enterRenameMode();
+    }
   };
 
   const commitRename = () => {
@@ -287,7 +296,7 @@ export function renderProjectDetailContent(): void {
   const nextBtn = document.getElementById("chartNextBtn") as HTMLButtonElement | null;
 
   if (!sortedDays.length) {
-    chartContainer.innerHTML = `<div class="no-data">No activity in this period</div>`;
+    chartContainer.innerHTML = `<div class="v-empty"><i class="ph ph-chart-bar v-empty-icon"></i><div class="v-empty-title">No activity in this period</div></div>`;
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
     void renderSessionsList(cwd, range);
@@ -307,7 +316,7 @@ export function renderProjectDetailContent(): void {
 }
 
 export function buildBarChartSVG(days: Array<{ date: string; tokens: number }>): string {
-  if (!days.length) return `<div class="no-data">No data</div>`;
+  if (!days.length) return `<div class="v-empty"><i class="ph ph-chart-bar v-empty-icon"></i><div class="v-empty-title">No data</div></div>`;
 
   const W = 420, H = 160;
   const ML = 40, MR = 8, MT = 8, MB = 36;
@@ -321,8 +330,8 @@ export function buildBarChartSVG(days: Array<{ date: string; tokens: number }>):
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((frac) => {
     const val = frac * maxTok;
     const y = MT + (1 - frac) * PH;
-    return `<line x1="${ML}" x2="${W - MR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2d2c44" stroke-width="1"/>
-      <text x="${ML - 4}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" fill="#6b6990" font-size="9" font-family="Fira Code,monospace">${formatTokens(Math.round(val))}</text>`;
+    return `<line x1="${ML}" x2="${W - MR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--color-border)" stroke-width="1"/>
+      <text x="${ML - 4}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" fill="var(--sb-muted)" font-size="9" font-family="Fira Code,monospace">${formatTokens(Math.round(val))}</text>`;
   }).join("");
 
   const bars = days.map((d, i) => {
@@ -330,13 +339,13 @@ export function buildBarChartSVG(days: Array<{ date: string; tokens: number }>):
     const barH = Math.max(1, (d.tokens / maxTok) * PH);
     const y = MT + PH - barH;
     const label = d.date.slice(5);
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="2" fill="#9d7dfc" opacity="0.85"/>
-      <text x="${(x + barW / 2).toFixed(1)}" y="${(H - MB + 14).toFixed(1)}" text-anchor="middle" fill="#6b6990" font-size="9" font-family="DM Sans,system-ui">${label}</text>`;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="2" fill="var(--color-primary)" opacity="0.85"/>
+      <text x="${(x + barW / 2).toFixed(1)}" y="${(H - MB + 14).toFixed(1)}" text-anchor="middle" fill="var(--sb-muted)" font-size="9" font-family="DM Sans,system-ui">${label}</text>`;
   }).join("");
 
   return `<div class="chart-container"><svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible">
     ${yTicks}
-    <line x1="${ML}" x2="${ML}" y1="${MT}" y2="${MT + PH}" stroke="#2d2c44" stroke-width="1"/>
+    <line x1="${ML}" x2="${ML}" y1="${MT}" y2="${MT + PH}" stroke="var(--color-border)" stroke-width="1"/>
     ${bars}
   </svg></div>`;
 }
@@ -379,7 +388,7 @@ async function renderSessionsList(cwd: string, range: string): Promise<void> {
     const when = timeAgo(rec.lastActiveAt || rec.recordedAt || rec.date);
     const title = (rec.sessionId && titleMap.get(rec.sessionId)) || "—";
     const tok = formatMillions(totalTok(r));
-    return `<tr class="session-row" data-session-idx="${i}" style="cursor:pointer">
+    return `<tr class="session-row v-row v-focusable" data-session-idx="${i}" role="button" tabindex="0" style="cursor:pointer">
       <td class="col-when">${when}</td>
       <td class="col-tokens">${tok}</td>
       <td class="col-name" title="${title}">${title}</td>
@@ -397,9 +406,16 @@ async function renderSessionsList(cwd: string, range: string): Promise<void> {
   </div>`;
 
   list.querySelectorAll<HTMLTableRowElement>(".session-row").forEach((el) => {
-    el.onclick = () => {
+    const open = () => {
       const idx = Number(el.dataset.sessionIdx);
       openSessionDetail(top[idx]);
+    };
+    el.onclick = open;
+    el.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        open();
+      }
     };
   });
   const seeAllBtn = list.querySelector<HTMLButtonElement>("#seeAllSessionsBtn");
@@ -423,8 +439,8 @@ function template() {
         <div class="project-detail-heading">
           <div class="avatar-mini" id="projectDetailAvatar">?</div>
           <div class="project-detail-titles">
-            <h2 id="projectDetailTitle" style="font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to rename">Project</h2>
-            <input id="projectDetailTitleInput" type="text" style="display:none;flex:1;font-weight:600;font-size:0.88rem">
+            <h2 id="projectDetailTitle" class="v-focusable" tabindex="0" style="font-size: var(--fs-title);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="Click to rename" aria-label="Rename project">Project</h2>
+            <input id="projectDetailTitleInput" type="text" style="display:none;flex:1;font-weight:600;font-size: var(--fs-title)">
           </div>
         </div>
         <div class="menu-anchor">
@@ -446,7 +462,11 @@ function template() {
               <i class="ph ph-plus"></i>
             </button>
           </div>
-          <div id="runningInstancesEmpty" class="no-data">No Claude Code instances running in this project.</div>
+          <div id="runningInstancesEmpty" class="v-empty">
+            <i class="ph ph-terminal-window v-empty-icon"></i>
+            <div class="v-empty-title">No running instances</div>
+            <div class="v-empty-hint">No Claude Code instances running in this project.</div>
+          </div>
           <div id="runningInstancesList" style="display:none"></div>
         </section>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -456,17 +476,17 @@ function template() {
             <button class="range-btn" data-range="all">All</button>
           </div>
           <div style="display:flex;gap:6px">
-            <button class="btn-secondary" id="chartPrevBtn" style="padding:3px 10px;font-size:0.75rem">◀</button>
-            <button class="btn-secondary" id="chartNextBtn" style="padding:3px 10px;font-size:0.75rem">▶</button>
+            <button class="btn-secondary" id="chartPrevBtn" title="Earlier" style="padding:3px 10px;font-size:0.75rem"><i class="ph ph-caret-left"></i></button>
+            <button class="btn-secondary" id="chartNextBtn" title="Later" style="padding:3px 10px;font-size:0.75rem"><i class="ph ph-caret-right"></i></button>
           </div>
         </div>
         <div id="project-chart-container"></div>
         <div id="project-sessions-list" style="margin-top:12px"></div>
         <div style="padding:4px 0 8px">
-          <div class="section-title" style="margin-bottom:8px;font-size:0.72rem">Open project</div>
+          <div class="section-title" style="margin-bottom:8px;font-size: var(--fs-micro)">Open project</div>
           <div style="display:flex;gap:8px">
-            <button class="btn-secondary" id="openExplorerBtn" style="flex:1;font-size:0.8rem">File Explorer</button>
-            <button class="btn-secondary" id="openVSCodeBtn" style="flex:1;font-size:0.8rem">VSCode</button>
+            <button class="btn-secondary" id="openExplorerBtn" style="flex:1;font-size: var(--fs-body)">File Explorer</button>
+            <button class="btn-secondary" id="openVSCodeBtn" style="flex:1;font-size: var(--fs-body)">VSCode</button>
           </div>
         </div>
       </div>

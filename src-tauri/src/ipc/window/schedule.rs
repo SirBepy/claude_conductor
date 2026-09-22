@@ -40,6 +40,7 @@ fn build_schedule_window(app: &AppHandle) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn open_schedule_window(app: AppHandle) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window("session-schedule") {
+        super::activation::before_show(&app, "session-schedule");
         let _ = existing.show();
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| e.to_string())?;

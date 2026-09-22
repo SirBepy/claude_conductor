@@ -39,8 +39,10 @@ export function renderSkillUsageWidget(container: HTMLElement): () => void {
     }
     if (!state || state.entries.length === 0) {
       render(html`
-        <div class="skill-usage-widget">
-          <div class="empty">No skill usage tracked yet. The Stop hook installs automatically on the next Claude Code session.</div>
+        <div class="v-empty">
+          <i class="ph ph-chart-pie-slice v-empty-icon"></i>
+          <div class="v-empty-title">No skill usage yet</div>
+          <div class="v-empty-hint">The Stop hook installs automatically on the next Claude Code session.</div>
         </div>
       `, container);
       return;
@@ -101,7 +103,18 @@ export function renderSkillUsageWidget(container: HTMLElement): () => void {
         </thead>
         <tbody>
           ${entries.map((e) => html`
-            <tr @click=${() => onRowClick(e.skill)}>
+            <tr
+              class="v-focusable"
+              role="button"
+              tabindex="0"
+              @click=${() => onRowClick(e.skill)}
+              @keydown=${(ev: KeyboardEvent) => {
+                if (ev.key === "Enter" || ev.key === " ") {
+                  ev.preventDefault();
+                  onRowClick(e.skill);
+                }
+              }}
+            >
               <td>${e.skill}</td>
               <td>${e.invocations.total}</td>
               <td>${e.chats}</td>

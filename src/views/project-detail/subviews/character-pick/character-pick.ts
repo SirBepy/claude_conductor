@@ -1,20 +1,17 @@
 import { html, render } from "lit-html";
-import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons, projectLabel } from "../../../../shared/projects";
-import { getProjectDetailState, getSettings } from "../../../../shared/state";
+import { getProjectDetailState } from "../../../../shared/state";
 import { api } from "../../../../shared/api";
 import { backFromSubview } from "../../../../shared/navigation";
 import { renderWhitelistEditor } from "../../../../shared/whitelist-editor";
+import { projectSubviewHeaderData, subviewHeaderTemplate, hydrateSubviewHeader } from "../../subview-header";
+import type { Avatar } from "../../subview-header";
 import "./character-pick.css";
 
-function template() {
+function template(avatar: Avatar, title: string, projectPath?: string) {
   return html`
     <div class="view view-project-character-pick">
-      <div class="view-header">
-        <button class="icon-btn" id="characterPickBackBtn" title="Back"><i class="ph ph-arrow-left"></i></button>
-        <div style="display:flex;align-items:center;gap:8px;flex:1">
-          <div class="avatar-mini" id="characterPickAvatar">?</div>
-          <h2 id="characterPickTitle" style="font-size:0.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Character whitelist</h2>
-        </div>
+      <div class="view-header subview-header">
+        ${subviewHeaderTemplate(avatar, title, () => backFromSubview(), projectPath)}
       </div>
       <div class="view-body">
         <p class="muted">Which characters can be randomly assigned to this project's sessions. Each session gets one, and you can change it per session. "Use default" inherits the global default from Settings.</p>
@@ -25,33 +22,12 @@ function template() {
 }
 
 export async function renderCharacterPickView(root: HTMLElement): Promise<() => void> {
-  render(template(), root);
-
-  const back = root.querySelector<HTMLButtonElement>("#characterPickBackBtn");
-  if (back) back.onclick = () => backFromSubview();
+  const { avatar, title, cwd: headerCwd } = projectSubviewHeaderData();
+  render(template(avatar, title, headerCwd), root);
+  void hydrateSubviewHeader(root);
 
   const cwd = getProjectDetailState().cwd;
   if (!cwd) return () => { /* nothing */ };
-
-  // Populate header
-  const settings = getSettings();
-  const configured = (settings.projects || []).find((p) => p.path === cwd);
-  // No custom avatar -> hydratable project-face placeholder (icon -> tech logo
-  // -> folder), consistent with the projects list (ai_todo 114).
-  const avatar = configured?.avatar || { kind: "none" as const };
-  const aliases = settings.projectAliases || {};
-
-  const titleEl = root.querySelector<HTMLElement>("#characterPickTitle");
-  if (titleEl) titleEl.textContent = projectLabel(cwd, aliases);
-
-  const avatarEl = root.querySelector<HTMLElement>("#characterPickAvatar");
-  if (avatarEl) {
-    avatarEl.innerHTML = renderAvatar(avatar, cwd);
-    if (avatar.kind === "character") {
-      void hydrateCharacterAvatars(avatarEl);
-    }
-    void hydrateProjectTechIcons(avatarEl);
-  }
 
   const host = root.querySelector<HTMLElement>("#whitelist-editor-host");
   if (!host) return () => { /* nothing */ };

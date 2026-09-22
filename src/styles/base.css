@@ -68,7 +68,7 @@ body {
 .view-header h2 {
     font-family: 'Manrope', system-ui, sans-serif;
     font-weight: 600;
-    font-size: 1rem;
+    font-size: var(--fs-heading);
     flex: 1;
     text-align: center;
     color: var(--color-text);
@@ -193,7 +193,7 @@ body.chats-window-mode .icon-btn.burger {
 
 .no-data {
     color: var(--color-text-muted);
-    font-size: 0.9rem;
+    font-size: var(--fs-title);
     text-align: center;
     padding: 48px 0;
 }

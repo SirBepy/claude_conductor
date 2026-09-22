@@ -38,6 +38,7 @@ fn build_chats_window(app: &AppHandle) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn open_chats_window(app: AppHandle) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window("session-chats") {
+        super::activation::before_show(&app, "session-chats");
         let _ = existing.show();
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| e.to_string())?;
@@ -58,6 +59,7 @@ pub fn open_chats_window(app: AppHandle) -> Result<(), String> {
 pub fn open_chats_for_session(app: AppHandle, session_id: String, mode: String) -> Result<(), String> {
     use tauri::Emitter;
     if let Some(existing) = app.get_webview_window("session-chats") {
+        super::activation::before_show(&app, "session-chats");
         let _ = existing.show();
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| e.to_string())?;
@@ -133,6 +135,7 @@ pub fn open_chats_new_chat(
         character_id,
     };
     if let Some(existing) = app.get_webview_window("session-chats") {
+        super::activation::before_show(&app, "session-chats");
         let _ = existing.show();
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| e.to_string())?;

@@ -10,6 +10,7 @@ import { hourToMs } from "../../../shared/time";
 import { buildProjectListHTML, isBlackRef, type ListProject } from "./project-list";
 import type { UsageRecord } from "../../../shared/api";
 import { stepPageOffset } from "./usage-charts";
+import { buildSmoothPath } from "./chart-path";
 
 // ── Module-local chart state (line visibility) ─────────────────────────────
 // Shared across accounts (mirrors the pre-milestone single-account behaviour;
@@ -121,8 +122,8 @@ export function buildChart(
 
   const gridLines = [0, 25, 50, 75, 100].map((v) => {
     const y = py(v);
-    return `<line x1="${ML}" x2="${W - MR}" y1="${y}" y2="${y}" stroke="#2d2c44" stroke-width="1"/>
-            <text x="${ML - 4}" y="${y + 3.5}" text-anchor="end" fill="#6b6990" font-size="10" font-family="Fira Code, monospace">${v}</text>`;
+    return `<line x1="${ML}" x2="${W - MR}" y1="${y}" y2="${y}" stroke="var(--color-border)" stroke-width="1"/>
+            <text x="${ML - 4}" y="${y + 3.5}" text-anchor="end" fill="var(--sb-muted)" font-size="11" font-family="Fira Code, monospace">${v}</text>`;
   }).join("");
 
   const tickItems: string[] = [];
@@ -136,8 +137,8 @@ export function buildChart(
       const hh = d.getHours().toString().padStart(2, "0");
       const mm = d.getMinutes().toString().padStart(2, "0");
       tickItems.push(
-        `<line x1="${x}" x2="${x}" y1="${MT + PH}" y2="${MT + PH + 4}" stroke="#2d2c44" stroke-width="1"/>` +
-        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="#6b6990" font-size="10" font-family="DM Sans, system-ui">${hh}:${mm}</text>`,
+        `<line x1="${x}" x2="${x}" y1="${MT + PH}" y2="${MT + PH + 4}" stroke="var(--color-border)" stroke-width="1"/>` +
+        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="var(--sb-muted)" font-size="11" font-family="DM Sans, system-ui">${hh}:${mm}</text>`,
       );
     }
   } else {
@@ -148,9 +149,9 @@ export function buildChart(
       const dayName = cursor.toLocaleDateString("en-US", { weekday: "short" });
       const dateStr = (cursor.getMonth() + 1) + "/" + cursor.getDate();
       tickItems.push(
-        `<line x1="${x}" x2="${x}" y1="${MT + PH}" y2="${MT + PH + 4}" stroke="#2d2c44" stroke-width="1"/>` +
-        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="#6b6990" font-size="10" font-family="DM Sans, system-ui">${dayName}</text>` +
-        `<text x="${x}" y="${H - MB + 26}" text-anchor="middle" fill="#4a4870" font-size="9" font-family="DM Sans, system-ui">${dateStr}</text>`,
+        `<line x1="${x}" x2="${x}" y1="${MT + PH}" y2="${MT + PH + 4}" stroke="var(--color-border)" stroke-width="1"/>` +
+        `<text x="${x}" y="${H - MB + 14}" text-anchor="middle" fill="var(--sb-muted)" font-size="11" font-family="DM Sans, system-ui">${dayName}</text>` +
+        `<text x="${x}" y="${H - MB + 26}" text-anchor="middle" fill="var(--color-text-muted)" font-size="11" font-family="DM Sans, system-ui">${dateStr}</text>`,
       );
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -160,7 +161,7 @@ export function buildChart(
     `<line data-line="expected"` +
     ` x1="${px(minT).toFixed(1)}" y1="${py(0).toFixed(1)}"` +
     ` x2="${px(maxT).toFixed(1)}" y2="${py(100).toFixed(1)}"` +
-    ` stroke="#6b6990" stroke-width="1.5" stroke-dasharray="5,4"/>`;
+    ` stroke="var(--color-text-muted)" stroke-width="1.5" stroke-dasharray="5,4"/>`;
 
   interface Pt { t: number; s: number | null; w: number | null; }
   const pts: Pt[] = history
@@ -171,7 +172,7 @@ export function buildChart(
     pts.unshift({ t: minT, s: 0, w: 0 });
   }
 
-  const lineColor = lineKey === "s" ? "#9d7dfc" : "#6e8fff";
+  const lineColor = lineKey === "s" ? "var(--color-primary)" : "var(--color-secondary)";
   const lineName = lineKey === "s" ? "session" : "weekly";
 
   const makeLine = (key: "s" | "w", color: string, name: string): string => {
@@ -181,19 +182,7 @@ export function buildChart(
       const first = f[0]!;
       return `<circle data-line="${name}" cx="${px(first.t).toFixed(1)}" cy="${py(first[key]).toFixed(1)}" r="2.5" fill="${color}"/>`;
     }
-    const cPts = f.map((p) => ({ x: px(p.t), y: py(p[key]) }));
-    let d = `M${cPts[0]!.x.toFixed(1)},${cPts[0]!.y.toFixed(1)}`;
-    for (let i = 0; i < cPts.length - 1; i++) {
-      const p0 = cPts[Math.max(0, i - 1)]!;
-      const p1 = cPts[i]!;
-      const p2 = cPts[i + 1]!;
-      const p3 = cPts[Math.min(cPts.length - 1, i + 2)]!;
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-      d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
-    }
+    const d = buildSmoothPath(f.map((p) => ({ x: px(p.t), y: py(p[key]) })));
     return `<path data-line="${name}" d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
   };
 
@@ -205,10 +194,10 @@ export function buildChart(
 
   const hoverGroup =
     `<g id="${svgId}-hover" style="pointer-events:none;display:none">` +
-    `<line id="${svgId}-hline" x1="0" x2="0" y1="${MT}" y2="${MT + PH}" stroke="#4a4870" stroke-width="1" stroke-dasharray="3,2"/>` +
-    `<circle id="${svgId}-hdot" cx="0" cy="0" r="3.5" fill="${lineColor}" stroke="#1e1d30" stroke-width="1.5"/>` +
-    `<rect id="${svgId}-hbox" rx="5" ry="5" fill="#1a1928" stroke="#2d2c44" stroke-width="1"/>` +
-    `<text id="${svgId}-hlabel" fill="#8885aa" font-size="10" font-family="DM Sans, system-ui"></text>` +
+    `<line id="${svgId}-hline" x1="0" x2="0" y1="${MT}" y2="${MT + PH}" stroke="var(--color-text-muted)" stroke-width="1" stroke-dasharray="3,2"/>` +
+    `<circle id="${svgId}-hdot" cx="0" cy="0" r="3.5" fill="${lineColor}" stroke="var(--color-surface)" stroke-width="1.5"/>` +
+    `<rect id="${svgId}-hbox" rx="5" ry="5" fill="var(--color-background)" stroke="var(--color-border)" stroke-width="1"/>` +
+    `<text id="${svgId}-hlabel" fill="var(--sb-muted)" font-size="10" font-family="DM Sans, system-ui"></text>` +
     `<text id="${svgId}-hval" fill="${lineColor}" font-size="12" font-family="Fira Code, monospace" font-weight="600"></text>` +
     `</g>` +
     `<rect id="${svgId}-overlay" x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="transparent" style="cursor:crosshair"/>`;
@@ -217,7 +206,7 @@ export function buildChart(
     `<svg id="${svgId}" viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible"` +
     ` data-hover-pts="${hoverPts}" data-min-t="${minT}" data-max-t="${maxT}" data-window-type="${windowType}" data-line-color="${lineColor}">` +
     gridLines +
-    `<line x1="${ML}" x2="${ML}" y1="${MT}" y2="${MT + PH}" stroke="#2d2c44" stroke-width="1"/>` +
+    `<line x1="${ML}" x2="${ML}" y1="${MT}" y2="${MT + PH}" stroke="var(--color-border)" stroke-width="1"/>` +
     tickItems.join("") +
     refLine +
     makeLine(lineKey, lineColor, lineName) +
@@ -304,7 +293,7 @@ export function setupChartHover(root: ParentNode): void {
     const minT = parseInt(svg.dataset["minT"] || "0");
     const maxT = parseInt(svg.dataset["maxT"] || "1");
     const windowType = svg.dataset["windowType"] || "session";
-    const color = svg.dataset["lineColor"] || "#9d7dfc";
+    const color = svg.dataset["lineColor"] || "var(--color-primary)";
     const tRange = maxT - minT || 1;
 
     const hoverPts: Array<{ t: number; v: number }> = ptsRaw

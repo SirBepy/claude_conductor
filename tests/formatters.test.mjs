@@ -7,8 +7,8 @@ import { hourToMs } from "../src/shared/time.ts";
 
 describe("pctColor", () => {
   it("returns dim for null/undefined", () => {
-    expect(pctColor(null)).toBe("var(--text-dim)");
-    expect(pctColor(undefined)).toBe("var(--text-dim)");
+    expect(pctColor(null)).toBe("var(--sb-muted)");
+    expect(pctColor(undefined)).toBe("var(--sb-muted)");
   });
   it("green below 50", () => {
     expect(pctColor(0)).toBe("#27ae60");
@@ -63,19 +63,19 @@ describe("valueColor overlay target", () => {
   const settings = { paceBand: 10 };
   it("colors the overlay by pace when colorApplyTo.overlay is unset (default on)", () => {
     const c = valueColor(30, 50, settings, "overlay");
-    expect(c).not.toBe("var(--text)");
+    expect(c).not.toBe("var(--color-text)");
   });
   it("colors the overlay by pace when colorApplyTo.overlay is explicitly true", () => {
     const c = valueColor(30, 50, { ...settings, colorApplyTo: { overlay: true } }, "overlay");
-    expect(c).not.toBe("var(--text)");
+    expect(c).not.toBe("var(--color-text)");
   });
   it("falls back to neutral text when colorApplyTo.overlay is false", () => {
     const c = valueColor(30, 50, { ...settings, colorApplyTo: { overlay: false } }, "overlay");
-    expect(c).toBe("var(--text)");
+    expect(c).toBe("var(--color-text)");
   });
   it("disabling overlay does not affect the dashboard target", () => {
     const c = valueColor(30, 50, { ...settings, colorApplyTo: { overlay: false } }, "dashboard");
-    expect(c).not.toBe("var(--text)");
+    expect(c).not.toBe("var(--color-text)");
   });
 });
 

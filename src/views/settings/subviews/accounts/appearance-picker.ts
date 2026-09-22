@@ -52,7 +52,7 @@ export function renderAppearancePicker(
     <div class="field">
       <label>Colour</label>
       <div class="swatches">
-        ${COLOUR_POOL.map((c) => `<span class="swatch${c === state.colour ? " sel" : ""}" data-colour="${escapeHtml(c)}" style="background:${escapeHtml(c)}"></span>`).join("")}
+        ${COLOUR_POOL.map((c) => `<button type="button" class="swatch v-focusable${c === state.colour ? " sel" : ""}" data-colour="${escapeHtml(c)}" style="background:${escapeHtml(c)}" aria-label="${escapeHtml(c)} colour" aria-pressed="${c === state.colour}"></button>`).join("")}
         <label class="swatch custom${customColour ? " sel" : ""}" title="Custom colour" ${customColour ? `style="background:${escapeHtml(state.colour)}"` : ""}>
           <i class="ph ph-eyedropper"></i>
           <input type="color" class="ap-custom-colour" value="${escapeHtml(customColour ? state.colour : "#8888ff")}">
@@ -84,7 +84,10 @@ export function renderAppearancePicker(
   customEl?.addEventListener("input", () => {
     state.colour = customEl.value;
     container.style.setProperty("--acc", state.colour);
-    container.querySelectorAll<HTMLElement>(".swatch").forEach((sw) => sw.classList.remove("sel"));
+    container.querySelectorAll<HTMLElement>(".swatch").forEach((sw) => {
+      sw.classList.remove("sel");
+      if (sw.hasAttribute("aria-pressed")) sw.setAttribute("aria-pressed", "false");
+    });
     const custom = customEl.closest<HTMLElement>(".swatch.custom");
     if (custom) {
       custom.classList.add("sel");

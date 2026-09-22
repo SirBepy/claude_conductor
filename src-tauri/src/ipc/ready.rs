@@ -101,6 +101,7 @@ fn timeout_outcome(
 /// the app-relative URL the window was built with (e.g.
 /// `"index.html?chatswindow=1#sessions"`), reused verbatim on reload.
 pub fn watch(app: &AppHandle, label: &str, url: &str) {
+    crate::ipc::window::activation::before_show(app, label);
     let generation = next_generation();
     registry()
         .lock()
@@ -108,12 +109,24 @@ pub fn watch(app: &AppHandle, label: &str, url: &str) {
         .insert(label.to_string(), Entry { shown: false, attempts: 0, generation });
     if let Some(w) = app.get_webview_window(label) {
         let dead_label = label.to_string();
+        let handle = app.clone();
         w.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let mut reg = registry().lock().unwrap();
                 if reg.get(&dead_label).is_some_and(|e| e.generation == generation) {
                     reg.remove(&dead_label);
                 }
+            }
+            // Close and destroy are what drop the macOS dock icon back off
+            // (`attach_hide_to_tray` hides first - it registers before this
+            // handler); focus is the cheapest signal a hidden window is back.
+            if matches!(
+                event,
+                tauri::WindowEvent::Destroyed
+                    | tauri::WindowEvent::CloseRequested { .. }
+                    | tauri::WindowEvent::Focused(_)
+            ) {
+                crate::ipc::window::activation::sync(&handle);
             }
         });
     }
@@ -253,6 +266,7 @@ pub fn mark_ready(app: &AppHandle, label: &str) {
             }
         }
         if let Some(w) = app.get_webview_window(label) {
+            crate::ipc::window::activation::before_show(app, label);
             let _ = w.show();
             let _ = w.set_focus();
         }

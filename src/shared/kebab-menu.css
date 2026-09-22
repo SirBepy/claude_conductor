@@ -13,8 +13,22 @@
   padding: 4px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   z-index: 1400;
+  transform-origin: top right;
 }
 .menu-popover.hidden { display: none; }
+
+/* Becoming visible from display:none counts as a first paint, so this plays
+   fresh on every open - matching the anchor's top/right corner. */
+@keyframes kebab-menu-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.menu-popover:not(.hidden) {
+  animation: kebab-menu-in var(--motion-fast, 150ms) var(--motion-ease, ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu-popover:not(.hidden) { animation: none; }
+}
 .menu-popover .menu-item {
   display: block;
   width: 100%;
@@ -28,3 +42,7 @@
   cursor: pointer;
 }
 .menu-popover .menu-item:hover { background: var(--color-surface-alt, #2a2840); }
+.menu-popover .menu-item:focus-visible {
+  outline: 2px solid var(--color-primary, #6e8fff);
+  outline-offset: -2px;
+}

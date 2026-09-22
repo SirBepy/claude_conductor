@@ -6,6 +6,7 @@ import * as shortcuts from "../../../../shared/shortcuts";
 import { normalizeEvent } from "../../../../shared/shortcuts";
 import type { ShortcutDef } from "../../../../shared/shortcuts";
 import type { DatasetInfo, DatasetId, RetentionPolicy } from "../../../../types/ipc.generated";
+import { askConfirm } from "../../../../shared/confirm";
 import { settingsHeader, toggleRow, selectHtml, escapeHtml } from "../../ui";
 import "./system.css";
 
@@ -278,7 +279,9 @@ async function refreshDataSection(): Promise<void> {
       if (!btn) return;
       const dataset = btn.dataset.dataset as DatasetId | undefined;
       if (!dataset) return;
+      const label = btn.closest(".data-card")?.querySelector(".kit-row-label")?.textContent ?? dataset;
       void (async () => {
+        if (!(await askConfirm(`Clear all ${label} data?`, { confirmLabel: "Clear" }))) return;
         try {
           await api.clearDataset(dataset);
           await refreshDataSection();

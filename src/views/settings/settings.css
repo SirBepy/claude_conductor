@@ -5,3 +5,13 @@
 .kit-nav-row .ph {
   margin-right: 8px;
 }
+
+/* The kit's section eyebrow, nav chevron, and unselected palette-card label
+ * all render raw --color-text-muted (measured 3.2:1 contrast). --sb-muted is
+ * the same token blended toward --color-text and already used app-wide for
+ * readable secondary text (see base.css). */
+.kit-section-title,
+.kit-nav-arrow,
+.kit-palette-card:not(.kit-palette-card--active) {
+  color: var(--sb-muted);
+}

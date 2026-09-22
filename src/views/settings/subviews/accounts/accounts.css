@@ -3,14 +3,14 @@
 
 .acc-explainer {
   margin: 0 0 10px;
-  font-size: 0.82rem;
+  font-size: var(--fs-body);
   line-height: 1.45;
-  color: var(--color-text-muted, #8a8a96);
+  color: var(--sb-muted);
 }
 
 .acc-explainer code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
 }
 
 .acc-list {
@@ -24,10 +24,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 10px 9px 12px;
+  padding: 9px 10px;
   background: var(--color-surface-alt, #1a1d27);
   border-radius: 8px;
-  border-left: 3px solid var(--acc, var(--color-primary, #6e8fff));
+  border: 1px solid color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 30%, var(--color-border, #2d2c44));
 }
 
 /* Size override for the shared icon badge (src/shared/account-chip.css) in
@@ -48,7 +48,7 @@
 }
 
 .acc-label {
-  font-size: 0.9rem;
+  font-size: var(--fs-title);
   font-weight: 600;
   color: var(--color-text, #e8e8ee);
   display: flex;
@@ -68,15 +68,15 @@
 }
 
 .acc-sub {
-  font-size: 0.76rem;
-  color: var(--color-text-muted, #8a8a96);
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .acc-sub-expiry {
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   opacity: 0.85;
 }
 
@@ -84,7 +84,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.74rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--color-danger, #f87171);
   white-space: normal;
@@ -108,14 +108,8 @@
   margin: 4px 2px;
 }
 
-.acc-empty {
-  font-size: 0.82rem;
-  color: var(--color-text-muted, #8a8a96);
-  margin: 4px 0 10px;
-}
-
 .acc-terminal-identity {
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
   color: var(--color-text, #e8e8ee);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }

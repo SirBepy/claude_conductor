@@ -567,7 +567,7 @@ function template() {
             <span class="kit-row-label">Push-to-talk</span>
             <div class="ptt-controls">
               <button type="button" id="pttCaptureBtn" class="btn-secondary">Click to set</button>
-              <button type="button" id="pttClearBtn" class="btn-secondary ptt-clear" title="Clear binding"><i class="ph ph-x"></i></button>
+              <button type="button" id="pttClearBtn" class="btn-secondary ptt-clear" title="Clear binding" aria-label="Clear binding"><i class="ph ph-x"></i></button>
             </div>
           </div>
           <div class="settings-caption">Hold this button (while Conductor is focused) to record voice, release to stop. Click Set, then press a key or mouse side-button. Tip: pick a mouse side-button or a non-printing key so it doesn't type into the box.</div>

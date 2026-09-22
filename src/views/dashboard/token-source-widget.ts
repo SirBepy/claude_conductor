@@ -22,7 +22,13 @@ function draw(root: HTMLElement, buckets: TokenSourceBucket[] | null): void {
   }
   const rows = buckets.filter((b) => b.sessions > 0);
   if (!rows.length) {
-    render(html`<div class="no-data">No token history recorded yet.</div>`, root);
+    render(html`
+      <div class="v-empty">
+        <i class="ph ph-scales v-empty-icon"></i>
+        <div class="v-empty-title">No token source data yet</div>
+        <div class="v-empty-hint">Breakdown appears once sessions are recorded.</div>
+      </div>
+    `, root);
     return;
   }
   render(html`

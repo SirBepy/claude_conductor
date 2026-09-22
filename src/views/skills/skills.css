@@ -6,48 +6,99 @@
   gap: 12px;
   margin-bottom: 16px;
 }
-.skills-search input {
+.skills-search-field {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 12px;
-  font-size: 13px;
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: inherit;
 }
-.skills-search input:focus { outline: none; border-color: #5b8def; }
-.skills-count { font-size: 11px; opacity: 0.6; white-space: nowrap; }
-
-.skills-empty { opacity: 0.6; font-style: italic; padding: 24px 0; }
-.skills-empty code {
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-style: normal;
+/* :focus-within moves the global input focus recipe (widgets.css's
+   input[type="search"]:focus) onto the container, since the inner input's
+   own chrome is stripped below - otherwise both boxes glow independently. */
+.skills-search-field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow:
+    inset 0 3px 10px rgba(0, 0, 0, 0.5),
+    inset 0 1px 2px 0 rgba(0, 0, 0, 0.3),
+    inset 0 -1px 1px 0 rgba(255, 255, 255, 0.07),
+    0 0 0 3px rgba(var(--color-primary-rgb), 0.15),
+    0 0 16px rgba(var(--color-primary-rgb), 0.08);
 }
+.skills-search-field i { color: var(--sb-muted); font-size: 13px; }
+.skills-search-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  font-size: var(--fs-body);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  color: var(--color-text);
+}
+.skills-search-field input:focus {
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+.skills-count { font-size: var(--fs-micro); color: var(--sb-muted); white-space: nowrap; }
 
 .skills-list { list-style: none; padding: 0; margin: 0; }
 .skills-list li {
   padding: 10px 12px;
-  border-bottom: 1px solid #1f1f1f;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 6px;
   cursor: pointer;
 }
-.skills-list li:hover { background: rgba(255, 255, 255, 0.04); }
+
+.skills-skeleton-row {
+  height: 52px;
+  margin-bottom: 8px;
+}
 
 .skill-row-main {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.skill-name { font-size: 13px; font-weight: 500; }
-.skill-plugin {
+.skill-name { font-size: var(--fs-title); font-weight: 500; color: var(--color-text); }
+
+.skill-badge {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 3px;
-  background: rgba(140, 91, 239, 0.2);
-  color: #8c5bef;
   text-transform: lowercase;
+  white-space: nowrap;
 }
-.skill-plugin.user { background: rgba(91, 141, 239, 0.2); color: #5b8def; }
-.skill-plugin.project { background: rgba(34, 197, 94, 0.18); color: #22c55e; text-transform: none; }
-.skill-desc { font-size: 11px; opacity: 0.6; margin-top: 4px; }
+/* Text mixed 50% into --color-text (not the raw accent) keeps contrast at or
+   above 4.5:1 against the 20%-tinted background across all 4 themes x 2
+   modes - verified with a relative-luminance check, worst case 4.6:1. */
+.skill-badge-plugin {
+  background: color-mix(in srgb, var(--color-primary) 20%, var(--color-surface-alt));
+  color: color-mix(in srgb, var(--color-primary) 50%, var(--color-text));
+}
+.skill-badge-personal {
+  background: color-mix(in srgb, var(--color-info) 20%, var(--color-surface-alt));
+  color: color-mix(in srgb, var(--color-info) 50%, var(--color-text));
+}
+.skill-badge-project {
+  background: color-mix(in srgb, var(--color-success) 20%, var(--color-surface-alt));
+  color: color-mix(in srgb, var(--color-success) 50%, var(--color-text));
+  text-transform: none;
+}
+
+.skill-desc {
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skills-retry { margin-top: 12px; }

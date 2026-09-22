@@ -134,7 +134,9 @@ test("the character art and project name survive the merge", async ({ page }) =>
 
   // Joe was explicit that these had to stay.
   await expect(page.locator(".session-header .session-header-avatar-wrap")).toBeVisible();
-  await expect(page.locator(".session-header .meta")).toHaveText("zng-app");
+  // `.meta` also wraps the model/effort block (6fc6edd4), whose hidden `·`
+  // separator still lands in textContent. The project name is `.meta-proj`.
+  await expect(page.locator(".session-header .meta-proj")).toHaveText("zng-app");
   await expect(page.locator(".session-header .title")).toContainText("204 tiles swept");
 });
 

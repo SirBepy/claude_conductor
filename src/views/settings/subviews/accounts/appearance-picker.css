@@ -7,8 +7,8 @@
 .appearance-picker .field { margin: 12px 0; }
 .appearance-picker .field label {
   display: block;
-  font-size: 11.5px;
-  color: var(--color-text-muted, #8a8a96);
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
   margin-bottom: 5px;
 }
 
@@ -47,6 +47,8 @@
   border-radius: 7px;
   cursor: pointer;
   border: 2px solid transparent;
+  padding: 0;
+  font: inherit;
 }
 .appearance-picker .swatch.sel { border-color: var(--color-text, #e8e8ee); }
 
@@ -57,7 +59,7 @@
   place-items: center;
   position: relative;
   overflow: hidden;
-  font-size: 14px;
+  font-size: var(--fs-title);
   color: var(--color-text-muted, #8a8a96);
   background: var(--color-surface-alt, #24242e);
 }

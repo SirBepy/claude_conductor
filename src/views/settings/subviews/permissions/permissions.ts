@@ -22,7 +22,7 @@ function ruleRow(cwd: string, rule: PermissionRule) {
   return html`
     <div class="perm-rule" data-cwd="${cwd}" data-rule="${rule.raw}">
       <span class="perm-rule__label"><strong>${rule.toolName}</strong> ${patternHtml}</span>
-      <button class="perm-rule__rm" data-act="remove" title="Remove rule"><i class="ph ph-trash"></i></button>
+      <button class="perm-rule__rm" data-act="remove" title="Remove rule" aria-label="Remove rule"><i class="ph ph-trash"></i></button>
     </div>
   `;
 }
@@ -49,7 +49,13 @@ function template(rulesByCwd: Record<string, PermissionRule[]>) {
             (rm -rf, git push --force, drop database, etc.) always prompt regardless of rules.
           </p>
           ${entries.length === 0
-            ? html`<div class="perm-empty">No remembered permissions yet. Click "Always Allow" on a tool prompt to add one.</div>`
+            ? html`
+              <div class="v-empty">
+                <i class="ph ph-shield-check v-empty-icon"></i>
+                <div class="v-empty-title">No remembered permissions yet</div>
+                <div class="v-empty-hint">Click "Always Allow" on a tool prompt to add one.</div>
+              </div>
+            `
             : entries.map(([cwd, rules]) => projectBlock(cwd, rules))}
         </div>
       </div>

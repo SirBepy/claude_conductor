@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::settings::{self, paths};
 
-const OVERLAY_LABEL: &str = "session-overlay";
+pub(crate) const OVERLAY_LABEL: &str = "session-overlay";
 const OVERLAY_WIDTH: f64 = 320.0;
 const OVERLAY_HEIGHT: f64 = 420.0;
 

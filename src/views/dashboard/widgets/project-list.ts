@@ -99,7 +99,7 @@ export function buildProjectListHTML(opts: BuildListOpts): string {
   const renderRow = (p: ListProject): string => {
     const isDead = dead.has(p.cwd);
     const deadIcon = isDead ? `<span class="dead-path-warning" title="Folder no longer exists">⚠</span> ` : "";
-    return `<tr class="proj-row" data-cwd="${p.cwd}">
+    return `<tr class="proj-row v-focusable" data-cwd="${p.cwd}" role="button" tabindex="0">
       <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${deadIcon}${plabel(p.cwd)}</td>
       <td class="mono">${formatTokens(p.tokens)}</td>
       ${showPct ? `<td class="mono">${p.sessionPct != null ? p.sessionPct + "%" : "-"}</td>` : ""}
@@ -111,12 +111,12 @@ export function buildProjectListHTML(opts: BuildListOpts): string {
   const remaining = sorted.length - visible.length;
   const showMoreBtn = capped
     ? `<div style="display:flex;justify-content:center;padding-top:8px">
-         <button class="btn-secondary show-more-btn" data-list-id="${containerId}" style="font-size:0.72rem;padding:2px 10px">Show ${remaining} more</button>
+         <button class="btn-secondary show-more-btn" data-list-id="${containerId}" style="font-size: var(--fs-micro);padding:2px 10px">Show ${remaining} more</button>
        </div>`
     : "";
 
   return `<div class="today-section" ${style ? `style="${style}"` : ""}>
-    ${title ? `<div style="font-size:0.92rem;font-weight:700;margin-bottom:10px">${title}</div>` : ""}
+    ${title ? `<div style="font-size: var(--fs-title);font-weight:700;margin-bottom:10px">${title}</div>` : ""}
     <table class="stats-table">
       ${headerRow}
       <tbody>${visibleRows}</tbody>
@@ -143,6 +143,11 @@ export function wireProjectListClicks(
         const cwd = row.dataset["cwd"];
         if (!cwd) return;
         openProjectDetail(cwd);
+      };
+      row.onkeydown = (e: KeyboardEvent) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        row.click();
       };
     }
   });

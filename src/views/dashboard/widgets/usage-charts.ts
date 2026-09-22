@@ -95,7 +95,7 @@ export function sessionWindow(history: UsageRecord[]): WindowState {
     startMs, endMs, hasPrev,
     pageLabel: sessionPageOffset === 0 ? "This session" : `${sessionPageOffset} session${sessionPageOffset > 1 ? "s" : ""} ago`,
     pageOffset: sessionPageOffset,
-    legends: [legendItem("legend-session", "#9d7dfc", false, "Session"), legendItem("legend-expected", "#6b6990", true, "Expected")],
+    legends: [legendItem("legend-session", "var(--color-primary)", false, "Session"), legendItem("legend-expected", "var(--color-text-muted)", true, "Expected")],
     lineKey: "s", pctKey: "s",
   };
 }
@@ -117,7 +117,7 @@ export function weeklyWindow(history: UsageRecord[]): WindowState {
     startMs, endMs, hasPrev,
     pageLabel: weeklyPageOffset === 0 ? "This week" : `${weeklyPageOffset}w ago`,
     pageOffset: weeklyPageOffset,
-    legends: [legendItem("legend-weekly", "#6e8fff", false, "Weekly"), legendItem("legend-expected", "#6b6990", true, "Expected")],
+    legends: [legendItem("legend-weekly", "var(--color-secondary)", false, "Weekly"), legendItem("legend-expected", "var(--color-text-muted)", true, "Expected")],
     lineKey: "w", pctKey: "w",
   };
 }
@@ -136,7 +136,11 @@ function mountUsageWidget(
     const history = await fetchHistory(ctx.accountId);
     if (disposed) return;
     if (!history.length) {
-      root.innerHTML = `<div class="no-data">No history recorded yet.</div>`;
+      root.innerHTML = `<div class="v-empty">
+        <i class="ph ph-chart-line v-empty-icon"></i>
+        <div class="v-empty-title">No history recorded yet</div>
+        <div class="v-empty-hint">Data appears after the first successful refresh.</div>
+      </div>`;
       return;
     }
     const win = metric === "session" ? sessionWindow(history) : weeklyWindow(history);

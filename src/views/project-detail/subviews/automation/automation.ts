@@ -218,8 +218,10 @@ function template(avatar: Avatar, title: string, projectPath?: string) {
         </section>
         <section class="automation-section" id="automationSection" style="margin-top:16px">
           <div class="section-title">Automation</div>
-          <div id="automationEmpty" class="no-data" style="display:flex;flex-direction:column;gap:8px;align-items:flex-start">
-            <span>No automation configured. Click to have this project's Claude Code session start at boot and stay alive.</span>
+          <div id="automationEmpty" class="v-empty">
+            <i class="ph ph-robot v-empty-icon"></i>
+            <div class="v-empty-title">No automation configured</div>
+            <div class="v-empty-hint">Have this project's Claude Code session start at boot and stay alive.</div>
             <button class="automate-cta" id="automateChannelBtn">+ Automate channel</button>
           </div>
           <div id="automationForm" style="display:none">

@@ -1,3 +1,88 @@
-/* Projects view inherits .project-card / .projects-sort / .projects-list
- * rules from src/dashboard.css for now. Phase-4 extracts project-card into
- * src/components/project-card/. */
+.view-projects .view-body {
+  padding: 16px 24px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.projects-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.projects-search {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.projects-search .ph-magnifying-glass {
+  position: absolute;
+  left: 10px;
+  color: var(--sb-muted);
+  font-size: var(--fs-body);
+  pointer-events: none;
+}
+.projects-search input[type="search"] {
+  width: 100%;
+  padding: 7px 10px 7px 30px;
+  font-size: var(--fs-body);
+}
+
+.projects-count {
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  margin-bottom: 10px;
+}
+
+.projects-backfill-status {
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  margin-bottom: 12px;
+}
+
+.projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Loading placeholder: same footprint as a real card so the list doesn't jump. */
+.project-skeleton {
+  height: 64px;
+}
+
+.proj-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.proj-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.64rem;
+  font-weight: 500;
+  color: var(--sb-muted);
+  background: var(--color-surface-alt);
+}
+.proj-tag i {
+  font-size: 0.72rem;
+}
+
+.proj-tag-live {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+}
+.proj-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+}

@@ -12,7 +12,6 @@
 
 use super::identity::{self, OauthAccountInfo};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 /// Result of checking whether the profile dir holds a complete login.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,12 +61,10 @@ pub fn has_complete_login(config_dir: &Path) -> bool {
 // incident: /login typed into a stale terminal from a cancelled wizard run -
 // the credentials landed in a different profile dir and the wizard waited
 // forever). While the login step is Pending, we watch every OTHER known
-// Claude profile (`~/.claude` plus each `~/.claude-*` sibling) for a
-// `.credentials.json` write that happened after the step started, and surface
+// Claude profile (`~/.claude` plus each `~/.claude-*` sibling) for a stored
+// OAuth record that appeared or changed after the step started, and surface
 // "your login went to X" instead of spinning silently.
 
-/// `.credentials.json` mtimes of every profile dir that is NOT the wizard's
-/// target, captured when the login step starts.
 #[derive(Debug, Clone, Default)]
 pub struct LoginWatch {
     entries: Vec<WatchEntry>,
@@ -77,12 +74,16 @@ pub struct LoginWatch {
 struct WatchEntry {
     /// Human description used in the misdirected-login message.
     desc: String,
-    creds_path: PathBuf,
-    baseline_mtime: Option<SystemTime>,
+    config_dir: PathBuf,
+    baseline: Option<String>,
 }
 
-fn creds_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).ok()?.modified().ok()
+/// Non-secret stand-in for a profile's stored OAuth record. Reads through
+/// `identity::read_oauth_record`, so it sees the macOS Keychain too.
+fn record_fingerprint(config_dir: &Path) -> Option<String> {
+    let record = identity::read_oauth_record(config_dir)?;
+    let digest = crate::util::sha256_hex(&record.access_token);
+    Some(format!("{}:{}", &digest[..16], record.expires_at.unwrap_or_default()))
 }
 
 /// Captures the watch baseline: `<home>/.claude` (the terminal's default
@@ -94,9 +95,8 @@ pub fn capture_login_watch(home_dir: &Path, target_config_dir: &Path) -> LoginWa
         if dir == target_config_dir {
             return;
         }
-        let creds_path = dir.join(".credentials.json");
-        let baseline_mtime = creds_mtime(&creds_path);
-        entries.push(WatchEntry { desc, creds_path, baseline_mtime });
+        let baseline = record_fingerprint(&dir);
+        entries.push(WatchEntry { desc, config_dir: dir, baseline });
     };
 
     push(home_dir.join(".claude"), "your terminal's default profile (~/.claude)".to_string());
@@ -111,19 +111,12 @@ pub fn capture_login_watch(home_dir: &Path, target_config_dir: &Path) -> LoginWa
     LoginWatch { entries }
 }
 
-/// Returns a description of the first watched profile whose
-/// `.credentials.json` was (re)written after the baseline - i.e. a login that
-/// landed somewhere OTHER than the wizard's target dir. `None` while nothing
-/// suspicious happened. Token auto-refresh also rewrites `.credentials.json`,
-/// so callers should phrase this as a hint, not a hard error.
+/// The first watched profile whose stored record appeared or changed since
+/// the baseline. Auto-refresh also rewrites it, so this is a hint, not proof.
 pub fn detect_misdirected_login(watch: &LoginWatch) -> Option<String> {
     for entry in &watch.entries {
-        let Some(now) = creds_mtime(&entry.creds_path) else { continue };
-        let fresh = match entry.baseline_mtime {
-            None => true,
-            Some(base) => now > base,
-        };
-        if fresh {
+        let Some(now) = record_fingerprint(&entry.config_dir) else { continue };
+        if entry.baseline.as_deref() != Some(now.as_str()) {
             return Some(entry.desc.clone());
         }
     }
@@ -327,9 +320,18 @@ mod tests {
 
     // ── misdirected-login watch ─────────────────────────────────────────────
 
-    fn touch_creds(dir: &Path) {
+    /// A real record, not `{}`: the watch fingerprints the stored blob.
+    fn write_creds_token(dir: &Path, token: &str) {
         std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join(".credentials.json"), "{}").unwrap();
+        std::fs::write(
+            dir.join(".credentials.json"),
+            format!(r#"{{"claudeAiOauth":{{"accessToken":"{token}","expiresAt":1783437706982}}}}"#),
+        )
+        .unwrap();
+    }
+
+    fn touch_creds(dir: &Path) {
+        write_creds_token(dir, "sk-ant-oat01-watch");
     }
 
     #[test]
@@ -385,10 +387,7 @@ mod tests {
         touch_creds(&work);
 
         let watch = capture_login_watch(home.path(), &target);
-        // Force an mtime strictly newer than the baseline.
-        let newer = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
-        let f = std::fs::File::options().write(true).open(work.join(".credentials.json")).unwrap();
-        f.set_modified(newer).unwrap();
+        write_creds_token(&work, "sk-ant-oat01-relogin");
 
         assert!(detect_misdirected_login(&watch).is_some());
     }

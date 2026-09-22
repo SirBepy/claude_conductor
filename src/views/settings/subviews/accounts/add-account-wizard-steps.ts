@@ -76,7 +76,7 @@ export function renderCreateStep(state: WizardState): string {
     </div>
     ${state.error ? `<div class="aaw-error"><i class="ph ph-warning-circle"></i> ${escapeHtml(state.error)}</div>` : ""}
     <div class="wz-actions">
-      <span class="muted" style="font-size:11px">Next: log into claude.ai in a browser window</span>
+      <span class="muted" style="font-size: var(--fs-micro)">Next: log into claude.ai in a browser window</span>
       <button class="btn primary" id="aaw-create-btn" ${state.busy || !state.nameInput.trim() ? "disabled" : ""}>
         ${state.busy ? `<i class="ph ph-spinner aaw-spin"></i> Creating...` : "Create"}
       </button>

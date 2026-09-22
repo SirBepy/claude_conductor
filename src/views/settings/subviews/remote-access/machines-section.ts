@@ -64,7 +64,16 @@ export async function renderMachinesSection(root: HTMLElement, myUrlSeed?: strin
         await api.unpairMachine(id);
         await renderMachinesSection(root);
       },
-      { emptyHtml: `<p class="ra-caption">No paired machines yet.</p>`, errorLabel: "unpair_machine" },
+      {
+        emptyHtml: `
+          <div class="v-empty">
+            <i class="ph ph-devices v-empty-icon"></i>
+            <div class="v-empty-title">No paired machines yet</div>
+            <div class="v-empty-hint">Paste another machine's pairing URL below to pair it.</div>
+          </div>
+        `,
+        errorLabel: "unpair_machine",
+      },
     );
 
     // Prefill only once (empty + untouched) - never stomp a value the dev is

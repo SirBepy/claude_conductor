@@ -13,7 +13,7 @@
   border-radius: 7px;
   background: var(--color-surface-alt, #3a3a52);
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.05rem;
+  font-size: var(--fs-heading);
   flex-shrink: 0;
 }
 .project-detail-titles {
@@ -21,8 +21,8 @@
   min-width: 0; flex: 1;
 }
 .project-detail-path {
-  font-size: 0.66rem;
-  color: var(--color-text-muted, #8a8aa0);
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
   font-family: 'Fira Code', monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -37,10 +37,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.72rem;
+  font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-muted, #9a9ab0);
+  color: var(--sb-muted);
   font-weight: 600;
   margin-bottom: 8px;
 }
@@ -52,23 +52,34 @@
   width: 26px; height: 26px;
   display: flex; align-items: center; justify-content: center;
 }
-.instances-section .no-data {
-  font-size: 0.78rem;
-  color: var(--color-text-muted, #8a8aa0);
-  padding: 10px 0;
+/* Compact variant of the shared .v-empty (motion.css) - its 48px padding is
+ * sized for a full-page empty state, not this mid-page section. */
+.instances-section .v-empty,
+#project-chart-container .v-empty {
+  padding: 20px 8px;
+}
+.instances-section .v-empty .v-empty-icon,
+#project-chart-container .v-empty-icon {
+  font-size: 1.5rem;
 }
 
 /* Range toggle */
 .range-toggle { display: flex; gap: 4px; }
 .range-btn {
-  padding: 3px 10px; font-size: 0.75rem; border-radius: 6px;
-  background: var(--color-surface-alt); color: var(--color-text-muted);
+  padding: 3px 10px; font-size: var(--fs-micro); border-radius: 6px;
+  background: var(--color-surface-alt); color: var(--sb-muted);
   border: 1px solid var(--color-border); cursor: pointer;
   font-family: 'DM Sans', system-ui, sans-serif; font-weight: 600;
   transition: all 0.15s;
 }
 .range-btn.active { background: var(--color-primary); color: var(--color-background); border-color: var(--color-primary); }
 .range-btn:hover:not(.active) { border-color: var(--color-primary); color: var(--color-primary); }
+
+/* Right-slot spacer for subview-header.ts, balancing the back button so the
+ * title stays centered - mirrors character-detail's own header spacer. */
+.subview-header-spacer {
+  width: 32px;
+}
 
 /* .menu-anchor/.menu-popover/.menu-item rules moved to
  * src/shared/kebab-menu.css (todo 204). */

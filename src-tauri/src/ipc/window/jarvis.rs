@@ -31,6 +31,7 @@ use tauri::{AppHandle, Manager};
 pub async fn open_jarvis_window(app: AppHandle) -> Result<(), String> {
     let label = "session-jarvis";
     if let Some(existing) = app.get_webview_window(label) {
+        super::activation::before_show(&app, label);
         let _ = existing.show();
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| e.to_string())?;

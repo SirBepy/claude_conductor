@@ -16,6 +16,7 @@ import {
 import { toolLabel, toolSummary } from "../../../../shared/chat/tool-meta";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { type Pos, insertChip, moveChip, removeAt, addRow, trimRows, moveRow } from "./statusline-dnd";
+import { askConfirm } from "../../../../shared/confirm";
 import { settingsHeader } from "../../ui";
 import "../../settings.css";
 import "./statusline.css";
@@ -98,8 +99,8 @@ const shell = (profile: StatuslineProfile) => html`
       </div>
 
       <div class="kit-section" style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn-secondary" id="slClearBtn" style="font-size:0.8rem;">Clear all</button>
-        <button class="btn-secondary" id="slResetBtn" style="font-size:0.8rem;">Reset to defaults</button>
+        <button class="btn-secondary" id="slClearBtn" style="font-size: var(--fs-body);">Clear all</button>
+        <button class="btn-secondary" id="slResetBtn" style="font-size: var(--fs-body);">Reset to defaults</button>
       </div>
     </div>
   </div>
@@ -291,9 +292,12 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   });
 
   root.querySelector<HTMLButtonElement>("#slClearBtn")?.addEventListener("click", () => {
-    rows = [[]];
-    paint();
-    persist();
+    void (async () => {
+      if (!(await askConfirm("Clear the whole layout?", { confirmLabel: "Clear" }))) return;
+      rows = [[]];
+      paint();
+      persist();
+    })();
   });
 
   root.querySelector<HTMLButtonElement>("#slResetBtn")?.addEventListener("click", () => {

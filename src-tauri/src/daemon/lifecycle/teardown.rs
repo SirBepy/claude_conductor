@@ -78,7 +78,7 @@ async fn send_message_inner(
     if is_meta {
         wire_text.push_str(text);
     } else {
-        wire_text.push_str(&crate::slash::mentions::augment(text, Some(&session.cwd)));
+        wire_text.push_str(&crate::slash::mentions::augment(text, Some(&session.cwd)).await);
     }
     let msg = serde_json::json!({
         "type": "user",

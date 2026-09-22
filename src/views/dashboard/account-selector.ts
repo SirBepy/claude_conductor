@@ -10,6 +10,7 @@ import { accountIconBadgeHtml } from "../../shared/account-chip";
 import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes } from "../../shared/formatters";
 import type { ValueColorSettings } from "../../shared/formatters";
 import type { Account, AuthState, UsageRecord } from "../../shared/api";
+import { navigateTo } from "../../router";
 
 const SESSION_WINDOW_MS = 5 * 3_600_000;
 const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
@@ -89,6 +90,7 @@ function ringHtml(
           <div class="dash-ring-pcts"><span class="dash-ring-cur dash-ring-cur-dim">--</span></div>
         </div>
       </div>
+      <span class="dash-ring-label">${escapeHtml(label)}</span>
     </div>`;
   }
 
@@ -127,6 +129,7 @@ function ringHtml(
         </div>
       </div>
     </div>
+    <span class="dash-ring-label">${escapeHtml(label)}</span>
     ${timeHtml}
   </div>`;
 }
@@ -147,11 +150,13 @@ function accountCardHtml(account: Account, usage: UsageRecord | undefined, selec
   // Additive, not a replacement for `body` - a network/timeout failure never
   // reaches "needslogin" (see get_auth_state_map), so this never masks stale
   // but still-valid usage numbers. Mirrors accounts.css's `.acc-drift-warning`.
+  // A real button (not a static badge) so the login problem is actionable,
+  // not just visible - stops event bubbling to the card's own select handler.
   const needsLoginBadge = authState === "needslogin"
-    ? `<div class="dash-acard-warning"><i class="ph ph-warning"></i> Needs login</div>`
+    ? `<button type="button" class="dash-acard-warning v-focusable" data-needs-login="true" title="Needs login - go to Settings > Accounts"><i class="ph ph-warning"></i> Needs login</button>`
     : "";
 
-  return `<div class="dash-acard${selected ? " active" : ""}" data-acc-id="${escapeHtml(account.id)}" style="--acc:${escapeHtml(account.colour)}">
+  return `<div class="dash-acard v-card v-focusable${selected ? " active" : ""}" role="button" tabindex="0" aria-pressed="${selected ? "true" : "false"}" data-acc-id="${escapeHtml(account.id)}" style="--acc:${escapeHtml(account.colour)}">
     <div class="dash-ah">${accountIconBadgeHtml(account)}<span class="dash-who">${escapeHtml(account.label)}</span></div>
     ${body}
     ${needsLoginBadge}
@@ -202,6 +207,20 @@ export function wireAccountCardClicks(root: HTMLElement, onSelect: (accountId: s
     card.onclick = () => {
       const id = card.dataset["accId"];
       if (id) onSelect(id);
+    };
+    card.onkeydown = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const id = card.dataset["accId"];
+      if (id) onSelect(id);
+    };
+  });
+  // The needs-login badge is a button inside the card - it must navigate
+  // instead of triggering (or in addition to) the card's own select handler.
+  root.querySelectorAll<HTMLButtonElement>("[data-needs-login]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      void navigateTo("settings-accounts");
     };
   });
 }

@@ -3,9 +3,9 @@
 
 .ra-explainer {
   margin: 0 0 4px;
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
   line-height: 1.45;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .ra-statusline {
@@ -13,7 +13,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 0.85rem;
+  font-size: var(--fs-title);
 }
 
 .ra-status {
@@ -22,14 +22,14 @@
   gap: 4px;
 }
 
-.ra-status-warn { color: var(--warning, #e0a83a); }
-.ra-status-ok { color: var(--primary); }
-.ra-status-dim { color: var(--text-dim); }
+.ra-status-warn { color: var(--color-warning, #e0a83a); }
+.ra-status-ok { color: var(--color-primary); }
+.ra-status-dim { color: var(--sb-muted); }
 
 .ra-url {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.82rem;
-  color: var(--text);
+  font-size: var(--fs-body);
+  color: var(--color-text);
   word-break: break-all;
 }
 
@@ -51,27 +51,27 @@
 }
 
 .ra-qr-fallback {
-  color: var(--text-dim);
-  font-size: 0.85rem;
+  color: var(--sb-muted);
+  font-size: var(--fs-title);
 }
 
 .ra-caption {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   line-height: 1.4;
-  color: var(--text-dim);
+  color: var(--sb-muted);
 }
 
 .ra-token-field {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: var(--text);
+  color: var(--color-text);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.8rem;
+  font-size: var(--fs-body);
 }
 
 .ra-qr-actions {
@@ -102,23 +102,23 @@
 }
 
 .ra-device-name {
-  font-size: .9rem;
+  font-size: var(--fs-title);
   font-weight: 500;
   color: var(--color-text);
 }
 
 .ra-device-date {
-  font-size: .78rem;
-  color: var(--color-text-muted);
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
 }
 
 .ra-machine-label-input {
   padding: 5px 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: var(--text);
-  font-size: 0.85rem;
+  color: var(--color-text);
+  font-size: var(--fs-title);
   width: 200px;
   max-width: 50%;
 }
@@ -136,13 +136,13 @@
 
 .ra-machine-pair-error {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: var(--fs-body);
   color: var(--color-warning, #e5a040);
 }
 
 .btn-danger-sm {
   padding: 4px 10px;
-  font-size: .8rem;
+  font-size: var(--fs-body);
   background: transparent;
   color: #f87171;
   border: 1px solid #f87171;

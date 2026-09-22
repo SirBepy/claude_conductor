@@ -15,7 +15,7 @@ export function buildPieSvg(
       const y1 = cy + Math.sin(start) * r;
       const x2 = cx + Math.cos(end) * r;
       const y2 = cy + Math.sin(end) * r;
-      return `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z" fill="${slice.color}" stroke="#0a0a0a" stroke-width="1.5" />`;
+      return `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z" fill="${slice.color}" stroke="var(--color-surface)" stroke-width="1.5" />`;
     })
     .join("");
   return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${paths}</svg>`;

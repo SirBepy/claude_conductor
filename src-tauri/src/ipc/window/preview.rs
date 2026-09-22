@@ -11,6 +11,7 @@ pub fn open_preview_window(app: AppHandle, session_id: String) -> Result<(), Str
     crate::ipc::chat::attachments::validate_session_id(&session_id)?;
     let label = "session-preview";
     if let Some(existing) = app.get_webview_window(label) {
+        super::activation::before_show(&app, label);
         let _ = existing.show();
         let _ = existing.unminimize();
         existing.set_focus().map_err(|e| e.to_string())?;

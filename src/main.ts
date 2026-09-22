@@ -6,6 +6,7 @@ import "../vendor/tauri_kit/frontend/settings/styles.css";
 import "../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default.css";
 import "./styles/base.css";
 import "./styles/widgets.css";
+import "./styles/motion.css";
 
 import { mountRouter, registerView } from "./router";
 import { initBoot, applySettingsToDocument } from "./shared/boot";

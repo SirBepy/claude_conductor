@@ -68,4 +68,107 @@ test.describe("view-harness / dashboard", () => {
     await expect(expiredCard.locator(".dash-acard-warning")).toContainText("Needs login");
     await expect(healthyCard.locator(".dash-acard-warning")).toHaveCount(0);
   });
+
+  // P1-4: account cards are `role="button" tabindex="0"`, not native buttons,
+  // so Tab-focus + Enter must select them the same as a click does.
+  test("keyboard: Tab-focusing an account card and pressing Enter selects it", async ({ page }) => {
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [
+          { id: "acc-1", label: "One", icon: "user", colour: "#8b5cf6" },
+          { id: "acc-2", label: "Two", icon: "user", colour: "#f59e0b" },
+        ],
+        get_usage_map: {},
+        get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        poll_now: null,
+      },
+    });
+
+    const first = page.locator('.dash-acard[data-acc-id="acc-1"]');
+    const second = page.locator('.dash-acard[data-acc-id="acc-2"]');
+    // No default_account_id in settings -> the first registered account wins.
+    await expect(first).toHaveClass(/active/);
+
+    await second.focus();
+    await expect(second).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    await expect(second).toHaveClass(/active/);
+    await expect(first).not.toHaveClass(/active/);
+  });
+
+  // P0-1: the ring's unit ("5h"/"7d") used to live only in a hover title
+  // attribute - it must also render as visible text.
+  test("ring columns show a visible 5h/7d unit label", async ({ page }) => {
+    // get_usage_map returns raw UsageSnapshot rows (api.ts's own
+    // usageSnapshotMapToRecordMap converts them) - not flat session_pct
+    // fields, which silently produce a null (empty-ring) record instead.
+    const future2h = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const future48h = new Date(Date.now() + 48 * 3_600_000).toISOString();
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [{ id: "acc-1", label: "One", icon: "user", colour: "#8b5cf6" }],
+        get_usage_map: {
+          "acc-1": {
+            captured_at: new Date().toISOString(),
+            five_hour: { utilization: 40, resets_at: future2h },
+            seven_day: { utilization: 20, resets_at: future48h },
+          },
+        },
+        get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        poll_now: null,
+      },
+    });
+
+    const labels = page.locator('.dash-acard[data-acc-id="acc-1"] .dash-ring-label');
+    await expect(labels).toHaveCount(2);
+    await expect(labels.nth(0)).toBeVisible();
+    await expect(labels.nth(0)).toHaveText("5h");
+    await expect(labels.nth(1)).toHaveText("7d");
+  });
+
+  // P0-2: listAccounts/getUsageMap/getAuthStateMap self-catch in shared/api.ts
+  // and never reach fullRefresh's own catch - the genuinely reachable
+  // failure is the crossover auto-poll's pollNow() call, which does not.
+  test("shows a dismissible banner when an automatic poll fails", async ({ page }) => {
+    const pastIso = new Date(Date.now() - 3_600_000).toISOString();
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [],
+        get_usage_map: {},
+        get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        // Session window already expired -> the crossover auto-poll fires
+        // immediately on mount instead of waiting for the real interval.
+        get_history: [
+          {
+            captured_at: pastIso,
+            five_hour: { utilization: 50, resets_at: pastIso },
+            seven_day: { utilization: 30, resets_at: pastIso },
+          },
+        ],
+        // poll_now intentionally unmocked: the harness rejects an unmocked
+        // command, simulating a real (non-self-catching) poll failure.
+      },
+    });
+
+    const banner = page.locator("#dashRefreshErrorBanner");
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveAttribute("aria-live", "polite");
+    await expect(banner).toContainText("Couldn't refresh");
+
+    await page.locator("#dashRefreshErrorDismiss").click();
+    await expect(banner).toHaveCount(0);
+  });
 });

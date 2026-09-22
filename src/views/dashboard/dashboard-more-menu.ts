@@ -1,14 +1,12 @@
-// Dashboard header "more options" kebab menu - extracted from dashboard.ts
-// (ai_todo 174) so dashboard.ts can stay focused on mount/lifecycle/refresh +
-// widget shell. Talks back to dashboard.ts purely via the injected deps bag
-// (never imports dashboard.ts state directly) to avoid an import cycle - see
-// the sidebar.ts import-cycle memory.
+// Dashboard header "more options" kebab, migrated onto the shared ARIA kebab
+// (src/shared/kebab-menu.ts, todo 204/P1-6) instead of the ARIA-less
+// session-more-menu base. The add-widget submenu is flattened into this one
+// menu ("Add: <name>" items), since wireKebabMenu only manages one popover.
 
 import { escapeHtml } from "../../shared/escape-html";
 import { getWidget } from "./widget-registry";
 import type { DashboardWidgetEntry } from "./widget-registry";
-import { positionSubmenu } from "../sessions/position-dropdown";
-import { createMoreMenu } from "../sessions/more-menu-base";
+import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
 
 export interface DashMoreMenuDeps {
   isEditMode: () => boolean;
@@ -19,85 +17,76 @@ export interface DashMoreMenuDeps {
   enableWidget: (id: string) => void;
 }
 
-let dashSubmenu: HTMLElement | null = null;
+let menuEl: HTMLElement | null = null;
 
-const dashMenu = createMoreMenu<[DashMoreMenuDeps]>({
-  isOutside: (target, menu, btn) =>
-    !menu.contains(target) && target !== btn && !dashSubmenu?.contains(target),
-  beforeClose: () => {
-    dashSubmenu?.remove();
-    dashSubmenu = null;
-  },
-  build: (menu, close, deps) => {
-    const editMode = deps.isEditMode();
-    const editItem = document.createElement("button");
-    editItem.className = "smore-item" + (editMode ? " is-on" : "");
-    editItem.innerHTML =
-      `<i class="ph ph-sliders-horizontal"></i>` +
-      `<span>${editMode ? "Done editing" : "Edit dashboard"}</span>` +
-      (editMode ? `<span class="smore-check-dot"></span>` : "");
-    editItem.onclick = () => { close(); deps.onToggleEditMode(); };
-    menu.appendChild(editItem);
+// The menu is rebuilt from scratch on every open (not once at mount) because
+// its content is state-dependent: the edit-mode label flips, and the
+// add-widget rows shrink as widgets get added.
+function buildMenuHtml(deps: DashMoreMenuDeps): string {
+  const editMode = deps.isEditMode();
+  const parts: string[] = [
+    `<button class="menu-item" role="menuitem" data-act="toggle-edit">
+      <i class="ph ph-sliders-horizontal"></i> ${editMode ? "Done editing" : "Edit dashboard"}
+    </button>`,
+    `<button class="menu-item" role="menuitem" data-act="refresh">
+      <i class="ph ph-arrows-clockwise"></i> Refresh now
+    </button>`,
+  ];
 
-    const refreshItem = document.createElement("button");
-    refreshItem.className = "smore-item";
-    refreshItem.innerHTML = `<i class="ph ph-arrows-clockwise"></i><span>Refresh now</span>`;
-    refreshItem.onclick = () => { close(); void deps.triggerRefresh(); };
-    menu.appendChild(refreshItem);
+  const addable = deps.getDashboardWidgets().filter((e) => !e.enabled && getWidget(e.id));
+  if (addable.length > 0) {
+    parts.push(`<div class="menu-sep"></div>`);
+    for (const entry of addable) {
+      const widget = getWidget(entry.id)!;
+      parts.push(`<button class="menu-item" role="menuitem" data-act="add-widget" data-widget-id="${escapeHtml(entry.id)}">
+        <i class="ph ${escapeHtml(widget.icon)}"></i> Add: ${escapeHtml(widget.title)}
+      </button>`);
+    }
+  }
+  return parts.join("");
+}
 
-    const sep = document.createElement("div");
-    sep.className = "smore-sep";
-    menu.appendChild(sep);
-
-    const addParent = document.createElement("button");
-    addParent.className = "smore-item smore-has-sub";
-    addParent.innerHTML =
-      `<i class="ph ph-plus"></i><span>Add widget</span>` +
-      `<i class="ph ph-caret-right smore-sub-caret"></i>`;
-    addParent.onclick = (ev) => {
-      ev.stopPropagation();
-      if (dashSubmenu) { dashSubmenu.remove(); dashSubmenu = null; return; }
-      openAddWidgetSubmenu(addParent, deps);
+function wireMenuItems(menu: HTMLElement, deps: DashMoreMenuDeps): void {
+  menu.querySelectorAll<HTMLButtonElement>(".menu-item").forEach((btn) => {
+    btn.onclick = () => {
+      closeKebabMenu(menu);
+      const act = btn.dataset["act"];
+      if (act === "toggle-edit") deps.onToggleEditMode();
+      else if (act === "refresh") void deps.triggerRefresh();
+      else if (act === "add-widget") {
+        const id = btn.dataset["widgetId"];
+        if (id) deps.enableWidget(id);
+      }
     };
-    menu.appendChild(addParent);
-  },
-});
+  });
+}
+
+/** Wires the dashboard header's `#dashMoreBtn`/`#dashMoreMenu` pair (markup
+ * lives in dashboard.ts's template). Returns a dispose fn for view teardown. */
+export function wireDashMoreMenu(root: HTMLElement, deps: DashMoreMenuDeps): () => void {
+  const btn = root.querySelector<HTMLButtonElement>("#dashMoreBtn");
+  const menu = root.querySelector<HTMLElement>("#dashMoreMenu");
+  if (!btn || !menu) return () => { /* markup not mounted */ };
+
+  menuEl = menu;
+  const rebuild = () => {
+    menu.innerHTML = buildMenuHtml(deps);
+    wireMenuItems(menu, deps);
+  };
+  // Populate before first open too, and re-populate on every subsequent
+  // click - registered before wireKebabMenu's own `onclick` below, so it
+  // always runs first within the same toggle.
+  rebuild();
+  btn.addEventListener("click", rebuild);
+  const disposeKebab = wireKebabMenu(btn, menu);
+
+  return () => {
+    btn.removeEventListener("click", rebuild);
+    disposeKebab();
+    if (menuEl === menu) menuEl = null;
+  };
+}
 
 export function closeDashMenu(): void {
-  dashMenu.close();
-}
-
-export function onDashMoreClick(e: Event, deps: DashMoreMenuDeps): void {
-  const btn = e.currentTarget as HTMLButtonElement;
-  dashMenu.toggle(btn, deps);
-}
-
-/** Add-widget submenu: every registry widget is listed; already-added ones are
- * greyed out (not clickable), the rest enable on click. */
-function openAddWidgetSubmenu(parent: HTMLElement, deps: DashMoreMenuDeps): void {
-  const sub = document.createElement("div");
-  sub.className = "session-more-menu";
-  for (const entry of deps.getDashboardWidgets()) {
-    const widget = getWidget(entry.id);
-    if (!widget) continue;
-    const item = document.createElement("button");
-    item.className = "smore-item" + (entry.enabled ? " is-disabled" : "");
-    item.innerHTML =
-      `<i class="ph ${escapeHtml(widget.icon)}"></i>` +
-      `<span>${escapeHtml(widget.title)}</span>` +
-      (entry.enabled ? `<i class="ph ph-check" style="margin-left:auto;opacity:0.6"></i>` : "");
-    if (entry.enabled) {
-      item.title = "Already added";
-    } else {
-      item.onclick = () => {
-        deps.enableWidget(entry.id);
-        closeDashMenu();
-      };
-    }
-    sub.appendChild(item);
-  }
-  document.body.appendChild(sub);
-  dashSubmenu = sub;
-
-  positionSubmenu(sub, parent);
+  if (menuEl) closeKebabMenu(menuEl);
 }

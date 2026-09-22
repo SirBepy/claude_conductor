@@ -119,7 +119,7 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
         </div>
         <div id="aem-appearance-picker"></div>
         <div class="kit-row">
-          <span class="kit-row-label">Fleet eligible (Jarvis may spawn workers on this account)</span>
+          <span class="kit-row-label">Fleet eligible - automated background sessions may use this account</span>
           <label class="kit-toggle">
             <input type="checkbox" id="aem-fleet-eligible" ${fleetEligible ? "checked" : ""}>
             <span class="kit-toggle-track"></span>
@@ -140,9 +140,22 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
     }
 
     function projectsTabHtml(): string {
-      if (!projectsLoaded) return `<p class="rev-empty">Loading...</p>`;
+      if (!projectsLoaded) {
+        return `
+          <div class="v-skeleton aem-row-skeleton"></div>
+          <div class="v-skeleton aem-row-skeleton"></div>
+        `;
+      }
       return `
-        ${projects.length === 0 ? `<p class="rev-empty">No projects bound to this account yet.</p>` : projects.map(projectRowHtml).join("")}
+        ${projects.length === 0
+          ? `
+            <div class="v-empty">
+              <i class="ph ph-folder v-empty-icon"></i>
+              <div class="v-empty-title">No projects bound to this account yet</div>
+              <div class="v-empty-hint">Add one below to use this account for it by default.</div>
+            </div>
+          `
+          : projects.map(projectRowHtml).join("")}
         <button class="rev-add-btn" id="aem-add-project"><i class="ph ph-plus"></i> Add a project</button>
       `;
     }
