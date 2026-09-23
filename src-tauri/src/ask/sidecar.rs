@@ -44,7 +44,7 @@ pub struct SidecarResult {
 /// `stream_event` lines `claude` emits under `--include-partial-messages`,
 /// which a one-shot Ask never passes, so reading deltas here silently produced
 /// an empty answer after every paid-for run.
-pub fn parse_result_line(line: &str) -> Option<SidecarResult> {
+pub fn parse_ask_result_line(line: &str) -> Option<SidecarResult> {
     let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
     if v.get("type")?.as_str()? != "result" {
         return None;
@@ -150,7 +150,7 @@ pub async fn ask(
     let mut result: Option<SidecarResult> = None;
     let mut lines = BufReader::new(stdout).lines();
     while let Some(line) = lines.next_line().await.context("read claude stdout")? {
-        if let Some(r) = parse_result_line(&line) {
+        if let Some(r) = parse_ask_result_line(&line) {
             result = Some(r);
         }
     }
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn result_line_yields_the_answer_and_the_session_claude_actually_used() {
-        let r = parse_result_line(REAL_RESULT_LINE).expect("result line");
+        let r = parse_ask_result_line(REAL_RESULT_LINE).expect("result line");
         assert_eq!(r.text, "PONG");
         assert_eq!(r.session_id.as_deref(), Some("348563a5-17c8-4908-b25a-f36c316ee356"));
         assert!(!r.is_error);
@@ -232,14 +232,14 @@ mod tests {
             "",
             "not json",
         ] {
-            assert!(parse_result_line(line).is_none(), "{line}");
+            assert!(parse_ask_result_line(line).is_none(), "{line}");
         }
     }
 
     #[test]
     fn an_errored_run_is_not_read_as_an_answer() {
         let line = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"","session_id":"s"}"#;
-        let r = parse_result_line(line).expect("result line");
+        let r = parse_ask_result_line(line).expect("result line");
         assert!(r.is_error);
         assert!(r.text.is_empty());
     }
