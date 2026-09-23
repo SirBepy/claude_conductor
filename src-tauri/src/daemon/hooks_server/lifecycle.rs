@@ -70,6 +70,18 @@ pub(super) async fn on_session_start(
     };
     let cwd_path = std::path::PathBuf::from(&cwd);
 
+    // Ask / news-summary sidecars are daemon-internal `claude -p` runs, not
+    // chats. The global hook fires for them too, and registering one put a
+    // ghost External row in the sidebar that died the instant the sidecar
+    // exited, plus the app-data dir itself in the project list.
+    if crate::sessions::internal::is_internal_sidecar_cwd(&cwd_path) {
+        log::info!(
+            "hook /hooks/session-start: ignoring internal sidecar session={}",
+            payload.session_id,
+        );
+        return (StatusCode::NO_CONTENT, Json(json!({})));
+    }
+
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
     // Phase 4: if the hook's pid belongs to a channel we spawned, tag it

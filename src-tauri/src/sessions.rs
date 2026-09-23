@@ -5,6 +5,7 @@ pub mod registry_flags;
 pub mod registry_account;
 pub mod registry_turn;
 pub mod detector;
+pub mod internal;
 pub mod persistence;
 pub mod chat_config;
 pub mod chat_state;
