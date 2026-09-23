@@ -44,6 +44,14 @@ export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuest
 // (checkbox or free text) instead of treating an untouched question as done.
 const NONE_LABEL = "None of the above";
 
+/** True for the elements whose focus is what raises the phone's soft keyboard,
+ *  so hardware-back can lower it before it starts navigating. */
+function raisesSoftKeyboard(el: HTMLElement): boolean {
+  return el instanceof HTMLTextAreaElement
+    || el instanceof HTMLInputElement
+    || el.isContentEditable;
+}
+
 export function renderQuestionUI(opts: QuestionUIOpts): void {
   const { host } = ensureHost();
   // showQuestionCard seeds a new card from whatever card is still live in the
@@ -112,9 +120,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const savedScrollTop = messagesEl?.scrollTop ?? 0;
   const savedPaddingBottom = messagesEl?.style.paddingBottom ?? "";
 
-  // Phone back button skips the question (same as Escape / the Skip button) so
-  // the card never traps the user, and the prompt resolves rather than silently
-  // hiding. Registered below once `cancel` exists; disposed on teardown.
+  // Phone back button never answers or skips the question - it only drops the
+  // soft keyboard, then falls through to the mobile-pane handler. Registered
+  // below once `cancel` exists; disposed on teardown.
   let backDisposer: (() => void) | null = null;
 
   // Declared and wired BEFORE `teardown` (which closes over it) so there is no
@@ -277,11 +285,24 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   backDisposer = registerOverlayBack(() => {
-    // Always consumes the press (returns true) even when it no-ops - with the
-    // lightbox unregistered, falling through (false) would step the
-    // view-navigation stack instead, an even bigger surprise than a no-op.
-    dismissUnlessOverlayAbove();
-    return true;
+    // A lightbox above the card owns the press even when it skipped its own
+    // registration; consume it so the fall-through below can't step the
+    // view-navigation stack behind the open image.
+    if (document.querySelector(`.${LIGHTBOX_OVERLAY_CLASS}`)) return true;
+    // Back must never skip the question: a skipped card sends NO answer, and
+    // Android's back is far too easy to hit by accident to spend a prompt on.
+    // First press only drops the soft keyboard; with nothing focused we fall
+    // through (false) to main.ts's mobile-pane handler, which returns to the
+    // session list. The card stays live in the hidden pane; switching to
+    // another chat tears it down display-only (active-session.ts), and
+    // selectSession's rehydratePendingPrompts refetches it from the daemon
+    // on the way back.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && raisesSoftKeyboard(focused)) {
+      focused.blur();
+      return true;
+    }
+    return false;
   });
 
   const answeredAt = (qi: number): boolean =>
