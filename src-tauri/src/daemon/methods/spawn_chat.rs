@@ -36,16 +36,6 @@ fn claim_turn_slot(state: &Arc<DaemonState>, caller_session_id: &str) -> bool {
     true
 }
 
-/// Tolerates the shapes a model emits for its own cwd (trailing separators,
-/// `.`-segments, Windows case). An uncanonicalizable path falls back to a
-/// literal compare, which can only reject, never wrongly accept.
-fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
-}
-
 /// Spawns a new Interactive session in the caller's own project and sends
 /// `prompt` as its first turn. The prompt lands as a real, visible user
 /// message - the whole point of this over the retired handoff button, which
@@ -68,7 +58,7 @@ pub(crate) async fn spawn_chat(
         .ok_or_else(|| format!("unknown caller session: {caller_session_id}"))?;
 
     let requested = std::path::PathBuf::from(cwd);
-    if !same_dir(&caller.cwd, &requested) {
+    if !crate::util::same_dir(&caller.cwd, &requested) {
         return Err(format!(
             "spawn_chat only spawns into the calling session's own working directory ({}) - \
              refusing {}",
@@ -378,7 +368,7 @@ mod tests {
         let here = std::env::current_dir().unwrap();
         let mut trailing = here.clone().into_os_string();
         trailing.push(std::path::MAIN_SEPARATOR.to_string());
-        assert!(same_dir(&here, std::path::Path::new(&trailing)));
+        assert!(crate::util::same_dir(&here, std::path::Path::new(&trailing)));
     }
 
     fn machine_registry_with_a_peer() -> MachineRegistry {

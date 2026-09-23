@@ -13,29 +13,8 @@ use std::path::Path;
 /// (`jarvis-home`) host real chats and must stay visible.
 pub fn is_internal_sidecar_cwd(cwd: &Path) -> bool {
     match crate::settings::paths::data_dir() {
-        Ok(data_dir) => same_dir(cwd, &data_dir),
+        Ok(data_dir) => crate::util::same_dir(cwd, &data_dir),
         Err(_) => false,
-    }
-}
-
-/// `canonicalize` is the reliable comparison but fails on a path that no longer
-/// exists, so a normalized string compare backs it up.
-fn same_dir(a: &Path, b: &Path) -> bool {
-    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        return a == b;
-    }
-    norm(a) == norm(b)
-}
-
-/// The hook reports whatever casing and separator the spawner used. Only
-/// Windows gets the case fold and the `\` rewrite - elsewhere a backslash is a
-/// legal filename character.
-fn norm(p: &Path) -> String {
-    let s = p.to_string_lossy();
-    if cfg!(windows) {
-        s.replace('\\', "/").trim_end_matches('/').to_lowercase()
-    } else {
-        s.trim_end_matches('/').to_string()
     }
 }
 
@@ -63,21 +42,9 @@ mod tests {
     }
 
     #[test]
-    fn same_dir_ignores_a_trailing_separator() {
-        assert!(same_dir(&PathBuf::from("/a/b/"), &PathBuf::from("/a/b")));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn same_dir_ignores_windows_casing_and_separator_style() {
-        assert!(same_dir(
-            &PathBuf::from(r"C:\Users\X\AppData\Roaming\claude-conductor"),
-            &PathBuf::from("c:/users/x/appdata/roaming/claude-conductor"),
-        ));
-    }
-
-    #[test]
-    fn same_dir_still_separates_siblings() {
-        assert!(!same_dir(&PathBuf::from("/a/b"), &PathBuf::from("/a/c")));
+    fn a_trailing_separator_still_reads_as_the_data_dir() {
+        let mut trailing = crate::settings::paths::data_dir().expect("data dir").into_os_string();
+        trailing.push(std::path::MAIN_SEPARATOR.to_string());
+        assert!(is_internal_sidecar_cwd(Path::new(&trailing)));
     }
 }

@@ -10,6 +10,17 @@ pub mod process;
 #[cfg(test)]
 pub(crate) static ENV_MUTATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Tolerates the shapes a path can arrive in (trailing separators,
+/// `.`-segments, Windows case). An uncanonicalizable path falls back to a
+/// literal compare, which can only reject, never wrongly accept - `spawn_chat`
+/// leans on that direction to guard which cwd a chat may be spawned in.
+pub(crate) fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 use sha2::{Digest, Sha256};
 
 /// Lowercase hex encoding, byte order preserved. Shared by device
