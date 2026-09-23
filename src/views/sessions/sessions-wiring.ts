@@ -153,11 +153,15 @@ export async function wireDaemonStatusListeners(
 
   // The `ev` listeners above are Tauri-only: `sessions.ts` reads
   // `window.__TAURI__?.event`, which is undefined in a remote browser, so the
-  // phone got NO character refresh at all and kept the portraits it loaded at
-  // mount. These two go through the transport seam instead, so they reach both
-  // clients - the daemon publishes them from `set_settings` (a desktop-side
-  // (re)assignment) and from `invalidate_characters_cache` (new/re-arted
-  // artwork on disk).
+  // phone gets NO character refresh from them and keeps the portraits it loaded
+  // at mount. These two go through the transport seam instead. The daemon
+  // publishes them from `set_settings` (a desktop-side (re)assignment) and from
+  // `invalidate_characters_cache` (new/re-arted artwork on disk).
+  //
+  // Live on the PHONE only, despite the seam: `daemon_link.rs` has no match arm
+  // for either name, so a Tauri window never receives them. Desktop reaches the
+  // same state through `settings-changed` above instead. Todo 947 decides
+  // whether that stays.
   const refreshCharacters = async (artworkChanged: boolean): Promise<void> => {
     if (state.mountId !== myMount) return;
     if (artworkChanged) resetCharacterCaches();
