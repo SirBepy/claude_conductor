@@ -1,9 +1,10 @@
 // The right-hand rail (todo 702, split out of preview-panel.ts). It owns the
-// host element, the dragged width, and the two rail-wide buttons (pop-out,
-// close). Preview is its only content: Todos moved to the chat pane's FAB
-// (Joe, 2026-08-24), which took the tab strip with it.
+// host element, the dragged width, and the two rail-wide buttons (pop-out /
+// restore, close). Preview is its only content: Todos moved to the chat pane's
+// FAB (Joe, 2026-08-24), which took the tab strip with it.
 
 import { invoke } from "../../shared/ipc";
+import { listen } from "../../shared/events";
 import { wireResizeHandle, clampPanelWidth, splittableWidth } from "./preview-panel-resize";
 
 export type RailMode = "panel" | "window";
@@ -43,8 +44,8 @@ export interface RailController {
   /** Relocates this chat's rail to its own OS window (todo 290, panel mode
    *  only). Docked view stays scoped but hidden until dockBack. */
   popOut(): void;
-  /** Pop-out window's own dock-back path (window mode only) - clears the
-   *  popped flag and closes the OS window. */
+  /** Pop-out window's own restore path (window mode only) - clears the popped
+   *  flag and closes the OS window, so the docked rail takes it back. */
   dockBack(): void;
   destroy(): void;
 }
@@ -140,6 +141,8 @@ class RailPanel implements RailController {
    *  own OS window; docked host stays scoped but hidden until dockBack(). */
   private popped = false;
   private storageHandler: ((e: StorageEvent) => void) | null = null;
+  private unlistenDocked: (() => void) | null = null;
+  private destroyed = false;
 
   constructor(root: HTMLElement, mode: RailMode, mountPreview: RailTabMount) {
     this.root = root;
@@ -172,9 +175,23 @@ class RailPanel implements RailController {
         if (!this.currentSessionId || e.key !== poppedKey(this.currentSessionId)) return;
         this.popped = e.newValue === "1";
         if (this.popped) this.root.hidden = true;
-        else if (this.openState) { this.root.hidden = false; this.preview?.refresh(); }
+        else this.applyOpenFromStorage();
       };
       window.addEventListener("storage", this.storageHandler);
+      // The pop-out's OS close is a Rust-side hide, not a real close, so that
+      // realm gets no chance to write storage - this event is the only signal
+      // that the window is gone. Without it the popped flag outlives the
+      // window and the rail refuses to show in either place (Joe, 2026-09-23).
+      void listen<{ sessionId: string }>("preview-window-docked", (p) => {
+        if (!p?.sessionId) return;
+        savePopped(p.sessionId, false);
+        if (p.sessionId !== this.currentSessionId) return;
+        this.popped = false;
+        this.applyOpenFromStorage();
+      }).then((un) => {
+        if (this.destroyed) un();
+        else this.unlistenDocked = un;
+      });
     }
 
     this.root.hidden = true;
@@ -205,9 +222,26 @@ class RailPanel implements RailController {
     this.root.style.flex = `0 0 ${Math.round(px)}px`;
   }
 
+  /** Re-derives visibility from THIS chat's saved open flag. Used by the two
+   *  paths that learn the rail stopped being popped out, where the in-memory
+   *  openState can't be trusted: the pop-out writes the flag it wants (closed
+   *  for its X, open for its restore button) just before the window goes. */
+  private applyOpenFromStorage(): void {
+    const sid = this.currentSessionId;
+    this.openState = !!sid && loadOpen(sid);
+    this.root.hidden = !this.openState;
+    if (!this.openState) return;
+    this.applyWidth();
+    this.preview?.refresh();
+  }
+
   // ── Public controller API ────────────────────────────────────────────────
 
   toggle(): void {
+    // Popped out, so there is no docked host to toggle - surface that window
+    // instead. Also the only escape when a popped flag outlives its window
+    // (app restart while popped), which otherwise leaves the dial inert.
+    if (this.mode === "panel" && this.popped) { this.popOut(); return; }
     if (this.openState) this.close();
     else this.open();
   }
@@ -275,7 +309,21 @@ class RailPanel implements RailController {
     });
   }
 
+  /** Window mode's X: the preview is dismissed, not relocated, so the docked
+   *  rail must come back CLOSED. Both flags are written before the close is
+   *  requested, because `preview-window-docked` reads them back. */
+  private closePreview(): void {
+    if (this.mode !== "window" || !this.currentSessionId) return;
+    saveOpen(this.currentSessionId, false);
+    savePopped(this.currentSessionId, false);
+    void invoke("close_preview_window").catch((err) => {
+      console.error("[rail-panel] close_preview_window failed", err);
+    });
+  }
+
   destroy(): void {
+    this.destroyed = true;
+    if (this.unlistenDocked) { this.unlistenDocked(); this.unlistenDocked = null; }
     if (this.resizeCleanup) { this.resizeCleanup(); this.resizeCleanup = null; }
     if (this.layoutObserver) { this.layoutObserver.disconnect(); this.layoutObserver = null; }
     if (this.storageHandler) {
@@ -288,15 +336,21 @@ class RailPanel implements RailController {
 
   // ── Rendering + events ───────────────────────────────────────────────────
 
+  /** The strip's first button is the mode's own inverse: pop out when docked,
+   *  restore when windowed. It used to be `hidden` in window mode, which did
+   *  nothing - `.icon-btn-sq { display: grid }` is an AUTHOR rule and beats
+   *  the UA `[hidden] { display: none }`, so it stayed visible and dead
+   *  (Joe, 2026-09-23). Rendering the real action leaves nothing to hide. */
   private renderShell(): void {
+    const win = this.mode === "window";
     this.root.innerHTML = `
       <div class="preview-panel" data-mode="${this.mode}">
         <div class="pv-resize-handle" data-resize title="Drag to resize"></div>
         <div class="rail-strip">
           <span class="rail-strip-title">Preview</span>
           <span class="rail-strip-grow"></span>
-          <button type="button" class="icon-btn-sq pv-icon-btn" data-act="popout" title="Pop out into its own window"${this.mode === "window" ? " hidden" : ""}><i class="ph ph-arrows-out-simple"></i></button>
-          <button type="button" class="icon-btn-sq pv-icon-btn" data-act="close" title="${this.mode === "window" ? "Dock back into chat" : "Close panel"}"><i class="ph ${this.mode === "window" ? "ph-arrow-line-down" : "ph-x"}"></i></button>
+          <button type="button" class="icon-btn-sq pv-icon-btn" data-act="${win ? "restore" : "popout"}" title="${win ? "Put it back in the chat window" : "Pop out into its own window"}"><i class="ph ${win ? "ph-arrows-in-simple" : "ph-arrows-out-simple"}"></i></button>
+          <button type="button" class="icon-btn-sq pv-icon-btn" data-act="close" title="${win ? "Close preview" : "Close panel"}"><i class="ph ph-x"></i></button>
         </div>
         <div class="rail-tab-body" data-tab-body="preview"></div>
       </div>
@@ -313,9 +367,11 @@ class RailPanel implements RailController {
       if (!actBtn) return;
       switch (actBtn.dataset.act) {
         case "popout": this.popOut(); return;
+        case "restore": this.dockBack(); return;
         // The strip's close acts on the whole rail (Joe: "the x button closes
-        // the entire window").
-        case "close": if (this.mode === "window") this.dockBack(); else this.close(); return;
+        // the entire window"), and in window mode it dismisses the preview
+        // rather than relocating it - that's what `restore` above is for.
+        case "close": if (this.mode === "window") this.closePreview(); else this.close(); return;
         default: return;
       }
     });
