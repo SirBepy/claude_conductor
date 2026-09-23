@@ -251,6 +251,15 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "scheduled_item_fired" => {
             let _ = app.emit("scheduled-item-fired", params);
         }
+        // Held messages the PostToolBatch hook injected into a running turn
+        // (`hooks_server::nudge`). Pure forward: the payload carries the ids and
+        // blocks the UI needs to drop them from its own held set and render them
+        // as sent. `sync_held_count` fires `instances_changed` alongside this, so
+        // the sidebar count heals either way - this event is what puts the
+        // message in the transcript, which nothing else can reconstruct.
+        "held_messages_delivered" => {
+            let _ = app.emit("held-messages-delivered", params);
+        }
         // In-app HTML preview push (daemon::preview via POST /hooks/preview).
         // Pure forward: the docked preview panel re-reads via `list_previews`
         // on open/focus, so this is just the fast live-update nudge. Payload

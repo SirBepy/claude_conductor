@@ -21,6 +21,7 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   scheduled_items_changed: "scheduled-items-changed",
   scheduled_item_fired: "scheduled-item-fired",
   turn_sound: "turn-sound",
+  held_messages_delivered: "held-messages-delivered",
 };
 export const GLOBAL_KEBAB_EVENTS = new Set(Object.values(GLOBAL_EVENT_MAP));
 

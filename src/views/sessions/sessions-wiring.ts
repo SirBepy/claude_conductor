@@ -290,7 +290,7 @@ export async function wireInstancesChangedListener(
   // synthetic push active-session-composer.ts's sendBundle uses for an
   // ordinary send, for the same reason.
   state.unlistenHeldDelivered = await getTransport().listen<HeldDelivered>(
-    "held_messages_delivered",
+    "held-messages-delivered",
     (payload) => {
       const sid = payload?.session_id;
       if (!sid || !payload.blocks?.length) return;
