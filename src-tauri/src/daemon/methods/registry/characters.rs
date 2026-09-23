@@ -18,6 +18,24 @@ pub fn register_characters(router: &mut Router, state: Arc<DaemonState>) {
             async move { Ok(json!(crate::characters::list())) }
         });
     }
+    // Pipe-only on purpose (absent from `remote_handlers::TRANSPORT_TABLE`): the
+    // app process drops its own `characters::cache` when the user hits Refresh in
+    // the Characters view, but the daemon is a SEPARATE process holding its own
+    // copy, and the daemon's copy is what answers `list_characters` /
+    // `character_asset_url` for every remote client. `characters_changed` then
+    // tells those clients to drop their icon caches: re-arting a character keeps
+    // its id, so nothing else would ever consider a cached data URL stale.
+    {
+        let state = state.clone();
+        router.register("invalidate_characters_cache", move |_params, _ctx| {
+            let state = state.clone();
+            async move {
+                crate::characters::cache::invalidate();
+                state.notifier.publish("characters_changed", json!({}));
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
     // Mirrors `character_asset_url` (params: character_id, file) -> Option<String>
     // data URL. `file` is client-supplied, so `asset_path_checked` canonicalizes
     // and rejects any escape from the character's own dir before the fs read.

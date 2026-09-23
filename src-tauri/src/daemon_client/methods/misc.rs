@@ -18,6 +18,12 @@ impl PersistentClient {
         Ok(())
     }
 
+    /// Drop the daemon's own copy of the character-list cache (separate process,
+    /// separate cache) right after the app dropped its own.
+    pub async fn invalidate_characters_cache(&self) -> Result<(), ClientError> {
+        self.call("invalidate_characters_cache", Value::Null).await.map(|_| ())
+    }
+
     /// Forward a freshly-polled usage snapshot to the daemon so it can fan it
     /// out over `/api/global/stream` (see `daemon/methods/usage.rs`'s
     /// `notify_usage_snapshot` handler) to non-Tauri local consumers. Pipe-side

@@ -16,6 +16,10 @@ import { persistIcon, readPersistedIcon } from "./character-icon-store";
 
 const iconUrlCache = new Map<string, string | null>();
 const inflight = new Map<string, Promise<string | null>>();
+/** Generation counter: {@link clearCharacterIconCache} advances it so a request
+ *  begun under an older generation cannot write its stale result into the fresh
+ *  cache. */
+let cacheGen = 0;
 
 /** Resolve (and cache) a character's `icon.png` data URL. Returns null when the
  *  character has no icon or the lookup fails. Cached + de-duped, so calling it
@@ -28,6 +32,7 @@ export async function getCharacterIconUrl(id: string): Promise<string | null> {
   if (existing) return existing;
 
   const p = (async () => {
+    const gen = cacheGen;
     let url = await readPersistedIcon(id);
     if (!url) {
       try {
@@ -37,12 +42,21 @@ export async function getCharacterIconUrl(id: string): Promise<string | null> {
       }
       if (url) void persistIcon(id, url);
     }
-    iconUrlCache.set(id, url);
+    if (gen === cacheGen) iconUrlCache.set(id, url);
     inflight.delete(id);
     return url;
   })();
   inflight.set(id, p);
   return p;
+}
+
+/** Drop every resolved icon URL so the next lookup refetches. For when a
+ *  character's artwork was replaced on disk: the id is unchanged, so nothing
+ *  else here would ever treat the cached data URL as stale. */
+export function clearCharacterIconCache(): void {
+  cacheGen += 1;
+  iconUrlCache.clear();
+  inflight.clear();
 }
 
 /** Synchronous read of an already-resolved icon URL. Returns null both when the

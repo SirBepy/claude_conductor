@@ -14,11 +14,21 @@ pub fn list_characters() -> Vec<Character> {
     characters::list()
 }
 
+/// `persist` only writes settings.json and emits the in-process
+/// `settings-changed` Tauri event, so without this the daemon's `SettingsCache`
+/// keeps the pre-change `session_characters` / whitelists for the rest of its
+/// life - and that cache is what `list_session_characters` and
+/// `resolve_whitelist_characters` answer a remote client from. Every character
+/// mutation below therefore ends with persist + this.
+async fn push_to_daemon(state: &AppState, snapshot: &crate::types::Settings) {
+    crate::daemon_link::push_settings_to_daemon(state, snapshot).await;
+}
+
 #[tauri::command]
-pub fn assign_character(
+pub async fn assign_character(
     project_id: String,
     character_id: Option<String>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let snapshot = {
@@ -33,6 +43,7 @@ pub fn assign_character(
         s.clone()
     };
     persist(&app, &snapshot);
+    push_to_daemon(&state, &snapshot).await;
     Ok(())
 }
 
@@ -108,8 +119,14 @@ pub fn get_characters_dir() -> Result<String, String> {
 /// the user clicks Refresh in the Characters view (e.g. after the
 /// `/character-creator` skill writes a new bundle to disk).
 #[tauri::command]
-pub fn invalidate_characters_cache() {
+pub async fn invalidate_characters_cache(state: State<'_, AppState>) -> Result<(), String> {
     characters::cache::invalidate();
+    // The daemon is a SEPARATE process holding its own copy of this cache, and
+    // it is the one that answers `list_characters` / `character_asset_url` for
+    // every remote client. Dropping only the app's copy left a newly added or
+    // re-arted character invisible on the phone for the daemon's whole lifetime.
+    crate::daemon_link::invalidate_daemon_characters_cache(&state).await;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -146,74 +163,58 @@ fn live_session_ids(state: &AppState) -> HashSet<String> {
 /// the project's whitelist while avoiding characters held by sibling sessions
 /// in the same project.
 #[tauri::command]
-pub fn ensure_session_character(
+pub async fn ensure_session_character(
     session_id: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     let live_ids = live_session_ids(&state);
-    let mut s = state.settings.lock().unwrap();
+    let instances = state.cached_instances.lock().unwrap().clone();
 
-    let pruned = prune_dead_sessions(&mut s.session_characters, &live_ids);
+    // The whole settings mutation stays inside this block: its `MutexGuard` is
+    // a std lock and the daemon push below is an await, so the two can never
+    // overlap. `snapshot` is Some only when there is something to write out.
+    let (pick, snapshot) = {
+        let mut s = state.settings.lock().unwrap();
+        let pruned = prune_dead_sessions(&mut s.session_characters, &live_ids);
 
-    // Already assigned and session is live.
-    if let Some(existing) = s.session_characters.get(&session_id).cloned() {
-        if pruned {
-            let snapshot = s.clone();
-            drop(s);
-            persist(&app, &snapshot);
+        if let Some(existing) = s.session_characters.get(&session_id).cloned() {
+            // Already assigned and session is live.
+            (Some(existing), pruned.then(|| s.clone()))
+        } else if let Some(inst) = instances.iter().find(|i| i.session_id == session_id) {
+            let project_id = &inst.project_id;
+            let proj_wl = s
+                .projects
+                .iter()
+                .find(|p| p.id == *project_id)
+                .map(|p| p.whitelist.clone())
+                .unwrap_or(CharacterWhitelist::Default);
+
+            let all = characters::list();
+            let resolved = whitelist::resolve(&proj_wl, &s.default_character_whitelist, &all);
+
+            // Chars taken by any OTHER live session (global dedup across all projects).
+            let live_taken: HashSet<String> = instances
+                .iter()
+                .filter(|i| i.session_id != session_id && i.end_reason.is_none())
+                .filter_map(|i| s.session_characters.get(&i.session_id).cloned())
+                .collect();
+
+            let pick = whitelist::pick_deterministic(&resolved, &live_taken, &session_id);
+            if let Some(ref id) = pick {
+                s.session_characters.insert(session_id.clone(), id.clone());
+            }
+            let dirty = pruned || pick.is_some();
+            (pick, dirty.then(|| s.clone()))
+        } else {
+            // No Instance for this id, so no project to resolve a whitelist from.
+            (None, pruned.then(|| s.clone()))
         }
-        return Ok(Some(existing));
-    }
-
-    // Find the session's Instance to get project_id.
-    let instance = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|i| i.session_id == session_id)
-        .cloned();
-    let Some(inst) = instance else {
-        if pruned {
-            let snapshot = s.clone();
-            drop(s);
-            persist(&app, &snapshot);
-        }
-        return Ok(None);
     };
 
-    let project_id = &inst.project_id;
-    let proj_wl = s
-        .projects
-        .iter()
-        .find(|p| p.id == *project_id)
-        .map(|p| p.whitelist.clone())
-        .unwrap_or(CharacterWhitelist::Default);
-
-    let all = characters::list();
-    let resolved = whitelist::resolve(&proj_wl, &s.default_character_whitelist, &all);
-
-    // Chars taken by any OTHER live session (global dedup across all projects).
-    let live_taken: HashSet<String> = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|i| i.session_id != session_id && i.end_reason.is_none())
-        .filter_map(|i| s.session_characters.get(&i.session_id).cloned())
-        .collect();
-
-    let pick = whitelist::pick_deterministic(&resolved, &live_taken, &session_id);
-    if let Some(ref id) = pick {
-        s.session_characters.insert(session_id, id.clone());
-    }
-
-    let should_persist = pruned || pick.is_some();
-    if should_persist {
-        let snapshot = s.clone();
-        drop(s);
+    if let Some(snapshot) = snapshot {
         persist(&app, &snapshot);
+        push_to_daemon(&state, &snapshot).await;
     }
 
     Ok(pick)
@@ -221,10 +222,10 @@ pub fn ensure_session_character(
 
 /// Override or clear a session's character assignment explicitly.
 #[tauri::command]
-pub fn set_session_character(
+pub async fn set_session_character(
     session_id: String,
     character_id: Option<String>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let snapshot = {
@@ -236,70 +237,64 @@ pub fn set_session_character(
         s.clone()
     };
     persist(&app, &snapshot);
+    push_to_daemon(&state, &snapshot).await;
     Ok(())
 }
 
 /// Pick a new character for a session, explicitly excluding its current one
 /// so the reroll always produces something different when alternatives exist.
 #[tauri::command]
-pub fn reroll_session_character(
+pub async fn reroll_session_character(
     session_id: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     let live_ids = live_session_ids(&state);
-    let mut s = state.settings.lock().unwrap();
-    let pruned = prune_dead_sessions(&mut s.session_characters, &live_ids);
+    let instances = state.cached_instances.lock().unwrap().clone();
 
-    let instance = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|i| i.session_id == session_id)
-        .cloned();
-    let Some(inst) = instance else {
-        if pruned {
-            let snapshot = s.clone();
-            drop(s);
-            persist(&app, &snapshot);
+    // Same guard-before-await shape as `ensure_session_character` above.
+    let (pick, snapshot) = {
+        let mut s = state.settings.lock().unwrap();
+        let pruned = prune_dead_sessions(&mut s.session_characters, &live_ids);
+
+        if let Some(inst) = instances.iter().find(|i| i.session_id == session_id) {
+            let project_id = &inst.project_id;
+            let proj_wl = s
+                .projects
+                .iter()
+                .find(|p| p.id == *project_id)
+                .map(|p| p.whitelist.clone())
+                .unwrap_or(CharacterWhitelist::Default);
+
+            let all = characters::list();
+            let resolved = whitelist::resolve(&proj_wl, &s.default_character_whitelist, &all);
+
+            // live_taken includes OTHER sessions PLUS the current session's char (forcing a change).
+            let mut live_taken: HashSet<String> = instances
+                .iter()
+                .filter(|i| i.project_id == *project_id && i.end_reason.is_none())
+                .filter_map(|i| s.session_characters.get(&i.session_id).cloned())
+                .collect();
+            // Also include current session's existing char so it can't be re-picked.
+            if let Some(cur) = s.session_characters.get(&session_id).cloned() {
+                live_taken.insert(cur);
+            }
+
+            let pick = whitelist::pick_random(&resolved, &live_taken);
+            if let Some(ref id) = pick {
+                s.session_characters.insert(session_id.clone(), id.clone());
+            }
+            (pick, Some(s.clone()))
+        } else {
+            // No Instance for this id: nothing to reroll against.
+            (None, pruned.then(|| s.clone()))
         }
-        return Ok(None);
     };
 
-    let project_id = &inst.project_id;
-    let proj_wl = s
-        .projects
-        .iter()
-        .find(|p| p.id == *project_id)
-        .map(|p| p.whitelist.clone())
-        .unwrap_or(CharacterWhitelist::Default);
-
-    let all = characters::list();
-    let resolved = whitelist::resolve(&proj_wl, &s.default_character_whitelist, &all);
-
-    // live_taken includes OTHER sessions PLUS the current session's char (forcing a change).
-    let mut live_taken: HashSet<String> = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|i| i.project_id == *project_id && i.end_reason.is_none())
-        .filter_map(|i| s.session_characters.get(&i.session_id).cloned())
-        .collect();
-    // Also include current session's existing char so it can't be re-picked.
-    if let Some(cur) = s.session_characters.get(&session_id).cloned() {
-        live_taken.insert(cur);
+    if let Some(snapshot) = snapshot {
+        persist(&app, &snapshot);
+        push_to_daemon(&state, &snapshot).await;
     }
-
-    let pick = whitelist::pick_random(&resolved, &live_taken);
-    if let Some(ref id) = pick {
-        s.session_characters.insert(session_id, id.clone());
-    }
-
-    let snapshot = s.clone();
-    drop(s);
-    persist(&app, &snapshot);
 
     Ok(pick)
 }
@@ -334,10 +329,10 @@ pub fn get_project_whitelist(project_id: String, state: State<AppState>) -> Char
 
 /// Set the whitelist for a specific project.
 #[tauri::command]
-pub fn set_project_whitelist(
+pub async fn set_project_whitelist(
     project_id: String,
     whitelist: CharacterWhitelist,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let snapshot = {
@@ -348,6 +343,7 @@ pub fn set_project_whitelist(
         s.clone()
     };
     persist(&app, &snapshot);
+    push_to_daemon(&state, &snapshot).await;
     Ok(())
 }
 
@@ -359,9 +355,9 @@ pub fn get_default_whitelist(state: State<AppState>) -> CharacterWhitelist {
 
 /// Set the settings-level default whitelist.
 #[tauri::command]
-pub fn set_default_whitelist(
+pub async fn set_default_whitelist(
     whitelist: CharacterWhitelist,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let snapshot = {
@@ -370,6 +366,7 @@ pub fn set_default_whitelist(
         s.clone()
     };
     persist(&app, &snapshot);
+    push_to_daemon(&state, &snapshot).await;
     Ok(())
 }
 

@@ -73,6 +73,25 @@ export async function changeCharacterForSession(
   if (listEl) renderSidebar(listEl);
 }
 
+/** Repoint the open chat's header face at `charId` in place, leaving its status
+ *  ring alone. For a change that originated elsewhere (the desktop app while
+ *  you're on the phone, another paired machine) there is no local pick to
+ *  apply, and a pane re-render would tear down the live renderer/composer
+ *  mid-session. No-op while the header is still the `?` placeholder or the icon
+ *  hasn't resolved - the next pane mount renders it correctly either way. */
+export function repointHeaderCharacter(charId: string): void {
+  const url = characterIconUrl(charId);
+  if (!url) return;
+  const imgs = document.querySelectorAll<HTMLImageElement>(
+    ".session-header .header-char-clickable .char-avatar",
+  );
+  imgs.forEach((img) => {
+    img.dataset.characterId = charId;
+    img.dataset.hydrated = charId;
+    img.src = url;
+  });
+}
+
 /** Carry per-chat client state onto a fresh session id - a `respawn`
  *  successor, or a fork from an older daemon. Only what the daemon does not
  *  mirror, plus the half-typed draft, which is the loss the user notices. */

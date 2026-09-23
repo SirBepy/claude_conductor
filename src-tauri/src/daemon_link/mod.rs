@@ -197,6 +197,19 @@ pub async fn push_settings_to_daemon(state: &crate::state::AppState, settings: &
     }
 }
 
+/// Drop the daemon process's own `characters::cache`, which serves every remote
+/// client's `list_characters` / `character_asset_url`. Paired with the app-side
+/// `characters::cache::invalidate()` in `ipc::invalidate_characters_cache`.
+/// No-op (logged) if the daemon isn't connected - its cache is empty anyway then.
+pub async fn invalidate_daemon_characters_cache(state: &crate::state::AppState) {
+    let guard = state.daemon_client.lock().await;
+    if let Some(client) = guard.as_ref() {
+        if let Err(e) = client.invalidate_characters_cache().await {
+            log::warn!("invalidate_characters_cache (daemon) failed: {e}");
+        }
+    }
+}
+
 /// Overwrites `cached_instances` with `instances`. Single place for this assignment.
 pub(crate) fn store_cached_instances(state: &crate::state::AppState, instances: Vec<crate::types::Instance>) {
     *state.cached_instances.lock().unwrap() = instances;

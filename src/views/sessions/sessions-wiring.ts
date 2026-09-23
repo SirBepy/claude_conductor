@@ -1,10 +1,11 @@
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";
-import { carrySessionSettings, applyAccountMove } from "./active-session-account";
+import { carrySessionSettings, applyAccountMove, repointHeaderCharacter } from "./active-session-account";
 import { state, setActiveSession, loadLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle, paneEmptyStateHtml } from "./sessions-helpers";
 import { renderSidebar, refreshSessions, forceRefreshScheduledCounts } from "./sidebar";
-import { loadSessionCharacters } from "./session-characters";
+import { loadSessionCharacters, characterForSessionId } from "./session-characters";
+import { resetCharacterCaches } from "../../shared/characters";
 import { api } from "../../shared/api";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
 import { mountUsageDials } from "./usage-dials";
@@ -91,8 +92,9 @@ export function wireRateLimitBanner(
 
 /** Subscribes to settings-changed (re-resolve session hero assignments) and
  * daemon-status-changed (stall-timer arm/disarm + resync + restore-on-
- * reconnect); returns a dispose function. Stall-timer arm/disarm are
- * threaded in from sessions.ts rather than duplicated here. */
+ * reconnect), plus the two transport-seam character events that carry the same
+ * refresh to a remote client; returns a dispose function. Stall-timer arm/disarm
+ * are threaded in from sessions.ts rather than duplicated here. */
 export async function wireDaemonStatusListeners(
   ev: TauriEventApi,
   listEl: HTMLElement,
@@ -149,9 +151,36 @@ export async function wireDaemonStatusListeners(
     });
   }
 
+  // The `ev` listeners above are Tauri-only: `sessions.ts` reads
+  // `window.__TAURI__?.event`, which is undefined in a remote browser, so the
+  // phone got NO character refresh at all and kept the portraits it loaded at
+  // mount. These two go through the transport seam instead, so they reach both
+  // clients - the daemon publishes them from `set_settings` (a desktop-side
+  // (re)assignment) and from `invalidate_characters_cache` (new/re-arted
+  // artwork on disk).
+  const refreshCharacters = async (artworkChanged: boolean): Promise<void> => {
+    if (state.mountId !== myMount) return;
+    if (artworkChanged) resetCharacterCaches();
+    await loadSessionCharacters();
+    if (state.mountId !== myMount) return;
+    const openCharId = state.selectedId ? characterForSessionId(state.selectedId) : null;
+    if (openCharId) repointHeaderCharacter(openCharId);
+    renderSidebar(listEl);
+  };
+  const unlistenSessionChars = await getTransport().listen(
+    "session-characters-changed",
+    () => { void refreshCharacters(false); },
+  );
+  const unlistenCharacters = await getTransport().listen(
+    "characters-changed",
+    () => { void refreshCharacters(true); },
+  );
+
   return () => {
     if (unlistenDaemonStatus) { try { unlistenDaemonStatus(); } catch { /* ignore */ } }
     if (unlistenSettingsChanged) { try { unlistenSettingsChanged(); } catch { /* ignore */ } }
+    try { unlistenSessionChars(); } catch { /* ignore */ }
+    try { unlistenCharacters(); } catch { /* ignore */ }
   };
 }
 
