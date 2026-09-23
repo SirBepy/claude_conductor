@@ -30,6 +30,32 @@ pub struct AskAnswer {
     pub sidecar_session_id: String,
 }
 
+/// The terminal `result` line of a `--output-format stream-json` run.
+pub struct SidecarResult {
+    pub text: String,
+    /// Whichever session id `claude` actually ran under - a `--resume` is free
+    /// to continue under a new one, and the follow-up has to resume that.
+    pub session_id: Option<String>,
+    pub is_error: bool,
+}
+
+/// Reads the whole answer off one stdout line, or `None` if the line isn't the
+/// `result` line. NOT `chat::parser::text_delta`: that matches only the
+/// `stream_event` lines `claude` emits under `--include-partial-messages`,
+/// which a one-shot Ask never passes, so reading deltas here silently produced
+/// an empty answer after every paid-for run.
+pub fn parse_result_line(line: &str) -> Option<SidecarResult> {
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("type")?.as_str()? != "result" {
+        return None;
+    }
+    Some(SidecarResult {
+        text: v.get("result").and_then(|r| r.as_str()).unwrap_or_default().to_string(),
+        session_id: v.get("session_id").and_then(|s| s.as_str()).map(str::to_string),
+        is_error: v.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false),
+    })
+}
+
 pub fn build_prompt(question: &str, transcript: Option<&Path>, cwd: Option<&str>) -> String {
     let mut ctx = String::new();
     if let Some(t) = transcript {
@@ -121,11 +147,11 @@ pub async fn ask(
         s
     });
 
-    let mut full = String::new();
+    let mut result: Option<SidecarResult> = None;
     let mut lines = BufReader::new(stdout).lines();
     while let Some(line) = lines.next_line().await.context("read claude stdout")? {
-        if let Some(chunk) = crate::chat::parser::text_delta(&line) {
-            full.push_str(&chunk);
+        if let Some(r) = parse_result_line(&line) {
+            result = Some(r);
         }
     }
 
@@ -134,13 +160,17 @@ pub async fn ask(
     if !status.success() {
         return Err(anyhow!("claude exited {:?}: {}", status.code(), stderr_out.trim()));
     }
-    let text = full.trim().to_string();
-    if text.is_empty() {
-        return Err(anyhow!("Ask produced an empty answer"));
+    let result = result
+        .ok_or_else(|| anyhow!("Ask got no result from claude: {}", stderr_out.trim()))?;
+    let text = result.text.trim().to_string();
+    if result.is_error || text.is_empty() {
+        return Err(anyhow!("Ask produced an empty answer: {}", stderr_out.trim()));
     }
     Ok(AskAnswer {
         text,
-        sidecar_session_id: resume.unwrap_or(new_session_id).to_string(),
+        sidecar_session_id: result
+            .session_id
+            .unwrap_or_else(|| resume.unwrap_or(new_session_id).to_string()),
     })
 }
 
@@ -176,6 +206,42 @@ mod tests {
     fn prompt_treats_empty_cwd_as_absent() {
         let p = build_prompt("why", None, Some(""));
         assert!(!p.contains("project is at"));
+    }
+
+    /// Captured verbatim from `claude -p --output-format stream-json --verbose`
+    /// (2.1.278), trimmed to the fields this parser reads.
+    const REAL_RESULT_LINE: &str = r#"{"stop_reason":"end_turn","session_id":"348563a5-17c8-4908-b25a-f36c316ee356","total_cost_usd":0.17245,"is_error":false,"num_turns":1,"subtype":"success","result":"PONG","type":"result","duration_ms":3820}"#;
+
+    #[test]
+    fn result_line_yields_the_answer_and_the_session_claude_actually_used() {
+        let r = parse_result_line(REAL_RESULT_LINE).expect("result line");
+        assert_eq!(r.text, "PONG");
+        assert_eq!(r.session_id.as_deref(), Some("348563a5-17c8-4908-b25a-f36c316ee356"));
+        assert!(!r.is_error);
+    }
+
+    #[test]
+    fn non_result_lines_are_skipped() {
+        // Without --include-partial-messages there are no stream_event deltas at
+        // all, so the assistant + init lines are all the loop sees before the
+        // result line; none of them may be mistaken for the answer.
+        for line in [
+            r#"{"type":"system","subtype":"init","session_id":"s"}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"PONG"}]},"session_id":"s"}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"PO"}}}"#,
+            "",
+            "not json",
+        ] {
+            assert!(parse_result_line(line).is_none(), "{line}");
+        }
+    }
+
+    #[test]
+    fn an_errored_run_is_not_read_as_an_answer() {
+        let line = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"","session_id":"s"}"#;
+        let r = parse_result_line(line).expect("result line");
+        assert!(r.is_error);
+        assert!(r.text.is_empty());
     }
 
     #[test]
