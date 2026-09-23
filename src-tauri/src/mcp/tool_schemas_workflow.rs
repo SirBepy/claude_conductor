@@ -33,7 +33,7 @@ pub fn workflow_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": TOOL_SPAWN_CHAT,
-            "description": "Start a SEPARATE chat alongside this one, in this same project, and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's model, effort, account, character and auto-accept unless overridden. Own working directory only, once per turn. To REPLACE this chat instead of running beside it, use `respawn`.",
+            "description": "Start a SEPARATE chat alongside this one, in this same project, and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's model, effort, account and auto-accept unless overridden; it gets its own character, since it is a separate chat. Own working directory only, once per turn. To REPLACE this chat instead of running beside it, use `respawn`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

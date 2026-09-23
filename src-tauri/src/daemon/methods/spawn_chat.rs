@@ -2,7 +2,8 @@
 //! `spawn_chat` and `respawn` MCP tools.
 //! Not `jarvis_fleet::spawn_worker`, which is `CC_JARVIS`-gated and fleet-
 //! tagged. Guards instead: own-cwd only, one spawn per turn; and it inherits
-//! the caller's own model/effort/account/character/auto-accept.
+//! the caller's own model/effort/account/auto-accept, plus the character on
+//! the `respawn` path only.
 
 use crate::daemon::lifecycle::{self, StartSessionParams};
 use crate::daemon::machines::registry::{MachineRegistry, PeerMachine};
@@ -98,9 +99,15 @@ pub(crate) async fn spawn_chat(
     let session = lifecycle::spawn_session(state, params).await.map_err(|e| e.to_string())?;
     let sid = session.session_id.clone();
 
-    // Character is keyed by session id and never survives a fresh id, so the
-    // successor would otherwise reroll a different avatar mid-handoff.
-    let character_id = state.settings.snapshot().session_characters.get(caller_session_id).cloned();
+    // Respawn only: character is keyed by session id and never survives a fresh
+    // id, so the successor would otherwise reroll a different avatar
+    // mid-handoff. A `spawn_chat` sibling is a separate chat and must NOT wear
+    // the caller's face - passing `None` leaves it to the frontend's
+    // `ensure_session_character`, whose `live_taken` set already holds the
+    // caller's character, so the sibling picks a different one.
+    let character_id = respawn
+        .then(|| state.settings.snapshot().session_characters.get(caller_session_id).cloned())
+        .flatten();
     let now = chrono::Utc::now().to_rfc3339();
     crate::daemon::session_registration::register_new_session(
         state,
