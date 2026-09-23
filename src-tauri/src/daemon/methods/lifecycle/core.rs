@@ -202,6 +202,12 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // turn's "waiting") is dead with the cancel - clear it so the
                 // sidebar doesn't keep flagging a question nobody is asking.
                 state.registry.set_awaiting(&p.session_id, None);
+                // Every subagent still running dies with the turn, and nothing
+                // in the transcript says so - the tool results it was waiting
+                // on just never arrive. Record them here, while the live set is
+                // still the set that died; the next UserPromptSubmit names them
+                // (`hooks_server::subagents`).
+                state.record_subagents_killed_by_interrupt(&p.session_id);
                 // Settle any AskUserQuestion/permission prompt still open for this
                 // session (e.g. the user hit Skip on the question card, which now
                 // routes through this same interrupt instead of answering the

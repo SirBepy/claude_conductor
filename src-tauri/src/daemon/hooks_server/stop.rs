@@ -140,6 +140,12 @@ pub(super) async fn on_stop(
                 return (StatusCode::OK, Json(json!({"ok": true, "reason": reason})));
             }
         }
+        // Past every early return above, so this only runs when the turn is
+        // genuinely over (a `block` keeps it alive, and its subagents with it).
+        // Anything still tracked finished without firing `SubagentStop`;
+        // carrying it forward would make a later interrupt blame subagents that
+        // stopped running turns ago. See `hooks_server::subagents`.
+        ctx.state.clear_live_subagents(&session_id);
         // Title: durable transcript record, mirrors /close's manual rename.
         // Best-effort - a write failure must never block the turn.
         if let Some(title) = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.title.as_deref()) {

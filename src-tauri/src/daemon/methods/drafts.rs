@@ -26,7 +26,7 @@ fn reject_unknown_session(state: &DaemonState, session_id: &str) -> Result<(), R
 /// Recomputes `held_count` from the store and publishes `instances_changed`
 /// only if it actually changed - the one path that keeps the cheap broadcast
 /// signal truthful after an add/remove/clear.
-fn sync_held_count(state: &Arc<DaemonState>, session_id: &str) {
+pub(crate) fn sync_held_count(state: &Arc<DaemonState>, session_id: &str) {
     let count = state.draft_store.held_count(session_id) as u32;
     if state.registry.set_held_count(session_id, count) {
         crate::daemon::machines::publish_instances_changed(&state);

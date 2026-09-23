@@ -59,7 +59,7 @@ export class HeldMessagesRender {
         <span class="held-count">${n}</span> ${n === 1 ? "message" : "messages"} waiting
         <i class="ph ph-caret-${this.expanded ? "up" : "down"}"></i>
       </button>
-      <button class="held-send-now" type="button">Send now</button>
+      <button class="held-send-now" type="button" title="Cancels the running turn, and any subagents with it, to send right now. Without this the message still reaches Claude at its next step.">Interrupt &amp; send</button>
     `;
     a.chipSlot.querySelector<HTMLButtonElement>(".held-chip")?.addEventListener("click", (e) => {
       e.stopPropagation();

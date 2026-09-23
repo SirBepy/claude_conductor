@@ -18,6 +18,7 @@ mod drafts;
 mod jarvis;
 mod lifecycle;
 mod messages;
+mod nudge;
 mod permission;
 mod plan;
 mod preview;
@@ -27,6 +28,7 @@ mod relay;
 mod spawn_chat;
 mod stop;
 mod stop_verdict;
+mod subagents;
 mod turn_status;
 mod user_todos;
 mod validated_json;
@@ -184,6 +186,9 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/plan/write", post(plan::on_write_plan))
         .route("/drafts/write", post(drafts::on_write_draft))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
+        .route("/hooks/tool-batch", post(nudge::on_tool_batch))
+        .route("/hooks/subagent-start", post(subagents::on_subagent_start))
+        .route("/hooks/subagent-stop", post(subagents::on_subagent_stop))
         .with_state(ctx);
 
     tokio::spawn(async move {

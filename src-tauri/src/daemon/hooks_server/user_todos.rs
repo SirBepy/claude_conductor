@@ -73,6 +73,10 @@ pub(super) async fn on_prompt_submit(
     let blocks: Vec<String> = [
         todo_methods::render_for_injection(&ctx.state, &q.session_id),
         draft_methods::render_for_injection(&ctx.state, &q.session_id),
+        // Third rider on the same event: what a `cancel_turn` killed last turn
+        // (`hooks_server::subagents`). Same reason as the drafts block - one
+        // hook the CLI already fires beats a second one it has to fire too.
+        super::subagents::render_for_injection(&ctx.state, &q.session_id),
     ]
     .into_iter()
     .flatten()

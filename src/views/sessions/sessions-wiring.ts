@@ -9,6 +9,7 @@ import { api } from "../../shared/api";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
 import { mountUsageDials } from "./usage-dials";
 import { sessionEvents } from "../../shared/chat/event-store";
+import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
 import { dropRetainedChat } from "./chat-pane-cache";
 import { getTransport, isRemote } from "../../shared/transport";
 import { findSuccessorToFollow, markFollowed } from "./successor-follow";
@@ -18,6 +19,9 @@ import { freezePane } from "./pane-freeze";
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
  * one re-reading `window.__TAURI__?.event`. */
 export type TauriEventApi = NonNullable<Window["__TAURI__"]>["event"];
+
+/** Payload of "held_messages_delivered" (daemon `hooks_server::nudge`). */
+type HeldDelivered = { session_id: string; ids: number[]; blocks: ContentBlock[] };
 
 /** Evicts the event-store cache for sessions that ended/vanished from
  *  `state.sessions`. `previousIds` must be snapshotted BEFORE the refresh
@@ -279,6 +283,25 @@ export async function wireInstancesChangedListener(
   state.unlistenScheduled = await getTransport().listen("scheduled-items-changed", () => {
     forceRefreshScheduledCounts();
   });
+  // A held message the daemon injected into a running turn (hooks_server::nudge)
+  // reaches claude as hook context, which the CLI never echoes back on its
+  // stream - so without this the chip would empty with nothing appearing in
+  // the transcript, which reads as the message being thrown away. Same
+  // synthetic push active-session-composer.ts's sendBundle uses for an
+  // ordinary send, for the same reason.
+  state.unlistenHeldDelivered = await getTransport().listen<HeldDelivered>(
+    "held_messages_delivered",
+    (payload) => {
+      const sid = payload?.session_id;
+      if (!sid || !payload.blocks?.length) return;
+      sessionEvents.pushSynthetic(sid, {
+        type: "user_message",
+        content: payload.blocks,
+        timestamp: BigInt(Date.now()),
+      } as ChatEvent);
+      state.heldMessages?.markDelivered(sid, payload.ids ?? []);
+    },
+  );
   // Poll fallback: the daemon->app notifier is lossy under pipe backpressure,
   // so a dropped instances_changed frame used to freeze a row's busy/awaiting
   // until an unrelated event happened to fire another broadcast. This heals

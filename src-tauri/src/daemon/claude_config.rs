@@ -122,10 +122,15 @@ fn write_mcp_config_inner(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> 
 /// Write a per-session settings.json that registers: a `UserPromptSubmit` hook
 /// injecting this project's open "Your Todos" cards into every turn (todo 692,
 /// `hooks_server::user_todos`), a `PreToolUse` hook for
-/// the builtin `AskUserQuestion` tool, and a `PreToolUse`/`PostToolUse` pair on
+/// the builtin `AskUserQuestion` tool, a `PreToolUse`/`PostToolUse` pair on
 /// `Bash` enforcing the cross-session commit mutex (`hooks_server::commit_lock`
 /// - two concurrent sessions in the same project must never `git commit` at
-/// the same time). The hooks `curl` their payload to the daemon. Returns None
+/// the same time), a `PostToolBatch` hook delivering held messages into a
+/// still-running turn (`hooks_server::nudge`, the alternative to interrupting
+/// the turn and killing its subagents), and a `SubagentStart`/`SubagentStop`
+/// pair tracking in-flight `Agent` calls so an interrupt that does happen can
+/// report what it killed (`hooks_server::subagents`). The hooks `curl` their
+/// payload to the daemon. Returns None
 /// if the app-data dir is unavailable (non-fatal; the affected hooks just
 /// won't fire this session).
 ///
@@ -185,6 +190,28 @@ pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<Pa
         daemon_hook_port(),
         tracking_id
     );
+    // Mid-turn delivery of held messages (`hooks_server::nudge`). Fires once
+    // per resolved tool batch, so the timeouts have to stay small: this is on
+    // the hot path of every model round-trip, unlike the others here, which
+    // are gated to one tool name or to turn boundaries.
+    let tool_batch_command = format!(
+        "curl -s --connect-timeout 3 --max-time 8 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{}/hooks/tool-batch?session_id={}\"",
+        daemon_hook_port(),
+        tracking_id
+    );
+    // In-flight `Agent` tracking, so an interrupt can report what it killed
+    // (`hooks_server::subagents`). Both are fire-and-forget bookkeeping writes:
+    // nothing downstream waits on them, so they get the smallest budget here.
+    let subagent_start_command = format!(
+        "curl -s --connect-timeout 3 --max-time 5 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{}/hooks/subagent-start?session_id={}\"",
+        daemon_hook_port(),
+        tracking_id
+    );
+    let subagent_stop_command = format!(
+        "curl -s --connect-timeout 3 --max-time 5 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{}/hooks/subagent-stop?session_id={}\"",
+        daemon_hook_port(),
+        tracking_id
+    );
     let config = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [
@@ -216,6 +243,21 @@ pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<Pa
                         "command": commit_lock_release_command,
                         "timeout": 15
                     } ]
+                }
+            ],
+            "PostToolBatch": [
+                {
+                    "hooks": [ { "type": "command", "command": tool_batch_command, "timeout": 10 } ]
+                }
+            ],
+            "SubagentStart": [
+                {
+                    "hooks": [ { "type": "command", "command": subagent_start_command, "timeout": 8 } ]
+                }
+            ],
+            "SubagentStop": [
+                {
+                    "hooks": [ { "type": "command", "command": subagent_stop_command, "timeout": 8 } ]
                 }
             ]
         }

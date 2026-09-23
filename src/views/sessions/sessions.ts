@@ -335,6 +335,10 @@ function teardownState(): void {
     try { state.unlistenScheduled(); } catch { /* ignore */ }
     state.unlistenScheduled = null;
   }
+  if (state.unlistenHeldDelivered) {
+    try { state.unlistenHeldDelivered(); } catch { /* ignore */ }
+    state.unlistenHeldDelivered = null;
+  }
   if (instancesPollTimer !== null) {
     clearInterval(instancesPollTimer);
     instancesPollTimer = null;

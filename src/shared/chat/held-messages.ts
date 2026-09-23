@@ -534,6 +534,28 @@ export class HeldMessages {
     return last.blocks;
   }
 
+  /** The daemon injected these items into a still-running turn instead of
+   *  waiting for it to end (hooks_server::nudge), so they are sent, not
+   *  queued. Drops them locally WITHOUT syncing a remove back: the daemon
+   *  already removed them from its own list, and a redundant
+   *  `remove_held_message` would race a same-id item staged since.
+   *
+   *  Works for any session, mounted or not - a chat delivering a nudge in the
+   *  background must not keep showing a chip for a message it already sent. */
+  markDelivered(sid: string, ids: number[]): void {
+    const list = this.map.get(sid);
+    if (!list?.length) return;
+    const gone = new Set(ids);
+    const remaining = list.filter((i) => !gone.has(i.id));
+    if (remaining.length === list.length) return;
+    this.map.set(sid, remaining);
+    this.persist();
+    if (this.attached?.sessionId === sid) {
+      this.render.renderChip();
+      this.attached.onChange();
+    }
+  }
+
   /** HeldRenderHost: drop one staged item (dropdown row emptied/removed). */
   removeItem(id: number): void {
     const sid = this.sid;

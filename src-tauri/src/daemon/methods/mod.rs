@@ -9,7 +9,10 @@ pub(crate) mod channel;
 mod ask;
 mod channels;
 mod context;
-mod drafts;
+// pub(crate): `hooks_server::nudge` (the PostToolBatch route that drains held
+// messages into a running turn) calls this module's `sync_held_count` after
+// removing what it delivered - same non-RPC shape as `channel` above.
+pub(crate) mod drafts;
 // pub(crate): `hooks_server::drafts` (the `write_draft` MCP tool route and
 // the drafts half of the per-turn injection, todo 666) calls this module's
 // handlers directly - same non-RPC shape as `channel` above.

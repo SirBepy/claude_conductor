@@ -20,8 +20,10 @@ use tokio::sync::{oneshot, Mutex, Notify};
 mod commit_lock;
 mod prompts;
 mod step_comments;
+pub mod subagents;
 
 use commit_lock::CommitLock;
+use subagents::LiveSubagent;
 
 pub type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
 
@@ -73,6 +75,12 @@ pub struct DaemonState {
     /// every access is a quick check-and-set with no await held across it,
     /// same shape as `db` above.
     commit_locks: std::sync::Mutex<HashMap<String, CommitLock>>,
+    /// In-flight `Agent` calls per session, and the ones an interrupt killed
+    /// before they could report back - see `state::subagents`. Plain
+    /// `std::sync::Mutex` for the same reason as `commit_locks`: every access
+    /// is a short check-and-set with no await held across it.
+    live_subagents: std::sync::Mutex<HashMap<String, Vec<LiveSubagent>>>,
+    killed_subagents: std::sync::Mutex<HashMap<String, Vec<LiveSubagent>>>,
     /// Per-Jarvis-session wake queue (todo 272 chunk 3) - see
     /// `daemon::jarvis_wake` for the enqueue/drain contract. Public (not a
     /// `DaemonState` method wrapper) because the module's free functions read
@@ -165,6 +173,8 @@ impl DaemonState {
             db,
             push: OnceLock::new(),
             commit_locks: std::sync::Mutex::new(HashMap::new()),
+            live_subagents: std::sync::Mutex::new(HashMap::new()),
+            killed_subagents: std::sync::Mutex::new(HashMap::new()),
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
             repo_channel_wakes: crate::daemon::repo_channel_wake::new_queue(),
             draft_store: DraftStore::new(),

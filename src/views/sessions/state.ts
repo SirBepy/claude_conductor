@@ -69,6 +69,11 @@ export interface SessionsState {
   /** Unsubscribe for the "scheduled-items-changed" event (sidebar's scheduled
    *  marker/count recount - see sidebar.ts's forceRefreshScheduledCounts). */
   unlistenScheduled: (() => void) | null;
+  /** Unsubscribe for "held_messages_delivered" - a held message the daemon
+   *  injected into a still-running turn (hooks_server::nudge). The CLI never
+   *  echoes an injected message back on its stream, so this is the only thing
+   *  that puts it in the transcript. */
+  unlistenHeldDelivered: (() => void) | null;
   pendingNewSession: PendingNewSession | null;
   parkedDrafts: ParkedDraft[];
   statusbar: SessionStatusbar | null;
@@ -117,6 +122,7 @@ export function createInitialState(mountId: number): SessionsState {
     scheduledChip: null,
     unlistenInstances: null,
     unlistenScheduled: null,
+    unlistenHeldDelivered: null,
     pendingNewSession: null,
     parkedDrafts: [],
     statusbar: null,
