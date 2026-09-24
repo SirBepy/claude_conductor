@@ -149,9 +149,15 @@ pub(crate) async fn run_stdout_pump(
                             log::trace!("daemon stdout[{}]: {}", pump_session.session_id, &raw[..cut]);
                         }
                         let feed_events = ctx.feed(&line_buf);
+                        // Drained on EVERY line, never from behind `turn.is_live()`. The flag is
+                        // re-set by every `stream_event` of the running turn, so short-circuiting
+                        // past the take leaves it latched at turn end: the next line the child
+                        // writes - a trailing frame, a control line - then reads as a fresh turn
+                        // and pins `busy` on with nothing running and no result line coming.
+                        let stream_event_seen = ctx.take_stream_event_seen();
                         // `--resume` history replay never emits `stream_event` lines, so this
                         // is the earliest live-exclusive signal, firing even for tool-only turns.
-                        if !turn.is_live() && ctx.take_stream_event_seen()
+                        if !turn.is_live() && stream_event_seen
                             && turn.on_stream_event() == TurnAction::TurnStarted
                         {
                             let mut dirty = state_for_pump.registry.mark_turn_live(&pump_session.session_id);
@@ -495,6 +501,42 @@ pub(crate) async fn run_stdout_pump(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 5th recurrence of "stuck In progress" (todos 475, 525, 621; observed
+    /// 2026-09-24 on four idle sessions at once, each pinned busy with no turn
+    /// in its transcript). `saw_stream_event` is re-set by every `stream_event`
+    /// of the running turn and is cleared only by `take_stream_event_seen`, so
+    /// the take has to run on every line: from behind a `!turn.is_live()` guard
+    /// it never runs mid-turn, and the flag is still set once the turn ends. The
+    /// next line the child writes while idle - the trailing frame
+    /// `trailing_line_after_result_does_not_pin_the_ended_turns_gen` covers -
+    /// then reads as a fresh turn, and `mark_turn_live` pins `busy` on with
+    /// nothing running and no result line coming to clear it. Mirrors the guard
+    /// in `run_stdout_pump`, take first.
+    #[test]
+    fn a_trailing_idle_line_after_turn_end_does_not_start_a_phantom_turn() {
+        let mut ctx = ParserContext::new_live();
+        let mut turn = TurnBoundary::new(false);
+        let mut starts = 0;
+        for line in [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"done","timestamp":1}"#,
+            r#"{"type":"system","subtype":"trailing_idle_frame"}"#,
+        ] {
+            ctx.feed(format!("{line}\n").as_bytes());
+            let stream_event_seen = ctx.take_stream_event_seen();
+            if !turn.is_live() && stream_event_seen && turn.on_stream_event() == TurnAction::TurnStarted {
+                starts += 1;
+            }
+            if line.contains(r#""type":"result""#) {
+                assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
+            }
+        }
+        assert_eq!(starts, 1, "only the real turn starts one; the trailing idle line must not");
+        assert!(!turn.is_live(), "the session is idle after its result line");
+    }
 
     /// A tool-only turn never emits `AssistantDelta`; without capturing `pump_turn_gen`
     /// on the first `stream_event` line instead, busy would latch on forever.
