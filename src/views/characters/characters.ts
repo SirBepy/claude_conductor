@@ -143,7 +143,9 @@ function openNewCharacterModal(): void {
 }
 
 async function refresh(list: HTMLElement): Promise<void> {
-  render(skeletonTemplate(), list);
+  // Only skeleton on a truly empty list - re-skeletoning over already-rendered
+  // content is what caused the flash on every warm-cache refresh.
+  if (list.childElementCount === 0) render(skeletonTemplate(), list);
   const chars = await loadCharacters();
   if (chars.length === 0) {
     render(emptyTemplate(), list);

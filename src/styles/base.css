@@ -188,6 +188,7 @@ body.chats-window-mode .icon-btn.burger {
 .view-body {
     flex: 1;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding: 16px;
 }
 

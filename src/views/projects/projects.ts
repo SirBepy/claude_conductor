@@ -73,8 +73,14 @@ function draw(): void {
 }
 
 async function load(): Promise<void> {
-  loadState = "loading";
-  draw();
+  // Only skeleton when nothing's rendered yet - re-skeletoning over already
+  // -loaded content is what caused the flash on every live-update event
+  // (onHistoryUpdated/onTokenHistoryUpdated/onInstancesChanged fire a lot
+  // while actively working, and each one called load()).
+  if (allGroups.length === 0) {
+    loadState = "loading";
+    draw();
+  }
   try {
     allGroups = await api.listProjectGroups();
     loadState = "loaded";
@@ -321,7 +327,9 @@ function template(): TemplateResult {
 
 export async function renderProjectsView(root: HTMLElement): Promise<() => void> {
   mounted = root;
-  loadState = "loading";
+  // Re-mounting after a prior visit already has allGroups warm - keep showing
+  // it instead of flashing back to the skeleton (load() below refreshes it).
+  if (allGroups.length === 0) loadState = "loading";
   query = "";
   backfillRunning = false;
   backfillStatusMsg = null;
