@@ -202,10 +202,12 @@ export function enqueueTurnClose(r: ChatRenderer, opts?: { allowMetaMerge?: bool
     while (end > turnStart && r.messages[end - 1]?.noiseLabel) end--;
     // A wake turn that never spoke has no bubble, so its footer would stack
     // under the previous turn's as a detached block of chips and screenshots.
+    // A continuation (unfreeze / literal "continue") merges unconditionally -
+    // unlike a silent meta retry, it isn't judged by whether it stayed quiet,
+    // it's explicitly resuming the SAME prior turn (see activeTurnIsContinuation).
     const mergeIntoKey = opts?.allowMetaMerge !== false
-      && r.activeTurnIsMeta
       && r.prevTurnChipKey !== null
-      && !turnProducedVisibleContent(r)
+      && (r.activeTurnIsContinuation || (r.activeTurnIsMeta && !turnProducedVisibleContent(r)))
       ? r.prevTurnChipKey
       : null;
     r.closeTurnQueue.push({
@@ -297,6 +299,17 @@ export function processTurnCloseQueue(r: ChatRenderer): void {
     // After the collapse, so every chip/screenshot this turn produced exists
     // before it moves house.
     if (chipKey !== null && mergeIntoKey !== null) {
+      const destFooter = r.turnFooters.getOrCreateFooter(mergeIntoKey);
+      // absorbInto moves src's CONTENTS into dest but never dest's own DOM
+      // position. The meta-wake merge never needed this (nothing ever sat
+      // between the two footers), but a continuation's dest footer is still
+      // sitting where its OWN turn closed - above the "Continuing session…"
+      // divider and everything the continuation just rendered. Steal the
+      // closing turn's just-computed bottom-of-everything slot instead of
+      // leaving dest stranded above the content it's about to absorb.
+      if (footer && footer.parentElement === r.container) {
+        r.container.insertBefore(destFooter, footer);
+      }
       const destTotals = r.turnFooters.getTotals(mergeIntoKey);
       if (r.turnFooters.absorbInto(chipKey, mergeIntoKey) && settled) {
         r.turnFooters.settleMetaRow(mergeIntoKey, destTotals ? sumTurnTotals(destTotals, settled) : settled);

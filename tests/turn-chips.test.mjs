@@ -769,4 +769,45 @@ describe("Silent auto-continue streak merge", () => {
 
     expect(container.querySelectorAll(".turn-footer").length).toBe(3);
   });
+
+  // Joe: continuing a frozen chat (Unfreeze chat, or typing "continue")
+  // resends literal "continue" with is_meta:false (see unfreeze_session /
+  // restart_live_session, neither tags is_meta) - so this is the isSilent,
+  // non-meta path, distinct from the harness's is_meta retries above. The
+  // continuation must land in the SAME footer as the turn it resumes, not
+  // spawn a second box below it ("the chips split").
+  it("merges a 'continue' turn's chips into the interrupted turn's footer", async () => {
+    const { renderer, container } = await createRenderer();
+
+    // Turn 1: frozen mid-tool-use - no turn_usage, the process was torn
+    // down before a result line arrived.
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeToolUse("t1"));
+    renderer.handleEvent(makeToolResult("t1"));
+    // Unfreeze / manual "continue".
+    renderer.handleEvent(makeUserMessage("continue"));
+    renderer.handleEvent(makeToolUse("t2"));
+    renderer.handleEvent(makeToolResult("t2"));
+    renderer.handleEvent(makeSendMessage("Done.", "tu1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    // Closing boundary - its own turn, so it gets its own (third) footer;
+    // only turns 1 and 2 should have merged into one.
+    renderer.handleEvent(makeUserMessage("and now Y"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 10 }));
+
+    const footers = container.querySelectorAll(".turn-footer");
+    expect(footers.length).toBe(2);
+    const bashChips = footers[0].querySelectorAll('.tool-strip > .tool-chip[data-tool="Bash"]');
+    expect(bashChips.length).toBe(1);
+    expect(bashChips[0].querySelector(".tool-chip-count").textContent).toBe("x2");
+    // The resume marker still shows as its own row - only the chip strip
+    // merges, so it stays informative rather than disappearing.
+    expect(container.textContent).toContain("Continuing session");
+    // The merged footer sinks below everything it absorbed (both turns'
+    // content), rather than staying stranded where turn 1 originally closed.
+    const children = [...container.children];
+    const footerIdx = children.indexOf(footers[0]);
+    const continuingIdx = children.findIndex((el) => el.textContent.includes("Continuing session"));
+    expect(footerIdx).toBeGreaterThan(continuingIdx);
+  });
 });

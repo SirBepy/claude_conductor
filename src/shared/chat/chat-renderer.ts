@@ -126,6 +126,13 @@ export class ChatRenderer {
   // renders no bubble of its own, so if it also produces no visible message
   // its footer folds into prevTurnChipKey's at close (enqueueTurnClose).
   activeTurnIsMeta = false;
+  // True when the open turn was opened by a silent "continue" (unfreeze,
+  // restart-with-resume, or literally typing "continue") - see
+  // isSilentSystemUserMessage. Unlike activeTurnIsMeta this always folds into
+  // prevTurnChipKey's footer at close regardless of visible content: a
+  // continue is explicitly resuming the SAME prior turn, not starting a new
+  // one, so its chips must land in the same strip rather than a second box.
+  activeTurnIsContinuation = false;
   // Key of the turn that closed most recently - the absorb target above.
   prevTurnChipKey: TurnChipKey | null = null;
   // Monotonically-increasing counter for chip keys. Using a counter instead of
@@ -264,6 +271,7 @@ export class ChatRenderer {
   resetActiveTurnMeta(): void {
     this.activeTurnChipKey = null;
     this.activeTurnIsMeta = false;
+    this.activeTurnIsContinuation = false;
     this.activeTurnStreamedText = "";
     this.activeTurnStartedAtMs = 0;
     this.activeTurnUsage = null;

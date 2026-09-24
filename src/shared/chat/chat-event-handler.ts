@@ -150,6 +150,7 @@ function handleUserMessageEvent(
   // replay-time Date.now()) so a resumed tick's baseline stays correct.
   r.activeTurnChipKey = ++r._chipKeySeq;
   r.activeTurnIsMeta = isMeta;
+  r.activeTurnIsContinuation = isSilent;
   r.activeTurnStreamedText = "";
   r.activeTurnStartedAtMs = ts > 0 ? ts : Date.now();
   r.activeTurnUsage = null;
