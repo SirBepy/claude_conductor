@@ -37,9 +37,21 @@ export function renderAccountListBodyHtml(accounts: Account[], currentId: string
 export async function openChangeAccountModal(opts: {
   currentId: string | null;
   title?: string;
+  /** Set by a caller that cannot proceed without an id (the history
+   *  "Continue this chat" gate, the manual-takeover gate). With exactly one
+   *  account those callers must get it back rather than a modal: the
+   *  single-account body renders a static chip with no `data-acc-id`, so there
+   *  is deliberately nothing to click and no `registerSelectableOptions` entry
+   *  for Enter - the only exits are Escape and the close button, both of which
+   *  resolve null and strand the caller on its `if (!id) return`. A
+   *  "Change account" style caller leaves this off and keeps the static
+   *  confirmation, which is a display, not a gate. */
+  autoPickSole?: boolean;
 }): Promise<string | null> {
   const title = opts.title ?? "Change account";
   const accounts = await api.listAccounts();
+
+  if (opts.autoPickSole && accounts.length === 1) return accounts[0]!.id;
 
   return new Promise<string | null>((resolve) => {
     const overlay = document.createElement("div");

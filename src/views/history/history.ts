@@ -144,7 +144,11 @@ async function selectHistorySession(sessionId: string, pane: HTMLElement): Promi
       // associated with one), so ask which account future turns should run
       // under instead of silently falling back to the app's default account
       // - same reasoning as the manual-takeover confirmation.
-      const accountId = await openChangeAccountModal({ currentId: null, title: "Continue as which account?" });
+      const accountId = await openChangeAccountModal({
+        currentId: null,
+        title: "Continue as which account?",
+        autoPickSole: true,
+      });
       if (!accountId) return;
       try {
         await invoke<void>("register_historical_session", { sessionId: entry.session_id, cwd: entry.cwd, accountId });

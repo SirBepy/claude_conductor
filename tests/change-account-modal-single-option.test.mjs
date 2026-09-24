@@ -4,8 +4,14 @@
 // "Change account" modal must still name the account, but stop offering it
 // as something to click through.
 
-import { describe, it, expect } from "vitest";
-import { renderAccountListBodyHtml } from "../src/shared/change-account-modal.ts";
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+const { listAccounts } = vi.hoisted(() => ({ listAccounts: vi.fn() }));
+vi.mock("../src/shared/api.ts", () => ({ api: { listAccounts: (...a) => listAccounts(...a) } }));
+
+const { renderAccountListBodyHtml, openChangeAccountModal } = await import(
+  "../src/shared/change-account-modal.ts"
+);
 
 const personal = { id: "acct-personal", label: "personal", icon: "user", colour: "#9d7dfc" };
 const work = { id: "acct-work", label: "work", icon: "briefcase", colour: "#f5a623" };
@@ -59,5 +65,59 @@ describe("renderAccountListBodyHtml - two or more accounts (unchanged)", () => {
     const personalChip = el.querySelector(`[data-acc-id="${personal.id}"]`);
     expect(workChip.className).toContain("sel");
     expect(personalChip.className).not.toContain("sel");
+  });
+});
+
+// Red->green regression. The todo-883 static chip above is deliberately inert -
+// no data-acc-id, so no click handler, no number badge, no
+// registerSelectableOptions entry. That is right for a "Change account"
+// display, but the history "Continue this chat" gate and the manual-takeover
+// gate both bail on `if (!accountId) return`, so for them the same modal was
+// an unclosable dead end: with one account there was nothing to click, Enter
+// did nothing, and the only exits (Escape, the X) resolve null. Continuing a
+// chat from history was impossible for anyone with a single account.
+describe("openChangeAccountModal - autoPickSole (the gate callers)", () => {
+  const overlay = () => document.querySelector(".cc-modal-overlay");
+
+  afterEach(() => {
+    document.querySelectorAll(".cc-modal-overlay").forEach((el) => el.remove());
+    listAccounts.mockReset();
+  });
+
+  it("returns the sole account without ever opening a modal", async () => {
+    listAccounts.mockResolvedValue([personal]);
+    const picked = await openChangeAccountModal({
+      currentId: null,
+      title: "Continue as which account?",
+      autoPickSole: true,
+    });
+    expect(picked).toBe(personal.id);
+    expect(overlay()).toBeNull();
+  });
+
+  it("still opens the picker when there is a real choice to make", async () => {
+    listAccounts.mockResolvedValue([personal, work]);
+    const pending = openChangeAccountModal({ currentId: null, autoPickSole: true });
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    overlay().querySelector(`[data-acc-id="${work.id}"]`).click();
+    expect(await pending).toBe(work.id);
+  });
+
+  it("still opens with zero accounts, so the empty-registry message is seen", async () => {
+    listAccounts.mockResolvedValue([]);
+    const pending = openChangeAccountModal({ currentId: null, autoPickSole: true });
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    expect(overlay().textContent).toContain("No Claude accounts configured yet");
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(await pending).toBeNull();
+  });
+
+  it("leaves the opt-out callers on the static confirmation", async () => {
+    listAccounts.mockResolvedValue([personal]);
+    const pending = openChangeAccountModal({ currentId: personal.id, title: "Change account" });
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    expect(overlay().querySelector(".cam-acc-static")).not.toBeNull();
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(await pending).toBeNull();
   });
 });

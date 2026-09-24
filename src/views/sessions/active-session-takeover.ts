@@ -36,7 +36,11 @@ export async function handleTakeoverClick(
   // account already on record for it - ask which one future turns
   // (--resume calls) should run under, instead of silently falling back
   // to the app's default account.
-  const accountId = await openChangeAccountModal({ currentId: null, title: "Take over as which account?" });
+  const accountId = await openChangeAccountModal({
+    currentId: null,
+    title: "Take over as which account?",
+    autoPickSole: true,
+  });
   if (!accountId) return;
   const originalId = sess.session_id;
   takeoverBtn.disabled = true;
