@@ -58,8 +58,17 @@ test.describe("view-harness / sidebar machine mark", () => {
     await expect(badge).toHaveAttribute("data-tip", "On Mac Mini (offline)");
     await expect(row).toHaveClass(/is-machine-offline/);
 
+    // `.row-entering` runs slideInLeft, which animates opacity 0->1. An
+    // animated value outranks the static `opacity: .55` on
+    // `.is-machine-offline`, so sampling inside that 0.32s window reads the
+    // same mid-flight number off both rows and the comparison is meaningless.
+    // sidebar-anim.ts drops the class on animationend.
+    const localRow = page.locator('#sessions-list li[data-session-id="s-local"]');
+    await expect(localRow).not.toHaveClass(/row-entering/);
+    await expect(row).not.toHaveClass(/row-entering/);
+
     const [localOpacity, offlineOpacity] = await Promise.all([
-      page.locator('#sessions-list li[data-session-id="s-local"]').evaluate((el) => getComputedStyle(el).opacity),
+      localRow.evaluate((el) => getComputedStyle(el).opacity),
       row.evaluate((el) => getComputedStyle(el).opacity),
     ]);
     expect(Number(offlineOpacity)).toBeLessThan(Number(localOpacity));
