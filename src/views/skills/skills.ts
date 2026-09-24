@@ -133,26 +133,28 @@ function template(): TemplateResult {
         <div style="width:32px"></div>
       </div>
       <div class="view-body">
-        <div class="skills-search">
-          <div class="skills-search-field">
-            <i class="ph ph-magnifying-glass"></i>
-            <input
-              type="search"
-              id="skillsSearchInput"
-              placeholder="Search skills..."
-              .value=${query}
-              @input=${(e: Event) => {
-                query = (e.target as HTMLInputElement).value;
-                draw();
-              }}
-              @keydown=${onSearchKeydown}
-              autocomplete="off"
-              spellcheck="false"
-            />
+        <div class="view-body-inner">
+          <div class="skills-search">
+            <div class="skills-search-field">
+              <i class="ph ph-magnifying-glass"></i>
+              <input
+                type="search"
+                id="skillsSearchInput"
+                placeholder="Search skills..."
+                .value=${query}
+                @input=${(e: Event) => {
+                  query = (e.target as HTMLInputElement).value;
+                  draw();
+                }}
+                @keydown=${onSearchKeydown}
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <div class="skills-count">${rows.length} of ${allSkills.length}</div>
           </div>
-          <div class="skills-count">${rows.length} of ${allSkills.length}</div>
+          ${content()}
         </div>
-        ${content()}
       </div>
     </div>
   `;

@@ -297,29 +297,31 @@ function template(): TemplateResult {
     <div class="view view-projects">
       ${headerTemplate()}
       <div class="view-body">
-        <div class="projects-toolbar">
-          <div class="projects-search">
-            <i class="ph ph-magnifying-glass"></i>
-            <input
-              type="search"
-              id="projectsSearchInput"
-              placeholder="Search projects..."
-              .value=${query}
-              autocomplete="off"
-              spellcheck="false"
-              @input=${onSearchInput}
-              @keydown=${onSearchKeydown}
-            />
+        <div class="view-body-inner">
+          <div class="projects-toolbar">
+            <div class="projects-search">
+              <i class="ph ph-magnifying-glass"></i>
+              <input
+                type="search"
+                id="projectsSearchInput"
+                placeholder="Search projects..."
+                .value=${query}
+                autocomplete="off"
+                spellcheck="false"
+                @input=${onSearchInput}
+                @keydown=${onSearchKeydown}
+              />
+            </div>
+            <select id="projectsSortSelect" class="projects-sort-select" .value=${sortBy} @change=${onSortChange}>
+              <option value="recent">Recently used</option>
+              <option value="name">Name</option>
+              <option value="live">Live now</option>
+              <option value="tokens">Tokens (7d)</option>
+            </select>
           </div>
-          <select id="projectsSortSelect" class="projects-sort-select" .value=${sortBy} @change=${onSortChange}>
-            <option value="recent">Recently used</option>
-            <option value="name">Name</option>
-            <option value="live">Live now</option>
-            <option value="tokens">Tokens (7d)</option>
-          </select>
+          ${backfillStatusMsg ? html`<div class="projects-backfill-status" aria-live="polite">${backfillStatusMsg}</div>` : ""}
+          ${bodyTemplate()}
         </div>
-        ${backfillStatusMsg ? html`<div class="projects-backfill-status" aria-live="polite">${backfillStatusMsg}</div>` : ""}
-        ${bodyTemplate()}
       </div>
     </div>
   `;

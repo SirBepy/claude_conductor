@@ -1,7 +1,9 @@
 .view-projects .view-body {
+  padding: 0;
+}
+.view-projects .view-body-inner {
   padding: 16px 24px;
   max-width: 720px;
-  margin: 0 auto;
 }
 
 .projects-toolbar {

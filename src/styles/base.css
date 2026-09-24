@@ -192,6 +192,16 @@ body.chats-window-mode .icon-btn.burger {
     padding: 16px;
 }
 
+/* A view that centers a narrower content column (Projects, Skills, Skill
+ * detail) puts the max-width/centering here, on an inner wrapper, instead of
+ * on .view-body itself - .view-body is the overflow container, and
+ * constraining its own width drags the scrollbar in from the window edge
+ * to sit against the narrow column instead. */
+.view-body-inner {
+    width: 100%;
+    margin: 0 auto;
+}
+
 .no-data {
     color: var(--color-text-muted);
     font-size: var(--fs-title);

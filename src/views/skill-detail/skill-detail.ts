@@ -44,7 +44,9 @@ export async function renderSkillDetailView(root: HTMLElement): Promise<() => vo
             <div style="width:32px"></div>
           </div>
           <div class="view-body">
-            <div class="skill-detail empty">No skill selected.</div>
+            <div class="view-body-inner">
+              <div class="skill-detail empty">No skill selected.</div>
+            </div>
           </div>
         </div>
       `,
@@ -85,25 +87,27 @@ function buildView(d: SkillDetail): TemplateResult {
         <div style="width:32px"></div>
       </div>
       <div class="view-body">
-        <div class="counters">
-          ${counter("Total", d.invocations.total)}
-          ${counter("Manual", d.invocations.manual)}
-          ${counter("Skill-chained", d.invocations.skill)}
-          ${counter("Auto", d.invocations.auto)}
+        <div class="view-body-inner">
+          <div class="counters">
+            ${counter("Total", d.invocations.total)}
+            ${counter("Manual", d.invocations.manual)}
+            ${counter("Skill-chained", d.invocations.skill)}
+            ${counter("Auto", d.invocations.auto)}
+          </div>
+          ${sourcePie(d)}
+          ${d.events.length === 0
+            ? html`<div class="empty">No invocations recorded for this skill in the last 7 days.</div>`
+            : html`
+              <table class="invocations">
+                <thead>
+                  <tr><th>Time</th><th>Project</th><th>Tokens</th><th>Source</th></tr>
+                </thead>
+                <tbody>
+                  ${d.events.map(eventRow)}
+                </tbody>
+              </table>
+            `}
         </div>
-        ${sourcePie(d)}
-        ${d.events.length === 0
-          ? html`<div class="empty">No invocations recorded for this skill in the last 7 days.</div>`
-          : html`
-            <table class="invocations">
-              <thead>
-                <tr><th>Time</th><th>Project</th><th>Tokens</th><th>Source</th></tr>
-              </thead>
-              <tbody>
-                ${d.events.map(eventRow)}
-              </tbody>
-            </table>
-          `}
       </div>
     </div>
   `;

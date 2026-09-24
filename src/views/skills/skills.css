@@ -1,4 +1,5 @@
-.view-skills .view-body { padding: 16px 24px; max-width: 800px; margin: 0 auto; }
+.view-skills .view-body { padding: 0; }
+.view-skills .view-body-inner { padding: 16px 24px; max-width: 800px; }
 
 .skills-search {
   display: flex;

@@ -1,4 +1,5 @@
-.view-skill-detail .view-body { padding: 16px 24px; max-width: 900px; margin: 0 auto; }
+.view-skill-detail .view-body { padding: 0; }
+.view-skill-detail .view-body-inner { padding: 16px 24px; max-width: 900px; }
 
 .counters { display: flex; gap: 32px; margin: 16px 0; }
 .counter .value { font-size: var(--fs-display); font-weight: 600; color: var(--color-text); }
