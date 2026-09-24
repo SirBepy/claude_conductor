@@ -1,19 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { mountView } from "./harness";
+import { shotDir } from "./shot-dir";
 
 // Skills revamp: tokenized colors, keyboard-operable rows, plugin-prefix
 // stripped from the display name, AA-contrast badges, and a distinct
 // error state from a true-empty list. See src/views/skills/.
 
-const SHOT_DIR = path.join(
-  process.cwd(),
-  ".for_bepy",
-  "screenshots",
-  "61363-Thu Sep 17 23:37:07 2026",
-);
-mkdirSync(SHOT_DIR, { recursive: true });
+const SHOT_DIR = shotDir("61363-Thu Sep 17 23:37:07 2026");
 
 const LONG_DESC =
   "A very long description that should wrap onto more than two lines when rendered in the narrow skill row layout, so the line-clamp behavior can be verified by checking the rendered row height stays fixed regardless of how much text the skill author wrote for it.";

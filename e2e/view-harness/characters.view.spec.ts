@@ -1,19 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { mountView } from "./harness";
+import { shotDir } from "./shot-dir";
 
 // Characters revamp (todo: cards keyboard+motion, letter-tile avatar fallback,
 // slot-fill dots, themed New-character modal, empty/loading states, detail
 // slot icons + aria-pressed play buttons). See src/views/characters/.
 
-const SHOT_DIR = path.join(
-  process.cwd(),
-  ".for_bepy",
-  "screenshots",
-  "61363-Thu Sep 17 23:37:07 2026",
-);
-mkdirSync(SHOT_DIR, { recursive: true });
+const SHOT_DIR = shotDir("61363-Thu Sep 17 23:37:07 2026");
 
 const ALL_SLOTS = ["work_finished", "question_asked", "ready", "select", "annoyed", "death"];
 

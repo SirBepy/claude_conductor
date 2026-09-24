@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { mountView } from "./harness";
+import { shotDir } from "./shot-dir";
 import type { ProjectGroup } from "../../src/types/ipc.generated";
 
 // Projects revamp (design critique: raw innerHTML -> lit-html, keyboard-
@@ -9,13 +9,7 @@ import type { ProjectGroup } from "../../src/types/ipc.generated";
 // no search, 2 of 4 sort modes hidden, footer button violating the header/
 // kebab convention). See src/views/projects/.
 
-const SHOT_DIR = path.join(
-  process.cwd(),
-  ".for_bepy",
-  "screenshots",
-  "61363-Thu Sep 17 23:37:07 2026",
-);
-mkdirSync(SHOT_DIR, { recursive: true });
+const SHOT_DIR = shotDir("61363-Thu Sep 17 23:37:07 2026");
 
 async function shotBothViewports(page: Page, label: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 800 });
