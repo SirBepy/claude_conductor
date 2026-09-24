@@ -7,6 +7,7 @@ import { mountAskPanel, type AskPanelHandle } from "./ask-panel";
 import { mountTodosPanel, type TodosPanelHandle } from "./todos-panel";
 import { mountDraftsPanel, type DraftsPanelHandle } from "./drafts-panel";
 import type { PreviewController } from "./preview-panel";
+import { getTransport, type Unlisten } from "../../shared/transport";
 import "./fab-dial.css";
 
 /** What the card can hold. Preview is reachable from the dial but never lives
@@ -14,6 +15,13 @@ import "./fab-dial.css";
 export type CardPanel = "ask" | "todos" | "drafts";
 
 type Surface = "rest" | "dial" | "card";
+
+/** `message-drafts-changed`. `added` rides only the `add` action
+ *  (`methods::drafts_store::publish_added`); every other mutation omits it. */
+interface DraftsChanged {
+  project_id?: string;
+  added?: { id?: string; origin_session_id?: string };
+}
 
 export interface FabDialDeps {
   /** Ask's hand-off target: fills the real composer, unsent. */
@@ -48,6 +56,10 @@ class FabDial implements FabDialHandle {
   private todos: TodosPanelHandle | null = null;
   private drafts: DraftsPanelHandle | null = null;
   private liftObs: ResizeObserver | null = null;
+  private draftsUnlisten: Unlisten | null = null;
+  /** The draft the card should land on once it mounts, set by the auto-open
+   *  below. `mountBody` runs a render tick later, so it cannot read the event. */
+  private openDraftId: string | null = null;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
     this.pane = pane;
@@ -56,6 +68,34 @@ class FabDial implements FabDialHandle {
     this.host.className = "fab-dial-host";
     this.host.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
+    void this.watchDrafts();
+  }
+
+  /** A draft Claude just wrote opens the card onto it, so a reply meant for
+   *  somewhere else is visible without Joe going looking (his ask, 2026-09-24).
+   *  Scoped like the preview panel: only the chat on screen, never a forced
+   *  switch from a background one, and no badge at rest. */
+  private async watchDrafts(): Promise<void> {
+    try {
+      this.draftsUnlisten = await getTransport().listen<DraftsChanged>(
+        "message-drafts-changed",
+        (p) => this.onDraftAdded(p),
+      );
+    } catch (err) {
+      console.warn("[fab-dial] listen(message-drafts-changed) failed", err);
+    }
+  }
+
+  private onDraftAdded(payload: DraftsChanged | undefined): void {
+    const added = payload?.added;
+    // Only an `add` carries `added` - a revise, a state flip or Joe's own edit
+    // in the panel publishes the bare event and must not take over the pane.
+    if (!added?.id || !this.sessionId || added.origin_session_id !== this.sessionId) return;
+    // He already has a card open: that is his choice of surface, and Drafts is
+    // refreshing itself anyway. Never yank him off a field he is typing in.
+    if (this.surface === "card") return;
+    this.openDraftId = added.id;
+    this.open("drafts");
   }
 
   /** active-session.ts rewrites the pane's innerHTML on every chat switch,
@@ -101,6 +141,8 @@ class FabDial implements FabDialHandle {
   setSessionScope(sessionId: string | null, cwd: string | null): void {
     this.sessionId = sessionId;
     this.cwd = cwd;
+    // A pending auto-open belongs to the chat he just left.
+    this.openDraftId = null;
     // No chat mounted means no transcript to ask about, so the FAB goes away
     // rather than floating over an empty pane.
     if (!sessionId) {
@@ -228,6 +270,10 @@ class FabDial implements FabDialHandle {
     } else if (this.panel === "drafts") {
       this.drafts = mountDraftsPanel(body);
       this.drafts.setSessionScope(this.sessionId);
+      if (this.openDraftId) {
+        this.drafts.openDraft(this.openDraftId);
+        this.openDraftId = null;
+      }
     } else {
       this.todos = mountTodosPanel(body);
       this.todos.setSessionScope(this.sessionId);
@@ -247,6 +293,10 @@ class FabDial implements FabDialHandle {
     this.disposeBodies();
     this.liftObs?.disconnect();
     this.liftObs = null;
+    if (this.draftsUnlisten) {
+      try { this.draftsUnlisten(); } catch { /* ignore */ }
+      this.draftsUnlisten = null;
+    }
     this.host.removeEventListener("click", this.onClick);
     document.removeEventListener("keydown", this.onKeydown);
     this.host.remove();

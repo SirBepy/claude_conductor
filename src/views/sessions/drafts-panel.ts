@@ -11,6 +11,7 @@ import "./drafts-panel.css";
 
 export interface DraftsPanelHandle {
   setSessionScope(sessionId: string | null): void;
+  openDraft(id: string): void;
   refresh(): void;
   destroy(): void;
 }
@@ -49,6 +50,7 @@ class DraftsPanel implements DraftsPanelHandle {
   private drafts: MessageDraft[] = [];
   private sessionId: string | null = null;
   private openId: string | null = null;
+  private pendingOpenId: string | null = null;
   private editor: DraftsEditor | null = null;
   private unlisten: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
@@ -69,7 +71,17 @@ class DraftsPanel implements DraftsPanelHandle {
     this.sessionId = sessionId;
     this.drafts = [];
     this.openId = null;
+    this.pendingOpenId = null;
     this.render();
+    this.refresh();
+  }
+
+  /** Opens straight onto one card. The id has to survive the in-flight list
+   *  fetch: at mount time nothing is loaded yet, and `render` drops an `openId`
+   *  it cannot find, so it is applied once the drafts actually land. */
+  openDraft(id: string): void {
+    this.pendingOpenId = id;
+    this.openId = null;
     this.refresh();
   }
 
@@ -81,6 +93,11 @@ class DraftsPanel implements DraftsPanelHandle {
         // A scope change mid-flight must not paint the previous project's cards.
         if (this.sessionId !== sid) return;
         this.drafts = Array.isArray(view?.drafts) ? view.drafts : [];
+        if (this.pendingOpenId) {
+          const wanted = this.pendingOpenId;
+          this.pendingOpenId = null;
+          if (this.drafts.some((d) => d.id === wanted)) this.openId = wanted;
+        }
         this.render();
       })
       .catch((err) => console.error("[drafts-panel] list_message_drafts failed", err));
@@ -101,12 +118,16 @@ class DraftsPanel implements DraftsPanelHandle {
 
   private async subscribeLive(): Promise<void> {
     try {
+      // Kebab, not the snake_case name it is published under: the daemon
+      // renames it on the way out on both transports (`GLOBAL_EVENT_MAP`,
+      // `handle_daemon_notification`), and the snake name silently matches
+      // nothing.
       this.unlisten = await getTransport().listen<{ project_id?: string }>(
-        "message_drafts_changed",
+        "message-drafts-changed",
         () => this.refresh(),
       );
     } catch (err) {
-      console.warn("[drafts-panel] listen(message_drafts_changed) failed", err);
+      console.warn("[drafts-panel] listen(message-drafts-changed) failed", err);
     }
   }
 

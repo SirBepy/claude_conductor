@@ -21,6 +21,21 @@ pub(super) fn publish_changed(state: &Arc<DaemonState>, project_id: &str) {
     state.notifier.publish("message_drafts_changed", json!({"project_id": project_id}));
 }
 
+/// The `add` case only. `added` is what lets the FAB open itself onto a brand
+/// new card: every other mutation (a revise, a state flip, the user's own edit
+/// in the panel) rides the bare event above and must not steal the pane.
+/// `origin_session_id` scopes the open to the chat the user is actually
+/// watching, matching the preview panel's "never force a switch" rule.
+fn publish_added(state: &Arc<DaemonState>, project_id: &str, session_id: &str, draft_id: &str) {
+    state.notifier.publish(
+        "message_drafts_changed",
+        json!({
+            "project_id": project_id,
+            "added": {"id": draft_id, "origin_session_id": session_id},
+        }),
+    );
+}
+
 fn parse_state(s: &str) -> Result<DraftState, String> {
     match s {
         "needs-you" => Ok(DraftState::NeedsYou),
@@ -156,7 +171,11 @@ pub(crate) fn write_draft(
         }
         other => return Err(format!("unknown action: {other} (want add|revise|variant|drop)")),
     };
-    publish_changed(state, &project_id);
+    if action == "add" {
+        publish_added(state, &project_id, session_id, &draft.id);
+    } else {
+        publish_changed(state, &project_id);
+    }
     Ok(json!({"ok": true, "draft": draft}))
 }
 
@@ -260,6 +279,30 @@ mod tests {
         assert!(err.contains("recipient"), "got {err}");
         let err = write_draft(&state, "s1", "add", &json!({"topic": "t", "recipient": "Bruno"})).unwrap_err();
         assert!(err.contains("body"), "got {err}");
+    }
+
+    /// The FAB opens its Drafts card off `added` alone (todo 951), so a
+    /// mutation that is not an `add` must not carry it - a revise or Joe's own
+    /// edit in the panel would otherwise take over the pane he is reading.
+    /// Exercised through the publishers rather than a real `write_draft`: an
+    /// `add` writes into the live app-data store, which the tests here stay out
+    /// of on purpose.
+    #[tokio::test]
+    async fn only_an_add_publishes_the_payload_the_fab_opens_on() {
+        let state = registered();
+        let mut rx = state.notifier.subscribe();
+
+        publish_added(&state, "proj-1", "s1", "draft-9");
+        let frame = rx.recv().await.expect("an add publishes");
+        assert_eq!(frame["method"], json!("message_drafts_changed"));
+        assert_eq!(frame["params"]["added"]["id"], json!("draft-9"));
+        assert_eq!(frame["params"]["added"]["origin_session_id"], json!("s1"));
+
+        publish_changed(&state, "proj-1");
+        let frame = rx.recv().await.expect("every other mutation publishes too");
+        assert_eq!(frame["method"], json!("message_drafts_changed"));
+        assert_eq!(frame["params"]["project_id"], json!("proj-1"));
+        assert!(frame["params"].get("added").is_none(), "got {}", frame["params"]);
     }
 
     #[test]
