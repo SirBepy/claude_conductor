@@ -12,7 +12,7 @@ export interface ShortcutDef {
 
 const SHORTCUT_DEFS: ShortcutDef[] = [
   // Global
-  { id: "new-chat",   defaultKeys: "ctrl+n",       label: "New chat",       description: "Open project picker to start a chat",   suppressInInput: true },
+  { id: "new-chat",   defaultKeys: "ctrl+n",       label: "New chat",       description: "Open project picker to start a chat",   context: "sessions", suppressInInput: true },
   { id: "go-home",    defaultKeys: "ctrl+shift+h",  label: "Go to Home",     description: "Navigate to the Home view",              suppressInInput: true },
   { id: "go-chats",   defaultKeys: "ctrl+shift+c",  label: "Go to Chats",    description: "Navigate to the Chats view",             suppressInInput: true },
 
