@@ -47,9 +47,9 @@ fn build_preview_window(app: &AppHandle, session_id: &str) -> Result<(), String>
     Ok(())
 }
 
-/// Hide-to-tray on close like `attach_hide_to_tray`, plus the event that tells
-/// the docked rail its pop-out is gone (Joe, 2026-09-23: the titlebar X puts
-/// the preview back in the chat window). Without the event the frontend's
+/// The shared hide-to-tray close handler plus the event that tells the docked
+/// rail its pop-out is gone (Joe, 2026-09-23: the titlebar X puts the preview
+/// back in the chat window). Without the event the frontend's
 /// `cc_preview_panel_popped:<id>` flag outlives the window, and the rail then
 /// refuses to show in BOTH places - preview becomes unreachable.
 ///
@@ -57,26 +57,12 @@ fn build_preview_window(app: &AppHandle, session_id: &str) -> Result<(), String>
 /// the rail re-derives its open state from storage, which the pop-out writes
 /// before asking for the close.
 fn attach_dock_back_on_close(window: &tauri::WebviewWindow, session_id: &str) {
-    let w = window.clone();
     let sid = session_id.to_string();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            let app = w.app_handle();
-            let quitting = app
-                .try_state::<crate::state::AppState>()
-                .map(|s| s.should_quit.load(std::sync::atomic::Ordering::SeqCst))
-                .unwrap_or(false);
-            if quitting {
-                return;
-            }
-            api.prevent_close();
-            let _ = w.hide();
-            let _ = app.emit(
-                "preview-window-docked",
-                serde_json::json!({ "sessionId": sid }),
-            );
-            super::activation::sync(app);
-        }
+    super::attach_hide_to_tray_with(window, move |app| {
+        let _ = app.emit(
+            "preview-window-docked",
+            serde_json::json!({ "sessionId": sid }),
+        );
     });
 }
 

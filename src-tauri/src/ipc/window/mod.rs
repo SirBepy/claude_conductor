@@ -85,11 +85,25 @@ fn surface_main_if_ready(app: &AppHandle, w: &tauri::WebviewWindow) {
 /// reopen is a cold webview boot; a hidden one reopens instantly with its state
 /// intact. Real quit (tray menu) sets should_quit and passes.
 fn attach_hide_to_tray(window: &tauri::WebviewWindow) {
+    attach_hide_to_tray_with(window, |_| {});
+}
+
+/// `attach_hide_to_tray` with one extra step, run after the hide and before
+/// `activation::sync`. The preview pop-out is the only window that needs it
+/// (it emits `preview-window-docked` there), and before todo 942 it carried a
+/// full second copy of the should_quit/prevent_close/hide/sync body to get it -
+/// so a fix to the guard or the sync had two homes and nothing named the
+/// second. `on_hidden` takes the handle rather than borrowing one from the
+/// closure's environment, so the caller needs no clone of its own.
+fn attach_hide_to_tray_with(
+    window: &tauri::WebviewWindow,
+    on_hidden: impl Fn(&AppHandle) + Send + 'static,
+) {
     let w = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            let quitting = w
-                .app_handle()
+            let app = w.app_handle();
+            let quitting = app
                 .try_state::<crate::state::AppState>()
                 .map(|s| s.should_quit.load(Ordering::SeqCst))
                 .unwrap_or(false);
@@ -98,7 +112,8 @@ fn attach_hide_to_tray(window: &tauri::WebviewWindow) {
             }
             api.prevent_close();
             let _ = w.hide();
-            activation::sync(w.app_handle());
+            on_hidden(app);
+            activation::sync(app);
         }
     });
 }
