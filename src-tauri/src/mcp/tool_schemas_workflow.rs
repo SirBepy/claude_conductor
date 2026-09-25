@@ -5,7 +5,8 @@
 use serde_json::{json, Value};
 
 // Sibling-session spawn. Unconditional despite the name similarity with
-// `spawn_worker`: no fleet, caller's own project only.
+// `spawn_worker`: no fleet. `cwd` must be the caller's own project or another
+// project already in Settings.projects - never an arbitrary path.
 pub const TOOL_SPAWN_CHAT: &str = "spawn_chat";
 // Hand this chat's work to a fresh context window and stand down. Same spawn
 // as above plus the successor link the sidebar follows, so the user stays put.
@@ -33,11 +34,11 @@ pub fn workflow_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": TOOL_SPAWN_CHAT,
-            "description": "Start a SEPARATE chat alongside this one, in this same project, and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's model, effort, account and auto-accept unless overridden; it gets its own character, since it is a separate chat. Own working directory only, once per turn. To REPLACE this chat instead of running beside it, use `respawn`.",
+            "description": "Start a SEPARATE chat alongside this one and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's model, effort, account and auto-accept unless overridden; it gets its own character, since it is a separate chat. `cwd` can be this session's own project or a DIFFERENT project the user already has open/known to the app - never an arbitrary path. Once per turn. To REPLACE this chat instead of running beside it, use `respawn`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "cwd": {"type": "string", "description": "Absolute working directory. Must be this session's own cwd."},
+                    "cwd": {"type": "string", "description": "Absolute working directory: this session's own cwd, or another project already known to the app."},
                     "prompt": {"type": "string", "description": "The new chat's first message. Carry the full handoff context here - it is what the user reads."},
                     "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
@@ -53,7 +54,7 @@ pub fn workflow_schemas() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "cwd": {"type": "string", "description": "Absolute working directory. Must be this session's own cwd."},
+                    "cwd": {"type": "string", "description": "Absolute working directory: this session's own cwd, or another project already known to the app."},
                     "prompt": {"type": "string", "description": "The successor's first message. Carry the full handoff context here - it is what the user reads."},
                     "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},

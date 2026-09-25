@@ -1,9 +1,10 @@
 //! `spawn_chat`: the unconditional sibling-session spawn, shared by the
 //! `spawn_chat` and `respawn` MCP tools.
 //! Not `jarvis_fleet::spawn_worker`, which is `CC_JARVIS`-gated and fleet-
-//! tagged. Guards instead: own-cwd only, one spawn per turn; and it inherits
-//! the caller's own model/effort/account/auto-accept, plus the character on
-//! the `respawn` path only.
+//! tagged. Guards instead: `cwd` must be either the caller's own working
+//! directory or a project already in `Settings.projects` (never an arbitrary
+//! path), one spawn per turn; and it inherits the caller's own model/effort/
+//! account/auto-accept, plus the character on the `respawn` path only.
 
 use crate::daemon::lifecycle::{self, StartSessionParams};
 use crate::daemon::machines::registry::{MachineRegistry, PeerMachine};
@@ -37,12 +38,13 @@ fn claim_turn_slot(state: &Arc<DaemonState>, caller_session_id: &str) -> bool {
     true
 }
 
-/// Spawns a new Interactive session in the caller's own project and sends
-/// `prompt` as its first turn. The prompt lands as a real, visible user
-/// message - the whole point of this over the retired handoff button, which
-/// hid its context in a scratch file. `respawn` makes it a takeover instead:
-/// `successor_of = caller` plus a close flag the caller's pump acts on at
-/// turn end, both here so the old spawn-then-close ordering trap is gone.
+/// Spawns a new Interactive session in the caller's own project - or another
+/// project the user already has registered - and sends `prompt` as its first
+/// turn. The prompt lands as a real, visible user message - the whole point
+/// of this over the retired handoff button, which hid its context in a
+/// scratch file. `respawn` makes it a takeover instead: `successor_of =
+/// caller` plus a close flag the caller's pump acts on at turn end, both here
+/// so the old spawn-then-close ordering trap is gone.
 pub(crate) async fn spawn_chat(
     state: &Arc<DaemonState>,
     caller_session_id: &str,
@@ -59,14 +61,7 @@ pub(crate) async fn spawn_chat(
         .ok_or_else(|| format!("unknown caller session: {caller_session_id}"))?;
 
     let requested = std::path::PathBuf::from(cwd);
-    if !crate::util::same_dir(&caller.cwd, &requested) {
-        return Err(format!(
-            "spawn_chat only spawns into the calling session's own working directory ({}) - \
-             refusing {}",
-            caller.cwd.display(),
-            requested.display()
-        ));
-    }
+    let target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
 
     if !claim_turn_slot(state, caller_session_id) {
         return Err(
@@ -87,7 +82,7 @@ pub(crate) async fn spawn_chat(
     let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
 
     let params = StartSessionParams {
-        cwd: caller.cwd.clone(),
+        cwd: target_cwd.clone(),
         model: model.clone(),
         effort: effort.clone(),
         resume_id: None,
@@ -112,7 +107,7 @@ pub(crate) async fn spawn_chat(
     crate::daemon::session_registration::register_new_session(
         state,
         &sid,
-        &caller.cwd,
+        &target_cwd,
         &model,
         &effort,
         &session.account_id,
@@ -140,6 +135,32 @@ pub(crate) async fn spawn_chat(
     crate::sessions::chat_state::set_busy(&sid, true);
     crate::daemon::machines::publish_instances_changed(&state);
     Ok(sid)
+}
+
+/// Resolves `spawn_chat`'s `cwd` guard: accepts either the caller's own
+/// directory or a project already in `Settings.projects`, never an arbitrary
+/// path - this is what keeps an unconditional spawn tool from being a way to
+/// start sessions anywhere on the machine, while still letting a chat hand
+/// off to a DIFFERENT project the user has already opened before. Returns the
+/// registry's own canonical path rather than the caller-supplied string, same
+/// as the pre-existing own-cwd case always did.
+fn resolve_target_cwd(
+    caller_cwd: &std::path::Path,
+    requested: &std::path::Path,
+    known_projects: &[crate::types::ProjectConfig],
+) -> Result<std::path::PathBuf, String> {
+    if crate::util::same_dir(caller_cwd, requested) {
+        return Ok(caller_cwd.to_path_buf());
+    }
+    if let Some(p) = known_projects.iter().find(|p| crate::util::same_dir(&p.path, requested)) {
+        return Ok(p.path.clone());
+    }
+    Err(format!(
+        "spawn_chat only spawns into the calling session's own working directory ({}) or a \
+         project you've already opened - refusing {}",
+        caller_cwd.display(),
+        requested.display()
+    ))
 }
 
 /// `spawn_chat`'s optional `machine`: label or id of a paired peer, or
@@ -354,6 +375,52 @@ mod tests {
         let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
         let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false).await;
         let err = r.expect_err("foreign cwd must be rejected");
+        assert!(err.contains("own working directory"), "{err}");
+    }
+
+    fn project(path: &str) -> crate::types::ProjectConfig {
+        crate::types::ProjectConfig {
+            id: "proj-known".into(),
+            path: std::path::PathBuf::from(path),
+            name: "Known Project".into(),
+            avatar: Default::default(),
+            automation: None,
+            created_at: "2026-08-18T00:00:00Z".into(),
+            last_active_at: None,
+            whitelist: Default::default(),
+            preferred_account_id: None,
+            last_worktree_path: None,
+            last_start_folder_rel: None,
+        }
+    }
+
+    #[test]
+    fn resolve_target_cwd_accepts_the_callers_own_directory() {
+        let caller_cwd = std::env::current_dir().unwrap();
+        let resolved = resolve_target_cwd(&caller_cwd, &caller_cwd, &[]).unwrap();
+        assert_eq!(resolved, caller_cwd);
+    }
+
+    /// The whole point of the loosened guard: a `cwd` that is NOT the
+    /// caller's own directory is still accepted when it matches a project the
+    /// user already has registered - this is what lets a chat hand off to a
+    /// different project instead of only ever spawning beside itself.
+    #[test]
+    fn resolve_target_cwd_accepts_a_known_project_outside_the_callers_own() {
+        let caller_cwd = std::path::PathBuf::from(if cfg!(windows) { "C:\\proj-a" } else { "/proj-a" });
+        let other = if cfg!(windows) { "C:\\proj-b" } else { "/proj-b" };
+        let resolved =
+            resolve_target_cwd(&caller_cwd, std::path::Path::new(other), &[project(other)]).unwrap();
+        assert_eq!(resolved, std::path::PathBuf::from(other));
+    }
+
+    #[test]
+    fn resolve_target_cwd_rejects_a_cwd_matching_no_known_project() {
+        let caller_cwd = std::path::PathBuf::from(if cfg!(windows) { "C:\\proj-a" } else { "/proj-a" });
+        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
+        let known = if cfg!(windows) { "C:\\proj-b" } else { "/proj-b" };
+        let err = resolve_target_cwd(&caller_cwd, std::path::Path::new(elsewhere), &[project(known)])
+            .expect_err("neither own cwd nor a known project must be rejected");
         assert!(err.contains("own working directory"), "{err}");
     }
 
