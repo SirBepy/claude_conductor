@@ -93,7 +93,8 @@ export function wireRateLimitBanner(
 /** Subscribes to settings-changed (re-resolve session hero assignments) and
  * daemon-status-changed (stall-timer arm/disarm + resync + restore-on-
  * reconnect), plus the two transport-seam character events that carry the same
- * refresh to a remote client; returns a dispose function. Stall-timer arm/disarm
+ * refresh over the wire (desktop and remote alike, since todo 947); returns a
+ * dispose function. Stall-timer arm/disarm
  * are threaded in from sessions.ts rather than duplicated here. */
 export async function wireDaemonStatusListeners(
   ev: TauriEventApi,
@@ -158,10 +159,12 @@ export async function wireDaemonStatusListeners(
   // publishes them from `set_settings` (a desktop-side (re)assignment) and from
   // `invalidate_characters_cache` (new/re-arted artwork on disk).
   //
-  // Live on the PHONE only, despite the seam: `daemon_link.rs` has no match arm
-  // for either name, so a Tauri window never receives them. Desktop reaches the
-  // same state through `settings-changed` above instead. Todo 947 decides
-  // whether that stays.
+  // Now live on desktop too (todo 947): `daemon_link/mod.rs` forwards both names,
+  // so a Tauri window gets this refresh as well as `settings-changed` above - the
+  // one case that matters is the detached Chats window, which is a second Tauri
+  // realm with no other path to hear about a catalogue invalidation. The
+  // assignment half is a same-tick double refresh on the main sidebar
+  // (`settings-changed` fires it too); accepted as cheap rather than suppressed.
   const refreshCharacters = async (artworkChanged: boolean): Promise<void> => {
     if (state.mountId !== myMount) return;
     if (artworkChanged) resetCharacterCaches();

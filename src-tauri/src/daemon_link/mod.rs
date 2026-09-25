@@ -281,6 +281,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "message_drafts_changed" => {
             let _ = app.emit("message-drafts-changed", params);
         }
+        // "Your Todos" FAB list changed (`methods::user_todos::publish_changed`).
+        // Pure forward: the panel also refetches on open and on window focus, so
+        // this is just the fast live-update nudge (todo 952).
+        "user_todos_changed" => {
+            let _ = app.emit("user-todos-changed", params);
+        }
         // In-app HTML preview push (daemon::preview via POST /hooks/preview).
         // Pure forward: the docked preview panel re-reads via `list_previews`
         // on open/focus, so this is just the fast live-update nudge. Payload
@@ -386,6 +392,18 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         }
         "project_created" => handlers::handle_project_created(app, params),
         "session_character_assigned" => handlers::handle_session_character_assigned(app, params),
+        // Desktop-side character (re)assignment (`set_settings` diffing
+        // `session_characters`) and catalogue invalidation
+        // (`invalidate_characters_cache`). Pure forward: `sessions-wiring.ts`'s two
+        // transport-seam listeners already carry these to the phone; this arm makes
+        // the same refresh reach every Tauri window too, including the detached
+        // Chats window, which previously kept serving stale icon data URLs until
+        // reload (todo 947). The assignment half also still fires `settings-changed`
+        // from `persist`, so a Tauri window's main sidebar now runs
+        // loadSessionCharacters()+renderSidebar() twice per change - cheap, and
+        // accepted rather than suppressed.
+        "session_characters_changed" => { let _ = app.emit("session-characters-changed", params); }
+        "characters_changed" => { let _ = app.emit("characters-changed", params); }
         "jarvis_session_created" => handlers::handle_jarvis_session_created(app, params),
         other => {
             log::debug!("daemon notif ignored: {other}");
