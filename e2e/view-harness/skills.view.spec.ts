@@ -7,7 +7,7 @@ import { shotDir } from "./shot-dir";
 // stripped from the display name, AA-contrast badges, and a distinct
 // error state from a true-empty list. See src/views/skills/.
 
-const SHOT_DIR = shotDir("61363-Thu Sep 17 23:37:07 2026");
+const SHOT_DIR = shotDir();
 
 const LONG_DESC =
   "A very long description that should wrap onto more than two lines when rendered in the narrow skill row layout, so the line-clamp behavior can be verified by checking the rendered row height stays fixed regardless of how much text the skill author wrote for it.";

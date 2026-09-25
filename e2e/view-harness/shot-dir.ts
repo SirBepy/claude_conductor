@@ -1,17 +1,11 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { test } from "@playwright/test";
 
 /** `<pid>-<procStart-ticks>`, the id `close/rename-session.ps1 -GetId` prints: the
  *  ~/.claude/sessions record whose sessionId matches this session. Global CLAUDE.md:
- *  "never hand-rolled - unstable, see todo 60."
- *
- *  This is a duplicate of `harness.ts`'s own (unexported) `sessionShotId()` - todo 958
- *  wanted `shotDir()` to import that one directly instead of re-implementing it, but
- *  `harness.ts` was owned by a different lane in the run that fixed this todo and stayed
- *  out of reach. Once `sessionShotId()`/`repoRoot()` are exported from `harness.ts`, this
- *  copy should be deleted and `shotDir()` should call those instead - see the todo 958
- *  file for the follow-up note. */
+ *  "never hand-rolled - unstable, see todo 60." */
 function sessionShotId(): string {
   const pinned = process.env.CC_SHOT_ID;
   if (pinned) return pinned;
@@ -52,19 +46,36 @@ function sessionShotId(): string {
   return "no-session";
 }
 
+/** `config.rootDir` is the testDir (e2e/view-harness), so climb to the directory
+ *  holding playwright.config.ts, which is the repo root. `test.info()` throws outside
+ *  a running test, which is the normal case here: a spec calls shotDir() at module
+ *  scope during collect, and cwd is the repo root there. */
+function repoRoot(): string {
+  let dir: string;
+  try {
+    dir = test.info().config.rootDir;
+  } catch {
+    dir = process.cwd();
+  }
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(path.join(dir, "playwright.config.ts"))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return process.cwd();
+}
+
 /** Resolve (and create) this session's throwaway screenshot directory under
  *  `.for_bepy/screenshots/<session-id>/`, the repo convention for disposable
- *  verification shots. The id is always resolved via `sessionShotId()` above, never
- *  supplied by the caller - a hand-rolled literal (a typed date string, `:` and all) is
- *  exactly what put a Windows-illegal path into three specs and aborted the whole
- *  `test:view` run at collect time (todo 958).
+ *  verification shots.
  *
- *  The parameter is accepted-and-ignored, not removed, purely so the existing call sites
- *  in `characters.view.spec.ts` / `projects.view.spec.ts` / `skills.view.spec.ts` (outside
- *  this fix's file scope) keep passing their old literal without a type error; it has no
- *  effect. New callers should call `shotDir()` with no argument. */
-export function shotDir(_legacyCallerSuppliedId?: string): string {
-  const dir = path.join(process.cwd(), ".for_bepy", "screenshots", sessionShotId());
+ *  This is the ONE place in the harness that builds a screenshot path - `capture()`
+ *  routes through it too. It takes no caller-supplied id on purpose: a hand-rolled
+ *  literal (a typed date string, `:` and all) is a Windows-illegal path, and three
+ *  specs carrying one aborted the whole `test:view` run at collect time (todo 958). */
+export function shotDir(): string {
+  const dir = path.join(repoRoot(), ".for_bepy", "screenshots", sessionShotId());
   mkdirSync(dir, { recursive: true });
   return dir;
 }

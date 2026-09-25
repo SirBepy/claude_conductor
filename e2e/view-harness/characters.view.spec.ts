@@ -7,7 +7,7 @@ import { shotDir } from "./shot-dir";
 // slot-fill dots, themed New-character modal, empty/loading states, detail
 // slot icons + aria-pressed play buttons). See src/views/characters/.
 
-const SHOT_DIR = shotDir("61363-Thu Sep 17 23:37:07 2026");
+const SHOT_DIR = shotDir();
 
 const ALL_SLOTS = ["work_finished", "question_asked", "ready", "select", "annoyed", "death"];
 

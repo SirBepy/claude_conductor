@@ -9,7 +9,7 @@ import type { ProjectGroup } from "../../src/types/ipc.generated";
 // no search, 2 of 4 sort modes hidden, footer button violating the header/
 // kebab convention). See src/views/projects/.
 
-const SHOT_DIR = shotDir("61363-Thu Sep 17 23:37:07 2026");
+const SHOT_DIR = shotDir();
 
 async function shotBothViewports(page: Page, label: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 800 });
