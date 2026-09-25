@@ -1,8 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import { mountView } from "./harness";
+import { shotDir } from "./shot-dir";
 
-const SCREENSHOT_DIR = ".for_bepy/screenshots/32088-134328660195440996";
+// shotDir() resolves the running session's own id and creates the directory - never a
+// hand-rolled literal (todo 958).
+const SCREENSHOT_DIR = shotDir();
 
 // Todo 666, the Drafts panel. Drives the REAL panel and editor, not internal
 // state. The harness's invoke map is fixed at mount, so this swaps in a
@@ -310,6 +312,5 @@ test("the footer stays inside the card and the toolbar stays reachable at the re
   // min-height alone would not prove the flex chrome actually yielded space.
   expect(bodyBox.height).toBeGreaterThan(60);
 
-  mkdirSync(SCREENSHOT_DIR, { recursive: true });
   await page.screenshot({ path: `${SCREENSHOT_DIR}/drafts-panel-360x390.png`, clip: hostBox });
 });

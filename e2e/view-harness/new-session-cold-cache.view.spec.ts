@@ -1,16 +1,17 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { shotDir } from "./shot-dir";
 
 // Todo 809: forces new-session-cache.ts's cold-cache path (boot's own
 // warmNewSessionCache() otherwise always warms it first) so
 // .modal-card-loading (src/shared/modal.css) actually renders. The delay is
 // an addInitScript ahead of the boot navigation - too late post-mount.
 
-const SCREENSHOT_DIR = path.join(
-  process.cwd(), ".for_bepy", "screenshots", "32088-134328660195440996",
-);
+// shotDir() resolves the running session's own id and creates the directory - never a
+// hand-rolled literal (todo 958).
+const SCREENSHOT_DIR = shotDir();
 
 const PROJECT = {
   id: "proj1", path: "C:/repo", name: "repo", parent_segment: null,
@@ -70,7 +71,6 @@ test.describe("view-harness / new-session cold cache", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("cold project-picker and model/effort steps show the loading spinner shell", async ({ page }) => {
-    mkdirSync(SCREENSHOT_DIR, { recursive: true });
     await mountColdSessions(page);
 
     await page.locator("#sessionsFab").click();
