@@ -3,8 +3,23 @@
 // immediate flush on blur, and the load-bearing focused-input rule (a
 // reconciled remote draft must never clobber text the user is typing).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { mountComposer as mountComposerBase, destroyMounted, tauriMock } from "./helpers/composer-mount.mjs";
+
+// todo 955: mountComposerBase's dynamic import() of composer.ts (and its
+// whole dependency graph) is a real esbuild/Vite transform, not application
+// logic - measured 4.3-4.5s the first time any test in this file imports it
+// under normal contention, under 15ms every time after, and over 10s under
+// genuine CPU starvation. That one-time cost, not the debounce/fake-timer
+// logic below, is what was eating almost all of the first test's budget - see
+// composer-draft-clear-cross-device.test.mjs for the same fix and fuller
+// evidence. Paying it here, in a hook with no assertion of its own, removes
+// the wall-clock race from every `it()` below instead of widening any of
+// them - the explicit timeout only bounds an unconditional module load.
+beforeAll(async () => {
+  await import("../src/shared/transport.ts");
+  await import("../src/shared/chat/composer.ts");
+}, 30000);
 
 let invokeMock;
 
@@ -43,10 +58,11 @@ function regainVisibility() {
 }
 
 describe("Composer draft sync - debounce coalescing", () => {
-  // Measured 2026-09-01: this test's own jsdom mount + fake-timer path takes
-  // 4.7-4.9s on an idle machine, leaving under 300ms of headroom against the
-  // 5000ms default testTimeout - one loaded run tipped over at 5010ms. Widen
-  // just this test rather than the file's default.
+  // todo 955: this used to carry an explicit 15000ms timeout, guessing the
+  // slowness lived in "this test's own jsdom mount + fake-timer path". It
+  // didn't - the file's beforeAll() above now pays the real cost (a cold
+  // module transform) once, so this runs in single-digit ms like its siblings
+  // and needs no timeout override.
   it("coalesces rapid keystrokes into a single set_composer_draft call", async () => {
     const { textarea } = await mountComposer("sess-debounce");
     vi.useFakeTimers();
@@ -60,7 +76,7 @@ describe("Composer draft sync - debounce coalescing", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(draftPushCalls().length).toBe(1);
     expect(draftPushCalls()[0][1]).toMatchObject({ sessionId: "sess-debounce", text: "hello" });
-  }, 15000);
+  });
 });
 
 describe("Composer draft sync - flush on blur", () => {

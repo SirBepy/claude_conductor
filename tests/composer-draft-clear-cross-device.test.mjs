@@ -5,8 +5,25 @@
 // an empty-text tombstone, which has to land on both the textarea and the
 // localStorage copy.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { mountComposer as mountComposerBase, destroyMounted, tauriMock } from "./helpers/composer-mount.mjs";
+
+// todo 955: mountComposerBase's dynamic import() of composer.ts (and its
+// whole dependency graph) is a real esbuild/Vite transform, not application
+// logic - measured 4.3-4.5s the first time any test in this file imports it
+// under normal contention, under 1ms every time after, and over 10s when the
+// machine is genuinely CPU-starved (reproduced here against real concurrent
+// load, not synthetic). That one-time cost was silently eating almost all of
+// the first test's 5000ms budget, so any CPU hog beside the suite (a cargo
+// build, another agent's vitest run) tips it into a timeout that reads like a
+// reconcile-logic regression but isn't one. Paying the transform here, in a
+// hook that carries no assertion of its own, removes the wall-clock race from
+// every `it()` below instead of widening any of them - the explicit timeout
+// only bounds an unconditional module load, not application logic under test.
+beforeAll(async () => {
+  await import("../src/shared/transport.ts");
+  await import("../src/shared/chat/composer.ts");
+}, 30000);
 
 let invokeMock;
 let remoteDrafts;
