@@ -29,6 +29,7 @@ import { openModelEffortModal } from "./views/sessions/model-effort-modal";
 import { startNewSession } from "./views/sessions/pending-flow";
 import { setupRemoteVoicelines } from "./shared/remote-voiceline";
 import { setupNewsBadgeAndNotifications, setupScheduleMissedPopup, setupScheduledFireToast } from "./shared/notification-listeners";
+import { initWindowTitlebar } from "./shared/window-titlebar";
 import "./missed-panel.css";
 import type { ChatEvent } from "./types/ipc.generated";
 
@@ -233,6 +234,7 @@ if (currentWindowLabel === "main") {
 }
 
 installExternalLinkInterceptor();
+initWindowTitlebar();
 
 if (new URLSearchParams(window.location.search).get("chatswindow") === "1") {
   document.body.classList.add("chats-window-mode");

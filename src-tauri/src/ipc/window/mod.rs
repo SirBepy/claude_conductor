@@ -211,7 +211,10 @@ pub fn build_main_window(app: &AppHandle, nav: Option<&str>) -> Result<(), Strin
             // well below the 720 default. The builder needs both dimensions.
             .min_inner_size(360.0, 200.0)
             .resizable(true)
-            .decorations(true)
+            // Windows gets a custom in-webview title bar (window-titlebar.ts) instead
+            // of the native one - see the same comment on chats.rs's builder. macOS/
+            // Linux keep native decorations; nothing changes there.
+            .decorations(!cfg!(target_os = "windows"))
             .visible(false)
             .build()
             .map_err(|e| {

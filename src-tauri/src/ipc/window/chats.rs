@@ -21,6 +21,11 @@ fn build_chats_window(app: &AppHandle) -> Result<(), String> {
     .inner_size(1280.0, 860.0)
     .min_inner_size(600.0, 400.0)
     .resizable(true)
+    // Windows gets a custom in-webview title bar (window-titlebar.ts, mounted
+    // for the "main" and "session-chats" window labels only) instead of the
+    // native one, folding minimize/maximize/close into a dedicated strip
+    // above the existing header row. macOS/Linux keep native decorations.
+    .decorations(!cfg!(target_os = "windows"))
     .visible(false)
     // Opaque app-dark background so the first composited frame is never the
     // desktop wallpaper (see build_schedule_window). Matches --color-background.
