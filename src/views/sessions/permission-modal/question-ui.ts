@@ -16,6 +16,7 @@ import {
 } from "./question-state";
 import { flushAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
 import { invoke } from "../../../shared/ipc";
+import { isTextEntryElement } from "../../../shared/text-entry";
 
 // Cadence for the live cross-device reconcile poll below - matches the order
 // of magnitude of the phone's 700ms poll and the Rust adaptive poll (500-2000ms).
@@ -43,14 +44,6 @@ export { isQuestionAnswered, computeAnswer, formatAnswersAsMessage, extractQuest
 // zero-selections state - lets isQuestionAnswered require a real choice
 // (checkbox or free text) instead of treating an untouched question as done.
 const NONE_LABEL = "None of the above";
-
-/** True for the elements whose focus is what raises the phone's soft keyboard,
- *  so hardware-back can lower it before it starts navigating. */
-function raisesSoftKeyboard(el: HTMLElement): boolean {
-  return el instanceof HTMLTextAreaElement
-    || el instanceof HTMLInputElement
-    || el.isContentEditable;
-}
 
 export function renderQuestionUI(opts: QuestionUIOpts): void {
   const { host } = ensureHost();
@@ -298,7 +291,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // selectSession's rehydratePendingPrompts refetches it from the daemon
     // on the way back.
     const focused = document.activeElement;
-    if (focused instanceof HTMLElement && raisesSoftKeyboard(focused)) {
+    if (focused instanceof HTMLElement && isTextEntryElement(focused)) {
       focused.blur();
       return true;
     }

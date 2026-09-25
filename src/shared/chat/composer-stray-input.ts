@@ -7,6 +7,7 @@
 
 import { HOST_ID as QUESTION_CARD_HOST_ID } from "../../views/sessions/permission-modal/host";
 import { isAnyModalOpen } from "../modal-input-lock";
+import { isFormControlElement } from "../text-entry";
 import { PASTE_LOG_THRESHOLD, clipboardHasFile } from "./composer-attachments";
 
 export interface ComposerStrayInputCallbacks {
@@ -29,13 +30,7 @@ export class ComposerStrayInput {
     // non-editable, so modal-input-lock lets the event bubble here - this
     // must not hijack it just because activeElement isn't a field.
     if (isAnyModalOpen()) return null;
-    const active = document.activeElement;
-    if (
-      active instanceof HTMLTextAreaElement ||
-      active instanceof HTMLInputElement ||
-      active instanceof HTMLSelectElement ||
-      (active instanceof HTMLElement && active.isContentEditable)
-    ) return null;
+    if (isFormControlElement(document.activeElement)) return null;
     const cardInput = document.querySelector<HTMLTextAreaElement>(
       `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`,
     );

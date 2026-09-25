@@ -2,6 +2,8 @@
 // this through pr-review-modal, and lit-html touches document at module eval,
 // which breaks node-environment tests that never render a modal.
 
+import { isTextEntryElement } from "./text-entry";
+
 const lockedHosts: HTMLElement[] = [];
 const keyAllowlists = new WeakMap<HTMLElement, (e: KeyboardEvent) => boolean>();
 const selectableOptions = new WeakMap<HTMLElement, () => HTMLElement[]>();
@@ -9,11 +11,6 @@ let globalGuardDisposer: (() => void) | null = null;
 
 function isInsideLockedHost(target: EventTarget | null): boolean {
   return target instanceof Node && lockedHosts.some((h) => h.contains(target));
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
 }
 
 /** Registers `host`'s ordered, number-selectable option elements - the trap
@@ -54,7 +51,7 @@ function ensureGlobalGuard(): void {
     // own text field so "2" still types a 2. Only the topmost (most
     // recently locked) host's registered options respond, matching which
     // step is actually mounted right now.
-    if (/^[1-9]$/.test(e.key) && !(inside && isEditableTarget(e.target))) {
+    if (/^[1-9]$/.test(e.key) && !(inside && isTextEntryElement(e.target))) {
       const topHost = lockedHosts[lockedHosts.length - 1]!;
       const opt = selectableOptions.get(topHost)?.()[Number(e.key) - 1];
       if (opt) {

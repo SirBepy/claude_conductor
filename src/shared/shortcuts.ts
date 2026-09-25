@@ -1,5 +1,7 @@
 // src/shared/shortcuts.ts
 
+import { isFormControlElement } from "./text-entry";
+
 export interface ShortcutDef {
   id: string;
   defaultKeys: string;
@@ -211,15 +213,7 @@ function _init(): void {
     });
     if (!def) return;
 
-    if (def.suppressInInput) {
-      const t = document.activeElement;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        t instanceof HTMLSelectElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      ) return;
-    }
+    if (def.suppressInInput && isFormControlElement(document.activeElement)) return;
 
     if (def.context && getActiveView && getActiveView() !== def.context) return;
 
