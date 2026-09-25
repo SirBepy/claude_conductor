@@ -26,6 +26,14 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   characters_changed: "characters-changed",
   message_drafts_changed: "message-drafts-changed",
   user_todos_changed: "user-todos-changed",
+  // Same snake/kebab spelling, so this one is easy to mistake for already
+  // wired up. Found by todo 946's own check (`tests/
+  // notifier-event-registration-contract.test.mjs`): `preview-panel.ts` already
+  // called `getTransport().listen("preview", ...)`, which reached the desktop
+  // fine via `daemon_link/mod.rs`'s existing arm, but had no map entry, so the
+  // phone's `HttpTransport.listen` silently no-op'd and the live push never
+  // arrived there.
+  preview: "preview",
 };
 export const GLOBAL_KEBAB_EVENTS = new Set(Object.values(GLOBAL_EVENT_MAP));
 
