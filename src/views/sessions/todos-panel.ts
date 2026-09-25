@@ -122,11 +122,11 @@ class TodosPanel implements TodosPanelHandle {
   private async subscribeLive(): Promise<void> {
     try {
       this.unlisten = await getTransport().listen<{ project_id?: string }>(
-        "user_todos_changed",
+        "user-todos-changed",
         () => this.refresh(),
       );
     } catch (err) {
-      console.warn("[todos-panel] listen(user_todos_changed) failed", err);
+      console.warn("[todos-panel] listen(user-todos-changed) failed", err);
     }
   }
 

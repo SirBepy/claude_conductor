@@ -25,6 +25,7 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   session_characters_changed: "session-characters-changed",
   characters_changed: "characters-changed",
   message_drafts_changed: "message-drafts-changed",
+  user_todos_changed: "user-todos-changed",
 };
 export const GLOBAL_KEBAB_EVENTS = new Set(Object.values(GLOBAL_EVENT_MAP));
 
