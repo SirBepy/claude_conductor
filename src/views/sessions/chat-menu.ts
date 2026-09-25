@@ -20,6 +20,9 @@ import {
 import { isRawViewEnabled, setRawViewEnabled } from "../../shared/chat/message-filter-pref";
 import { state } from "./state";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
+import { sendWithFailureRecovery } from "./send-with-failure-recovery";
+import { sessionEvents } from "../../shared/chat/event-store";
+import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
 
 export interface ChatMenuCtx {
   kind: "live" | "draft";
@@ -316,6 +319,29 @@ export function buildChatMenuBlock(
             catch (err) { console.warn("[chat-menu] detach_window unavailable", err); }
           },
       disabledReason: isDraft ? "No active agent" : (!sessionId ? "No session" : undefined),
+    },
+    {
+      // Injects the literal `/deploy` (never `/deploy go`) - the skill's own
+      // step 2 shows the repo/branch/sha/subject and asks to confirm before
+      // it does anything, so the confirmation lives there, with more context
+      // than a menu item could show, not duplicated here.
+      icon: "rocket-launch",
+      label: "Deploy",
+      run: isDraft || !sessionId || ctx.readOnly
+        ? undefined
+        : async () => {
+            const blocks: ContentBlock[] = [{ type: "text", text: "/deploy" }];
+            const optimisticEvent = {
+              type: "user_message",
+              content: blocks,
+              timestamp: BigInt(Date.now()),
+            } as ChatEvent;
+            sessionEvents.pushSynthetic(sessionId, optimisticEvent);
+            await sendWithFailureRecovery(sessionId, String(cwd ?? "."), blocks, optimisticEvent);
+          },
+      disabledReason: isDraft
+        ? "No active agent"
+        : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" : undefined)),
     },
   ];
 
