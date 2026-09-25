@@ -304,9 +304,7 @@ class RailPanel implements RailController {
   dockBack(): void {
     if (this.mode !== "window" || !this.currentSessionId) return;
     savePopped(this.currentSessionId, false);
-    void invoke("close_preview_window").catch((err) => {
-      console.error("[rail-panel] close_preview_window failed", err);
-    });
+    this.sendClose();
   }
 
   /** Window mode's X: the preview is dismissed, not relocated, so the docked
@@ -316,6 +314,13 @@ class RailPanel implements RailController {
     if (this.mode !== "window" || !this.currentSessionId) return;
     saveOpen(this.currentSessionId, false);
     savePopped(this.currentSessionId, false);
+    this.sendClose();
+  }
+
+  /** The one `close_preview_window` call shared by dockBack() and
+   *  closePreview() - each writes its OWN flags first (they diverge on the
+   *  open flag), then both request the same close. */
+  private sendClose(): void {
     void invoke("close_preview_window").catch((err) => {
       console.error("[rail-panel] close_preview_window failed", err);
     });
