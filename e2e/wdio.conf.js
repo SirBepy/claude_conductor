@@ -37,6 +37,13 @@ const application = path.join(debugDir, "claude-conductor.exe");
 const daemonBin = path.join(debugDir, "cc-conductor-daemon.exe");
 const tauriDriverBin = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver.exe");
 const edgeDriver = path.resolve(__dirname, "drivers", "msedgedriver.exe");
+// e2e/drivers/ is gitignored (per-machine), so a fresh clone has no record of which
+// msedgedriver build it needs until it hits the wall todo 956 describes. As of
+// 2026-09-25 the required major version is 153, matching the installed WebView2
+// runtime on this machine - checkEdgeDriverVersion() below re-verifies this at every
+// run rather than trusting the number to stay current. Download a matching driver from
+// https://msedgedriver.microsoft.com/<full-version>/edgedriver_win64.zip and drop it at
+// e2e/drivers/msedgedriver.exe.
 // Isolated instance: distinct pipe/lockfile/hook-port so the harness daemon and
 // any app-respawned daemon never collide with a real cc-conductor-daemon the
 // user has running (ai_todo 71 / ai_todo 74).
@@ -54,6 +61,59 @@ let daemon;
 let vite;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// todo 956: a stale msedgedriver makes EVERY spec fail at session creation, in the
+// `before` hook, with an error that reads as "the app broke" rather than "the driver is
+// stale" - it cost most of an hour on 2026-09-24. Exported so the isolation check in the
+// todo's verify floor can call these directly without spawning the real suite.
+
+/** The installed WebView2 runtime's full version string, e.g. "153.0.4234.48". This is
+ *  what actually diagnosed the 2026-09-24 incident - `pv` on the "Microsoft Edge WebView2
+ *  Runtime" client under EdgeUpdate's registered products. */
+export function getInstalledWebView2Version() {
+  const out = execSync(
+    "powershell -NoProfile -Command " +
+      JSON.stringify(
+        "Get-ChildItem 'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients' | " +
+          "ForEach-Object { $p = Get-ItemProperty $_.PSPath; " +
+          "if ($p.name -eq 'Microsoft Edge WebView2 Runtime') { $p.pv } }"
+      ),
+    { encoding: "utf8" }
+  ).trim();
+  if (!out) {
+    throw new Error(
+      "[wdio] Could not read the installed WebView2 runtime version from " +
+        "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients - is WebView2 installed?"
+    );
+  }
+  return out;
+}
+
+/** Compares `driverPath --version`'s major version against `installedRuntimeVersion`'s
+ *  major version and throws a one-line, actionable error naming both full versions plus
+ *  the download URL if they differ - never lets a version skew masquerade as 8 broken
+ *  specs. Returns `{ driverVersion, runtimeVersion }` on a match. */
+export function checkEdgeDriverVersion(driverPath, installedRuntimeVersion) {
+  const driverOutput = execSync(`${JSON.stringify(driverPath)} --version`, { encoding: "utf8" }).trim();
+  const driverMatch = driverOutput.match(/Microsoft Edge WebDriver ([\d.]+)/);
+  if (!driverMatch) {
+    throw new Error(`[wdio] Could not parse "${driverPath} --version" output: "${driverOutput}"`);
+  }
+  const driverVersion = driverMatch[1];
+  const driverMajor = driverVersion.split(".")[0];
+  const runtimeMajor = installedRuntimeVersion.split(".")[0];
+  if (driverMajor !== runtimeMajor) {
+    throw new Error(
+      `[wdio] msedgedriver/WebView2 version mismatch - every spec would fail at session ` +
+        `creation. Driver at ${driverPath} is ${driverVersion} (major ${driverMajor}); the ` +
+        `installed WebView2 runtime is ${installedRuntimeVersion} (major ${runtimeMajor}). ` +
+        `Download the matching driver from ` +
+        `https://msedgedriver.microsoft.com/${installedRuntimeVersion}/edgedriver_win64.zip ` +
+        `and replace ${driverPath}.`
+    );
+  }
+  return { driverVersion, runtimeVersion: installedRuntimeVersion };
+}
 
 // The debug binary auto-opens ONLY the Chats window (`bootstrap.rs:29-31`) and
 // builds the dashboard lazily (`:33-37`), so tauri-driver binds to
@@ -172,6 +232,11 @@ export const config = {
   // Spawn the daemon before the app launches so the Sessions view renders from
   // its snapshot. No-autostart keeps it from spawning real automation channels.
   onPrepare: async () => {
+    // Fails fast, before the build/vite/daemon spawns below, so a stale driver costs
+    // seconds instead of burning every spec's retries on an opaque session-creation
+    // error (todo 956).
+    checkEdgeDriverVersion(edgeDriver, getInstalledWebView2Version());
+
     // Propagate the instance label into the current process env so that
     // tauri-driver (spawned in beforeSession without an explicit env) inherits
     // it, passes it to the app, and the app's reconnect loop + respawn both
