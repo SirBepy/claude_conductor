@@ -17,6 +17,7 @@ import { AUQ_EXTRA_SENTINEL, isAuqAnswerBlock } from "./chat-transforms";
 import { loadAllHeld, saveAllHeld } from "./held-messages-persistence";
 import { HeldMessagesRender } from "./held-messages-render";
 import { HeldDraftSync } from "./held-draft-sync";
+import { HeldMessagesRescue } from "./held-messages-rescue";
 import "./held-messages.css";
 
 export interface HeldItem {
@@ -35,14 +36,6 @@ const DEFER_RETRY_MS = 2100;
 // flushing anyway, which would be the same race the wait exists to avoid.
 const SEND_NOW_IDLE_POLL_MS = 150;
 const SEND_NOW_IDLE_TIMEOUT_MS = 20_000;
-
-// Auto-rescue fuse (todo 926): a fire-and-forget AUQ answer staged while
-// `busy` is stuck true is deadlocked - the thing that would clear `busy`
-// (the turn's own result line) is what's waiting on the answer. The healthy
-// case (the asking turn genuinely still finishing) resolves on its own via
-// onCompletion within ~15s, well under this, so the fuse only ever fires on
-// the genuinely stuck case. Decided by Joe 2026-09-10: ~60s.
-const RESCUE_FUSE_MS = 60_000;
 
 /** Everything the controller needs from the currently-mounted pane/composer.
  * Re-supplied on every `attach()` because the pane DOM and the per-session
@@ -103,19 +96,17 @@ export class HeldMessages {
   private attached: HeldAttach | null = null;
   private deferredSid: string | null = null;
   private deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  // Auto-rescue fuse state (todo 926). Scoped to the ATTACHED session only:
-  // the rescue reuses sendNow(), which acts through `this.attached`'s own
-  // interrupt()/getIsBusy() closures, and those are only reliable for
-  // whichever session is currently mounted (getIsBusy() in particular reads
-  // "the current session", not "sessionId X" - see isCurrentSessionBusy()).
-  // A background stageFor() (answered a question in a chat you're not
-  // looking at) does not arm this; the existing ~15s background sweep still
-  // owns that case, unchanged.
-  private rescueSid: string | null = null;
-  private rescueTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
   private render = new HeldMessagesRender(this);
   private sync = new HeldDraftSync();
+  // Auto-rescue fuse (todo 926, split out per todo 935 - see
+  // held-messages-rescue.ts for the fuse itself and the safety argument).
+  private rescue = new HeldMessagesRescue({
+    isAttachedTo: (sid) => this.attached?.sessionId === sid,
+    hasAuqAnswerFor: (sid) => this.hasAuqAnswerFor(sid),
+    isBusy: () => this.attached?.getIsBusy() ?? false,
+    sendNow: () => this.sendNow(),
+  });
 
   private _visibilityHandler = (): void => {
     if (document.visibilityState === "hidden") {
@@ -151,7 +142,7 @@ export class HeldMessages {
     // opts replaces) - cancel rather than let it fire against the wrong
     // turn later. Re-attaching to the SAME session (its own timer, still
     // counting) is left alone.
-    if (this.rescueSid && this.rescueSid !== opts.sessionId) this.clearRescue();
+    if (this.rescue.sid && this.rescue.sid !== opts.sessionId) this.rescue.clear();
     this.attached = opts;
     opts.onChange();
     // Reconcile on session open: the local map may be stale or empty if a
@@ -195,11 +186,7 @@ export class HeldMessages {
       this.attached.sessionId = to;
       this.render.renderChip();
     }
-    // Follow the rename rather than cancel: fireRescue() re-reads rescueSid
-    // at fire time, so this keeps the SAME in-flight timer pointed at the
-    // session's new id instead of losing the fuse to a mid-flight rename
-    // (e.g. a pending-session placeholder upgrading while its answer waits).
-    if (this.rescueSid === from) this.rescueSid = to;
+    this.rescue.rename(from, to);
   }
 
   private get sid(): string | null {
@@ -270,7 +257,7 @@ export class HeldMessages {
     // that's actually on screen right now means `send_message` was just
     // refused as SESSION_BUSY. Arm the fuse so a stuck (never-clearing)
     // `busy` gets rescued instead of wedging the chat until freeze/unfreeze.
-    if (isAuqAnswerBlock(blocks[0]) && sid === this.sid) this.scheduleRescue(sid);
+    if (isAuqAnswerBlock(blocks[0]) && sid === this.sid) this.rescue.schedule(sid);
     return true;
   }
 
@@ -290,7 +277,7 @@ export class HeldMessages {
     this.clearServerHeld(sid);
     this.deferredSid = null;
     this.clearDeferRetry();
-    if (this.rescueSid === sid) this.clearRescue();
+    if (this.rescue.sid === sid) this.rescue.clear();
     this.render.reset();
     if (includeDraft && draftBlocks.length) a.clearComposer();
     a.onChange();
@@ -316,7 +303,7 @@ export class HeldMessages {
     // Manual override supersedes the auto-rescue fuse outright - flush()
     // below would clear it anyway on success, but this also covers the
     // "turn ignored the interrupt" path where flush() never runs.
-    this.clearRescue();
+    this.rescue.clear();
     try {
       await a.interrupt();
     } catch {
@@ -336,54 +323,13 @@ export class HeldMessages {
     return true;
   }
 
-  /** Arm the 60s auto-rescue fuse for `sid` (todo 926), unless one is already
-   *  running. One at a time: `sid` is always the attached session (the only
-   *  caller, stageFor, gates on that), so a second stage before the first
-   *  fuse fires just leaves the original countdown running. */
-  private scheduleRescue(sid: string): void {
-    if (this.rescueTimer !== null) return;
-    this.rescueSid = sid;
-    this.rescueTimer = setTimeout(() => this.fireRescue(), RESCUE_FUSE_MS);
-  }
-
-  /** Disarm the auto-rescue fuse, if any. Safe to call unconditionally. */
-  private clearRescue(): void {
-    if (this.rescueTimer !== null) {
-      clearTimeout(this.rescueTimer);
-      this.rescueTimer = null;
-    }
-    this.rescueSid = null;
-  }
-
   /** Public escape hatch for a full pane/view teardown (todo 926's "chat is
    *  destroyed" case) that isn't a same-controller attach() to a different
    *  session - e.g. leaving the Sessions view entirely. This controller is a
    *  per-window singleton that otherwise survives such a teardown by design
    *  (see the class-doc comment), so nothing else disarms the fuse here. */
   cancelPendingRescue(): void {
-    this.clearRescue();
-  }
-
-  /** Fires ~60s after an AUQ answer was staged (see stageFor). Reads
-   *  rescueSid fresh rather than closing over the id staged at, so a
-   *  renameSession() mid-flight is followed rather than missed. Every guard
-   *  below is a reason NOT to touch the turn - this is the highest-risk path
-   *  in the class, since an errant cancel_turn would hit an unrelated, live
-   *  turn:
-   *   - the session was switched away from (attach() to a different sid
-   *     already cleared this - rescueSid would be null here, not a stale id)
-   *   - the answer already flushed by the normal completion path
-   *   - `busy` already cleared (rescuing now would interrupt a FRESH turn,
-   *     not the stuck one this fuse exists for) */
-  private fireRescue(): void {
-    this.rescueTimer = null;
-    const sid = this.rescueSid;
-    this.rescueSid = null;
-    if (!sid) return;
-    if (this.attached?.sessionId !== sid) return;
-    if (!this.hasAuqAnswerFor(sid)) return;
-    if (!this.attached.getIsBusy()) return;
-    void this.sendNow();
+    this.rescue.clear();
   }
 
   /** Composer routed a normal (not-busy) send here because held items exist:
@@ -401,7 +347,7 @@ export class HeldMessages {
     this.clearServerHeld(sid);
     this.deferredSid = null;
     this.clearDeferRetry();
-    if (this.rescueSid === sid) this.clearRescue();
+    if (this.rescue.sid === sid) this.rescue.clear();
     this.render.reset();
     a.onChange();
     if (bundle.length === 0) return true;
