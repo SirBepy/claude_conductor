@@ -12,10 +12,13 @@ import { sortProjectGroups, filterProjectGroups } from "../src/views/projects/pr
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const distDir = join(__dirname, "..", "src");
 const html = readFileSync(join(distDir, "index.html"), "utf8");
-const projectsTs = readFileSync(
-  join(distDir, "views", "projects", "projects.ts"),
-  "utf8",
-);
+// The view's markup lives in projects-render.ts since todo 961 split it out, while
+// state and the exported list/refresh functions stayed in projects.ts. Every static
+// assertion below is about the view as a whole, so both halves are read as one.
+const projectsTs = [
+  readFileSync(join(distDir, "views", "projects", "projects.ts"), "utf8"),
+  readFileSync(join(distDir, "views", "projects", "projects-render.ts"), "utf8"),
+].join("\n");
 const projectDetailTs = readFileSync(
   join(distDir, "views", "project-detail", "project-detail.ts"),
   "utf8",
