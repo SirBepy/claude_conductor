@@ -43,8 +43,7 @@ import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
-import { EffortPopover } from "./effort-popover";
-import { ModelPopover } from "./model-popover";
+import { ModelEffortState } from "./session-statusbar-model-effort";
 import { GitCard } from "./git-card";
 import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
@@ -98,12 +97,8 @@ export class SessionStatusbar {
   // of gitCwd, so an off-repo cwd stays visible even while gitCwd (and the
   // git chip's branch/sha data) fall back to the chat's own repo.
   private liveCwd: string | null;
-  private effort: string;
   private sessionId: string | null;
-  private sessionModel: string | null;
-  private readOnlyEffort: boolean;
-  private onEffortChange: ((effort: string) => void) | null;
-  private onModelChange: ((model: string) => void) | null;
+  private modelEffort: ModelEffortState;
   private accountId: string | null;
   private onAccountClick: (() => void) | null;
   private onConfig: ((model: string | null, effort: string, effortEditable: boolean) => void) | null;
@@ -122,13 +117,6 @@ export class SessionStatusbar {
   // Polls the server_supervisor for this project's running dev servers.
   private serversTimer: ReturnType<typeof setInterval> | null = null;
   private imagesPopover = new ImagesPopover();
-  private effortPopover = new EffortPopover();
-  private modelPopover = new ModelPopover();
-  /** Whatever last opened the model/effort popover - a statusline chip, or the
-   *  pane header's config text. Which one it was decides whether a re-render
-   *  has to re-bind the anchor; see `reanchorConfigPopover`. */
-  private modelAnchor: HTMLElement | null = null;
-  private effortAnchor: HTMLElement | null = null;
   private gitCard = new GitCard();
   private overflowPopover = new OverflowPopover();
   private mobileUnsub: (() => void) | null = null;
@@ -140,12 +128,14 @@ export class SessionStatusbar {
     this.cwd = opts.cwd ?? null;
     this.gitCwd = this.cwd;
     this.liveCwd = this.cwd;
-    this.effort = opts.effort ?? "";
     this.sessionId = opts.sessionId ?? null;
-    this.sessionModel = opts.sessionModel ?? null;
-    this.readOnlyEffort = opts.readOnly ?? false;
-    this.onEffortChange = opts.onEffortChange ?? null;
-    this.onModelChange = opts.onModelChange ?? null;
+    this.modelEffort = new ModelEffortState({
+      effort: opts.effort ?? "",
+      sessionModel: opts.sessionModel ?? null,
+      readOnly: opts.readOnly ?? false,
+      onEffortChange: opts.onEffortChange ?? null,
+      onModelChange: opts.onModelChange ?? null,
+    });
     this.accountId = opts.accountId ?? null;
     this.onAccountClick = opts.onAccountClick ?? null;
     this.onConfig = opts.onConfig ?? null;
@@ -374,9 +364,7 @@ export class SessionStatusbar {
   }
 
   setReadOnlyEffort(readOnly: boolean): void {
-    if (this.readOnlyEffort === readOnly) return;
-    this.readOnlyEffort = readOnly;
-    this.render();
+    if (this.modelEffort.setReadOnlyEffort(readOnly)) this.render();
   }
 
   /** Switches the model chip from draft-local editing to live editing once the
@@ -384,9 +372,7 @@ export class SessionStatusbar {
    *  into the started session, or picking a model would only update local
    *  state instead of calling set_session_model). */
   disableModelEdit(): void {
-    if (!this.onModelChange) return;
-    this.onModelChange = null;
-    this.render();
+    if (this.modelEffort.disableModelEdit()) this.render();
   }
 
   /** Open (or dismiss) the model slider on `anchor`. Public because the pane
@@ -394,37 +380,20 @@ export class SessionStatusbar {
    *  surfaces share one popover and one commit path. `anchor` may sit outside
    *  this statusbar's container. */
   toggleModelPopover(anchor: HTMLElement): void {
-    const wasOpen = this.modelPopover.isOpen;
-    this.closeChipPopovers();
-    if (wasOpen) return;
-    this.modelAnchor = anchor;
-    this.modelPopover.open(anchor, {
-      model: this.sessionModel ?? this.meta.model ?? "",
-      sessionId: this.sessionId,
-      onModelChange: this.onModelChange ?? undefined,
-      onCommit: (next) => {
-        this.sessionModel = next;
-        this.modelPopover.close();
-        this.render();
-      },
-    });
+    this.modelEffort.toggleModelPopover(
+      anchor, this.sessionId, this.meta.model,
+      () => this.closeChipPopovers(), () => this.render(),
+    );
   }
 
   /** Effort's counterpart to `toggleModelPopover`. A read-only (external)
    *  session has no effort to set, so the click is swallowed here rather than
    *  in each caller. */
   toggleEffortPopover(anchor: HTMLElement): void {
-    if (this.readOnlyEffort) return;
-    const wasOpen = this.effortPopover.isOpen;
-    this.closeChipPopovers();
-    if (wasOpen) return;
-    this.effortAnchor = anchor;
-    this.effortPopover.open(anchor, {
-      effort: this.effort,
-      sessionId: this.sessionId,
-      onEffortChange: this.onEffortChange,
-      onCommit: (next) => { this.effort = next; this.effortPopover.close(); this.render(); },
-    });
+    this.modelEffort.toggleEffortPopover(
+      anchor, this.sessionId,
+      () => this.closeChipPopovers(), () => this.render(),
+    );
   }
 
   destroy(): void {
@@ -452,9 +421,9 @@ export class SessionStatusbar {
     return {
       meta: this.meta,
       metaLoaded: this.metaLoaded,
-      sessionModel: this.sessionModel,
-      effort: this.effort,
-      readOnlyEffort: this.readOnlyEffort,
+      sessionModel: this.modelEffort.sessionModel,
+      effort: this.modelEffort.effort,
+      readOnlyEffort: this.modelEffort.readOnlyEffort,
       accountId: this.accountId,
       hasAccountClick: !!this.onAccountClick,
       gitInfo: this.gitInfo,
@@ -539,7 +508,7 @@ export class SessionStatusbar {
     wireChipPopovers(this.container, this.popoverWireCtx());
 
     updateRowFades(this.container);
-    this.onConfig?.(this.sessionModel ?? this.meta.model, this.effort, !this.readOnlyEffort);
+    this.onConfig?.(this.modelEffort.sessionModel ?? this.meta.model, this.modelEffort.effort, !this.modelEffort.readOnlyEffort);
   }
 
   /** The popovers a closeChipPopovers() sweep dismisses, bundled for reuse by
@@ -550,8 +519,8 @@ export class SessionStatusbar {
       aiTodosPopover: this.aiTodosPopover,
       serversPopover: this.serversPopover,
       imagesPopover: this.imagesPopover,
-      effortPopover: this.effortPopover,
-      modelPopover: this.modelPopover,
+      effortPopover: this.modelEffort.effortPopover,
+      modelPopover: this.modelEffort.modelPopover,
       gitCard: this.gitCard,
       overflowPopover: this.overflowPopover,
       tally: this.tally,
@@ -567,8 +536,8 @@ export class SessionStatusbar {
       liveCwd: this.liveCwd,
       gitInfo: this.gitInfo,
       gitCwd: this.gitCwd,
-      effortAnchor: this.effortAnchor,
-      modelAnchor: this.modelAnchor,
+      effortAnchor: this.modelEffort.effortAnchor,
+      modelAnchor: this.modelEffort.modelAnchor,
       toggleModelPopover: (anchor) => this.toggleModelPopover(anchor),
       toggleEffortPopover: (anchor) => this.toggleEffortPopover(anchor),
       refreshGitInfo: () => void this.refreshGitInfo(),
