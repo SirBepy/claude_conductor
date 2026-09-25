@@ -396,6 +396,22 @@ mod tests {
         let prompt = args.get(p + 1).map(String::as_str).unwrap_or("");
         assert!(prompt.contains("report_turn_status"), "prompt must nudge the report_turn_status tool: {prompt}");
         assert!(prompt.contains("<cc-progress:"), "prompt must request the progress marker: {prompt}");
+        // todo 963: a spawned session's tool list is whatever `claude -p
+        // --input-format=stream-json` registers, and `TodoWrite` is not in it
+        // (measured 2026-09-26 against CLI 2.1.278 - naming it in `--tools`
+        // does not add it back, the flag silently drops the unknown name). The
+        // checklist the prompt is asking for is driven by our OWN MCP
+        // `write_plan` tool, which is advertised, so the prompt must name that
+        // one. Asserting both halves, because a prompt sentence naming a tool
+        // rots exactly the way this one did without the tie.
+        assert!(
+            prompt.contains(crate::mcp::tool_schemas_workflow::TOOL_WRITE_PLAN),
+            "prompt must name the write_plan tool for the step checklist: {prompt}"
+        );
+        assert!(
+            !prompt.contains("TodoWrite"),
+            "prompt must not instruct TodoWrite - it is absent from a spawned session's tool list: {prompt}"
+        );
     }
 
     #[tokio::test]

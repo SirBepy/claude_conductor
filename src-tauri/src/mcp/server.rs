@@ -334,6 +334,31 @@ mod tests {
         assert!(names.contains(&"write_plan"));
     }
 
+    /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
+    /// 2026-09-26 against CLI 2.1.278: `claude -p --input-format=stream-json`
+    /// registers `TaskCreate`/`TaskList`/`TaskUpdate` but no `TodoWrite`, and
+    /// naming it in `--tools` silently drops it rather than adding it). A tool
+    /// description that steers the model toward it is worse than dead text -
+    /// it points at a surface that cannot be fed. `write_plan` is the tool that
+    /// actually drives the turn-footer checklist.
+    #[test]
+    fn no_tool_description_instructs_a_tool_absent_from_a_spawned_session() {
+        let resp = dispatch(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+            27182,
+            "",
+        );
+        for tool in resp["result"]["tools"].as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap_or("<unnamed>");
+            let desc = tool["description"].as_str().unwrap_or("");
+            assert!(
+                !desc.contains("TodoWrite"),
+                "{name}'s description instructs TodoWrite, which no spawned session has; \
+                 point at write_plan instead"
+            );
+        }
+    }
+
     #[test]
     fn tools_list_jarvis_adds_four_fleet_tools() {
         let resp = dispatch_as(
