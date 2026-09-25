@@ -235,7 +235,11 @@ switch ($Command) {
         }
 
         # Build if stale: compare the debug exe's mtime against the newest source file.
+        # Capability files are compiled into the binary's ACL at build time (todo 965) - an
+        # edit there alone must count as staleness too, same LastWriteTime comparison as
+        # the .rs/Cargo.* files below.
         $srcFiles = @(Get-ChildItem -Path (Join-Path $repoRoot 'src-tauri\src') -Filter '*.rs' -Recurse)
+        $srcFiles += Get-ChildItem -Path (Join-Path $repoRoot 'src-tauri\capabilities') -Filter '*.json' -Recurse
         $srcFiles += Get-Item (Join-Path $repoRoot 'src-tauri\Cargo.toml')
         $srcFiles += Get-Item (Join-Path $repoRoot 'src-tauri\Cargo.lock')
         $newestSrc = ($srcFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
