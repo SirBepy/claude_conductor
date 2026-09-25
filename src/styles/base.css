@@ -24,6 +24,12 @@ html {
 html[data-mode="dark"] { color-scheme: dark; }
 html[data-mode="light"] { color-scheme: light; }
 
+/* Set by cursor-autohide.ts while typing; cleared on real mouse movement. */
+html.cursor-typing-hidden,
+html.cursor-typing-hidden * {
+    cursor: none !important;
+}
+
 body {
     font-family: 'DM Sans', system-ui, sans-serif;
     background-color: var(--color-background);
