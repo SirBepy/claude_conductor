@@ -94,12 +94,6 @@ describe("AUQ card vs the phone back button", () => {
     expect(opts.onCancel).not.toHaveBeenCalled();
   });
 
-  it("Escape still skips the card - only the back button changed", () => {
-    const opts = baseOpts();
-    renderQuestionUI(opts);
-
-    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-
-    expect(opts.onCancel).toHaveBeenCalledTimes(1);
-  });
+  // Escape used to be the one dismiss key that still skipped; it no longer
+  // does either, and its contract now lives in auq-escape-no-skip.test.mjs.
 });

@@ -125,7 +125,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // synchronously during setup.
   const keydownHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
-      dismissUnlessOverlayAbove();
+      handleEscape();
       return;
     }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -268,13 +268,19 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     void opts.onCancel();
   };
 
-  // A lightbox on top of this card has no overlay registration of its own,
-  // so without this check Escape/back would also cancel the card - sending
-  // NO answer at all (onCancel), unrecoverable for a keypress meant for the
-  // image. One guarded path here so both dismiss triggers stay in sync.
-  const dismissUnlessOverlayAbove = () => {
+  // Escape must never skip the question: a skipped card sends NO answer at
+  // all (onCancel), and Escape is reflexive enough to spend a whole prompt on
+  // by accident. Same shape as the phone back button below, deliberately -
+  // first press only drops focus out of a text field, and with nothing
+  // focused it does nothing. The footer's "Skip" button stays the one
+  // explicit route to answering nothing.
+  //
+  // A lightbox on top of this card has no overlay registration of its own, so
+  // it still gets checked first and consumes the press outright.
+  const handleEscape = () => {
     if (document.querySelector(`.${LIGHTBOX_OVERLAY_CLASS}`)) return;
-    cancel();
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && isTextEntryElement(focused)) focused.blur();
   };
 
   backDisposer = registerOverlayBack(() => {

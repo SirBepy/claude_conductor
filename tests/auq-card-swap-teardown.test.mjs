@@ -36,8 +36,12 @@ function baseOpts(overrides = {}) {
   };
 }
 
-function pressEscape() {
-  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+// Escape used to be the instrument here, back when it cancelled the card. It
+// no longer skips at all (auq-escape-no-skip.test.mjs), so the observable for
+// "whose cancel path is still wired" is the footer Skip button - the live
+// card's own DOM, routing through the same closure Escape used to reach.
+function clickSkip() {
+  document.querySelector('[data-act="cancel"]').click();
 }
 
 // Pairs every document.addEventListener with its removeEventListener so a
@@ -86,13 +90,13 @@ describe("a second question card tears the first one down", () => {
     expect(getActiveCardId()).toBe("p-new");
   });
 
-  it("Escape after the swap cancels only the live prompt, never the stale one", () => {
+  it("Skip after the swap cancels only the live prompt, never the stale one", () => {
     const stale = baseOpts({ id: "p-old", sessionId: "s-old" });
     renderQuestionUI(stale);
     const live = baseOpts({ id: "p-new", sessionId: "s-new" });
     renderQuestionUI(live);
 
-    pressEscape();
+    clickSkip();
 
     expect(stale.onCancel).not.toHaveBeenCalled();
     expect(live.onCancel).toHaveBeenCalledTimes(1);
@@ -126,7 +130,7 @@ describe("a second question card tears the first one down", () => {
     expect(document.querySelectorAll("#prompt-card-host").length).toBe(1);
     expect(fromFirst.filter((l) => liveDocListeners.includes(l))).toEqual([]);
 
-    pressEscape();
+    clickSkip();
     expect(first.onCancel).not.toHaveBeenCalled();
     expect(live.onCancel).toHaveBeenCalledTimes(1);
   });
