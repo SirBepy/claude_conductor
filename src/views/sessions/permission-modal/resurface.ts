@@ -24,7 +24,7 @@ import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
 import { showPermissionCard, showQuestionReplay } from "./permission-card";
 import { findQuestionIndexById } from "../../../shared/chat/chat-question-card";
-import { rerenderSidebar, dismissQuestionCard } from "./index";
+import { rerenderSidebar, dismissQuestionCard, queueSiblingQuestion, takeQueuedSiblingQuestionById } from "./index";
 import { showQuestionCard } from "./question-submit";
 
 /**
@@ -104,9 +104,15 @@ async function applyRehydration(
   recs: ReturnType<typeof findPendingPromptsForSession> | null,
 ): Promise<boolean> {
   if (!recs) return false;
-  // One park per session, so take the longest-waiting if the daemon holds two.
-  const [rec] = recs;
+  // One park per session, so take the longest-waiting (state/prompts.rs
+  // sorts by seq, oldest first) - but queue any still-open siblings instead
+  // of silently dropping them (todo 897: they'd otherwise keep the daemon's
+  // `awaiting` set with no local pointer left to reach them).
+  const [rec, ...siblings] = recs;
   if (!rec) return false;
+  for (const sib of siblings) {
+    if (sib.kind === "question") queueSiblingQuestion(sessionId, sib.payload);
+  }
   if (rec.kind !== "question") {
     storePendingPrompt(sessionId, { kind: "permission", payload: rec.payload });
     rerenderSidebar();
@@ -189,6 +195,18 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     if (rehydrated && !wanted(rehydrated)) storePendingPrompt(sessionId, rehydrated);
     else pending = rehydrated;
   }
+  // A sibling queued behind the session's current slot (todo 897) is a real,
+  // still-open prompt, not a ghost - check it before the "newest wins, mark
+  // the rest superseded" fallback below, or clicking an older sibling's own
+  // card would wrongly settle it as superseded.
+  if (!pending && cardId) {
+    const queued = takeQueuedSiblingQuestionById(sessionId, cardId);
+    if (queued) {
+      markLatestQuestion(sessionId, queued.id, queued.seq);
+      const draft = await fetchFreshestAuqDraft(sessionId, queued.id);
+      pending = { kind: "question", payload: queued, draft: draft ?? undefined };
+    }
+  }
   // `cardId` is Claude's tool_use_id and can never equal the daemon's prompt
   // uuid, so an MCP card always reached the rebuild below and settled a
   // request_id the daemon never held, stranding the real prompt (todo 833).
@@ -210,6 +228,16 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     if (payload) pending = { kind: "question", payload };
   }
   if (!pending) return false;
+  // Whatever still occupies the session's slot at this point belongs to a
+  // DIFFERENT question than `pending` (a match would have been taken - and
+  // left empty - by one of the branches above): queue it instead of letting
+  // showQuestionCard's own storePendingPrompt silently overwrite its only
+  // remaining pointer (todo 897).
+  const displaced = peekPendingPrompt(sessionId);
+  if (displaced && displaced.kind === "question" && displaced.payload.id !== pending.payload.id) {
+    takePendingPrompt(sessionId);
+    queueSiblingQuestion(sessionId, displaced.payload);
+  }
   // Only safe to drop what's on screen now we hold a replacement.
   dismissQuestionCard();
   rerenderSidebar();

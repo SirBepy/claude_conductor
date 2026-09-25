@@ -70,6 +70,67 @@ export function rerenderSidebar(): void {
   _rerenderSidebar?.();
 }
 
+// ── Sibling question queue (todo 897) ───────────────────────────────────────
+//
+// gating.ts's `_pendingPrompts` holds exactly one entry per session, whether
+// shown or parked. The daemon (1d4e1815) now keeps a session's `awaiting`
+// set to "question" until every open sibling resolves, so a second still-open
+// question for the SAME session must never overwrite that one slot - doing so
+// drops the older prompt from all local tracking while the daemon still holds
+// it open, which is exactly "input needed" with nothing on screen to answer.
+// Queued here instead; drained into the slot once the front prompt resolves
+// (promoteQueuedSibling) or picked directly by id when its own transcript
+// card is clicked (resurface.ts's reopenPendingPrompt).
+
+const _queuedSiblingQuestions = new Map<string, QuestionRequestedPayload[]>();
+
+/** Queue a still-open sibling behind whichever prompt already owns this
+ *  session's slot, instead of clobbering it. No-op if already queued.
+ *  Exported for resurface.ts's rehydration/reopen paths, which hit the same
+ *  one-slot limit against the daemon's own `list_pending_prompts`. */
+export function queueSiblingQuestion(sessionId: string, payload: QuestionRequestedPayload): void {
+  const q = _queuedSiblingQuestions.get(sessionId) ?? [];
+  if (q.some((p) => p.id === payload.id)) return;
+  q.push(payload);
+  _queuedSiblingQuestions.set(sessionId, q);
+}
+
+/** Remove and return the queued sibling carrying `id`, if any - lets a
+ *  clicked transcript card surface directly instead of falling through to
+ *  the "newest open question" fallback, which would wrongly mark a genuine
+ *  sibling as superseded (todo 860). */
+export function takeQueuedSiblingQuestionById(sessionId: string, id: string): QuestionRequestedPayload | null {
+  const q = _queuedSiblingQuestions.get(sessionId);
+  if (!q) return null;
+  const i = q.findIndex((p) => p.id === id);
+  if (i === -1) return null;
+  const [payload] = q.splice(i, 1);
+  if (q.length === 0) _queuedSiblingQuestions.delete(sessionId);
+  return payload ?? null;
+}
+
+/** Promote the oldest queued sibling once the session's front prompt
+ *  resolves, by re-running the normal arrival gate - the slot is already
+ *  empty by the time handlePromptResolved calls this, so it parks or shows
+ *  exactly as a fresh event would. */
+function promoteQueuedSibling(sessionId: string): void {
+  const q = _queuedSiblingQuestions.get(sessionId);
+  if (!q?.length) return;
+  const next = q.shift();
+  if (q.length === 0) _queuedSiblingQuestions.delete(sessionId);
+  if (next) handleQuestionRequested(next);
+}
+
+/** Which session (if any) currently owns the pending-prompt slot holding
+ *  `id` - captured before clearPendingPromptById removes it, so the right
+ *  sibling queue can be drained. */
+function findSessionForPendingId(id: string): string | null {
+  for (const sid of pendingPromptSessionIds()) {
+    if (peekPendingPrompt(sid)?.payload.id === id) return sid;
+  }
+  return null;
+}
+
 /** A permission tool fired. Allow (auto-accept / remembered rule), park (a
  *  backgrounded chat), or surface the card (the focused chat). */
 function handlePermissionRequested(payload: PermissionRequestedPayload): void {
@@ -131,13 +192,33 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
   markLatestQuestion(payload.session_id, payload.id, payload.seq);
   if (!isForSelectedSession(payload.session_id)) {
     if (payload.session_id) {
-      storePendingPrompt(payload.session_id, { kind: "question", payload });
+      const sid = payload.session_id;
+      const existing = peekPendingPrompt(sid);
+      if (existing?.kind === "question" && existing.payload.id !== payload.id) {
+        // A different question is already parked for this backgrounded
+        // session - queue this one instead of overwriting the single park
+        // slot (see the sibling-queue block above). Scoped to the parked
+        // case only (todo 897's actual reported shape: a session left
+        // unattended for ~90 minutes, i.e. backgrounded the whole time) -
+        // NOT the focused/live-show branch below, which a same-turn parallel
+        // tool_use pair could also race, but a second live arrival there is
+        // an existing, deliberately-untouched path (todo 773's regression
+        // test exercises exactly that sequencing on a focused session).
+        queueSiblingQuestion(sid, payload);
+        // Not parked yet, but genuinely delivered here (queued) - the
+        // daemon's on_question_request wait must not time out over this.
+        confirmQuestionRendered(payload.id);
+        rerenderSidebar();
+        console.warn("[perm-gate] QUEUED sibling question-requested behind an open park", { eventSessionId: sid, ...gateDiag() });
+        return;
+      }
+      storePendingPrompt(sid, { kind: "question", payload });
       // A parked prompt is a genuine delivery, just like the shown-card branch
       // in question-ui.ts - the backgrounded chat WILL see it via its sidebar
       // marker, so on_question_request must not time out and report false.
       confirmQuestionRendered(payload.id);
       rerenderSidebar();
-      console.warn("[perm-gate] PARKED question-requested for backgrounded chat", { eventSessionId: payload.session_id, ...gateDiag() });
+      console.warn("[perm-gate] PARKED question-requested for backgrounded chat", { eventSessionId: sid, ...gateDiag() });
     } else {
       console.warn("[perm-gate] DROPPED question-requested (no session_id)", { ...gateDiag() });
     }
@@ -149,12 +230,16 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
 /** A durable resolve is always genuine; a non-durable one for the id ON
  *  SCREEN can be a `claude -p` EOF poll-tick race mid-edit, so it's left alone. */
 export function handlePromptResolved(id: string, durable = false): void {
+  const sid = findSessionForPendingId(id);
   clearPendingPromptById(id);
   const isActive = isActiveCardId(id);
   if (durable || !isActive) clearQuestionDraft(id);
   // Only cancel the (module-global) push for the card actually on screen.
   if (isActive && durable) cancelAuqPush();
   if (durable) dismissQuestionCard(id);
+  // A genuine resolve (or a background id that was never on screen) frees the
+  // session's slot for its next queued sibling, if any (todo 897).
+  if (sid && (durable || !isActive)) promoteQueuedSibling(sid);
   rerenderSidebar();
 }
 
