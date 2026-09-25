@@ -1,0 +1,98 @@
+/* ── Projects view: sort control + card grid ─────────────────────────────
+ * Split out of widgets.css (todo 960) - pure move, no rule changes.
+ * Imported by src/views/projects/projects.ts, the only consumer
+ * (.proj-face stayed behind in widgets.css - shared/projects.ts's
+ * renderAvatar() and sessions/sidebar-row-visuals.ts also render it). */
+.projects-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.projects-sort-label {
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted, #8a8aa0);
+}
+.projects-sort-select {
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2a2a3a);
+  border-radius: 6px;
+  color: var(--color-text, #e4e4ee);
+  padding: 4px 8px;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-card {
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 7px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color var(--motion-fast, 120ms) var(--motion-ease, ease-out),
+    box-shadow var(--motion-fast, 120ms) var(--motion-ease, ease-out),
+    transform var(--motion-fast, 120ms) var(--motion-ease, ease-out);
+}
+.project-card:hover {
+  border-color: var(--color-primary, #4c9eff);
+}
+.project-card:active {
+  transform: scale(0.99);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+.project-card:focus-visible {
+  outline: 2px solid var(--color-primary, #4c9eff);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-card:active {
+    transform: none;
+  }
+}
+
+.project-card .avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 7px;
+  background: var(--color-surface-alt, #3a3a52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.project-card .body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.project-card .name {
+  font-weight: 600;
+  font-size: var(--fs-title);
+  color: var(--color-text, #e4e4ee);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-card .tags {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+}
+.project-card .tokens {
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+}

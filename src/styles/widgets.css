@@ -753,147 +753,17 @@ input:checked + .slider:before {
   pointer-events: none;
 }
 
-/* ── Sidemenu ──────────────────────────────────────────────────────────── */
-.sidemenu-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms ease;
-  z-index: 900;
-}
-.sidemenu-backdrop.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.sidemenu {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 220px;
-  background: var(--color-surface, #1b1b26);
-  border-right: 1px solid var(--color-border, #2a2a3a);
-  transform: translateX(-100%);
-  transition: transform 200ms ease;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  padding: 12px 8px;
-  /* Full-height overlay: clear the notch (top), home indicator (bottom), and a
-     left-edge notch in landscape. env() is 0 on desktop, so it stays 12px 8px. */
-  padding-top: max(12px, env(safe-area-inset-top));
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
-  padding-left: max(8px, env(safe-area-inset-left));
-  box-sizing: border-box;
-}
-.sidemenu.open {
-  transform: translateX(0);
-}
-
-.sidemenu-header {
-  font-size: var(--fs-micro);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-muted, #9a9ab0);
-  padding: 6px 10px 14px;
-  font-weight: 600;
-}
-
-.sidemenu-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-radius: 6px;
-  margin-bottom: 2px;
-  font-size: var(--fs-body);
-  cursor: pointer;
-  color: var(--color-text, #c5c5d6);
-}
-.sidemenu-nav-item:hover {
-  background: var(--color-surface-alt, rgba(255, 255, 255, 0.05));
-}
-.sidemenu-nav-item.active {
-  background: var(--color-surface-alt, #2a2a3a);
-  color: var(--color-text, #ffffff);
-}
-.sidemenu-nav-item i {
-  font-size: 1.1rem;
-  width: 20px;
-  text-align: center;
-}
+/* Sidemenu rules (.sidemenu-backdrop, .sidemenu, .sidemenu-header,
+ * .sidemenu-nav-item) moved to src/styles/sidemenu.css (todo 960), imported
+ * by src/shared/sidemenu.ts. */
 
 /* Home (dashboard) view styles moved to src/views/dashboard/dashboard.css. */
 
-.projects-sort {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.projects-sort-label {
-  font-size: var(--fs-micro);
-  color: var(--color-text-muted, #8a8aa0);
-}
-.projects-sort-select {
-  background: var(--color-surface, #1f1f2c);
-  border: 1px solid var(--color-border, #2a2a3a);
-  border-radius: 6px;
-  color: var(--color-text, #e4e4ee);
-  padding: 4px 8px;
-  font-size: var(--fs-body);
-  cursor: pointer;
-}
-
-.projects-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.project-card {
-  background: var(--color-surface, #1f1f2c);
-  border: 1px solid var(--color-border, #2e2e40);
-  border-radius: 7px;
-  padding: 10px 12px;
-  display: flex;
-  gap: 10px;
-  cursor: pointer;
-  transition: border-color var(--motion-fast, 120ms) var(--motion-ease, ease-out),
-    box-shadow var(--motion-fast, 120ms) var(--motion-ease, ease-out),
-    transform var(--motion-fast, 120ms) var(--motion-ease, ease-out);
-}
-.project-card:hover {
-  border-color: var(--color-primary, #4c9eff);
-}
-.project-card:active {
-  transform: scale(0.99);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
-}
-.project-card:focus-visible {
-  outline: 2px solid var(--color-primary, #4c9eff);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .project-card:active {
-    transform: none;
-  }
-}
-
-.project-card .avatar {
-  width: 38px;
-  height: 38px;
-  border-radius: 7px;
-  background: var(--color-surface-alt, #3a3a52);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  flex-shrink: 0;
-}
+/* Projects view sort control + card grid (.projects-sort*, .projects-list,
+ * .project-card and its descendants below .proj-face) moved to
+ * src/styles/project-card.css (todo 960), imported by
+ * src/views/projects/projects.ts. .proj-face itself stayed here - it is also
+ * rendered by shared/projects.ts and sessions/sidebar-row-visuals.ts. */
 
 /* Project tech-icon face (ai_todo 99): the detected-logo placeholder rendered by
  * renderAvatar's no-user-avatar path, hydrated by hydrateProjectTechIcons. Fills
@@ -915,32 +785,9 @@ input:checked + .slider:before {
 .proj-face .devicon-rust-plain {
   color: #e0a884;
 }
-.project-card .body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.project-card .name {
-  font-weight: 600;
-  font-size: var(--fs-title);
-  color: var(--color-text, #e4e4ee);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-card .tags {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-}
-.project-card .tokens {
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-}
+/* .project-card .body/.name/.tags/.tokens moved to
+ * src/styles/project-card.css alongside the rest of the project-card family
+ * (todo 960). */
 
 /* Rules for .project-detail-header, .project-detail-heading,
  * .project-detail-heading .avatar-mini, .project-detail-titles,

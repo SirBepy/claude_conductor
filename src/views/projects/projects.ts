@@ -2,6 +2,7 @@ import { render } from "lit-html";
 import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
 import "../../shared/kebab-menu.css";
 import "./projects.css";
+import "../../styles/project-card.css";
 import { setTokenHistory } from "../../shared/state";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { showToast } from "../../shared/toast";

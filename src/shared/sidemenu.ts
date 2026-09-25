@@ -1,4 +1,5 @@
 import { registerOverlayBack } from "./back-button";
+import "../styles/sidemenu.css";
 
 // While the slide-out menu is open, the phone's back button should close it
 // (not navigate). Registered on open, disposed on close.
