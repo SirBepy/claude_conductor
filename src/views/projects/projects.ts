@@ -1,19 +1,15 @@
-import { html, render, type TemplateResult } from "lit-html";
-import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
-import { openSidemenu } from "../../shared/sidemenu";
+import { render } from "lit-html";
 import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
 import "../../shared/kebab-menu.css";
 import "./projects.css";
 import { setTokenHistory } from "../../shared/state";
-import { openProjectDetail } from "../../shared/navigation";
-import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons, type Avatar } from "../../shared/projects";
-import { formatTokens } from "../../shared/tokens";
-import { timeAgo } from "../../shared/time";
+import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { showToast } from "../../shared/toast";
 import { api, type ProjectGroup } from "../../shared/api";
 import type { ProjectsSortBy } from "../../types/ipc.generated";
+import { template } from "./projects-render";
 
-type LoadState = "loading" | "loaded" | "error";
+export type LoadState = "loading" | "loaded" | "error";
 
 let mounted: HTMLElement | null = null;
 let allGroups: ProjectGroup[] = [];
@@ -69,7 +65,23 @@ export function filterProjectGroups(groups: ProjectGroup[], q: string): ProjectG
 
 function draw(): void {
   if (!mounted) return;
-  render(template(), mounted);
+  render(
+    template({
+      loadState,
+      allGroups,
+      sortBy,
+      query,
+      backfillRunning,
+      backfillStatusMsg,
+      onRetry: () => void load(),
+      onRefreshClick,
+      onRebuildClick,
+      onSearchInput,
+      onSearchKeydown,
+      onSortChange,
+    }),
+    mounted,
+  );
 }
 
 async function load(): Promise<void> {
@@ -172,159 +184,6 @@ function wireKebab(): void {
   const menu = mounted.querySelector<HTMLElement>("#projects-menu");
   if (!btn || !menu) return;
   disposeKebab = wireKebabMenu(btn, menu);
-}
-
-function cardTemplate(g: ProjectGroup): TemplateResult {
-  const displayName = g.parent_segment ? `${g.name} · ${g.parent_segment}` : g.name;
-  const avatar = renderAvatar(g.avatar as Avatar, g.path);
-  const tokens = formatTokens(Number(g.tokens_7d) || 0);
-  const lastSeen = g.last_active_at ? timeAgo(g.last_active_at) : "";
-  const cwd = g.path;
-  const activate = (): void => openProjectDetail(cwd);
-  return html`
-    <div
-      class="project-card v-focusable"
-      role="button"
-      tabindex="0"
-      data-project-id=${g.id || ""}
-      @click=${activate}
-      @keydown=${(e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          activate();
-        }
-      }}
-    >
-      <div class="avatar">${unsafeHTML(avatar)}</div>
-      <div class="body">
-        <div class="name">${displayName}</div>
-        ${g.live || g.any_remote || g.any_automated
-          ? html`
-            <div class="proj-tags">
-              ${g.live
-                ? html`<span class="proj-tag proj-tag-live" title="${g.live} live" aria-label="${g.live} live"><span class="proj-tag-dot"></span>${g.live}</span>`
-                : ""}
-              ${g.any_remote
-                ? html`<span class="proj-tag" title="remote" aria-label="remote"><i class="ph ph-device-mobile"></i>remote</span>`
-                : ""}
-              ${g.any_automated
-                ? html`<span class="proj-tag" title="auto" aria-label="auto"><i class="ph ph-gear"></i>auto</span>`
-                : ""}
-            </div>
-          `
-          : ""}
-        <div class="tokens">${tokens} tokens${lastSeen ? ` · ${lastSeen}` : ""}</div>
-      </div>
-    </div>
-  `;
-}
-
-function bodyTemplate(): TemplateResult {
-  if (loadState === "loading") {
-    return html`
-      <div id="projects-list" class="projects-list">
-        ${[0, 1, 2, 3].map(() => html`<div class="v-skeleton project-skeleton"></div>`)}
-      </div>
-    `;
-  }
-
-  if (loadState === "error") {
-    return html`
-      <div class="v-empty">
-        <i class="ph ph-warning v-empty-icon"></i>
-        <div class="v-empty-title">Couldn't load projects</div>
-        <div class="v-empty-hint">Something went wrong talking to the backend. Retry below.</div>
-        <button class="btn-secondary" @click=${() => void load()}>Retry</button>
-      </div>
-    `;
-  }
-
-  if (allGroups.length === 0) {
-    return html`
-      <div class="v-empty">
-        <i class="ph ph-folder-open v-empty-icon"></i>
-        <div class="v-empty-title">No projects yet</div>
-        <div class="v-empty-hint">Projects appear here once you use Claude Code in a folder.</div>
-      </div>
-    `;
-  }
-
-  const sorted = sortProjectGroups(allGroups, sortBy);
-  const rows = filterProjectGroups(sorted, query);
-  const isFiltering = query.trim().length > 0;
-
-  return html`
-    ${isFiltering ? html`<div class="projects-count">${rows.length} of ${allGroups.length}</div>` : ""}
-    ${rows.length === 0
-      ? html`
-        <div class="v-empty">
-          <i class="ph ph-magnifying-glass v-empty-icon"></i>
-          <div class="v-empty-title">No matches for "${query}"</div>
-        </div>
-      `
-      : html`<div id="projects-list" class="projects-list">${rows.map(cardTemplate)}</div>`}
-  `;
-}
-
-function headerTemplate(): TemplateResult {
-  return html`
-    <div class="view-header">
-      <button class="icon-btn burger" title="Menu" data-burger="true" @click=${openSidemenu}>
-        <i class="ph ph-list"></i>
-      </button>
-      <h2>Projects</h2>
-      <div class="view-header-actions">
-        <div class="menu-anchor">
-          <button class="icon-btn" id="projects-more" title="More options">
-            <i class="ph ph-dots-three-vertical"></i>
-          </button>
-          <div class="menu-popover hidden" id="projects-menu">
-            <button class="menu-item" id="projects-refresh" @click=${onRefreshClick}>
-              <i class="ph ph-arrow-clockwise"></i> Refresh
-            </button>
-            <button class="menu-item" id="projects-rebuild" @click=${onRebuildClick} ?disabled=${backfillRunning}>
-              <i class="ph ph-arrows-clockwise"></i> Rebuild history
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function template(): TemplateResult {
-  return html`
-    <div class="view view-projects">
-      ${headerTemplate()}
-      <div class="view-body">
-        <div class="view-body-inner">
-          <div class="projects-toolbar">
-            <div class="projects-search">
-              <i class="ph ph-magnifying-glass"></i>
-              <input
-                type="search"
-                id="projectsSearchInput"
-                placeholder="Search projects..."
-                .value=${query}
-                autocomplete="off"
-                spellcheck="false"
-                @input=${onSearchInput}
-                @keydown=${onSearchKeydown}
-              />
-            </div>
-            <select id="projectsSortSelect" class="projects-sort-select" .value=${sortBy} @change=${onSortChange}>
-              <option value="recent">Recently used</option>
-              <option value="name">Name</option>
-              <option value="live">Live now</option>
-              <option value="tokens">Tokens (7d)</option>
-            </select>
-          </div>
-          ${backfillStatusMsg ? html`<div class="projects-backfill-status" aria-live="polite">${backfillStatusMsg}</div>` : ""}
-          ${bodyTemplate()}
-        </div>
-      </div>
-    </div>
-  `;
 }
 
 export async function renderProjectsView(root: HTMLElement): Promise<() => void> {
