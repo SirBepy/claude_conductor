@@ -7,8 +7,8 @@ import * as shortcuts from "../../shared/shortcuts";
 import { renderPreview, type PreviewController } from "./preview-panel";
 import { mountFabDial } from "./fab-dial";
 import { initHeaderMerge } from "./mobile-header-merge";
-import { startNewSession, launchNewSession, discardDraft, resumeDraft } from "./pending-flow";
-import { discardComposerDraft, moveComposerDraft } from "../../shared/chat/composer";
+import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { discardComposerDraft } from "../../shared/chat/composer";
 import { selectSession } from "./active-session";
 import { state, setActiveSession, clearLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
@@ -219,15 +219,9 @@ export function wireStaticListeners(
       if (pid) {
         const draft = state.parkedDrafts.find(d => d.placeholderId === pid);
         if (draft) {
-          const oldPid = draft.placeholderId;
           state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
           void (async () => {
-            await launchNewSession(pane, { path: draft.projectPath, name: draft.projectName }, draft.config);
-            const newPid = state.pendingNewSession?.placeholderId;
-            if (newPid && newPid !== oldPid) {
-              moveComposerDraft(oldPid, newPid);
-              state.composer?.setSessionId(newPid, { readOnly: false });
-            }
+            await resumeParkedDraft(pane, draft);
             updateThinkingBar();
           })();
         }

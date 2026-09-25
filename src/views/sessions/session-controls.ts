@@ -6,7 +6,8 @@
 
 import { state } from "./state";
 import { selectSession } from "./active-session";
-import { startNewSession } from "./pending-flow";
+import { startNewSession, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { updateThinkingBar } from "./session-thinking-bar";
 import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
 import { showView } from "../../shared/navigation";
@@ -79,10 +80,45 @@ export function triggerNewSessionGlobal(): void {
 
 // ── Keyboard shortcut handlers ────────────────────────────────────────────────
 
+/**
+ * Ctrl+Num in auto-slot mode. `state.sortedSessionIds` (built by
+ * buildSidebarEntries) interleaves draft-row placeholder ids ahead of real
+ * session ids, in the same order they're visually numbered - so an index can
+ * resolve to either kind. Draft/parked resume mirrors the sidebar's own
+ * click handlers (sessions-dom-wiring.ts) rather than re-deriving the logic.
+ */
 export function selectSessionByIndex(index: number): void {
-  if (!_pane) return;
+  const pane = _pane;
+  if (!pane) return;
   const id = state.sortedSessionIds[index];
-  if (id) void selectSession(id, _pane);
+  if (!id) return;
+
+  const pending = state.pendingNewSession;
+  if (pending?.placeholderId === id) {
+    if (pending.firstMessageSent) {
+      const realId = pending.realId;
+      if (!realId) return;
+      void (async () => {
+        await selectSession(realId, pane);
+        updateThinkingBar();
+      })();
+      return;
+    }
+    void resumeDraft(pane).then(updateThinkingBar);
+    return;
+  }
+
+  const parked = state.parkedDrafts.find(d => d.placeholderId === id);
+  if (parked) {
+    state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== parked.placeholderId);
+    void (async () => {
+      await resumeParkedDraft(pane, parked);
+      updateThinkingBar();
+    })();
+    return;
+  }
+
+  void selectSession(id, pane);
 }
 
 export function selectSessionBySlot(slot: number): void {

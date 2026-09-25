@@ -182,6 +182,7 @@ export function sessionRowOptions(
 export function draftRowOptions(
   pending: PendingNewSession,
   isActive: boolean,
+  kbdHint: string = "",
 ): RowOptions {
   const starting = pending.firstMessageSent;
   return buildRowOptions({
@@ -189,7 +190,7 @@ export function draftRowOptions(
       idAttr: "placeholder-id",
       id: pending.placeholderId,
       liClasses: `${isActive ? "active" : ""} pending ${starting ? "" : "draft"} row-portrait`,
-      liExtraAttrs: ` data-pending="1"`,
+      liExtraAttrs: ` data-pending="1"${kbdHint}`,
     },
     charId: pending.config.characterId,
     cwd: pending.projectPath,
@@ -211,13 +212,13 @@ export function draftRowOptions(
 }
 
 /** Maps a parked (paused) draft to `RowOptions`. */
-export function parkedRowOptions(d: ParkedDraft): RowOptions {
+export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptions {
   return buildRowOptions({
     identity: {
       idAttr: "placeholder-id",
       id: d.placeholderId,
       liClasses: "parked-draft row-portrait",
-      liExtraAttrs: "",
+      liExtraAttrs: kbdHint,
     },
     charId: d.config.characterId,
     cwd: d.projectPath,

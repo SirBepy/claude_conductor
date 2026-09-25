@@ -1,4 +1,4 @@
-import { discardComposerDraft } from "../../shared/chat/composer";
+import { discardComposerDraft, moveComposerDraft } from "../../shared/chat/composer";
 import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
 import { lockBackgroundInput, unlockBackgroundInputIfClosed } from "../../shared/modal";
@@ -232,6 +232,24 @@ export async function launchNewSession(
   if (root) {
     const listEl = root.querySelector<HTMLElement>("#sessions-list");
     if (listEl) renderSidebar(listEl);
+  }
+}
+
+/**
+ * Take a parked draft out of the parked list and make it the active pending
+ * draft again. `launchNewSession` always mints a fresh placeholderId, so the
+ * composer's staged text for the old one has to be moved across. Shared by
+ * the sidebar's parked-draft row click and the Ctrl+Num shortcut path, which
+ * must not diverge on this - both start from the caller having already
+ * removed `draft` from `state.parkedDrafts`.
+ */
+export async function resumeParkedDraft(pane: HTMLElement, draft: ParkedDraft): Promise<void> {
+  const oldPid = draft.placeholderId;
+  await launchNewSession(pane, { path: draft.projectPath, name: draft.projectName }, draft.config);
+  const newPid = state.pendingNewSession?.placeholderId;
+  if (newPid && newPid !== oldPid) {
+    moveComposerDraft(oldPid, newPid);
+    state.composer?.setSessionId(newPid, { readOnly: false });
   }
 }
 

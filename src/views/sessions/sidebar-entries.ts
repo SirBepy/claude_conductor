@@ -145,6 +145,20 @@ export function buildSidebarEntries(
 
   const entries: Array<{ key: string; html: string }> = [];
 
+  // Ctrl+Num order: draft rows (below) come first since they render above the
+  // segmented list, then real sessions in renderSeg. Manual slot mode never
+  // reads this array (selectSessionBySlot goes through getSlotAssignment
+  // instead), so it's fine that a draft/parked row has no stable id to pin to
+  // a manual slot - kbdOrderIds is only ever consumed by the auto-index path.
+  let sessionIndex = 0;
+  const kbdOrderIds: string[] = [];
+  const pushKbdRow = (id: string): string => {
+    const hint = !isManualSlots && sessionIndex < 9 ? ` data-kbd-hint="${sessionIndex + 1}"` : "";
+    kbdOrderIds[sessionIndex] = id;
+    sessionIndex++;
+    return hint;
+  };
+
   // Hide a draft row whose placeholder has a pending scheduled NewChat: the
   // user deferred it, so don't clutter the list with it until it fires (322 #6).
   const pendingHidden = !!pending && scheduledPendingPlaceholders.has(pending.placeholderId);
@@ -159,14 +173,14 @@ export function buildSidebarEntries(
 
   if (pending && !pendingHidden && !pendingRealVisible) {
     const isPendingActive = state.selectedId === pending.placeholderId;
-    const html = renderSidebarRow(draftRowOptions(pending, isPendingActive));
+    const html = renderSidebarRow(draftRowOptions(pending, isPendingActive, pushKbdRow(pending.placeholderId)));
     entries.push({ key: `p:${pending.placeholderId}`, html });
   }
 
   for (const d of visibleParked) {
     entries.push({
       key: `p:${d.placeholderId}`,
-      html: renderSidebarRow(parkedRowOptions(d)),
+      html: renderSidebarRow(parkedRowOptions(d, pushKbdRow(d.placeholderId))),
     });
   }
 
@@ -181,10 +195,8 @@ export function buildSidebarEntries(
     segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds))!.push(s);
   }
 
-  let sessionIndex = 0;
   // Same order as the data-kbd-hint badges below, so Ctrl+N always opens the
   // row visually numbered N (a flat pre-segmentation sort drifted from this).
-  const kbdOrderIds: string[] = [];
   const renderSeg = (seg: number) => {
     const group = segmented.get(seg)!;
     if (group.length === 0) {
