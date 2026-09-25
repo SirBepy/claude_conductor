@@ -1,0 +1,218 @@
+/* ── Custom animated slider (Model / Effort) - see model-effort-modal.ts
+ * for why this isn't a native <input type=range>. ──
+ * Split out of model-effort-modal.css (todo 936) - pure move, no rule
+ * changes. Imported by sessions.ts right after model-effort-modal.css. */
+.model-effort-modal-card .me-slider-wrap {
+  padding: 9px 0;
+  cursor: pointer;
+}
+
+.model-effort-modal-card .me-slider-track {
+  position: relative;
+  height: 4px;
+  background: var(--color-border, #2a2a36);
+  border-radius: 2px;
+}
+
+.model-effort-modal-card .me-slider-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--color-primary, #6e8fff);
+  border-radius: 2px;
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 0.28s cubic-bezier(.4, 0, .2, 1);
+}
+
+.model-effort-modal-card .me-slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary, #6e8fff);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #6e8fff) 25%, transparent);
+  transition: left 0.28s cubic-bezier(.4, 0, .2, 1);
+}
+
+.model-effort-modal-card .me-slider-wrap:focus-visible .me-slider-thumb {
+  outline: 2px solid var(--color-primary, #6e8fff);
+  outline-offset: 3px;
+}
+
+.model-effort-modal-card .me-stop-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
+/* Stops are real buttons - clicking a label jumps the slider straight to it
+ * (impeccable session, 2026-08-23), alongside dragging the track itself. */
+.model-effort-modal-card .slider-stop-label {
+  background: none;
+  border: 0;
+  padding: 2px;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--color-text-muted, #8a8a96);
+  cursor: pointer;
+}
+
+.model-effort-modal-card .slider-stop-label:hover {
+  color: var(--color-text, #e8e8ee);
+}
+
+.model-effort-modal-card .slider-stop-label.active {
+  color: var(--color-primary, #6e8fff);
+  font-weight: 600;
+}
+
+/* 1-9 keyboard-shortcut hint next to each Model slider stop. Rendered as a
+ * small kbd-style chip - the previous 0.62rem/70%-opacity text was present in
+ * the DOM but unreadable at a glance (impeccable critique, 2026-08-22). */
+.model-effort-modal-card .me-key-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 13px;
+  margin-left: 4px;
+  padding: 0 3px;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--color-text-muted, #8a8a96);
+  background: var(--color-surface-alt, #24242e);
+  border: 1px solid var(--color-border, #2a2a36);
+  border-radius: 3px;
+}
+
+/* Spinner next to the Model label while the availability probe is in flight -
+ * reuses base.css's icon-btn-spin keyframes rather than adding another. */
+.model-effort-modal-card .me-label-spinner {
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  animation: icon-btn-spin 0.8s linear infinite;
+}
+
+/* Framed advanced-options body (Effort + toggles) - reads as one revealed
+ * section, not a continuation of the always-visible fields above it. */
+.model-effort-modal-card .me-more-body {
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border, #2a2a36);
+}
+
+.model-effort-modal-card .me-more-body .me-field:first-child {
+  margin-top: 0;
+}
+
+.model-effort-modal-card .me-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text, #e8e8ee);
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-effort-modal-card .me-check input[type="checkbox"] {
+  accent-color: var(--color-primary, #6e8fff);
+  cursor: pointer;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.model-effort-modal-card .me-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-effort-modal-card .me-check-hint {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--color-text-muted, #8a8a96);
+}
+
+/* Footer row: "More options" joins Cancel/Start instead of floating mid-form
+ * as an orphaned link (impeccable session, 2026-08-22/23) - ghost-styled,
+ * left-aligned flush with the rest of the content, never bordered; the two
+ * real submit actions stay grouped on the right. */
+.model-effort-modal-card .me-actions {
+  margin-top: 26px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-effort-modal-card .me-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.model-effort-modal-card .me-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--color-text-muted, #8a8a96);
+  padding: 7px 0;
+  border: 0;
+  background: none;
+}
+
+.model-effort-modal-card .me-more-btn:hover,
+.model-effort-modal-card .me-more-btn.open {
+  color: var(--color-text, #e8e8ee);
+}
+
+.model-effort-modal-card .me-more-btn .ph {
+  font-size: 0.85rem;
+  transition: transform 0.15s ease;
+}
+
+.model-effort-modal-card .me-more-btn.open .ph {
+  transform: rotate(90deg);
+}
+
+.model-effort-modal-card .me-cancel,
+.model-effort-modal-card .me-confirm {
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  border: 1px solid var(--color-border, #2a2a36);
+  background: var(--color-surface-alt, #24242e);
+  color: var(--color-text, #e8e8ee);
+}
+
+.model-effort-modal-card .me-confirm {
+  background: var(--color-primary, #6e8fff);
+  color: var(--color-background, #0e0e14);
+  border-color: var(--color-primary, #6e8fff);
+}
+
+.model-effort-modal-card .me-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.model-effort-modal-card .me-model-warning {
+  margin-top: 14px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: var(--color-danger, #ff6b6b);
+  background: color-mix(in srgb, var(--color-danger, #ff6b6b) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger, #ff6b6b) 35%, transparent);
+}
