@@ -33,6 +33,7 @@ import { triggerNewSessionGlobal } from "../views/sessions/sessions";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
+import { mountBootProgress } from "./boot-progress";
 import { applyBackgroundFx } from "./background-fx";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
@@ -249,6 +250,11 @@ export function applySettingsToDocument(s: SettingsShape): SettingsShape {
 
 // ── Public entrypoint ──────────────────────────────────────────────────────
 export function initBoot(): void {
+  // Phone-only cold-boot overlay. Torn down from onReady, which the gate fires
+  // once all three fetches SETTLE, so a rejected fetch cannot strand it on
+  // screen - the same guarantee that keeps the render gate itself from wedging.
+  const bootProgress = mountBootProgress();
+
   // Initial data fetches: render once all three settle (success OR failure, so
   // a failed fetch can't wedge the gate - see wireInitialFetches).
   wireInitialFetches({
@@ -261,6 +267,7 @@ export function initBoot(): void {
       if (s) applySettingsToDocument(s);
     },
     onReady: () => {
+      bootProgress.done();
       refreshDashboardView();
       void runDeadPathCheck();
     },

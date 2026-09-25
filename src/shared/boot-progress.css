@@ -1,0 +1,82 @@
+/* Full-screen cold-boot progress for the phone. Sits above the app shell until
+ * every boot fetch settles, replacing what used to be an unexplained blank
+ * screen for the length of a cold LTE round-trip. */
+
+.boot-progress {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--color-background);
+  /* Fades out on teardown; the shell underneath is already painted by then. */
+  opacity: 1;
+  transition: opacity var(--motion-base) var(--motion-ease);
+}
+
+.boot-progress[data-leaving] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-progress .boot-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-heading);
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.boot-progress .boot-brand i {
+  font-size: var(--fs-display);
+  color: var(--color-primary);
+}
+
+/* One line per boot fetch, so a single slow leg is visibly the slow one instead
+ * of hiding inside the aggregate dial above it. */
+.boot-progress .boot-legs {
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.boot-progress .boot-leg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+}
+
+.boot-progress .boot-leg i {
+  font-size: 13px;
+  flex: 0 0 auto;
+}
+
+.boot-progress .boot-leg-name { flex: 1; }
+
+.boot-progress .boot-leg-ms {
+  font-variant-numeric: tabular-nums;
+}
+
+.boot-progress .boot-leg[data-state="pending"] { opacity: 0.45; }
+
+.boot-progress .boot-leg[data-state="running"] i {
+  color: var(--color-primary);
+  animation: load-dial-spin 1s linear infinite;
+}
+
+.boot-progress .boot-leg[data-state="done"] { color: var(--color-text); }
+.boot-progress .boot-leg[data-state="done"] i { color: var(--color-success); }
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-progress { transition: none; }
+  .boot-progress .boot-leg[data-state="running"] i { animation-duration: 2.2s; }
+}

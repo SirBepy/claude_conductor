@@ -12,6 +12,7 @@ import {
   removeGlobalListener,
   teardownGlobalStream,
 } from "./global-stream";
+import { beginLoad, readTrackedJson } from "./load-progress";
 
 /** localStorage key holding the per-device bearer token the user pasted/paired. */
 export const REMOTE_TOKEN_KEY = "rc_token";
@@ -619,13 +620,26 @@ export class HttpTransport implements Transport {
   }
 
   private async rpc<T>(method: string, params: unknown): Promise<T> {
-    const res = await fetch("/api/rpc", {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ method, params }),
-    });
+    // Tracked so the phone's loading UI has a real denominator to show: the
+    // body is drained through readTrackedJson, which reports bytes against the
+    // response's Content-Length (see load-progress.ts). A failed request calls
+    // `abandon` rather than `finish`, keeping its duration out of the median -
+    // how long a 500 took says nothing about how long success takes.
+    const tracker = beginLoad(method);
+    let res: Response;
+    try {
+      res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ method, params }),
+      });
+    } catch (e) {
+      tracker.abandon();
+      throw e;
+    }
     if (res.status === 401) handleAuthFailure();
     if (!res.ok) {
+      tracker.abandon();
       // Daemon RPC errors (e.g. request_live_usage_refresh's "desktop app is
       // not running") come back as a JSON-RPC error body - surface its
       // message instead of just the bare HTTP status so a caller can show the
@@ -641,7 +655,15 @@ export class HttpTransport implements Transport {
       }
       throw new Error(message || `rpc ${method} failed: ${res.status}`);
     }
-    return (await res.json()) as T;
+    let parsed: T;
+    try {
+      parsed = await readTrackedJson<T>(res, tracker);
+    } catch (e) {
+      tracker.abandon();
+      throw e;
+    }
+    tracker.finish();
+    return parsed;
   }
 
   private headers(): Record<string, string> {

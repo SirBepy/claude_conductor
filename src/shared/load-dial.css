@@ -1,0 +1,110 @@
+/* Determinate loading dial for the phone (see load-progress.ts for why the
+ * percent only exists on the remote transport). Shared by the cold-boot
+ * overlay and the chat transcript overlay. */
+
+.load-dial {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  flex: 0 0 auto;
+}
+
+.load-dial svg {
+  width: 100%;
+  height: 100%;
+  /* -90deg so the arc starts at 12 o'clock rather than 3. */
+  transform: rotate(-90deg);
+  display: block;
+}
+
+.load-dial .load-dial-track {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 5;
+}
+
+.load-dial .load-dial-arc {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 5;
+  stroke-linecap: round;
+  /* r=30, so the circumference is 2*pi*30 = 188.5; setLoadDial writes the
+     offset as (1 - fraction) * 188.5. */
+  stroke-dasharray: 188.5;
+  stroke-dashoffset: 188.5;
+  transition: stroke-dashoffset var(--motion-base) var(--motion-ease);
+}
+
+.load-dial[data-phase="overdue"] .load-dial-arc {
+  stroke: var(--color-info);
+}
+
+/* No honest number yet, so the readout is suppressed and the arc sweeps rather
+   than sitting frozen at zero. The transition is dropped here because the
+   animation owns the same property. */
+.load-dial[data-indeterminate] .load-dial-arc {
+  stroke-dasharray: 47 141;
+  stroke-dashoffset: 0;
+  transition: none;
+  animation: load-dial-spin 1.1s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+.load-dial[data-indeterminate] .load-dial-pct {
+  opacity: 0;
+}
+
+@keyframes load-dial-spin {
+  to { transform: rotate(360deg); }
+}
+
+.load-dial .load-dial-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-title);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  transition: opacity var(--motion-fast) ease;
+}
+
+.load-dial .load-dial-pct small {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  margin-left: 1px;
+  color: var(--color-text-muted);
+}
+
+/* ── Copy under the dial ─────────────────────────────────────────────────── */
+
+.load-copy {
+  text-align: center;
+}
+
+.load-copy .load-what {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 3px;
+}
+
+.load-copy .load-eta {
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  /* Reserved so the dial does not jump when the label swaps between an ETA and
+     the overdue copy. */
+  min-height: 15px;
+}
+
+.load-copy .load-eta[data-overdue] {
+  color: var(--color-info);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .load-dial .load-dial-arc { transition: none; }
+  .load-dial[data-indeterminate] .load-dial-arc { animation-duration: 2.2s; }
+}
