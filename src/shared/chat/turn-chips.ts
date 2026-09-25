@@ -3,6 +3,7 @@ import {
   updateTodoSteps as updateTodoStepsImpl,
   interruptTodoChecklist as interruptTodoChecklistImpl,
   settleTodoChecklist as settleTodoChecklistImpl,
+  mergeSettledChecklists,
   type TodoChecklistState,
   type TodoStepStatus,
 } from "./turn-todo-checklist";
@@ -173,7 +174,14 @@ export class TurnFooterRegistry {
     }
     absorbFooterContents(src.footer, dest.footer);
     if (!dest.metaChip && src.metaChip) dest.metaChip = src.metaChip;
-    if (!dest.todoChecklist && src.todoChecklist) dest.todoChecklist = src.todoChecklist;
+    // Both turns built their own checklist (todo 969): combine the two
+    // already-settled summary chips into one rather than silently keeping
+    // only dest's and discarding src's count - see mergeSettledChecklists.
+    if (dest.todoChecklist && src.todoChecklist) {
+      mergeSettledChecklists(dest.todoChecklist, src.todoChecklist);
+    } else if (!dest.todoChecklist && src.todoChecklist) {
+      dest.todoChecklist = src.todoChecklist;
+    }
     if (!dest.agentRail && src.agentRail) dest.agentRail = src.agentRail;
     this.turns.delete(srcKey);
     return true;

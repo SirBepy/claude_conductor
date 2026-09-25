@@ -72,6 +72,11 @@ export interface TodoChecklistState {
   /** The owning session, for `add_step_comment`. Null (comments disabled in
    *  practice) if the footer was never tagged - defensive, not expected. */
   sessionId: string | null;
+  /** Step count + noted-comment texts committed at settle time (todo 969) -
+   *  kept off the DOM so a later absorbInto merge (see mergeSettledChecklists)
+   *  can combine two already-collapsed summaries without re-parsing chip
+   *  textContent. Null until settleTodoChecklist runs. */
+  settledSummary: { total: number; noted: string[] } | null;
 }
 
 /** Set a row's icon + status class (and connector fill, when present). */
@@ -254,6 +259,7 @@ export function ensureTodoChecklist(st: TurnFooterState | undefined): void {
     order: [],
     commentable: st.footer.dataset.planCommentable === "1",
     sessionId: st.footer.dataset.planSessionId || null,
+    settledSummary: null,
   };
 }
 
@@ -327,6 +333,25 @@ export function interruptTodoChecklist(st: TurnFooterState | undefined): void {
   }
 }
 
+/** Build the collapsed summary chip DOM (icon + "N steps" + optional noted
+ *  indicator) shared by settleTodoChecklist and mergeSettledChecklists, so
+ *  a merge's combined total renders identically to a single turn's own. */
+function buildSummaryChip(total: number, noted: string[]): HTMLElement {
+  const chip = document.createElement("span");
+  chip.className = "turn-chip";
+  const icon = document.createElement("i");
+  icon.className = "ph-fill ph-check-circle";
+  chip.appendChild(icon);
+  chip.appendChild(document.createTextNode(` ${total} step${total === 1 ? "" : "s"}`));
+  if (noted.length > 0) {
+    const note = document.createElement("i");
+    note.className = "ph-fill ph-chat-circle-text todo-checklist-comment-noted";
+    note.title = noted.length === 1 ? noted[0]! : noted.map((t, i) => `${i + 1}. ${t}`).join("\n");
+    chip.appendChild(note);
+  }
+  return chip;
+}
+
 /**
  * Settle the checklist: sweep any leftover pending/active row to `skipped`
  * (a race - never interrupted or completed), then collapse the visible
@@ -350,18 +375,31 @@ export function settleTodoChecklist(st: TurnFooterState | undefined): void {
     if (entry.comment?.text) noted.push(entry.comment.text);
   }
   tc.settled = true;
-  const chip = document.createElement("span");
-  chip.className = "turn-chip";
-  const icon = document.createElement("i");
-  icon.className = "ph-fill ph-check-circle";
-  chip.appendChild(icon);
-  chip.appendChild(document.createTextNode(` ${total} step${total === 1 ? "" : "s"}`));
-  if (noted.length > 0) {
-    const note = document.createElement("i");
-    note.className = "ph-fill ph-chat-circle-text todo-checklist-comment-noted";
-    note.title = noted.length === 1 ? noted[0]! : noted.map((t, i) => `${i + 1}. ${t}`).join("\n");
-    chip.appendChild(note);
-  }
+  tc.settledSummary = { total, noted };
   tc.el.classList.add("todo-checklist-collapsed");
-  tc.el.replaceChildren(chip);
+  tc.el.replaceChildren(buildSummaryChip(total, noted));
+}
+
+/**
+ * Combine two ALREADY-SETTLED checklists' summary chips into one (todo 969):
+ * a turn absorbed into another (silent wake merge / "continue") that also
+ * built its own write_plan/TodoWrite checklist must not leave two separate
+ * "N step" chips stacked in the merged footer - same as tool-strip chips and
+ * turn totals, which already sum on merge rather than duplicate. Both sides
+ * are guaranteed settled by the time this runs: `absorbInto`'s only caller
+ * (processTurnCloseQueue) always calls settleMetaRow/cancelMetaRow on the
+ * closing (src) turn before merging, and dest can only be a merge target
+ * once it has itself already closed and settled the same way. `src.el` was
+ * already physically relocated into dest's footer by absorbFooterContents
+ * (the generic "move whatever's left" pass) - drop it here now that its
+ * count has been folded into dest's own chip.
+ */
+export function mergeSettledChecklists(dest: TodoChecklistState, src: TodoChecklistState): void {
+  const destSummary = dest.settledSummary ?? { total: dest.rows.size, noted: [] };
+  const srcSummary = src.settledSummary ?? { total: src.rows.size, noted: [] };
+  const total = destSummary.total + srcSummary.total;
+  const noted = [...destSummary.noted, ...srcSummary.noted];
+  dest.settledSummary = { total, noted };
+  dest.el.replaceChildren(buildSummaryChip(total, noted));
+  src.el.remove();
 }

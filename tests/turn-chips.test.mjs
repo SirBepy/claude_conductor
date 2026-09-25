@@ -139,6 +139,17 @@ function makeToolUse(id = "tool1", tsMs = 0) {
   };
 }
 
+function makeWritePlanToolUse(steps, id = "wp1", tsMs = 0) {
+  return {
+    type: "tool_use",
+    tool_name: "mcp__cc_conductor__write_plan",
+    input: { steps },
+    id,
+    timestamp: BigInt(tsMs),
+    parent_tool_use_id: null,
+  };
+}
+
 function makeShotToolUse(id, tsMs = 0) {
   return {
     type: "tool_use",
@@ -711,6 +722,41 @@ describe("Silent auto-continue streak merge", () => {
     expect(footers[0].querySelectorAll(".turn-meta-chips").length).toBe(1);
     // Tokens are the two turns summed, not the survivor's alone.
     expect(footers[0].querySelector(".turn-chip--tokens").textContent).toContain("150");
+  });
+
+  // Todo 969: absorbInto only carries src's checklist onto dest when dest has
+  // none (`if (!dest.todoChecklist && src.todoChecklist) ...`). When BOTH the
+  // destination turn and the silent wake turn built their own write_plan
+  // checklist, the guard blocks the assignment - the wake turn's steps must
+  // not vanish from the registry state the merged footer exposes.
+  it("keeps the wake turn's own checklist steps when the destination turn already built one", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("do X"));
+    renderer.handleEvent(makeWritePlanToolUse([
+      { text: "Dest step one", status: "done" },
+    ], "wp1"));
+    renderer.handleEvent(makeSendMessage("Done.", "tu1"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 100 }));
+    // Wake turn: silent (no send_message), but it ALSO drives its own
+    // write_plan checklist.
+    renderer.handleEvent(makeMetaUserMessage());
+    renderer.handleEvent(makeWritePlanToolUse([
+      { text: "Source step one", status: "done" },
+    ], "wp2"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 50 }));
+    // Closing boundary.
+    renderer.handleEvent(makeUserMessage("and now Y"));
+    renderer.handleEvent(makeTurnUsage({ outputTokens: 10 }));
+
+    const footers = container.querySelectorAll(".turn-footer");
+    expect(footers.length).toBe(2);
+    // Both turns' steps must be combined into ONE summary chip (matching how
+    // same-tool chips and turn totals already sum on merge), not silently
+    // keep only the destination's count while the wake turn's is discarded.
+    const collapsedChips = footers[0].querySelectorAll(".todo-checklist-collapsed");
+    expect(collapsedChips.length).toBe(1);
+    expect(collapsedChips[0].textContent).toContain("2 steps");
   });
 
   it("merges the absorbed turn's screenshots into one thumbnail row", async () => {
