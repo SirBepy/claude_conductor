@@ -218,6 +218,14 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // prompt" cleanup in `lifecycle.rs`'s pump loop; a no-op when
                 // nothing is open for this session (the common Stop-turn case).
                 state.expire_prompts_for_session(&p.session_id).await;
+                // Same reasoning one level down (todo 933): a `write_plan` step
+                // comment is keyed by step TEXT alone, so one still unclaimed
+                // when its turn dies would be delivered against whatever
+                // unrelated step a LATER turn happens to give the same text.
+                // `pump::exit` already clears them on EOF, but the interrupt is
+                // cooperative and keeps the child alive, so stdout never closes
+                // and that teardown never runs for a cancelled turn.
+                state.clear_step_comments(&p.session_id).await;
                 crate::daemon::machines::publish_instances_changed(&state);
                 Ok(json!({"ok": true}))
             }
@@ -240,6 +248,35 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 Ok(json!({"ok": true}))
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod interrupt_cleanup_contract {
+    /// `cancel_turn` interrupts cooperatively and keeps the child process
+    /// alive, so stdout never hits EOF and `pump::exit` - the only other
+    /// caller of `clear_step_comments` - never runs for an interrupted turn.
+    /// A comment queued against step text a LATER turn happens to reuse would
+    /// then be delivered against that unrelated step. Nothing in the type
+    /// system ties the two teardown sites together, so the handler body is
+    /// asserted directly, the same shape as the notifier-event registration
+    /// contract guard.
+    #[test]
+    fn cancel_turn_clears_queued_step_comments() {
+        let src = include_str!("core.rs");
+        let after_register = src
+            .split_once("router.register(\"cancel_turn\"")
+            .expect("cancel_turn handler is registered in this file")
+            .1;
+        let handler_body = after_register
+            .split_once("router.register(")
+            .map(|(body, _)| body)
+            .unwrap_or(after_register);
+        assert!(
+            handler_body.contains("clear_step_comments"),
+            "cancel_turn must clear queued step comments, beside its \
+             expire_prompts_for_session call"
+        );
     }
 }
 
