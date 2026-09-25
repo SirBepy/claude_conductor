@@ -190,28 +190,33 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
   // Track staleness (see gating.ts) before the park/show branch below, so a
   // superseded card's late answer can be told apart from a live one.
   markLatestQuestion(payload.session_id, payload.id, payload.seq);
-  if (!isForSelectedSession(payload.session_id)) {
-    if (payload.session_id) {
-      const sid = payload.session_id;
-      const existing = peekPendingPrompt(sid);
-      if (existing?.kind === "question" && existing.payload.id !== payload.id) {
-        // A different question is already parked for this backgrounded
-        // session - queue this one instead of overwriting the single park
-        // slot (see the sibling-queue block above). Scoped to the parked
-        // case only (todo 897's actual reported shape: a session left
-        // unattended for ~90 minutes, i.e. backgrounded the whole time) -
-        // NOT the focused/live-show branch below, which a same-turn parallel
-        // tool_use pair could also race, but a second live arrival there is
-        // an existing, deliberately-untouched path (todo 773's regression
-        // test exercises exactly that sequencing on a focused session).
-        queueSiblingQuestion(sid, payload);
-        // Not parked yet, but genuinely delivered here (queued) - the
-        // daemon's on_question_request wait must not time out over this.
-        confirmQuestionRendered(payload.id);
-        rerenderSidebar();
-        console.warn("[perm-gate] QUEUED sibling question-requested behind an open park", { eventSessionId: sid, ...gateDiag() });
-        return;
-      }
+  const sid = payload.session_id;
+  if (sid) {
+    const existing = peekPendingPrompt(sid);
+    // A different question already owns this session's one slot - queue this
+    // one instead of overwriting it (see the sibling-queue block above), UNLESS
+    // that slot is merely a STALE answered entry (todo 971): onSubmit marks a
+    // slot `answered` the instant the user settles it, well before the
+    // daemon's `prompt-resolved` poll clears it, so a slot's presence alone
+    // can't tell "still genuinely open" from "answered, poll hasn't caught up
+    // yet" - tests/auq-second-card-answer-delivery.test.mjs (todo 773) depends
+    // on the latter case rendering q2 immediately, on a FOCUSED session, with
+    // no poll ever simulated. Session-agnostic on purpose: a live parallel
+    // tool_use pair on a focused session is the same clobber shape 897 fixed
+    // for the backgrounded/parked case, just reachable with the chat on screen
+    // instead of AFK (todo 971).
+    if (existing?.kind === "question" && existing.payload.id !== payload.id && !existing.answered) {
+      queueSiblingQuestion(sid, payload);
+      // Not shown/parked yet, but genuinely delivered here (queued) - the
+      // daemon's on_question_request wait must not time out over this.
+      confirmQuestionRendered(payload.id);
+      rerenderSidebar();
+      console.warn("[perm-gate] QUEUED sibling question-requested behind an open slot", { eventSessionId: sid, ...gateDiag() });
+      return;
+    }
+  }
+  if (!isForSelectedSession(sid)) {
+    if (sid) {
       storePendingPrompt(sid, { kind: "question", payload });
       // A parked prompt is a genuine delivery, just like the shown-card branch
       // in question-ui.ts - the backgrounded chat WILL see it via its sidebar

@@ -123,12 +123,26 @@ export function isForSelectedSession(eventSessionId: string | undefined): boolea
 
 export type PendingPrompt =
   | { kind: "permission"; payload: PermissionRequestedPayload; draft?: QuestionDraft }
-  | { kind: "question"; payload: QuestionRequestedPayload; draft?: QuestionDraft };
+  | { kind: "question"; payload: QuestionRequestedPayload; draft?: QuestionDraft; answered?: boolean };
 
 const _pendingPrompts = new Map<string, PendingPrompt>();
 
 export function storePendingPrompt(sessionId: string, prompt: PendingPrompt): void {
   _pendingPrompts.set(sessionId, prompt);
+}
+
+/** Mark the slot's own question as answered (todo 971), IF it still holds
+ *  `id` - a no-op otherwise (e.g. the slot was already reused). Called from
+ *  question-submit.ts's onSubmit/onCancel, at the moment the user settles the
+ *  card, rather than waiting for the daemon's `prompt-resolved` poll: that
+ *  poll can lag behind a same-turn sibling's arrival by a full round trip, and
+ *  during that window a slot holding an already-answered id is indistinguishable
+ *  from one holding a genuinely still-open question by id alone. `peekPendingPrompt`
+ *  surfaces the flag directly, so index.ts's arrival gate can tell a real open
+ *  sibling (queue it) from a merely-stale slot (let the next arrival show). */
+export function markPendingPromptAnswered(sessionId: string, id: string): void {
+  const p = _pendingPrompts.get(sessionId);
+  if (p?.kind === "question" && p.payload.id === id) _pendingPrompts.set(sessionId, { ...p, answered: true });
 }
 
 /** Attach a draft snapshot to an already-parked prompt. No-op if nothing is

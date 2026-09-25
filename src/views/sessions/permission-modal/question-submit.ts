@@ -15,6 +15,7 @@ import {
   resolveCwdForSession,
   storePendingPrompt,
   clearPendingPromptById,
+  markPendingPromptAnswered,
 } from "./gating";
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 import { rerenderSidebar } from "./index";
@@ -79,6 +80,13 @@ export async function showQuestionCard(
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
     onSubmit: async (answers, extras) => {
+      // Mark the slot answered NOW (todo 971), synchronously, before any
+      // await below - the daemon's `prompt-resolved` poll that would
+      // otherwise clear this slot can lag a full round trip behind a
+      // same-turn sibling's arrival, and handleQuestionRequested's sibling
+      // gate needs this flag to tell "answered, poll hasn't caught up" apart
+      // from "still genuinely open" by more than id-inequality alone.
+      if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
       // NOT cleared here (ai_todo 820): the card tears down before this runs,
       // so localStorage is the only surviving draft. Cleared per-branch below.
       void clearAuqPush(payload.session_id, payload.id);
@@ -163,6 +171,10 @@ export async function showQuestionCard(
       // Fire-and-forget skip: the asking turn already ended, so just settle
       // the card (drop the durable prompt + clear "Input Needed"). No message
       // is sent - with no blocking waiter the model never sees a skip signal.
+      // Marked answered too (todo 971) - a skip settles the slot exactly like
+      // a submit does, same stale-vs-open ambiguity while the resolve poll
+      // hasn't caught up yet.
+      if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
       clearQuestionDraft(payload.id);
       void clearAuqPush(payload.session_id, payload.id);
       try {
