@@ -7,7 +7,8 @@ import { mountAskPanel, type AskPanelHandle } from "./ask-panel";
 import { mountTodosPanel, type TodosPanelHandle } from "./todos-panel";
 import { mountDraftsPanel, type DraftsPanelHandle } from "./drafts-panel";
 import type { PreviewController } from "./preview-panel";
-import { getTransport, type Unlisten } from "../../shared/transport";
+import type { Unlisten } from "../../shared/transport";
+import { watchDrafts } from "./fab-dial-drafts-watch";
 import "./fab-dial.css";
 
 /** What the card can hold. Preview is reachable from the dial but never lives
@@ -15,13 +16,6 @@ import "./fab-dial.css";
 export type CardPanel = "ask" | "todos" | "drafts";
 
 type Surface = "rest" | "dial" | "card";
-
-/** `message-drafts-changed`. `added` rides only the `add` action
- *  (`methods::drafts_store::publish_added`); every other mutation omits it. */
-interface DraftsChanged {
-  project_id?: string;
-  added?: { id?: string; origin_session_id?: string };
-}
 
 export interface FabDialDeps {
   /** Ask's hand-off target: fills the real composer, unsent. */
@@ -68,34 +62,15 @@ class FabDial implements FabDialHandle {
     this.host.className = "fab-dial-host";
     this.host.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
-    void this.watchDrafts();
-  }
-
-  /** A draft Claude just wrote opens the card onto it, so a reply meant for
-   *  somewhere else is visible without Joe going looking (his ask, 2026-09-24).
-   *  Scoped like the preview panel: only the chat on screen, never a forced
-   *  switch from a background one, and no badge at rest. */
-  private async watchDrafts(): Promise<void> {
-    try {
-      this.draftsUnlisten = await getTransport().listen<DraftsChanged>(
-        "message-drafts-changed",
-        (p) => this.onDraftAdded(p),
-      );
-    } catch (err) {
-      console.warn("[fab-dial] listen(message-drafts-changed) failed", err);
-    }
-  }
-
-  private onDraftAdded(payload: DraftsChanged | undefined): void {
-    const added = payload?.added;
-    // Only an `add` carries `added` - a revise, a state flip or Joe's own edit
-    // in the panel publishes the bare event and must not take over the pane.
-    if (!added?.id || !this.sessionId || added.origin_session_id !== this.sessionId) return;
-    // He already has a card open: that is his choice of surface, and Drafts is
-    // refreshing itself anyway. Never yank him off a field he is typing in.
-    if (this.surface === "card") return;
-    this.openDraftId = added.id;
-    this.open("drafts");
+    // Auto-open predicate lives in fab-dial-drafts-watch.ts; this just wires
+    // the current scope and what "open" means for a FabDial instance.
+    void watchDrafts(
+      () => ({ sessionId: this.sessionId, cardOpen: this.surface === "card" }),
+      (draftId) => {
+        this.openDraftId = draftId;
+        this.open("drafts");
+      },
+    ).then((unlisten) => { this.draftsUnlisten = unlisten; });
   }
 
   /** active-session.ts rewrites the pane's innerHTML on every chat switch,
