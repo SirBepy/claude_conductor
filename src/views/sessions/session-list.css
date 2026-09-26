@@ -3,6 +3,12 @@
   min-height: 0;
   padding: 0;
   overflow: hidden;
+  /* .view-body's scrollbar-gutter: stable (fd5c133a) still applies to
+     overflow-y: hidden, not just auto/scroll - it was reserving a phantom
+     5px on the right edge that this pane's own scrollbar never uses (its
+     children scroll internally instead), shrinking the mobile preview
+     rail/permission-card's full-bleed width below the real viewport (todo 970). */
+  scrollbar-gutter: auto;
 }
 
 .sessions-sidebar {
