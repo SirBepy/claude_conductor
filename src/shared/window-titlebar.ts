@@ -8,6 +8,7 @@
 // .view-header" option because it keeps drag region and interactive header
 // buttons (burger/⋮) in separate rows with no hit-testing overlap (Joe,
 // 2026-09-25 /mockup session).
+import "./window-titlebar.css";
 import { isTauri } from "./transport";
 
 // withGlobalTauri = true, so the window API lives on the global - same loose
