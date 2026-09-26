@@ -24,7 +24,7 @@
 // (below) is the drive side, for specs that push a backend event sequence.
 
 import path from "node:path";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { Instance } from "../../src/types/ipc.generated";
 import { shotDir } from "./shot-dir";
 
