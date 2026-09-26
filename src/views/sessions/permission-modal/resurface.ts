@@ -112,6 +112,21 @@ async function applyRehydration(
   if (!rec) return false;
   for (const sib of siblings) {
     if (sib.kind === "question") queueSiblingQuestion(sessionId, sib.payload);
+    // A `kind: "permission"` sibling past `rec` is dropped here on purpose,
+    // not fixed (todo 975, checked 2026-09-26): the sibling QUEUE (index.ts's
+    // `_queuedSiblingQuestions`) and its promotion (`promoteQueuedSibling` ->
+    // `handleQuestionRequested`) are both question-shaped only - there is no
+    // permission-sibling queue to push this into, and building one is a
+    // cross-file change outside this fix's scope. Confirmed NOT provably
+    // unreachable: `src-tauri/src/daemon/state/prompts.rs`'s `pending_prompts`
+    // is a plain id-keyed map with no single-permission-per-session guard,
+    // and `permission.rs`'s own test `permission_prompts_are_not_sibling_questions`
+    // documents that a permission prompt is tracked with zero mutual-exclusion
+    // against another one for the same session - unlike questions, which get
+    // explicit sibling tracking via `awaiting`/`session_has_pending_question`.
+    // Still logged instead of silently vanishing, so a live hit surfaces in
+    // the console this time rather than looking like the daemon just forgot.
+    else console.warn("[perm-gate] a second live permission prompt for this session was dropped on rehydrate (todo 975, no permission-sibling queue exists yet)", { sessionId, id: sib.payload.id });
   }
   if (rec.kind !== "question") {
     storePendingPrompt(sessionId, { kind: "permission", payload: rec.payload });
@@ -236,7 +251,14 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   const displaced = peekPendingPrompt(sessionId);
   if (displaced && displaced.kind === "question" && displaced.payload.id !== pending.payload.id) {
     takePendingPrompt(sessionId);
-    queueSiblingQuestion(sessionId, displaced.payload);
+    // An already-answered slot (todo 971's `answered` flag, set synchronously
+    // at onSubmit/onCancel before the daemon's `prompt-resolved` poll clears
+    // it) must not be requeued as if still open - `queueSiblingQuestion` only
+    // takes a bare payload, so re-queuing it here would drop the flag on the
+    // way in, and a later promotion (index.ts's promoteQueuedSibling) would
+    // re-render it as a fresh, unanswered card (todo 975). Nothing left to
+    // track: the answer already went out via respond_question.
+    if (!displaced.answered) queueSiblingQuestion(sessionId, displaced.payload);
   }
   // Only safe to drop what's on screen now we hold a replacement.
   dismissQuestionCard();

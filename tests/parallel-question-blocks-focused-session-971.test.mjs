@@ -169,3 +169,50 @@ describe("todo 971: two question blocks in one turn on a focused session", () =>
     expect(pendingPromptSessionIds().has(SID)).toBe(false);
   });
 });
+
+// Regression (todo 975): resurface.ts's `reopenPendingPrompt` swap branch
+// re-queues a slot it displaces via `queueSiblingQuestion(sessionId,
+// displaced.payload)` - `.payload` only. Todo 971's `answered` flag (set
+// synchronously at onSubmit/onCancel, before the daemon's `prompt-resolved`
+// poll has caught up) lives on the PendingPrompt, not the payload, so it was
+// dropped on the way into the sibling queue. If the displaced prompt is later
+// promoted back out (its temporary occupant resolving), it re-entered
+// handleQuestionRequested with no memory of having been answered and
+// rendered as a fresh, open card.
+describe("todo 975: a displaced answered prompt must not resurface as open", () => {
+  it("submit A, reopen B's own card while A's slot is stale, then promote A back out via B resolving - A must not re-render", async () => {
+    const SID = nextSessionId();
+    focusSession(SID);
+    const q1 = questionPayload(SID, "q1-d", 1);
+    const q2 = questionPayload(SID, "q2-d", 2);
+
+    // A arrives and is shown; B arrives in the same turn and queues behind it.
+    handleQuestionRequested(q1);
+    await flush();
+    handleQuestionRequested(q2);
+    await flush();
+    expect(renderCalls.map((o) => o.id)).toEqual(["q1-d"]);
+
+    // Submit A. The slot still holds A (answered=true) - the resolve poll
+    // was never simulated, same staleness window as todo 971's own test above.
+    await renderCalls[0].onSubmit({ "Question q1-d?": "A" }, { additionalMessage: "", attachments: [] });
+    expect(peekPendingPrompt(SID)?.payload.id).toBe("q1-d");
+
+    // User reopens B's own transcript card while A's stale-but-answered
+    // record still occupies the slot. reopenPendingPrompt's swap branch
+    // displaces A to make room for B.
+    const opened = await reopenPendingPrompt(SID, "q2-d");
+    await flush();
+    expect(opened).toBe(true);
+    expect(renderCalls.map((o) => o.id)).toEqual(["q1-d", "q2-d"]);
+    expect(peekPendingPrompt(SID)?.payload.id).toBe("q2-d");
+
+    // B resolves durably, freeing the slot and promoting whatever the swap
+    // branch displaced - which must NOT be A rendered as a fresh open card,
+    // because A was already submitted.
+    handlePromptResolved("q2-d", true);
+    await flush();
+    expect(renderCalls.map((o) => o.id)).toEqual(["q1-d", "q2-d"]); // A did not re-render
+    expect(peekPendingPrompt(SID)).toBeNull(); // nothing left to promote as "open"
+  });
+});
