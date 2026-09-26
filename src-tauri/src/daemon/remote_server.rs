@@ -193,7 +193,9 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
     let protected = Router::new()
         .route("/api/sessions", get(list_sessions))
         .route("/api/sessions/:id/send", post(send_message))
-        .route("/api/sessions/:id/cancel", post(cancel_turn))
+        // No dedicated cancel route (todo 974: deleted, not fixed - nothing
+        // called it). Cancel reaches the daemon through `/api/rpc
+        // {"method":"cancel_turn"}` below, same as every other client.
         .route(
             "/api/rpc",
             post(rpc_dispatch).layer(DefaultBodyLimit::max(MAX_RPC_BODY_BYTES)),
@@ -431,5 +433,27 @@ mod tests {
         std::fs::write(dir.path().join("remote-pairing.json"), body.to_string()).unwrap();
         assert!(check_pairing_code("wrongcode", dir.path()).is_err());
         assert!(dir.path().join("remote-pairing.json").exists());
+    }
+
+    /// Todo 974: the old dedicated per-session cancel REST route (a sibling
+    /// of the send route just above it in `build_router`) called
+    /// `lifecycle::cancel_turn` directly, skipping the four teardown steps
+    /// the RPC `cancel_turn` handler does. Nothing called the route (SPA and
+    /// Android both cancel via `/api/rpc {"method":"cancel_turn"}`), so it
+    /// was deleted instead of duplicated. Source-contract test, same shape as
+    /// `core.rs`'s `interrupt_cleanup_contract`. The needle is built from two
+    /// pieces at runtime, not spelled out contiguously here, so this test's
+    /// own source can't satisfy the very check it performs.
+    #[test]
+    fn sessions_cancel_route_stays_deleted() {
+        let src = include_str!("remote_server.rs");
+        let needle = ["/api/sessions/:id/", "cancel"].concat();
+        assert!(
+            !src.contains(&needle),
+            "the dedicated REST cancel route was deleted in todo 974 because \
+             nothing called it; if it's coming back it MUST reach the same \
+             teardown as the RPC cancel_turn handler in \
+             methods/lifecycle/core.rs, not a bare lifecycle::cancel_turn() call"
+        );
     }
 }

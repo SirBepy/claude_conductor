@@ -116,16 +116,6 @@ pub(super) async fn send_message(
     }
 }
 
-pub(super) async fn cancel_turn(
-    State(ctx): State<Arc<RemoteCtx>>,
-    AxPath(id): AxPath<String>,
-) -> Response {
-    match crate::daemon::lifecycle::cancel_turn(&ctx.state.sessions, &id).await {
-        Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
 #[derive(Deserialize)]
 pub(super) struct RpcBody {
     method: String,
