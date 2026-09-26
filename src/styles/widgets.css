@@ -31,57 +31,10 @@
   pointer-events: none;
 }
 
-/* ── Pin button (top-right of pinnable cards) ── */
-.pin-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    color 0.15s,
-    background 0.15s;
-  z-index: 2;
-}
-.pin-btn i {
-  font-size: 1rem;
-}
-.pin-btn:hover {
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-}
-.pin-btn.pinned {
-  color: var(--color-primary);
-}
-.pinnable-wrap {
-  position: relative;
-}
-.pinnable-wrap .pin-btn {
-  top: 6px;
-  right: 6px;
-}
-
 /* Reserve space on the right so the pin button doesn't overlap the pagination arrow */
 .chart-container .chart-pagination {
   padding-right: 34px;
   padding-left: 34px;
-}
-
-/* ── Pinned cards block on Home ── */
-.pinned-cards {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
 }
 
 /* Toast rules (.toast-stack, .toast, .toast.show, .toast.leaving,
@@ -768,55 +721,8 @@ input:checked + .slider:before {
 /* Session-detail chip + action bar rules moved to
  * src/views/session-detail/session-detail.css. */
 
-/* ── Project card tags ───────────────────────────────────────────────────── */
-.card-tags {
-  margin-left: 6px;
-}
-.card-tag {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 0.62rem;
-  font-weight: 500;
-  margin-left: 2px;
-}
-.card-tag.live {
-  background: color-mix(in srgb, var(--color-success) 15%, transparent);
-  color: var(--color-success);
-}
-.card-tag.remote {
-  background: color-mix(in srgb, var(--color-info, #6e8fff) 15%, transparent);
-  color: var(--color-info, #6e8fff);
-}
-.card-tag.automated {
-  background: color-mix(in srgb, var(--color-warning, #e5a040) 15%, transparent);
-  color: var(--color-warning, #e5a040);
-}
-
 /* Automation-section rules moved to
  * src/views/project-detail/subviews/automation/automation.css. */
-
-/* ── Legacy import banner ────────────────────────────────────────────────── */
-.banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--color-surface, #1e1d2b);
-  border: 1px solid var(--color-primary, #9d7dfc);
-  border-radius: 8px;
-  margin: 10px 12px;
-  font-size: var(--fs-body);
-  flex-wrap: wrap;
-}
-.banner i {
-  font-size: 1.2rem;
-  color: var(--color-primary, #9d7dfc);
-}
-.banner span {
-  flex: 1;
-  min-width: 140px;
-}
 
 /* .menu-anchor and .menu-popover rules moved to src/shared/kebab-menu.css
  * (todo 204).
