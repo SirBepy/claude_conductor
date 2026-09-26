@@ -28,24 +28,28 @@ fn excerpt(body: &str) -> String {
     }
 }
 
-fn open_line(d: &MessageDraft, viewer_session_id: &str) -> String {
+fn open_line(d: &MessageDraft) -> String {
     let handles: Vec<String> = d.variants.iter().map(store::handle_of).collect();
-    let scope = if d.origin_session_id == viewer_session_id {
-        String::new()
-    } else {
-        format!(" (chat: {})", d.origin_label)
-    };
-    format!("- [{}] {} - {}{scope}", handles.join(", "), d.topic, short(&d.id))
+    format!("- [{}] {} - {}", handles.join(", "), d.topic, short(&d.id))
 }
 
-/// The per-turn `UserPromptSubmit` block, or None when there is nothing open
-/// and nothing edited. Callers MUST treat rendering as consumption: `mark_seen`
-/// runs in the same daemon call, so an edit is reported exactly once.
+/// The per-turn `UserPromptSubmit` block, or None when this chat has nothing
+/// open and nothing edited. Callers MUST treat rendering as consumption:
+/// `mark_seen` runs in the same daemon call, so an edit is reported exactly
+/// once.
 pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
     let project_id = caller_project(state, session_id).ok()?;
     let drafts = store::list(&project_id);
 
-    let open: Vec<&MessageDraft> = drafts.iter().filter(|d| d.state != DraftState::Copied).collect();
+    // Own chat only (Joe 2026-09-26). The store stays project-wide and the
+    // panel still lists every card, but this block is rebuilt every single
+    // turn, so one unanswered draft was costing EVERY chat in the project a
+    // line forever - nothing drains the list until someone presses Copy. A
+    // chat that never wrote a draft now gets no block at all.
+    let open: Vec<&MessageDraft> = drafts
+        .iter()
+        .filter(|d| d.state != DraftState::Copied && d.origin_session_id == session_id)
+        .collect();
     let edited: Vec<&MessageDraft> = drafts
         .iter()
         .filter(|d| !d.seen_by_origin && d.origin_session_id == session_id)
@@ -55,14 +59,17 @@ pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -
     }
 
     let mut out = String::from(
-        "[drafts] Message drafts you wrote for the user to send somewhere else, living in this \
-         project's Drafts panel. Never paste a draft message into chat - write it there with the \
-         `write_draft` tool (add|revise|variant|drop) and refer to it by its handle.\n",
+        "[drafts] Message drafts YOU wrote in THIS chat for the user to send somewhere else. Each \
+         one lives in this project's Drafts panel and renders inline in this transcript, where he \
+         can read, edit and copy it. Drafts from the project's other chats are deliberately not \
+         listed here - the panel holds them. Never paste a draft message into your chat text - \
+         write it with the `write_draft` tool (add|revise|variant|drop) and refer to it by its \
+         handle.\n",
     );
     if !open.is_empty() {
         out.push_str(&format!("Open ({}):\n", open.len()));
         for d in open.iter().take(MAX_INJECTED) {
-            out.push_str(&open_line(d, session_id));
+            out.push_str(&open_line(d));
             out.push('\n');
         }
         if open.len() > MAX_INJECTED {
@@ -147,10 +154,9 @@ mod tests {
     }
 
     #[test]
-    fn open_line_marks_another_chats_card_but_not_your_own() {
+    fn open_line_carries_handle_topic_and_short_id() {
         let d = draft(vec![variant("Bruno", 2, &[("hey", DraftAuthor::Ai)])]);
-        assert_eq!(open_line(&d, "s1"), "- [Bruno #2] Sprint slip - abcdef12");
-        assert!(open_line(&d, "s2").ends_with("(chat: chat A)"));
+        assert_eq!(open_line(&d), "- [Bruno #2] Sprint slip - abcdef12");
     }
 
     #[test]
@@ -159,7 +165,7 @@ mod tests {
             variant("Bruno", 2, &[("technical", DraftAuthor::Ai)]),
             variant("Ana", 1, &[("plain", DraftAuthor::Ai)]),
         ]);
-        assert!(open_line(&d, "s1").starts_with("- [Bruno #2, Ana #1]"), "got {}", open_line(&d, "s1"));
+        assert!(open_line(&d).starts_with("- [Bruno #2, Ana #1]"), "got {}", open_line(&d));
     }
 
     #[test]
