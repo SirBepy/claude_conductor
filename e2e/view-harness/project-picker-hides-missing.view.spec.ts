@@ -63,7 +63,11 @@ test.describe("view-harness / project picker hides folders that no longer exist"
     await page.locator("#project-picker-search").fill("fibo-archived");
 
     await expect(page.locator(".project-picker-row")).toHaveCount(0);
-    await expect(page.locator(".project-picker-empty")).toHaveText("No matches");
+    // A name that matches nothing is now the add-a-project state rather than
+    // a bare "No matches" line, so the assertion is "no ROW came back", not
+    // "the empty placeholder is showing".
+    await expect(page.locator(".project-picker-row--missing")).toHaveCount(0);
+    await expect(page.locator(".pp-act", { hasText: "Create" })).toContainText('"fibo-archived"');
   });
 
   test("Enter on a filtered list still picks a live project", async ({ page }) => {

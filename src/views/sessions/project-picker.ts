@@ -4,8 +4,24 @@ import { invoke } from "../../shared/ipc";
 import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
-import { openNewProjectModal, isNewProjectModalOpen } from "./new-project-modal";
-import { openLocationModal } from "./location-picker";
+import { openLocationModal, resolveRememberedLocation } from "./location-picker";
+import {
+  SLOT_COUNT,
+  type FavoriteSlots,
+  readFavorites,
+  writeFavorites,
+  assignSlot,
+  moveSlot,
+  clearSlot,
+  slotOf,
+  pathForKey,
+} from "./project-favorites";
+import {
+  PROJECTS_ROOT_SETTINGS_KEY,
+  resolveProjectsRoot,
+  joinProjectPath,
+  isValidProjectName,
+} from "./projects-root";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
 import { api } from "../../shared/api";
@@ -133,12 +149,63 @@ export function openProjectPickerModal(
         peerMachines = res.peers;
         if (peerMachines.length > 0) renderModal();
       }).catch(() => { /* machine federation unavailable - no chip row, same as zero peers */ });
+
+      // The projects root, if the user has ever set one explicitly. Absent,
+      // projectsRoot() infers it; this read only ever upgrades the answer, so
+      // the Create row is usable before it resolves.
+      void invoke<Record<string, unknown>>("get_settings").then((s) => {
+        if (resolved) return;
+        const v = s?.[PROJECTS_ROOT_SETTINGS_KEY];
+        if (typeof v === "string" && v.length > 0) {
+          projectsRootStored = v;
+          renderModal();
+        }
+      }).catch(() => { /* inference covers it */ });
     }
 
     let sort: SortChoice = readStoredSort();
     let showTodos: boolean = readShowTodos();
     let optionsOpen = false;
     let filter = "";
+
+    // ── Favourite slots 1-9 (desktop only) ──────────────────────────────────
+    let favorites: FavoriteSlots = readFavorites();
+    // What the pointer is currently carrying: a project path dragged off a
+    // list row, or a slot index dragged off the rail. Tracked here rather than
+    // read back from dataTransfer on dragover, because Chromium only exposes
+    // getData() on drop - a dragover handler can see the TYPE but not the
+    // value, which is not enough to paint the right hover state.
+    let dragging: { kind: "row"; path: string } | { kind: "slot"; index: number } | null = null;
+    let dragOverSlot: number | null = null;
+    // Set by a slot's own drop handler so dragend can tell "landed on another
+    // slot" (a move/swap, already applied) from "released anywhere else",
+    // which is the remove gesture.
+    let slotDropHandled = false;
+
+    // Stored root wins over the inference; see projects-root.ts. Read once per
+    // open, refreshed when the user repoints it.
+    let projectsRootStored: string | null = null;
+
+    const persistFavorites = (next: FavoriteSlots): void => {
+      favorites = next;
+      writeFavorites(favorites);
+      renderModal();
+    };
+
+    const projectByPath = (path: string): ProjectGroup | undefined =>
+      localProjects?.find((p) => p.path.toLowerCase() === path.toLowerCase());
+
+    /** The favourites fast path. Skips BOTH the list and the Location step and
+     *  resolves the project's remembered worktree/start folder directly - that
+     *  is the whole point of a number key, per Joe 2026-09-26. A slot pointing
+     *  at a project that has since been removed or whose folder is gone is
+     *  inert rather than an error; the tile already renders as unresolved. */
+    const openFavorite = (path: string): boolean => {
+      const p = projectByPath(path);
+      if (!p || p.path_exists === false) return false;
+      finish({ ...resolveRememberedLocation(p), machineId: null });
+      return true;
+    };
     // Keyboard-navigable highlight. Always points at a row in the current
     // filtered/sorted `computeRows()` output. Reset to 0 whenever filter or
     // sort changes (top of the new list).
@@ -220,6 +287,177 @@ export function openProjectPickerModal(
       finish({ ...result, machineId: null });
     };
 
+    // ── Add a project, inline in the empty-results state ────────────────────
+    // Replaces the old "New project…" / "Open in new folder…" footer pair.
+    // Both said "folder" and one said "new" while the other meant "existing",
+    // so neither label distinguished them (Joe, 2026-09-26). Typing a name
+    // that matches nothing now offers both, with the name already filled in.
+
+    /** Root shown in the Create row: explicit setting, else inferred from
+     *  where the existing projects already live. Null means neither, in which
+     *  case Create asks for a parent first instead of guessing. */
+    const projectsRoot = (): string | null =>
+      resolveProjectsRoot(projectsRootStored, (localProjects ?? []).map((p) => p.path));
+
+    const repointProjectsRoot = async (): Promise<void> => {
+      const picked = await invoke<string | null>("pick_folder");
+      if (!picked) return;
+      projectsRootStored = picked;
+      try {
+        const cur = await invoke<Record<string, unknown>>("get_settings");
+        await invoke("save_settings", { updated: { ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: picked } });
+      } catch (e) {
+        console.error("[project-picker] failed to persist the projects root", e);
+      }
+      renderModal();
+    };
+
+    const createProject = async (name: string): Promise<void> => {
+      let root = projectsRoot();
+      if (!root) {
+        // No stored root and nothing to infer from - a first run. Ask for the
+        // parent rather than inventing one, then remember it.
+        const picked = await invoke<string | null>("pick_folder");
+        if (!picked) return;
+        projectsRootStored = picked;
+        root = picked;
+      }
+      const fullPath = joinProjectPath(root, name.trim());
+      try {
+        await invoke("create_folder", { path: fullPath });
+      } catch (e) {
+        alert(`Could not create folder: ${e}`);
+        return;
+      }
+      try {
+        const cur = await invoke<Record<string, unknown>>("get_settings");
+        await invoke("save_settings", { updated: { ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: root } });
+      } catch { /* the folder exists either way; remembering is best-effort */ }
+      finish({ path: fullPath, name: name.trim(), machineId: null });
+    };
+
+    const browseForProject = async (): Promise<void> => {
+      const picked = await invoke<string | null>("pick_folder");
+      if (!picked) return;
+      const name = picked.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? picked;
+      finish({ path: picked, name, machineId: null });
+    };
+
+    // The empty-results state carries both add-a-project routes, with the
+    // typed term already filled into Create. A search that matches nothing is
+    // exactly the moment "this project isn't here yet" becomes true, so the
+    // offer lands there instead of in two permanent footer buttons.
+    const renderNoMatches = () => {
+      const typed = filter.trim();
+      const canCreate = isValidProjectName(typed) && !isRemote() && machineField.machineId === null;
+      const root = projectsRoot();
+      if (isRemote() || machineField.machineId !== null) {
+        return html`<li class="project-picker-empty">No matches</li>`;
+      }
+      return html`
+        <li class="pp-inline-actions">
+          ${canCreate ? html`
+            <div class="pp-act" role="button" tabindex="0"
+              @click=${() => void createProject(typed)}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void createProject(typed); }
+              }}
+            >
+              <i class="ph ph-folder-plus pp-lead"></i>
+              <span class="pp-body">
+                <b>Create "${typed}"</b><br>
+                ${root
+                  // The path IS the control (wording L2): nothing to label, so
+                  // nothing to word ambiguously. It is a real <button>, which
+                  // is why the row above is a role="button" div - a button
+                  // inside a button gets ejected out by the HTML parser.
+                  ? html`<em>in </em><button class="pp-root-inline" title="Change where new projects are created"
+                      @click=${(e: Event) => { e.stopPropagation(); void repointProjectsRoot(); }}
+                    >${root} <i class="ph ph-pencil-simple"></i></button>`
+                  : html`<em>pick where to put it&hellip;</em>`}
+              </span>
+            </div>
+          ` : ""}
+          <button class="pp-act" @click=${() => void browseForProject()}>
+            <i class="ph ph-folder-open pp-lead"></i>
+            <span class="pp-body"><b>Browse for a folder&hellip;</b><br><em>pick one that already exists on disk</em></span>
+          </button>
+          ${canCreate ? "" : html`<span class="pp-inline-hint">No matches. Type a folder name to create one.</span>`}
+        </li>
+      `;
+    };
+
+    // ── The favourites rail (placement P4: inline in the footer) ───────────
+    // Drop semantics live in project-favorites.ts; this only wires the
+    // gestures to them. A tile released anywhere that is NOT another tile is
+    // the remove gesture, which is why dragend checks slotDropHandled rather
+    // than relying on a dropzone that covers "outside".
+    const renderFavoriteRail = () => {
+      if (isRemote() || machineField.machineId !== null) return "";
+      return html`
+        <div class="pp-fav-rail" role="group" aria-label="Favourite projects, keys 1 to 9">
+          ${Array.from({ length: SLOT_COUNT }, (_, i) => {
+            const path = favorites[i] ?? null;
+            const p = path ? projectByPath(path) : undefined;
+            // A slot whose project left the registry keeps its number and goes
+            // quiet rather than vanishing: silently renumbering everything
+            // would repoint every key below it.
+            const unresolved = path !== null && p === undefined;
+            const label = p ? p.name : (path ? "(missing)" : `Empty slot ${i + 1}`);
+            return html`
+              <div
+                class="pp-fav-slot${path === null ? " is-empty" : ""}${unresolved ? " is-unresolved" : ""}${dragOverSlot === i ? " is-target" : ""}"
+                data-slot=${i}
+                title=${p ? `${p.name} - press ${i + 1}` : (path ?? `Empty - drag a project here for key ${i + 1}`)}
+                aria-label=${label}
+                draggable=${path !== null}
+                @click=${() => { if (path) openFavorite(path); }}
+                @dragstart=${(e: DragEvent) => {
+                  if (path === null) return;
+                  dragging = { kind: "slot", index: i };
+                  slotDropHandled = false;
+                  e.dataTransfer?.setData("text/plain", `slot:${i}`);
+                  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                }}
+                @dragend=${() => {
+                  // Released off the rail: that is how a favourite is removed.
+                  if (dragging?.kind === "slot" && !slotDropHandled) {
+                    persistFavorites(clearSlot(favorites, dragging.index));
+                  }
+                  dragging = null;
+                  dragOverSlot = null;
+                  renderModal();
+                }}
+                @dragover=${(e: DragEvent) => {
+                  if (!dragging) return;
+                  e.preventDefault();
+                  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                  if (dragOverSlot !== i) { dragOverSlot = i; renderModal(); }
+                }}
+                @dragleave=${() => { if (dragOverSlot === i) { dragOverSlot = null; renderModal(); } }}
+                @drop=${(e: DragEvent) => {
+                  e.preventDefault();
+                  slotDropHandled = true;
+                  dragOverSlot = null;
+                  if (!dragging) { renderModal(); return; }
+                  const next = dragging.kind === "row"
+                    ? assignSlot(favorites, i, dragging.path)
+                    : moveSlot(favorites, dragging.index, i);
+                  dragging = null;
+                  persistFavorites(next);
+                }}
+              >
+                <span class="pp-num">${i + 1}</span>
+                ${p
+                  ? html`<span class="pp-fav-face">${unsafeHTML(renderAvatar(p.avatar, p.path))}</span>`
+                  : (unresolved ? html`<i class="ph ph-question pp-fav-gone"></i>` : "")}
+              </div>
+            `;
+          })}
+        </div>
+      `;
+    };
+
     const renderModal = () => {
       if (!localProjects) {
         render(
@@ -280,6 +518,18 @@ export function openProjectPickerModal(
                 renderModal();
               }}
               @keydown=${(e: KeyboardEvent) => {
+                // Favourite keys 1-9. Intercepted only when the search box is
+                // EMPTY and that slot is actually filled, so a digit is still
+                // a literal character the moment either is untrue - typing
+                // "2048-game", or pressing 7 with slot 7 empty, both behave
+                // exactly as before. Modifier combos are left to the OS.
+                if (filter === "" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                  const favPath = pathForKey(favorites, e.key);
+                  if (favPath && openFavorite(favPath)) {
+                    e.preventDefault();
+                    return;
+                  }
+                }
                 if (e.key === "Escape") {
                   if (filter !== "") {
                     e.preventDefault();
@@ -334,7 +584,7 @@ export function openProjectPickerModal(
                 if (machineField.machineId !== null && remoteProjectsState.error) {
                   return html`<li class="project-picker-empty project-picker-error">${remoteProjectsState.error}</li>`;
                 }
-                if (rows.length === 0) return html`<li class="project-picker-empty">No matches</li>`;
+                if (rows.length === 0) return renderNoMatches();
                 return rows.map((p, i) => {
                   const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
                   const missing = p.path_exists === false;
@@ -343,6 +593,13 @@ export function openProjectPickerModal(
                         class="project-picker-row ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${missing ? "project-picker-row--missing" : ""}"
                         data-row-idx=${i}
                         style="position:relative"
+                        draggable="true"
+                        @dragstart=${(e: DragEvent) => {
+                          dragging = { kind: "row", path: p.path };
+                          e.dataTransfer?.setData("text/plain", `row:${p.path}`);
+                          if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+                        }}
+                        @dragend=${() => { dragging = null; dragOverSlot = null; renderModal(); }}
                         @mouseenter=${() => {
                           if (selectedIdx !== i) {
                             selectedIdx = i;
@@ -357,6 +614,15 @@ export function openProjectPickerModal(
                           <span class="project-picker-path">${p.path}</span>
                           ${missing ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
                         </div>
+                        ${(() => {
+                          // Which key opens this row, when it has one. Without
+                          // it the rail's tiles are the only place that state
+                          // lives, and you cannot tell whether dragging a row
+                          // up would add a favourite or just move an existing
+                          // one to a different number.
+                          const fav = slotOf(favorites, p.path);
+                          return fav >= 0 ? html`<span class="pp-row-fav" title="Press ${fav + 1}">${fav + 1}</span>` : "";
+                        })()}
                         ${p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}
                         ${showTodos && todoCount > 0 ? html`<span class="project-picker-todo-badge">${todoCount}</span>` : ""}
                       </li>
@@ -365,36 +631,8 @@ export function openProjectPickerModal(
               })()}
             </ul>
           </div>
-          <footer class="modal-footer">
-            ${isRemote() || machineField.machineId !== null ? "" : html`
-            <button
-              class="btn btn-secondary btn-new-folder"
-              @click=${async () => {
-                if (isNewProjectModalOpen()) return;
-                host.classList.remove("open");
-                const result = await openNewProjectModal();
-                if (!result) {
-                  host.classList.add("open");
-                  renderModal();
-                  return;
-                }
-                finish({ ...result, machineId: null });
-              }}
-            >
-              <i class="ph ph-folder-plus"></i> New project&hellip;
-            </button>
-            <button
-              class="btn btn-secondary btn-new-folder"
-              @click=${async () => {
-                const picked = await invoke<string | null>("pick_folder");
-                if (!picked) return;
-                const name = picked.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? picked;
-                finish({ path: picked, name, machineId: null });
-              }}
-            >
-              <i class="ph ph-folder-open"></i> Open in new folder&hellip;
-            </button>
-            `}
+          <footer class="modal-footer pp-footer">
+            ${renderFavoriteRail()}
             <button class="btn btn-secondary" @click=${() => finish(null)}>Cancel</button>
           </footer>
         </div>

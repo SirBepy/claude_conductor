@@ -262,3 +262,172 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ── Favourite slots 1-9 (placement P4: inline in the footer) ─────────────
+   Sharing the footer strip instead of taking a row of its own keeps the card
+   70px shorter; the cost is that Cancel leaves ~440px for nine tiles, so a
+   tile shows its numeral and avatar and no name. Slot algebra: see
+   project-favorites.ts. */
+.project-picker-modal .modal-footer.pp-footer {
+  justify-content: flex-start;
+  gap: 10px;
+}
+.pp-fav-rail {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+}
+.pp-fav-slot {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  position: relative;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #2e2e40);
+  background: var(--color-surface-alt, #15151e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.pp-fav-slot.is-empty {
+  border-style: dashed;
+  background: transparent;
+  opacity: 0.45;
+  cursor: default;
+}
+.pp-fav-slot:not(.is-empty):hover {
+  border-color: var(--color-primary, #4c9eff);
+}
+/* Drop target, for both gestures: a row dragged in, and a tile dragged from
+   another number. */
+.pp-fav-slot.is-target {
+  opacity: 1;
+  border-style: dashed;
+  border-color: var(--color-primary, #4c9eff);
+  background: color-mix(in srgb, var(--color-primary, #4c9eff) 12%, transparent);
+}
+/* The slot's project left the registry. Keeps its number rather than
+   vanishing - renumbering would silently repoint every key below it. */
+.pp-fav-slot.is-unresolved {
+  opacity: 0.5;
+  cursor: default;
+}
+.pp-fav-gone {
+  font-size: 13px;
+  color: var(--color-text-muted, #8a8aa0);
+}
+.pp-num {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-muted, #8a8aa0);
+  pointer-events: none;
+}
+/* widgets.css's `.proj-face` is declared unscoped as width/height 100%, on the
+   assumption it always sits in a sized avatar box. Without this it fills the
+   tile and swallows the numeral. */
+.pp-fav-face {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.pp-fav-face .proj-face { font-size: 12px; }
+
+/* The key that opens a row, shown on the row itself so the rail is not the
+   only place that state is visible. */
+.pp-row-fav {
+  flex-shrink: 0;
+  min-width: 15px;
+  text-align: center;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: var(--color-text-muted, #8a8aa0);
+  background: var(--color-surface-alt, #15151e);
+  border: 1px solid var(--color-border, #2e2e40);
+}
+
+/* ── Add a project, inline in the empty-results state ─────────────────────
+   Replaces the old "New project…" / "Open in new folder…" footer pair. */
+.pp-inline-actions {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 12px;
+}
+.pp-act {
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--color-border, #2e2e40);
+  background: var(--color-surface-alt, #15151e);
+  color: var(--color-text);
+}
+.pp-act:hover,
+.pp-act:focus-visible {
+  border-color: var(--color-primary, #4c9eff);
+  outline: none;
+}
+.pp-act .pp-lead {
+  font-size: 16px;
+  flex-shrink: 0;
+  color: var(--color-text-muted, #8a8aa0);
+}
+.pp-act .pp-body { min-width: 0; }
+.pp-act b { font-weight: 600; }
+.pp-act em {
+  font-style: normal;
+  font-size: 0.74rem;
+  color: var(--color-text-muted, #8a8aa0);
+}
+/* Wording L2: the path itself is the control, so there is no label to get
+   wrong. A real <button>, which is why its row is a role="button" div - a
+   button nested in a button is ejected out to be a sibling by the parser. */
+.pp-root-inline {
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted, #8a8aa0);
+  border-bottom: 1px dashed var(--color-text-muted, #8a8aa0);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pp-root-inline:hover,
+.pp-root-inline:focus-visible {
+  color: var(--color-primary, #4c9eff);
+  border-bottom-color: var(--color-primary, #4c9eff);
+  outline: none;
+}
+.pp-root-inline i { font-size: 12px; }
+.pp-inline-hint {
+  font-size: 0.74rem;
+  font-style: italic;
+  color: var(--color-text-muted, #8a8aa0);
+  padding: 2px 2px 0;
+}

@@ -13,6 +13,26 @@ import "./location-picker.css";
 /// the session should actually open in. Shows nothing and resolves
 /// instantly when there's nothing to choose (no worktrees and at most one
 /// CLAUDE.md) - same auto-skip principle the worktree picker already used.
+/// The favourites fast path (keys 1-9) deliberately skips this whole modal,
+/// so it needs the location the modal WOULD have pre-selected without any UI
+/// or IPC. Both fields are already on ProjectGroup, persisted by
+/// persistAndFinish below, so this re-reads the same remembered choice rather
+/// than deriving a second answer that could disagree with it.
+///
+/// Does NOT re-scan for CLAUDE.md files: a project the user has opened before
+/// has last_start_folder_rel set, and one they have not falls back to the
+/// worktree root, which is exactly what the modal defaults to on a first open.
+export function resolveRememberedLocation(project: ProjectGroup): { path: string; name: string } {
+  let wt = { path: project.path, name: project.name };
+  if (project.last_worktree_path) {
+    const match = project.worktrees.find((w) => w.path === project.last_worktree_path);
+    if (match) wt = { path: match.path, name: match.name };
+  }
+  const rel = project.last_start_folder_rel;
+  if (!rel) return wt;
+  return { path: `${wt.path}\\${rel.replace(/\//g, "\\")}`, name: wt.name };
+}
+
 export function openLocationModal(project: ProjectGroup): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const slot = modalCardSlot();
