@@ -4,8 +4,9 @@ import { eventToRenderedMessage, originSessionIdOf, isBoundaryMessage, cleanUser
 import type { SkipMark } from "./skip-marks";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
-import { isAskQuestionTool } from "./tool-meta";
+import { isAskQuestionTool, isWriteDraftTool } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
+import { draftResultFieldsOf } from "./chat-draft-card";
 import { findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
@@ -196,6 +197,22 @@ export class ChatPaginator {
         updateMsgIds.add(ev.id);
       }
     }
+    // A write_draft tool_result never renders its own row either - it carries
+    // the draft id, which is what makes the card a live view of the store row
+    // rather than a snapshot (chat-draft-card.ts). Same absorb as the live
+    // path's handleToolResultEvent.
+    const draftToolIds = new Set<string>();
+    const draftResultById = new Map<string, Partial<RenderedMessage>>();
+    for (const ev of events) {
+      if (ev.type === "tool_use" && isWriteDraftTool(ev.tool_name) && !ev.parent_tool_use_id) {
+        draftToolIds.add(ev.id);
+      }
+    }
+    for (const ev of events) {
+      if (ev.type !== "tool_result" || !draftToolIds.has(ev.tool_use_id)) continue;
+      const fields = draftResultFieldsOf(ev.output);
+      draftResultById.set(ev.tool_use_id, ev.is_error || !fields ? { draftFailed: true } : fields);
+    }
     // A question's tool_result never renders its own row - it resolves the card
     // instead, mirroring chat-event-handler.ts's live absorb. A receipt-only
     // result carries no resolution, leaving the card open for the fold below.
@@ -300,7 +317,7 @@ export class ChatPaginator {
     // Answered-later-in-this-page cards render at the answer, not the ask site.
     const deferredQuestions = new Map<string, RenderedMessage>();
     const filtered = events.filter((ev) =>
-      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id) || questionToolIds.has(ev.tool_use_id))));
+      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id) || questionToolIds.has(ev.tool_use_id) || draftToolIds.has(ev.tool_use_id))));
 
     const messages = this.cb.getMessages();
     const messageEls = this.cb.getMessageEls();
@@ -386,6 +403,12 @@ export class ChatPaginator {
       msg.originSessionId = originSessionIdOf(ev);
       if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
         msg.failed = true;
+      }
+      if (ev.type === "tool_use" && msg.kind === "draft") {
+        // Result second, but never letting an empty recipient blank the input's
+        // own - see the live path's matching fold.
+        const fields = draftResultById.get(ev.id);
+        if (fields) Object.assign(msg, fields, { draftRecipient: fields.draftRecipient || msg.draftRecipient });
       }
       // Baked in before the branches below so it survives regardless of
       // which one runs (see sentinelExtraById above).

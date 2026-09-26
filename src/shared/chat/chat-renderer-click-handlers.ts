@@ -9,6 +9,7 @@ import { openLightbox } from "./lightbox";
 import { onWaitingChipClick } from "./turn-chips";
 import { getCta } from "./cta-registry";
 import { PREVIEW_OPEN_EVENT } from "./chat-preview-card";
+import { DRAFT_OPEN_EVENT, copyDraftCard } from "./chat-draft-card";
 import type { ChatRenderer } from "./chat-renderer";
 
 /** Delegated `click` handlers for `ChatRenderer`'s container. Each factory
@@ -157,6 +158,34 @@ export function createHandlePreviewCardClick(_renderer: ChatRenderer): (e: Mouse
     const summary = (e.target as HTMLElement).closest<HTMLElement>("[data-preview-toggle]");
     const card = summary?.closest<HTMLElement>(".msg.preview-card");
     if (card) card.classList.toggle("open");
+  };
+}
+
+/** The write_draft card: Copy writes both clipboard payloads and flips the
+ *  draft to `copied`, ⤢ hands the id to the Drafts panel, the chevron folds.
+ *  Editing stays in the panel - the card is read/copy only. */
+export function createHandleDraftCardClick(_renderer: ChatRenderer): (e: MouseEvent) => void {
+  return (e: MouseEvent): void => {
+    const target = e.target as HTMLElement;
+    const card = target.closest<HTMLElement>(".msg.draft-card");
+    if (!card) return;
+    const copy = target.closest<HTMLElement>("[data-draft-copy]");
+    if (copy) {
+      e.stopPropagation();
+      copyDraftCard(card, copy);
+      return;
+    }
+    if (target.closest("[data-draft-pop]")) {
+      e.stopPropagation();
+      // Announced, not called directly: the Drafts panel lives in the sessions
+      // view, and importing it from shared/ would close a cycle - the same
+      // split the preview card's ⤢ uses.
+      window.dispatchEvent(new CustomEvent(DRAFT_OPEN_EVENT, { detail: { id: card.dataset.draftId ?? "" } }));
+      return;
+    }
+    // Only the chevron folds, not the whole header: the body is selectable text
+    // and a stray click near it must not collapse what he is reading.
+    if (target.closest("[data-draft-toggle]")) card.classList.toggle("open");
   };
 }
 

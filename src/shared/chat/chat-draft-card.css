@@ -1,0 +1,186 @@
+/* write_draft card: an outbound message draft as its own centered message row.
+   Geometry tracks .msg.preview-card so the three card families (question,
+   preview, draft) read as one system. 560px, between the question card's 460
+   and preview's 640: this holds prose, not a wide render. */
+
+.msg.draft-card {
+  align-self: center;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0;
+  max-width: 560px;
+  width: 90%;
+  margin-top: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  /* Own container so the header sheds the Copy label by CARD width, not
+     viewport width - the pane can be narrow while the window is wide. */
+  container-type: inline-size;
+}
+
+.dc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  user-select: none;
+  border-bottom: 1px solid transparent;
+}
+
+.msg.draft-card.open .dc-head {
+  border-bottom-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.dc-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.dc-label {
+  flex-shrink: 0;
+}
+
+/* The recipient handle is the card's real identity, so it gets the accent pill
+   and the topic trails behind it as quieter context. */
+.dc-to {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 100px;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.dc-topic {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.dc-grow {
+  flex: 1;
+}
+
+.dc-ver {
+  flex-shrink: 0;
+  font-size: 0.64rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.dc-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.dc-act:hover {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.dc-chevron {
+  flex-shrink: 0;
+  opacity: 0.5;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.msg.draft-card.open .dc-chevron {
+  transform: rotate(180deg);
+}
+
+.dc-body {
+  padding: 10px 12px;
+  background: var(--color-background);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--color-text);
+  max-height: 460px;
+  overflow-y: auto;
+  /* Selectable on purpose: Copy is the happy path, but pulling one paragraph
+     out by hand has to work too. */
+  user-select: text;
+}
+
+.dc-body > :first-child {
+  margin-top: 0;
+}
+
+.dc-body > :last-child {
+  margin-bottom: 0;
+}
+
+.msg.draft-card:not(.open) .dc-body,
+.msg.draft-card:not(.open) .dc-foot {
+  display: none;
+}
+
+.dc-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 7px;
+  font-size: 0.62rem;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Copied: the state flip is the only signal that this one is dealt with, so it
+   reads as settled rather than waiting. */
+.msg.draft-card.copied .dc-icon {
+  color: var(--color-success, var(--color-text-muted));
+}
+
+.msg.draft-card.copied .dc-to {
+  background: color-mix(in srgb, var(--color-text-muted) 14%, transparent);
+  color: var(--color-text-muted);
+}
+
+/* Superseded by a later version, and deleted from the panel: both keep the row
+   readable (folded, dimmed) rather than removing history from the transcript. */
+.msg.draft-card.superseded,
+.msg.draft-card.gone {
+  opacity: 0.6;
+}
+
+.msg.draft-card.gone .dc-topic,
+.msg.draft-card.gone .dc-to {
+  text-decoration: line-through;
+}
+
+/* A dropped draft and a failed call both have nothing to copy or open. */
+.msg.draft-card.unresolved .dc-act {
+  display: none;
+}
+
+@container (max-width: 420px) {
+  .dc-act span {
+    display: none;
+  }
+
+  .dc-topic {
+    display: none;
+  }
+}

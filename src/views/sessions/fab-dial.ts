@@ -28,6 +28,8 @@ export interface FabDialHandle {
   setSessionScope(sessionId: string | null, cwd: string | null): void;
   /** Re-append the host after a pane innerHTML rebuild has detached it. */
   reattach(): void;
+  /** Open the card straight onto one draft - the ⤢ on an inline draft card. */
+  openDraft(id: string): void;
   close(): void;
   destroy(): void;
 }
@@ -140,6 +142,14 @@ class FabDial implements FabDialHandle {
    *  subtree while detached, so re-appending restores it without a re-render. */
   reattach(): void {
     if (this.sessionId) this.attach();
+  }
+
+  /** Unlike the constructor's auto-open, this IS the user asking, so it takes
+   *  the surface even over a card he already had open. `open` re-renders, which
+   *  remounts the panel, and `mountBody` is what consumes `openDraftId`. */
+  openDraft(id: string): void {
+    this.openDraftId = id;
+    this.open("drafts");
   }
 
   close(): void {

@@ -140,7 +140,7 @@ export function detectProgressToken(text: string): { n: number; m: number } | nu
 export const CHAIN_DIVIDER_KIND = "chain_divider";
 
 export interface RenderedMessage {
-  kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question" | "message" | "preview";
+  kind: "system" | "user" | "assistant" | "tool_use" | "tool_result" | "notification" | "question" | "message" | "preview" | "draft";
   content?: ContentBlock[];
   text?: string;
   tool?: string;
@@ -210,6 +210,23 @@ export interface RenderedMessage {
    *  reached the store. */
   previewHtml?: string;
   previewSlug?: string;
+  /** `kind:"draft"` only - see chat-draft-card.ts. `draftAction` and the three
+   *  body fields come off the write_draft tool_use input, so the card paints
+   *  before the daemon answers; `draftId` arrives with the tool_result and is
+   *  what makes the row LIVE (the store, not this snapshot, is what a mounted
+   *  card renders). A row with no `draftId` never resolved - the call was
+   *  rejected or errored - and renders as a dead stub rather than vanishing. */
+  draftAction?: "add" | "revise" | "variant" | "drop";
+  draftId?: string;
+  draftTopic?: string;
+  draftRecipient?: string;
+  draftBody?: string;
+  /** Version number this call produced, read off the tool_result. An earlier
+   *  row for the same variant collapses once a higher one exists. */
+  draftVersion?: number;
+  /** Set when the write_draft call came back an error: the row keeps the body
+   *  Claude tried to write and says it never landed. */
+  draftFailed?: boolean;
   /** Boundary between a `/respawn` successor and the chat it took over from -
    *  everything above the row belongs to the predecessor. Injected by the
    *  event store on a chain hop, never present in any transcript. */

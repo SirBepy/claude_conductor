@@ -30,6 +30,7 @@ import {
   createHandleCtaClick,
   createHandleToolChipClick,
   createHandlePreviewCardClick,
+  createHandleDraftCardClick,
 } from "./chat-renderer-click-handlers";
 import { findQuestionIndexById } from "./chat-question-card";
 
@@ -326,6 +327,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", handlePrPreviewClick);
     this.container.addEventListener("click", createHandleToolChipClick(this));
     this.container.addEventListener("click", createHandlePreviewCardClick(this));
+    this.container.addEventListener("click", createHandleDraftCardClick(this));
     this.container.addEventListener("click", createHandleToolFileClick(this));
     this.container.addEventListener("click", createHandleToolResultLoadFullClick(this));
     this.container.addEventListener("click", createHandleRetryClick(this));
@@ -338,7 +340,7 @@ export class ChatRenderer {
       getMessageEls: () => this.messageEls,
       setMessages: (m) => { this.messages = m; },
       setMessageEls: (els) => { this.messageEls = els; },
-      buildMessageEl: (m) => buildMessageEl(m),
+      buildMessageEl: (m) => buildMessageEl(m, this.sessionId),
       clampUserMessages: () => clampUserMessages(this.messages, this.messageEls),
       foldClosedRange: (start, end, usage, tsSpanMs) => foldClosedRange(this, start, end, usage, tsSpanMs),
       // Prepend: every tracked index moves down the transcript by n.

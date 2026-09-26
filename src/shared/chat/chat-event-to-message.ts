@@ -9,8 +9,9 @@ import {
   noiseAssistantLabel,
   CHAIN_DIVIDER_KIND,
 } from "./chat-classifiers";
-import { isAskQuestionTool, isShowPreviewTool } from "./tool-meta";
+import { isAskQuestionTool, isShowPreviewTool, isWriteDraftTool } from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
+import { draftFieldsOf } from "./chat-draft-card";
 export type { RenderedMessage } from "./chat-classifiers";
 
 // Matches <file:PATH> or <file:PATH::DISPLAYNAME> tokens in user message text.
@@ -181,6 +182,12 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       // pushed mockup renders as the same card on the scrollback path.
       if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
         return { ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null };
+      }
+      // Mirrors chat-event-handler-tools.ts's write_draft special-case. Its
+      // tool_result (which carries the draft id) is folded in by
+      // chat-pagination.ts's prependEvents, like the AUQ answer absorb.
+      if (isWriteDraftTool(ev.tool_name) && !ev.parent_tool_use_id) {
+        return { ...draftFieldsOf(ev.input), kind: "draft", id: ev.id, ts, parentToolUseId: null };
       }
       return { kind: "tool_use", tool: ev.tool_name, input: ev.input, id: ev.id, ts, parentToolUseId: ev.parent_tool_use_id ?? null };
     case "tool_result":

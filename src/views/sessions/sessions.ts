@@ -3,6 +3,7 @@ import { template, detachedTemplate } from "./template";
 import { invoke } from "../../shared/ipc";
 import type { PreviewMeta } from "../../types/ipc.generated";
 import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
+import { DRAFT_OPEN_EVENT } from "../../shared/chat/chat-draft-card";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
 import "./sessions-mobile.css";
@@ -149,6 +150,15 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   };
   window.addEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
 
+  // ⤴ on an inline draft card: hand the id to the FAB's Drafts panel, which
+  // owns editing. Announced on `window` for the same reason the preview card
+  // does it - shared/chat must not import this view.
+  const onDraftOpen = (e: Event): void => {
+    const id = (e as CustomEvent<{ id?: string }>).detail?.id ?? "";
+    if (id) state.fabDial?.openDraft(id);
+  };
+  window.addEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
+
   const teardownUsageDials = wireRateLimitBanner(root, listEl, myMount);
 
   if (consumePendingOpenPicker()) {
@@ -203,6 +213,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     teardownDaemonStatusListeners();
     teardownMobileKeyboard();
     window.removeEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
+    window.removeEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
     previewController?.destroy();
     previewController = null;
     state.previewController = null;

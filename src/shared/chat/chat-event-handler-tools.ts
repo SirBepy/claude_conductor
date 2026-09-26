@@ -10,9 +10,11 @@ import {
   BUILTIN_TODO_WRITE_TOOL,
   canonicalTool,
   isShowPreviewTool,
+  isWriteDraftTool,
   MCP_WRITE_PLAN_TOOL,
 } from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
+import { draftFieldsOf, draftResultFieldsOf } from "./chat-draft-card";
 import {
   tryHandleQuestionToolUse,
   tryHandleQuestionResult,
@@ -67,6 +69,15 @@ export function handleToolUseEvent(
   // narration. The rail still gets the same snapshot via the daemon push.
   if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
     r.messages.push({ ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null });
+    return { touched: true, coalesce: false };
+  }
+  // An outbound message draft: its own card row rather than a narration chip,
+  // since the whole point of the Drafts panel is that a draft is something Joe
+  // ACTS on. The row goes live once its tool_result stamps the draft id on it
+  // (handleToolResultEvent below) - painted from the input first so it does not
+  // wait on the daemon.
+  if (isWriteDraftTool(ev.tool_name) && !ev.parent_tool_use_id) {
+    r.messages.push({ ...draftFieldsOf(ev.input), kind: "draft", id: ev.id, ts, parentToolUseId: null });
     return { touched: true, coalesce: false };
   }
   // Revise/retract a message Claude already sent (see resolveOrdinalIn in
@@ -249,6 +260,22 @@ export function handleToolResultEvent(
       r.messages[mIdx] = { ...r.messages[mIdx]!, failed: true };
       r.dirtyIndices.add(mIdx);
     }
+    return { touched: true, coalesce: false };
+  }
+  // A write_draft answer: absorbed, never its own row, and it is what turns the
+  // card from a snapshot of the tool input into a live view of the store row -
+  // the draft id for an `add` exists nowhere else.
+  const dIdx = r.messages.findIndex((m) => m.kind === "draft" && m.id === ev.tool_use_id);
+  if (dIdx >= 0) {
+    const prev = r.messages[dIdx]!;
+    const fields = draftResultFieldsOf(ev.output);
+    r.messages[dIdx] = ev.is_error || !fields
+      ? { ...prev, draftFailed: true }
+      // Input first, result second: `revise` sends no topic and `add` sends no
+      // version, so each half fills what the other cannot see. An empty
+      // recipient from the result must not blank the input's own.
+      : { ...prev, ...fields, draftRecipient: fields.draftRecipient || prev.draftRecipient };
+    r.dirtyIndices.add(dIdx);
     return { touched: true, coalesce: false };
   }
   // Built by the shared converter, not a literal: this path used to drop

@@ -14,6 +14,7 @@
  *  - chat-tool-file-row.css: .tool-file-row / .tool-skill-row / .tool-qa panels
  *  - chat-question-card.css: AUQ question card (post-answer, first-class message)
  *  - chat-preview-card.css:  show_preview card (pushed HTML, centered message row)
+ *  - chat-draft-card.css:    write_draft card (outbound message draft, centered row)
  *  - chat-screenshot-block.css: screenshot block + thumbnail row
  *  - chat-turn-footer.css:   per-turn footer meta chips, progress bar, todo checklist
  *  - pr-preview.css:         PR preview card + modal (the /create-pr skill preview)
@@ -39,6 +40,7 @@
 @import "./chat-tool-file-row.css";
 @import "./chat-question-card.css";
 @import "./chat-preview-card.css";
+@import "./chat-draft-card.css";
 @import "./chat-screenshot-block.css";
 @import "./chat-turn-footer.css";
 @import "./turn-todo-comment.css";

@@ -23,6 +23,15 @@ export function isShowPreviewTool(tool: string): boolean {
   return tool === MCP_SHOW_PREVIEW_TOOL;
 }
 
+// Outbound message draft. Same live/scrollback drift guard as the two above:
+// one predicate, both paths. The Drafts panel is still the editing surface -
+// the inline card is a read/copy view of the same store row.
+export const MCP_WRITE_DRAFT_TOOL = "mcp__cc_conductor__write_draft";
+
+export function isWriteDraftTool(tool: string): boolean {
+  return tool === MCP_WRITE_DRAFT_TOOL;
+}
+
 // Turn-footer step checklist. Two wire names for one concept: our own tool,
 // always in a session's list, and TodoWrite, which the harness hands out only
 // sometimes (4 of 188 transcripts, 2026-09-04). No merged predicate: the input

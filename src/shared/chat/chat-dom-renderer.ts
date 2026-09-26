@@ -13,6 +13,7 @@ import { groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
 import { renderQuestionCardHtml } from "./tool-views";
 import { renderPreviewCardHtml, mountPreviewFrame } from "./chat-preview-card";
+import { renderDraftCardHtml, mountDraftCard } from "./chat-draft-card";
 import type { ChatRenderer } from "./chat-renderer";
 import { ensureActiveTurnFooter, applyRunningHighlight, processTurnCloseQueue } from "./chat-turn-fold";
 
@@ -63,7 +64,7 @@ export function flushRender(r: ChatRenderer): void {
   if (r.dirtyIndices.size > 0) {
     for (const idx of r.dirtyIndices) {
       if (idx < r.messageEls.length) {
-        const newEl = buildMessageEl(r.messages[idx]!);
+        const newEl = buildMessageEl(r.messages[idx]!, r.sessionId);
         const oldEl = r.messageEls[idx]!;
         oldEl.replaceWith(newEl);
         r.messageEls[idx] = newEl;
@@ -77,7 +78,7 @@ export function flushRender(r: ChatRenderer): void {
     const frag = document.createDocumentFragment();
     while (r.messageEls.length < r.messages.length) {
       const idx = r.messageEls.length;
-      const el = buildMessageEl(r.messages[idx]!);
+      const el = buildMessageEl(r.messages[idx]!, r.sessionId);
       frag.appendChild(el);
       r.messageEls.push(el);
       touchedEls.push(el);
@@ -116,7 +117,9 @@ export function finalizeStreamingBubble(r: ChatRenderer): void {
   r.streamingIndex = null;
 }
 
-export function buildMessageEl(m: RenderedMessage): HTMLElement {
+/** `sessionId` is only read by the `kind:"draft"` branch, which needs a scope to
+ *  call `list_message_drafts` with - every other row type is self-contained. */
+export function buildMessageEl(m: RenderedMessage, sessionId: string | null = null): HTMLElement {
   if (m.kind === "question") {
     const el = document.createElement("div");
     el.className = "msg question-card";
@@ -131,6 +134,14 @@ export function buildMessageEl(m: RenderedMessage): HTMLElement {
     el.className = "msg preview-card open";
     el.innerHTML = renderPreviewCardHtml(m);
     void mountPreviewFrame(el, m);
+    return el;
+  }
+  if (m.kind === "draft") {
+    const el = document.createElement("div");
+    // A dropped draft has no body worth expanding, so only that one lands folded.
+    el.className = m.draftAction === "drop" ? "msg draft-card" : "msg draft-card open";
+    el.innerHTML = renderDraftCardHtml(m);
+    mountDraftCard(el, m, sessionId);
     return el;
   }
   const wrap = document.createElement("div");
