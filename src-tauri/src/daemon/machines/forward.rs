@@ -15,7 +15,7 @@ use crate::daemon::state::DaemonState;
 use super::peer_client::{client_for, PeerError};
 
 /// The mirrored session's owning machine understood the method (per
-/// `remote_handlers::TRANSPORT_TABLE`'s `PM`/`M` set) but this daemon refuses
+/// `remote_transport_table::TRANSPORT_TABLE`'s `PM`/`M` set) but this daemon refuses
 /// to relay it - the method has no forwarding story (e.g. it isn't
 /// session-scoped in a way a peer accepts).
 pub const ERR_NOT_FORWARDABLE: i32 = -32011;
@@ -27,7 +27,7 @@ pub const ERR_REPAIR_REQUIRED: i32 = -32013;
 
 /// Methods whose session-identifying param is literally named `id` rather
 /// than `session_id`. Empty today: every current `PM`/`M` method in
-/// `remote_handlers::TRANSPORT_TABLE` keys on `session_id` (verified by
+/// `remote_transport_table::TRANSPORT_TABLE` keys on `session_id` (verified by
 /// reading each handler under `daemon/methods/`) - `confirm_question_rendered`'s
 /// `id` is a prompt id, not a session id, and that method is phone-only
 /// anyway. Kept as a named seam for the first future method that does.

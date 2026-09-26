@@ -2,7 +2,7 @@
 //! `write_plan` step from the checklist UI. Stored on `DaemonState` and taken
 //! back out by `hooks_server::plan::on_write_plan` the moment that step goes
 //! `active` - see `daemon::state::step_comments` for the full lifecycle.
-//! Desktop-pipe only: absent from `remote_handlers::TRANSPORT_TABLE`, so a
+//! Desktop-pipe only: absent from `remote_transport_table::TRANSPORT_TABLE`, so a
 //! phone/peer-machine session cannot leave one yet (not asked for by todo 898).
 
 use crate::daemon::rpc::{Router, RpcError};

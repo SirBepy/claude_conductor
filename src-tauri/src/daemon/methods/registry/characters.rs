@@ -18,7 +18,7 @@ pub fn register_characters(router: &mut Router, state: Arc<DaemonState>) {
             async move { Ok(json!(crate::characters::list())) }
         });
     }
-    // Pipe-only on purpose (absent from `remote_handlers::TRANSPORT_TABLE`): the
+    // Pipe-only on purpose (absent from `remote_transport_table::TRANSPORT_TABLE`): the
     // app process drops its own `characters::cache` when the user hits Refresh in
     // the Characters view, but the daemon is a SEPARATE process holding its own
     // copy, and the daemon's copy is what answers `list_characters` /

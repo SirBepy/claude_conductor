@@ -1,6 +1,6 @@
 //! Machine-identity RPCs: `list_machines` (desktop + read-only), and the
 //! pairing/unpairing/labeling mutators, desktop-pipe-only (absent from
-//! `remote_handlers::TRANSPORT_TABLE`) except `peer_unpaired` - the one
+//! `remote_transport_table::TRANSPORT_TABLE`) except `peer_unpaired` - the one
 //! peer-callable exception (mask `M` there), the OTHER side of an unpair.
 //! `list_machine_projects` is also desktop-pipe-only: it's the new-chat
 //! picker's own cross-machine fetch, not a method a peer daemon would call.
@@ -88,7 +88,7 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
     // (or no registry yet) mirrors `list_projects`'s own body exactly; any
     // other known machine forwards the SAME "list_projects" RPC to it over
     // `/api/rpc` and returns its result verbatim - `list_projects` is PM in
-    // `remote_handlers::TRANSPORT_TABLE` precisely so that peer accepts it.
+    // `remote_transport_table::TRANSPORT_TABLE` precisely so that peer accepts it.
     router.register("list_machine_projects", {
         let state = state.clone();
         move |params, _ctx| {

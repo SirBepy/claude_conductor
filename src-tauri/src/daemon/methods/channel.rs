@@ -207,7 +207,7 @@ pub(crate) async fn post_message_or_forward(
 }
 
 /// Registers the peer-facing half of `post_message`'s `to` param on the
-/// shared RPC router: reached only via `remote_handlers::TRANSPORT_TABLE`'s
+/// shared RPC router: reached only via `remote_transport_table::TRANSPORT_TABLE`'s
 /// `M`-only entry, so `ctx.transport` is always `Transport::PeerMachine(..)`
 /// here. SECURITY: the stored author's machine label comes from THAT (via
 /// `state.machines`'s own registry of who `machine_id` is), never from

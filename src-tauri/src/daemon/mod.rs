@@ -33,6 +33,7 @@ mod remote_preview_render;
 mod remote_push;
 pub mod remote_server;
 mod remote_static;
+mod remote_transport_table;
 mod remote_voice;
 mod remote_ws_pump;
 pub(crate) mod render_cache;
@@ -158,7 +159,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_machines(&mut router, state.clone());
     // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
     // `to` (multi-machine chat parity): reached only via a paired peer's
-    // forwarded call, gated `M`-only in `remote_handlers::TRANSPORT_TABLE`.
+    // forwarded call, gated `M`-only in `remote_transport_table::TRANSPORT_TABLE`.
     methods::spawn_chat::register_spawn_chat_rpc(&mut router, state.clone());
     methods::channel::register_channel_rpc(&mut router, state.clone());
     // Mirrored-session forwarding seam (multi-machine federation): must run
