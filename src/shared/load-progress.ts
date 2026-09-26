@@ -23,12 +23,10 @@
  *  into the remaining 88%, so the handover never steps backwards. */
 const HANDOFF = 0.12;
 
-/** Ceiling an unmeasurable load may approach but never reach. Only a real
- *  completion is allowed to render 100%. */
-const CEILING = 0.95;
-
-/** Ceiling for the overdue arc, held below `CEILING` so a load we have stopped
- *  predicting never looks closer to done than one we are still measuring. */
+/** Ceiling every unmeasurable path approaches but never reaches - both the
+ *  time-only climb and the overdue arc it hands over to. One value, not two, so
+ *  that handover is continuous by construction rather than by matching numbers.
+ *  Only a real completion is allowed to render 100%. */
 const OVERDUE_CEILING = 0.9;
 
 /** Time constant of the overdue climb, in seconds. Deliberately slow: at the
@@ -187,23 +185,33 @@ export class LoadTracker {
 
     // Past the estimate with nothing measurable to show: stop counting down and
     // let the bar asymptote, so it keeps moving without ever claiming to finish.
+    //
+    // The curve starts wherever the load actually was when it crossed the
+    // estimate, not at a fixed point. A body already streaming without a
+    // Content-Length has been climbing on time alone and sits at the branch
+    // below's ceiling; anchoring this at HANDOFF instead would snap it from 90%
+    // back to 12% in a single frame, which is the exact backward step the whole
+    // handoff design exists to prevent.
     if (elapsedMs > this.estimate) {
       const over = (elapsedMs - this.estimate) / 1000;
+      const from = this.firstByteAt !== null ? OVERDUE_CEILING : HANDOFF;
       return {
         ...base,
         phase: "overdue",
-        fraction: OVERDUE_CEILING - (OVERDUE_CEILING - HANDOFF) * Math.exp(-over / OVERDUE_TAU_S),
+        fraction: OVERDUE_CEILING - (OVERDUE_CEILING - from) * Math.exp(-over / OVERDUE_TAU_S),
         etaMs: null,
       };
     }
 
-    // Streaming, but chunked with no Content-Length: time is all there is, and
-    // it is capped so it cannot reach 100% on a guess.
+    // Streaming, but chunked with no Content-Length: time is all there is, so
+    // it climbs to OVERDUE_CEILING rather than CEILING - landing exactly where
+    // the overdue branch above picks up, which is what makes that crossing
+    // continuous.
     if (this.firstByteAt !== null) {
       return {
         ...base,
         phase: "streaming",
-        fraction: Math.min(CEILING, elapsedMs / this.estimate),
+        fraction: Math.min(OVERDUE_CEILING, elapsedMs / this.estimate),
         etaMs: Math.max(0, this.estimate - elapsedMs),
       };
     }

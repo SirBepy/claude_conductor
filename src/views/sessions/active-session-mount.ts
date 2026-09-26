@@ -233,8 +233,12 @@ export async function mountRenderer(
   }
 
   let loadSettled = false;
-  // Held so settleLoad can stop the dial's paint loop, not just drop its DOM.
+  // Held so teardown can stop the dial's paint loop, not just drop its DOM.
   let ringOverlay: ChatLoadingOverlay | null = null;
+  const dropRing = (): void => {
+    ringOverlay?.remove();
+    ringOverlay = null;
+  };
   const ringTimer = window.setTimeout(() => {
     if (!loadSettled) ringOverlay = mountChatLoadingOverlay(messagesEl);
   }, 150);
@@ -245,8 +249,7 @@ export async function mountRenderer(
     // waiting on the daemon pipe. If this fires, the stall is in that local
     // chain (or an unhandled exception before it), not a pipe EOF.
     console.error(`[sessions] chat load stalled >8s (local settings/history read), session=${sessionId}`);
-    ringOverlay?.remove();
-    ringOverlay = null;
+    dropRing();
     messagesEl.querySelector(".chat-loading-overlay")?.remove();
     messagesEl.innerHTML =
       `<div class="session-empty session-empty--stalled chat-load-stalled">` +
@@ -260,8 +263,7 @@ export async function mountRenderer(
     loadSettled = true;
     window.clearTimeout(ringTimer);
     window.clearTimeout(stallTimer);
-    ringOverlay?.remove();
-    ringOverlay = null;
+    dropRing();
     messagesEl.querySelector(".chat-loading-overlay")?.remove();
   };
 
@@ -282,6 +284,10 @@ export async function mountRenderer(
   // IPC. Cache miss triggers load_history_page under the hood (last 20
   // messages). Either way the store keeps the live `chat:<id>` listener
   // attached so events accrue even when this session isn't selected.
+  // Drop the 150ms ring first if it is still up: mountChatLoadingOverlay only
+  // removes the previous overlay's DOM node, so without this its paint loop
+  // keeps running against a detached dial until the load settles on its own.
+  dropRing();
   const overlay = sessionEvents.isLoaded(sessionId) ? null : mountChatLoadingOverlay(messagesEl);
   try {
     // Only resume ticking if a turn is genuinely in flight right now - an

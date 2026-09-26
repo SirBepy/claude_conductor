@@ -134,6 +134,31 @@ describe("LoadTracker phases", () => {
     expect(snap.fraction).toBeCloseTo(0.5, 5);
   });
 
+  // Regression: the overdue branch used to be evaluated before the
+  // no-Content-Length streaming branch AND anchored at HANDOFF, so a body
+  // already climbing on time alone snapped from 95% to 12% in one frame the
+  // instant it crossed the estimate - the exact backward step the handoff
+  // design exists to prevent, on the slow-network case the feature targets.
+  it("does not snap backwards crossing into overdue with no Content-Length", () => {
+    const t = new LoadTracker("m", 0);
+    t.onHead(null, 5);
+    const before = t.snapshot(1799).fraction;
+    const after = t.snapshot(1801).fraction;
+    expect(before).toBeGreaterThan(0.8);
+    expect(after).toBeGreaterThanOrEqual(before - 0.001);
+  });
+
+  it("climbs monotonically across the whole no-Content-Length lifetime", () => {
+    const t = new LoadTracker("m", 0);
+    t.onHead(null, 5);
+    let prev = -1;
+    for (let ms = 10; ms <= 120000; ms += 37) {
+      const f = t.snapshot(ms).fraction ?? 0;
+      expect(f).toBeGreaterThanOrEqual(prev - 0.001);
+      prev = f;
+    }
+  });
+
   it("caps the no-Content-Length estimate below a claimed completion", () => {
     const t = new LoadTracker("m", 0);
     t.onHead(null, 100);

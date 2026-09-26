@@ -49,6 +49,9 @@ export function etaLabel(snap: LoadSnapshot): string {
   const seconds = snap.etaMs / 1000;
   const left = seconds < 0.15 ? "almost there" : `~${seconds.toFixed(1)}s left`;
   if (snap.totalBytes !== null && snap.receivedBytes > 0) {
+    // Deliberately not formatBytes: it auto-scales each number independently,
+    // which renders a mid-size body as "500.0 KB of 2.0 MB". Forcing both onto
+    // one unit and naming it once is what makes the pair comparable at a glance.
     const kb = Math.round(snap.receivedBytes / 1024);
     const totalKb = Math.round(snap.totalBytes / 1024);
     return `${left} · ${kb} of ${totalKb} KB`;
