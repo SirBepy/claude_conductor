@@ -7,7 +7,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import type { Account } from "../../shared/api";
-import { accountChipHtml, accountIconBadgeHtml } from "../../shared/account-chip";
+import { accountChipHtml } from "../../shared/account-chip";
 import "../../shared/account-chip.css";
 
 /** Mutable account-picker state, owned by the modal's closure. `accountId`
@@ -45,22 +45,14 @@ export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFie
     `;
   }
 
-  // Exactly one account: nothing to pick (todo 883 - a single-option picker
-  // is a confirmation, not a choice), but the field stays on screen so Joe
-  // still sees which account this session spawns under. No data-acc-id/role
-  // "button": attachAccountFieldHandlers only wires elements with an id to
-  // pick, and this one has nothing to switch to.
-  if (accounts.length === 1) {
-    const a = accounts[0]!;
-    return `
-      <div class="me-acc-field">
-        <label class="me-label">Account</label>
-        <div class="me-acc-edit">
-          <span class="account-chip sel me-acc-static" style="--acc:${escapeHtml(a.colour)}">${accountIconBadgeHtml(a)}${escapeHtml(a.label)}</span>
-        </div>
-      </div>
-    `;
-  }
+  // Exactly one account: the field renders nothing at all. todo 883 first
+  // made it a non-interactive chip, on the reasoning that Joe should still see
+  // which account spawns the session; he overruled that on 2026-09-26 - with
+  // one account there is no other answer, so naming it is a row of dead
+  // vertical space above the model slider. resolveInitialAccountId() already
+  // resolves the sole account, so accountPickIncomplete() stays false and
+  // "Start session" is never gated on a field nobody can see.
+  if (accounts.length === 1) return "";
 
   return `
     <div class="me-acc-field">

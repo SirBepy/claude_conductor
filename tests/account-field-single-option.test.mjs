@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
-// A single-account registry is a confirmation, not a choice (todo 883): the
-// new-chat account field must still show which account is in play, but stop
-// offering it as something to click through.
+// A single-account registry is not a choice at all (todo 883, tightened by
+// Joe 2026-09-26): the new-chat account field renders nothing, rather than a
+// non-interactive chip naming the only possible answer.
 
 import { describe, it, expect } from "vitest";
 import {
   renderAccountFieldHtml,
   attachAccountFieldHandlers,
+  accountPickIncomplete,
 } from "../src/views/sessions/account-field.ts";
 
 const personal = { id: "acct-personal", label: "personal", icon: "user", colour: "#9d7dfc" };
@@ -28,29 +29,25 @@ describe("renderAccountFieldHtml - zero accounts", () => {
   });
 });
 
-describe("renderAccountFieldHtml - exactly one account (todo 883 skip path)", () => {
-  it("still names the account", () => {
+describe("renderAccountFieldHtml - exactly one account (hidden entirely)", () => {
+  it("renders nothing at all: no label, no chip, no field wrapper", () => {
     const html = renderAccountFieldHtml({ accountId: personal.id }, { accounts: [personal] });
-    expect(html).toContain("Account");
-    expect(html).toContain("personal");
+    expect(html).toBe("");
   });
 
-  it("renders it as a non-interactive chip: no data-acc-id, no role=button", () => {
-    const html = renderAccountFieldHtml({ accountId: personal.id }, { accounts: [personal] });
-    expect(html).not.toContain("data-acc-id");
-    expect(html).not.toContain("role=\"button\"");
-    expect(html).toContain("me-acc-static");
-  });
-
-  it("attachAccountFieldHandlers finds nothing to wire a click to", () => {
+  it("leaves the modal with no account DOM for a handler to find", () => {
     const html = renderAccountFieldHtml({ accountId: personal.id }, { accounts: [personal] });
     const el = mount(html);
     const state = { accountId: personal.id };
     let changed = false;
     attachAccountFieldHandlers(el, state, () => { changed = true; }, () => {});
-    el.querySelector(".me-acc-static")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(el.querySelector(".account-chip")).toBeNull();
     expect(changed).toBe(false);
     expect(state.accountId).toBe(personal.id);
+  });
+
+  it("does not gate Start session: the sole account is still the picked one", () => {
+    expect(accountPickIncomplete({ accountId: personal.id }, [personal])).toBe(false);
   });
 });
 
