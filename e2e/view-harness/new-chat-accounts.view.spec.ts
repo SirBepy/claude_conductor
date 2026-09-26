@@ -31,9 +31,12 @@ test.describe("view-harness / new-chat account picker", () => {
     const overlay = page.locator(".model-effort-modal-card");
     await expect(overlay).toBeVisible();
 
-    // The account resolved (sole account) -> not the empty state, chip shown.
+    // The account resolved (sole account) -> not the empty state. The field
+    // itself renders nothing at all with one account (Joe, 2026-09-26): there
+    // is no other answer, so naming it was dead vertical space. What this test
+    // actually guards is the gating below, not the chip.
     await expect(overlay.locator(".me-acc-empty")).toHaveCount(0);
-    await expect(overlay.locator(".me-acc-edit .account-chip").first()).toContainText("Test Account");
+    await expect(overlay.locator(".me-acc-field")).toHaveCount(0);
 
     // Start session is enabled.
     await expect(overlay.locator(".me-confirm")).toBeEnabled();
