@@ -1,13 +1,24 @@
 //! IPC commands for character listing, assignment, asset URLs, and folder ops.
 
 use crate::characters::{self, Character};
-use crate::characters::slots::Slot;
 use crate::characters::whitelist;
 use crate::state::AppState;
 use crate::settings::{paths, persist};
 use crate::types::{Avatar, CharacterWhitelist};
 use std::collections::{HashMap, HashSet};
 use tauri::{AppHandle, State};
+
+// Bound to `whitelist_commands` rather than `whitelist` because
+// `crate::characters::whitelist` (the domain resolver, imported above) is
+// already in scope under the bare name `whitelist` for the session-character
+// commands below - `mod whitelist;` here would collide with that `use`.
+#[path = "characters/whitelist.rs"]
+mod whitelist_commands;
+pub use whitelist_commands::*;
+
+#[path = "characters/sound.rs"]
+mod sound_commands;
+pub use sound_commands::*;
 
 #[tauri::command]
 pub fn list_characters() -> Vec<Character> {
@@ -48,64 +59,9 @@ pub async fn assign_character(
 }
 
 #[tauri::command]
-pub fn play_character_slot(
-    character_id: String,
-    slot: Slot,
-    app: AppHandle,
-    state: State<AppState>,
-) -> Result<(), String> {
-    let settings = state.settings.lock().unwrap().clone();
-    if settings.mute_all() || settings.mute_sounds() {
-        return Ok(());
-    }
-    if settings.pause_notifications_in_meeting()
-        && state.meeting_active.load(std::sync::atomic::Ordering::Relaxed)
-    {
-        return Ok(());
-    }
-    // Per-slot toggle (Settings > Sound). Defaults on when unset.
-    if !settings.character_slot_enabled(slot.camel_key()) {
-        return Ok(());
-    }
-    let Some(c) = characters::get(&character_id) else {
-        return Err(format!("unknown character: {character_id}"));
-    };
-    let files = c.slot_files(slot);
-    let Some(pick) = characters::slots::random_pick(files) else {
-        return Err("slot has no files".into());
-    };
-    let path = c.asset_path(pick);
-    crate::notifications::audio::play_path(&app, &path);
-    Ok(())
-}
-
-#[tauri::command]
 pub fn character_asset_url(character_id: String, file: String) -> Option<String> {
     let c = characters::get(&character_id)?;
     characters::assets::file_data_url_at(&c.asset_path(&file))
-}
-
-#[tauri::command]
-pub fn preview_character_file(
-    character_id: String,
-    file: String,
-    state: State<AppState>,
-    app: AppHandle,
-) -> Result<(), String> {
-    let Some(c) = characters::get(&character_id) else {
-        return Err(format!("unknown character: {character_id}"));
-    };
-    let path = c.asset_path(&file);
-    if !path.exists() {
-        return Err(format!("asset not found: {file}"));
-    }
-    state.preview.play(path, app);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn stop_character_preview(state: State<AppState>) {
-    state.preview.stop();
 }
 
 #[tauri::command]
@@ -307,88 +263,4 @@ pub async fn reroll_session_character(
 #[tauri::command]
 pub fn list_session_characters(state: State<AppState>) -> HashMap<String, String> {
     state.settings.lock().unwrap().session_characters.clone()
-}
-
-// ---------------------------------------------------------------------------
-// Project whitelist commands
-// ---------------------------------------------------------------------------
-
-/// Get the whitelist for a specific project.
-#[tauri::command]
-pub fn get_project_whitelist(project_id: String, state: State<AppState>) -> CharacterWhitelist {
-    state
-        .settings
-        .lock()
-        .unwrap()
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .map(|p| p.whitelist.clone())
-        .unwrap_or(CharacterWhitelist::Default)
-}
-
-/// Set the whitelist for a specific project.
-#[tauri::command]
-pub async fn set_project_whitelist(
-    project_id: String,
-    whitelist: CharacterWhitelist,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<(), String> {
-    let snapshot = {
-        let mut s = state.settings.lock().unwrap();
-        let p = s.projects.iter_mut().find(|p| p.id == project_id)
-            .ok_or_else(|| format!("project not found: {project_id}"))?;
-        p.whitelist = whitelist;
-        s.clone()
-    };
-    persist(&app, &snapshot);
-    push_to_daemon(&state, &snapshot).await;
-    Ok(())
-}
-
-/// Get the settings-level default whitelist.
-#[tauri::command]
-pub fn get_default_whitelist(state: State<AppState>) -> CharacterWhitelist {
-    state.settings.lock().unwrap().default_character_whitelist.clone()
-}
-
-/// Set the settings-level default whitelist.
-#[tauri::command]
-pub async fn set_default_whitelist(
-    whitelist: CharacterWhitelist,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<(), String> {
-    let snapshot = {
-        let mut s = state.settings.lock().unwrap();
-        s.default_character_whitelist = whitelist;
-        s.clone()
-    };
-    persist(&app, &snapshot);
-    push_to_daemon(&state, &snapshot).await;
-    Ok(())
-}
-
-/// Resolve the effective whitelist for a project to a list of Character objects.
-/// Used by the modal's "Whitelisted" tab.
-#[tauri::command]
-pub fn resolve_whitelist_characters(project_id: String, state: State<AppState>) -> Vec<Character> {
-    let s = state.settings.lock().unwrap();
-    let proj_wl = s
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .map(|p| p.whitelist.clone())
-        .unwrap_or(CharacterWhitelist::Default);
-    let default_wl = s.default_character_whitelist.clone();
-    drop(s);
-
-    let all = characters::list();
-    let resolved_ids = whitelist::resolve(&proj_wl, &default_wl, &all);
-    // Map ids back to Character, preserving the sorted order from resolve().
-    resolved_ids
-        .iter()
-        .filter_map(|id| characters::get(id))
-        .collect()
 }

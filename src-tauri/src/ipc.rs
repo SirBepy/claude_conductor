@@ -42,6 +42,9 @@ pub mod drafts;
 pub mod step_comments;
 pub mod waiting_tail;
 pub mod ready;
+pub mod instances;
+pub mod hook_registration;
+pub mod external_launchers;
 
 pub use usage::*;
 pub use accounts::*;
