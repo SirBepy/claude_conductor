@@ -151,7 +151,10 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                     let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(
                         crate::ipc::project_groups::fold_worktrees(groups),
                     );
-                    crate::ipc::project_groups::groups_test_helpers::filter_out_ephemeral_projects(groups)
+                    let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_ephemeral_projects(groups);
+                    // Dead token-history-only rows (the `wf_*` worktree scratch
+                    // pile) - same prune the desktop command applies.
+                    crate::ipc::project_groups::groups_test_helpers::filter_out_history_only_ghosts(groups)
                 })
                 .await
                 .map_err(|e| RpcError::internal(format!("join: {e}")))?;

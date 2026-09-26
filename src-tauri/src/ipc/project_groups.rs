@@ -157,6 +157,35 @@ pub mod groups_test_helpers {
             .filter(|g| !is_ephemeral_root_path(Path::new(&g.path)))
             .collect()
     }
+
+    /// Drops groups that exist ONLY because a token-history record named a
+    /// cwd that is now gone: `id.is_none()` (no `settings.projects` entry, so
+    /// nothing is configured about them) and `path_exists == false`.
+    ///
+    /// This is the `wf_*` pile - worktree scratch dirs from e2e runs, whose
+    /// records carry a bare relative cwd (`wf_eace3d5a-9a1`, no parent), so
+    /// `worktree_main_repo` cannot fold them and they land as top-level rows
+    /// that accumulate forever. Measured against the live registry on
+    /// 2026-09-26: zero of them were in `settings.projects`, so pruning that
+    /// store would have been a no-op, and the only other store holding them is
+    /// the token DB, whose records are the usage accounting itself and are not
+    /// ours to delete. Filtering at build time is the prune: they reach no
+    /// consumer and nothing keeps a copy to re-seed from.
+    ///
+    /// Deliberately keeps a group that HAS a `settings.projects` entry even
+    /// when its folder is missing - `C:\Users\tecno\.claude-fibo` is one
+    /// today. That row carries an avatar, a bound account and automation
+    /// config; dropping it server-side would destroy that over what may be an
+    /// unplugged drive. The picker hides it client-side instead.
+    ///
+    /// Runs last, after `path_exists` is stamped and after `fold_worktrees`,
+    /// at both call sites (desktop Tauri command + the daemon's RPC mirror).
+    pub fn filter_out_history_only_ghosts(groups: Vec<ProjectGroup>) -> Vec<ProjectGroup> {
+        groups
+            .into_iter()
+            .filter(|g| g.path_exists || g.id.is_some())
+            .collect()
+    }
 }
 
 #[tauri::command]
@@ -177,7 +206,8 @@ pub async fn list_project_groups(state: State<'_, AppState>) -> Result<Vec<crate
             g.path_exists = Path::new(&g.path).exists();
         }
         let groups = groups_test_helpers::filter_out_jarvis_home(fold_worktrees(groups));
-        groups_test_helpers::filter_out_ephemeral_projects(groups)
+        let groups = groups_test_helpers::filter_out_ephemeral_projects(groups);
+        groups_test_helpers::filter_out_history_only_ghosts(groups)
     })
     .await
     .unwrap_or_default();
@@ -554,6 +584,60 @@ mod build_groups_tests {
         let filtered = filter_out_ephemeral_projects(groups);
         assert_eq!(filtered.len(), 1, "only the temp-dir project should be dropped");
         assert_eq!(filtered[0].path, "C:\\some\\real\\project");
+    }
+
+    #[test]
+    fn filter_out_history_only_ghosts_drops_dead_unconfigured_rows_only() {
+        use super::groups_test_helpers::filter_out_history_only_ghosts;
+        use crate::types::ProjectGroup;
+
+        fn group(path: &str, id: Option<&str>, path_exists: bool) -> ProjectGroup {
+            ProjectGroup {
+                id: id.map(|s| s.to_string()),
+                path: path.to_string(),
+                name: path.to_string(),
+                parent_segment: None,
+                avatar: Avatar::None,
+                automation_enabled: false,
+                tokens_7d: 0,
+                live: 0,
+                any_remote: false,
+                any_automated: false,
+                last_active_at: None,
+                path_exists,
+                worktrees: Vec::new(),
+                last_worktree_path: None,
+                last_start_folder_rel: None,
+            }
+        }
+
+        let groups = vec![
+            // The `wf_*` pile: token-history only, folder gone. Dropped.
+            group("wf_eace3d5a-9a1", None, false),
+            group("wf_5e12d0a7-a11", None, false),
+            // History-only but the folder is still there - a real project the
+            // user simply never configured. Kept.
+            group("C:\\some\\real\\project", None, true),
+            // Configured but the folder is missing (unplugged drive, moved
+            // repo). Kept: its avatar/account/automation config is worth more
+            // than the row is annoying, and the picker hides it client-side.
+            group("C:\\Users\\tecno\\.claude-fibo", Some("proj-fibo"), false),
+            // The ordinary case.
+            group("C:\\Users\\tecno\\Desktop\\Projects\\countoff", Some("proj-countoff"), true),
+        ];
+
+        let kept: Vec<String> = filter_out_history_only_ghosts(groups)
+            .into_iter()
+            .map(|g| g.path)
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                "C:\\some\\real\\project".to_string(),
+                "C:\\Users\\tecno\\.claude-fibo".to_string(),
+                "C:\\Users\\tecno\\Desktop\\Projects\\countoff".to_string(),
+            ]
+        );
     }
 }
 

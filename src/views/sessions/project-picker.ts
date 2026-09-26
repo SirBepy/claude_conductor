@@ -162,7 +162,13 @@ export function openProjectPickerModal(
       const list = currentProjects();
       if (!list) return [];
       const f = filter.trim().toLowerCase();
-      let rows = list.filter((p) =>
+      // A folder that no longer exists is never pickable (selectProjectRow
+      // returns early on it), so the row was pure noise - Joe, 2026-09-26,
+      // looking at a dozen dead `wf_*` worktree scratch dirs. The daemon
+      // already drops the unconfigured ones; what reaches here is a project
+      // with real config whose folder moved, hidden rather than deleted so
+      // reconnecting the drive brings it straight back.
+      let rows = list.filter((p) => p.path_exists !== false).filter((p) =>
         !f
         || p.name.toLowerCase().includes(f)
         || p.path.toLowerCase().includes(f)
