@@ -10,6 +10,16 @@ use crate::daemon::state::DaemonState;
 use serde_json::json;
 use std::sync::Arc;
 
+/// Params shared by `load_history` and `transcript_stats`: both just resolve
+/// a transcript by session id (+ optional cwd hint) and run a pure function
+/// over it via `chat::history::with_transcript`.
+#[derive(serde::Deserialize)]
+struct TranscriptParams {
+    session_id: String,
+    #[serde(default)]
+    cwd: Option<String>,
+}
+
 pub fn register_history(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
@@ -65,45 +75,25 @@ pub fn register_history(router: &mut Router, state: Arc<DaemonState>) {
     }
     router.register("load_history", move |params, _ctx| {
         async move {
-            #[derive(serde::Deserialize)]
-            struct P {
-                session_id: String,
-                #[serde(default)]
-                cwd: Option<String>,
-            }
-            let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+            let p: TranscriptParams = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             crate::ipc::chat::attachments::validate_session_id(&p.session_id)
                 .map_err(RpcError::invalid_params)?;
-            let events = tokio::task::spawn_blocking(move || {
-                let path = crate::chat::history::locate_transcript(&p.session_id, p.cwd.as_deref())?;
-                crate::chat::history::replay(&path)
-            })
-            .await
-            .map_err(|e| RpcError::internal(format!("join: {e}")))?
-            .map_err(RpcError::internal)?;
+            let events = crate::chat::history::with_transcript(p.session_id, p.cwd, crate::chat::history::replay)
+                .await
+                .map_err(RpcError::internal)?;
             Ok(json!(events))
         }
     });
     router.register("transcript_stats", move |params, _ctx| {
         async move {
-            #[derive(serde::Deserialize)]
-            struct P {
-                session_id: String,
-                #[serde(default)]
-                cwd: Option<String>,
-            }
-            let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+            let p: TranscriptParams = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             crate::ipc::chat::attachments::validate_session_id(&p.session_id)
                 .map_err(RpcError::invalid_params)?;
-            let stats = tokio::task::spawn_blocking(move || {
-                let path = crate::chat::history::locate_transcript(&p.session_id, p.cwd.as_deref())?;
-                crate::chat::history::stats(&path)
-            })
-            .await
-            .map_err(|e| RpcError::internal(format!("join: {e}")))?
-            .map_err(RpcError::internal)?;
+            let stats = crate::chat::history::with_transcript(p.session_id, p.cwd, crate::chat::history::stats)
+                .await
+                .map_err(RpcError::internal)?;
             Ok(json!(stats))
         }
     });

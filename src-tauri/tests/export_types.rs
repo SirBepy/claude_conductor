@@ -6,6 +6,7 @@
 //! ourselves by composing each type's `decl()` into a single output.
 
 use claude_conductor_lib::accounts::{Account, OauthAccountInfo};
+use claude_conductor_lib::chat::history::TranscriptStats;
 use claude_conductor_lib::context_status::ContextStatus;
 use claude_conductor_lib::ipc::accounts::{
     AccountIdentity, AccountsSetupPromptState, AddAccountSession, LoginCheckOutcome,
@@ -138,6 +139,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<ContentBlock>());
     out.push_str(&decl::<HistoryEntry>());
     out.push_str(&decl::<HistoryPage>());
+    out.push_str(&decl::<TranscriptStats>());
 
     // news
     out.push_str(&decl::<NewsPost>());

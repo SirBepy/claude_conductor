@@ -6,13 +6,7 @@ import { backFromSubview } from "../../shared/navigation";
 import { getCurrentSessionRecord } from "../../shared/state";
 import { api } from "../../shared/api";
 import { invoke } from "../../shared/ipc";
-import type { HistoryEntry } from "../../types/ipc.generated";
-
-/** Return shape of the `transcript_stats` command (src-tauri/src/chat/history.rs). */
-interface TranscriptStats {
-  messages: number;
-  model: string;
-}
+import type { HistoryEntry, TranscriptStats } from "../../types/ipc.generated";
 import { renderAvatar } from "../../shared/projects";
 import { projectSubviewHeaderData, hydrateSubviewHeader } from "../project-detail/subview-header";
 import type { Avatar } from "../project-detail/subview-header";

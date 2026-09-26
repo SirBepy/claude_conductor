@@ -6,6 +6,7 @@ use crate::types::chat::ChatEvent;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use ts_rs::TS;
 
 pub use crate::chat::history_page::{read_page, read_single_event};
 
@@ -72,6 +73,37 @@ pub fn read_page_for_session(
     Ok(page)
 }
 
+/// Resolve `session_id`'s transcript path and run `f` against it on the
+/// blocking pool, folding both the locate error and the `spawn_blocking`
+/// join error into the one `Result<T, String>` every history command
+/// already returns. Shared by `load_history`, `transcript_stats` and
+/// `load_event_detail` on both the desktop IPC layer (`ipc/chat/history.rs`)
+/// and the daemon RPC mirrors (`daemon/methods/history.rs`), which used to
+/// each repeat the locate + spawn_blocking + join-map_err trio by hand.
+///
+/// Deliberately does NOT call `validate_session_id`: the daemon RPC side
+/// needs that failure tagged `RpcError::invalid_params` (code -32602)
+/// distinctly from an internal error (code -32603, see
+/// `daemon/rpc.rs:98-111`), which a single post-hoc `map_err` on this
+/// helper's `Result<T, String>` can't recover once collapsed. Callers still
+/// validate first, exactly as before.
+pub async fn with_transcript<T, F>(
+    session_id: String,
+    cwd: Option<String>,
+    f: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Path) -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let path = locate_transcript(&session_id, cwd.as_deref())?;
+        f(&path)
+    })
+    .await
+    .map_err(|e| format!("join: {}", e))?
+}
+
 pub fn replay(path: &Path) -> Result<Vec<ChatEvent>, String> {
     let f = File::open(path).map_err(|e| format!("open {}: {}", path.display(), e))?;
     let reader = BufReader::new(f);
@@ -87,7 +119,8 @@ pub fn replay(path: &Path) -> Result<Vec<ChatEvent>, String> {
 }
 
 /// Summary of a transcript for the session-detail cards.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct TranscriptStats {
     pub messages: u32,
     /// Model from the last `TurnUsage` carrying one, else the `SessionStarted`

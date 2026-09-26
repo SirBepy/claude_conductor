@@ -28,12 +28,7 @@ pub async fn load_history(session_id: String, cwd: Option<String>) -> Result<Vec
     // (megabytes, thousands of events). Run on the blocking pool so the
     // Tauri async runtime stays responsive to other IPC calls while the
     // session loads.
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = crate::chat::history::locate_transcript(&session_id, cwd.as_deref())?;
-        crate::chat::history::replay(&path)
-    })
-    .await
-    .map_err(|e| format!("join: {}", e))?
+    crate::chat::history::with_transcript(session_id, cwd, crate::chat::history::replay).await
 }
 
 /// User-message count and model for a past session's detail cards, without
@@ -47,12 +42,7 @@ pub async fn transcript_stats(
 ) -> Result<crate::chat::history::TranscriptStats, String> {
     validate_session_id(&session_id)?;
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = crate::chat::history::locate_transcript(&session_id, cwd.as_deref())?;
-        crate::chat::history::stats(&path)
-    })
-    .await
-    .map_err(|e| format!("join: {}", e))?
+    crate::chat::history::with_transcript(session_id, cwd, crate::chat::history::stats).await
 }
 
 /// Paginated transcript reader. Returns the last `message_limit` message
@@ -92,10 +82,8 @@ pub async fn load_event_detail(
 ) -> Result<ChatEvent, String> {
     validate_session_id(&session_id)?;
 
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = crate::chat::history::locate_transcript(&session_id, cwd.as_deref())?;
-        crate::chat::history::read_single_event(&path, seq, &tool_use_id)
+    crate::chat::history::with_transcript(session_id, cwd, move |path| {
+        crate::chat::history::read_single_event(path, seq, &tool_use_id)
     })
     .await
-    .map_err(|e| format!("join: {}", e))?
 }
