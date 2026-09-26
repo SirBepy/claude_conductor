@@ -2,6 +2,7 @@
 // Unchanged from the pre-milestone dashboard - the account-selector cards
 // replace this once at least one account is registered.
 
+import "./stat-cards.css";
 import { fmtPct, fmtResetDisplay, valueColor } from "../../shared/formatters";
 import type { ResetDisplay } from "../../shared/formatters";
 import { getSettings } from "../../shared/state";

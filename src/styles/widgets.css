@@ -1,60 +1,8 @@
-/* ── Stat cards ── */
-.stat-cards {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.stat-card {
-  flex: 1;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 14px 16px;
-  text-align: center;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-
-.stat-label {
-  font-size: var(--fs-micro);
-  font-weight: 700;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 8px;
-}
-
-.stat-value {
-  font-family: "Manrope", system-ui, sans-serif;
-  font-size: var(--fs-display);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--color-text);
-}
-
-.stat-value-dim {
-  color: var(--color-text);
-  opacity: 0.45;
-}
-
-.stat-sublabel {
-  font-size: var(--fs-micro);
-  color: var(--color-text-muted);
-  margin-top: 6px;
-  font-family: "Fira Code", monospace;
-}
-
-.stat-values-row {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-}
-
-.stat-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
+/* Stat card rules (.stat-cards, .stat-card, .stat-label, .stat-value,
+ * .stat-value-dim, .stat-sublabel, .stat-values-row, .stat-col) moved to
+ * src/views/dashboard/stat-cards.css (todo 960), imported by
+ * src/views/dashboard/legacy-stat-cards.ts - the sole renderer of this
+ * markup. */
 
 /* ── Chart pagination ── */
 .chart-pagination {
@@ -136,53 +84,10 @@
   gap: 0;
 }
 
-/* ── Toast ── */
-.toast-stack {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 3000;
-  pointer-events: none;
-}
-.toast {
-  pointer-events: auto;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
-  padding: 8px 10px 8px 14px;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  font-size: var(--fs-body);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 240px;
-  max-width: 320px;
-  opacity: 0;
-  transform: translateY(8px);
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
-}
-.toast.show {
-  opacity: 1;
-  transform: translateY(0);
-}
-.toast.leaving {
-  opacity: 0;
-  transform: translateY(8px);
-}
-.toast-msg {
-  flex: 1;
-}
-.toast-undo {
-  padding: 4px 10px;
-  font-size: var(--fs-micro);
-}
+/* Toast rules (.toast-stack, .toast, .toast.show, .toast.leaving,
+ * .toast-msg, .toast-undo) moved to src/shared/toast.css (todo 960),
+ * imported by src/shared/toast.ts - the sole module that builds this
+ * markup, loaded from 24+ call sites so it's guaranteed at boot. */
 
 /* ── Chart ── */
 .chart-container {
@@ -650,64 +555,11 @@ input:checked + .slider:before {
 /* Range toggle rules (.range-toggle, .range-btn) moved to
  * src/views/project-detail/project-detail.css. */
 
-/* ── Horizontal project bars ── */
-.project-bars {
-  margin-top: 4px;
-}
-.project-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.project-bar-label {
-  font-size: var(--fs-micro);
-  color: var(--color-text);
-  min-width: 80px;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-  flex-shrink: 0;
-}
-.project-bar-track {
-  flex: 1;
-  height: 14px;
-  background: var(--color-surface-alt);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.project-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.3s ease;
-  min-width: 2px;
-}
-.project-bar-value {
-  font-size: var(--fs-micro);
-  font-family: "Fira Code", monospace;
-  color: var(--color-text-muted);
-  min-width: 32px;
-  flex-shrink: 0;
-}
-.project-bars-total {
-  font-size: var(--fs-micro);
-  color: var(--color-text-muted);
-  text-align: right;
-  margin-top: 4px;
-  font-family: "Fira Code", monospace;
-}
-.project-bars-more {
-  font-size: var(--fs-micro);
-  color: var(--color-primary);
-  cursor: pointer;
-  text-align: center;
-  margin-top: 4px;
-}
-.project-bars-more:hover {
-  text-decoration: underline;
-}
+/* Horizontal project-bar rules (.project-bars, .project-bar-row,
+ * .project-bar-label, .project-bar-track, .project-bar-fill,
+ * .project-bar-value, .project-bars-total, .project-bars-more) moved to
+ * src/views/dashboard/widgets/usage-bars-view.css (todo 960), imported by
+ * usage-bars-view.ts - the sole renderer of this markup. */
 
 /* ── Theme mode toggle ── */
 .mode-toggle-row {

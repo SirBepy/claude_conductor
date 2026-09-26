@@ -2,6 +2,7 @@
 // and its "show N more" wiring. Split out of usage-charts.ts, see
 // .for_bepy/ai_todos/177-split-usage-charts-widget-file.md.
 
+import "./usage-bars-view.css";
 import { getTokenHistory } from "../../../shared/state";
 import type { TokenRecord } from "../../../shared/tokens";
 import { formatTokens, totalTok } from "../../../shared/tokens";

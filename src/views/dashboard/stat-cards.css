@@ -1,0 +1,57 @@
+/* ── Stat cards ── */
+.stat-cards {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  flex: 1;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.stat-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-family: "Manrope", system-ui, sans-serif;
+  font-size: var(--fs-display);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text);
+}
+
+.stat-value-dim {
+  color: var(--color-text);
+  opacity: 0.45;
+}
+
+.stat-sublabel {
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  font-family: "Fira Code", monospace;
+}
+
+.stat-values-row {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.stat-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}

@@ -1,3 +1,5 @@
+import "./toast.css";
+
 interface ToastOptions {
   onClick?: () => void;
   ttlMs?: number;

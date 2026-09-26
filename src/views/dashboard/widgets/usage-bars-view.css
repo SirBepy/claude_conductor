@@ -1,0 +1,58 @@
+/* ── Horizontal project bars ── */
+.project-bars {
+  margin-top: 4px;
+}
+.project-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.project-bar-label {
+  font-size: var(--fs-micro);
+  color: var(--color-text);
+  min-width: 80px;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  flex-shrink: 0;
+}
+.project-bar-track {
+  flex: 1;
+  height: 14px;
+  background: var(--color-surface-alt);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.project-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+.project-bar-value {
+  font-size: var(--fs-micro);
+  font-family: "Fira Code", monospace;
+  color: var(--color-text-muted);
+  min-width: 32px;
+  flex-shrink: 0;
+}
+.project-bars-total {
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  text-align: right;
+  margin-top: 4px;
+  font-family: "Fira Code", monospace;
+}
+.project-bars-more {
+  font-size: var(--fs-micro);
+  color: var(--color-primary);
+  cursor: pointer;
+  text-align: center;
+  margin-top: 4px;
+}
+.project-bars-more:hover {
+  text-decoration: underline;
+}
