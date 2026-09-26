@@ -35,14 +35,30 @@ export interface LightboxComposerBridge {
   getCwd?(): string | null;
 }
 
-// Set by the sessions view (active-session-composer.ts) to the currently mounted
-// Composer, so the lightbox's own textbox can seed from / hand back to the
-// real draft without importing the views layer - same seam as
-// setFileEditsProvider in file-viewer.ts.
+// Registered by Composer itself (ctor/destroy), so the lightbox's own textbox
+// can seed from / hand back to the real draft without importing the views
+// layer - same seam as setFileEditsProvider in file-viewer.ts. Composer owns
+// it rather than a pane, because a pane that mounts a Composer and forgets to
+// register leaves this pointing at the PREVIOUS session's composer: destroy()
+// doesn't null that object's textarea, so setDraftText still runs saveDraft
+// against the wrong session id and the caption surfaces in another chat.
 let composerBridge: LightboxComposerBridge | null = null;
 export function setLightboxComposerBridge(bridge: LightboxComposerBridge | null): void {
   composerBridge = bridge;
 }
+
+/** Unregister on teardown. No-ops unless `bridge` is still the live one, so a
+ *  composer destroyed AFTER its successor registered can't wipe the successor. */
+export function clearLightboxComposerBridge(bridge: LightboxComposerBridge): void {
+  if (composerBridge === bridge) composerBridge = null;
+}
+
+// The bridge captured when the overlay opened. Seed and write-back both go
+// through THIS one, never whatever is registered at close time: a session
+// switch is reachable with a preview open (Ctrl+Num), and that swaps the
+// registered composer mid-overlay - reading the live one on close would post
+// the caption into the chat the user switched TO.
+let openBridge: LightboxComposerBridge | null = null;
 
 // Same shared composer-core as main composer/AUQ card/preview-panel. No
 // onEnter (Enter stays a plain newline) and no paste adapter (attachments
@@ -52,7 +68,8 @@ let slashProvider: SlashProvider | null = null;
 let fileProvider: FileProvider | null = null;
 
 export function openLightbox(content: LightboxContent): void {
-  closeLightbox();
+  closeLightbox(); // clears openBridge, so capture below must follow it
+  openBridge = composerBridge;
 
   overlay = document.createElement("div");
   overlay.className = LIGHTBOX_OVERLAY_CLASS;
@@ -101,8 +118,8 @@ export function openLightbox(content: LightboxContent): void {
   }
 
   // Caption/reply textbox: same draft box regardless of preview type (image,
-  // pdf, or text), gated only on a bridge being wired (active-session-composer.ts).
-  if (composerBridge) {
+  // pdf, or text), gated only on a composer being mounted to hand the text to.
+  if (openBridge) {
     const wrap = document.createElement("div");
     wrap.className = "lightbox-composer-wrap cc-typing-wrap";
     const highlight = document.createElement("div");
@@ -111,11 +128,11 @@ export function openLightbox(content: LightboxContent): void {
     const box = document.createElement("textarea");
     box.className = "lightbox-composer cc-typing-input";
     box.placeholder = "Type a message...";
-    box.value = composerBridge.getDraftText();
+    box.value = openBridge.getDraftText();
     wrap.append(highlight, box);
     overlay.appendChild(wrap);
 
-    const cwd = composerBridge.getCwd?.() ?? null;
+    const cwd = openBridge.getCwd?.() ?? null;
     slashProvider = new SlashProvider();
     fileProvider = new FileProvider();
     void slashProvider.start(cwd);
@@ -147,7 +164,8 @@ export function closeLightbox(): void {
   backDisposer = null;
   closeAllMenus();
   const box = overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer");
-  if (box && composerBridge) composerBridge.setDraftText(box.value, false);
+  if (box && openBridge) openBridge.setDraftText(box.value, false);
+  openBridge = null;
   composerCore?.destroy();
   composerCore = null;
   slashProvider?.stop();

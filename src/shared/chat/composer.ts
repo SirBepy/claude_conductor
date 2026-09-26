@@ -26,6 +26,11 @@ import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
 import { ComposerHighlight } from "./composer-highlight";
 import { ComposerStrayInput } from "./composer-stray-input";
+import {
+  setLightboxComposerBridge,
+  clearLightboxComposerBridge,
+  type LightboxComposerBridge,
+} from "./lightbox";
 import { isMobileViewport } from "../mobile-viewport";
 import * as shortcuts from "../shortcuts";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
@@ -111,6 +116,15 @@ export class Composer {
   // One instance per Composer, itself created fresh per window/pane.
   private draftSync = new ComposerDraftSync();
 
+  // Identity the lightbox holds onto, so clearLightboxComposerBridge() can tell
+  // "still mine" from "a successor already took over". Built as a field, not in
+  // the ctor body, only so the ctor's register call has it in hand.
+  private lightboxBridge: LightboxComposerBridge = {
+    getDraftText: () => this.getDraftText(),
+    setDraftText: (text, clearAttachments) => this.setDraftText(text, clearAttachments),
+    getCwd: () => this.opts.projectDir ?? null,
+  };
+
   private _visibilityHandler = (): void => {
     if (document.visibilityState === "hidden") this.draftSync.flush();
     else if (document.visibilityState === "visible") void this.reconcileFromDaemon();
@@ -183,6 +197,11 @@ export class Composer {
     window.addEventListener("focus", this._windowFocusHandler);
     shortcuts.register("blur-composer", () => { this.textarea?.blur(); });
     this.ptt.mount();
+    // The lightbox's caption box hands its text to whichever Composer is
+    // mounted. Registering here rather than at each pane's mount site is what
+    // keeps a pane that forgets (pending-pane did) from leaving the preview
+    // bound to the previous session's composer.
+    setLightboxComposerBridge(this.lightboxBridge);
     _composerInstanceCount++;
     if (_composerInstanceCount > 1) {
       console.warn(
@@ -192,6 +211,7 @@ export class Composer {
   }
 
   destroy(): void {
+    clearLightboxComposerBridge(this.lightboxBridge);
     this.strayInput.destroy();
     document.removeEventListener("visibilitychange", this._visibilityHandler);
     window.removeEventListener("focus", this._windowFocusHandler);

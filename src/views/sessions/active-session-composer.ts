@@ -10,7 +10,6 @@ import { ScheduledChip } from "../../shared/chat/scheduled-chip";
 import { formatFireAt } from "../../shared/chat/schedule-picker";
 import { blocksToText } from "../../shared/chat/content-blocks";
 import { showToast } from "../../shared/toast";
-import { setLightboxComposerBridge } from "../../shared/chat/lightbox";
 import type { ChatEvent, ContentBlock, Instance, ScheduledItem, ScheduledKind } from "../../types/ipc.generated";
 import { state } from "./state";
 import { api } from "../../shared/api";
@@ -125,11 +124,6 @@ export function mountComposer(
   });
   state.composer = composer;
   composer.setSessionId(sessionId, { readOnly });
-  setLightboxComposerBridge({
-    getDraftText: () => composer.getDraftText(),
-    setDraftText: (text, clearAttachments) => composer.setDraftText(text, clearAttachments),
-    getCwd: () => sess.cwd ?? null,
-  });
 
   state.scheduledChip?.destroy();
   const scheduledChipSlot = pane.querySelector<HTMLElement>(".scheduled-chip-slot");
