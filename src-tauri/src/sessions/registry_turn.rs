@@ -224,6 +224,30 @@ impl Registry {
     pub fn reset_builtin_ask_attempts(&self, session_id: &str) {
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
     }
+
+    /// Drop every per-session turn-state side map for `session_id`. The one
+    /// choke point for the leak the audit found: `mark_ended` is already the
+    /// single mutation every end path funnels through (SessionEnd hook,
+    /// detector process-gone reconcile, force-end, `/close`, pump EOF for a
+    /// non-Interactive kind) - it just wasn't clearing all nine maps, so five
+    /// of them (`close_requested`, `reported_status`, `message_sent_gen`,
+    /// `question_posted`, `turn_opened_by_wake`, `mcp_tool_used_gen`) leaked
+    /// forever whenever a session ended before its normal per-turn consumer
+    /// (`take_reported_status_if_gen`, `take_close_requested`) ever ran.
+    /// Only ever called from `mark_ended`, which itself only fires once, on
+    /// the None -> Some `end_reason` transition - so this can never touch a
+    /// live session's gen-stamped state mid-turn.
+    pub(super) fn clear_all_turn_state(&self, session_id: &str) {
+        self.turn_activity.lock().unwrap().remove(session_id);
+        self.close_requested.lock().unwrap().remove(session_id);
+        self.reported_status.lock().unwrap().remove(session_id);
+        self.message_sent_gen.lock().unwrap().remove(session_id);
+        self.question_posted.lock().unwrap().remove(session_id);
+        self.turn_opened_by_wake.lock().unwrap().remove(session_id);
+        self.builtin_ask_attempts.lock().unwrap().remove(session_id);
+        self.pending_turn_gen.lock().unwrap().remove(session_id);
+        self.mcp_tool_used_gen.lock().unwrap().remove(session_id);
+    }
 }
 
 #[cfg(test)]
@@ -462,5 +486,58 @@ mod tests {
         registry.record_builtin_ask_attempt("s1");
         registry.record_builtin_ask_attempt("s1");
         assert_eq!(registry.record_builtin_ask_attempt("s2"), 1, "s2 must not inherit s1's count");
+    }
+
+    /// The leak the audit found: an abnormal end (here, `mark_ended` called
+    /// directly - the same call `detector::reconcile`'s process-gone sweep and
+    /// a force-end make, with no per-turn consumer ever having run first) used
+    /// to leave `close_requested`, `reported_status`, `message_sent_gen`,
+    /// `question_posted`, `turn_opened_by_wake` and `mcp_tool_used_gen`
+    /// populated forever. `turn_activity`, `builtin_ask_attempts` and
+    /// `pending_turn_gen` were already covered - this asserts all nine.
+    #[test]
+    fn mark_ended_clears_every_turn_state_side_map_even_mid_turn() {
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(crate::types::Settings::default());
+        let session_id = uuid::Uuid::new_v4().to_string();
+        registry.record_interactive_session(
+            &session_id, std::path::Path::new("/tmp/x"), &settings, "2026-09-28T00:00:00Z",
+        );
+
+        // Populate every side map as if a turn were live and never finished.
+        registry.set_busy(&session_id, true); // stamps pending_turn_gen
+        registry.set_turn_activity(&session_id, TurnActivity::Working);
+        registry.set_close_requested(&session_id);
+        registry.set_reported_status(&session_id, 1, "working".into(), None, None);
+        registry.mark_message_sent(&session_id, 1);
+        registry.mark_question_posted(&session_id, 1, false);
+        registry.set_turn_opened_by_wake(&session_id, 1);
+        registry.record_builtin_ask_attempt(&session_id);
+        registry.mark_mcp_tool_used(&session_id, 1);
+
+        // Sanity: everything actually landed before the abnormal end.
+        assert_eq!(registry.turn_activity(&session_id), TurnActivity::Working);
+        assert!(registry.take_close_requested(&session_id), "close_requested must be set before end");
+        registry.set_close_requested(&session_id); // put it back, take_close_requested consumed it
+        assert!(registry.peek_reported_status(&session_id).is_some());
+        assert_eq!(registry.peek_message_sent_gen(&session_id), Some(1));
+        assert!(registry.question_undelivered_this_turn(&session_id, 1));
+        assert!(registry.is_turn_opened_by_wake(&session_id, 1));
+        assert_eq!(registry.peek_mcp_tool_used_gen(&session_id), Some(1));
+
+        // The abnormal end: no Stop hook, no `take_reported_status_if_gen`,
+        // no `expire_prompts_for_session` - just the registry noticing the
+        // session is gone, exactly what `detector::reconcile` does.
+        registry.mark_ended(&session_id, crate::types::EndReason::ProcessGone, "2026-09-28T00:01:00Z");
+
+        assert_eq!(registry.turn_activity(&session_id), TurnActivity::Unknown, "turn_activity leaked");
+        assert!(!registry.take_close_requested(&session_id), "close_requested leaked");
+        assert!(registry.peek_reported_status(&session_id).is_none(), "reported_status leaked");
+        assert!(registry.peek_message_sent_gen(&session_id).is_none(), "message_sent_gen leaked");
+        assert!(!registry.question_undelivered_this_turn(&session_id, 1), "question_posted leaked");
+        assert!(!registry.is_turn_opened_by_wake(&session_id, 1), "turn_opened_by_wake leaked");
+        assert_eq!(registry.record_builtin_ask_attempt(&session_id), 1, "builtin_ask_attempts leaked");
+        assert!(registry.peek_mcp_tool_used_gen(&session_id).is_none(), "mcp_tool_used_gen leaked");
+        assert!(registry.take_pending_turn_gen(&session_id).is_none(), "pending_turn_gen leaked");
     }
 }

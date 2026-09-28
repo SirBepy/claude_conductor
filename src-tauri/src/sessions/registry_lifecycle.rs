@@ -213,12 +213,12 @@ impl Registry {
         inst.ended_at = Some(when.to_string());
         drop(guard);
         // Non-interactive kinds never hit `expire_prompts_for_session`'s reset,
-        // so a session-end sweep here is the only cleanup they get.
-        self.builtin_ask_attempts.lock().unwrap().remove(session_id);
-        self.pending_turn_gen.lock().unwrap().remove(session_id);
-        // Since todo 888 `set_turn_activity` inserts `Idle` instead of
-        // removing, so this is the map's only eviction path.
-        self.turn_activity.lock().unwrap().remove(session_id);
+        // so a session-end sweep here is the only cleanup they get. Also the
+        // only eviction path for every other per-turn side map (`turn_activity`
+        // included: since todo 888 `set_turn_activity` inserts `Idle` instead
+        // of removing) - without this, six of them leaked forever on an
+        // abnormal end that never reached their normal per-turn consumer.
+        self.clear_all_turn_state(session_id);
         crate::sessions::repo_channel::forget_session(session_id);
         true
     }
