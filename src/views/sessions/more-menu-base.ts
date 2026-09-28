@@ -55,8 +55,20 @@ export function createMoreMenu<Args extends unknown[] = []>(
         : !m.contains(target) && target !== btn;
       if (outside) close();
     };
+    // kebab-menu.ts precedent: Escape closes and returns focus to the
+    // trigger button, not just outside-click/toggle.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        close();
+        btn.focus();
+      }
+    };
     setTimeout(() => document.addEventListener("click", onOutside), 0);
-    cleanup = () => document.removeEventListener("click", onOutside);
+    document.addEventListener("keydown", onKeyDown);
+    cleanup = () => {
+      document.removeEventListener("click", onOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }
 
   function toggle(btn: HTMLElement, ...args: Args): void {

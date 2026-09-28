@@ -468,6 +468,16 @@
   padding: 4px;
   min-width: 180px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* max-height is set inline by positionDropdown/positionSubmenu (viewport-
+     aware); this only makes it scroll instead of clip once that lands. */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.session-more-menu::-webkit-scrollbar { width: 8px; }
+.session-more-menu::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
 }
 
 .smore-item {

@@ -74,8 +74,20 @@ export class PopoverShell {
     const onOutside = (e: MouseEvent) => {
       if (!pop.contains(e.target as Node) && !anchor.contains(e.target as Node)) this.close();
     };
+    // kebab-menu.ts precedent: Escape closes and returns focus to the chip
+    // that opened the popover, not just outside-click.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        this.close();
+        anchor.focus();
+      }
+    };
     setTimeout(() => document.addEventListener("click", onOutside), 0);
-    this.cleanup = () => document.removeEventListener("click", onOutside);
+    document.addEventListener("keydown", onKeyDown);
+    this.cleanup = () => {
+      document.removeEventListener("click", onOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }
 
   /** Reposition against `anchor` (defaults to the last one) without rebuilding. */

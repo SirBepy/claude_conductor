@@ -5,6 +5,7 @@
 // Returns a built DOM fragment; caller appends it into the parent container.
 
 import { closeChat } from "./close-chat";
+import { positionSubmenu } from "./position-dropdown";
 import {
   buildOpenProjectItems,
   buildChatItems,
@@ -29,20 +30,7 @@ export function positionAndShowSubmenu(sub: HTMLElement, parentItem: HTMLElement
   closeSub();
   document.body.appendChild(sub);
   _activeSub = sub;
-
-  const itemRect = parentItem.getBoundingClientRect();
-  const subRect = sub.getBoundingClientRect();
-  let left = itemRect.right + 4;
-  if (left + subRect.width > window.innerWidth - 4) {
-    left = itemRect.left - subRect.width - 4;
-  }
-  let top = itemRect.top;
-  if (top + subRect.height > window.innerHeight - 4) {
-    top = window.innerHeight - subRect.height - 4;
-  }
-  if (top < 4) top = 4;
-  sub.style.left = `${left}px`;
-  sub.style.top = `${top}px`;
+  positionSubmenu(sub, parentItem);
 }
 
 // ── Build helper ─────────────────────────────────────────────────────────────

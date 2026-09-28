@@ -36,6 +36,9 @@ export function resolveRememberedLocation(project: ProjectGroup): { path: string
 export function openLocationModal(project: ProjectGroup): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const slot = modalCardSlot();
+    // kebab-menu.ts precedent: Escape returns focus to whatever opened this
+    // step (usually project-picker's own re-mounted card).
+    const trigger = document.activeElement as HTMLElement | null;
     let resolved = false;
     // Deliberately does NOT close the shared host - this picker is always
     // reached via project-picker.ts's selectProjectRow, which decides what
@@ -131,11 +134,24 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
 
     // Ctrl/Cmd+Enter submits, matching the AUQ question card's shortcut -
     // guarded by the same busy/scopeExpanded condition that disables the
-    // Open button itself.
+    // Open button itself. Escape narrows before it exits (project-picker's
+    // clear-filter-first idiom): collapses the expanded scope field first via
+    // the same transition its own Cancel button already uses, closes the
+    // whole step on a second press. Both branches are guarded to only act
+    // while THIS step's card is the one mounted - the promise stays
+    // unresolved while worktree-picker's card is on top of it (changeWorktree).
     const keydownHandler = (e: KeyboardEvent) => {
+      if (!slot.querySelector('[data-picker-step="location"]')) return;
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && scopes !== null && !scopeExpanded) {
         e.preventDefault();
         persistAndFinish();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (scopeExpanded) { toggleScopeField(); return; }
+        finish(null);
+        trigger?.focus?.();
       }
     };
     document.addEventListener("keydown", keydownHandler);
@@ -209,7 +225,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     const renderModal = () => {
       const busy = scopes === null;
       const tpl = html`
-        <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Open ${project.name}">
+        <div class="modal-card wt-picker-modal" data-picker-step="location" role="dialog" aria-modal="true" aria-label="Open ${project.name}">
           <header class="modal-header"><h3>Open ${project.name}</h3></header>
           <div class="modal-body wt-picker-body loc-fields">
             ${renderWorktreeField()}

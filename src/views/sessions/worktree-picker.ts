@@ -13,14 +13,34 @@ type Step = "choice" | "existing" | "new";
 export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const slot = modalCardSlot();
+    // kebab-menu.ts precedent: Escape returns focus to whatever opened this
+    // step (location-picker's "Change worktree" chip).
+    const trigger = document.activeElement as HTMLElement | null;
     let resolved = false;
     // Deliberately does NOT close the shared host - always reached via
     // location-picker.ts's changeWorktree, which decides what shows next.
     const finish = (val: { path: string; name: string } | null) => {
       if (resolved) return;
       resolved = true;
+      document.removeEventListener("keydown", keydownHandler);
       resolve(val);
     };
+
+    // Escape narrows before it exits, same idiom as location-picker.ts and
+    // project-picker.ts: collapses the expanded base-branch field first (the
+    // same transition its own Cancel button already uses), then backs out of
+    // a sub-step to the choice screen (same transition as the Back button),
+    // then closes the whole step on a final press. No stacked-sub-modal guard
+    // needed here - this picker doesn't open any further step of its own.
+    const keydownHandler = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (baseExpanded) { baseExpanded = false; baseFilter = ""; renderModal(); return; }
+      if (step !== "choice") { step = "choice"; renderModal(); return; }
+      finish(null);
+      trigger?.focus?.();
+    };
+    document.addEventListener("keydown", keydownHandler);
 
     let step: Step = "choice";
 

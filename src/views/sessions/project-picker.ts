@@ -101,10 +101,16 @@ export function openProjectPickerModal(
   return new Promise((resolve) => {
     const host = ensureModalHost();
     const slot = modalCardSlot();
+    // kebab-menu.ts precedent: Escape returns focus to whatever opened the
+    // picker. Captured once, since a later step's own re-render can steal
+    // document.activeElement before this modal ever closes.
+    const trigger = document.activeElement as HTMLElement | null;
     let resolved = false;
+    let onEscapeKeydown: ((e: KeyboardEvent) => void) | null = null;
     const finish = (val: PickedProject | null) => {
       if (resolved) return;
       resolved = true;
+      if (onEscapeKeydown) document.removeEventListener("keydown", onEscapeKeydown);
       closeHostCard();
       resolve(val);
     };
@@ -210,6 +216,24 @@ export function openProjectPickerModal(
     // filtered/sorted `computeRows()` output. Reset to 0 whenever filter or
     // sort changes (top of the new list).
     let selectedIdx = 0;
+
+    // Escape closes the picker from anywhere in the card (options panel, a
+    // row, nowhere in particular), not just the search box - the search
+    // input's own @keydown below already owns Escape while it's focused
+    // (clear-filter-first idiom), so this skips that case to avoid double
+    // handling. Guarded to only act while THIS step's card is the one
+    // mounted: the promise stays unresolved through the whole project ->
+    // location -> worktree chain, so a stacked sub-modal's Escape must not
+    // also close this one underneath it.
+    onEscapeKeydown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (!slot.querySelector('[data-picker-step="project"]')) return;
+      if (document.activeElement?.id === "project-picker-search") return;
+      e.preventDefault();
+      finish(null);
+      trigger?.focus?.();
+    };
+    document.addEventListener("keydown", onEscapeKeydown);
 
     // 0 = exact name, 1 = name starts with, 2 = name contains, 3 = path only
     const matchRank = (p: ProjectGroup, f: string): number => {
@@ -461,7 +485,7 @@ export function openProjectPickerModal(
     const renderModal = () => {
       if (!localProjects) {
         render(
-          html`<div class="modal-card modal-card-loading" role="dialog" aria-modal="true" aria-label="Pick project">
+          html`<div class="modal-card modal-card-loading" data-picker-step="project" role="dialog" aria-modal="true" aria-label="Pick project">
             <i class="ph ph-circle-notch" aria-hidden="true"></i> Loading projects&hellip;
           </div>`,
           slot,
@@ -472,6 +496,7 @@ export function openProjectPickerModal(
       const tpl = html`
         <div
           class="modal-card project-picker-modal"
+          data-picker-step="project"
           role="dialog"
           aria-modal="true"
           aria-label="Pick project"
@@ -539,6 +564,7 @@ export function openProjectPickerModal(
                     renderModal();
                   } else {
                     finish(null);
+                    trigger?.focus?.();
                   }
                 } else if (e.key === "Enter") {
                   const matches = computeRows();
