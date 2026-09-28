@@ -93,6 +93,14 @@ pub enum LifecycleError {
     MeteredBilling(String),
     #[error("session id {0} already exists in map")]
     AlreadyExists(String),
+    /// A caller-supplied id reaches `turn_id`, which is joined into the mcp /
+    /// hook-settings filenames AND string-formatted into the curl commands
+    /// those hooks run through a shell. `start_session` is phone- and
+    /// peer-machine-reachable, so an unchecked id is both a path traversal and
+    /// a command injection that never touches Claude's own tool-permission
+    /// prompt. Real ids are UUIDs.
+    #[error("invalid session id: {0}")]
+    InvalidSessionId(String),
     #[error("session id {0} not found")]
     NotFound(String),
     #[error("io: {0}")]

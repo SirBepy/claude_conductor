@@ -112,6 +112,9 @@ fn err_to_rpc(e: LifecycleError) -> RpcError {
         // Grouped with the other actionable setup failures, not with `Io`:
         // the message tells the user exactly what to install or set.
         | LifecycleError::ClaudeNotFound(_)
+        // A malformed caller-supplied session id, rejected before it reaches a
+        // path or a hook command string.
+        | LifecycleError::InvalidSessionId(_)
         | LifecycleError::Frozen(_) => RpcError::invalid_params(e.to_string()),
         LifecycleError::NotFound(_) => RpcError { code: -32004, message: e.to_string(), data: None },
         LifecycleError::AlreadyExists(_) => RpcError { code: -32005, message: e.to_string(), data: None },

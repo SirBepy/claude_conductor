@@ -71,6 +71,10 @@ pub async fn spawn_session(
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         (Some(id), false) => id.clone(),
     };
+    // Before the id is used to build anything: it flows into `turn_id` below,
+    // and from there into filesystem paths and shell command strings.
+    crate::ipc::chat::attachments::validate_session_id(&session_id)
+        .map_err(|e| LifecycleError::InvalidSessionId(e))?;
     if map.contains_key(&session_id) {
         return Err(LifecycleError::AlreadyExists(session_id));
     }

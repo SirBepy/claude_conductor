@@ -22,6 +22,45 @@ pub struct PrFileChange {
 /// Resolves the lower bound of a `(lower, to]` range: the parent of `from` if
 /// given, else the parent of `to`. Falls back to the git empty-tree hash when
 /// the target commit has no parent (root commit).
+/// Refuses a revision/pathspec that git would read as an option. `git diff`
+/// accepts `--output=<file>`, so an unchecked `to` is an arbitrary-file-write
+/// primitive for anything that can reach these commands - and `get_range_files`
+/// / `get_file_diff` are both phone-reachable (`remote_transport_table.rs`).
+/// A real revision or path never starts with `-`.
+fn reject_option_like(label: &str, value: &str) -> Result<(), String> {
+    if value.starts_with('-') {
+        return Err(format!("invalid {label}: must not start with '-'"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod option_guard_tests {
+    use super::reject_option_like;
+
+    #[test]
+    fn plain_revisions_and_paths_pass() {
+        for v in ["HEAD", "main", "abc1234", "src/main.rs", "a b/c.txt", ""] {
+            assert!(reject_option_like("to", v).is_ok(), "rejected {v:?}");
+        }
+    }
+
+    #[test]
+    fn a_leading_dash_is_refused() {
+        // `git diff --output=<file>` writes the diff wherever it is pointed, so
+        // this is the difference between a read and an arbitrary file write.
+        for v in ["--output=C:/Users/x/startup.bat", "-o", "--no-index", "-"] {
+            assert!(reject_option_like("to", v).is_err(), "accepted {v:?}");
+        }
+    }
+
+    #[test]
+    fn the_error_names_which_argument_was_bad() {
+        let err = reject_option_like("from", "--output=x").unwrap_err();
+        assert!(err.contains("from"), "{err}");
+    }
+}
+
 fn resolve_lower_bound(cwd: &str, from: &Option<String>, to: &str) -> String {
     let target = from.as_deref().unwrap_or(to);
     let mut cmd = std::process::Command::new("git");
@@ -140,10 +179,12 @@ fn parse_range_files(name_status: &str, numstat: &str) -> Vec<PrFileChange> {
 #[tauri::command]
 pub async fn get_range_files(cwd: String, from: Option<String>, to: String) -> Result<Vec<PrFileChange>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        reject_option_like("to", &to)?;
+        if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
         let lower = resolve_lower_bound(&cwd, &from, &to);
 
-        let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &lower, &to])?;
-        let numstat = run_git(&cwd, &["diff", "--numstat", "-M", &lower, &to])?;
+        let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &lower, &to, "--"])?;
+        let numstat = run_git(&cwd, &["diff", "--numstat", "-M", &lower, &to, "--"])?;
 
         Ok(parse_range_files(&name_status, &numstat))
     })
@@ -159,6 +200,9 @@ pub async fn get_file_diff(cwd: String, from: Option<String>, to: String, path: 
     const MAX_BYTES: usize = 1_000_000;
 
     tauri::async_runtime::spawn_blocking(move || {
+        reject_option_like("to", &to)?;
+        reject_option_like("path", &path)?;
+        if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
         let lower = resolve_lower_bound(&cwd, &from, &to);
 
         let mut cmd = std::process::Command::new("git");

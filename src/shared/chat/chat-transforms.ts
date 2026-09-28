@@ -45,16 +45,11 @@ const mdBreaks = new MarkdownIt({
 });
 mdBreaks.linkify.tlds("md", false);
 
-// PR preview bodies are Claude-authored (git commits / /create-pr output),
-// not arbitrary chat/tool content, so raw HTML like GitHub's <details>
-// collapsible sections is safe to render here even though the general
-// chat renderer above keeps html:false as a blast-radius guard.
-const mdHtml = new MarkdownIt({
-  html: true,
-  linkify: true,
-  typographer: false,
-});
-mdHtml.linkify.tlds("md", false);
+// Every markdown instance here keeps html:false. Assistant text is not a trust
+// boundary - it is shaped by whatever files, tool results and web pages the
+// session read - so a raw-HTML instance reachable from a text marker is an
+// injection sink, not a formatting convenience. The PR preview card loses
+// GitHub's <details> blocks as a result.
 
 // Matches <file:PATH> or <file:PATH::DISPLAYNAME> tokens in user message text.
 // Group 1 = path, group 2 = display name (optional).
@@ -213,7 +208,7 @@ function pastedLogChipHtml(name: string, body: string): string {
  * directly without re-parsing rendered HTML. */
 export function renderPrPreviewCard(title: string, bodyB64: string, commitsB64: string): string {
   const body = base64ToUtf8(bodyB64);
-  const renderedBody = body ? renderMarkdown(body, false, true) : "<p><em>No description.</em></p>";
+  const renderedBody = body ? renderMarkdown(body) : "<p><em>No description.</em></p>";
   return `<div class="pr-preview-card" data-pr-title="${escapeHtml(title)}" data-pr-commits="${escapeHtml(commitsB64)}"><div class="pr-card-strip"><i class="ph ph-git-pull-request"></i><span class="pr-card-label">PR ready — review before creating</span><button class="pr-preview-btn">Preview</button></div><template class="pr-modal-tpl"><div class="pr-modal-body-content"><h1 class="pr-body-title">${escapeHtml(title)}</h1>${renderedBody}</div></template></div>`;
 }
 
@@ -336,8 +331,8 @@ export function renderMessage(m: RenderedMessage): string {
   }
 }
 
-export function renderMarkdown(text: string, breaks = false, allowHtml = false): string {
-  const inst = allowHtml ? mdHtml : breaks ? mdBreaks : md;
+export function renderMarkdown(text: string, breaks = false): string {
+  const inst = breaks ? mdBreaks : md;
   return highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst)));
 }
 
