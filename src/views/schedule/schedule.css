@@ -68,7 +68,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .dot--upcoming, .dot--firing { background: var(--color-primary); }
 .dot--sent { background: var(--color-success, #7af0c0); }
-.dot--missed { background: var(--color-warning, #e5a040); }
+.dot--missed { background: var(--color-warning); }
 .dot--failed { background: var(--color-danger, #ff6b6b); }
 .dot--external { background: var(--color-text-muted); }
 .dot--recurring { background: transparent; border: 1.5px solid var(--color-primary); width: 7px; height: 7px; }
@@ -244,7 +244,7 @@ details.schedule-section[open] > summary.schedule-section-title::before {
 }
 
 .schedule-section--attn .schedule-section-title {
-  color: var(--color-warning, #e5a040);
+  color: var(--color-warning);
 }
 
 .schedule-list {
@@ -342,7 +342,7 @@ details.schedule-section[open] > summary.schedule-section-title::before {
 }
 
 .schedule-row--attn.schedule-row--warn {
-  background: color-mix(in srgb, var(--color-warning, #e5a040) 10%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 .schedule-row--attn.schedule-row--danger {
   background: color-mix(in srgb, var(--color-danger, #ff6b6b) 10%, transparent);
@@ -375,8 +375,8 @@ details.schedule-section[open] > summary.schedule-section-title::before {
   color: var(--color-danger, #ff6b6b);
 }
 .schedule-status-pill--missed {
-  background: color-mix(in srgb, var(--color-warning, #e5a040) 15%, transparent);
-  color: var(--color-warning, #e5a040);
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
 }
 
 .schedule-badge {
@@ -396,7 +396,7 @@ details.schedule-section[open] > summary.schedule-section-title::before {
 }
 
 .schedule-delta {
-  color: var(--color-warning, #e5a040);
+  color: var(--color-warning);
 }
 
 .schedule-reschedule-inline {

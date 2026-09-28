@@ -22,7 +22,7 @@
   gap: 4px;
 }
 
-.ra-status-warn { color: var(--color-warning, #e0a83a); }
+.ra-status-warn { color: var(--color-warning); }
 .ra-status-ok { color: var(--color-primary); }
 .ra-status-dim { color: var(--sb-muted); }
 
@@ -137,7 +137,7 @@
 .ra-machine-pair-error {
   margin: 0;
   font-size: var(--fs-body);
-  color: var(--color-warning, #e5a040);
+  color: var(--color-warning);
 }
 
 .btn-danger-sm {

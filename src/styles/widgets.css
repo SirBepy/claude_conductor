@@ -530,7 +530,7 @@ input:checked + .slider:before {
 
 /* ── Dead path warning ── */
 .dead-path-warning {
-  color: #f0a500;
+  color: var(--color-warning);
   font-size: var(--fs-micro);
   vertical-align: middle;
 }

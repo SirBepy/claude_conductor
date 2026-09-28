@@ -33,8 +33,8 @@
   color: var(--sb-muted);
 }
 .instance-row .tag.automated {
-  background: color-mix(in srgb, var(--color-warning, #e5a040) 15%, transparent);
-  color: var(--color-warning, #e5a040);
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
 }
 .instance-row .tag.remote {
   background: color-mix(in srgb, var(--color-info, #6e8fff) 15%, transparent);

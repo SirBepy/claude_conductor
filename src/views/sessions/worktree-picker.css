@@ -106,19 +106,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wt-picker-row--stale { background: color-mix(in srgb, var(--color-warning, #e5a040) 8%, transparent); }
+.wt-picker-row--stale { background: color-mix(in srgb, var(--color-warning) 8%, transparent); }
 .wt-picker-stale-tag {
   flex-shrink: 0;
   font-size: 0.66rem;
   font-weight: 600;
   padding: 2px 7px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-warning, #e5a040) 18%, transparent);
-  color: var(--color-warning, #e5a040);
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
 }
 .wt-picker-cleanup-btn:not([disabled]) {
-  color: var(--color-warning, #e5a040);
-  border-color: color-mix(in srgb, var(--color-warning, #e5a040) 40%, var(--color-border, #2e2e40));
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border, #2e2e40));
 }
 
 /* ── new-worktree form ── */

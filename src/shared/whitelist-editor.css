@@ -90,7 +90,7 @@
 .wle-empty-hint {
   margin: 8px 0 0;
   font-size: 0.78rem;
-  color: var(--color-warning, #e0a33e);
+  color: var(--color-warning);
 }
 
 .wle-actions {

@@ -30,7 +30,7 @@
   transform: none;
 }
 .prompt-summary-row.is-unanswered {
-  border-color: color-mix(in srgb, var(--color-warning, orange) 40%, var(--color-border));
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border));
 }
 .prompt-summary-row__main {
   display: flex;

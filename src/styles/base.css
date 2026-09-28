@@ -3,6 +3,12 @@
    floor in every theme and both modes, which a hardcoded hex could not. */
 :root {
     --sb-muted: color-mix(in srgb, var(--color-text-muted) 62%, var(--color-text));
+
+    /* No vendor theme defines a warning hue (--color-surface/-border/-text
+       do, --color-warning never has). Single flat value, not palette-keyed:
+       every site used to pin its own fallback hex here, six different
+       yellows. One declaration so the colour is a one-line flip. */
+    --color-warning: #e5a040;
 }
 
 *, *::before, *::after {

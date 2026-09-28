@@ -347,8 +347,8 @@
   font-family: monospace;
 }
 .pr-file-status.st-M {
-  color: #f0c674;
-  background: rgba(240, 198, 116, 0.12);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 .pr-file-status.st-A {
   color: var(--color-success);

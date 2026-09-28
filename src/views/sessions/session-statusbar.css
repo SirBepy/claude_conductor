@@ -168,17 +168,17 @@
 .sb-chip.sb-folder-btn { cursor: pointer; }
 .sb-chip.sb-folder-btn:hover { color: var(--color-text); background: rgba(255, 255, 255, 0.08); border-color: var(--color-border); }
 .sb-chip.sb-context { color: #34d399; border-color: rgba(52, 211, 153, 0.25); }
-.sb-chip.sb-context.warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); }
+.sb-chip.sb-context.warn { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 30%, transparent); }
 .sb-chip.sb-context.danger { color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
 .sb-chip.sb-thinking.active { color: #a78bfa; border-color: rgba(167, 139, 250, 0.3); }
 .sb-chip.sb-duration { color: var(--color-text-muted); }
-.sb-chip.sb-cost { color: #fbbf24; border-color: rgba(251, 191, 36, 0.2); }
+.sb-chip.sb-cost { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 20%, transparent); }
 .sb-chip.sb-clock { color: var(--color-text-muted); }
 .sb-chip.sb-messages { color: #60a5fa; border-color: rgba(96, 165, 250, 0.2); }
 .sb-chip.sb-turns { color: #38bdf8; border-color: rgba(56, 189, 248, 0.2); }
 .sb-chip.sb-commits { color: #818cf8; border-color: rgba(129, 140, 248, 0.25); }
 .sb-chip.sb-sha { color: var(--color-text-muted); }
-.sb-chip.sb-dirty { color: #fbbf24; border-color: rgba(251, 191, 36, 0.2); }
+.sb-chip.sb-dirty { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 20%, transparent); }
 .sb-chip.sb-diffstat { color: var(--color-text-muted); }
 .sb-chip.sb-diffstat .sb-ins { color: #4ade80; }
 .sb-chip.sb-diffstat .sb-del { color: #f87171; }
@@ -295,9 +295,9 @@
   line-height: 1.4;
 }
 
-.sb-chip.sb-ai-todos { color: #fbbf24; border-color: rgba(251, 191, 36, 0.2); }
+.sb-chip.sb-ai-todos { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 20%, transparent); }
 .sb-chip.sb-ai-todos-btn { cursor: pointer; }
-.sb-chip.sb-ai-todos-btn:hover { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.35); }
+.sb-chip.sb-ai-todos-btn:hover { background: color-mix(in srgb, var(--color-warning) 10%, transparent); border-color: color-mix(in srgb, var(--color-warning) 35%, transparent); }
 
 .sb-ai-todos-popover {
   min-width: 280px;
@@ -329,7 +329,7 @@
 
 .sb-ai-todos-popover-file:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 /* ── Servers chip + running-servers popover ──────────────────────────────── */
@@ -386,7 +386,7 @@
 /* Base (under 50% share): teal, matching the healthy context chip. warn/danger
    escalate with the same palette as the context chip. */
 .sb-chip.sb-drain { color: #34d399; border-color: rgba(52, 211, 153, 0.25); }
-.sb-chip.sb-drain.warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); }
+.sb-chip.sb-drain.warn { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 30%, transparent); }
 .sb-chip.sb-drain.danger { color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
 .sb-chip.sb-drain.muted { color: var(--color-text-muted); border-color: transparent; }
 .sb-chip.sb-drain-btn { cursor: pointer; }
@@ -536,7 +536,7 @@
 
 .sb-git-branch-seg { color: #4ade80; }
 .sb-git-ahead { color: #4ade80; }
-.sb-git-behind { color: #fbbf24; }
+.sb-git-behind { color: var(--color-warning); }
 .sb-git-noup { color: var(--sb-muted); }
 .sb-git-away { color: var(--sb-muted); }
 

@@ -240,9 +240,9 @@
   padding: 9px 11px;
   border-radius: 8px;
   font-size: var(--fs-micro);
-  color: var(--color-warning, #f5a623);
-  background: color-mix(in srgb, var(--color-warning, #f5a623) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-warning, #f5a623) 35%, transparent);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
   margin: 10px 0;
 }
 

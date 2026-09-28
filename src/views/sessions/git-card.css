@@ -296,4 +296,4 @@
   font-size: 0.67rem;
 }
 
-.gc-away-foot i { color: #fbbf24; font-size: 0.82rem; flex-shrink: 0; }
+.gc-away-foot i { color: var(--color-warning); font-size: 0.82rem; flex-shrink: 0; }

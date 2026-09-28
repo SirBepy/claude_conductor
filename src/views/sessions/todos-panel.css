@@ -5,12 +5,12 @@
    the project's own tokens (the mockup's local --color-text-dim is
    mockup-only; --color-text-muted is the real one, see todo #691). */
 
-/* The theme palette has no amber (verified: theme-void.css ships primary /
+/* The vendor palette has no amber (verified: theme-void.css ships primary /
    success / danger / info only), and --chat-state-busy is the row-dot
-   vocabulary, so reusing it here would read as "this chat is busy". One local
-   token, the approved mockup's value. */
+   vocabulary, so reusing it here would read as "this chat is busy". Alias the
+   repo's own --color-warning token (src/styles/base.css) instead. */
 :root {
-  --td-attention: #f0c674;
+  --td-attention: var(--color-warning);
 }
 
 .todos-panel {

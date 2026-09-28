@@ -202,7 +202,7 @@
 }
 .project-picker-missing-msg {
   font-size: 0.7rem;
-  color: var(--color-warning, #e5a040);
+  color: var(--color-warning);
   font-style: italic;
 }
 .project-picker-empty {
@@ -213,7 +213,7 @@
   list-style: none;
 }
 .project-picker-error {
-  color: var(--color-warning, #e5a040);
+  color: var(--color-warning);
 }
 
 /* Machine chip row (multi-machine federation, H4) - reuses .account-chip's

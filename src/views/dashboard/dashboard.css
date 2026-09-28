@@ -83,8 +83,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: color-mix(in srgb, var(--color-warning, #e5a040) 12%, var(--color-surface, #1f1f2c));
-  border: 1px solid var(--color-warning, #e5a040);
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface, #1f1f2c));
+  border: 1px solid var(--color-warning);
   border-radius: 10px;
   padding: 10px 12px;
   margin-bottom: 14px;
@@ -92,7 +92,7 @@
 }
 .view-dashboard .dash-refresh-error-banner > i.ph {
   font-size: 1.2rem;
-  color: var(--color-warning, #e5a040);
+  color: var(--color-warning);
   flex-shrink: 0;
 }
 .view-dashboard .dash-refresh-error-text { flex: 1; color: var(--color-text, #e8e8f0); }
@@ -160,7 +160,7 @@
 .view-dashboard .dash-ring-pcts .dash-ring-safe { color: var(--sb-muted); opacity: 0.65; font-size: var(--fs-micro); }
 .view-dashboard .dash-ring-time { display: flex; flex-direction: column; align-items: center; font-variant-numeric: tabular-nums; }
 .view-dashboard .dash-ring-time .dash-ring-time-big { font-size: var(--fs-body); font-weight: 700; line-height: 1.2; }
-.view-dashboard .dash-ring-time .dash-ring-time-near { color: var(--color-warning, #e5a040); }
+.view-dashboard .dash-ring-time .dash-ring-time-near { color: var(--color-warning); }
 .view-dashboard .dash-ring-time .dash-ring-time-hot { color: var(--color-danger); }
 .view-dashboard .dash-ring-time .dash-ring-time-dim { font-size: var(--fs-micro); color: var(--sb-muted); opacity: 0.65; }
 .view-dashboard .dash-ring-empty { font-size: var(--fs-micro); color: var(--sb-muted); margin-top: 8px; min-height: 1.1em; text-align: center; }

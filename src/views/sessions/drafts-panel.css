@@ -1,10 +1,10 @@
 /* "Drafts" FAB-card body (todo 666). Lives inside the card owned by
    fab-dial.css, so this file styles only the list, the cards and the editor -
    never the card chrome, the spine or the close button.
-   The palette ships no amber (see todos-panel.css's own note), so the
-   attention accent is one local token reusing that file's approved value. */
+   The vendor palette ships no amber; --dr-attention aliases the repo's own
+   --color-warning token (src/styles/base.css) instead of a local literal. */
 :root {
-  --dr-attention: #f0c674;
+  --dr-attention: var(--color-warning);
 }
 
 .drafts-panel {
