@@ -13,17 +13,18 @@
 //   npm run test:e2e:accounts
 //
 // FREE in the billing sense (no `claude` process spawned), but NOT fixture-
-// free: the harness's `wdio` daemon instance starts with an EMPTY accounts
-// registry (no wizard has ever run against it), and the wizard's `/login`
-// step cannot be scripted (00-overview.md, locked decision) - there is no
-// IPC seam to fabricate a fake registered account the way `changes-panel.
-// e2e.js` seeds a fake session via `register_historical_session`. So:
+// free: the wizard's `/login` step cannot be scripted (00-overview.md, locked
+// decision) and there is no IPC seam to fabricate a fake registered account the
+// way `changes-panel.e2e.js` seeds a fake session via
+// `register_historical_session`. So the account count is whatever the `wdio`
+// daemon instance happens to hold, and the assertions below read it rather than
+// assuming it.
 //
-//   - The dashboard + new-chat-picker specs below assert the well-defined
-//     EMPTY-registry path (deterministic, matches the harness's real state).
-//     A future update that adds a lightweight "seed account" test-only IPC
-//     command (mirroring `__injectEdit`'s dev-only seam in main.ts) could
-//     extend these to the populated (`.dash-acard` / account-chip) path.
+//   - This file once documented that instance as starting EMPTY. A dump on
+//     2026-09-28 found ONE account, the case where the account field renders
+//     nothing at all (3133a010). Read the count, never assume it.
+//   - A test-only "seed account" IPC seam (mirroring `__injectEdit` in main.ts)
+//     would make the populated path deterministic rather than machine-dependent.
 //   - The overlay lives in a SEPARATE always-on-top Tauri window
 //     (`session-overlay`, `overlay.html`) built only from
 //     `ipc::overlay_window::toggle_overlay_window`, which is a plain Rust fn wired to
@@ -64,8 +65,9 @@ describe("Dashboard account selector (multi-account milestone 05)", () => {
   });
 
   it("surfaces the one-time 'set up your accounts' banner only when a legacy session exists", async () => {
-    // Harness-dependent: the banner needs BOTH an empty registry (true here)
-    // AND a legacy `session.txt` on disk (`should_show_setup_prompt`). The
+    // Harness-dependent: the banner needs BOTH an empty registry (NOT the case
+    // here - this instance holds one account) AND a legacy `session.txt` on
+    // disk (`should_show_setup_prompt`). The
     // wdio harness's app-data dir may or may not have one depending on
     // whether a prior manual login ever ran against it - so this assertion
     // is a structural existence check, not a hard true/false expectation.
