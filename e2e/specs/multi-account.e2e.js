@@ -107,17 +107,24 @@ describe("New-chat account picker (multi-account milestone 04)", () => {
     // assertion on which project it hit.
     await selectProjectRow(PROJECT_NAME);
 
-    const accField = await $(".me-acc-field");
-    await accField.waitForExist({ timeout: 15000 });
-    // Registry-aware (model-effort-modal.ts `renderAccountFieldHtml`): chip
-    // picker with accounts, warning + "Add one in Settings" link without.
+    // Wait for the modal body, not the account field: the field is absent by
+    // design with a single registered account, so waiting on it burns the full
+    // timeout and fails on a modal that rendered correctly.
+    await (await $(".me-columns")).waitForExist({ timeout: 15000 });
+    // Registry-aware (model-effort-modal.ts `renderAccountFieldHtml`), three
+    // cases not two: 2+ accounts show the chip picker, exactly one shows no
+    // field at all (3133a010 - there is nothing to choose), none shows the
+    // warning plus an "Add one in Settings" link.
     const accounts = await browser.execute(() => window.__TAURI__.core.invoke("list_accounts"));
-    if (accounts.length > 0) {
+    if (accounts.length > 1) {
       // Every account is always on screen - there is no collapsed trigger
       // and no "remember this account?" checkbox any more.
       await expect($(".me-acc-field .account-chip")).toExist();
       await expect($(".me-acc-empty")).not.toExist();
       await expect($(".me-remember")).not.toExist();
+    } else if (accounts.length === 1) {
+      await expect($(".me-acc-field")).not.toExist();
+      await expect($(".me-acc-empty")).not.toExist();
     } else {
       await expect($(".me-acc-empty")).toExist();
       await expect($(".me-acc-add-link")).toExist();
