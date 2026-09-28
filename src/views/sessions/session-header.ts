@@ -134,7 +134,7 @@ export class SessionHeader {
     if (isRemote && !existing) {
       const icon = document.createElement("i");
       icon.className = "ph ph-device-mobile session-header-remote-badge";
-      icon.title = "Remote chat";
+      icon.title = "Started from phone";
       this._titleEl.appendChild(icon);
     } else if (!isRemote && existing) {
       existing.remove();

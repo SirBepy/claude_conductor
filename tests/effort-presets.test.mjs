@@ -125,27 +125,23 @@ describe("model identity migration (full id -> family)", () => {
 });
 
 describe("readDefaultFlags", () => {
-  it("defaults both flags to true when absent", () => {
-    expect(readDefaultFlags({})).toEqual({ autoAccept: true, remote: true });
+  it("defaults to true when absent", () => {
+    expect(readDefaultFlags({})).toEqual({ autoAccept: true });
   });
 
   it("respects explicit false", () => {
-    expect(
-      readDefaultFlags({ defaultAutoAllow: false, defaultRemoteControl: false }),
-    ).toEqual({ autoAccept: false, remote: false });
+    expect(readDefaultFlags({ defaultAutoAllow: false })).toEqual({ autoAccept: false });
   });
 
   it("treats any non-false value as true", () => {
-    expect(
-      readDefaultFlags({ defaultAutoAllow: true, defaultRemoteControl: 0 }),
-    ).toEqual({ autoAccept: true, remote: true });
+    expect(readDefaultFlags({ defaultAutoAllow: 0 })).toEqual({ autoAccept: true });
   });
 
-  it("flips flags independently", () => {
-    expect(readDefaultFlags({ defaultAutoAllow: false })).toEqual({
-      autoAccept: false,
-      remote: true,
-    });
+  /** `defaultRemoteControl` fed `--remote-control`, removed once the flag was
+   *  found inert under `-p`. A stale key in settings.json must not resurrect a
+   *  second flag here. */
+  it("ignores the retired defaultRemoteControl key", () => {
+    expect(readDefaultFlags({ defaultRemoteControl: false })).toEqual({ autoAccept: true });
   });
 });
 

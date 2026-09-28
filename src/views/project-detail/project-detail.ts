@@ -192,7 +192,6 @@ export async function renderProjectDetailView(
         effort: config.effort,
         accountId: config.accountId ?? null,
         autoAccept: config.autoAccept,
-        remote: config.remote,
         characterId: config.characterId ?? null,
       });
     };

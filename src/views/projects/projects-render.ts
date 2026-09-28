@@ -58,7 +58,7 @@ function cardTemplate(g: ProjectGroup): TemplateResult {
                 ? html`<span class="proj-tag proj-tag-live" title="${g.live} live" aria-label="${g.live} live"><span class="proj-tag-dot"></span>${g.live}</span>`
                 : ""}
               ${g.any_remote
-                ? html`<span class="proj-tag" title="remote" aria-label="remote"><i class="ph ph-device-mobile"></i>remote</span>`
+                ? html`<span class="proj-tag" title="started from phone" aria-label="started from phone"><i class="ph ph-device-mobile"></i>phone</span>`
                 : ""}
               ${g.any_automated
                 ? html`<span class="proj-tag" title="auto" aria-label="auto"><i class="ph ph-gear"></i>auto</span>`

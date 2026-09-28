@@ -35,7 +35,7 @@ export interface RowOptions {
   title: string;
   /** Project folder name, escaped. */
   projectLabel: string;
-  /** Remote/autopilot badges after the project name. "" when neither flag is set. */
+  /** Phone/autopilot badges after the project name. "" when neither flag is set. */
   badges: string;
   /** Portrait's secondary slot: model battery + drain chip, for every row kind. */
   portraitSecondary: string;
@@ -97,7 +97,7 @@ function buildRowOptions(args: {
   const machineBadge = args.machine
     ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>`
     : "";
-  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Remote chat"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}${machineBadge}`;
+  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Started from phone"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}${machineBadge}`;
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
@@ -198,8 +198,7 @@ export function draftRowOptions(
     projectLabel: pending.projectName || "New session",
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
-    // config.remote is the *intended* flag for once this draft starts, not
-    // a live transport fact - nothing is reachable yet, so never badge it.
+    // A draft has no session yet, so it was never started from a phone.
     isRemote: false,
     isAutopilot: false,
     frozen: false,
@@ -226,7 +225,7 @@ export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptio
     projectLabel: d.projectName || "New session",
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
-    // Same as draftRowOptions - config.remote is only the future intent.
+    // Same as draftRowOptions - a parked draft has no session yet.
     isRemote: false,
     isAutopilot: false,
     frozen: false,

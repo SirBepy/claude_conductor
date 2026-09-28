@@ -145,15 +145,14 @@ function parseUserModels(settings: Record<string, unknown>): string[] {
 }
 
 /**
- * Default checkbox states for the "New session" modal. Both default ON when the
- * setting is absent; only an explicit `false` flips them off.
+ * Default checkbox state for the "New session" modal. Defaults ON when the
+ * setting is absent; only an explicit `false` flips it off.
  */
 export function readDefaultFlags(
   settings: Record<string, unknown>,
-): { autoAccept: boolean; remote: boolean } {
+): { autoAccept: boolean } {
   return {
     autoAccept: settings["defaultAutoAllow"] !== false,
-    remote: settings["defaultRemoteControl"] !== false,
   };
 }
 

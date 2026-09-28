@@ -114,7 +114,6 @@ pub async fn spawn_session(
         &session_id,
         &params.model,
         &params.effort,
-        params.remote,
         params.fork,
     ));
     if let Some(ref mcp_path) = mcp_config_path {
@@ -250,7 +249,6 @@ pub(super) async fn respawn_interactive(
             model,
             effort,
             resume_id: Some(session_id.to_string()),
-            remote: false,
             account_id: inst.account_id,
             fork: false,
             new_session_id: None,
@@ -290,7 +288,7 @@ mod tests {
     /// instead of blocking on stdout to discover it.
     #[test]
     fn fork_passes_resume_and_a_distinct_pinned_session_id() {
-        let args = base_claude_args(Some("old-id"), "new-id", "opus", "high", false, true);
+        let args = base_claude_args(Some("old-id"), "new-id", "opus", "high", true);
         let r = args.iter().position(|a| a == "--resume").expect("--resume");
         assert_eq!(args.get(r + 1).map(String::as_str), Some("old-id"));
         assert!(args.iter().any(|a| a == "--fork-session"), "fork must pass --fork-session: {args:?}");
@@ -303,7 +301,7 @@ mod tests {
     /// ordinary respawn path, which would silently mint a new id per turn.
     #[test]
     fn plain_resume_is_unchanged_by_the_fork_flag() {
-        let args = base_claude_args(Some("abc-123"), "abc-123", "opus", "high", false, false);
+        let args = base_claude_args(Some("abc-123"), "abc-123", "opus", "high", false);
         assert!(!args.iter().any(|a| a == "--fork-session"), "{args:?}");
         assert!(!args.iter().any(|a| a == "--session-id"), "{args:?}");
     }
@@ -313,7 +311,7 @@ mod tests {
         // Root-cause guard: a brand-new session must use `--session-id <uuid>`,
         // NOT `--resume <uuid>`. claude rejects `--resume` of an unknown id
         // ("No conversation found with session ID") and exits.
-        let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
+        let args = base_claude_args(None, "new-uuid", "opus", "high", false);
         assert!(
             !args.iter().any(|a| a == "--resume"),
             "new session must not pass --resume: {args:?}"
@@ -327,7 +325,7 @@ mod tests {
 
     #[test]
     fn resume_session_uses_resume_not_session_id() {
-        let args = base_claude_args(Some("abc-123"), "abc-123", "opus", "high", false, false);
+        let args = base_claude_args(Some("abc-123"), "abc-123", "opus", "high", false);
         assert!(
             !args.iter().any(|a| a == "--session-id"),
             "resume must not pass --session-id: {args:?}"
@@ -341,7 +339,7 @@ mod tests {
 
     #[test]
     fn base_args_always_carry_model_and_effort() {
-        let args = base_claude_args(None, "new-uuid", "sonnet", "medium", false, false);
+        let args = base_claude_args(None, "new-uuid", "sonnet", "medium", false);
         let m = args.iter().position(|a| a == "--model").expect("--model");
         assert_eq!(args.get(m + 1).map(String::as_str), Some("sonnet"));
         let e = args.iter().position(|a| a == "--effort").expect("--effort");
@@ -364,7 +362,7 @@ mod tests {
         // to mcp__cc_conductor__ask_user_question must never reach the
         // ordinary approval gate, so it always renders through index.ts's
         // fire-and-forget path, never permission-card.ts's fallback.
-        let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
+        let args = base_claude_args(None, "new-uuid", "opus", "high", false);
         let p = args
             .iter()
             .position(|a| a == "--allowedTools")
@@ -379,7 +377,7 @@ mod tests {
     fn base_args_pretrust_show_preview() {
         // todo 815: show_preview only renders HTML into a sandboxed frame, so
         // the per-session permission card it used to raise bought nothing.
-        let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
+        let args = base_claude_args(None, "new-uuid", "opus", "high", false);
         let p = args
             .iter()
             .position(|a| a == "--allowedTools")
@@ -392,7 +390,7 @@ mod tests {
     fn base_args_carry_turn_status_prompt() {
         // The report_turn_status nudge must ride on every spawn (todo 435).
         // cc-progress is unmigrated this pass, so its marker still rides too.
-        let args = base_claude_args(None, "new-uuid", "opus", "high", false, false);
+        let args = base_claude_args(None, "new-uuid", "opus", "high", false);
         let p = args
             .iter()
             .position(|a| a == "--append-system-prompt")
@@ -428,7 +426,6 @@ mod tests {
                 model: "bogus".into(),
                 effort: "high".into(),
                 resume_id: None,
-                remote: false,
                 account_id: None,
                 fork: false,
                 new_session_id: None,
@@ -452,7 +449,6 @@ mod tests {
                 model: "claude-opus-4-8".into(),
                 effort: "high".into(),
                 resume_id: None,
-                remote: false,
                 account_id: None,
                 fork: false,
                 new_session_id: None,
@@ -472,7 +468,6 @@ mod tests {
                 model: "opus".into(),
                 effort: "ultra".into(),
                 resume_id: None,
-                remote: false,
                 account_id: None,
                 fork: false,
                 new_session_id: None,
@@ -493,7 +488,6 @@ mod tests {
                 model: "opus".into(),
                 effort: "high".into(),
                 resume_id: None,
-                remote: false,
                 account_id: None,
                 fork: false,
                 new_session_id: None,

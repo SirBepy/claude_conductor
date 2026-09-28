@@ -154,7 +154,6 @@ async fn spawn_fresh_jarvis(state: &Arc<DaemonState>) -> Result<String, RpcError
         model: JARVIS_MODEL.to_string(),
         effort: JARVIS_EFFORT.to_string(),
         resume_id: None,
-        remote: false,
         account_id: None,
         fork: false,
         new_session_id: None,

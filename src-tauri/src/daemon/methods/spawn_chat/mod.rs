@@ -97,7 +97,6 @@ pub(crate) async fn spawn_chat(
         model: model.clone(),
         effort: effort.clone(),
         resume_id: None,
-        remote: false,
         account_id,
         fork: false,
         new_session_id: None,
@@ -155,7 +154,7 @@ pub(crate) async fn spawn_chat(
 /// off to a DIFFERENT project the user has already opened before. Returns the
 /// registry's own canonical path rather than the caller-supplied string, same
 /// as the pre-existing own-cwd case always did.
-fn resolve_target_cwd(
+pub(crate) fn resolve_target_cwd(
     caller_cwd: &std::path::Path,
     requested: &std::path::Path,
     known_projects: &[crate::types::ProjectConfig],

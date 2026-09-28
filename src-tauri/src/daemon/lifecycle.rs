@@ -60,10 +60,6 @@ pub struct StartSessionParams {
     pub effort: String,
     /// If Some, resume an existing session JSONL; if None, generate a new UUID.
     pub resume_id: Option<String>,
-    /// If true, spawn claude with `--remote-control`. Defaults to false when the
-    /// caller omits it so non-chat spawn paths never register a bridge.
-    #[serde(default)]
-    pub remote: bool,
     /// Registry account id to spawn under. `Some(id)` is a caller-picked
     /// account - the new-chat account picker (milestone 04) supplies this
     /// explicitly. `None` resolves to the daemon's cached

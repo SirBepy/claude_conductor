@@ -22,14 +22,13 @@ pub async fn start_session(
     prompt: String,
     model: String,
     effort: String,
-    remote: bool,
     placeholder_id: Option<String>,
     account_id: Option<String>,
     auto_accept: Option<bool>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    start_session_daemon(cwd, prompt, model, effort, remote, placeholder_id, account_id, auto_accept.unwrap_or(false), &state, &app).await
+    start_session_daemon(cwd, prompt, model, effort, placeholder_id, account_id, auto_accept.unwrap_or(false), &state, &app).await
 }
 
 /// Daemon-backed new session: spawn via RPC, bridge events, hand the real id
@@ -39,7 +38,6 @@ async fn start_session_daemon(
     prompt: String,
     model: String,
     effort: String,
-    remote: bool,
     placeholder_id: Option<String>,
     account_id: Option<String>,
     auto_accept: bool,
@@ -55,7 +53,7 @@ async fn start_session_daemon(
         };
         let generation = client.generation;
         client
-            .start_session(&cwd, &model, &effort, None, remote, account_id.as_deref(), auto_accept, placeholder_id.as_deref())
+            .start_session(&cwd, &model, &effort, None, account_id.as_deref(), auto_accept, placeholder_id.as_deref())
             .await
             .map_err(|e| (generation, e))
     };
@@ -174,11 +172,10 @@ async fn send_message_daemon(
                 let guard = state.daemon_client.lock().await;
                 let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
                 client
-                    // Resume respawn: never request a fresh remote-control bridge.
                     // auto_accept: false - this session_id already exists, so
                     // register_new_session's "only write when true" semantics
                     // leave its already-persisted chat_config flag untouched.
-                    .start_session(cwd, model, effort, Some(session_id), false, account_id, false, None)
+                    .start_session(cwd, model, effort, Some(session_id), account_id, false, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }

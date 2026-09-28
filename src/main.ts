@@ -420,7 +420,6 @@ interface PendingNewChatPayload {
   effort?: string;
   accountId?: string | null;
   autoAccept?: boolean;
-  remote?: boolean;
   characterId?: string | null;
 }
 
@@ -434,7 +433,6 @@ async function applyChatNewRequest(payload: PendingNewChatPayload | undefined): 
       effort: payload.effort ?? "",
       accountId: payload.accountId ?? null,
       autoAccept: payload.autoAccept,
-      remote: payload.remote,
       characterId: payload.characterId ?? null,
     },
   );

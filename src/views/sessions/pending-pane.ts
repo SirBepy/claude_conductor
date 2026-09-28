@@ -282,7 +282,6 @@ export async function renderPendingPane(
               prompt: promptText,
               model: config.model,
               effort: config.effort,
-              remote: config.remote !== false,
               placeholderId,
               accountId: config.accountId ?? null,
               // Machine federation (H4): spawns on a peer instead of this

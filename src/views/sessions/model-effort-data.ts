@@ -18,7 +18,6 @@ export interface ModelEffortResolvedData {
   model: string;
   effort: string;
   autoAccept: boolean;
-  remote: boolean;
   projectId: string | null;
   preferredAccountId: string | null;
   accounts: Account[];
@@ -75,7 +74,6 @@ export async function resolveModelEffortData(
     model: initial.model,
     effort: initial.effort,
     autoAccept: defaultFlags.autoAccept,
-    remote: defaultFlags.remote,
     projectId,
     preferredAccountId,
     accounts,

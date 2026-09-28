@@ -56,10 +56,9 @@ export async function openModelEffortModal(
 
     let model = "";
     let effort = "";
-    // Default flags come from settings (defaultAutoAllow / defaultRemoteControl),
-    // NOT lastChoice, which doesn't store them. Both default on.
+    // Default comes from settings (defaultAutoAllow), NOT lastChoice, which
+    // doesn't store it.
     let autoAccept = true;
-    let remote = true;
     // Replaces native <details>'s own open state now that the trigger lives
     // in the footer row instead of directly above the content it reveals.
     let moreOpen = false;
@@ -105,10 +104,6 @@ export async function openModelEffortModal(
         <label class="me-check">
           <input type="checkbox" class="me-auto-accept-input"${autoAccept ? " checked" : ""}>
           <span class="me-check-text">Auto allow permissions<span class="me-check-hint">Skips confirmation prompts when Claude wants to run a tool</span></span>
-        </label>
-        <label class="me-check">
-          <input type="checkbox" class="me-remote-input"${remote ? " checked" : ""}>
-          <span class="me-check-text">Remote chat<span class="me-check-hint">Reachable from the mobile app while this session runs</span></span>
         </label>
       `;
 
@@ -171,10 +166,6 @@ export async function openModelEffortModal(
         autoAccept = (e.target as HTMLInputElement).checked;
       });
 
-      card.querySelector<HTMLInputElement>(".me-remote-input")?.addEventListener("change", (e) => {
-        remote = (e.target as HTMLInputElement).checked;
-      });
-
       card.querySelector<HTMLButtonElement>(".me-more-btn")?.addEventListener("click", () => {
         moreOpen = !moreOpen;
         renderBody();
@@ -230,7 +221,7 @@ export async function openModelEffortModal(
       if (sessionBlocked() || accountPickIncomplete(accountField, accounts)) return;
       await persistChoice();
       await persistAccountBinding();
-      close({ model, effort, autoAccept, remote, characterId: charPane.currentCharacterId(), accountId: accountField.accountId });
+      close({ model, effort, autoAccept, characterId: charPane.currentCharacterId(), accountId: accountField.accountId });
     }
 
     function close(result: SessionConfig | null) {
@@ -289,7 +280,6 @@ export async function openModelEffortModal(
       model = data.model;
       effort = data.effort;
       autoAccept = data.autoAccept;
-      remote = data.remote;
       projectId = data.projectId;
       preferredAccountId = data.preferredAccountId;
       accounts = data.accounts;

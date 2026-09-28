@@ -19,7 +19,7 @@ function parseModels(raw: string): string[] {
 
 function template(
   models: string[],
-  flags: { autoAccept: boolean; remote: boolean },
+  flags: { autoAccept: boolean },
   sort: SessionSort,
 ) {
   return html`
@@ -39,7 +39,6 @@ function template(
             </select>
           </div>
           ${toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}
-          ${toggleRow({ label: "Remote chat by default", inputId: "chatDefaultsRemote", checked: flags.remote })}
         </div>
 
         <div class="kit-section">
@@ -88,13 +87,11 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   async function persist(): Promise<void> {
     models = readModelsField();
     const autoAllow = root.querySelector<HTMLInputElement>("#chatDefaultsAutoAllow")?.checked ?? flags.autoAccept;
-    const remote = root.querySelector<HTMLInputElement>("#chatDefaultsRemote")?.checked ?? flags.remote;
-    flags = { autoAccept: autoAllow, remote };
+    flags = { autoAccept: autoAllow };
     const cur = {
       ...getSettings(),
       models,
       defaultAutoAllow: autoAllow,
-      defaultRemoteControl: remote,
     };
     setSettings(cur);
     await api.saveSettings(cur);

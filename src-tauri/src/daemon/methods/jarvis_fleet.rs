@@ -112,7 +112,6 @@ pub(crate) async fn spawn_worker(
         model: model.clone(),
         effort: WORKER_DEFAULT_EFFORT.to_string(),
         resume_id: None,
-        remote: false,
         account_id,
         fork: false,
         new_session_id: None,

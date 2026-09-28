@@ -40,18 +40,6 @@ async function startNewChatPickingFirstProject() {
     await accChip.click();
   }
 
-  // .me-remote-input lives inside .me-more-body (ba44deea); open it, then match
-  // the app default (on) unless E2E_REMOTE=0 asks for the remote-off A/B.
-  const moreOptionsBtn = await $(".me-more-btn");
-  await moreOptionsBtn.waitForClickable({ timeout: 10000 });
-  await moreOptionsBtn.click();
-  const wantRemote = process.env.E2E_REMOTE !== "0";
-  const remoteInput = await $(".me-remote-input");
-  await remoteInput.waitForExist({ timeout: 10000 });
-  if ((await remoteInput.isSelected()) !== wantRemote) {
-    await remoteInput.click();
-  }
-
   const confirm = await $(".me-confirm");
   await confirm.waitForClickable({ timeout: 10000 });
   await confirm.click();

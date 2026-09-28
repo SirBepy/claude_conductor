@@ -70,7 +70,6 @@ pub(crate) async fn spawn_chat_for_peer(
         model: model.to_string(),
         effort: effort.to_string(),
         resume_id: None,
-        remote: false,
         account_id: None,
         fork: false,
         new_session_id: None,
