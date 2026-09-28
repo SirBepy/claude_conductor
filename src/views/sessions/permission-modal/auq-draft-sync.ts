@@ -68,8 +68,12 @@ export async function fetchRemoteAuqDraft(sessionId: string | undefined, promptI
  *  ComposerDraftSync.reconcile), not "first non-null" - the daemon's push is
  *  debounced up to 500ms and could otherwise beat a fresher local draft. */
 export async function fetchFreshestAuqDraft(sessionId: string | undefined, promptId: string): Promise<QuestionDraft | null> {
-  const local = loadQuestionDraftMeta(promptId);
+  // Read local AFTER awaiting remote, not before: a stale pre-click snapshot
+  // read here would out-age a fresh local write made while the remote round
+  // trip was in flight, sending mergeFreshDraft a draft older than what's
+  // already on screen (the click-answer flash-back-a-tab bug).
   const remote = await fetchRemoteAuqDraftMeta(sessionId, promptId);
+  const local = loadQuestionDraftMeta(promptId);
   if (!remote) return local?.draft ?? null;
   if (!local || local.updatedAt === null) return remote.draft;
   return remote.updatedAt > local.updatedAt ? remote.draft : local.draft;
