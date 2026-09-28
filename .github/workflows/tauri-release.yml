@@ -64,8 +64,68 @@ jobs:
             echo "android_changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-  tag:
+  # Gates the tag, so a red check stops the release before anything is published
+  # to the auto-updater. Fast checks only: the wdio e2e suite needs a built
+  # binary and a display, and the 31 #[ignore]'d integration tests spawn a real
+  # `claude`, so neither belongs in front of every push to master.
+  test:
     needs: check
+    if: needs.check.outputs.should_release == 'true'
+    # windows-latest, not ubuntu: Linux is a paused release target, so the crate
+    # compiling there is unproven and a failure would be the runner's, not the
+    # code's. Windows is a platform the release itself builds on.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `../dist` is tauri.conf.json's frontendDist and is embedded at compile
+      # time by RustEmbed, so it must exist before any cargo command or the
+      # build fails as "../dist does not exist" - which reads like a broken path
+      # rather than a missing frontend build. `vite build` alone is enough here;
+      # `pnpm run build` would also rerun the export_types test via prebuild.
+      - name: Build frontend
+        run: pnpm exec vite build
+
+      - name: Typecheck
+        run: pnpm tsc --noEmit
+
+      - name: Frontend unit tests
+        run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: test-x86_64-pc-windows-msvc
+          cache-on-failure: true
+
+      # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
+      # and spawn a real daemon plus a real `claude`, which CI has no account for.
+      - name: Rust unit tests
+        env:
+          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
+          # dev-machine-only D: path. Env outranks config; without this the
+          # target dir is unwritable here. Same trap that broke every 0.2.53
+          # platform in the build job below.
+          CARGO_TARGET_DIR: target
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+  tag:
+    needs: [check, test]
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
