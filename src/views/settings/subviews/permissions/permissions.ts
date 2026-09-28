@@ -16,9 +16,16 @@ function projectShortName(cwd: string): string {
 }
 
 function ruleRow(cwd: string, rule: PermissionRule) {
+  // An empty pattern means two different things now. For Bash it still means
+  // every command. For any other tool it is only ever an old persisted rule
+  // from before rules were scoped to their argument, and `matchesRule` refuses
+  // to honour it - so labelling it "(any input)" would overstate a rule that
+  // authorizes nothing.
   const patternHtml = rule.pattern
     ? html`<code>${rule.pattern}</code>`
-    : html`<span class="perm-rule__any">(any input)</span>`;
+    : rule.toolName === "Bash"
+      ? html`<span class="perm-rule__any">(any command)</span>`
+      : html`<span class="perm-rule__any">(old rule, no longer applies)</span>`;
   return html`
     <div class="perm-rule" data-cwd="${cwd}" data-rule="${rule.raw}">
       <span class="perm-rule__label"><strong>${rule.toolName}</strong> ${patternHtml}</span>
