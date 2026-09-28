@@ -70,10 +70,24 @@ fn persist_enabled(enabled: bool, state: &State<AppState>, app: &AppHandle) {
         s.remote_access_enabled = enabled;
         s.clone()
     };
-    if let Ok(path) = paths::settings_file() {
-        let _ = settings::save(&path, &snapshot);
+    let saved = match paths::settings_file() {
+        Ok(path) => match settings::save(&path, &snapshot) {
+            Ok(()) => true,
+            Err(e) => {
+                log::error!("[remote_access] persist_enabled: save to {path:?} failed: {e:#}");
+                false
+            }
+        },
+        Err(e) => {
+            log::error!("[remote_access] persist_enabled: could not resolve settings path: {e}");
+            false
+        }
+    };
+    // Don't claim success to any settings-changed listener for a write that
+    // didn't land.
+    if saved {
+        let _ = app.emit("settings-changed", &snapshot);
     }
-    let _ = app.emit("settings-changed", &snapshot);
 }
 
 // ── Public boot helper ────────────────────────────────────────────────────────

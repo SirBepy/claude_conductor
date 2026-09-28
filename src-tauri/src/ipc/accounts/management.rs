@@ -49,11 +49,15 @@ pub fn remove_account(account_id: String, state: State<AppState>, app: AppHandle
     accounts_store::save(&accounts_path, &accounts).map_err(|e| e.to_string())?;
 
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
+    let mut default_account_save_failed = false;
     let snapshot = {
         let mut settings = state.settings.lock().unwrap();
         if settings.default_account_id.as_deref() == Some(account_id.as_str()) {
             settings.default_account_id = None;
-            let _ = crate::settings::save(&settings_path, &settings);
+            if let Err(e) = crate::settings::save(&settings_path, &settings) {
+                log::error!("[accounts] remove_account: settings save failed after clearing default_account_id: {e:#}");
+                default_account_save_failed = true;
+            }
         }
         settings.clone()
     };
@@ -61,7 +65,13 @@ pub fn remove_account(account_id: String, state: State<AppState>, app: AppHandle
     // this, a removed account would stay visible in the tray tooltip/menu
     // until the next scheduled poll (up to 600s), even though the account
     // list itself changed regardless of whether default_account_id did.
-    let _ = app.emit("settings-changed", &snapshot);
+    // Skip the emit only when the settings write above actually failed -
+    // a listener shouldn't be told the clobbered default_account_id landed
+    // when it didn't. The account removal itself (already persisted above)
+    // still succeeds either way.
+    if !default_account_save_failed {
+        let _ = app.emit("settings-changed", &snapshot);
+    }
     Ok(())
 }
 

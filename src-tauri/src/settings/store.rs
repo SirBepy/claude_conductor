@@ -250,11 +250,60 @@ pub fn save(path: &Path, settings: &Settings) -> Result<()> {
 /// Save `snapshot` to `settings_file()` and emit `settings-changed`. The
 /// shared tail of every settings mutation (ai_todo 555/539 - was hand-rolled
 /// six times).
+///
+/// Never emits `settings-changed` for a write that didn't land - a listener
+/// (the UI, the daemon push) has no other way to tell a real save from a
+/// silently-dropped one, so a failed `save` logs loudly instead and returns
+/// without emitting.
 pub fn persist(app: &AppHandle, snapshot: &Settings) {
-    if let Ok(path) = super::paths::settings_file() {
-        let _ = save(&path, snapshot);
+    let path = match super::paths::settings_file() {
+        Ok(path) => path,
+        Err(e) => {
+            log::error!("[settings] persist: could not resolve settings_file() path: {e:#}; settings NOT saved, settings-changed NOT emitted");
+            return;
+        }
+    };
+    if let Err(e) = save(&path, snapshot) {
+        log::error!("[settings] persist: save to {path:?} failed: {e:#}; settings-changed NOT emitted");
+        return;
     }
     let _ = app.emit("settings-changed", snapshot);
+}
+
+/// Reconciles the three fields a running daemon can mutate out from under an
+/// open Settings panel - project auto-registration, character assignment, the
+/// Jarvis singleton id (see `daemon_link/handlers.rs`'s `handle_project_created`
+/// / `handle_session_character_assigned` / `handle_jarvis_session_created`) -
+/// so a frontend `save_settings` built from a snapshot read before one of
+/// those lands can't silently revert it (settings-loss audit, confirmed
+/// reachable path).
+///
+/// All three are additive-only on the daemon side: `upsert_project_with_id_for_cwd`
+/// only ever appends a project, never edits one in place; `session_characters`
+/// entries and `jarvis_session_id` are only ever set, never cleared by the
+/// daemon. So union-merging `current`'s copy into `updated` can restore a lost
+/// daemon write but can never clobber a frontend edit - there is no case where
+/// the two sides touch the same value and disagree, which is why this can
+/// merge unconditionally instead of rejecting the save.
+pub fn merge_daemon_owned_fields(updated: &mut Settings, current: &Settings) {
+    for p in &current.projects {
+        if !updated.projects.iter().any(|u| u.id == p.id) {
+            log::warn!("[settings] save_settings: restoring project {} added by the daemon after the frontend's snapshot was read", p.id);
+            updated.projects.push(p.clone());
+        }
+    }
+    for (session_id, character_id) in &current.session_characters {
+        if !updated.session_characters.contains_key(session_id) {
+            log::warn!("[settings] save_settings: restoring session_characters[{session_id}] assigned by the daemon after the frontend's snapshot was read");
+            updated.session_characters.insert(session_id.clone(), character_id.clone());
+        }
+    }
+    if updated.jarvis_session_id.is_none() {
+        if let Some(id) = &current.jarvis_session_id {
+            log::warn!("[settings] save_settings: restoring jarvis_session_id ({id}) stamped by the daemon after the frontend's snapshot was read");
+            updated.jarvis_session_id = Some(id.clone());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -724,5 +773,93 @@ mod tests {
         } else {
             panic!("neither key was applied; the accepted default state was never overwritten");
         }
+    }
+
+    /// Reproduces the confirmed settings-loss race: a daemon-side mutation
+    /// (project auto-registration) lands on `state.settings` while a Settings
+    /// panel is still holding a snapshot read moments earlier. Documents the
+    /// bug (what the old blind `*s = updated.clone()` in `save_settings`
+    /// produced) alongside the fix (`merge_daemon_owned_fields`) in the same
+    /// test so the "before" claim can't silently drift from the real old
+    /// behavior.
+    #[test]
+    fn frontend_save_from_stale_snapshot_preserves_daemon_added_project() {
+        let dir = non_ephemeral_tempdir();
+        let now = "2026-09-28T00:00:00Z";
+
+        // What the Settings panel read via get_settings, before the race.
+        let frontend_snapshot = Settings::default();
+
+        // Daemon-side mutation lands after that read (mirrors
+        // daemon_link/handlers.rs::handle_project_created).
+        let mut current = frontend_snapshot.clone();
+        upsert_project_with_id_for_cwd(&mut current, "proj-1", dir.path(), now);
+        assert_eq!(current.projects.len(), 1, "setup: the daemon-side mutation must actually land");
+
+        // The frontend's Save is built from its stale snapshot, not `current`,
+        // plus the user's real edit.
+        let mut updated = frontend_snapshot.clone();
+        updated.autostart = true;
+
+        // THE BUG: `save_settings` used to do exactly this - clone `updated`
+        // straight into the cache/disk with no reconciliation against
+        // `current`. That silently reverts the daemon's project.
+        let blind_overwrite_result = updated.clone();
+        assert!(
+            blind_overwrite_result.projects.is_empty(),
+            "documents the confirmed loss: a blind overwrite drops the daemon-added project"
+        );
+
+        // THE FIX: reconcile against the current in-memory state before
+        // applying, the same way `ipc::settings::save_settings` now does.
+        merge_daemon_owned_fields(&mut updated, &current);
+
+        assert_eq!(
+            updated.projects.len(), 1,
+            "a concurrent daemon-added project must survive a save built from a stale frontend snapshot"
+        );
+        assert_eq!(updated.projects[0].id, "proj-1");
+        assert!(updated.autostart, "the user's real edit must still apply");
+    }
+
+    /// Same race, `session_characters` and `jarvis_session_id` variants
+    /// (handle_session_character_assigned / handle_jarvis_session_created).
+    #[test]
+    fn frontend_save_from_stale_snapshot_preserves_daemon_character_and_jarvis_fields() {
+        let frontend_snapshot = Settings::default();
+
+        let mut current = frontend_snapshot.clone();
+        current.session_characters.insert("sess-1".to_string(), "char-1".to_string());
+        current.jarvis_session_id = Some("jarvis-sess-1".to_string());
+
+        let mut updated = frontend_snapshot.clone();
+        updated.poll_interval_secs = 900; // the user's real edit
+
+        let blind_overwrite_result = updated.clone();
+        assert!(blind_overwrite_result.session_characters.is_empty());
+        assert!(blind_overwrite_result.jarvis_session_id.is_none());
+
+        merge_daemon_owned_fields(&mut updated, &current);
+
+        assert_eq!(updated.session_characters.get("sess-1"), Some(&"char-1".to_string()));
+        assert_eq!(updated.jarvis_session_id.as_deref(), Some("jarvis-sess-1"));
+        assert_eq!(updated.poll_interval_secs, 900);
+    }
+
+    /// A frontend edit to the same daemon-owned surface (adding a project
+    /// itself, in a different call, e.g. the manual "add project" flow) is
+    /// never clobbered by the merge - it only fills in entries `updated`
+    /// doesn't already know about.
+    #[test]
+    fn merge_daemon_owned_fields_never_overwrites_an_id_already_present_in_updated() {
+        let mut current = Settings::default();
+        current.jarvis_session_id = Some("daemon-value".to_string());
+
+        let mut updated = Settings::default();
+        updated.jarvis_session_id = Some("frontend-value".to_string());
+
+        merge_daemon_owned_fields(&mut updated, &current);
+
+        assert_eq!(updated.jarvis_session_id.as_deref(), Some("frontend-value"));
     }
 }
