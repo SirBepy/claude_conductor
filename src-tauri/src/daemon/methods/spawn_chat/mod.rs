@@ -28,8 +28,8 @@ pub(crate) use forward::{resolve_machine, spawn_chat_or_forward};
 /// Used only when the caller has no recorded `chat_config` at all (a session
 /// that predates the config file, or one whose record was lost). A real
 /// respawn always inherits.
-const FALLBACK_MODEL: &str = "sonnet";
-const FALLBACK_EFFORT: &str = "medium";
+pub(crate) const FALLBACK_MODEL: &str = "sonnet";
+pub(crate) const FALLBACK_EFFORT: &str = "medium";
 
 /// `caller_session_id` -> the `turn_gen` it last spawned in. A static rather
 /// than a `DaemonState` field: one guard does not earn a field threaded

@@ -450,6 +450,52 @@ mod tests {
         }
     }
 
+    /// Contract with `hooks_server::schedule::WriteScheduleBody`, which is
+    /// `pub(super)` there and so cannot be named from here: this asserts the
+    /// exact key set the relay sends, and that arm's own
+    /// `body_accepts_an_add_with_only_the_keys_the_relay_sends` asserts the
+    /// receiver takes it. Change one side alone and one of the two goes red,
+    /// which is the point - a key the receiver does not know is dropped
+    /// silently, with the tool still reporting success.
+    #[test]
+    fn schedule_relays_exactly_the_keys_its_receiver_declares() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let args = json!({
+            "action": "add", "prompt": "check CI", "target": "new_chat",
+            "in_minutes": 30, "at": "2026-01-06T09:00", "repeat": "weekdays",
+            "cwd": "C:/proj", "name": "CI watch", "id": "abc",
+        });
+        POSTED_BODIES.with(|b| b.borrow_mut().clear());
+        dispatch_tool_with(&rt, &json!(1), TOOL_SCHEDULE, &args, "sess-1", 1234, fake_http_post);
+        let body = POSTED_BODIES.with(|b| b.borrow()[0].clone());
+        let mut keys: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "action", "at", "cwd", "id", "in_minutes", "name", "prompt", "repeat",
+                "session_id", "target",
+            ]
+        );
+        assert_eq!(body["session_id"], json!("sess-1"), "taken from CC_SESSION_ID, never tool args");
+    }
+
+    /// Absent keys are OMITTED, not relayed as null: the receiver's
+    /// `#[serde(default)]` covers a missing key, and an explicit null on a
+    /// non-Option field would 4xx instead (the todo 741 shape).
+    #[test]
+    fn schedule_omits_absent_keys_rather_than_sending_null() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let args = json!({"action": "cancel", "id": "abc"});
+        POSTED_BODIES.with(|b| b.borrow_mut().clear());
+        dispatch_tool_with(&rt, &json!(1), TOOL_SCHEDULE, &args, "sess-1", 1234, fake_http_post);
+        let body = POSTED_BODIES.with(|b| b.borrow()[0].clone());
+        let obj = body.as_object().unwrap();
+        assert!(!obj.contains_key("prompt"), "absent key must not be relayed at all");
+        assert!(!obj.contains_key("in_minutes"));
+        assert_eq!(obj["id"], json!("abc"));
+    }
+
     /// The flag is the entire difference between "run beside this chat" and
     /// "replace it" - backwards, it would silently close the caller.
     #[test]

@@ -15,6 +15,7 @@
 //! costs nothing when the list is empty and hands the model real ids without
 //! a round trip.
 
+use super::spawn_chat;
 use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{
     self, Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus,
@@ -68,6 +69,42 @@ fn add(
         .registry
         .get(session_id)
         .ok_or_else(|| format!("unknown caller session: {session_id}"))?;
+    let inherited = crate::sessions::chat_config::get(session_id).unwrap_or_default();
+    let item = build_item(
+        &caller.cwd,
+        &state.settings.snapshot().projects,
+        &inherited,
+        session_id,
+        args,
+        now,
+    )?;
+    let id = item.id.clone();
+    let fire_at = item.fire_at.clone();
+    scheduled_items::upsert(item);
+    super::schedule::publish_changed(state);
+    Ok(json!({
+        "ok": true,
+        "id": short(&id),
+        "fire_at_local": DateTime::parse_from_rfc3339(&fire_at)
+            .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or(fire_at),
+        "name": args.name,
+    }))
+}
+
+/// Everything `add` decides, with no store or notifier I/O, so the whole
+/// decision surface (time form, recurrence, kind selection, inheritance, the
+/// two refusals) is unit-testable without writing to the real
+/// `scheduled-items.json`. `add` is then just this plus an `upsert` and a
+/// publish.
+fn build_item(
+    caller_cwd: &std::path::Path,
+    known_projects: &[crate::types::ProjectConfig],
+    inherited: &crate::sessions::chat_config::ChatConfig,
+    session_id: &str,
+    args: &ScheduleArgs,
+    now: DateTime<Utc>,
+) -> Result<ScheduledItem, String> {
     let prompt = args
         .prompt
         .as_deref()
@@ -94,7 +131,7 @@ fn add(
             }
             ScheduledKind::Message {
                 session_id: session_id.to_string(),
-                cwd: caller.cwd.to_string_lossy().to_string(),
+                cwd: caller_cwd.to_string_lossy().to_string(),
             }
         }
         "new_chat" => {
@@ -102,17 +139,21 @@ fn add(
                 .cwd
                 .as_deref()
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| caller.cwd.clone());
+                .unwrap_or_else(|| caller_cwd.to_path_buf());
             let target_cwd = crate::daemon::methods::spawn_chat::resolve_target_cwd(
-                &caller.cwd,
+                caller_cwd,
                 &requested,
-                &state.settings.snapshot().projects,
+                known_projects,
             )?;
-            let inherited = crate::sessions::chat_config::get(session_id).unwrap_or_default();
             ScheduledKind::NewChat {
                 cwd: target_cwd.to_string_lossy().to_string(),
-                model: inherited.model.clone(),
-                effort: inherited.effort.clone(),
+                // Same fallbacks `spawn_chat` applies, and for the same
+                // reason: a caller with no recorded `chat_config` yields an
+                // EMPTY model/effort, which `fire_new_chat` would hand to
+                // `StartSessionParams` verbatim at fire time - long after
+                // anyone could connect the failure to this call.
+                model: non_empty(&inherited.model, spawn_chat::FALLBACK_MODEL),
+                effort: non_empty(&inherited.effort, spawn_chat::FALLBACK_EFFORT),
                 account_id: Some(inherited.account_id.clone()).filter(|a| !a.is_empty()),
                 placeholder_id: None,
                 // Left to the frontend's `ensure_session_character`, same as a
@@ -125,16 +166,11 @@ fn add(
         other => return Err(format!("unknown target {other:?}; expected new_chat or this_chat")),
     };
 
-    let item = ScheduledItem::new(kind, prompt.to_string(), fire_at.to_rfc3339(), recurrence);
-    let id = item.id.clone();
-    scheduled_items::upsert(item);
-    super::schedule::publish_changed(state);
-    Ok(json!({
-        "ok": true,
-        "id": short(&id),
-        "fire_at_local": fire_at.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string(),
-        "name": args.name,
-    }))
+    Ok(ScheduledItem::new(kind, prompt.to_string(), fire_at.to_rfc3339(), recurrence))
+}
+
+fn non_empty(value: &str, fallback: &str) -> String {
+    if value.is_empty() { fallback.to_string() } else { value.to_string() }
 }
 
 fn cancel(state: &Arc<DaemonState>, args: &ScheduleArgs) -> Result<Value, String> {
@@ -425,5 +461,133 @@ mod tests {
     #[test]
     fn short_id_is_the_injected_prefix() {
         assert_eq!(short("0123456789abcdef"), "01234567");
+    }
+
+    // --- build_item: the whole decision surface, pure (no store I/O), so
+    // these never touch the real scheduled-items.json ---
+
+    use crate::sessions::chat_config::ChatConfig;
+
+    fn cfg(model: &str, effort: &str) -> ChatConfig {
+        ChatConfig {
+            model: model.to_string(),
+            effort: effort.to_string(),
+            account_id: "acct-7".to_string(),
+            auto_accept: true,
+            ..Default::default()
+        }
+    }
+
+    fn args(extra: impl FnOnce(&mut ScheduleArgs)) -> ScheduleArgs {
+        let mut a = ScheduleArgs {
+            action: "add".into(),
+            prompt: Some("check CI".into()),
+            in_minutes: Some(30),
+            ..Default::default()
+        };
+        extra(&mut a);
+        a
+    }
+
+    fn build(cfg: &ChatConfig, a: &ScheduleArgs) -> Result<ScheduledItem, String> {
+        build_item(
+            std::path::Path::new("C:/proj"),
+            &[],
+            cfg,
+            "sess-1",
+            a,
+            utc("2026-01-05T10:00:00Z"),
+        )
+    }
+
+    #[test]
+    fn default_target_is_a_new_chat_inheriting_the_callers_config() {
+        let item = build(&cfg("opus", "high"), &args(|_| {})).unwrap();
+        match item.kind {
+            ScheduledKind::NewChat { model, effort, account_id, auto_accept, character_id, .. } => {
+                assert_eq!(model, "opus");
+                assert_eq!(effort, "high");
+                assert_eq!(account_id.as_deref(), Some("acct-7"));
+                assert!(auto_accept);
+                assert_eq!(character_id, None, "a scheduled chat is a sibling, not a handoff");
+            }
+            other => panic!("expected NewChat, got {other:?}"),
+        }
+        assert_eq!(item.status, ScheduledStatus::Pending);
+        assert_eq!(item.prompt, "check CI");
+    }
+
+    /// The bug this test exists for: a caller with no recorded `chat_config`
+    /// yields empty model/effort strings, and `fire_new_chat` hands them
+    /// straight to `StartSessionParams` at fire time - hours later, where
+    /// nothing connects the failure back to the call that scheduled it.
+    #[test]
+    fn a_caller_with_no_chat_config_gets_the_spawn_chat_fallbacks_not_empty_strings() {
+        let item = build(&ChatConfig::default(), &args(|_| {})).unwrap();
+        match item.kind {
+            ScheduledKind::NewChat { model, effort, account_id, .. } => {
+                assert_eq!(model, spawn_chat::FALLBACK_MODEL);
+                assert_eq!(effort, spawn_chat::FALLBACK_EFFORT);
+                assert_eq!(account_id, None, "an empty account id is None, not an empty string");
+            }
+            other => panic!("expected NewChat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn this_chat_targets_the_calling_session_by_id_and_cwd() {
+        let a = args(|a| a.target = Some("this_chat".into()));
+        let item = build(&cfg("opus", "high"), &a).unwrap();
+        match item.kind {
+            ScheduledKind::Message { session_id, cwd } => {
+                assert_eq!(session_id, "sess-1");
+                assert_eq!(cwd, "C:/proj");
+            }
+            other => panic!("expected Message, got {other:?}"),
+        }
+    }
+
+    /// A recurring Message into its own session refills that one context
+    /// window on every fire. Refused at the call, never downgraded silently.
+    #[test]
+    fn a_repeating_this_chat_item_is_refused() {
+        let a = args(|a| {
+            a.target = Some("this_chat".into());
+            a.repeat = Some("daily".into());
+        });
+        let err = build(&cfg("opus", "high"), &a).unwrap_err();
+        assert!(err.contains("cannot target this_chat"), "got {err}");
+    }
+
+    #[test]
+    fn a_repeating_new_chat_item_is_fine() {
+        let a = args(|a| a.repeat = Some("daily".into()));
+        let item = build(&cfg("opus", "high"), &a).unwrap();
+        assert!(item.recurrence.is_some());
+    }
+
+    /// The guard that keeps a tool advertised to every session from starting a
+    /// chat anywhere on disk. Reused from `spawn_chat`, asserted here because
+    /// this call site passes its own `known_projects`.
+    #[test]
+    fn an_unknown_cwd_is_refused_rather_than_spawning_anywhere() {
+        let a = args(|a| a.cwd = Some("C:/somewhere/else".into()));
+        let err = build(&cfg("opus", "high"), &a).unwrap_err();
+        assert!(err.contains("refusing"), "got {err}");
+    }
+
+    #[test]
+    fn an_unknown_target_names_the_two_that_exist() {
+        let a = args(|a| a.target = Some("somewhere".into()));
+        let err = build(&cfg("opus", "high"), &a).unwrap_err();
+        assert!(err.contains("new_chat") && err.contains("this_chat"), "got {err}");
+    }
+
+    #[test]
+    fn a_blank_prompt_is_refused() {
+        let a = args(|a| a.prompt = Some("   ".into()));
+        assert!(build(&cfg("opus", "high"), &a).is_err());
+        let a = args(|a| a.prompt = None);
+        assert!(build(&cfg("opus", "high"), &a).is_err());
     }
 }
