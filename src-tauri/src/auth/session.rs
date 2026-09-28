@@ -10,13 +10,16 @@ pub fn load(path: &Path) -> Option<String> {
     if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
 }
 
-/// Saves the sessionKey, creating parent dirs as needed.
+/// Saves the sessionKey, creating parent dirs as needed. Write-temp-then-
+/// rename via `util::write_json_atomic` (the helper writes whatever text
+/// it's given, not just JSON) so a crash or kill mid-write can't leave a
+/// torn cookie file behind - matching `settings::store::save`.
 pub fn save(path: &Path, session_key: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating parent dir {parent:?}"))?;
     }
-    std::fs::write(path, session_key.trim())
+    crate::util::write_json_atomic(path, session_key.trim())
         .with_context(|| format!("writing session to {path:?}"))?;
     Ok(())
 }

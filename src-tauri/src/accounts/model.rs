@@ -5,12 +5,28 @@
 
 use serde::{Deserialize, Serialize};
 
+/// `id`, `config_dir`, `chrome_profile_dir`, `email`, `org_uuid` and
+/// `created_at` deliberately carry NO `#[serde(default)]`, mirroring
+/// `ProjectConfig`'s own id/path/name/created_at: they are identity or
+/// filesystem-path fields where a silently-defaulted empty value is actively
+/// dangerous (an empty `config_dir`/`chrome_profile_dir` resolves relative to
+/// cwd - wrong-account credential/profile access - and an empty
+/// `email`/`org_uuid` would falsely "match" every other broken entry in
+/// `find_duplicate`'s comparisons). A JSON object missing one of these is
+/// genuine corruption; `accounts::store::load`'s per-entry lenient parse
+/// (mirroring `deserialize_lenient_projects`) drops just that one account
+/// instead of failing the whole registry. The cosmetic/informational fields
+/// below use `#[serde(default)]` because a blank fallback for them is
+/// harmless.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct Account {
     pub id: String,
+    #[serde(default)]
     pub label: String,
+    #[serde(default)]
     pub colour: String,
+    #[serde(default)]
     pub icon: String,
     pub config_dir: std::path::PathBuf,
     pub chrome_profile_dir: std::path::PathBuf,
@@ -19,6 +35,7 @@ pub struct Account {
     /// Raw `organizationType` from `oauthAccount` (e.g. whatever Claude Code's
     /// `.claude.json` calls the Pro/Max/Team tier). Passed through verbatim;
     /// human-friendly labeling is a frontend concern.
+    #[serde(default)]
     pub subscription_tier: String,
     pub created_at: String,
     /// Opt-in for Jarvis fleet worker spawns (todo 272, "Fleet account

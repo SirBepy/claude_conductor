@@ -183,7 +183,7 @@ impl PushManager {
         let path = subs_path(&self.app_data);
         match serde_json::to_string(subs) {
             Ok(json) => {
-                if let Err(e) = std::fs::write(&path, json) {
+                if let Err(e) = crate::util::write_json_atomic(&path, &json) {
                     log::warn!("[push] persist subscriptions failed: {e}");
                 }
             }
@@ -214,9 +214,9 @@ fn load_or_create_vapid(app_data: &Path) -> ES256KeyPair {
     }
     let kp = ES256KeyPair::generate();
     let b64 = Base64UrlUnpadded::encode_string(&kp.to_bytes());
-    let _ = std::fs::write(
-        vapid_path(app_data),
-        serde_json::to_string(&json!({ "vapid": b64 })).unwrap_or_default(),
+    let _ = crate::util::write_json_atomic(
+        &vapid_path(app_data),
+        &serde_json::to_string(&json!({ "vapid": b64 })).unwrap_or_default(),
     );
     kp
 }

@@ -81,7 +81,7 @@ fn load(app_data: &Path) -> RegistryFile {
 
 fn save(reg: &RegistryFile, app_data: &Path) -> Result<(), String> {
     let body = serde_json::to_string_pretty(reg).map_err(|e| e.to_string())?;
-    std::fs::write(registry_path(app_data), body).map_err(|e| e.to_string())
+    crate::util::write_json_atomic(&registry_path(app_data), &body).map_err(|e| e.to_string())
 }
 
 pub struct DeviceRegistry;
@@ -110,9 +110,9 @@ impl DeviceRegistry {
             return;
         }
         let body = serde_json::json!({ "hash": sha256_hex(&token), "token": token });
-        if let Err(e) = std::fs::write(
-            desktop_token_path(app_data),
-            serde_json::to_string_pretty(&body).unwrap_or_default(),
+        if let Err(e) = crate::util::write_json_atomic(
+            &desktop_token_path(app_data),
+            &serde_json::to_string_pretty(&body).unwrap_or_default(),
         ) {
             log::error!("device_registry: failed to write desktop token file: {e}");
         }

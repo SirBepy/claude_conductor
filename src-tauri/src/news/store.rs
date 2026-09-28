@@ -34,7 +34,7 @@ pub fn save(path: &Path, store: &NewsStore) -> Result<()> {
         std::fs::create_dir_all(parent).with_context(|| format!("mkdir {parent:?}"))?;
     }
     let raw = serde_json::to_string_pretty(store)?;
-    std::fs::write(path, raw).with_context(|| format!("write {path:?}"))?;
+    crate::util::write_json_atomic(path, &raw).with_context(|| format!("write {path:?}"))?;
     Ok(())
 }
 

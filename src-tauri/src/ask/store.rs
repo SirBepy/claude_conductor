@@ -65,8 +65,9 @@ pub fn load(chat_session_id: &str) -> Vec<AskThread> {
 
 pub fn save(chat_session_id: &str, threads: &[AskThread]) -> Result<()> {
     let path = file_for(chat_session_id)?;
-    let json = serde_json::to_vec_pretty(threads).context("serialize ask threads")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
+    let json = serde_json::to_string_pretty(threads).context("serialize ask threads")?;
+    crate::util::write_json_atomic(&path, &json)
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 

@@ -75,7 +75,7 @@ pub fn mark_session(dir: &Path, session_id: &str, day: &str) -> std::io::Result<
         "day": day,
         "session_ids": set.iter().collect::<Vec<_>>(),
     });
-    std::fs::write(&path, serde_json::to_string_pretty(&payload).unwrap())?;
+    crate::util::write_json_atomic(&path, &serde_json::to_string_pretty(&payload).unwrap())?;
     Ok(())
 }
 
