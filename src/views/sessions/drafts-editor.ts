@@ -87,14 +87,20 @@ export class DraftsEditor {
     if (!body) return;
     const markdown = htmlToMarkdown(body);
     if (markdown === this.saved) return;
-    this.saved = markdown;
+    // `saved` only advances once the write actually lands - if it rejects,
+    // the next flush (autosave timer, back, or destroy) still sees a diff
+    // against the old `saved` and retries the same markdown, instead of
+    // treating an unwritten edit as already persisted.
     void invoke("set_draft_body", {
       sessionId: this.deps.sessionId,
       id: this.draft.id,
       recipient: this.recipient,
       body: markdown,
     })
-      .then(() => this.deps.onChanged())
+      .then(() => {
+        this.saved = markdown;
+        this.deps.onChanged();
+      })
       .catch((err) => console.error("[drafts-editor] set_draft_body failed", err));
   }
 

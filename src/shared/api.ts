@@ -375,13 +375,11 @@ export const api = {
     try { return (await invoke<TokenRecord[]>("get_active_sessions")) || []; }
     catch (e) { console.error("get_active_sessions failed", e); return []; }
   },
-  backfillTranscripts: async (): Promise<BackfillResult> => {
-    try { return await invoke<BackfillResult>("backfill_transcripts"); }
-    catch (e) {
-      console.error("backfill_transcripts failed", e);
-      return { processed: 0, skipped: 0, subProcessed: 0, subSkipped: 0 };
-    }
-  },
+  // Throws on failure rather than swallowing to a zeroed result - a real
+  // no-op run and a failed run both look like {processed: 0, skipped: 0},
+  // so the caller (src/views/projects/projects.ts::runBackfill) needs the
+  // rejection to tell them apart; it already has its own try/catch.
+  backfillTranscripts: (): Promise<BackfillResult> => invoke<BackfillResult>("backfill_transcripts"),
 
   // --- Characters ---
   listCharacters: (): Promise<Character[]> => invoke("list_characters"),

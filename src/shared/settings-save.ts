@@ -7,6 +7,7 @@
 import { getSettings, setSettings } from "./state";
 import type { SettingsShape } from "./state";
 import { api } from "./api";
+import { showToast } from "./toast";
 
 function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
@@ -170,7 +171,14 @@ export function saveSettings(): void {
   };
 
   setSettings(settings);
-  void api.saveSettings(settings);
+  // Optimistic: the UI already reflects `settings`. If the write never lands,
+  // roll the in-memory copy back to what disk actually has and say so - a
+  // silent swallow here means the app and disk disagree forever.
+  void api.saveSettings(settings).catch((err) => {
+    console.error("[settings-save] save_settings failed", err);
+    setSettings(prev);
+    showToast("Couldn't save settings - your last change wasn't saved. Try again.");
+  });
   const w = window as unknown as {
     renderHistory?: (h: unknown) => void;
     lastHistory?: unknown;
