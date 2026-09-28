@@ -116,7 +116,7 @@ pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
 /// method name and payload shape): Defect 5 was that these RPC handlers never
 /// published, so the schedule view only ever caught up when the next tick (or
 /// a manual reload) happened to run.
-fn publish_changed(state: &Arc<DaemonState>) {
+pub(crate) fn publish_changed(state: &Arc<DaemonState>) {
     state.notifier.publish(
         "scheduled_items_changed",
         json!({ "items": scheduled_items::list() }),

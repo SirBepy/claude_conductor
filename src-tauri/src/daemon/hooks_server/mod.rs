@@ -25,6 +25,7 @@ mod preview;
 pub(crate) mod preview_render;
 mod question;
 mod relay;
+mod schedule;
 mod spawn_chat;
 mod stop;
 mod stop_verdict;
@@ -185,6 +186,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/todos/write", post(user_todos::on_write_user_todo))
         .route("/plan/write", post(plan::on_write_plan))
         .route("/drafts/write", post(drafts::on_write_draft))
+        .route("/schedule/write", post(schedule::on_write_schedule))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))
         .route("/hooks/subagent-start", post(subagents::on_subagent_start))

@@ -15,8 +15,9 @@ use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
-    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW,
-    TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
+    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_SCHEDULE, TOOL_SEND_MESSAGE,
+    TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN,
+    TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -128,6 +129,20 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "machine": ctx.args.get("machine"),
             });
             Some(ctx.relay("/chat/spawn", body, None, None))
+        }
+        TOOL_SCHEDULE => {
+            // Same omit-absent-keys rule as the todo/draft writes below: the
+            // receiver's `#[serde(default)]` covers a missing key, not an
+            // explicit null.
+            let mut body = serde_json::Map::new();
+            body.insert("session_id".to_string(), json!(ctx.session_id));
+            body.insert("action".to_string(), ctx.args["action"].clone());
+            for key in ["prompt", "target", "in_minutes", "at", "repeat", "cwd", "name", "id"] {
+                if let Some(v) = ctx.args.get(key) {
+                    body.insert(key.to_string(), v.clone());
+                }
+            }
+            Some(ctx.relay("/schedule/write", Value::Object(body), Some("invalid schedule write"), None))
         }
         _ => None,
     }

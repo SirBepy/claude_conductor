@@ -6,6 +6,7 @@
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::drafts_store as draft_methods;
+use crate::daemon::methods::schedule_mcp as schedule_methods;
 use crate::daemon::methods::user_todos as todo_methods;
 use axum::{
     extract::{Query, State as AxState},
@@ -77,6 +78,10 @@ pub(super) async fn on_prompt_submit(
         // (`hooks_server::subagents`). Same reason as the drafts block - one
         // hook the CLI already fires beats a second one it has to fire too.
         super::subagents::render_for_injection(&ctx.state, &q.session_id),
+        // Fourth rider: prompts already queued to fire later. This is what
+        // replaces a `list` action on the `schedule` tool - the ids arrive for
+        // free, and a session with nothing scheduled pays nothing.
+        schedule_methods::render_for_injection(&ctx.state, &q.session_id),
     ]
     .into_iter()
     .flatten()

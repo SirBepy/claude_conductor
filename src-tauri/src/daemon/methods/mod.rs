@@ -37,6 +37,11 @@ mod preview;
 // property, same as the model/effort swaps that helper was written for.
 pub(crate) mod registry;
 mod schedule;
+/// MCP-facing half of the scheduler, kept out of `schedule.rs` so that file
+/// stays the desktop RPC surface: different caller, different trust model
+/// (an untrusted `session_id` re-derived against the registry, exactly as
+/// `spawn_chat` does it).
+pub(crate) mod schedule_mcp;
 pub(crate) mod spawn_chat;
 mod statusbar;
 mod step_comments;

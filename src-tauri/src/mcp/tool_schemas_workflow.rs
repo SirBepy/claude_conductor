@@ -29,6 +29,12 @@ pub const TOOL_SHOW_PREVIEW: &str = "show_preview";
 // checklist rendered in 4 of 188 transcripts (2026-09-04). Unconditional, and
 // `TodoWrite` still feeds the same checklist wherever it does exist.
 pub const TOOL_WRITE_PLAN: &str = "write_plan";
+// Write access to the Schedule panel's `scheduled-items.json`, previously
+// UI-only (`daemon::methods::schedule`'s mutators are desktop-RPC). `list` is
+// deliberately NOT an action: pending items ride the `UserPromptSubmit`
+// injection (`methods::schedule_mcp::render_for_injection`), which costs
+// nothing when there are none and hands over real ids for free.
+pub const TOOL_SCHEDULE: &str = "schedule";
 
 pub fn workflow_schemas() -> Vec<Value> {
     vec![
@@ -139,6 +145,25 @@ pub fn workflow_schemas() -> Vec<Value> {
                     }
                 },
                 "required": ["steps"]
+            }
+        }),
+        json!({
+            "name": TOOL_SCHEDULE,
+            "description": "Run a prompt LATER, once or on a repeat, without this chat having to stay open for it. The item lands in the app's Schedule panel, where the user can see, edit and delete it, and it fires on its own.\n\n`add` defaults to starting a NEW chat at that time, which is what you want for anything recurring - a fresh context beats a three-hour-old one. `target: \"this_chat\"` sends the prompt into this chat instead; use it only for a genuine \"come back to me later\" nudge, never with `repeat`, since a recurring message into your own session just fills its own context window. A new chat inherits this session's model, effort and account.\n\nGive the time as `in_minutes` - you do not reliably know the current wall-clock time, so a relative offset is the safe form. Use `at` (local `YYYY-MM-DDTHH:MM`) only when the user named a clock time.\n\n`cancel` needs `id`. Ids come from the pending list injected into your turn, so never ask the user to read one out.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "cancel"]},
+                    "prompt": {"type": "string", "description": "What to send when it fires. It lands as a real user message with nothing else around it, so it must stand alone - the future chat cannot see this conversation."},
+                    "target": {"type": "string", "enum": ["new_chat", "this_chat"], "description": "Where it fires. Defaults to new_chat."},
+                    "in_minutes": {"type": "integer", "description": "Fire this many minutes from now. Preferred over `at`."},
+                    "at": {"type": "string", "description": "Local wall-clock time, `YYYY-MM-DDTHH:MM`. Only when the user named a specific time."},
+                    "repeat": {"type": "string", "description": "Makes it recurring at the same time of day: `daily`, `weekdays`, `weekly`, or `every-N-days`. Omit for a one-shot."},
+                    "cwd": {"type": "string", "description": "Project for a new_chat. This session's own, or another already known to the app. Defaults to this session's."},
+                    "name": {"type": "string", "description": "Optional short label for the chat this spawns."},
+                    "id": {"type": "string", "description": "Which item, for cancel. The short id from the injected list."}
+                },
+                "required": ["action"]
             }
         }),
     ]
