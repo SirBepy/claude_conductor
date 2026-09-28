@@ -1,6 +1,12 @@
-import type { PendingNewSession } from "./state";
+import type { PendingNewSession, ParkedDraft } from "./state";
 
 export const PENDING_SESSION_KEY = "pending-session:v1";
+export const PARKED_DRAFTS_KEY = "parked-drafts:v1";
+
+// Matches sent-outbox.ts's MAX_ENTRIES precedent: deep enough that a real
+// pile of abandoned drafts survives, bounded so localStorage can't grow
+// forever off never-resumed rows.
+const MAX_PARKED_DRAFTS = 20;
 
 export function savePendingSession(pending: PendingNewSession): void {
   try {
@@ -45,5 +51,40 @@ export function clearPendingSession(): void {
     localStorage.removeItem(PENDING_SESSION_KEY);
   } catch {
     /* ignore */
+  }
+}
+
+/** Persists only the metadata needed to rebuild a parked-draft sidebar row.
+ *  The typed text itself already lives under composer-persistence's
+ *  `chat-draft:v1:<placeholderId>` key - this is deliberately not a second
+ *  copy of it. */
+export function saveParkedDrafts(list: ParkedDraft[]): void {
+  try {
+    if (list.length === 0) {
+      localStorage.removeItem(PARKED_DRAFTS_KEY);
+      return;
+    }
+    localStorage.setItem(PARKED_DRAFTS_KEY, JSON.stringify(list.slice(-MAX_PARKED_DRAFTS)));
+  } catch {
+    /* quota or storage disabled */
+  }
+}
+
+export function loadParkedDrafts(): ParkedDraft[] {
+  try {
+    const raw = localStorage.getItem(PARKED_DRAFTS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (d): d is ParkedDraft =>
+        !!d &&
+        typeof d.placeholderId === "string" &&
+        typeof d.projectPath === "string" &&
+        typeof d.projectName === "string" &&
+        d.config != null,
+    );
+  } catch {
+    return [];
   }
 }

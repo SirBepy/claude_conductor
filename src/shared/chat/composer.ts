@@ -645,6 +645,11 @@ export class Composer {
         if (ok !== false) return;
         this.restoreDraft(text, savedHeldAttachments, savedHeldPastedBlocks);
         this.showNotice("Couldn't send that - your message is still here.");
+      }).catch((err) => {
+        // flushHeldWithDraft restages a failed send into the held queue
+        // itself now, so this text is not lost - just log; restoring the
+        // draft too would duplicate it against the restaged held item.
+        console.error("[Composer] flushHeldWithDraft rejected unexpectedly", err);
       });
       return;
     }

@@ -7,6 +7,7 @@
 import { state } from "./state";
 import { selectSession } from "./active-session";
 import { startNewSession, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { saveParkedDrafts } from "./pending-draft-storage";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
@@ -111,6 +112,7 @@ export function selectSessionByIndex(index: number): void {
   const parked = state.parkedDrafts.find(d => d.placeholderId === id);
   if (parked) {
     state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== parked.placeholderId);
+    saveParkedDrafts(state.parkedDrafts);
     void (async () => {
       await resumeParkedDraft(pane, parked);
       updateThinkingBar();

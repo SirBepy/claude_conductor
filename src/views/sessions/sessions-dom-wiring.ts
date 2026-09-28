@@ -9,6 +9,7 @@ import { mountFabDial } from "./fab-dial";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumeParkedDraft } from "./pending-flow";
 import { discardComposerDraft } from "../../shared/chat/composer";
+import { saveParkedDrafts } from "./pending-draft-storage";
 import { selectSession } from "./active-session";
 import { state, setActiveSession, clearLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
@@ -192,6 +193,7 @@ export function wireStaticListeners(
       const parked = state.parkedDrafts.find(d => d.placeholderId === pid);
       openDraftCtxMenu(anchor, () => {
         state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
+        saveParkedDrafts(state.parkedDrafts);
         discardComposerDraft(pid);
         renderSidebar(listEl);
       }, parked?.projectPath ?? null);
@@ -220,6 +222,7 @@ export function wireStaticListeners(
         const draft = state.parkedDrafts.find(d => d.placeholderId === pid);
         if (draft) {
           state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
+          saveParkedDrafts(state.parkedDrafts);
           void (async () => {
             await resumeParkedDraft(pane, draft);
             updateThinkingBar();

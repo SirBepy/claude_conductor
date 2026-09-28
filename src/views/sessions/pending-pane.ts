@@ -184,7 +184,13 @@ export async function renderPendingPane(
     // turn, so the placeholder has already been upgraded to a real session id.
     const heldSend = async (blocks: ContentBlock[]): Promise<void> => {
       const target = state.pendingNewSession?.realId ?? state.selectedId;
-      if (!target || target === placeholderId) return;
+      // The stated assumption (a flush only happens once the placeholder has
+      // upgraded to a real id) can be wrong; fail loudly instead of resolving
+      // as though the bundle was delivered, so HeldMessages.flush()'s catch
+      // restages it rather than losing it silently.
+      if (!target || target === placeholderId) {
+        throw new Error("heldSend: no real session id yet, cannot deliver held bundle");
+      }
       const optimisticEvent = {
         type: "user_message",
         content: blocks,

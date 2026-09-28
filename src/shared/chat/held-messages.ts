@@ -282,7 +282,17 @@ export class HeldMessages {
     if (includeDraft && draftBlocks.length) a.clearComposer();
     a.onChange();
     if (bundle.length === 0) return;
-    await a.send(bundle);
+    try {
+      await a.send(bundle);
+    } catch (err) {
+      // State was already cleared above so a failed send would otherwise lose
+      // the bundle outright. Restage it - same recovery flushBackground uses -
+      // rather than only swallowing SESSION_BUSY: unlike that background path,
+      // this session is attached, so the next onCompletion/notifyDraftActivity
+      // flush (or a manual "Send now") is the natural retry.
+      if (!isSessionBusyError(err)) console.error("[held] flush send failed, restaging", err);
+      this.stageFor(sid, bundle);
+    }
   }
 
   /** Fire-and-forget: the daemon's held list for `sid` is now stale (we just
@@ -351,7 +361,17 @@ export class HeldMessages {
     this.render.reset();
     a.onChange();
     if (bundle.length === 0) return true;
-    await a.send(bundle);
+    try {
+      await a.send(bundle);
+    } catch (err) {
+      // Same restage-on-failure as flush() above. Still returns true (not the
+      // "no attached controller" false) - the bundle is recoverable via the
+      // held queue itself, and returning false here would also hand the
+      // draft text back to the composer, duplicating it against the restaged
+      // held item.
+      if (!isSessionBusyError(err)) console.error("[held] flushHeldWithDraft send failed, restaging", err);
+      this.stageFor(sid, bundle);
+    }
     return true;
   }
 

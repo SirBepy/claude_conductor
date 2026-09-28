@@ -6,7 +6,14 @@ import { state, setActiveSession, type ParkedDraft } from "./state";
 import { pickProject } from "./project-picker";
 import { renderSidebar } from "./sidebar";
 import { openModelEffortModal, type SessionConfig } from "./model-effort-modal";
-import { savePendingSession, loadPendingSession, clearPendingSession } from "./pending-draft-storage";
+import {
+  savePendingSession,
+  loadPendingSession,
+  clearPendingSession,
+  saveParkedDrafts,
+  loadParkedDrafts,
+} from "./pending-draft-storage";
+import { loadDraft } from "../../shared/chat/composer-persistence";
 import { renderPendingPane } from "./pending-pane";
 import { paneEmptyStateHtml, ownedScheduledNewChatIds } from "./sessions-helpers";
 import { PENDING_SESSION_ID_PREFIX } from "../../shared/chat/pending-session-id";
@@ -60,6 +67,16 @@ export function loadAndRestorePendingSession(): void {
     return;
   }
   state.pendingNewSession = pending;
+}
+
+/** Rebuild `state.parkedDrafts` from disk. An entry whose composer text was
+ *  itself dropped (quota eviction, manual localStorage clear) is skipped -
+ *  it would rehydrate as a row with nothing to resume. */
+export function loadAndRestoreParkedDrafts(): void {
+  const stored = loadParkedDrafts();
+  const withText = stored.filter((d) => loadDraft(d.placeholderId) !== "");
+  state.parkedDrafts = withText;
+  if (withText.length !== stored.length) saveParkedDrafts(withText);
 }
 
 /**
@@ -197,6 +214,7 @@ export async function launchNewSession(
         config: state.pendingNewSession.config,
       };
       state.parkedDrafts = [...state.parkedDrafts, parked];
+      saveParkedDrafts(state.parkedDrafts);
     }
     state.pendingNewSession = null;
     clearPendingSession();

@@ -99,7 +99,12 @@ export async function sendPvReply(
     return;
   }
   if (state.heldMessages?.hasItemsForActive()) {
-    void state.heldMessages.flushHeldWithDraft(blocks);
+    // flushHeldWithDraft restages a failed send into the held queue itself
+    // (held-messages.ts), so a rejection here just needs logging, not a
+    // recovery path of its own.
+    state.heldMessages.flushHeldWithDraft(blocks).catch((err) => {
+      console.error("[preview-composer] flushHeldWithDraft rejected unexpectedly", err);
+    });
     return;
   }
 

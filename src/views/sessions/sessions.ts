@@ -24,7 +24,7 @@ import "./model-effort-modal.css";
 import "./model-effort-slider.css";
 import "./new-project-modal.css";
 import "./preview-panel.css";
-import { startNewSession, loadAndRestorePendingSession } from "./pending-flow";
+import { startNewSession, loadAndRestorePendingSession, loadAndRestoreParkedDrafts } from "./pending-flow";
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";
 import { state, resetState } from "./state";
 import { initThinkingBar, updateThinkingBar } from "./session-thinking-bar";
@@ -91,6 +91,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   const myMount = resetState();
   _ensuredSessionIds.clear();
   loadAndRestorePendingSession();
+  loadAndRestoreParkedDrafts();
 
   render(template(), root);
 
