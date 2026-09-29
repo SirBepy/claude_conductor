@@ -12,6 +12,7 @@ import {
   panelHtml, summaryPanelHtml,
 } from "./question-ui-templates";
 import type { QuestionRenderState } from "./question-ui-templates";
+import { focusActivePanel } from "./question-keyboard";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import type { Question, QuestionUIOpts, Selection } from "./types";
@@ -41,6 +42,7 @@ export interface QuestionRenderDeps {
 export interface QuestionCardRenderer {
   render: () => void;
   goToTab: (target: number) => void;
+  togglePick: (qi: number, label: string) => void;
   /** Patches just the attachments strip in place - for a paste-driven attach
    *  while the free-text field is focused, where a full render() would
    *  recreate that (still-focused) textarea and drop focus/cursor mid-paste. */
@@ -243,6 +245,50 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   const advance = () => goToTab(state.activeTab + 1);
 
+  function applyPick(qi: number, label: string, checked: boolean, autoAdvance: boolean): void {
+    const q = questions[qi];
+    if (!q) return;
+    if (q.multiSelect) {
+      const set = (selections.get(qi) as Set<string> | undefined) ?? new Set<string>();
+      if (label === noneLabel) {
+        // Exclusive: picking "None of the above" clears every other pick.
+        set.clear();
+        if (checked) set.add(noneLabel);
+      } else if (checked) {
+        set.delete(noneLabel);
+        set.add(label);
+      } else {
+        set.delete(label);
+      }
+      selections.set(qi, set);
+    } else if (checked) {
+      selections.set(qi, label);
+    }
+    // Single-select: auto-advance to next unanswered panel.
+    if (autoAdvance && !q.multiSelect && questions.length > 1) {
+      const next = questions.findIndex((_, i) => i !== qi && !answeredAt(i));
+      if (next >= 0) state.activeTab = next;
+    }
+    render();
+  }
+
+  // Keyboard Space: same selection rules as a click, minus the single-select
+  // auto-advance, and re-picking the current single-select answer clears it
+  // like a re-click does.
+  function togglePick(qi: number, label: string): void {
+    const q = questions[qi];
+    if (!q) return;
+    if (q.multiSelect) {
+      const set = selections.get(qi) as Set<string> | undefined;
+      applyPick(qi, label, !set?.has(label), false);
+    } else if (selections.get(qi) === label) {
+      selections.delete(qi);
+      render();
+    } else {
+      applyPick(qi, label, true, false);
+    }
+  }
+
   const render = () => {
     // The old textareas (and the popups anchored to them) are about to be
     // thrown away by the innerHTML rebuild below - drop the popups' own
@@ -250,6 +296,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     // doesn't do that.
     slashPopup.destroyAll();
     state.activeTab = Math.min(Math.max(state.activeTab, 0), totalPanels - 1);
+    // The rebuild destroys a focused option, which would drop keyboard
+    // navigation back to <body> after every pick.
+    const prevFocus = document.activeElement;
+    const focusedOption = prevFocus instanceof HTMLInputElement && host.contains(prevFocus) && prevFocus.closest(".prompt-q__opts")
+      ? { qi: Number(prevFocus.closest<HTMLElement>(".prompt-panel")?.dataset.panel), label: prevFocus.dataset.label }
+      : null;
 
     if (minimized) {
       host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels);
@@ -299,31 +351,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       host.querySelectorAll<HTMLInputElement>(".prompt-q__opts input").forEach((input) => {
         input.addEventListener("change", () => {
           const qi = Number(input.closest<HTMLElement>(".prompt-panel")?.dataset.panel);
-          const q = questions[qi];
-          if (!q) return;
-          const label = input.dataset.label ?? "";
-          if (q.multiSelect) {
-            const set = (selections.get(qi) as Set<string> | undefined) ?? new Set<string>();
-            if (label === noneLabel) {
-              // Exclusive: picking "None of the above" clears every other pick.
-              set.clear();
-              if (input.checked) set.add(noneLabel);
-            } else if (input.checked) {
-              set.delete(noneLabel);
-              set.add(label);
-            } else {
-              set.delete(label);
-            }
-            selections.set(qi, set);
-          } else if (input.checked) {
-            selections.set(qi, label);
-          }
-          // Single-select: auto-advance to next unanswered panel.
-          if (!q.multiSelect && questions.length > 1) {
-            const next = questions.findIndex((_, i) => i !== qi && !answeredAt(i));
-            if (next >= 0) state.activeTab = next;
-          }
-          render();
+          applyPick(qi, input.dataset.label ?? "", input.checked, true);
         });
       });
 
@@ -353,6 +381,15 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
           if (Number.isFinite(idx)) goToTab(idx);
         });
       });
+
+      if (focusedOption) {
+        const same = focusedOption.qi === state.activeTab
+          ? Array.from(host.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${state.activeTab}"] .prompt-q__opts input`))
+            .find((el) => el.dataset.label === focusedOption.label)
+          : undefined;
+        if (same) same.focus();
+        else focusActivePanel(host, state.activeTab, hasSummary && state.activeTab === questions.length);
+      }
     }
     firstRender = false;
 
@@ -372,5 +409,5 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     syncMessagesPadding();
   };
 
-  return { render, goToTab, refreshAttachments };
+  return { render, goToTab, togglePick, refreshAttachments };
 }

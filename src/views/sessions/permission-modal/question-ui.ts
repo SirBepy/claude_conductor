@@ -5,6 +5,7 @@ import { createAuqSlashPopup } from "./slash-popup";
 import { LIGHTBOX_OVERLAY_CLASS } from "../../../shared/chat/lightbox";
 import { createQuestionCardRenderer } from "./question-ui-render";
 import type { QuestionRenderState } from "./question-ui-render";
+import { handleQuestionCardKey } from "./question-keyboard";
 import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
@@ -131,7 +132,18 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       triggerPrimaryShortcut();
+      return;
     }
+    handleQuestionCardKey(e, {
+      host,
+      questions,
+      hasSummary,
+      totalPanels,
+      state,
+      answeredAt,
+      goToTab: renderer.goToTab,
+      togglePick: renderer.togglePick,
+    });
   };
   document.addEventListener("keydown", keydownHandler);
 

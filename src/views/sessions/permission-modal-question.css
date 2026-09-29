@@ -123,6 +123,17 @@
   background: color-mix(in srgb, var(--dom, var(--color-primary)) 14%, var(--color-surface));
   border-color: var(--dom, var(--color-primary));
 }
+/* Keyboard highlight (question-keyboard.ts moves real focus between the
+ * inputs). The ring goes on the whole row, since the native one only circles
+ * the tiny radio. Inset, because .prompt-track-viewport's overflow:clip
+ * cuts off anything drawn outside the row's own box. */
+.prompt-opt:has(> input:focus-visible) {
+  outline: 2px solid var(--dom, var(--color-primary));
+  outline-offset: -1px;
+}
+.prompt-opt > input:focus-visible {
+  outline: none;
+}
 .prompt-opt > input {
   margin: 3px 0 0;
   flex-shrink: 0;
