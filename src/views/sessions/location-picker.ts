@@ -132,9 +132,9 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
       finish({ path, name: currentWt.name });
     };
 
-    // Ctrl/Cmd+Enter submits, matching the AUQ question card's shortcut -
-    // guarded by the same busy/scopeExpanded condition that disables the
-    // Open button itself. Escape narrows before it exits (project-picker's
+    // Enter submits, matching project-picker and worktree-picker - guarded
+    // by the same busy/scopeExpanded condition that disables the Open button
+    // itself. Escape narrows before it exits (project-picker's
     // clear-filter-first idiom): collapses the expanded scope field first via
     // the same transition its own Cancel button already uses, closes the
     // whole step on a second press. Both branches are guarded to only act
@@ -142,7 +142,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     // unresolved while worktree-picker's card is on top of it (changeWorktree).
     const keydownHandler = (e: KeyboardEvent) => {
       if (!slot.querySelector('[data-picker-step="location"]')) return;
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && scopes !== null && !scopeExpanded) {
+      if (e.key === "Enter" && scopes !== null && !scopeExpanded) {
         e.preventDefault();
         persistAndFinish();
         return;
