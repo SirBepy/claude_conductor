@@ -23,13 +23,24 @@
  * than honored; the user re-clicks "Always Allow" once and a properly scoped
  * rule replaces it.
  *
- * Destructive Bash patterns are hard-coded and always bypass the allow rules.
- * Even a `Bash::` rule (any Bash) will still prompt for `rm -rf`.
+ * Destructive shell command patterns are hard-coded and always bypass the
+ * allow rules. Even a `Bash::` rule (any Bash) will still prompt for
+ * `rm -rf`, and the same goes for `PowerShell::` and `Remove-Item -Recurse
+ * -Force`. `isDestructive` keys on the tool input having a string `command`
+ * field rather than a hardcoded tool-name list, since Bash and PowerShell
+ * (confirmed as the two tools that carry a `command` field - see
+ * `shared/chat/tool-meta.ts`'s `Bash`/`PowerShell` case) are not the only
+ * shell-ish tools this app may ever add.
  */
 
 const RULE_SEP = "::";
 
-const DESTRUCTIVE_BASH_PATTERNS: RegExp[] = [
+// Cross-shell text patterns: the same command text is destructive whether
+// typed into Bash or PowerShell, so these apply unconditionally. The
+// PowerShell-native `Remove-Item -Recurse -Force` family (order-independent
+// flags, aliases, abbreviations) needs statement-scoped flag matching instead
+// of a single regex - see `isPowerShellRecursiveForceRemoval` below.
+const DESTRUCTIVE_COMMAND_PATTERNS: RegExp[] = [
   /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r|--recursive\s+--force|--force\s+--recursive)\b/i,
   /\bgit\s+push\s+(--force\b|-f\b)/i,
   /\bgit\s+reset\s+--hard\b/i,
@@ -42,7 +53,39 @@ const DESTRUCTIVE_BASH_PATTERNS: RegExp[] = [
   /\bformat\s+[a-z]:/i,
   /\bdel\s+\/[fs]/i,
   /\brmdir\s+\/[sq]/i,
+  /\bFormat-Volume\b/i,
+  /\bClear-Disk\b/i,
 ];
+
+// One PowerShell statement, split on the separators that start a new command
+// (`;`, newline, `|`, `&&`, `||`) - so a recurse flag on one cmdlet and a
+// force flag on an unrelated later one in the same line (e.g.
+// `Remove-Item file.txt; Get-ChildItem -Recurse -Force`) don't combine into a
+// false positive.
+const POWERSHELL_STATEMENT_SPLIT_RE = /;|\n|\|\||&&|\|/;
+// Remove-Item and its aliases (Get-Alias ri, rm, del, rd, rmdir, erase).
+const POWERSHELL_REMOVE_VERB_RE = /\b(remove-item|ri|rm|del|erase|rd|rmdir)\b/i;
+// -Recurse, abbreviated down to the unambiguous `-r` (no other common
+// Remove-Item parameter starts with r).
+const POWERSHELL_RECURSE_FLAG_RE = /-r(ec\w*)?\b/i;
+// -Force, abbreviated down to `-fo` - stops short of bare `-f`, which
+// PowerShell itself treats as ambiguous against `-Filter`.
+const POWERSHELL_FORCE_FLAG_RE = /-fo\w*\b/i;
+
+/** `Remove-Item`/alias with both `-Recurse` and `-Force` (any order, any
+ *  PowerShell-legal abbreviation) in the same statement. `Remove-Item
+ *  foo.txt` (no flags) and `Get-ChildItem -Recurse` (no destructive verb)
+ *  both pass through untouched. */
+function isPowerShellRecursiveForceRemoval(cmd: string): boolean {
+  return cmd
+    .split(POWERSHELL_STATEMENT_SPLIT_RE)
+    .some(
+      (statement) =>
+        POWERSHELL_REMOVE_VERB_RE.test(statement) &&
+        POWERSHELL_RECURSE_FLAG_RE.test(statement) &&
+        POWERSHELL_FORCE_FLAG_RE.test(statement),
+    );
+}
 
 export interface PermissionRule {
   toolName: string;
@@ -130,11 +173,16 @@ export function describeRule(rule: PermissionRule): string {
   return `Always allow ${rule.toolName}: this exact input only`;
 }
 
-export function isDestructive(toolName: string, input: unknown): boolean {
-  if (toolName !== "Bash") return false;
+/** Not keyed on `toolName` at all: any tool whose input carries a string
+ *  `command` field is shell-ish enough to test (today that's Bash and
+ *  PowerShell - see the file-doc note above), and a tool with no `command`
+ *  field always falls through to `false`, matching the prior Bash-only
+ *  behavior for everything else. */
+export function isDestructive(_toolName: string, input: unknown): boolean {
   const cmd = (input as { command?: unknown } | null)?.command;
   if (typeof cmd !== "string") return false;
-  return DESTRUCTIVE_BASH_PATTERNS.some((re) => re.test(cmd));
+  if (DESTRUCTIVE_COMMAND_PATTERNS.some((re) => re.test(cmd))) return true;
+  return isPowerShellRecursiveForceRemoval(cmd);
 }
 
 /** A remembered Bash rule is a literal prefix, so shell chaining is also a
