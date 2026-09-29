@@ -68,6 +68,7 @@ fn persist_enabled(enabled: bool, state: &State<AppState>, app: &AppHandle) {
     let snapshot = {
         let mut s = state.settings.lock().unwrap();
         s.remote_access_enabled = enabled;
+        s.bump_generation();
         s.clone()
     };
     let saved = match paths::settings_file() {

@@ -107,6 +107,7 @@ pub(super) fn handle_session_character_assigned(app: &tauri::AppHandle, params: 
         let state = app.state::<crate::state::AppState>();
         let mut settings_guard = state.settings.lock().unwrap();
         settings_guard.session_characters.insert(session_id.to_string(), character_id.to_string());
+        settings_guard.bump_generation();
         let snapshot = settings_guard.clone();
         drop(settings_guard);
         crate::settings::persist(app, &snapshot);
@@ -122,6 +123,7 @@ pub(super) fn handle_jarvis_session_created(app: &tauri::AppHandle, params: serd
         let state = app.state::<crate::state::AppState>();
         let mut settings_guard = state.settings.lock().unwrap();
         settings_guard.jarvis_session_id = Some(session_id.to_string());
+        settings_guard.bump_generation();
         let snapshot = settings_guard.clone();
         drop(settings_guard);
         crate::settings::persist(app, &snapshot);

@@ -51,6 +51,7 @@ pub async fn assign_character(
             Some(id) if !id.is_empty() => Avatar::Character(id),
             _ => Avatar::None,
         };
+        s.bump_generation();
         s.clone()
     };
     persist(&app, &snapshot);
@@ -136,7 +137,7 @@ pub async fn ensure_session_character(
 
         if let Some(existing) = s.session_characters.get(&session_id).cloned() {
             // Already assigned and session is live.
-            (Some(existing), pruned.then(|| s.clone()))
+            (Some(existing), pruned.then(|| { s.bump_generation(); s.clone() }))
         } else if let Some(inst) = instances.iter().find(|i| i.session_id == session_id) {
             let project_id = &inst.project_id;
             let proj_wl = s
@@ -161,10 +162,10 @@ pub async fn ensure_session_character(
                 s.session_characters.insert(session_id.clone(), id.clone());
             }
             let dirty = pruned || pick.is_some();
-            (pick, dirty.then(|| s.clone()))
+            (pick, dirty.then(|| { s.bump_generation(); s.clone() }))
         } else {
             // No Instance for this id, so no project to resolve a whitelist from.
-            (None, pruned.then(|| s.clone()))
+            (None, pruned.then(|| { s.bump_generation(); s.clone() }))
         }
     };
 
@@ -190,6 +191,7 @@ pub async fn set_session_character(
             Some(id) => { s.session_characters.insert(session_id, id); }
             None => { s.session_characters.remove(&session_id); }
         }
+        s.bump_generation();
         s.clone()
     };
     persist(&app, &snapshot);
@@ -240,10 +242,11 @@ pub async fn reroll_session_character(
             if let Some(ref id) = pick {
                 s.session_characters.insert(session_id.clone(), id.clone());
             }
+            s.bump_generation();
             (pick, Some(s.clone()))
         } else {
             // No Instance for this id: nothing to reroll against.
-            (None, pruned.then(|| s.clone()))
+            (None, pruned.then(|| { s.bump_generation(); s.clone() }))
         }
     };
 

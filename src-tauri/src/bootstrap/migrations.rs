@@ -107,6 +107,7 @@ pub(super) fn migrate_hook_install_if_needed(app: &tauri::AppHandle) {
     let snapshot = {
         let mut g = state.settings.lock().unwrap();
         g.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
+        g.bump_generation();
         g.clone()
     };
     crate::settings::persist(app, &snapshot);
@@ -149,6 +150,7 @@ pub(super) fn backfill_project_characters_if_needed(app: &tauri::AppHandle) {
             serde_json::json!(crate::characters::assign::CURRENT_BACKFILL_VERSION),
         );
         log::info!("character migration v2: cleared character avatar from {cleared} project(s)");
+        g.bump_generation();
         g.clone()
     };
     crate::settings::persist(app, &snapshot);

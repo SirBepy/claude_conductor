@@ -155,7 +155,9 @@ pub fn upsert_project_for_cwd(
         .find(|p| project_key(&p.path) == key)
     {
         p.last_active_at = Some(now.to_string());
-        return (p.id.clone(), false);
+        let id = p.id.clone();
+        settings.bump_generation();
+        return (id, false);
     }
     if is_ephemeral_root_path(cwd) {
         return (format!("ephemeral:{key}"), false);
@@ -183,6 +185,7 @@ pub fn upsert_project_for_cwd(
         last_worktree_path: None,
         last_start_folder_rel: None,
     });
+    settings.bump_generation();
     (id, true)
 }
 
@@ -226,6 +229,7 @@ pub fn upsert_project_with_id_for_cwd(
         last_worktree_path: None,
         last_start_folder_rel: None,
     });
+    settings.bump_generation();
 }
 
 /// Saves settings to disk, creating parent dirs if needed.
@@ -304,6 +308,50 @@ pub fn merge_daemon_owned_fields(updated: &mut Settings, current: &Settings) {
             updated.jarvis_session_id = Some(id.clone());
         }
     }
+}
+
+/// Error string a future `save_settings` dispatch will return to the frontend
+/// for a stale save once the dashboard has a retry path (todo 1004's
+/// generation-stamp follow-up). Unused today - `reconcile_save` still merges
+/// a stale save rather than rejecting it - defined now so that flip is a
+/// one-line change instead of inventing a new constant under time pressure.
+#[allow(dead_code)]
+pub const SETTINGS_STALE: &str = "SETTINGS_STALE";
+
+/// The stale-save branch of `reconcile_save`: the frontend's snapshot predates
+/// the live settings, so a blind overwrite could revert whatever landed since
+/// that snapshot was read. For now this runs the existing three-field
+/// `merge_daemon_owned_fields` and warns, instead of rejecting the save with
+/// `SETTINGS_STALE` - the dashboard has no retry path yet (todo 1004 tracks
+/// that as a separate, frontend-touching dispatch). Kept as its own named
+/// function so that flip is a one-line change in `reconcile_save` below.
+fn reconcile_stale_save(updated: &mut Settings, current: &Settings) {
+    log::warn!(
+        "[settings] save_settings: stale snapshot (generation {} behind live {}); merging daemon-owned fields instead of rejecting (todo 1004)",
+        updated.settings_generation, current.settings_generation,
+    );
+    merge_daemon_owned_fields(updated, current);
+}
+
+/// Generation-checked reconciliation behind `ipc::settings::save_settings`.
+/// `updated` is the frontend's about-to-be-saved snapshot; `current` is the
+/// live in-memory settings, read under the SAME lock the caller uses to write
+/// `updated` back to disk and cache right after. One lock scope spanning
+/// compare, merge, disk write, and cache write leaves no window for a
+/// concurrent mutation to land in between and get silently dropped (todo
+/// 1004's residual race).
+///
+/// Equal generations mean the frontend read the latest state, so `updated` is
+/// accepted as-is. A behind generation means something else (a daemon-owned
+/// field write, or another save) landed since that read; `reconcile_stale_save`
+/// covers that gap for now. Either branch leaves `updated.settings_generation`
+/// one past `current`'s, so the disk write and the cache assignment the
+/// caller performs next always agree with each other.
+pub fn reconcile_save(updated: &mut Settings, current: &Settings) {
+    if updated.settings_generation != current.settings_generation {
+        reconcile_stale_save(updated, current);
+    }
+    updated.settings_generation = current.settings_generation.wrapping_add(1);
 }
 
 #[cfg(test)]
@@ -861,5 +909,147 @@ mod tests {
         merge_daemon_owned_fields(&mut updated, &current);
 
         assert_eq!(updated.jarvis_session_id.as_deref(), Some("frontend-value"));
+    }
+
+    // -----------------------------------------------------------------
+    // todo 1004: settings_generation / reconcile_save
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn bump_generation_increments_and_returns_the_new_value() {
+        let mut s = Settings::default();
+        assert_eq!(s.settings_generation, 0);
+        assert_eq!(s.bump_generation(), 1);
+        assert_eq!(s.settings_generation, 1);
+        assert_eq!(s.bump_generation(), 2);
+    }
+
+    /// A fresh save (the frontend's snapshot generation matches the live one)
+    /// must be accepted exactly as sent - no merge - and must still advance
+    /// the generation counter so a subsequent stale save from an older reader
+    /// is correctly detected as behind.
+    #[test]
+    fn reconcile_save_with_current_generation_writes_exactly_what_was_sent_and_bumps() {
+        let mut current = Settings::default();
+        current.bump_generation(); // generation 1, as if some earlier write happened
+        current.jarvis_session_id = Some("daemon-value".to_string());
+
+        // Frontend read generation 1, then made its own edit plus dropped the
+        // jarvis field from its own local model (nothing daemon-owned changed
+        // in between, so this must NOT be treated as a loss).
+        let mut updated = current.clone();
+        updated.jarvis_session_id = None;
+        updated.autostart = false;
+
+        reconcile_save(&mut updated, &current);
+
+        assert_eq!(
+            updated.jarvis_session_id, None,
+            "an up-to-date save is trusted as-is; no merge should run"
+        );
+        assert!(!updated.autostart);
+        assert_eq!(
+            updated.settings_generation,
+            current.settings_generation + 1,
+            "a save must advance the generation past the value it was checked against"
+        );
+    }
+
+    /// A stale save (frontend generation behind the live one) must still get
+    /// today's three-field merge-and-warn treatment, matching the existing
+    /// `frontend_save_from_stale_snapshot_preserves_daemon_added_project`
+    /// behavior, and must also bump the generation so the merged result
+    /// becomes the new "current" for the next save.
+    #[test]
+    fn reconcile_save_with_stale_generation_still_merges_daemon_owned_fields_and_bumps() {
+        let dir = non_ephemeral_tempdir();
+        let now = "2026-09-29T00:00:00Z";
+
+        let frontend_snapshot = Settings::default(); // generation 0, as read
+
+        let mut current = frontend_snapshot.clone();
+        upsert_project_with_id_for_cwd(&mut current, "proj-1", dir.path(), now);
+        // upsert bumped current's generation past the frontend's stale read.
+        assert!(current.settings_generation > frontend_snapshot.settings_generation);
+
+        let mut updated = frontend_snapshot.clone();
+        updated.autostart = true;
+
+        reconcile_save(&mut updated, &current);
+
+        assert_eq!(updated.projects.len(), 1, "the daemon-added project must survive");
+        assert_eq!(updated.projects[0].id, "proj-1");
+        assert!(updated.autostart, "the user's real edit must still apply");
+        assert_eq!(
+            updated.settings_generation,
+            current.settings_generation + 1,
+            "a merged save must still advance past the live generation"
+        );
+    }
+
+    /// `extra` must round-trip through `reconcile_save` untouched on both the
+    /// fresh and the stale path - a merge or a bump that dropped it would
+    /// itself be the data-loss bug this todo is about.
+    #[test]
+    fn reconcile_save_preserves_extra_on_both_paths() {
+        let mut current = Settings::default();
+        current.extra.insert("someDashboardOnlyField".to_string(), serde_json::json!("keep-me"));
+
+        // Fresh path.
+        let mut fresh = current.clone();
+        reconcile_save(&mut fresh, &current);
+        assert_eq!(
+            fresh.extra.get("someDashboardOnlyField"),
+            Some(&serde_json::json!("keep-me")),
+        );
+
+        // Stale path: current has moved on (generation bumped + a daemon
+        // mutation), but `extra` must still survive the merge.
+        let mut moved_on = current.clone();
+        moved_on.bump_generation();
+        moved_on.jarvis_session_id = Some("daemon-value".to_string());
+        let mut stale = current.clone(); // still at the old generation
+        stale.poll_interval_secs = 42;
+        reconcile_save(&mut stale, &moved_on);
+        assert_eq!(
+            stale.extra.get("someDashboardOnlyField"),
+            Some(&serde_json::json!("keep-me")),
+            "extra must survive a merged stale save too",
+        );
+        assert_eq!(stale.jarvis_session_id.as_deref(), Some("daemon-value"));
+        assert_eq!(stale.poll_interval_secs, 42);
+    }
+
+    /// `upsert_project_for_cwd` mutates the live guard on every call (either
+    /// creating a project or touching `last_active_at` on an existing one),
+    /// so both branches must bump the generation - this is the helper every
+    /// project-writing call site (`ensure_project`, `handle_project_created`'s
+    /// sibling `upsert_project_with_id_for_cwd`, the legacy-import path) relies
+    /// on to bump on its behalf instead of remembering to call
+    /// `bump_generation` itself.
+    #[test]
+    fn upsert_project_for_cwd_bumps_generation_on_create_and_on_update() {
+        let mut s = Settings::default();
+        let (_, created) = upsert_project_for_cwd(&mut s, std::path::Path::new("C:/new"), "t1");
+        assert!(created);
+        assert_eq!(s.settings_generation, 1, "creating a project must bump");
+
+        let (_, created2) = upsert_project_for_cwd(&mut s, std::path::Path::new("C:/new"), "t2");
+        assert!(!created2);
+        assert_eq!(s.settings_generation, 2, "touching last_active_at on an existing project must also bump");
+    }
+
+    /// `upsert_project_with_id_for_cwd` is a no-op when the project already
+    /// exists (unlike its sibling above, which still updates `last_active_at`)
+    /// - it must not bump the generation for a call that changed nothing.
+    #[test]
+    fn upsert_project_with_id_for_cwd_bumps_only_when_it_actually_inserts() {
+        let dir = non_ephemeral_tempdir();
+        let mut s = Settings::default();
+        upsert_project_with_id_for_cwd(&mut s, "proj-1", dir.path(), "t1");
+        assert_eq!(s.settings_generation, 1);
+
+        upsert_project_with_id_for_cwd(&mut s, "proj-1", dir.path(), "t2");
+        assert_eq!(s.settings_generation, 1, "a no-op call for an already-registered project must not bump");
     }
 }

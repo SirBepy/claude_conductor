@@ -129,6 +129,7 @@ pub async fn save_overlay_position(
         let mut s = state.settings.lock().unwrap();
         s.extra.insert("overlayX".into(), serde_json::json!(x));
         s.extra.insert("overlayY".into(), serde_json::json!(y));
+        s.bump_generation();
         s.clone()
     };
     let path = paths::settings_file().map_err(|e| e.to_string())?;

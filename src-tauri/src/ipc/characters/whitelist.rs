@@ -35,6 +35,7 @@ pub async fn set_project_whitelist(
         let p = s.projects.iter_mut().find(|p| p.id == project_id)
             .ok_or_else(|| format!("project not found: {project_id}"))?;
         p.whitelist = whitelist;
+        s.bump_generation();
         s.clone()
     };
     persist(&app, &snapshot);
@@ -58,6 +59,7 @@ pub async fn set_default_whitelist(
     let snapshot = {
         let mut s = state.settings.lock().unwrap();
         s.default_character_whitelist = whitelist;
+        s.bump_generation();
         s.clone()
     };
     persist(&app, &snapshot);

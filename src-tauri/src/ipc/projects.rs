@@ -157,6 +157,7 @@ pub fn update_project(
             return Err(format!("invalid_patch: {msg}"));
         }
     }
+    guard.bump_generation();
     settings::save(&settings_path, &guard).map_err(|e| e.to_string())?;
     let snapshot = guard.clone();
     drop(guard);
@@ -175,6 +176,7 @@ pub fn delete_project(
     if !projects_test_helpers::delete_in(&mut guard, &id) {
         return Err(format!("project_not_found: {id}"));
     }
+    guard.bump_generation();
     settings::save(&settings_path, &guard).map_err(|e| e.to_string())?;
     let snapshot = guard.clone();
     drop(guard);
@@ -191,6 +193,7 @@ pub fn set_projects_sort_by(
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
     let mut guard = state.settings.lock().unwrap();
     projects_test_helpers::set_sort_by(&mut guard, sort_by);
+    guard.bump_generation();
     settings::save(&settings_path, &guard).map_err(|e| e.to_string())?;
     let snapshot = guard.clone();
     drop(guard);
@@ -244,6 +247,7 @@ pub fn confirm_legacy_obsidian_import(
             }
         }
         guard.legacy_obsidian_import_handled = true;
+        guard.bump_generation();
         guard.clone()
     };
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;

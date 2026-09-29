@@ -267,6 +267,7 @@ fn toggle_mute_all(app: AppHandle) {
         let mut s = state.settings.lock().unwrap();
         let current = s.mute_all();
         s.extra.insert("muteAll".into(), serde_json::Value::Bool(!current));
+        s.bump_generation();
         s.clone()
     };
     if let Ok(path) = paths::settings_file() {

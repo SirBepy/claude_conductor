@@ -118,6 +118,16 @@ pub struct Settings {
     /// `poll_interval_secs`'s `.max(60)` idiom rather than a stored default.
     #[serde(default)]
     pub schedule_grace_secs: Option<u64>,
+    /// Monotonic counter bumped on every settings mutation, daemon- or
+    /// frontend-driven (todo 1004). `get_settings` hands this to the
+    /// dashboard, which echoes it back on `save_settings`: equal to the live
+    /// value means the frontend's snapshot is current and can be trusted
+    /// as-is; behind means something else (a daemon-owned field write, or
+    /// another save) landed since that snapshot was read - see
+    /// `settings::store::reconcile_save`. Never part of `extra`: it is a
+    /// named field so serde's flatten never sees it.
+    #[serde(default)]
+    pub settings_generation: u64,
     /// Everything the dashboard persists that Rust doesn't need to read —
     /// project aliases, blacklist, colour thresholds, themes, etc. Stored
     /// verbatim so renames / hides / theme changes actually stick.
@@ -176,6 +186,7 @@ impl Default for Settings {
             jarvis_session_id: None,
             accounts_setup_prompt_dismissed: false,
             schedule_grace_secs: None,
+            settings_generation: 0,
             extra: serde_json::Map::new(),
         }
     }
@@ -213,6 +224,17 @@ impl Settings {
 
     fn bool_extra(&self, key: &str) -> bool {
         self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+    }
+
+    /// Bumps `settings_generation` and returns the new value. Call this at
+    /// every site that mutates settings, under the same lock guarding that
+    /// mutation, so a snapshot cloned right after always carries the freshest
+    /// generation and the disk write / cache write it feeds stay in sync
+    /// (todo 1004). `settings::store::reconcile_save` covers the one site
+    /// (`save_settings`) that needs compare-then-decide instead of a bare bump.
+    pub fn bump_generation(&mut self) -> u64 {
+        self.settings_generation = self.settings_generation.wrapping_add(1);
+        self.settings_generation
     }
 }
 

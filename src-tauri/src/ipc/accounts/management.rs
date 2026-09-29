@@ -54,6 +54,7 @@ pub fn remove_account(account_id: String, state: State<AppState>, app: AppHandle
         let mut settings = state.settings.lock().unwrap();
         if settings.default_account_id.as_deref() == Some(account_id.as_str()) {
             settings.default_account_id = None;
+            settings.bump_generation();
             if let Err(e) = crate::settings::save(&settings_path, &settings) {
                 log::error!("[accounts] remove_account: settings save failed after clearing default_account_id: {e:#}");
                 default_account_save_failed = true;
@@ -154,6 +155,7 @@ pub async fn set_default_account(
     let snapshot = {
         let mut settings = state.settings.lock().unwrap();
         settings.default_account_id = account_id;
+        settings.bump_generation();
         settings.clone()
     };
     crate::settings::save(&settings_path, &snapshot).map_err(|e| e.to_string())?;

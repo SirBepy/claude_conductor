@@ -143,6 +143,7 @@ pub fn set_retention_policy(
             DatasetId::TokenRecords => s.retention.token_records = policy,
             DatasetId::SkillEvents => s.retention.skill_events = policy,
         }
+        s.bump_generation();
         s.clone()
     };
     let path = paths::settings_file().map_err(|e| e.to_string())?;

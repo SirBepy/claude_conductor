@@ -20,15 +20,20 @@ pub fn get_hook_registration_state(
         !s.hooks_registered && !s.hook_registration_declined
     };
     if needs_heal && crate::hooks::is_installed_globally() {
-        let snapshot = {
-            let mut g = state.settings.lock().unwrap();
-            g.hooks_registered = true;
-            g.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
-            g.clone()
-        };
+        // Built off a CLONE, not the live guard (todo 1004, item 6): the
+        // cache is only overwritten after `settings::save` actually succeeds,
+        // so a failed save can never leave the cache claiming
+        // `hooks_registered` when disk doesn't have it.
+        let mut snapshot = state.settings.lock().unwrap().clone();
+        snapshot.hooks_registered = true;
+        snapshot.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
+        snapshot.bump_generation();
         let saved = match paths::settings_file() {
             Ok(path) => match settings::save(&path, &snapshot) {
-                Ok(()) => true,
+                Ok(()) => {
+                    *state.settings.lock().unwrap() = snapshot.clone();
+                    true
+                }
                 Err(e) => {
                     log::error!("[settings] hook self-heal: save to {path:?} failed: {e:#}");
                     false
@@ -69,6 +74,7 @@ pub fn register_hooks_globally(
         g.hooks_registered = true;
         g.hook_registration_declined = false;
         g.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
+        g.bump_generation();
         g.clone()
     };
     let path = paths::settings_file().map_err(|e| e.to_string())?;
@@ -85,6 +91,7 @@ pub fn skip_hook_registration(
     let snapshot = {
         let mut g = state.settings.lock().unwrap();
         g.hook_registration_declined = true;
+        g.bump_generation();
         g.clone()
     };
     let path = paths::settings_file().map_err(|e| e.to_string())?;

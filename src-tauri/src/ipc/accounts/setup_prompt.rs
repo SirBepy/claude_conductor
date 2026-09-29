@@ -45,6 +45,7 @@ pub fn dismiss_accounts_setup_prompt(state: State<AppState>, app: AppHandle) -> 
     let snapshot = {
         let mut s = state.settings.lock().unwrap();
         s.accounts_setup_prompt_dismissed = true;
+        s.bump_generation();
         s.clone()
     };
     let path = paths::settings_file().map_err(|e| e.to_string())?;
