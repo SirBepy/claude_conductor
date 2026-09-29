@@ -10,18 +10,27 @@
  * Storage shape (in app settings.json under `projectPermissionRules`):
  *   { [cwd: string]: string[] }
  *
- * Each rule string is `"<tool_name>::<pattern>"`. For Bash the pattern is a
- * prefix of `input.command`. For every other tool the pattern scopes to that
- * tool's identifying argument (e.g. `file_path` for Write/Edit/Read, `pattern`
- * for Grep/Glob - see `IDENTIFYING_FIELD`), matched by exact equality. A tool
+ * Each rule string is `"<tool_name>::<pattern>"`. For any tool whose input
+ * carries a string `command` field (Bash, PowerShell, and any future
+ * shell-ish tool - see `hasCommandField`) the pattern is a prefix of
+ * `input.command`. For every other tool the pattern scopes to that tool's
+ * identifying argument (e.g. `file_path` for Write/Edit/Read, `pattern` for
+ * Grep/Glob - see `IDENTIFYING_FIELD`), matched by exact equality. A tool
  * with no known identifying argument gets a rule scoped to the exact input
  * JSON that was approved, never "any input" - see `matchesRule`.
  *
- * A pre-fix rule persisted with an empty pattern for a non-Bash tool meant
- * "match any input for that tool" - that was the bug. Those old rules are
- * deliberately invalidated (matchesRule always returns false for them) rather
- * than honored; the user re-clicks "Always Allow" once and a properly scoped
- * rule replaces it.
+ * A rule built before todo 1016 for a non-Bash shell tool (PowerShell had no
+ * `IDENTIFYING_FIELD` entry, so it fell into the exact-input-JSON shape above
+ * instead of getting Bash's prefix scoping) still loads and matches with its
+ * old exact-match meaning: `matchesRule` tries the new prefix check first,
+ * and falls back to the old full-input-JSON equality check when the prefix
+ * check fails, rather than silently widening or invalidating the stored rule.
+ *
+ * A pre-fix rule persisted with an empty pattern for a non-Bash, non-shell
+ * tool meant "match any input for that tool" - that was the bug. Those old
+ * rules are deliberately invalidated (matchesRule always returns false for
+ * them) rather than honored; the user re-clicks "Always Allow" once and a
+ * properly scoped rule replaces it.
  *
  * Destructive shell command patterns are hard-coded and always bypass the
  * allow rules. Even a `Bash::` rule (any Bash) will still prompt for
@@ -116,6 +125,15 @@ function asRecord(input: unknown): Record<string, unknown> | null {
   return input && typeof input === "object" ? (input as Record<string, unknown>) : null;
 }
 
+/** Same test `isDestructive` uses: any tool whose input carries a string
+ *  `command` field is shell-ish enough to get Bash's prefix-scoped "Always
+ *  Allow" behaviour (today that's Bash and PowerShell), rather than gating on
+ *  the literal tool name `"Bash"`. A future shell tool picks this up for
+ *  free. */
+function hasCommandField(input: unknown): input is { command: string } {
+  return typeof asRecord(input)?.command === "string";
+}
+
 /** Deterministic full-input snapshot for tools with no known identifying
  *  argument. Two calls that differ only in JS object key insertion order will
  *  fail to match (a false negative, just re-prompts) rather than risk a false
@@ -140,12 +158,9 @@ export function parseRule(raw: string): PermissionRule | null {
  *  the tool has none) - never to the tool name alone, which would authorize
  *  every future call regardless of target. */
 export function buildRule(toolName: string, input: unknown): PermissionRule {
-  if (toolName === "Bash" && input && typeof input === "object") {
-    const cmd = (input as { command?: unknown }).command;
-    if (typeof cmd === "string") {
-      const trimmed = cmd.trim();
-      return { toolName, pattern: trimmed, raw: `${toolName}${RULE_SEP}${trimmed}` };
-    }
+  if (hasCommandField(input)) {
+    const trimmed = input.command.trim();
+    return { toolName, pattern: trimmed, raw: `${toolName}${RULE_SEP}${trimmed}` };
   }
   const field = IDENTIFYING_FIELD[toolName];
   const val = field ? asRecord(input)?.[field] : undefined;
@@ -169,7 +184,9 @@ export function describeRule(rule: PermissionRule): string {
   // matchesRule now refuses to honor. Say so rather than repeating the old
   // (wrong) "matches everything" implication.
   if (!rule.pattern) return `Always allow ${rule.toolName} (old rule, no longer applies - re-approve to replace)`;
-  if (IDENTIFYING_FIELD[rule.toolName]) return `Always allow ${rule.toolName}: ${rule.pattern}`;
+  // Only fullInputPattern's JSON blob starts with "{"; a command prefix or an
+  // identifying argument never does.
+  if (!rule.pattern.startsWith("{")) return `Always allow ${rule.toolName}: ${rule.pattern}`;
   return `Always allow ${rule.toolName}: this exact input only`;
 }
 
@@ -195,13 +212,20 @@ const SHELL_CHAIN_RE = /[&;|`$(){}<>\n\r]/;
 export function matchesRule(rule: PermissionRule, toolName: string, input: unknown): boolean {
   if (rule.toolName !== toolName) return false;
 
-  if (toolName === "Bash") {
+  if (hasCommandField(input)) {
     if (!rule.pattern) return true;
-    const cmd = (input as { command?: unknown } | null)?.command;
-    if (typeof cmd !== "string") return false;
-    const trimmed = cmd.trim();
-    if (!trimmed.startsWith(rule.pattern)) return false;
-    return !SHELL_CHAIN_RE.test(trimmed.slice(rule.pattern.length));
+    const trimmed = input.command.trim();
+    if (trimmed.startsWith(rule.pattern) && !SHELL_CHAIN_RE.test(trimmed.slice(rule.pattern.length))) {
+      return true;
+    }
+    // A rule built before this fix (any non-Bash shell tool, e.g. PowerShell -
+    // see IDENTIFYING_FIELD's lack of a "PowerShell" entry) was persisted as
+    // the full approved input JSON via fullInputPattern, not a command
+    // prefix. That old pattern will never satisfy startsWith above (it's not
+    // a prefix of a real command string), so without this fallback the fix
+    // would silently invalidate every already-stored PowerShell rule instead
+    // of preserving its old exact-match meaning.
+    return fullInputPattern(input) === rule.pattern;
   }
 
   // Pre-fix rules for non-Bash tools were persisted with an empty pattern
