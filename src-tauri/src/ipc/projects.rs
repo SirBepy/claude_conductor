@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use crate::types::{ProjectConfig, ProjectsSortBy};
 use crate::settings::{self, paths};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 
 /// Pure helpers extracted from the Tauri command wrappers so they can be
@@ -147,20 +148,17 @@ pub fn update_project(
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
-    let mut guard = state.settings.lock().unwrap();
-    match projects_test_helpers::update_in(&mut guard, &id, patch) {
-        Ok(()) => {}
-        Err(projects_test_helpers::UpdateErr::NotFound) => {
-            return Err(format!("project_not_found: {id}"));
+    let snapshot = settings::mutate_and_save(&state.settings, &settings_path, |s| {
+        match projects_test_helpers::update_in(s, &id, patch) {
+            Ok(()) => Ok(()),
+            Err(projects_test_helpers::UpdateErr::NotFound) => {
+                Err(format!("project_not_found: {id}"))
+            }
+            Err(projects_test_helpers::UpdateErr::InvalidPatch(msg)) => {
+                Err(format!("invalid_patch: {msg}"))
+            }
         }
-        Err(projects_test_helpers::UpdateErr::InvalidPatch(msg)) => {
-            return Err(format!("invalid_patch: {msg}"));
-        }
-    }
-    guard.bump_generation();
-    settings::save(&settings_path, &guard).map_err(|e| e.to_string())?;
-    let snapshot = guard.clone();
-    drop(guard);
+    })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
 }
@@ -172,14 +170,13 @@ pub fn delete_project(
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
-    let mut guard = state.settings.lock().unwrap();
-    if !projects_test_helpers::delete_in(&mut guard, &id) {
-        return Err(format!("project_not_found: {id}"));
-    }
-    guard.bump_generation();
-    settings::save(&settings_path, &guard).map_err(|e| e.to_string())?;
-    let snapshot = guard.clone();
-    drop(guard);
+    let snapshot = settings::mutate_and_save(&state.settings, &settings_path, |s| {
+        if projects_test_helpers::delete_in(s, &id) {
+            Ok(())
+        } else {
+            Err(format!("project_not_found: {id}"))
+        }
+    })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
 }
@@ -191,12 +188,10 @@ pub fn set_projects_sort_by(
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
-    let mut guard = state.settings.lock().unwrap();
-    projects_test_helpers::set_sort_by(&mut guard, sort_by);
-    guard.bump_generation();
-    settings::save(&settings_path, &guard).map_err(|e| e.to_string())?;
-    let snapshot = guard.clone();
-    drop(guard);
+    let snapshot = settings::mutate_and_save(&state.settings, &settings_path, |s| {
+        projects_test_helpers::set_sort_by(s, sort_by);
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
 }
@@ -235,23 +230,20 @@ pub fn confirm_legacy_obsidian_import(
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let snapshot = {
-        let mut guard = state.settings.lock().unwrap();
+    let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
+    let snapshot = settings::mutate_and_save(&state.settings, &settings_path, |s| {
         if accept {
             if let Some(appdata) = dirs::config_dir() {
                 let config_path = appdata.join("obsidian_claude_remote").join("config.json");
                 if let Ok(raw) = std::fs::read_to_string(&config_path) {
                     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                    let _ = legacy_import_test_helpers::import_into(&mut guard, &raw, &now);
+                    let _ = legacy_import_test_helpers::import_into(s, &raw, &now);
                 }
             }
         }
-        guard.legacy_obsidian_import_handled = true;
-        guard.bump_generation();
-        guard.clone()
-    };
-    let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
-    settings::save(&settings_path, &snapshot).map_err(|e| e.to_string())?;
+        s.legacy_obsidian_import_handled = true;
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
 }
@@ -283,6 +275,110 @@ pub async fn detect_obsidian_vaults() -> Vec<std::path::PathBuf> {
     })
     .await
     .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod mutate_and_save_tests {
+    use super::*;
+    use crate::types::Settings;
+    use tempfile::tempdir;
+
+    /// Parent-is-a-file forces `settings::save`'s `create_dir_all` to fail,
+    /// deterministically and cross-platform (no reliance on OS
+    /// read-only-permission semantics).
+    fn unsavable_path(dir: &std::path::Path) -> std::path::PathBuf {
+        let blocker = dir.join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        blocker.join("settings.json")
+    }
+
+    fn settings_with_one_project() -> (Mutex<Settings>, String) {
+        let mut s = Settings::default();
+        let (id, _created) = crate::settings::upsert_project_for_cwd(
+            &mut s,
+            std::path::Path::new("C:/proj"),
+            "now",
+        );
+        (Mutex::new(s), id)
+    }
+
+    #[test]
+    fn update_project_shape_leaves_cache_unchanged_on_failed_save() {
+        let dir = tempdir().unwrap();
+        let bad_path = unsavable_path(dir.path());
+        let (settings, id) = settings_with_one_project();
+        // upsert_project_for_cwd itself bumps generation to 1 on create; the
+        // failed save below must not move it any further.
+        let generation_before = settings.lock().unwrap().settings_generation;
+        let patch = serde_json::json!({ "name": "renamed" });
+
+        let result = settings::mutate_and_save(&settings, &bad_path, |s| {
+            match projects_test_helpers::update_in(s, &id, patch) {
+                Ok(()) => Ok(()),
+                Err(projects_test_helpers::UpdateErr::NotFound) => {
+                    Err(format!("project_not_found: {id}"))
+                }
+                Err(projects_test_helpers::UpdateErr::InvalidPatch(msg)) => {
+                    Err(format!("invalid_patch: {msg}"))
+                }
+            }
+        });
+
+        assert!(result.is_err(), "save must fail against an unwritable path");
+        let cached = settings.lock().unwrap();
+        assert_ne!(cached.projects[0].name, "renamed", "cache must not carry the unsaved rename");
+        assert_eq!(cached.settings_generation, generation_before, "generation must not bump on a failed save");
+    }
+
+    #[test]
+    fn delete_project_shape_leaves_cache_unchanged_on_failed_save() {
+        let dir = tempdir().unwrap();
+        let bad_path = unsavable_path(dir.path());
+        let (settings, id) = settings_with_one_project();
+        // upsert_project_for_cwd itself bumps generation to 1 on create; the
+        // failed save below must not move it any further.
+        let generation_before = settings.lock().unwrap().settings_generation;
+
+        let result = settings::mutate_and_save(&settings, &bad_path, |s| {
+            if projects_test_helpers::delete_in(s, &id) {
+                Ok(())
+            } else {
+                Err(format!("project_not_found: {id}"))
+            }
+        });
+
+        assert!(result.is_err(), "save must fail against an unwritable path");
+        let cached = settings.lock().unwrap();
+        assert_eq!(cached.projects.len(), 1, "cache must still carry the project the failed save never removed");
+        assert_eq!(cached.settings_generation, generation_before, "generation must not bump on a failed save");
+    }
+
+    /// `confirm_legacy_obsidian_import`'s closure does more than one site
+    /// field: on `accept`, it imports a whole project via
+    /// `legacy_import_test_helpers::import_into` before also flipping
+    /// `legacy_obsidian_import_handled`. This proves the failed-save rollback
+    /// discards BOTH the imported project and the flag, not just a single
+    /// scalar - genuinely beyond what the generic helper test in
+    /// settings/store.rs already proves for a single-field mutate.
+    #[test]
+    fn confirm_legacy_obsidian_import_shape_leaves_cache_unchanged_on_failed_save() {
+        let dir = tempdir().unwrap();
+        let bad_path = unsavable_path(dir.path());
+        let settings = Mutex::new(Settings::default());
+        let raw = r#"{"vault_path": "C:/legacy-vault"}"#;
+
+        let result = settings::mutate_and_save(&settings, &bad_path, |s| {
+            let _ = legacy_import_test_helpers::import_into(s, raw, "now");
+            s.legacy_obsidian_import_handled = true;
+            Ok(())
+        });
+
+        assert!(result.is_err(), "save must fail against an unwritable path");
+        let cached = settings.lock().unwrap();
+        assert!(!cached.legacy_obsidian_import_handled, "cache must not claim the banner was handled");
+        assert!(cached.projects.is_empty(), "cache must not carry the imported project either");
+        assert_eq!(cached.settings_generation, 0, "generation must not bump on a failed save");
+    }
 }
 
 

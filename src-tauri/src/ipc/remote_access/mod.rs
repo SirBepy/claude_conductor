@@ -65,29 +65,23 @@ fn read_plaintext_token(path: &Path) -> Option<String> {
 // ── Settings persistence ──────────────────────────────────────────────────────
 
 fn persist_enabled(enabled: bool, state: &State<AppState>, app: &AppHandle) {
-    let snapshot = {
-        let mut s = state.settings.lock().unwrap();
-        s.remote_access_enabled = enabled;
-        s.bump_generation();
-        s.clone()
-    };
-    let saved = match paths::settings_file() {
-        Ok(path) => match settings::save(&path, &snapshot) {
-            Ok(()) => true,
-            Err(e) => {
-                log::error!("[remote_access] persist_enabled: save to {path:?} failed: {e:#}");
-                false
-            }
-        },
+    let path = match paths::settings_file() {
+        Ok(p) => p,
         Err(e) => {
             log::error!("[remote_access] persist_enabled: could not resolve settings path: {e}");
-            false
+            return;
         }
     };
-    // Don't claim success to any settings-changed listener for a write that
-    // didn't land.
-    if saved {
-        let _ = app.emit("settings-changed", &snapshot);
+    match settings::mutate_and_save(&state.settings, &path, |s| {
+        s.remote_access_enabled = enabled;
+        Ok(())
+    }) {
+        Ok(snapshot) => {
+            let _ = app.emit("settings-changed", &snapshot);
+        }
+        Err(e) => {
+            log::error!("[remote_access] persist_enabled: save to {path:?} failed: {e}");
+        }
     }
 }
 

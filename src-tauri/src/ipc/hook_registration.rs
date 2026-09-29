@@ -69,16 +69,13 @@ pub fn register_hooks_globally(
     };
     crate::hooks::install(crate::hooks::HookConfig { port })
         .map_err(|e| e.to_string())?;
-    let snapshot = {
-        let mut g = state.settings.lock().unwrap();
-        g.hooks_registered = true;
-        g.hook_registration_declined = false;
-        g.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
-        g.bump_generation();
-        g.clone()
-    };
     let path = paths::settings_file().map_err(|e| e.to_string())?;
-    settings::save(&path, &snapshot).map_err(|e| e.to_string())?;
+    let snapshot = settings::mutate_and_save(&state.settings, &path, |s| {
+        s.hooks_registered = true;
+        s.hook_registration_declined = false;
+        s.hook_install_version = crate::hooks::CURRENT_INSTALL_VERSION;
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
 }
@@ -88,14 +85,11 @@ pub fn skip_hook_registration(
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let snapshot = {
-        let mut g = state.settings.lock().unwrap();
-        g.hook_registration_declined = true;
-        g.bump_generation();
-        g.clone()
-    };
     let path = paths::settings_file().map_err(|e| e.to_string())?;
-    settings::save(&path, &snapshot).map_err(|e| e.to_string())?;
+    let snapshot = settings::mutate_and_save(&state.settings, &path, |s| {
+        s.hook_registration_declined = true;
+        Ok(())
+    })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())
 }

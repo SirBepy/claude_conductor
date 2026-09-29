@@ -3,6 +3,7 @@
 use crate::types::Settings;
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 // Re-export identity helpers so existing call sites that reach into
@@ -310,6 +311,31 @@ pub fn reconcile_save(updated: &mut Settings, current: &Settings) -> Result<(), 
     }
     updated.settings_generation = current.settings_generation.wrapping_add(1);
     Ok(())
+}
+
+/// Clones `settings`, applies `mutate` to the clone (which may reject the
+/// change before any save is attempted), bumps the clone's generation, saves
+/// it, and only on success commits the clone back as the new cache content -
+/// all under one continuous lock so no other writer can interleave between
+/// the read and the commit (todo 1020). On a failed mutate or a failed save
+/// the cache (and its generation) are left exactly as they were. Infallible
+/// callers just return `Ok(())` from `mutate`. Pure enough to unit-test
+/// directly: no `State`/`AppHandle` needed, just a `Mutex` and a path. This
+/// was three near-identical copies (hook_registration.rs, remote_access,
+/// projects.rs) before being consolidated here alongside `reconcile_save`,
+/// the other shared settings-write primitive.
+pub fn mutate_and_save(
+    settings: &Mutex<Settings>,
+    path: &Path,
+    mutate: impl FnOnce(&mut Settings) -> std::result::Result<(), String>,
+) -> std::result::Result<Settings, String> {
+    let mut guard = settings.lock().unwrap();
+    let mut candidate = guard.clone();
+    mutate(&mut candidate)?;
+    candidate.bump_generation();
+    save(path, &candidate).map_err(|e| e.to_string())?;
+    *guard = candidate.clone();
+    Ok(candidate)
 }
 
 #[cfg(test)]
@@ -956,5 +982,65 @@ mod tests {
 
         upsert_project_with_id_for_cwd(&mut s, "proj-1", dir.path(), "t2");
         assert_eq!(s.settings_generation, 1, "a no-op call for an already-registered project must not bump");
+    }
+
+    /// Parent-is-a-file forces `save`'s `create_dir_all` to fail,
+    /// deterministically and cross-platform (no reliance on OS
+    /// read-only-permission semantics).
+    fn unsavable_path(dir: &std::path::Path) -> std::path::PathBuf {
+        let blocker = dir.join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        blocker.join("settings.json")
+    }
+
+    #[test]
+    fn mutate_and_save_leaves_cache_unchanged_on_failed_save() {
+        let dir = tempdir().unwrap();
+        let bad_path = unsavable_path(dir.path());
+        let settings = Mutex::new(Settings::default());
+
+        let result = mutate_and_save(&settings, &bad_path, |s| {
+            s.hooks_registered = true;
+            Ok(())
+        });
+
+        assert!(result.is_err(), "save must fail against an unwritable path");
+        let cached = settings.lock().unwrap();
+        assert!(!cached.hooks_registered, "cache must not carry the unsaved mutation");
+        assert_eq!(cached.settings_generation, 0, "generation must not bump on a failed save");
+    }
+
+    #[test]
+    fn mutate_and_save_leaves_cache_unchanged_when_mutate_rejects() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Mutex::new(Settings::default());
+
+        let result = mutate_and_save(&settings, &path, |_s| {
+            Err("rejected before any save attempt".to_string())
+        });
+
+        assert!(result.is_err());
+        let cached = settings.lock().unwrap();
+        assert_eq!(cached.settings_generation, 0, "a mutate rejection must never reach save or bump generation");
+        assert!(!path.exists(), "a rejected mutate must never touch disk");
+    }
+
+    #[test]
+    fn mutate_and_save_commits_cache_on_successful_save() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Mutex::new(Settings::default());
+
+        let result = mutate_and_save(&settings, &path, |s| {
+            s.hooks_registered = true;
+            Ok(())
+        });
+
+        assert!(result.is_ok());
+        let cached = settings.lock().unwrap();
+        assert!(cached.hooks_registered);
+        assert_eq!(cached.settings_generation, 1);
+        assert!(path.exists(), "a successful save must land on disk");
     }
 }
