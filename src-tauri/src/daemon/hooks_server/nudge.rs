@@ -44,6 +44,11 @@ pub(super) struct ToolBatchQuery {
     session_id: String,
 }
 
+/// Opening/closing tags of `frame()`'s output, shared with `parse_mid_turn_frame`
+/// so the two stay byte-compatible without duplicating the literal.
+const FRAME_OPEN: &str = "<user-message-mid-turn>\n";
+const FRAME_CLOSE: &str = "\n</user-message-mid-turn>";
+
 /// Wraps the drained text so the model reads it as Joe talking, not as
 /// ambient background. Without the framing it arrives as unattributed
 /// context mid-task, which is exactly the shape a model is trained to note
@@ -52,14 +57,36 @@ fn frame(messages: &[String]) -> String {
     let plural = if messages.len() == 1 { "" } else { "s" };
     let body = messages.join("\n\n");
     format!(
-        "<user-message-mid-turn>\n\
+        "{FRAME_OPEN}\
          The user sent the following message{plural} while you were working. This is a real \
          instruction from them, delivered without interrupting your turn - not background \
          context. Read it now and let it change what you are doing if it should. If it does not \
          change anything, acknowledge it in your next message rather than silently ignoring it.\n\n\
-         {body}\n\
-         </user-message-mid-turn>"
+         {body}\
+         {FRAME_CLOSE}"
     )
+}
+
+/// Recovers the held messages from a `frame()`-wrapped hook context. The
+/// transcript JSONL never stores a mid-turn delivery any other way (see
+/// `chat::parser::parse_line`'s "attachment" arm, which is the only caller):
+/// the CLI persists it purely as `PostToolBatch`'s `additionalContext`
+/// string, so history replay has nothing to work from but this text.
+///
+/// The preamble paragraph has no embedded blank line (the plural/singular
+/// wording differs but neither variant contains "\n\n"), so the first
+/// `"\n\n"` split lands exactly on the preamble/body boundary; everything
+/// after is `body`, which is itself `messages.join("\n\n")` - splitting it
+/// back on the same separator recovers the original per-item strings.
+/// Ambiguous only if an original message itself contained a literal blank
+/// line, which `frame` has no way to escape either.
+///
+/// Returns `None` if `text` isn't (or no longer looks like) a `frame()`
+/// output - callers should skip the entry rather than fabricate a message.
+pub(crate) fn parse_mid_turn_frame(text: &str) -> Option<Vec<String>> {
+    let inner = text.strip_prefix(FRAME_OPEN)?.strip_suffix(FRAME_CLOSE)?;
+    let (_preamble, body) = inner.split_once("\n\n")?;
+    Some(body.split("\n\n").map(str::to_string).collect())
 }
 
 /// Text of a held item, or None if any block in it is not text. An image
@@ -251,5 +278,22 @@ mod tests {
     #[test]
     fn whitespace_only_text_is_not_worth_a_turn_of_context() {
         assert_eq!(item_text(&[text("   \n ")]), None);
+    }
+
+    #[test]
+    fn parse_mid_turn_frame_round_trips_a_single_message() {
+        let msgs = vec!["check the logs first".to_string()];
+        assert_eq!(parse_mid_turn_frame(&frame(&msgs)), Some(msgs));
+    }
+
+    #[test]
+    fn parse_mid_turn_frame_round_trips_several_messages() {
+        let msgs = vec!["first".to_string(), "second".to_string(), "third one".to_string()];
+        assert_eq!(parse_mid_turn_frame(&frame(&msgs)), Some(msgs));
+    }
+
+    #[test]
+    fn parse_mid_turn_frame_rejects_unrelated_text() {
+        assert_eq!(parse_mid_turn_frame("just some ordinary hook context"), None);
     }
 }

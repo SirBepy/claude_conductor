@@ -462,6 +462,47 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
         }],
         // "result" is handled by ParserContext::parse_result_line (stateful:
         // needs has_thinking). If it reaches here somehow, drop it.
+        // A `PostToolBatch` mid-turn delivery (`daemon::hooks_server::nudge`)
+        // is written to the transcript as an `attachment` line, never as a
+        // `user` line - the CLI doesn't echo injected hook context back as a
+        // real message. Without this arm that message is invisible to any
+        // rebuild from the JSONL (todo 1018): it renders live via the
+        // `held_messages_delivered` notifier event, but a resync/reload reads
+        // only this file and drops it. Two attachment lines exist for the
+        // same delivery (`hook_success`'s stdout blob and
+        // `hook_additional_context`'s own `content` array); only the latter
+        // is parsed; the former is skipped to avoid double-counting.
+        "attachment" => {
+            let Some(attachment) = v.get("attachment") else { return vec![]; };
+            if attachment.get("type").and_then(|t| t.as_str()) != Some("hook_additional_context") {
+                return vec![];
+            }
+            let Some(content) = attachment.get("content").and_then(|c| c.as_array()) else { return vec![]; };
+            let mut evs = Vec::new();
+            for item in content {
+                let Some(text) = item.as_str() else { continue };
+                let Some(messages) = crate::daemon::hooks_server::nudge::parse_mid_turn_frame(text) else { continue };
+                // One bubble per delivery, one content block per delivered
+                // item - matches the live path's `held_messages_delivered`
+                // handler (sessions-wiring.ts), which pushes a single
+                // synthetic user_message whose `content` is the whole
+                // `blocks` array so the resync dedup sig (event-store's
+                // `contentText`, concatenation with no separator) lines up.
+                let content_blocks: Vec<ContentBlock> =
+                    messages.into_iter().map(|text| ContentBlock::Text { text }).collect();
+                if content_blocks.is_empty() {
+                    continue;
+                }
+                evs.push(ChatEvent::UserMessage {
+                    content: content_blocks,
+                    timestamp: ts,
+                    remote_echo: false,
+                    is_meta: false,
+                    author_session_id: None,
+                });
+            }
+            evs
+        }
         "result" => vec![],
         "rate_limit_event" => {
             let info = v.get("rate_limit_info").cloned().unwrap_or(Value::Null);
@@ -1387,5 +1428,67 @@ mod tests {
         // The second block's chunk carries a new ordinal so downstream
         // accumulators know to reset instead of appending across blocks.
         assert_eq!(deltas, vec![("First".to_string(), 1), ("Second".to_string(), 2)]);
+    }
+
+    // todo 1018: a message typed mid-turn is delivered by the PostToolBatch
+    // hook (daemon::hooks_server::nudge) straight into the running turn, and
+    // the CLI persists that delivery to the transcript only as an
+    // `attachment`/`hook_additional_context` line - never as a `user` line.
+    // Before this arm existed, `parse_line` fell through to `_ => vec![]` for
+    // `type: "attachment"`, so any rebuild from the JSONL (resync/reload)
+    // silently dropped the message even though it was live-rendered as sent.
+    #[test]
+    fn attachment_hook_additional_context_recovers_mid_turn_message_as_user_row() {
+        let line = r#"{"type":"attachment","attachment":{"type":"hook_additional_context","content":["<user-message-mid-turn>\nThe user sent the following message while you were working. This is a real instruction from them, delivered without interrupting your turn - not background context. Read it now and let it change what you are doing if it should. If it does not change anything, acknowledge it in your next message rather than silently ignoring it.\n\nNow reply with only the word BETA and nothing else.\n</user-message-mid-turn>"],"hookName":"PostToolBatch"},"timestamp":"2026-09-29T11:38:02.201Z"}"#;
+        let evs = parse_line(line);
+        assert_eq!(evs.len(), 1, "exactly one recovered row, got {evs:?}");
+        match &evs[0] {
+            ChatEvent::UserMessage { content, is_meta, .. } => {
+                assert!(!is_meta, "a real typed message must not be flagged is_meta");
+                assert_eq!(content.len(), 1);
+                match &content[0] {
+                    ContentBlock::Text { text } => {
+                        assert_eq!(text, "Now reply with only the word BETA and nothing else.");
+                    }
+                    other => panic!("expected text block, got {other:?}"),
+                }
+            }
+            other => panic!("expected UserMessage, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn attachment_hook_success_variant_is_skipped_to_avoid_double_counting() {
+        // The transcript always carries BOTH the raw hook_success stdout blob
+        // and the cleaner hook_additional_context array for the same
+        // delivery - only the latter must be parsed, or every mid-turn
+        // message would render twice.
+        let line = r#"{"type":"attachment","attachment":{"type":"hook_success","hookName":"PostToolBatch","stdout":"{\"hookSpecificOutput\":{\"additionalContext\":\"<user-message-mid-turn>\\nThe user sent the following message while you were working.\\n\\nhi\\n</user-message-mid-turn>\"}}"},"timestamp":1}"#;
+        let evs = parse_line(line);
+        assert!(evs.is_empty(), "hook_success must not itself produce a row");
+    }
+
+    #[test]
+    fn attachment_with_several_held_messages_recovers_one_row_with_one_block_each() {
+        // Matches the live path (sessions-wiring.ts's held-messages-delivered
+        // handler): several items delivered in the same batch render as ONE
+        // user_message bubble carrying one content block per item, not one
+        // bubble per item.
+        let line = r#"{"type":"attachment","attachment":{"type":"hook_additional_context","content":["<user-message-mid-turn>\nThe user sent the following messages while you were working.\n\nfirst\n\nsecond\n</user-message-mid-turn>"]},"timestamp":1}"#;
+        let evs = parse_line(line);
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            ChatEvent::UserMessage { content, .. } => {
+                let texts: Vec<&str> = content
+                    .iter()
+                    .map(|b| match b {
+                        ContentBlock::Text { text } => text.as_str(),
+                        _ => panic!("expected text blocks only"),
+                    })
+                    .collect();
+                assert_eq!(texts, vec!["first", "second"]);
+            }
+            other => panic!("expected UserMessage, got {other:?}"),
+        }
     }
 }

@@ -18,7 +18,10 @@ mod drafts;
 mod jarvis;
 mod lifecycle;
 mod messages;
-mod nudge;
+// pub(crate): chat::parser's "attachment" arm needs parse_mid_turn_frame to
+// recover a mid-turn delivery's text from the transcript JSONL (that hook
+// context string is the only place the CLI persists it).
+pub(crate) mod nudge;
 mod permission;
 mod plan;
 mod preview;
