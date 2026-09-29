@@ -101,6 +101,9 @@ jobs:
       - name: Typecheck
         run: pnpm tsc --noEmit
 
+      - name: Check CSS custom properties
+        run: pnpm run check:css-vars
+
       - name: Frontend unit tests
         run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
 
