@@ -172,9 +172,9 @@ test.describe("view-harness / project picker favourites rail", () => {
     expect(slots.filter((s) => s === "C:/Projects/zng-app")).toHaveLength(1);
   });
 
-  test("pressing the slot's number opens it, skipping the Location step", async ({ page }) => {
+  test("ctrl+number opens the slot, skipping the Location step", async ({ page }) => {
     // fibo has a worktree AND more than one CLAUDE.md scope, so the normal
-    // click path would stop at the Location card. The number key must not.
+    // click path would stop at the Location card. The shortcut must not.
     await mountView(page, {
       invoke: {
         ...BASE_INVOKE,
@@ -196,25 +196,35 @@ test.describe("view-harness / project picker favourites rail", () => {
     });
     await page.waitForSelector(".pp-fav-slot");
 
-    await page.locator("#project-picker-search").press("1");
+    await page.locator("#project-picker-search").press("Control+1");
 
     await expect(page.locator(".project-picker-modal")).toHaveCount(0);
     await expect(page.locator(".loc-picker-modal, .loc-field")).toHaveCount(0);
   });
 
-  test("a number key is a literal character once the search box has text", async ({ page }) => {
+  test("a bare number key is always a literal character, even once the search box has text", async ({ page }) => {
     await openPicker(page, ["C:/Projects/zng-app", null, null, null, null, null, null, null, null]);
 
     const search = page.locator("#project-picker-search");
     await search.fill("fib");
     await search.press("1");
 
-    // Still in the picker, and the digit typed through.
+    // Still in the picker, and the digit typed through - the shortcut needs ctrl/cmd now.
     await expect(page.locator(".project-picker-modal")).toHaveCount(1);
     await expect(search).toHaveValue("fib1");
   });
 
-  test("a number key whose slot is empty types through instead of being swallowed", async ({ page }) => {
+  test("a bare number key types through even when that slot is filled - ctrl is required to trigger it", async ({ page }) => {
+    await openPicker(page, [null, null, null, null, null, null, "C:/Projects/countoff", null, null]);
+
+    const search = page.locator("#project-picker-search");
+    await search.press("7");
+
+    await expect(page.locator(".project-picker-modal")).toHaveCount(1);
+    await expect(search).toHaveValue("7");
+  });
+
+  test("a bare number key whose slot is empty types through instead of being swallowed", async ({ page }) => {
     await openPicker(page);
 
     const search = page.locator("#project-picker-search");
@@ -224,14 +234,14 @@ test.describe("view-harness / project picker favourites rail", () => {
     await expect(search).toHaveValue("7");
   });
 
-  test("a slot pointing at a project that is gone keeps its number and is inert", async ({ page }) => {
+  test("a slot pointing at a project that is gone keeps its number and is inert to ctrl+number too", async ({ page }) => {
     await openPicker(page, ["C:/Projects/deleted-long-ago", null, null, null, null, null, null, null, null]);
 
     const slot = page.locator('[data-slot="0"]');
     await expect(slot).toHaveClass(/is-unresolved/);
     await expect(page.locator(".pp-fav-slot")).toHaveCount(9);
 
-    await page.locator("#project-picker-search").press("1");
+    await page.locator("#project-picker-search").press("Control+1");
     await expect(page.locator(".project-picker-modal")).toHaveCount(1);
   });
 });

@@ -419,7 +419,7 @@ export function openProjectPickerModal(
     const renderFavoriteRail = () => {
       if (isRemote() || machineField.machineId !== null) return "";
       return html`
-        <div class="pp-fav-rail" role="group" aria-label="Favourite projects, keys 1 to 9">
+        <div class="pp-fav-rail" role="group" aria-label="Favourite projects, keys ctrl+1 to ctrl+9">
           ${Array.from({ length: SLOT_COUNT }, (_, i) => {
             const path = favorites[i] ?? null;
             const p = path ? projectByPath(path) : undefined;
@@ -432,7 +432,7 @@ export function openProjectPickerModal(
               <div
                 class="pp-fav-slot${path === null ? " is-empty" : ""}${unresolved ? " is-unresolved" : ""}${dragOverSlot === i ? " is-target" : ""}"
                 data-slot=${i}
-                title=${p ? `${p.name} - press ${i + 1}` : (path ?? `Empty - drag a project here for key ${i + 1}`)}
+                title=${p ? `${p.name} - press ctrl+${i + 1}` : (path ?? `Empty - drag a project here for ctrl+${i + 1}`)}
                 aria-label=${label}
                 draggable=${path !== null}
                 @click=${() => { if (path) openFavorite(path); }}
@@ -543,12 +543,11 @@ export function openProjectPickerModal(
                 renderModal();
               }}
               @keydown=${(e: KeyboardEvent) => {
-                // Favourite keys 1-9. Intercepted only when the search box is
-                // EMPTY and that slot is actually filled, so a digit is still
-                // a literal character the moment either is untrue - typing
-                // "2048-game", or pressing 7 with slot 7 empty, both behave
-                // exactly as before. Modifier combos are left to the OS.
-                if (filter === "" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                // Favourite keys ctrl+1..ctrl+9, same modifier as the Chats
+                // view's ctrl+1..ctrl+9 chat switcher. Ctrl/Cmd never types a
+                // character into the search box, so this fires regardless of
+                // whatever is already typed there.
+                if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
                   const favPath = pathForKey(favorites, e.key);
                   if (favPath && openFavorite(favPath)) {
                     e.preventDefault();
