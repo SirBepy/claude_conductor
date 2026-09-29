@@ -63,7 +63,7 @@
   font-size: 0.68rem;
   font-weight: 600;
   color: var(--color-text-muted);
-  background: var(--color-surface-3, rgba(255, 255, 255, 0.06));
+  background: var(--color-surface-3);
 }
 /* Diagnostic marker for the Rust-side hard-block hang-safety fallback -
    subtle, not an error state. */
@@ -142,7 +142,7 @@
    muted/italic chip hinting a note exists. The card's own <details> open/close
    is the only toggle - no separate expand affordance on the chip itself. */
 .question-card-extra-chip {
-  background: var(--color-surface-3, rgba(255, 255, 255, 0.06));
+  background: var(--color-surface-3);
   color: var(--color-text-muted);
   border-radius: 8px;
   padding: 1px 7px;
@@ -164,13 +164,3 @@
   white-space: nowrap;
 }
 
-/* Read-only option labels (inline rendering; interaction is in the modal) */
-.ask-option-label {
-  display: inline-block;
-  background: var(--color-surface-3, #2a2a2a);
-  border: 1px solid var(--color-border, rgba(255,255,255,0.15));
-  border-radius: 6px;
-  color: var(--color-text-secondary, #c0c0c0);
-  padding: 4px 10px;
-  font-size: 12px;
-}

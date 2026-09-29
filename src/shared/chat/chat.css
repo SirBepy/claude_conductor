@@ -9,7 +9,6 @@
  *  - chat-messages-blocks.css:    copy buttons, code/card blocks, links, attachments/CTA
  *  - composer.css:           composer input, attachments, file chips, drag-over state
  *  - chat-tool-row.css:      base .tool-row/.tool-row-summary chip row
- *  - chat-tool-qa.css:       inline AskUserQuestion rendering (pre-answer)
  *  - chat-tool-strip.css:    inline tool chip strip + .tool-strip-group nesting
  *  - chat-tool-file-row.css: .tool-file-row / .tool-skill-row / .tool-qa panels
  *  - chat-question-card.css: AUQ question card (post-answer, first-class message)
@@ -35,7 +34,6 @@
 @import "./chat-messages-blocks.css";
 @import "./composer.css";
 @import "./chat-tool-row.css";
-@import "./chat-tool-qa.css";
 @import "./chat-tool-strip.css";
 @import "./chat-tool-file-row.css";
 @import "./chat-question-card.css";

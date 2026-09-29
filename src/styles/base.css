@@ -9,6 +9,10 @@
        every site used to pin its own fallback hex here, six different
        yellows. One declaration so the colour is a one-line flip. */
     --color-warning: #e5a040;
+
+    /* The kit ladders only two surface steps; chips drawn on a --color-surface-alt
+       container need a third that stays distinct in every theme and mode. */
+    --color-surface-3: color-mix(in srgb, var(--color-surface-alt) 85%, var(--color-text) 15%);
 }
 
 *, *::before, *::after {
