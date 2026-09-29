@@ -4,6 +4,7 @@ import { modalCardSlot, presentHostCard, setBackdropCancel, registerHostOptions 
 import { askConfirm } from "../../shared/confirm";
 import { randomName } from "../../shared/random-name";
 import type { ProjectGroup, WorktreeDetail, BranchEntry } from "../../types/ipc.generated";
+import { restoreFocus } from "./restore-focus";
 
 type Step = "choice" | "existing" | "new";
 
@@ -38,7 +39,7 @@ export function openWorktreePickerModal(project: ProjectGroup): Promise<{ path: 
       if (baseExpanded) { baseExpanded = false; baseFilter = ""; renderModal(); return; }
       if (step !== "choice") { step = "choice"; renderModal(); return; }
       finish(null);
-      trigger?.focus?.();
+      restoreFocus(trigger);
     };
     document.addEventListener("keydown", keydownHandler);
 

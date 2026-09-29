@@ -3,6 +3,7 @@ import { invoke } from "../../shared/ipc";
 import { RemoteUnavailableError } from "../../shared/http-transport";
 import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { openWorktreePickerModal } from "./worktree-picker";
+import { restoreFocus } from "./restore-focus";
 import type { ProjectGroup, ClaudeMdScope } from "../../types/ipc.generated";
 import "./location-picker.css";
 
@@ -151,7 +152,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
         e.preventDefault();
         if (scopeExpanded) { toggleScopeField(); return; }
         finish(null);
-        trigger?.focus?.();
+        restoreFocus(trigger);
       }
     };
     document.addEventListener("keydown", keydownHandler);

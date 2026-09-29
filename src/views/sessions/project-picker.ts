@@ -6,6 +6,7 @@ import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBack
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openLocationModal, resolveRememberedLocation } from "./location-picker";
+import { restoreFocus } from "./restore-focus";
 import {
   SLOT_COUNT,
   type FavoriteSlots,
@@ -232,7 +233,7 @@ export function openProjectPickerModal(
       if (document.activeElement?.id === "project-picker-search") return;
       e.preventDefault();
       finish(null);
-      trigger?.focus?.();
+      restoreFocus(trigger);
     };
     document.addEventListener("keydown", onEscapeKeydown);
 
@@ -562,7 +563,7 @@ export function openProjectPickerModal(
                     renderModal();
                   } else {
                     finish(null);
-                    trigger?.focus?.();
+                    restoreFocus(trigger);
                   }
                 } else if (e.key === "Enter") {
                   const matches = computeRows();
