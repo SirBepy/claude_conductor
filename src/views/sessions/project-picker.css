@@ -250,9 +250,9 @@
   line-height: 1;
   padding: 2px 6px;
   border-radius: 10px;
-  background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.25);
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+  color: var(--color-warning);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 25%, transparent);
   white-space: nowrap;
 }
 .project-picker-modal .modal-footer {

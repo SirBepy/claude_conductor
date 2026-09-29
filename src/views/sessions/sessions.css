@@ -3,7 +3,7 @@
    distinct states may share a border/row colour by accident. Each render site
    (sidebar dot, sidebar icon, avatar strip, header ring, closing bar) reads
    from the --chat-state-* tokens below via the --st-* bindings - never a
-   hard-coded hex.
+   hard-coded hex, with two documented exemptions below the table.
 
    STATE          HUE     HEX        MEANING
    ───────────────────────────────────────────────────────────────────────────
@@ -29,6 +29,19 @@
                                       directly (not via --st-*) by the portrait
                                       rate-limited dot so it doesn't duplicate
                                       the red needs-input/closing family.
+   ───────────────────────────────────────────────────────────────────────────
+
+   Two families elsewhere in this file (and one in project-picker.css) share
+   the busy yellow by coincidence, not meaning, so neither binds to
+   --chat-state-busy / --st-working:
+
+   - Attention affordances (.readonly-banner with its .refresh-btn and
+     .takeover-btn, and project-picker.css's .project-picker-todo-badge) read
+     var(--color-warning) from src/styles/base.css.
+   - The "this menu toggle is on" family (.view-header .more-btn's
+     has-indicator dot, .smore-has-sub.is-on, .smore-item.is-on,
+     .smore-check-dot) stays a literal #fbbf24: it marks unrelated toggles
+     (when-done armed, auto-accept, raw view), so no single state token fits.
    ─────────────────────────────────────────────────────────────────────────── */
 :root {
   --chat-state-closing:      #ef4444;
@@ -328,19 +341,7 @@
   pointer-events: none;
 }
 
-.session-header .more-btn.has-indicator::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  top: 3px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #fbbf24;
-  box-shadow: 0 0 0 2px var(--color-surface-alt);
-}
-
-/* View-header "more options" button indicator (mirrors .session-header). */
+/* View-header "more options" button indicator: when-done armed. */
 .view-header .more-btn {
   position: relative;
 }
@@ -506,14 +507,6 @@
   flex-shrink: 0;
 }
 
-.smore-item.smore-auto-accept.is-on {
-  color: #fbbf24;
-}
-
-.smore-item.smore-auto-accept.is-on i {
-  color: #fbbf24;
-}
-
 .smore-check-dot {
   display: inline-block;
   width: 6px;
@@ -549,9 +542,9 @@
 }
 
 .readonly-banner {
-  background: rgba(251, 191, 36, 0.08);
-  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
-  color: #fbbf24;
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 25%, transparent);
+  color: var(--color-warning);
   font-size: 0.82rem;
   padding: 0 16px;
   display: flex;
@@ -572,8 +565,8 @@
 
 .readonly-banner .refresh-btn {
   background: transparent;
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fbbf24;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  color: var(--color-warning);
   font-size: 1rem;
   width: 28px;
   height: 28px;
@@ -587,16 +580,16 @@
 }
 
 .readonly-banner .refresh-btn:hover {
-  background: rgba(251, 191, 36, 0.15);
+  background: color-mix(in srgb, var(--color-warning) 15%, transparent);
 }
 
 .readonly-banner .refresh-btn:active {
-  background: rgba(251, 191, 36, 0.25);
+  background: color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 .readonly-banner .takeover-btn {
-  background: rgba(251, 191, 36, 0.18);
-  border: 1px solid rgba(251, 191, 36, 0.5);
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 50%, transparent);
   color: var(--color-text);
   font-size: 0.82rem;
   font-weight: 600;
@@ -607,11 +600,11 @@
 }
 
 .readonly-banner .takeover-btn:hover {
-  background: rgba(251, 191, 36, 0.3);
+  background: color-mix(in srgb, var(--color-warning) 30%, transparent);
 }
 
 .readonly-banner .takeover-btn:active {
-  background: rgba(251, 191, 36, 0.4);
+  background: color-mix(in srgb, var(--color-warning) 40%, transparent);
 }
 
 .session-messages {
