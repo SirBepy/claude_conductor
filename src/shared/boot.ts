@@ -24,6 +24,7 @@ import type { TokenRecord, AliasMap } from "./tokens";
 import { doMerge } from "./merges";
 import { showToast } from "./toast";
 import { api } from "./api";
+import type { HookRegistrationState } from "./api";
 import { curateLatestPerFamily, setApiModels } from "./effort-presets";
 import { refreshDashboardView } from "../views/dashboard/dashboard";
 import { renderProjectsList } from "../views/projects/projects";
@@ -111,8 +112,13 @@ async function runDeadPathCheck(): Promise<void> {
 
 // ── Hook-registration consent modal ────────────────────────────────────────
 async function renderHookModalPreview(): Promise<void> {
-  const state = await api.getHookRegistrationState();
-  const port = state?.port ?? "?";
+  let port: number | string | null = "?";
+  try {
+    const state = await api.getHookRegistrationState();
+    port = state?.port ?? "?";
+  } catch (e) {
+    console.error("get_hook_registration_state failed", e);
+  }
   const preview = [
     `"hooks": {`,
     `  "SessionStart": [{`,
@@ -142,14 +148,21 @@ function showHookModal(): void {
   void renderHookModalPreview();
 }
 
-async function maybeShowHookModal(): Promise<void> {
+export async function maybeShowHookModal(): Promise<void> {
   // Hook registration installs a SessionStart hook on THIS machine so local
   // `claude` instances surface in the app. It is meaningless on the remote
   // phone browser (which has no local machine to instrument) and the RPC isn't
   // served there, so the desktop-only check below keeps the modal from popping
   // on the phone home screen. The phone mirrors the desktop's state instead.
   if (isRemote()) return;
-  const state = await api.getHookRegistrationState();
+  let state: HookRegistrationState;
+  try {
+    state = await api.getHookRegistrationState();
+  } catch (e) {
+    // A failed read must not decide the nag's visibility, so it stays hidden.
+    console.error("get_hook_registration_state failed", e);
+    return;
+  }
   if (!state || state.registered || state.declined) return;
   showHookModal();
 }

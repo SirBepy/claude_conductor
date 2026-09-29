@@ -336,10 +336,10 @@ export const api = {
     try { return (await invoke<[string, string] | null>("take_pending_chat_open")) ?? null; }
     catch (e) { console.error("take_pending_chat_open failed", e); return null; }
   },
-  getSessionConfig: async (sessionId: string): Promise<{ model: string; effort: string } | null> => {
-    try { return (await invoke<{ model: string; effort: string } | null>("get_session_config", { sessionId })) ?? null; }
-    catch (e) { console.error("get_session_config failed", e); return null; }
-  },
+  // Rejects on failure: null means "no config recorded", so a swallowed error
+  // would be indistinguishable from it.
+  getSessionConfig: (sessionId: string): Promise<{ model: string; effort: string } | null> =>
+    invoke<{ model: string; effort: string } | null>("get_session_config", { sessionId }).then((r) => r ?? null),
 
   // --- File system ---
   checkPathsExist: async (paths: string[]): Promise<Record<string, boolean>> => {
@@ -560,13 +560,10 @@ export const api = {
     invoke("list_machine_projects", { machineId }),
 
   // --- Hook registration ---
-  getHookRegistrationState: async (): Promise<HookRegistrationState> => {
-    try { return await invoke<HookRegistrationState>("get_hook_registration_state"); }
-    catch (e) {
-      console.error("get_hook_registration_state failed", e);
-      return { registered: false, declined: false, port: null };
-    }
-  },
+  // Rejects on failure: any fallback value would read as a real "registered /
+  // declined" answer and flip the onboarding nag.
+  getHookRegistrationState: (): Promise<HookRegistrationState> =>
+    invoke<HookRegistrationState>("get_hook_registration_state"),
   registerHooksGlobally: async (): Promise<void> => {
     try { await invoke("register_hooks_globally"); }
     catch (e) { console.error("register_hooks_globally failed", e); throw e; }
