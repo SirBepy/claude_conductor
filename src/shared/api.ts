@@ -292,8 +292,6 @@ export const api = {
   /** One-shot: a message the first call after a startup that had to salvage
    * or reset settings.json, `null` otherwise (see `get_settings_load_notice`). */
   getSettingsLoadNotice: (): Promise<string | null> => invoke("get_settings_load_notice"),
-  saveSettings: (settings: SettingsShape): Promise<unknown> =>
-    invoke("save_settings", { updated: settings }),
   /** Persist the floating overlay's parked position (physical px) so it
    * reopens where the user last dragged/flicked it. */
   saveOverlayPosition: (x: number, y: number): Promise<unknown> =>

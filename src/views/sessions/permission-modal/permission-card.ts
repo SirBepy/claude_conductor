@@ -1,4 +1,5 @@
 import { invoke } from "../../../shared/ipc";
+import { updateSettings } from "../../../shared/settings-update";
 import { escapeHtml } from "../../../shared/escape-html";
 import { buildRule, describeRule, isDestructive, withAddedRule } from "../permission-rules";
 import { clearHost, ensureHost, renderCardShell } from "./host";
@@ -85,9 +86,7 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
   const alwaysAllow = async () => {
     if (!cwd) { void respond("allow"); return; }
     try {
-      const settings = await invoke<Record<string, unknown>>("get_settings");
-      const updated = withAddedRule(settings, cwd, rule);
-      await invoke("save_settings", { updated });
+      await updateSettings((settings) => withAddedRule(settings, cwd, rule));
     } catch (e) {
       console.warn("[perm-rules] save rule failed:", e);
     }

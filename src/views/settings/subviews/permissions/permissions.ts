@@ -1,5 +1,6 @@
 import { html, render } from "lit-html";
 import { invoke } from "../../../../shared/ipc";
+import { updateSettings } from "../../../../shared/settings-update";
 import { escapeHtml } from "../../../../shared/escape-html";
 import {
   loadAllRules,
@@ -88,10 +89,8 @@ export async function renderPermissionsView(root: HTMLElement): Promise<() => vo
         const cwd = row.dataset.cwd;
         const ruleRaw = row.dataset.rule;
         if (!cwd || !ruleRaw) return;
-        const updated = withRemovedRule(settings, cwd, ruleRaw);
         try {
-          await invoke("save_settings", { updated });
-          settings = updated;
+          settings = await updateSettings((fresh) => withRemovedRule(fresh, cwd, ruleRaw));
           rerender();
         } catch (e) {
           console.warn("[permissions] save_settings failed:", e);
@@ -107,14 +106,15 @@ export async function renderPermissionsView(root: HTMLElement): Promise<() => vo
         if (!cwd) return;
         const ok = await askConfirm(`Remove every remembered permission for ${escapeHtml(cwd)}?`, { confirmLabel: "Remove" });
         if (!ok) return;
-        let updated = settings;
-        const rules = loadAllRules(settings)[cwd] ?? [];
-        for (const rule of rules) {
-          updated = withRemovedRule(updated, cwd, rule.raw);
-        }
         try {
-          await invoke("save_settings", { updated });
-          settings = updated;
+          settings = await updateSettings((fresh) => {
+            let updated = fresh;
+            const rules = loadAllRules(fresh)[cwd] ?? [];
+            for (const rule of rules) {
+              updated = withRemovedRule(updated, cwd, rule.raw);
+            }
+            return updated;
+          });
           rerender();
         } catch (e) {
           console.warn("[permissions] save_settings failed:", e);

@@ -1,6 +1,7 @@
 import { html, render } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { invoke } from "../../shared/ipc";
+import { updateSettings } from "../../shared/settings-update";
 import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
 import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
@@ -328,8 +329,7 @@ export function openProjectPickerModal(
       if (!picked) return;
       projectsRootStored = picked;
       try {
-        const cur = await invoke<Record<string, unknown>>("get_settings");
-        await invoke("save_settings", { updated: { ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: picked } });
+        await updateSettings((cur) => ({ ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: picked }));
       } catch (e) {
         console.error("[project-picker] failed to persist the projects root", e);
       }
@@ -354,8 +354,7 @@ export function openProjectPickerModal(
         return;
       }
       try {
-        const cur = await invoke<Record<string, unknown>>("get_settings");
-        await invoke("save_settings", { updated: { ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: root } });
+        await updateSettings((cur) => ({ ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: root }));
       } catch { /* the folder exists either way; remembering is best-effort */ }
       finish({ path: fullPath, name: name.trim(), machineId: null });
     };

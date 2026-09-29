@@ -1,4 +1,5 @@
 import { invoke } from "../../shared/ipc";
+import { updateSettings } from "../../shared/settings-update";
 import { escapeHtml } from "../../shared/escape-html";
 import { lockInputToHost } from "../../shared/modal-input-lock";
 
@@ -18,8 +19,7 @@ async function readLastParent(): Promise<string> {
 
 async function saveLastParent(path: string): Promise<void> {
   try {
-    const cur = await invoke<Record<string, unknown>>("get_settings");
-    await invoke("save_settings", { updated: { ...cur, [LAST_PARENT_KEY]: path } });
+    await updateSettings((cur) => ({ ...cur, [LAST_PARENT_KEY]: path }));
   } catch { /* ignore */ }
 }
 

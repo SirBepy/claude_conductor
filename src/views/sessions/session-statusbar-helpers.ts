@@ -1,4 +1,5 @@
 import { invoke } from "../../shared/ipc";
+import { updateSettings } from "../../shared/settings-update";
 import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus, ChatDrain } from "../../types/ipc.generated";
 import { modelLabel } from "../../shared/model-name";
@@ -80,13 +81,16 @@ export async function migrateStatuslineToV2(): Promise<void> {
   try {
     const s = await invoke<Record<string, unknown>>("get_settings");
     if (s[V2_FLAG] === true) return;
-    await invoke("save_settings", {
-      updated: {
-        ...s,
+    await updateSettings((fresh) => {
+      // Re-check: `updateSettings` re-reads on a stale retry, and a
+      // concurrent call could have already applied this one-time migration.
+      if (fresh[V2_FLAG] === true) return fresh;
+      return {
+        ...fresh,
         statuslineRows: profileDefaultRows("desktop"),
         statuslineRowsMobile: profileDefaultRows("mobile"),
         [V2_FLAG]: true,
-      },
+      };
     });
   } catch (e) {
     console.error("[statusbar] statusline v2 migration failed", e);
@@ -106,7 +110,7 @@ export async function loadStatuslineRows(profile: StatuslineProfile = activeProf
     if (legacyFields) {
       const hidden = Array.isArray(s["tallyHiddenTools"]) ? (s["tallyHiddenTools"] as string[]) : [];
       const migrated = migrateLegacyFields(legacyFields, hidden);
-      await invoke("save_settings", { updated: { ...s, statuslineRows: migrated } });
+      await updateSettings((fresh) => ({ ...fresh, statuslineRows: migrated }));
       return migrated;
     }
   } catch { /* ignore */ }
@@ -118,10 +122,9 @@ export async function saveStatuslineRows(
   profile: StatuslineProfile = activeProfile(),
 ): Promise<void> {
   try {
-    const s = await invoke<Record<string, unknown>>("get_settings");
     const max = profileMaxRows(profile);
     const clean = (sanitizeRows(rows, max) ?? []).slice(0, max);
-    await invoke("save_settings", { updated: { ...s, [PROFILE_KEY[profile]]: clean } });
+    await updateSettings((s) => ({ ...s, [PROFILE_KEY[profile]]: clean }));
   } catch (e) {
     console.error("[statusbar] save rows failed", e);
   }
@@ -137,8 +140,7 @@ export async function loadStatuslineHideZero(): Promise<boolean> {
 
 export async function saveStatuslineHideZero(hide: boolean): Promise<void> {
   try {
-    const s = await invoke<Record<string, unknown>>("get_settings");
-    await invoke("save_settings", { updated: { ...s, statuslineHideZero: hide } });
+    await updateSettings((s) => ({ ...s, statuslineHideZero: hide }));
   } catch (e) {
     console.error("[statusbar] save hideZero failed", e);
   }

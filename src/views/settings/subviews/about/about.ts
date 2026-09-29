@@ -6,7 +6,8 @@ import {
   type AutoUpdateMode,
 } from "../../../../../vendor/tauri_kit/frontend/settings/pages/about";
 import { api, type UpdateState } from "../../../../shared/api";
-import { getSettings, setSettings } from "../../../../shared/state";
+import { getSettings } from "../../../../shared/state";
+import { updateSettings } from "../../../../shared/settings-update";
 import { settingsHeader } from "../../ui";
 
 function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
@@ -89,9 +90,11 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
     autoUpdate: initialAutoUpdate,
     onAutoUpdateChange: (mode) => {
       deps.autoUpdate = mode;
-      const updated = { ...getSettings(), autoUpdate: mode };
-      setSettings(updated);
-      void api.saveSettings(updated);
+      // Fresh-read + retry (todo 1004): building from the frontend's own
+      // settings cache could revert a concurrent daemon-owned write.
+      void updateSettings((fresh) => ({ ...fresh, autoUpdate: mode })).catch((e) => {
+        console.error("[about] failed to save autoUpdate", e);
+      });
     },
     onCheckNow: async () => {
       await api.checkForUpdates();

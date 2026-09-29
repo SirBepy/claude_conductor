@@ -1,6 +1,7 @@
 import { html, render } from "lit-html";
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
+import { updateSettings } from "../../shared/settings-update";
 import { api } from "../../shared/api";
 import type { Account } from "../../shared/api";
 import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel, registerHostOptions } from "../../shared/modal";
@@ -188,12 +189,13 @@ export async function openModelEffortModal(
 
     async function persistChoice(): Promise<void> {
       try {
-        const cur = (await invoke<Record<string, unknown> | null>("get_settings")) ?? {};
-        const lc = (cur["projectLastChoice"] && typeof cur["projectLastChoice"] === "object")
-          ? { ...(cur["projectLastChoice"] as Record<string, unknown>) }
-          : {};
-        lc[projectPath] = { model, effort };
-        await invoke("save_settings", { updated: { ...cur, projectLastChoice: lc } });
+        await updateSettings((cur) => {
+          const lc = (cur["projectLastChoice"] && typeof cur["projectLastChoice"] === "object")
+            ? { ...(cur["projectLastChoice"] as Record<string, unknown>) }
+            : {};
+          lc[projectPath] = { model, effort };
+          return { ...cur, projectLastChoice: lc };
+        });
       } catch (e) {
         console.error("[model-effort-modal] save_settings failed", e);
       }

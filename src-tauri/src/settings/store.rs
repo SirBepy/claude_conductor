@@ -274,84 +274,42 @@ pub fn persist(app: &AppHandle, snapshot: &Settings) {
     let _ = app.emit("settings-changed", snapshot);
 }
 
-/// Reconciles the three fields a running daemon can mutate out from under an
-/// open Settings panel - project auto-registration, character assignment, the
-/// Jarvis singleton id (see `daemon_link/handlers.rs`'s `handle_project_created`
-/// / `handle_session_character_assigned` / `handle_jarvis_session_created`) -
-/// so a frontend `save_settings` built from a snapshot read before one of
-/// those lands can't silently revert it (settings-loss audit, confirmed
-/// reachable path).
-///
-/// All three are additive-only on the daemon side: `upsert_project_with_id_for_cwd`
-/// only ever appends a project, never edits one in place; `session_characters`
-/// entries and `jarvis_session_id` are only ever set, never cleared by the
-/// daemon. So union-merging `current`'s copy into `updated` can restore a lost
-/// daemon write but can never clobber a frontend edit - there is no case where
-/// the two sides touch the same value and disagree, which is why this can
-/// merge unconditionally instead of rejecting the save.
-pub fn merge_daemon_owned_fields(updated: &mut Settings, current: &Settings) {
-    for p in &current.projects {
-        if !updated.projects.iter().any(|u| u.id == p.id) {
-            log::warn!("[settings] save_settings: restoring project {} added by the daemon after the frontend's snapshot was read", p.id);
-            updated.projects.push(p.clone());
-        }
-    }
-    for (session_id, character_id) in &current.session_characters {
-        if !updated.session_characters.contains_key(session_id) {
-            log::warn!("[settings] save_settings: restoring session_characters[{session_id}] assigned by the daemon after the frontend's snapshot was read");
-            updated.session_characters.insert(session_id.clone(), character_id.clone());
-        }
-    }
-    if updated.jarvis_session_id.is_none() {
-        if let Some(id) = &current.jarvis_session_id {
-            log::warn!("[settings] save_settings: restoring jarvis_session_id ({id}) stamped by the daemon after the frontend's snapshot was read");
-            updated.jarvis_session_id = Some(id.clone());
-        }
-    }
-}
-
-/// Error string a future `save_settings` dispatch will return to the frontend
-/// for a stale save once the dashboard has a retry path (todo 1004's
-/// generation-stamp follow-up). Unused today - `reconcile_save` still merges
-/// a stale save rather than rejecting it - defined now so that flip is a
-/// one-line change instead of inventing a new constant under time pressure.
-#[allow(dead_code)]
+/// Error `save_settings` returns to the frontend for a stale save (todo
+/// 1004): the frontend's `settings_generation` is behind the live value, so
+/// accepting the save could silently revert any field a daemon-owned writer
+/// touched since the frontend's snapshot was read - not just the three fields
+/// the earlier merge-based fix (`44295410`) covered. The frontend's
+/// `updateSettings` helper (`src/shared/settings-update.ts`) re-reads fresh
+/// settings, reapplies its own mutation on top, and retries on this error.
 pub const SETTINGS_STALE: &str = "SETTINGS_STALE";
-
-/// The stale-save branch of `reconcile_save`: the frontend's snapshot predates
-/// the live settings, so a blind overwrite could revert whatever landed since
-/// that snapshot was read. For now this runs the existing three-field
-/// `merge_daemon_owned_fields` and warns, instead of rejecting the save with
-/// `SETTINGS_STALE` - the dashboard has no retry path yet (todo 1004 tracks
-/// that as a separate, frontend-touching dispatch). Kept as its own named
-/// function so that flip is a one-line change in `reconcile_save` below.
-fn reconcile_stale_save(updated: &mut Settings, current: &Settings) {
-    log::warn!(
-        "[settings] save_settings: stale snapshot (generation {} behind live {}); merging daemon-owned fields instead of rejecting (todo 1004)",
-        updated.settings_generation, current.settings_generation,
-    );
-    merge_daemon_owned_fields(updated, current);
-}
 
 /// Generation-checked reconciliation behind `ipc::settings::save_settings`.
 /// `updated` is the frontend's about-to-be-saved snapshot; `current` is the
 /// live in-memory settings, read under the SAME lock the caller uses to write
-/// `updated` back to disk and cache right after. One lock scope spanning
-/// compare, merge, disk write, and cache write leaves no window for a
-/// concurrent mutation to land in between and get silently dropped (todo
-/// 1004's residual race).
+/// `updated` back to disk and cache right after.
 ///
 /// Equal generations mean the frontend read the latest state, so `updated` is
-/// accepted as-is. A behind generation means something else (a daemon-owned
-/// field write, or another save) landed since that read; `reconcile_stale_save`
-/// covers that gap for now. Either branch leaves `updated.settings_generation`
-/// one past `current`'s, so the disk write and the cache assignment the
-/// caller performs next always agree with each other.
-pub fn reconcile_save(updated: &mut Settings, current: &Settings) {
+/// accepted as-is and `updated.settings_generation` is advanced one past
+/// `current`'s, so the disk write and the cache assignment the caller
+/// performs next always agree with each other.
+///
+/// A behind generation means some other writer (a daemon-owned field write,
+/// or another save) landed since that read: rather than merging a fixed
+/// allowlist of fields (the old approach, which silently missed any
+/// daemon-owned field not on the list - e.g. `default_account_id` cleared by
+/// `remove_account`), this rejects the save outright with `SETTINGS_STALE`
+/// and leaves `updated`/disk/cache untouched, so the caller can re-read and
+/// retry with its edit reapplied on top of the current state instead.
+pub fn reconcile_save(updated: &mut Settings, current: &Settings) -> Result<(), &'static str> {
     if updated.settings_generation != current.settings_generation {
-        reconcile_stale_save(updated, current);
+        log::warn!(
+            "[settings] save_settings: rejecting stale snapshot (generation {} behind live {})",
+            updated.settings_generation, current.settings_generation,
+        );
+        return Err(SETTINGS_STALE);
     }
     updated.settings_generation = current.settings_generation.wrapping_add(1);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -823,15 +781,14 @@ mod tests {
         }
     }
 
-    /// Reproduces the confirmed settings-loss race: a daemon-side mutation
-    /// (project auto-registration) lands on `state.settings` while a Settings
-    /// panel is still holding a snapshot read moments earlier. Documents the
-    /// bug (what the old blind `*s = updated.clone()` in `save_settings`
-    /// produced) alongside the fix (`merge_daemon_owned_fields`) in the same
-    /// test so the "before" claim can't silently drift from the real old
-    /// behavior.
+    /// Reproduces the confirmed settings-loss race, now closed by rejection
+    /// rather than a merge: a daemon-side mutation (project auto-registration)
+    /// lands on `state.settings` while a Settings panel is still holding a
+    /// snapshot read moments earlier. `reconcile_save` must refuse the stale
+    /// save (leaving the daemon's project alone) instead of accepting it and
+    /// dropping the mutation the old blind `*s = updated.clone()` used to.
     #[test]
-    fn frontend_save_from_stale_snapshot_preserves_daemon_added_project() {
+    fn reconcile_save_rejects_a_save_built_from_a_stale_snapshot_leaving_current_untouched() {
         let dir = non_ephemeral_tempdir();
         let now = "2026-09-28T00:00:00Z";
 
@@ -842,73 +799,42 @@ mod tests {
         // daemon_link/handlers.rs::handle_project_created).
         let mut current = frontend_snapshot.clone();
         upsert_project_with_id_for_cwd(&mut current, "proj-1", dir.path(), now);
+        let current_before = current.clone();
         assert_eq!(current.projects.len(), 1, "setup: the daemon-side mutation must actually land");
 
         // The frontend's Save is built from its stale snapshot, not `current`,
         // plus the user's real edit.
         let mut updated = frontend_snapshot.clone();
         updated.autostart = true;
+        let updated_before = updated.clone();
 
-        // THE BUG: `save_settings` used to do exactly this - clone `updated`
-        // straight into the cache/disk with no reconciliation against
-        // `current`. That silently reverts the daemon's project.
-        let blind_overwrite_result = updated.clone();
-        assert!(
-            blind_overwrite_result.projects.is_empty(),
-            "documents the confirmed loss: a blind overwrite drops the daemon-added project"
-        );
+        let result = reconcile_save(&mut updated, &current);
 
-        // THE FIX: reconcile against the current in-memory state before
-        // applying, the same way `ipc::settings::save_settings` now does.
-        merge_daemon_owned_fields(&mut updated, &current);
-
-        assert_eq!(
-            updated.projects.len(), 1,
-            "a concurrent daemon-added project must survive a save built from a stale frontend snapshot"
-        );
-        assert_eq!(updated.projects[0].id, "proj-1");
-        assert!(updated.autostart, "the user's real edit must still apply");
+        assert_eq!(result, Err(SETTINGS_STALE));
+        assert_eq!(updated, updated_before, "a rejected save must leave `updated` untouched");
+        assert_eq!(current, current_before, "a rejected save must leave `current` untouched");
     }
 
-    /// Same race, `session_characters` and `jarvis_session_id` variants
-    /// (handle_session_character_assigned / handle_jarvis_session_created).
+    /// A frontend edit to a daemon-owned field (`default_account_id`, cleared
+    /// by `remove_account`) is the concrete gap the old three-field merge
+    /// allowlist could not close - it was never one of the three merged
+    /// fields, and a clear is not additive. Rejection closes it for free: the
+    /// save never applies, so the daemon's clear can't be reverted.
     #[test]
-    fn frontend_save_from_stale_snapshot_preserves_daemon_character_and_jarvis_fields() {
-        let frontend_snapshot = Settings::default();
-
-        let mut current = frontend_snapshot.clone();
-        current.session_characters.insert("sess-1".to_string(), "char-1".to_string());
-        current.jarvis_session_id = Some("jarvis-sess-1".to_string());
-
-        let mut updated = frontend_snapshot.clone();
-        updated.poll_interval_secs = 900; // the user's real edit
-
-        let blind_overwrite_result = updated.clone();
-        assert!(blind_overwrite_result.session_characters.is_empty());
-        assert!(blind_overwrite_result.jarvis_session_id.is_none());
-
-        merge_daemon_owned_fields(&mut updated, &current);
-
-        assert_eq!(updated.session_characters.get("sess-1"), Some(&"char-1".to_string()));
-        assert_eq!(updated.jarvis_session_id.as_deref(), Some("jarvis-sess-1"));
-        assert_eq!(updated.poll_interval_secs, 900);
-    }
-
-    /// A frontend edit to the same daemon-owned surface (adding a project
-    /// itself, in a different call, e.g. the manual "add project" flow) is
-    /// never clobbered by the merge - it only fills in entries `updated`
-    /// doesn't already know about.
-    #[test]
-    fn merge_daemon_owned_fields_never_overwrites_an_id_already_present_in_updated() {
+    fn reconcile_save_rejects_regardless_of_which_daemon_owned_field_moved() {
         let mut current = Settings::default();
-        current.jarvis_session_id = Some("daemon-value".to_string());
+        current.default_account_id = Some("acct-1".to_string());
+        current.bump_generation();
+        // Daemon-side clear (mirrors ipc/accounts/management.rs::remove_account).
+        current.default_account_id = None;
 
         let mut updated = Settings::default();
-        updated.jarvis_session_id = Some("frontend-value".to_string());
+        updated.default_account_id = Some("acct-1".to_string()); // the stale value
 
-        merge_daemon_owned_fields(&mut updated, &current);
+        let result = reconcile_save(&mut updated, &current);
 
-        assert_eq!(updated.jarvis_session_id.as_deref(), Some("frontend-value"));
+        assert_eq!(result, Err(SETTINGS_STALE));
+        assert_eq!(updated.default_account_id.as_deref(), Some("acct-1"), "rejected save leaves `updated` untouched");
     }
 
     // -----------------------------------------------------------------
@@ -941,11 +867,12 @@ mod tests {
         updated.jarvis_session_id = None;
         updated.autostart = false;
 
-        reconcile_save(&mut updated, &current);
+        let result = reconcile_save(&mut updated, &current);
 
+        assert_eq!(result, Ok(()));
         assert_eq!(
             updated.jarvis_session_id, None,
-            "an up-to-date save is trusted as-is; no merge should run"
+            "an up-to-date save is trusted as-is"
         );
         assert!(!updated.autostart);
         assert_eq!(
@@ -955,13 +882,11 @@ mod tests {
         );
     }
 
-    /// A stale save (frontend generation behind the live one) must still get
-    /// today's three-field merge-and-warn treatment, matching the existing
-    /// `frontend_save_from_stale_snapshot_preserves_daemon_added_project`
-    /// behavior, and must also bump the generation so the merged result
-    /// becomes the new "current" for the next save.
+    /// A stale save (frontend generation behind the live one) must be
+    /// rejected wholesale rather than merged, and must leave `current`'s own
+    /// generation untouched - only an accepted save advances the counter.
     #[test]
-    fn reconcile_save_with_stale_generation_still_merges_daemon_owned_fields_and_bumps() {
+    fn reconcile_save_with_stale_generation_is_rejected_and_current_generation_is_unchanged() {
         let dir = non_ephemeral_tempdir();
         let now = "2026-09-29T00:00:00Z";
 
@@ -971,53 +896,33 @@ mod tests {
         upsert_project_with_id_for_cwd(&mut current, "proj-1", dir.path(), now);
         // upsert bumped current's generation past the frontend's stale read.
         assert!(current.settings_generation > frontend_snapshot.settings_generation);
+        let current_generation_before = current.settings_generation;
 
         let mut updated = frontend_snapshot.clone();
         updated.autostart = true;
 
-        reconcile_save(&mut updated, &current);
+        let result = reconcile_save(&mut updated, &current);
 
-        assert_eq!(updated.projects.len(), 1, "the daemon-added project must survive");
-        assert_eq!(updated.projects[0].id, "proj-1");
-        assert!(updated.autostart, "the user's real edit must still apply");
-        assert_eq!(
-            updated.settings_generation,
-            current.settings_generation + 1,
-            "a merged save must still advance past the live generation"
-        );
+        assert_eq!(result, Err(SETTINGS_STALE));
+        assert_eq!(updated.projects.len(), 0, "a rejected save is not merged with the daemon's project");
+        assert_eq!(current.settings_generation, current_generation_before, "a rejected save must not touch `current`");
     }
 
-    /// `extra` must round-trip through `reconcile_save` untouched on both the
-    /// fresh and the stale path - a merge or a bump that dropped it would
-    /// itself be the data-loss bug this todo is about.
+    /// `extra` must round-trip through `reconcile_save` untouched on the
+    /// accepted path - a bump that dropped it would itself be the data-loss
+    /// bug this todo is about.
     #[test]
-    fn reconcile_save_preserves_extra_on_both_paths() {
+    fn reconcile_save_preserves_extra_on_the_accepted_path() {
         let mut current = Settings::default();
         current.extra.insert("someDashboardOnlyField".to_string(), serde_json::json!("keep-me"));
 
-        // Fresh path.
         let mut fresh = current.clone();
-        reconcile_save(&mut fresh, &current);
+        let result = reconcile_save(&mut fresh, &current);
+        assert_eq!(result, Ok(()));
         assert_eq!(
             fresh.extra.get("someDashboardOnlyField"),
             Some(&serde_json::json!("keep-me")),
         );
-
-        // Stale path: current has moved on (generation bumped + a daemon
-        // mutation), but `extra` must still survive the merge.
-        let mut moved_on = current.clone();
-        moved_on.bump_generation();
-        moved_on.jarvis_session_id = Some("daemon-value".to_string());
-        let mut stale = current.clone(); // still at the old generation
-        stale.poll_interval_secs = 42;
-        reconcile_save(&mut stale, &moved_on);
-        assert_eq!(
-            stale.extra.get("someDashboardOnlyField"),
-            Some(&serde_json::json!("keep-me")),
-            "extra must survive a merged stale save too",
-        );
-        assert_eq!(stale.jarvis_session_id.as_deref(), Some("daemon-value"));
-        assert_eq!(stale.poll_interval_secs, 42);
     }
 
     /// `upsert_project_for_cwd` mutates the live guard on every call (either

@@ -24,6 +24,7 @@ import type { TokenRecord, AliasMap } from "./tokens";
 import { doMerge } from "./merges";
 import { showToast } from "./toast";
 import { api } from "./api";
+import { updateSettings } from "./settings-update";
 import type { HookRegistrationState } from "./api";
 import { curateLatestPerFamily, setApiModels } from "./effort-presets";
 import { refreshDashboardView } from "../views/dashboard/dashboard";
@@ -94,15 +95,21 @@ async function runDeadPathCheck(): Promise<void> {
     );
     if (matches.length === 1 && matches[0]) {
       doMerge(aliases, deadCwd, matches[0]);
-      settings.projectAliases = aliases;
-      setSettings(settings);
-      void api.saveSettings(settings);
       anyMerged = true;
     } else {
       deadPaths.add(deadCwd);
     }
   }
   if (anyMerged) {
+    // One save for the whole batch (was one fire-and-forget save per merged
+    // pair, racing each other) built from a FRESH read so a concurrent
+    // daemon-owned write (project auto-registration, etc.) isn't reverted by
+    // this frontend-only aliases update.
+    try {
+      await updateSettings((fresh) => ({ ...fresh, projectAliases: aliases }));
+    } catch (e) {
+      console.error("[boot] failed to persist merged project aliases", e);
+    }
     void renderProjectsList();
     refreshDashboardView();
   } else if (deadPaths.size) {

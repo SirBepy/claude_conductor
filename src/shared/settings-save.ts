@@ -4,9 +4,8 @@
  * to whatever is already in currentSettings so round-trips don't drop data.
  */
 
-import { getSettings, setSettings } from "./state";
 import type { SettingsShape } from "./state";
-import { api } from "./api";
+import { updateSettings } from "./settings-update";
 import { showToast } from "./toast";
 
 function byId<T extends HTMLElement = HTMLElement>(id: string): T | null {
@@ -60,7 +59,6 @@ function gatherNotifSettings(prev: SettingsShape): Record<string, unknown> {
 }
 
 export function saveSettings(): void {
-  const prev = getSettings();
   const valOr = (id: string, fallback: string): string => {
     const el = byId<HTMLInputElement | HTMLSelectElement>(id);
     return el ? el.value : fallback;
@@ -70,30 +68,38 @@ export function saveSettings(): void {
     return el ? el.checked : fallback;
   };
 
-  const prevColorApply = (prev.colorApplyTo as Record<string, boolean | undefined>) || {};
-  const prevPace = (prev.paceColors as Record<string, string | undefined>) || {};
-  // Per-slot character-sound toggles. Default ON (absent key or unmounted Sound
-  // subview both resolve to true) so existing users keep hearing every slot.
-  const prevSlots = (prev.characterSoundSlots as Record<string, boolean | undefined>) || {};
-  const characterSoundSlots = {
-    workFinished: chkOr("soundSlotWorkFinished", prevSlots.workFinished !== false),
-    questionAsked: chkOr("soundSlotQuestionAsked", prevSlots.questionAsked !== false),
-    select: chkOr("soundSlotSelect", prevSlots.select !== false),
-    ready: chkOr("soundSlotReady", prevSlots.ready !== false),
-    death: chkOr("soundSlotDeath", prevSlots.death !== false),
-    annoyed: chkOr("soundSlotAnnoyed", prevSlots.annoyed !== false),
-  };
+  // Runs inside `updateSettings`'s mutate callback, on a FRESH read of
+  // backend settings rather than the frontend's own `currentSettings` cache -
+  // a save built from that cache is exactly the stale-snapshot bug todo 1004
+  // closes. Re-run (up to 3x) on a SETTINGS_STALE rejection, each time against
+  // whatever is current at that moment, so the DOM fields (the user's real
+  // edit) always land on top of the latest daemon-owned state rather than a
+  // stale one.
+  const buildFromDom = (prev: SettingsShape): SettingsShape => {
+    const prevColorApply = (prev.colorApplyTo as Record<string, boolean | undefined>) || {};
+    const prevPace = (prev.paceColors as Record<string, string | undefined>) || {};
+    // Per-slot character-sound toggles. Default ON (absent key or unmounted Sound
+    // subview both resolve to true) so existing users keep hearing every slot.
+    const prevSlots = (prev.characterSoundSlots as Record<string, boolean | undefined>) || {};
+    const characterSoundSlots = {
+      workFinished: chkOr("soundSlotWorkFinished", prevSlots.workFinished !== false),
+      questionAsked: chkOr("soundSlotQuestionAsked", prevSlots.questionAsked !== false),
+      select: chkOr("soundSlotSelect", prevSlots.select !== false),
+      ready: chkOr("soundSlotReady", prevSlots.ready !== false),
+      death: chkOr("soundSlotDeath", prevSlots.death !== false),
+      annoyed: chkOr("soundSlotAnnoyed", prevSlots.annoyed !== false),
+    };
 
-  const settings: SettingsShape = {
-    // Round-trip every field this function doesn't manage. `prev` is the full
-    // settings object from Rust `get_settings`, and `save_settings` is a
-    // FULL-REPLACE write (no server-side merge), so any key omitted here would
-    // reset to its serde default on save - silently wiping things the Settings
-    // page never touches (hooks_registered, default_account_id, retention,
-    // sessionCharacters, remote_access_enabled, overlayX/Y, ...). The named
-    // fields below override this spread with the current DOM values.
-    ...prev,
-    theme: (() => {
+    return {
+      // Round-trip every field this function doesn't manage. `prev` is the full
+      // settings object from a fresh `get_settings` read, and `save_settings` is
+      // a FULL-REPLACE write (no server-side merge), so any key omitted here
+      // would reset to its serde default on save - silently wiping things the
+      // Settings page never touches (hooks_registered, default_account_id,
+      // retention, sessionCharacters, remote_access_enabled, overlayX/Y, ...).
+      // The named fields below override this spread with the current DOM values.
+      ...prev,
+      theme: (() => {
       // Theme is stored as a flat id ("void" | "void-light"); the DOM carries it
       // as the styleguide 2D pair (data-theme=<palette> + data-mode=light|dark).
       const el = document.documentElement;
@@ -168,15 +174,14 @@ export function saveSettings(): void {
     projectBlacklist: prev.projectBlacklist || [],
     // Preserve unknown extras
     projects: prev.projects,
+    };
   };
 
-  setSettings(settings);
-  // Optimistic: the UI already reflects `settings`. If the write never lands,
-  // roll the in-memory copy back to what disk actually has and say so - a
-  // silent swallow here means the app and disk disagree forever.
-  void api.saveSettings(settings).catch((err) => {
+  // The DOM already reflects the user's edit, and `updateSettings` updates
+  // the settings cache on success, so there is nothing to show optimistically
+  // here - only a failure needs surfacing.
+  void updateSettings(buildFromDom).catch((err) => {
     console.error("[settings-save] save_settings failed", err);
-    setSettings(prev);
     showToast("Couldn't save settings - your last change wasn't saved. Try again.");
   });
   const w = window as unknown as {

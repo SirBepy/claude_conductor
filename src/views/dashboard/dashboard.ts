@@ -3,8 +3,9 @@ import { openSidemenu } from "../../shared/sidemenu";
 import "./dashboard.css";
 import "../../shared/account-chip.css";
 import "../../shared/kebab-menu.css";
-import { getSettings, setSettings, setUsageHistory, getUsageHistory } from "../../shared/state";
+import { getSettings, setUsageHistory, getUsageHistory } from "../../shared/state";
 import { api } from "../../shared/api";
+import { updateSettings } from "../../shared/settings-update";
 import type { AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
 import { loadTokenHistory } from "../../shared/token-history";
@@ -294,10 +295,11 @@ function dashMenuDeps(): DashMoreMenuDeps {
 // ── Settings persistence for the widget layout ──────────────────────────────
 
 function persistDashboardWidgets(): void {
-  const s = getSettings();
-  s.dashboardWidgets = dashboardWidgets;
-  setSettings(s);
-  void api.saveSettings(s);
+  // Fresh-read + retry (todo 1004): a save built from the frontend's own
+  // `currentSettings` cache could revert a concurrent daemon-owned write.
+  void updateSettings((fresh) => ({ ...fresh, dashboardWidgets })).catch((e) => {
+    console.error("[dashboard] failed to persist dashboard widgets", e);
+  });
 }
 
 // ── Widget shell + registry wiring ──────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { html, render } from "lit-html";
-import { getSettings, setSettings } from "../../../../shared/state";
-import { api } from "../../../../shared/api";
+import { getSettings } from "../../../../shared/state";
+import { updateSettings } from "../../../../shared/settings-update";
 import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
 import type { SessionSort } from "../../../sessions/sessions-helpers";
 import { readModels, readDefaultFlags } from "../../../../shared/effort-presets";
@@ -88,13 +88,13 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
     models = readModelsField();
     const autoAllow = root.querySelector<HTMLInputElement>("#chatDefaultsAutoAllow")?.checked ?? flags.autoAccept;
     flags = { autoAccept: autoAllow };
-    const cur = {
-      ...getSettings(),
+    // Fresh-read + retry (todo 1004): building from the frontend's own
+    // settings cache could revert a concurrent daemon-owned write.
+    await updateSettings((fresh) => ({
+      ...fresh,
       models,
       defaultAutoAllow: autoAllow,
-    };
-    setSettings(cur);
-    await api.saveSettings(cur);
+    }));
   }
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;

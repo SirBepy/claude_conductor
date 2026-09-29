@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { openSidemenu } from "../../shared/sidemenu";
 import { registerOverlayBack } from "../../shared/back-button";
 import { invoke } from "../../shared/ipc";
+import { updateSettings } from "../../shared/settings-update";
 import type { NewsPost } from "../../types/ipc.generated";
 import { state, setPaint } from "./news-state";
 import { openDetail, renderDetail, renderDetailMenu } from "./news-detail";
@@ -22,9 +23,7 @@ async function setNotifyEnabled(v: boolean, root: HTMLElement): Promise<void> {
   state.notifyEnabled = v;
   paint(root);
   try {
-    const s = await invoke<SettingsLike>("get_settings");
-    s.newsNotificationsEnabled = v;
-    await invoke("save_settings", { updated: s });
+    await updateSettings((s) => ({ ...s, newsNotificationsEnabled: v }));
   } catch (err) {
     console.error("[news] save_settings failed", err);
   }
