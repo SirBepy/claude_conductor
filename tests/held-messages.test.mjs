@@ -356,6 +356,103 @@ describe("HeldMessages - 60s auto-rescue fuse (todo 926)", () => {
       vi.useRealTimers();
     }
   });
+
+  // todo 929: a question answered while the chat was backgrounded stages an
+  // AUQ answer with nothing armed to rescue it - 926 only arms while the
+  // session is the one on screen. Opening the chat later must arm the same
+  // fuse retroactively.
+  it("arms the fuse for a chat answered while backgrounded, once Joe opens it", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, attach, interrupt, send, state } = makeHarness(); // attached to sess-A
+      state.busy = true;
+      interrupt.mockImplementation(async () => {
+        state.busy = false;
+      });
+      const answer = [{ type: "text", text: '<auq-answer id="card-5"/>Q: pick\nA: bg' }];
+      held.stageFor("sess-B", answer); // background stage - sess-A stays attached
+      expect(held.hasAuqAnswerFor("sess-B")).toBe(true);
+
+      // Not armed yet - nobody has opened sess-B.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).not.toHaveBeenCalled();
+
+      held.attach({ ...attach, sessionId: "sess-B" }); // Joe opens it; still busy
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(answer);
+      expect(held.hasItemsFor("sess-B")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not fire the arm-on-attach fuse when the backgrounded turn completes first", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, attach, interrupt, send, state } = makeHarness();
+      state.busy = true;
+      const answer = [{ type: "text", text: '<auq-answer id="card-6"/>Q: pick\nA: bg2' }];
+      held.stageFor("sess-B", answer);
+
+      held.attach({ ...attach, sessionId: "sess-B" }); // arms on attach
+
+      vi.advanceTimersByTime(30_000);
+      state.busy = false;
+      held.onCompletion("sess-B", /* isQuestion */ true); // normal completion flushes + disarms
+      expect(send).toHaveBeenCalledWith(answer);
+      expect(held.hasItemsFor("sess-B")).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(60_000); // past the original deadline
+      expect(interrupt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never arms a backgrounded answer's fuse if Joe never opens that chat", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, interrupt, state } = makeHarness(); // stays attached to sess-A throughout
+      state.busy = true;
+      const answer = [{ type: "text", text: '<auq-answer id="card-7"/>Q: pick\nA: bg3' }];
+      held.stageFor("sess-B", answer);
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(interrupt).not.toHaveBeenCalled();
+      expect(held.hasItemsFor("sess-B")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a session switch away doesn't block the next session's own arm-on-attach fuse", async () => {
+    vi.useFakeTimers();
+    try {
+      const { held, attach, interrupt, send, state } = makeHarness(); // attached to sess-A
+      state.busy = true;
+      interrupt.mockImplementation(async () => {
+        state.busy = false;
+      });
+      const answerA = [{ type: "text", text: '<auq-answer id="card-8"/>Q: pick\nA: for-A' }];
+      held.stage(answerA); // arms sess-A's fuse via the on-screen path (926)
+
+      held.attach({ ...attach, sessionId: "sess-B" }); // switch away before it fires
+
+      const answerB = [{ type: "text", text: '<auq-answer id="card-9"/>Q: pick\nA: for-B' }];
+      held.stage(answerB); // now attached to sess-B, still busy -> arms sess-B's own fuse
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(interrupt).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(answerB);
+      // sess-A's staged answer is untouched - its fuse never fires.
+      expect(held.hasItemsFor("sess-A")).toBe(true);
+      expect(held.hasItemsFor("sess-B")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("HeldMessages — background flush (non-attached session)", () => {

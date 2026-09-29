@@ -145,10 +145,23 @@ export class HeldMessages {
     if (this.rescue.sid && this.rescue.sid !== opts.sessionId) this.rescue.clear();
     this.attached = opts;
     opts.onChange();
+    // An answer staged while this chat was backgrounded had no fuse (it only
+    // acts on the attached session); opening the chat arms it now.
+    this.maybeArmRescueOnAttach(opts.sessionId);
     // Reconcile on session open: the local map may be stale or empty if a
     // message was held from a different surface (the push broadcast is lossy
     // - see notifier.rs - so this is the one call that's actually trustworthy).
     void this.reconcile(opts.sessionId);
+  }
+
+  /** Arm the rescue fuse for `sid` if it's the session just attached, it
+   *  already carries a staged AUQ answer (staged here or reconciled in from
+   *  another surface), and the turn is still busy. Re-checks attachment
+   *  fresh rather than trusting the caller's timing, since this is also
+   *  called from reconcile()'s async callback. */
+  private maybeArmRescueOnAttach(sid: string): void {
+    if (this.attached?.sessionId !== sid) return;
+    if (this.hasAuqAnswerFor(sid) && this.attached.getIsBusy()) this.rescue.schedule(sid);
   }
 
   /** Replace the local held set with the daemon's copy - authoritative since
@@ -166,6 +179,8 @@ export class HeldMessages {
       if (this.attached?.sessionId === sessionId) {
         this.render.renderChip();
         this.attached.onChange();
+        // An answer staged from another window/phone arrives only here.
+        this.maybeArmRescueOnAttach(sessionId);
       }
     });
   }

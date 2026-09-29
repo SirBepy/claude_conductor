@@ -38,8 +38,9 @@ export class HeldMessagesRescue {
   // Scoped to the ATTACHED session only: fire() acts through the host's
   // isAttachedTo/isBusy, which are only reliable for whichever session is
   // currently mounted. A background stageFor() (answered a question in a
-  // chat you're not looking at) does not arm this; the existing ~15s
-  // background sweep still owns that case, unchanged.
+  // chat you're not looking at) never arms this; the ~15s background sweep
+  // owns that case until the chat is opened, when held-messages.ts's
+  // maybeArmRescueOnAttach arms it for the now-attached session.
   private rescueSid: string | null = null;
   private rescueTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -50,12 +51,15 @@ export class HeldMessagesRescue {
     return this.rescueSid;
   }
 
-  /** Arm the fuse for `sid`, unless one is already running. One at a time:
-   *  `sid` is always the attached session (the only caller, stageFor, gates
-   *  on that), so a second stage before the first fuse fires just leaves the
-   *  original countdown running. */
+  /** Arm the fuse for `sid`. One at a time: a repeat call for the same
+   *  session leaves the original countdown running, while a call for a
+   *  different session replaces the timer, so a stale one can never block
+   *  the attached session's own fuse. */
   schedule(sid: string): void {
-    if (this.rescueTimer !== null) return;
+    if (this.rescueTimer !== null) {
+      if (this.rescueSid === sid) return;
+      this.clear();
+    }
     this.rescueSid = sid;
     this.rescueTimer = setTimeout(() => this.fire(), RESCUE_FUSE_MS);
   }
