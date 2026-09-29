@@ -623,7 +623,11 @@ export function openProjectPickerModal(
                         @dragstart=${(e: DragEvent) => {
                           dragging = { kind: "row", path: p.path };
                           e.dataTransfer?.setData("text/plain", `row:${p.path}`);
-                          if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+                          // Must include "move" - the favourite slot's dragover always
+                          // requests dropEffect "move" (it's shared with slot-to-slot
+                          // reordering). "copy" alone rejects the drop outright and shows
+                          // the no-drop cursor the whole time, even though drop is wired up.
+                          if (e.dataTransfer) e.dataTransfer.effectAllowed = "copyMove";
                         }}
                         @dragend=${() => { dragging = null; dragOverSlot = null; renderModal(); }}
                         @mouseenter=${() => {
