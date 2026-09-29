@@ -3,6 +3,7 @@
 // The panel owns the list and hands this one draft plus a save callback.
 
 import { invoke } from "../../shared/ipc";
+import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
@@ -45,6 +46,9 @@ export class DraftsEditor {
   /** What the body held at the last successful save, so a save that changes
    *  nothing never appends a version. */
   private saved = "";
+  /** Consecutive failed autosaves. One toast at the 3rd, not one per retry
+   *  (the timer keeps retrying every AUTOSAVE_MS while the user keeps typing). */
+  private autosaveFailures = 0;
 
   constructor(root: HTMLElement, draft: MessageDraft, deps: DraftsEditorDeps) {
     this.root = root;
@@ -99,9 +103,14 @@ export class DraftsEditor {
     })
       .then(() => {
         this.saved = markdown;
+        this.autosaveFailures = 0;
         this.deps.onChanged();
       })
-      .catch((err) => console.error("[drafts-editor] set_draft_body failed", err));
+      .catch((err) => {
+        console.error("[drafts-editor] set_draft_body failed", err);
+        this.autosaveFailures++;
+        if (this.autosaveFailures === 3) showToast("Draft isn't saving - check your connection.");
+      });
   }
 
   // ── Render ──────────────────────────────────────────────────────────────

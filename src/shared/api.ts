@@ -7,6 +7,7 @@
 
 import { invoke } from "./ipc";
 import { isTauri } from "./transport";
+import { showToast } from "./toast";
 import type { TokenRecord, AliasMap } from "./tokens";
 import type { SettingsShape } from "./state";
 import type {
@@ -344,13 +345,22 @@ export const api = {
     try { return (await invoke<Record<string, boolean>>("check_paths_exist", { paths })) || {}; }
     catch (e) { console.error("check_paths_exist failed", e); return {}; }
   },
+  // Toasts here (not per-caller) since every caller (project-detail,
+  // characters) would otherwise silently no-op - a click that opens nothing
+  // with no console visible looks broken, not merely unlucky.
   openInExplorer: async (p: string): Promise<void> => {
     try { await invoke("open_in_explorer", { path: p }); }
-    catch (e) { console.error("open_in_explorer failed", e); }
+    catch (e) {
+      console.error("open_in_explorer failed", e);
+      showToast("Couldn't open that folder.");
+    }
   },
   openInVSCode: async (p: string): Promise<void> => {
     try { await invoke("open_in_vscode", { path: p }); }
-    catch (e) { console.error("open_in_vscode failed", e); }
+    catch (e) {
+      console.error("open_in_vscode failed", e);
+      showToast("Couldn't open in VS Code.");
+    }
   },
 
   // --- Sync (cut from MVP — stubs) ---
@@ -510,10 +520,11 @@ export const api = {
     try { return (await invoke<InstanceInfo[]>("list_instances_for_project", { projectId })) || []; }
     catch (e) { console.error("list_instances_for_project failed", e); return []; }
   },
-  phoneLink: async (sessionId: string): Promise<string | null> => {
-    try { return await invoke<string | null>("phone_link", { sessionId }); }
-    catch (e) { console.error("phone_link failed", e); return null; }
-  },
+  // Rejects on failure: null means "no phone link yet", so a swallowed error
+  // would be indistinguishable from that (the caller's try/catch already
+  // shows a distinct "failed" toast instead of "not available yet").
+  phoneLink: (sessionId: string): Promise<string | null> =>
+    invoke<string | null>("phone_link", { sessionId }),
   instanceTokenStats: async (sessionId: string): Promise<InstanceTokenStats> => {
     try { return await invoke<InstanceTokenStats>("instance_token_stats", { sessionId }); }
     catch (e) { console.error("instance_token_stats failed", e); return { tokens: 0, turns: 0 }; }
@@ -668,10 +679,11 @@ export const api = {
   },
 
   // --- Accounts (multi-account milestone 07: settings identity surface) ---
-  getAccountIdentity: async (accountId: string): Promise<AccountIdentity | null> => {
-    try { return await invoke<AccountIdentity>("get_account_identity", { accountId }); }
-    catch (e) { console.error("get_account_identity failed", e); return null; }
-  },
+  // Rejects on failure: null means "no identity resolved", which gates the
+  // reauth CTA - a swallowed error would be indistinguishable from that (the
+  // caller's existing Promise.all try/catch already shows the error card).
+  getAccountIdentity: (accountId: string): Promise<AccountIdentity | null> =>
+    invoke<AccountIdentity>("get_account_identity", { accountId }),
   reauthAccount: (accountId: string): Promise<void> =>
     invoke("reauth_account", { accountId }),
   recaptureAccountCookie: (accountId: string): Promise<void> =>
