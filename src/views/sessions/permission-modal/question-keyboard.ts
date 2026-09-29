@@ -3,7 +3,6 @@
 // just act globally), and every other key only acts while an option itself
 // has focus - typing into the composer or the answer box is never touched.
 
-import { nextArrowDisabled } from "./question-ui-templates";
 import type { QuestionRenderState } from "./question-ui-templates";
 import type { Question } from "./types";
 
@@ -63,12 +62,27 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
   if (!target) return false;
   const isReview = () => hasSummary && state.activeTab === questions.length;
   const refocus = () => { if (host.isConnected) focusActivePanel(host, state.activeTab, isReview()); };
+  // Ungated, unlike the Next arrow: paging is free like the dots, so an
+  // unanswered question can be skipped and come back to later.
+  const page = (dir: -1 | 1) => {
+    const next = state.activeTab + dir;
+    if (next < 0 || next > totalPanels - 1) return;
+    goToTab(next);
+    refocus();
+  };
 
   const option = target instanceof HTMLInputElement && host.contains(target) && target.closest(".prompt-q__opts")
     ? target
     : null;
 
   if (!option) {
+    // Review has no options, so focus rests on a card button there - paging
+    // must still work from it or Left could never leave review.
+    if (target instanceof HTMLButtonElement && host.contains(target) && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      page(e.key === "ArrowLeft" ? -1 : 1);
+      return true;
+    }
     if (!(target instanceof HTMLTextAreaElement)) return false;
     const inCardOrComposer = host.contains(target) || Boolean(target.closest(".session-composer"));
     if (!inCardOrComposer) return false;
@@ -107,12 +121,9 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
       if (idx > 0) opts[idx - 1]?.focus();
       return true;
     case "ArrowLeft":
-      e.preventDefault();
-      if (state.activeTab > 0) { goToTab(state.activeTab - 1); refocus(); }
-      return true;
     case "ArrowRight":
       e.preventDefault();
-      if (!nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt)) { goToTab(state.activeTab + 1); refocus(); }
+      page(e.key === "ArrowLeft" ? -1 : 1);
       return true;
     case " ":
       // Native Space clicks the input, and a single-select click auto-advances

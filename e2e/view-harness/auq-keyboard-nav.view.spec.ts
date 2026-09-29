@@ -4,7 +4,7 @@ import { mountView } from "./harness";
 // Keyboard answering for the AUQ card (question-keyboard.ts): Tab from a text
 // box enters the options, Up/Down move, Space toggles without advancing,
 // Enter mirrors the Next/Submit button (picking the highlighted option first
-// on an unanswered single-select), Left/Right page, and typing a letter on an
+// on an unanswered single-select), Left/Right page freely, and typing a letter on an
 // option lands it in the answer box.
 
 declare global {
@@ -95,7 +95,7 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     await expect(card.locator('.prompt-panel[data-panel="0"] input[data-label="C"]')).toBeChecked();
   });
 
-  test("Right is gated on an unanswered question, Left pages back", async ({ page }) => {
+  test("Left/Right page freely, even past unanswered questions and out of review", async ({ page }) => {
     await mountView(page);
     await openCard(page);
     const card = page.locator(".prompt-card");
@@ -103,16 +103,22 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     await page.keyboard.press("Tab");
 
     await page.keyboard.press("ArrowRight");
-    expect(await activeTab(page)).toBe(0);
-
-    await page.keyboard.press(" ");
-    await page.keyboard.press("ArrowRight");
     await expect.poll(() => activeTab(page)).toBe(1);
     expect(await focusedLabel(page)).toBe("X");
 
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => activeTab(page)).toBe(2);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-act"))).toBe("primary");
+
+    await page.keyboard.press("ArrowRight");
+    expect(await activeTab(page)).toBe(2);
+
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => activeTab(page)).toBe(1);
     await page.keyboard.press("ArrowLeft");
     await expect.poll(() => activeTab(page)).toBe(0);
     expect(await focusedLabel(page)).toBe("A");
+    await expect(card.locator('.prompt-panel[data-panel="0"] input:checked')).toHaveCount(0);
   });
 
   test("Down off the last option reaches the answer box, Up from its start returns", async ({ page }) => {
