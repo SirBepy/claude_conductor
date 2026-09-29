@@ -1,6 +1,7 @@
 name: Auto-Fix Release Failure
 
-# Watches the Tauri Release workflow on master. If it fails, pulls the failed
+# Watches the Tauri Release workflow on master. If a build-side job fails (a red
+# `test` job alone is left for a human, see "Determine failure scope"), pulls the failed
 # step logs, hands them to Claude Code, lets it patch the repo, and pushes the
 # fix back to master so Tauri Release re-runs. Hard-capped at 2 consecutive
 # auto-fix commits to prevent loops.
@@ -52,8 +53,45 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Fetch failed logs
+      - name: Determine failure scope
+        id: scope
         if: steps.cap.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # Auto-fix covers build-side breakage only. An unattended patch for a red
+          # test tends to weaken the assertion, and this repo has known vitest
+          # flakes. Allowlisting build-side jobs fails CLOSED: a renamed or new
+          # job skips auto-fix rather than silently re-admitting test failures.
+          # Guarded: under the runner's `bash -e`, an unguarded failing $(...) would
+          # abort the step red with no explanation.
+          if ! failed=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/jobs" \
+            --paginate --jq '.jobs[] | select(.conclusion=="failure") | .name'); then
+            echo "::warning::Could not list this run's job results; skipping auto-fix."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Workflow commands are line-parsed, so a multi-line list would truncate.
+          failed_csv=$(printf '%s' "$failed" | tr '\n' ',' | sed 's/,$//')
+          echo "::notice::Failed jobs: ${failed_csv:-<none>}"
+          allow=false
+          while IFS= read -r job; do
+            [ -z "$job" ] && continue
+            # Only the matrix jobs need a wildcard ("build (windows-latest, ...)").
+            case "$job" in
+              check|build*|android*|tag|publish) allow=true ;;
+            esac
+          done <<< "$failed"
+          if [ "$allow" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Only non-build jobs failed (e.g. test). The red test blocks the release and needs a human; auto-fix will not run."
+          fi
+
+      - name: Fetch failed logs
+        if: steps.cap.outputs.skip == 'false' && steps.scope.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -68,7 +106,7 @@ jobs:
           head -n 30 failure.log
 
       - name: Run Claude Code
-        if: steps.cap.outputs.skip == 'false'
+        if: steps.cap.outputs.skip == 'false' && steps.scope.outputs.skip == 'false'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -87,7 +125,7 @@ jobs:
             - If the root cause is unclear from the log, make zero changes rather than guessing.
 
       - name: Commit and push fix
-        if: steps.cap.outputs.skip == 'false'
+        if: steps.cap.outputs.skip == 'false' && steps.scope.outputs.skip == 'false'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
