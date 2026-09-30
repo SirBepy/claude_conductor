@@ -279,4 +279,29 @@ describe("RateLimitBanner", () => {
     expect(host.querySelector(".rate-limit-banner--min")).toBeFalsy();
     expect(host.querySelector(".rlb-title")).toBeTruthy();
   });
+
+  // todo 1008: the 30s re-render tick now goes through visibleInterval
+  // (PAUSE-WHEN-HIDDEN) instead of a bare setInterval. Asserted via a spy on
+  // an injected storage (saveMinimized's setItem fires on every render)
+  // rather than vi.getTimerCount() - this suite never disposes a prior
+  // test's RateLimitBanner, so its leftover visibilitychange listener (a
+  // pre-existing test-isolation gap, unrelated to this conversion) would
+  // also react to a shared-document dispatch and pollute a raw timer count.
+  it("pauses the 30s re-render tick while hidden, and flushes one render on return", async () => {
+    const setItem = vi.fn();
+    const b = new RateLimitBanner({ storage: { getItem: () => null, setItem } });
+    b.mount(host);
+    await flush();
+    b.update([instance({ rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
+    setItem.mockClear();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    vi.advanceTimersByTime(60_000); // two skipped 30s ticks
+    expect(setItem).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(setItem).toHaveBeenCalled();
+  });
 });

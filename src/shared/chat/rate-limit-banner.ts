@@ -20,6 +20,7 @@ import type { Instance } from "../../types/ipc.generated";
 import { setCachedAccounts, listCachedAccounts, getCachedAccount, capitalize } from "../accounts-cache";
 import { formatRelativeMinutes } from "../formatters";
 import { openRlbMenu, type RlbMenuItem } from "./rate-limit-banner-menu";
+import { visibleInterval } from "../visible-interval";
 export { getCachedAccount, capitalize } from "../accounts-cache";
 
 /** Live predicate for "is this session's account currently blocked by a
@@ -87,7 +88,7 @@ function minimizedKey(accountId: string, resetsAtMs: number): string {
 export class RateLimitBanner {
   private host: HTMLElement | null = null;
   private instances: Instance[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: (() => void) | null = null;
   private now: () => number;
   private storage: Pick<Storage, "getItem" | "setItem"> | null;
   private minimized: Set<string>;
@@ -162,14 +163,14 @@ export class RateLimitBanner {
 
   private stopTimer(): void {
     if (this.timer) {
-      clearInterval(this.timer);
+      this.timer();
       this.timer = null;
     }
   }
 
   private startTimer(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => this.render(), 30_000);
+    this.timer = visibleInterval(() => this.render(), 30_000);
   }
 
   private render(): void {

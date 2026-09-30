@@ -10,6 +10,7 @@
 import type { Instance } from "../types/ipc.generated";
 import { deriveQuestionSet } from "../views/sessions/sessions-helpers";
 import { isRemote } from "./transport";
+import { visibleInterval } from "./visible-interval";
 
 const SIZE = 32;
 const FLICKER_MS = 600;
@@ -20,7 +21,7 @@ const DEFAULT_ICON_HREF = "/icons/icon-192.png";
 let iconImg: HTMLImageElement | null = null;
 let iconLoadFailed = false;
 let canvas: HTMLCanvasElement | null = null;
-let timer: ReturnType<typeof setInterval> | undefined;
+let timer: (() => void) | undefined;
 let flashOn = true;
 let currentColor: string | null = null;
 let currentCount = 0;
@@ -103,7 +104,7 @@ function render(count: number, color: string | null, on: boolean): void {
 
 function stopFlicker(): void {
   if (timer) {
-    clearInterval(timer);
+    timer();
     timer = undefined;
   }
 }
@@ -134,10 +135,16 @@ export function updateFaviconBadge(sessions: Instance[], unread: ReadonlySet<str
     }
     if (!timer) {
       flashOn = true;
-      timer = setInterval(() => {
+      // KEEP-RUNNING: the favicon is what a user sees in the browser tab
+      // strip while this tab is hidden on the phone/remote browser; flashing
+      // it is the point.
+      timer = visibleInterval(() => {
         flashOn = !flashOn;
         render(currentCount, currentColor, flashOn);
-      }, FLICKER_MS);
+      }, FLICKER_MS, {
+        whileHidden: true,
+        reason: "the favicon is what a user sees in the browser tab strip while this tab is hidden on the phone/remote browser; flashing it is the point",
+      });
     }
     render(currentCount, currentColor, flashOn);
   });

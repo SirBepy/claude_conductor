@@ -30,10 +30,11 @@ import type { DashboardWidgetEntry, WidgetContext } from "./widget-registry";
 import { wireDashMoreMenu, closeDashMenu } from "./dashboard-more-menu";
 import type { DashMoreMenuDeps } from "./dashboard-more-menu";
 import { legacyStatCardsHtml } from "./legacy-stat-cards";
+import { visibleInterval } from "../../shared/visible-interval";
 
 let refreshBusy = false;
 let lastAutoPollMs = 0;
-let aiPollTimer: number | null = null;
+let aiPollTimer: (() => void) | null = null;
 
 // ── Module state (per-mount; reset on each renderDashboard call) ───────────
 let selectedAccountId: string | null = null;
@@ -66,7 +67,7 @@ async function tickAiPoll(): Promise<void> {
     const instances = await api.listInstances();
     if (instances.length === 0) {
       if (aiPollTimer !== null) {
-        window.clearInterval(aiPollTimer);
+        aiPollTimer();
         aiPollTimer = null;
       }
       return;
@@ -79,7 +80,10 @@ async function tickAiPoll(): Promise<void> {
 
 function ensureAiPollRunning(): void {
   if (aiPollTimer !== null) return;
-  aiPollTimer = window.setInterval(() => void tickAiPoll(), 60_000);
+  aiPollTimer = visibleInterval(() => void tickAiPoll(), 60_000, {
+    whileHidden: true,
+    reason: "feeds the taskbar tray icon via poll_now -> render_tray_now, which must update while the window is hidden",
+  });
 }
 
 function getHistory(): UsageRecord[] | null {
@@ -163,11 +167,14 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
   document.addEventListener("visibilitychange", onVisibility);
 
   void maybeAutoPoll("crossover");
-  const crossoverTimer = window.setInterval(() => void maybeAutoPoll("crossover"), 60_000);
+  const disposeCrossover = visibleInterval(() => void maybeAutoPoll("crossover"), 60_000, {
+    whileHidden: true,
+    reason: "feeds the taskbar tray icon via poll_now -> render_tray_now, which must update while the window is hidden",
+  });
 
   // Live per-second ring countdown tick (targeted DOM update, not a re-render
   // - renderShell/mountWidgets aren't torn-down-safe on a 1s timer).
-  const ringTickTimer = window.setInterval(() => {
+  const disposeRingTick = visibleInterval(() => {
     if (mountedContainer) tickAccountCardCountdowns(mountedContainer);
   }, 1000);
 
@@ -183,9 +190,9 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
     try { unlistenInstances(); } catch { /* ignore */ }
     window.removeEventListener("refresh-dashboard-home", onRefreshEvent);
     document.removeEventListener("visibilitychange", onVisibility);
-    window.clearInterval(crossoverTimer);
-    window.clearInterval(ringTickTimer);
-    if (aiPollTimer !== null) { window.clearInterval(aiPollTimer); aiPollTimer = null; }
+    disposeCrossover();
+    disposeRingTick();
+    if (aiPollTimer !== null) { aiPollTimer(); aiPollTimer = null; }
     closeDashMenu();
     disposeDashMoreMenu?.();
     disposeDashMoreMenu = null;

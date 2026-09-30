@@ -7,6 +7,7 @@
 // the "why" behind lastAccess/ended semantics.
 
 import type { CacheEntry } from "./event-store";
+import { visibleInterval } from "../visible-interval";
 
 // Eviction (ai_todo perf fix): a session ever opened stays cached forever
 // (see event-store.ts's file header) unless reclaimed. An entry is eligible
@@ -37,14 +38,24 @@ export class EvictionPolicy {
   constructor(private cache: Map<string, CacheEntry>) {}
 
   /** Starts the module-level sweep timer (every SWEEP_INTERVAL_MS). Pure
-   * in-memory scan, no IPC, safe to run unconditionally on both the desktop
-   * and remote transports. unref() (Node-only) is best-effort so a test
-   * process that imports this module doesn't hang on an open timer handle;
-   * the browser's numeric interval id has no unref and is left alone. */
+   * in-memory scan, no IPC - a hidden window has nothing on screen for it to
+   * refresh, so it pauses like the rest of the PAUSE-WHEN-HIDDEN pollers
+   * (todo 1008) and flushes once on return.
+   *
+   * SessionEventStore is constructed in plenty of non-jsdom Node test
+   * environments (and DOM-shim suites with a partial `document`) that have no
+   * real `document.addEventListener` - visibleInterval needs one, so fall
+   * back to the original bare interval + best-effort unref there. The real
+   * Tauri webview always has a full `document`. */
   startSweepTimer(): void {
-    const timer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
-    const maybeUnref = (timer as unknown as { unref?: () => void })?.unref;
-    if (typeof maybeUnref === "function") maybeUnref.call(timer);
+    const hasDom = typeof document !== "undefined" && typeof document.addEventListener === "function";
+    if (!hasDom) {
+      const timer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
+      const maybeUnref = (timer as unknown as { unref?: () => void })?.unref;
+      if (typeof maybeUnref === "function") maybeUnref.call(timer);
+      return;
+    }
+    visibleInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
   }
 
   /** Full teardown: stop both live listeners (runner + file-watcher) and drop

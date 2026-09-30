@@ -16,6 +16,7 @@ import type { SettingsShape } from "../../shared/state";
 import { buildOverlayRows } from "./overlay-logic";
 import { cellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
 import { initOverlayDrag, resizeOverlayToContent } from "./overlay-drag";
+import { visibleInterval } from "../../shared/visible-interval";
 
 const DEFAULT_OVERLAY_OPACITY = 0.72;
 const REFRESH_INTERVAL_MS = 30_000;
@@ -143,8 +144,8 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
       void refresh();
     });
   }
-  const timer = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
-  const tickTimer = window.setInterval(() => {
+  const disposeRefresh = visibleInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+  const disposeTick = visibleInterval(() => {
     if (rowsEl) tickOverlayResetPopups(rowsEl);
   }, RESET_TICK_INTERVAL_MS);
 
@@ -152,7 +153,7 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     try { unlistenHistory(); } catch { /* ignore */ }
     if (unlistenSettings) { try { unlistenSettings(); } catch { /* ignore */ } }
     try { cleanupDrag(); } catch { /* ignore */ }
-    window.clearInterval(timer);
-    window.clearInterval(tickTimer);
+    disposeRefresh();
+    disposeTick();
   };
 }

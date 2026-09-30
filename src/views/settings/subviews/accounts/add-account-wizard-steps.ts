@@ -43,7 +43,7 @@ export interface WizardState {
   misdirected: string | null;
   credentialsNoProfile: boolean;
   manualCheckPending: boolean;
-  pollTimer: ReturnType<typeof setInterval> | null;
+  pollTimer: (() => void) | null;
   loginStartedAt: number;
   elapsedMs: number;
   loginFailure: { kind: "mismatch" | "duplicate" | "timeout"; message: string } | null;

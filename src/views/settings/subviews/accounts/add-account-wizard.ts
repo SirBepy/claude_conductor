@@ -42,6 +42,7 @@ import {
   type WizardState,
   type WizardCallbacks,
 } from "./add-account-wizard-steps";
+import { visibleInterval } from "../../../../shared/visible-interval";
 
 /** Everything one wizard run needs, in place of the pile of closure locals
  * the pre-split version carried. `onKey` is filled in right after
@@ -93,7 +94,7 @@ function createInitialState(): WizardState {
 
 function stopPolling(ctx: WizardCtx): void {
   if (ctx.state.pollTimer !== null) {
-    clearInterval(ctx.state.pollTimer);
+    ctx.state.pollTimer();
     ctx.state.pollTimer = null;
   }
 }
@@ -289,7 +290,7 @@ function startPolling(ctx: WizardCtx): void {
   state.elapsedMs = 0;
   state.loginFailure = null;
   render(ctx);
-  state.pollTimer = setInterval(() => void pollLogin(ctx), LOGIN_POLL_INTERVAL_MS);
+  state.pollTimer = visibleInterval(() => void pollLogin(ctx), LOGIN_POLL_INTERVAL_MS);
   void pollLogin(ctx);
 }
 

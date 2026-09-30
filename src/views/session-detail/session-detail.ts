@@ -19,6 +19,7 @@ import {
 import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
 import "../../shared/kebab-menu.css";
 import "./session-detail.css";
+import { visibleInterval } from "../../shared/visible-interval";
 
 function sessionIdOf(r: SessionRecord): string {
   return r.session_id || r.sessionId || "";
@@ -193,7 +194,7 @@ export async function renderSessionDetailView(
     void enrichHistorical(r, sid, ctx);
   }
 
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let disposeTimer: (() => void) | null = null;
   if (live && r.session_id) {
     const liveSid = r.session_id;
     const tick = async () => {
@@ -205,11 +206,11 @@ export async function renderSessionDetailView(
       } catch { /* ignore transient */ }
     };
     void tick();
-    timer = setInterval(tick, 2500);
+    disposeTimer = visibleInterval(tick, 2500);
   }
 
   return () => {
-    if (timer) { clearInterval(timer); timer = null; }
+    if (disposeTimer) { disposeTimer(); disposeTimer = null; }
     const menu = root.querySelector<HTMLElement>("#sessionDetailMenu") as unknown as { _cleanup?: () => void } | null;
     try { menu?._cleanup?.(); } catch { /* ignore */ }
   };
