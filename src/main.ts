@@ -143,16 +143,22 @@ if (currentWindowLabel === "main") {
   // Paint-liveness counter: JS can keep running (so pings keep firing) while
   // WebView2's compositor stops presenting frames. rAF only fires on an
   // actual paint, so a frozen count here (while pings keep arriving) is the
-  // watchdog's signal for that distinct failure mode.
+  // watchdog's signal for that distinct failure mode. `frontend_ping` only
+  // checks that the tick changed since the last ping, so one frame armed per
+  // ping proves the same thing a free-running loop did. `rafPending` stops
+  // hidden-window pings (rAF never fires while hidden) from stacking frames.
   let rafTick = 0;
-  function tickRaf(): void {
-    rafTick++;
-    requestAnimationFrame(tickRaf);
+  let rafPending = false;
+  function armRafTick(): void {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; rafTick++; });
   }
-  requestAnimationFrame(tickRaf);
+  armRafTick();
 
   function pingFrontend(): void {
     if (document.visibilityState === "visible") void invoke("frontend_ping", { rafTick }).catch(() => {});
+    armRafTick();
   }
   pingFrontend();
   setInterval(pingFrontend, 10_000);
