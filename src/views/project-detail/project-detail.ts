@@ -116,7 +116,10 @@ function wireTitleRename(cwd: string): void {
       saveSettings();
       // The new-chat picker reads ProjectConfig.name, not the alias map.
       const configured = (settings.projects || []).find((p) => p.path === cwd);
-      if (configured) void api.updateProject(configured.id, { name });
+      void (async () => {
+        const id = configured?.id ?? (await api.ensureProject(cwd)).id;
+        await api.updateProject(id, { name });
+      })().catch((e) => console.error("[project-detail] rename sync failed", e));
       title.textContent = projectLabel(cwd, aliases);
       refreshProjectsUI();
     }
