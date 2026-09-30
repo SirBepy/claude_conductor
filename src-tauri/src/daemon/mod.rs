@@ -4,6 +4,7 @@
 pub mod broadcast;
 pub mod busy_watchdog;
 pub mod channel_adopt;
+pub mod claude_ai_connectors;
 pub mod claude_config;
 pub mod channels;
 pub mod detector_task;

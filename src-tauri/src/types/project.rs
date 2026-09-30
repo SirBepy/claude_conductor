@@ -75,6 +75,12 @@ pub struct ProjectConfig {
     /// root if not, since different checkouts can have different layouts.
     #[serde(default)]
     pub last_start_folder_rel: Option<String>,
+    /// Loads the spawning account's claude.ai connectors (Google Drive etc.)
+    /// into this project's chats. Chats run `--strict-mcp-config`, so only
+    /// these explicitly named proxy entries get through, never the local
+    /// user-scope servers whose failed auth broke MCP init (todo 867).
+    #[serde(default)]
+    pub claude_ai_connectors: bool,
 }
 
 /// Which paired peer machine an `Instance` row is mirrored from, and
@@ -300,6 +306,7 @@ mod tests {
             preferred_account_id: None,
             last_worktree_path: None,
             last_start_folder_rel: None,
+            claude_ai_connectors: false,
         };
         let raw = serde_json::to_string(&p).unwrap();
         let back: ProjectConfig = serde_json::from_str(&raw).unwrap();

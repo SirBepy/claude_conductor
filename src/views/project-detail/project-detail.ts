@@ -114,6 +114,9 @@ function wireTitleRename(cwd: string): void {
     } else {
       aliases[cwd] = { ...aliases[cwd], name };
       saveSettings();
+      // The new-chat picker reads ProjectConfig.name, not the alias map.
+      const configured = (settings.projects || []).find((p) => p.path === cwd);
+      if (configured) void api.updateProject(configured.id, { name });
       title.textContent = projectLabel(cwd, aliases);
       refreshProjectsUI();
     }
@@ -448,7 +451,7 @@ function template() {
           </button>
           <div id="projectDetailMenu" class="menu-popover hidden" role="menu">
             <button class="menu-item" data-menu-item="character-pick" role="menuitem">Character</button>
-            <button class="menu-item" data-menu-item="automation" role="menuitem">Automation</button>
+            <button class="menu-item" data-menu-item="automation" role="menuitem">Settings</button>
             <button class="menu-item" data-menu-item="folder-mapping" role="menuitem">Folder mapping</button>
           </div>
         </div>

@@ -89,8 +89,13 @@ pub(crate) fn turn_nonce() -> u64 {
 /// registers ZERO MCP tools for the whole turn - it then dies as soon as
 /// anything needs `approval_prompt`, and until this log line the only trace
 /// of why was `claude stderr` naming a tool that was never wired up.
-pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> Option<PathBuf> {
-    match write_mcp_config_inner(turn_id, tracking_id, is_jarvis) {
+pub(crate) fn write_mcp_config(
+    turn_id: &str,
+    tracking_id: &str,
+    is_jarvis: bool,
+    connectors: serde_json::Map<String, serde_json::Value>,
+) -> Option<PathBuf> {
+    match write_mcp_config_inner(turn_id, tracking_id, is_jarvis, connectors) {
         Ok(path) => {
             log::info!(
                 "daemon: turn {turn_id} (session {tracking_id}) wrote mcp config to {}",
@@ -108,7 +113,12 @@ pub(crate) fn write_mcp_config(turn_id: &str, tracking_id: &str, is_jarvis: bool
     }
 }
 
-fn write_mcp_config_inner(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> Result<PathBuf, String> {
+fn write_mcp_config_inner(
+    turn_id: &str,
+    tracking_id: &str,
+    is_jarvis: bool,
+    connectors: serde_json::Map<String, serde_json::Value>,
+) -> Result<PathBuf, String> {
     let mcp_dir = crate::settings::paths::mcp_temp_dir()
         .map_err(|e| format!("mcp_temp_dir unavailable: {e}"))?;
     let exe = std::env::current_exe().map_err(|e| format!("current_exe unavailable: {e}"))?;
@@ -120,16 +130,17 @@ fn write_mcp_config_inner(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> 
     // stdio servers) at this relay's window so the CLI doesn't abort a pending
     // AUQ/permission card early. See mcp::server::RELAY_TIMEOUT_SECS.
     // Requires Claude Code v2.1.203+; older clients ignore the unknown field.
-    let config = serde_json::json!({
-        "mcpServers": {
-            "cc_conductor": {
-                "command": exe.to_string_lossy(),
-                "args": ["--mcp-permission"],
-                "env": env,
-                "timeout": 3_660_000_u64
-            }
-        }
-    });
+    let mut servers = connectors;
+    servers.insert(
+        "cc_conductor".into(),
+        serde_json::json!({
+            "command": exe.to_string_lossy(),
+            "args": ["--mcp-permission"],
+            "env": env,
+            "timeout": 3_660_000_u64
+        }),
+    );
+    let config = serde_json::json!({ "mcpServers": servers });
     let path = mcp_dir.join(format!("{turn_id}.json"));
     let body = serde_json::to_string(&config).map_err(|e| format!("serialize failed: {e}"))?;
     // Atomic tmp-then-rename: this file is handed straight to `claude` as
@@ -408,7 +419,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
-        let path = write_mcp_config("turn-1", "sess-1", false).expect("write must succeed");
+        let path = write_mcp_config("turn-1", "sess-1", false, Default::default()).expect("write must succeed");
         std::env::remove_var("CC_DATA_DIR");
 
         let raw = std::fs::read_to_string(&path).expect("config file must exist on disk");
@@ -428,11 +439,31 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
-        let path = write_mcp_config("turn-2", "sess-2", true).expect("write must succeed");
+        let path = write_mcp_config("turn-2", "sess-2", true, Default::default()).expect("write must succeed");
         std::env::remove_var("CC_DATA_DIR");
 
         let raw = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed["mcpServers"]["cc_conductor"]["env"]["CC_JARVIS"], serde_json::json!("1"));
+    }
+
+    #[test]
+    fn write_mcp_config_keeps_cc_conductor_beside_connector_entries() {
+        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+
+        let mut connectors = serde_json::Map::new();
+        connectors.insert(
+            "claude_ai_Google_Drive".into(),
+            serde_json::json!({"type": "claudeai-proxy", "url": "https://d.example", "id": "mcpsrv_a"}),
+        );
+        let path = write_mcp_config("turn-3", "sess-3", false, connectors).expect("write must succeed");
+        std::env::remove_var("CC_DATA_DIR");
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["mcpServers"]["cc_conductor"]["args"], serde_json::json!(["--mcp-permission"]));
+        assert_eq!(parsed["mcpServers"]["claude_ai_Google_Drive"]["type"], serde_json::json!("claudeai-proxy"));
     }
 }

@@ -149,6 +149,7 @@ mod tests {
             preferred_account_id: None,
             last_worktree_path: None,
             last_start_folder_rel: None,
+            claude_ai_connectors: false,
         }
     }
 

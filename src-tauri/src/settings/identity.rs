@@ -130,16 +130,33 @@ pub fn resolve_effective_preferred_account_id(
     projects: &[crate::types::ProjectConfig],
     path: &std::path::Path,
 ) -> Option<String> {
+    resolve_project_setting(projects, path, |p| p.preferred_account_id.clone())
+}
+
+/// Whether chats under `path` load the account's claude.ai connectors, with
+/// the same own-project-then-parent-repo fallback as the account binding.
+pub fn resolve_claude_ai_connectors(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> bool {
+    resolve_project_setting(projects, path, |p| p.claude_ai_connectors.then_some(())).is_some()
+}
+
+fn resolve_project_setting<T>(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+    pick: impl Fn(&crate::types::ProjectConfig) -> Option<T>,
+) -> Option<T> {
     let own_root = find_repo_root(path).unwrap_or_else(|| path.to_path_buf());
     let own_key = normalize_path(&own_root);
-    let by_root = |root_key: &str| -> Option<String> {
+    let by_root = |root_key: &str| -> Option<T> {
         projects
             .iter()
             .find(|p| normalize_path(&p.path) == root_key)
-            .and_then(|p| p.preferred_account_id.clone())
+            .and_then(&pick)
     };
-    if let Some(id) = by_root(&own_key) {
-        return Some(id);
+    if let Some(v) = by_root(&own_key) {
+        return Some(v);
     }
     let main_key = normalize_path(&worktree_main_repo(&own_root)?);
     by_root(&main_key)
@@ -254,6 +271,7 @@ mod tests {
             preferred_account_id: preferred_account_id.map(str::to_string),
             last_worktree_path: None,
             last_start_folder_rel: None,
+            claude_ai_connectors: false,
         }
     }
 

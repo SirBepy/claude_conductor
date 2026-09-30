@@ -23,6 +23,7 @@ interface ProjectCfg {
   path: string;
   automation?: Automation | null;
   preferred_account_id?: string | null;
+  claude_ai_connectors?: boolean;
 }
 
 /** Which account new chats in this project spawn under (multi-account
@@ -99,6 +100,33 @@ async function renderAccountRow(): Promise<void> {
       })();
     };
   }
+}
+
+/** Opt-in for the account's claude.ai connectors (Google Drive etc.) in
+ * this project's chats. Takes effect on the next turn's spawn. */
+async function renderConnectorsRow(): Promise<void> {
+  const cwd = getProjectDetailState().cwd;
+  const toggle = document.getElementById("connectorsEnabled") as HTMLInputElement | null;
+  if (!cwd || !toggle) return;
+  const projects = (await api.listProjects()) as unknown as ProjectCfg[];
+  const proj = projects.find((p) => p.path === cwd);
+  toggle.checked = !!proj?.claude_ai_connectors;
+  toggle.onchange = () => {
+    void (async () => {
+      toggle.disabled = true;
+      try {
+        const id = proj?.id ?? (await api.ensureProject(cwd)).id;
+        await api.updateProject(id, { claude_ai_connectors: toggle.checked });
+        showToast(toggle.checked ? "Connectors on for new turns." : "Connectors off for new turns.");
+      } catch (e) {
+        console.error("[automation] update connectors failed", e);
+        showToast(`Could not update connectors: ${e}`);
+      } finally {
+        toggle.disabled = false;
+        await renderConnectorsRow();
+      }
+    })();
+  };
 }
 
 async function renderAutomationForm(): Promise<void> {
@@ -196,6 +224,7 @@ export async function renderAutomationView(
 
   await renderAutomationForm();
   await renderAccountRow();
+  await renderConnectorsRow();
 
   return () => { /* no teardown */ };
 }
@@ -214,6 +243,15 @@ function template(avatar: Avatar, title: string, projectPath?: string) {
               <div class="option-label">Which account new chats in this project use</div>
             </span>
             <span class="acc-row-control" id="automationAccountControl"></span>
+          </div>
+        </section>
+        <section class="automation-section" id="connectorsSection" style="margin-top:16px">
+          <div class="section-title">Connectors</div>
+          <div class="option">
+            <span class="oi">
+              <div class="option-label">Use your claude.ai connectors (Google Drive etc.) in this project's chats</div>
+            </span>
+            <label class="switch"><input type="checkbox" id="connectorsEnabled"><span class="slider"></span></label>
           </div>
         </section>
         <section class="automation-section" id="automationSection" style="margin-top:16px">
