@@ -3,6 +3,12 @@
 // and the mic button visual state. Composer delegates all voice concerns here.
 
 import { VoiceController, warmVoiceEngine, type VoiceState } from "./controller";
+import { getSettings } from "../../state";
+
+/** Off unless the user turned it on in Settings > Notifications > Audio. */
+export function voiceDictationEnabled(): boolean {
+  return getSettings().voiceDictationEnabled === true;
+}
 
 export interface ComposerVoiceCallbacks {
   /** Full edit: autoResize + updateHighlight + persistDraft + onDraftActivity. */
@@ -32,6 +38,7 @@ export class ComposerVoice {
    *  daemon idle-shuts the sidecar down after a few idle minutes, so re-warm only
    *  when the last warm is stale enough to have plausibly expired. */
   warm(): void {
+    if (!voiceDictationEnabled()) return;
     const now = Date.now();
     if (now - this.lastWarmAt < 4 * 60_000) return;
     this.lastWarmAt = now;

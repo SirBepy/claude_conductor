@@ -7,6 +7,7 @@
 // back/forward.
 
 import { getPttBinding, keyMatches, mouseMatches } from "./push-to-talk";
+import { voiceDictationEnabled } from "./composer-voice";
 
 export interface ComposerPttCallbacks {
   /** Begin recording at the given caret/insert position. */
@@ -28,7 +29,7 @@ export class ComposerPtt {
   private cb: ComposerPttCallbacks;
 
   private _keydown = (e: KeyboardEvent): void => {
-    if (this.cb.isDisabled() || this.cb.isMobile()) return;
+    if (this.cb.isDisabled() || this.cb.isMobile() || !voiceDictationEnabled()) return;
     if (!keyMatches(getPttBinding(), e)) return;
     e.preventDefault();
     if (this.active || e.repeat) return;
@@ -42,7 +43,7 @@ export class ComposerPtt {
     void this.cb.stop();
   };
   private _mousedown = (e: MouseEvent): void => {
-    if (this.cb.isDisabled() || this.cb.isMobile()) return;
+    if (this.cb.isDisabled() || this.cb.isMobile() || !voiceDictationEnabled()) return;
     if (!mouseMatches(getPttBinding(), e)) return;
     e.preventDefault();
     if (this.active) return;

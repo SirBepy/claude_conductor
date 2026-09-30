@@ -12,7 +12,7 @@ import type { SuggestProvider } from "./caret-popup/types";
 import type { ChatRenderer } from "./chat-renderer";
 import { parseBuiltin, HANDLERS, type BuiltinContext } from "./builtins";
 import { ComposerCore } from "./composer-core/core";
-import { ComposerVoice } from "./voice/composer-voice";
+import { ComposerVoice, voiceDictationEnabled } from "./voice/composer-voice";
 import { ComposerPtt } from "./voice/composer-ptt";
 import "./composer-core/core.css";
 import "./voice/voice.css";
@@ -479,14 +479,16 @@ export class Composer {
     // Re-warm on menu open so Voice is hot by the time it's clicked, even if
     // the sidecar idle-shut-down since the chat opened. Throttled inside warm().
     this.cv.warm();
-    items.push({
-      icon: "microphone",
-      label: "Voice dictation",
-      run: () => {
-        this.textarea?.focus();
-        void this.cv.toggle(this.undo.currentInsertPos());
-      },
-    });
+    if (voiceDictationEnabled()) {
+      items.push({
+        icon: "microphone",
+        label: "Voice dictation",
+        run: () => {
+          this.textarea?.focus();
+          void this.cv.toggle(this.undo.currentInsertPos());
+        },
+      });
+    }
     if (isMobileViewport()) {
       items.push({
         icon: "image",

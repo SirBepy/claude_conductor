@@ -291,6 +291,11 @@ async function hydrateNotifications(): Promise<void> {
     el.checked = slots[key] !== false;
     el.addEventListener("change", saveSettings);
   }
+  const voiceSwitch = $("voiceDictationSwitch") as HTMLInputElement | null;
+  if (voiceSwitch) {
+    voiceSwitch.checked = s.voiceDictationEnabled === true;
+    voiceSwitch.addEventListener("change", saveSettings);
+  }
   const selectOnClick = $("selectOnSessionClickSwitch") as HTMLInputElement | null;
   if (selectOnClick) {
     // Default off.
@@ -549,6 +554,8 @@ function template() {
 
         <div class="kit-section">
           <div class="kit-section-title">Audio</div>
+          ${toggleRow({ label: "Voice dictation", inputId: "voiceDictationSwitch", checked: false })}
+          <div class="settings-caption">Shows the mic and push-to-talk in chats. While on, opening a chat loads the speech model (about 1.4 GB of RAM) so the first recording starts instantly.</div>
           <div class="kit-row">
             <span class="kit-row-label">Output device</span>
             <select id="audioOutputDevice">

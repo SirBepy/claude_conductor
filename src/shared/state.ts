@@ -41,6 +41,9 @@ export interface SettingsShape {
   /** Ambient animated background behind the main window and chat windows
    * (see shared/background-fx.ts). Off by default. */
   backgroundEnabled?: boolean;
+  /** Voice dictation (mic, push-to-talk, STT sidecar pre-warm). Off unless
+   *  set: the sidecar holds a ~1.4 GB Whisper model in RAM while warm. */
+  voiceDictationEnabled?: boolean;
   backgroundVariant?: "pattern" | "gradient";
   [k: string]: unknown;
 }

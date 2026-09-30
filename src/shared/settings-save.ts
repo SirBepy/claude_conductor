@@ -169,6 +169,7 @@ export function saveSettings(): void {
     characterSoundSlots,
     // Default off: opt-in "play select when clicking a session row".
     selectOnSessionClick: chkOr("selectOnSessionClickSwitch", !!prev.selectOnSessionClick),
+    voiceDictationEnabled: chkOr("voiceDictationSwitch", prev.voiceDictationEnabled === true),
     notifications: gatherNotifSettings(prev),
     projectAliases: prev.projectAliases || {},
     projectBlacklist: prev.projectBlacklist || [],
