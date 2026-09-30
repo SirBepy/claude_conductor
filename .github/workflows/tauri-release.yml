@@ -98,15 +98,6 @@ jobs:
       - name: Build frontend
         run: pnpm exec vite build
 
-      - name: Typecheck
-        run: pnpm tsc --noEmit
-
-      - name: Check CSS custom properties
-        run: pnpm run check:css-vars
-
-      - name: Frontend unit tests
-        run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
-
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
@@ -115,6 +106,24 @@ jobs:
           workspaces: src-tauri
           key: test-x86_64-pc-windows-msvc
           cache-on-failure: true
+
+      # src/types/ipc.generated.ts is gitignored and written by this test (ts-rs),
+      # so without it tsc fails on every `../types/ipc.generated` import. The
+      # build job gets it from `pnpm run build`'s prebuild; this job calls
+      # `vite build` directly, so it has to run the generator itself.
+      - name: Generate IPC types
+        env:
+          CARGO_TARGET_DIR: target
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test export_types
+
+      - name: Typecheck
+        run: pnpm tsc --noEmit
+
+      - name: Check CSS custom properties
+        run: pnpm run check:css-vars
+
+      - name: Frontend unit tests
+        run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
 
       # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
       # and spawn a real daemon plus a real `claude`, which CI has no account for.
