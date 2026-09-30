@@ -18,8 +18,7 @@ pub struct UserTodosView {
 
 #[tauri::command]
 pub async fn list_user_todos(session_id: String, state: State<'_, AppState>) -> Result<UserTodosView, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = client.list_user_todos(&session_id).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
@@ -32,8 +31,7 @@ pub async fn set_user_todo_state(
     next: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.set_user_todo_state(&session_id, &id, &next).await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -46,8 +44,7 @@ pub async fn mark_todos_seen(
     origin_session_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.mark_todos_seen(&session_id, &origin_session_id).await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -58,16 +55,14 @@ pub async fn set_todo_columns(
     columns: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.set_todo_columns(&session_id, columns).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn clear_archived_todos(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.clear_archived_todos(&session_id).await.map_err(|e| e.to_string())?;
     Ok(())
 }

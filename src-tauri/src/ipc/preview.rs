@@ -21,8 +21,7 @@ pub async fn push_preview(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .push_preview(&title, slug.as_deref(), &html, source.as_deref(), session_id.as_deref())
         .await
@@ -33,8 +32,7 @@ pub async fn push_preview(
 /// first, for the history rail.
 #[tauri::command]
 pub async fn list_previews(state: State<'_, AppState>) -> Result<Vec<PreviewMeta>, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = client.list_previews().await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
@@ -42,8 +40,7 @@ pub async fn list_previews(state: State<'_, AppState>) -> Result<Vec<PreviewMeta
 /// Full preview snapshot (html included) by id, for the iframe render.
 #[tauri::command]
 pub async fn get_preview(id: String, state: State<'_, AppState>) -> Result<PreviewSnapshot, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = client.get_preview(&id).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }

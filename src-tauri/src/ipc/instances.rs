@@ -13,7 +13,7 @@ pub async fn list_instances(state: State<'_, AppState>) -> Result<Vec<crate::typ
 
 #[tauri::command]
 pub async fn is_daemon_connected(state: State<'_, AppState>) -> Result<bool, ()> {
-    Ok(state.daemon_client.lock().await.is_some())
+    Ok(state.client().await.is_some())
 }
 
 #[tauri::command]

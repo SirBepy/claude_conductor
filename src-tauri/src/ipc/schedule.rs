@@ -35,8 +35,7 @@ pub async fn schedule_create(
     recurrence: Option<Recurrence>,
     state: State<'_, AppState>,
 ) -> Result<ScheduledItem, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let kind_v = serde_json::to_value(&kind).map_err(|e| e.to_string())?;
     let recurrence_v = recurrence
         .as_ref()
@@ -55,16 +54,14 @@ pub async fn schedule_create(
 /// `ScheduledItem` from `schedule_list`; the daemon rejects an unknown id.
 #[tauri::command]
 pub async fn schedule_update(item: ScheduledItem, state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = serde_json::to_value(&item).map_err(|e| e.to_string())?;
     client.schedule_update(v).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn schedule_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.schedule_delete(&id).await.map_err(|e| e.to_string())
 }
 
@@ -72,8 +69,7 @@ pub async fn schedule_delete(id: String, state: State<'_, AppState>) -> Result<(
 /// scheduler tick.
 #[tauri::command]
 pub async fn schedule_fire_now(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.schedule_fire_now(&id).await.map_err(|e| e.to_string())
 }
 

@@ -20,10 +20,7 @@ pub async fn tail_waiting_log(
     offset: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<TailResult, String> {
-    let client_guard = state.daemon_client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let result = client
         .call(
             "tail_waiting_log",

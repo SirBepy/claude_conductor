@@ -11,8 +11,7 @@ pub async fn ask_list_threads(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<AskThread>, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = client.ask_list_threads(&session_id).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
@@ -27,8 +26,7 @@ pub async fn ask_send(
     cwd: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<AskThread, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = client
         .ask_send(&session_id, thread_id.as_deref(), &question, cwd.as_deref())
         .await
@@ -42,8 +40,7 @@ pub async fn ask_delete_thread(
     thread_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<AskThread>, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     let v = client.ask_delete_thread(&session_id, &thread_id).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
