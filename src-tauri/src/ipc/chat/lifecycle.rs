@@ -83,8 +83,7 @@ pub async fn takeover_manual(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (model, effort) = resolve_takeover_model_effort(manual_pid, &state);
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.takeover_manual(manual_pid, &model, &effort, &account_id).await.map_err(|e| e.to_string())
 }
 
@@ -99,8 +98,7 @@ pub async fn move_session_to_account(
     target_account_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .move_session_to_account(&session_id, &target_account_id)
         .await
@@ -118,8 +116,7 @@ pub async fn restart_jarvis_session(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.restart_jarvis_session(&session_id).await.map_err(|e| e.to_string())
 }
 
@@ -132,8 +129,7 @@ pub async fn clear_jarvis_context(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.clear_jarvis_context(&session_id).await.map_err(|e| e.to_string())
 }
 
@@ -141,8 +137,7 @@ pub async fn clear_jarvis_context(
 /// frozen (blocks silent respawn), shown after in the sidebar's Frozen segment.
 #[tauri::command]
 pub async fn freeze_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.freeze_session(&session_id).await.map_err(|e| e.to_string())
 }
 
@@ -150,8 +145,7 @@ pub async fn freeze_session(session_id: String, state: State<'_, AppState>) -> R
 /// continues a cancelled turn, otherwise a no-op resume.
 #[tauri::command]
 pub async fn unfreeze_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.unfreeze_session(&session_id).await.map_err(|e| e.to_string())
 }
 
@@ -169,8 +163,7 @@ pub async fn simulate_rate_limit(
     kind: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .simulate_rate_limit(
             &session_id,
@@ -181,18 +174,17 @@ pub async fn simulate_rate_limit(
         .map_err(|e| e.to_string())
 }
 
-/// Debug builds only: holds `daemon_client`'s guard across a controllable
-/// server-side sleep. Written in the exact shape of the 74 sites todo 1006
-/// is measuring (lock, `as_ref()`, call, await, guard held throughout) so it
-/// stands in for them for a before/after lock-contention measurement. The
-/// daemon rejects `debug_sleep` in release builds, so this errors there too.
+/// Debug builds only: clones the client via `AppState::client()` and drops
+/// the `daemon_client` lock before a controllable server-side sleep, per
+/// todo 1006's fix. This is the AFTER measurement subject for that todo's
+/// before/after lock-contention number - the daemon rejects `debug_sleep` in
+/// release builds, so this errors there too.
 #[tauri::command]
 pub async fn debug_daemon_sleep(
     ms: u64,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.debug_sleep(ms).await.map_err(|e| e.to_string())
 }
 
@@ -258,10 +250,7 @@ pub async fn respond_permission(
         "deny" => false,
         _ => return Err(format!("invalid behavior: {behavior:?} (must be 'allow' or 'deny')")),
     };
-    let client_guard = state.daemon_client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .respond_permission(
             &id,
@@ -284,10 +273,7 @@ pub async fn respond_question(
     skipped: bool,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let client_guard = state.daemon_client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .respond_question(&id, answers, skipped)
         .await
@@ -303,10 +289,7 @@ pub async fn confirm_question_rendered(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let client_guard = state.daemon_client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .confirm_question_rendered(&id)
         .await
@@ -321,10 +304,7 @@ pub async fn get_skipped_question_marks(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<i64>, String> {
-    let client_guard = state.daemon_client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .get_skipped_question_marks(&session_id)
         .await
@@ -336,10 +316,7 @@ pub async fn get_skipped_question_marks(
 /// in-memory park needs this pull side to rebuild the card.
 #[tauri::command]
 pub async fn list_pending_prompts(state: State<'_, AppState>) -> Result<Value, String> {
-    let client_guard = state.daemon_client.lock().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
         .list_pending_prompts()
         .await

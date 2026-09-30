@@ -116,6 +116,15 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Locks `daemon_client`, clones the inner `Option`, and drops the guard
+    /// before returning. `PersistentClient` multiplexes on a shared connection
+    /// (every field is an `Arc<Mutex<..>>`), so a clone is cheap and shares the
+    /// same pipe - never hold the lock across the daemon round trip itself
+    /// (see todo 1006).
+    pub async fn client(&self) -> Option<crate::daemon_client::PersistentClient> {
+        self.daemon_client.lock().await.clone()
+    }
+
     pub fn new(settings: Settings, auth_state: AuthState) -> anyhow::Result<Self> {
         let audio_stream = crate::notifications::audio::AudioStreamCtrl::init(
             settings.audio_output_device.as_deref(),

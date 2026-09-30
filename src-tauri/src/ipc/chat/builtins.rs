@@ -35,8 +35,7 @@ pub async fn clear_session(
         }
     }
 
-    let guard = state.daemon_client.lock().await;
-    if let Some(client) = guard.as_ref() {
+    if let Some(client) = state.client().await {
         if is_interactive {
             // Fire-and-forget the graceful subprocess teardown. Awaiting
             // end_session blocks for up to 3 seconds (stdin close + wait +
@@ -61,7 +60,7 @@ pub async fn clear_session(
         // session's `ended_at` is dropped, `cached_instances` stays stale and
         // the closed chat reappears in the sidebar on the next window reopen.
         // Same direct-sync pattern register_historical uses for the inverse race.
-        crate::daemon_link::fetch_and_reseed_instances(client, &state).await;
+        crate::daemon_link::fetch_and_reseed_instances(&client, &state).await;
     }
     Ok(())
 }

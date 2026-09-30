@@ -69,11 +69,8 @@ async fn start_session_daemon(
     // racing this reseed - otherwise the sidebar keeps rendering the frozen
     // "starting..." placeholder (which ignores live status) until some later,
     // unrelated instances-changed broadcast happens to land.
-    {
-        let guard = state.daemon_client.lock().await;
-        if let Some(client) = guard.as_ref() {
-            crate::daemon_link::fetch_and_reseed_instances(client, state).await;
-        }
+    if let Some(client) = state.client().await {
+        crate::daemon_link::fetch_and_reseed_instances(&client, state).await;
     }
 
     // Hand the real id to the frontend: emit a synthetic SessionStarted on the
@@ -91,8 +88,7 @@ async fn start_session_daemon(
 
     // Send the first turn's prompt. Events flow over the attached bridge.
     {
-        let guard = state.daemon_client.lock().await;
-        let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
         client.send_message(&real_id, &prompt).await.map_err(|e| e.to_string())?;
     }
 
@@ -157,8 +153,7 @@ async fn send_message_daemon(
 
     // First attempt.
     let first = {
-        let guard = state.daemon_client.lock().await;
-        let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
         client.send_message(session_id, prompt).await
     };
 
@@ -169,8 +164,7 @@ async fn send_message_daemon(
             // Pass the session's ORIGINAL account_id (not the current default) so a
             // resume never silently rebinds to a different account.
             {
-                let guard = state.daemon_client.lock().await;
-                let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+                let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
                 client
                     // auto_accept: false - this session_id already exists, so
                     // register_new_session's "only write when true" semantics
@@ -184,12 +178,11 @@ async fn send_message_daemon(
             // would no-op (id still in attached_sessions).
             super::daemon_bridge::reattach(app, session_id).await?;
             {
-                let guard = state.daemon_client.lock().await;
-                let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+                let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
                 client.send_message(session_id, prompt).await.map_err(|e| e.to_string())?;
                 // Reseed cache so the pane-clear check sees the revived session
                 // (same race as start_session_daemon; see comment there).
-                crate::daemon_link::fetch_and_reseed_instances(client, state).await;
+                crate::daemon_link::fetch_and_reseed_instances(&client, state).await;
             }
             Ok(session_id.to_string())
         }
@@ -207,8 +200,7 @@ pub async fn set_session_effort(
     if !valid.contains(&effort.as_str()) {
         return Err(format!("invalid effort: {effort}"));
     }
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.set_session_effort(&session_id, &effort).await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -224,8 +216,7 @@ pub async fn set_session_model(
         return Err(format!("invalid model: {model}"));
     }
     let restarted = {
-        let guard = state.daemon_client.lock().await;
-        let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
         client.set_session_model(&session_id, &model).await.map_err(|e| e.to_string())?
     };
     // The daemon respawned the live process on a NEW broadcast channel - force a
@@ -246,8 +237,7 @@ pub async fn set_auto_accept(
     value: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.set_auto_accept(&session_id, value).await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -257,8 +247,7 @@ pub async fn cancel_turn(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.cancel_turn(&session_id).await.map_err(|e| e.to_string())
 }
 
@@ -293,14 +282,13 @@ pub async fn register_historical_session(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     super::attachments::validate_session_id(&session_id)?;
-    let guard = state.daemon_client.lock().await;
-    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.register_historical(&session_id, &cwd, &account_id).await.map_err(|e| e.to_string())?;
     // Sync the instance cache immediately so the Sessions view's list_instances
     // call sees the new entry before the async instances_changed notification
     // arrives via daemon_link (avoids a race that caused the resume to silently
     // no-op when the cache was still stale on mount).
-    crate::daemon_link::fetch_and_reseed_instances(client, &state).await;
+    crate::daemon_link::fetch_and_reseed_instances(&client, &state).await;
     Ok(())
 }
 

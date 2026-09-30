@@ -34,8 +34,7 @@ pub async fn open_session_in_terminal(
         return Err(format!("cwd does not exist: {}", cwd.display()));
     }
     spawn_terminal_for_session(&session_id, &cwd).map_err(|e| e.to_string())?;
-    let guard = state.daemon_client.lock().await;
-    if let Some(client) = guard.as_ref() {
+    if let Some(client) = state.client().await {
         let _ = client.externalize_session(&session_id).await;
     }
     Ok(())

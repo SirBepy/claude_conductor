@@ -39,8 +39,7 @@ pub async fn ensure_attached(app: &AppHandle, session_id: &str) -> Result<(), St
     }
 
     let mut rx = {
-        let guard = state.daemon_client.lock().await;
-        let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
         match client.attach_session(session_id).await {
             Ok(rx) => rx,
             Err(e) => {
