@@ -237,8 +237,24 @@ pub fn adopt_running_channels(state: Arc<DaemonState>) {
 ///
 /// Called AFTER `adopt_running_channels` so that `--remote-control` channel
 /// processes are already known; this function skips them.
+///
+/// Both data sources this scan reads are machine-wide, not scoped to this
+/// daemon: `sessions_dir()` is the single shared `~/.claude/sessions` (see
+/// its own multi-account-audit comment), and `sys.refresh_processes_specifics`
+/// enumerates every process on the box. A non-default instance (a test/phone
+/// daemon spun up with `CC_DAEMON_INSTANCE` + a scratch `CC_DATA_DIR`) has no
+/// way to tell "my session" apart from a real terminal session belonging to
+/// the production daemon or another tool, so it must not run this scan at
+/// all - see `should_adopt_external`.
 pub fn adopt_external_sessions(state: Arc<DaemonState>) {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+    if !should_adopt_external(&crate::daemon::instance::instance_suffix()) {
+        log::debug!(
+            "adopt_external_sessions: skipped for non-default instance (would scan machine-wide processes/sessions)"
+        );
+        return;
+    }
 
     let mut sys = System::new();
     sys.refresh_processes_specifics(
@@ -334,5 +350,36 @@ pub fn adopt_external_sessions(state: Arc<DaemonState>) {
         log::info!("adopt_external_sessions: adopted {} session(s)", adopted_count);
     } else {
         log::debug!("adopt_external_sessions: no new external sessions found");
+    }
+}
+
+/// Gate for `adopt_external_sessions`. Pure over the instance suffix (not
+/// `std::env` directly) so it's testable without touching process env - see
+/// `crate::daemon::instance::instance_suffix()` for what produces the value.
+///
+/// Only the default (production) instance may run the machine-wide scan.
+/// A non-default instance (any non-empty suffix: `-dev`, `-test`, a
+/// `CC_DAEMON_INSTANCE` label) shares no reliable marker with its own
+/// processes - the session files it would scan carry no instance tag, so
+/// there is no cheap correct way to filter candidates down to "mine" short
+/// of skipping the scan outright.
+pub fn should_adopt_external(instance_suffix: &str) -> bool {
+    instance_suffix.is_empty()
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::should_adopt_external;
+
+    #[test]
+    fn default_instance_adopts() {
+        assert!(should_adopt_external(""));
+    }
+
+    #[test]
+    fn suffixed_instance_does_not_adopt() {
+        assert!(!should_adopt_external("-dev"));
+        assert!(!should_adopt_external("-test"));
+        assert!(!should_adopt_external("-phone1028"));
     }
 }
