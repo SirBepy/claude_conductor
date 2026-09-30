@@ -3,6 +3,7 @@ import { openSidemenu } from "../../shared/sidemenu";
 import { registerOverlayBack } from "../../shared/back-button";
 import { invoke } from "../../shared/ipc";
 import { updateSettings } from "../../shared/settings-update";
+import { isRemote } from "../../shared/transport";
 import type { NewsPost } from "../../types/ipc.generated";
 import { state, setPaint } from "./news-state";
 import { openDetail, renderDetail, renderDetailMenu } from "./news-detail";
@@ -134,17 +135,19 @@ function renderMenu(root: HTMLElement, unreadCount: number) {
         <i class="ph ${state.refreshing ? "ph-spinner news-spin" : "ph-arrow-clockwise"}"></i>
         ${state.refreshing ? "Refreshing…" : "Refresh"}
       </button>
-      <label class="news-menu-item news-menu-toggle">
-        <span><i class="ph ph-bell"></i> Notify me on new posts</span>
-        <label class="switch">
-          <input
-            type="checkbox"
-            .checked=${state.notifyEnabled}
-            @change=${(e: Event) => setNotifyEnabled((e.target as HTMLInputElement).checked, root)}
-          />
-          <span class="slider"></span>
-        </label>
-      </label>
+      ${isRemote()
+        ? null
+        : html`<label class="news-menu-item news-menu-toggle">
+            <span><i class="ph ph-bell"></i> Notify me on new posts</span>
+            <label class="switch">
+              <input
+                type="checkbox"
+                .checked=${state.notifyEnabled}
+                @change=${(e: Event) => setNotifyEnabled((e.target as HTMLInputElement).checked, root)}
+              />
+              <span class="slider"></span>
+            </label>
+          </label>`}
     </div>
   `;
 }

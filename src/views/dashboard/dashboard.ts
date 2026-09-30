@@ -6,6 +6,7 @@ import "../../shared/kebab-menu.css";
 import { getSettings, setUsageHistory, getUsageHistory } from "../../shared/state";
 import { api } from "../../shared/api";
 import { updateSettings } from "../../shared/settings-update";
+import { isRemote } from "../../shared/transport";
 import type { AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
 import { loadTokenHistory } from "../../shared/token-history";
@@ -259,6 +260,10 @@ function template() {
 }
 
 function onToggleEditMode(): void {
+  // Second guard behind dashboard-more-menu.ts hiding the "Edit dashboard"
+  // entry on the phone: updateSettings rejects there (todo 1023), so entering
+  // edit mode would only make the layout LOOK reorderable.
+  if (isRemote()) return;
   editMode = !editMode;
   // Pure class toggle - the edit controls are already in the DOM, so the
   // widget bodies (graphs) are never torn down and re-mounted here.
@@ -292,6 +297,9 @@ function dashMenuDeps(): DashMoreMenuDeps {
     triggerRefresh,
     getDashboardWidgets: () => dashboardWidgets,
     enableWidget: (id) => {
+      // Second guard: dashboard-more-menu.ts also hides the "Add: <widget>"
+      // rows on the phone, since this persists via updateSettings too.
+      if (isRemote()) return;
       dashboardWidgets = setWidgetEnabled(dashboardWidgets, id, true);
       persistDashboardWidgets();
       if (mountedContainer) renderShell(mountedContainer);

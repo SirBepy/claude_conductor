@@ -39,20 +39,22 @@ function template(
               ${isRemote() ? "" : html`<option value="drain" ?selected=${sort === "drain"}>Token drain</option>`}
             </select>
           </div>
-          ${toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}
+          ${isRemote() ? "" : toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}
         </div>
 
-        <div class="kit-section">
-          <div class="kit-section-title">Models</div>
-          <input
-            type="text"
-            class="cd-models-input"
-            id="chatDefaultsModels"
-            .value=${models.join(", ")}
-            placeholder="haiku, sonnet, opus"
-          >
-          <p class="cd-hint">Models offered in the New session picker, comma-separated.</p>
-        </div>
+        ${isRemote()
+          ? ""
+          : html`<div class="kit-section">
+              <div class="kit-section-title">Models</div>
+              <input
+                type="text"
+                class="cd-models-input"
+                id="chatDefaultsModels"
+                .value=${models.join(", ")}
+                placeholder="haiku, sonnet, opus"
+              >
+              <p class="cd-hint">Models offered in the New session picker, comma-separated.</p>
+            </div>`}
 
       </div>
     </div>

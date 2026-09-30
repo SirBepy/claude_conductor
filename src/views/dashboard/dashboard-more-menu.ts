@@ -7,6 +7,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { getWidget } from "./widget-registry";
 import type { DashboardWidgetEntry } from "./widget-registry";
 import { wireKebabMenu, closeKebabMenu } from "../../shared/kebab-menu";
+import { isRemote } from "../../shared/transport";
 
 export interface DashMoreMenuDeps {
   isEditMode: () => boolean;
@@ -24,23 +25,30 @@ let menuEl: HTMLElement | null = null;
 // add-widget rows shrink as widgets get added.
 function buildMenuHtml(deps: DashMoreMenuDeps): string {
   const editMode = deps.isEditMode();
-  const parts: string[] = [
-    `<button class="menu-item" role="menuitem" data-act="toggle-edit">
-      <i class="ph ph-sliders-horizontal"></i> ${editMode ? "Done editing" : "Edit dashboard"}
-    </button>`,
-    `<button class="menu-item" role="menuitem" data-act="refresh">
-      <i class="ph ph-arrows-clockwise"></i> Refresh now
-    </button>`,
-  ];
+  const parts: string[] = [];
 
-  const addable = deps.getDashboardWidgets().filter((e) => !e.enabled && getWidget(e.id));
-  if (addable.length > 0) {
-    parts.push(`<div class="menu-sep"></div>`);
-    for (const entry of addable) {
-      const widget = getWidget(entry.id)!;
-      parts.push(`<button class="menu-item" role="menuitem" data-act="add-widget" data-widget-id="${escapeHtml(entry.id)}">
-        <i class="ph ${escapeHtml(widget.icon)}"></i> Add: ${escapeHtml(widget.title)}
-      </button>`);
+  // Both the edit toggle and the add-widget rows below persist the widget
+  // layout via updateSettings, which the daemon refuses from the phone (todo
+  // 1023) - hidden there rather than left to silently look-saved-but-isn't.
+  if (!isRemote()) {
+    parts.push(`<button class="menu-item" role="menuitem" data-act="toggle-edit">
+      <i class="ph ph-sliders-horizontal"></i> ${editMode ? "Done editing" : "Edit dashboard"}
+    </button>`);
+  }
+  parts.push(`<button class="menu-item" role="menuitem" data-act="refresh">
+      <i class="ph ph-arrows-clockwise"></i> Refresh now
+    </button>`);
+
+  if (!isRemote()) {
+    const addable = deps.getDashboardWidgets().filter((e) => !e.enabled && getWidget(e.id));
+    if (addable.length > 0) {
+      parts.push(`<div class="menu-sep"></div>`);
+      for (const entry of addable) {
+        const widget = getWidget(entry.id)!;
+        parts.push(`<button class="menu-item" role="menuitem" data-act="add-widget" data-widget-id="${escapeHtml(entry.id)}">
+          <i class="ph ${escapeHtml(widget.icon)}"></i> Add: ${escapeHtml(widget.title)}
+        </button>`);
+      }
     }
   }
   return parts.join("");

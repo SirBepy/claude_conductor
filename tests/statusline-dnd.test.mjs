@@ -7,6 +7,10 @@ const ipcMock = { impl: async (cmd) => (cmd === "get_settings" ? {} : null) };
 vi.mock("../src/shared/ipc.ts", () => ({
   invoke: vi.fn((cmd, args) => ipcMock.impl(cmd, args)),
 }));
+// This DOM suite exercises the desktop drag-and-drop path specifically
+// (todo 1023 made the builder read-only on the phone) - isRemote() defaults
+// to true in jsdom (no window.__TAURI__), so it must be pinned to desktop here.
+vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => false }));
 const { renderStatuslineView } = await import("../src/views/settings/subviews/statusline/statusline.ts");
 
 describe("statusline dnd model ops", () => {

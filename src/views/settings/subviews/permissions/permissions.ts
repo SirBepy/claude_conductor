@@ -8,6 +8,7 @@ import {
   type PermissionRule,
 } from "../../../sessions/permission-rules";
 import { askConfirm } from "../../../../shared/confirm";
+import { isRemote } from "../../../../shared/transport";
 import { settingsHeader } from "../../ui";
 import "./permissions.css";
 
@@ -30,7 +31,7 @@ function ruleRow(cwd: string, rule: PermissionRule) {
   return html`
     <div class="perm-rule" data-cwd="${cwd}" data-rule="${rule.raw}">
       <span class="perm-rule__label"><strong>${rule.toolName}</strong> ${patternHtml}</span>
-      <button class="perm-rule__rm" data-act="remove" title="Remove rule" aria-label="Remove rule"><i class="ph ph-trash"></i></button>
+      ${isRemote() ? "" : html`<button class="perm-rule__rm" data-act="remove" title="Remove rule" aria-label="Remove rule"><i class="ph ph-trash"></i></button>`}
     </div>
   `;
 }
@@ -40,7 +41,7 @@ function projectBlock(cwd: string, rules: PermissionRule[]) {
     <div class="perm-project" data-cwd="${cwd}">
       <span class="perm-project__cwd" title="${cwd}">${projectShortName(cwd)} - ${cwd}</span>
       ${rules.map((r) => ruleRow(cwd, r))}
-      <button class="perm-project__clear-all" data-act="clear-all">Clear all rules for this project</button>
+      ${isRemote() ? "" : html`<button class="perm-project__clear-all" data-act="clear-all">Clear all rules for this project</button>`}
     </div>
   `;
 }

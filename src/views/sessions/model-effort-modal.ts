@@ -17,6 +17,7 @@ import { attachChipKeyboardActivation } from "../../shared/account-chip";
 import { createCharacterPane, cancelCharacterPaneSound, type CharacterPane } from "./character-pane";
 import { createSliderController, type SliderController, type SliderKind } from "./slider-controller";
 import { createModelProbeController, type ModelProbeController } from "./model-effort-probe";
+import { isRemote } from "../../shared/transport";
 import {
   EFFORTS,
   type SessionConfig,
@@ -188,6 +189,10 @@ export async function openModelEffortModal(
     }
 
     async function persistChoice(): Promise<void> {
+      // updateSettings rejects on the phone (todo 1023); the modal itself
+      // still opens and starts the session, it just skips remembering the
+      // per-project model/effort choice there.
+      if (isRemote()) return;
       try {
         await updateSettings((cur) => {
           const lc = (cur["projectLastChoice"] && typeof cur["projectLastChoice"] === "object")

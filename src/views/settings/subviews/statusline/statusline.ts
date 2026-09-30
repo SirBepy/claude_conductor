@@ -17,6 +17,7 @@ import { toolLabel, toolSummary } from "../../../../shared/chat/tool-meta";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { type Pos, insertChip, moveChip, removeAt, addRow, trimRows, moveRow } from "./statusline-dnd";
 import { askConfirm } from "../../../../shared/confirm";
+import { isRemote } from "../../../../shared/transport";
 import { settingsHeader } from "../../ui";
 import "../../settings.css";
 import "./statusline.css";
@@ -63,7 +64,13 @@ function rowsHint(profile: StatuslineProfile): string {
   return `Drag chips from the palette into the bar. Reorder by dragging, remove by dragging a chip out of the bar. Up to ${n} row${n === 1 ? "" : "s"}.`;
 }
 
-const shell = (profile: StatuslineProfile) => html`
+// updateSettings rejects on the phone (todo 1023), and every write this
+// screen makes (drag/drop, row reorder, hide-zero, clear, reset) goes through
+// it - so the phone gets a read-only preview of the bar instead of controls
+// that would look saved but aren't.
+const REMOTE_HINT = "The statusline layout is edited from the desktop app.";
+
+const shell = (profile: StatuslineProfile, remote: boolean) => html`
   <div class="view view-settings-statusline">
     ${settingsHeader("Statusline")}
     <div class="view-body">
@@ -78,7 +85,7 @@ const shell = (profile: StatuslineProfile) => html`
 
       <div class="kit-section sl-section">
         <div class="kit-section-title">Preview &amp; layout</div>
-        <div class="kit-section-hint sl-hint" id="slRowsHint">${rowsHint(profile)}</div>
+        <div class="kit-section-hint sl-hint" id="slRowsHint">${remote ? REMOTE_HINT : rowsHint(profile)}</div>
         <div class="sl-builder-chrome">
           <div class="sl-builder-titlebar">my-project — active session</div>
           <div class="session-statusbar sl-builder-bar" id="slBar"></div>
@@ -86,22 +93,24 @@ const shell = (profile: StatuslineProfile) => html`
         </div>
       </div>
 
-      <div class="kit-section sl-section">
-        <div class="kit-section-title">Palette</div>
-        <div class="sl-palette" id="slPalette"></div>
-      </div>
+      ${remote
+        ? ""
+        : html`<div class="kit-section sl-section">
+              <div class="kit-section-title">Palette</div>
+              <div class="sl-palette" id="slPalette"></div>
+            </div>
 
-      <div class="kit-section sl-section">
-        <label class="sl-hidezero">
-          <input type="checkbox" id="slHideZero">
-          Hide tool / count chips when they're zero
-        </label>
-      </div>
+            <div class="kit-section sl-section">
+              <label class="sl-hidezero">
+                <input type="checkbox" id="slHideZero">
+                Hide tool / count chips when they're zero
+              </label>
+            </div>
 
-      <div class="kit-section" style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn-secondary" id="slClearBtn" style="font-size: var(--fs-body);">Clear all</button>
-        <button class="btn-secondary" id="slResetBtn" style="font-size: var(--fs-body);">Reset to defaults</button>
-      </div>
+            <div class="kit-section" style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn-secondary" id="slClearBtn" style="font-size: var(--fs-body);">Clear all</button>
+              <button class="btn-secondary" id="slResetBtn" style="font-size: var(--fs-body);">Reset to defaults</button>
+            </div>`}
     </div>
   </div>
 `;
@@ -112,12 +121,13 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   let profile: StatuslineProfile = activeProfile();
   let rows = await loadStatuslineRows(profile);
   let hideZero = await loadStatuslineHideZero();
+  const remote = isRemote();
 
-  render(shell(profile), root);
+  render(shell(profile, remote), root);
   const bar = root.querySelector<HTMLElement>("#slBar")!;
-  const palette = root.querySelector<HTMLElement>("#slPalette")!;
-  const hideZeroBox = root.querySelector<HTMLInputElement>("#slHideZero")!;
-  hideZeroBox.checked = hideZero;
+  const palette = root.querySelector<HTMLElement>("#slPalette");
+  const hideZeroBox = root.querySelector<HTMLInputElement>("#slHideZero");
+  if (hideZeroBox) hideZeroBox.checked = hideZero;
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   const persist = () => {
@@ -138,7 +148,7 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
       b.classList.toggle("on", b.dataset.profile === profile);
     }
     const hint = root.querySelector<HTMLElement>("#slRowsHint");
-    if (hint) hint.textContent = rowsHint(profile);
+    if (hint) hint.textContent = remote ? REMOTE_HINT : rowsHint(profile);
     paint();
   }
 
@@ -160,28 +170,34 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
     const rowCount = rows.length;
     bar.innerHTML =
       rows.map((row, ri) => {
-        const upBtn = ri > 0
-          ? `<button class="sl-row-btn" data-action="up" data-ri="${ri}" title="Move row up">↑</button>`
-          : `<span class="sl-row-btn-ph"></span>`;
-        const downBtn = ri < rowCount - 1
-          ? `<button class="sl-row-btn" data-action="down" data-ri="${ri}" title="Move row down">↓</button>`
-          : `<span class="sl-row-btn-ph"></span>`;
+        let controlsHtml = "";
+        if (!remote) {
+          const upBtn = ri > 0
+            ? `<button class="sl-row-btn" data-action="up" data-ri="${ri}" title="Move row up">↑</button>`
+            : `<span class="sl-row-btn-ph"></span>`;
+          const downBtn = ri < rowCount - 1
+            ? `<button class="sl-row-btn" data-action="down" data-ri="${ri}" title="Move row down">↓</button>`
+            : `<span class="sl-row-btn-ph"></span>`;
+          controlsHtml = `<div class="sl-row-controls">${upBtn}${downBtn}</div>`;
+        }
         return `<div class="sl-row-wrap">`
-          + `<div class="sl-row-controls">${upBtn}${downBtn}</div>`
+          + controlsHtml
           + `<div class="sb-row sl-row${row.length === 0 ? " sl-row-empty" : ""}" data-row="${ri}">`
           + row.map((type, ci) => chipHtml(type, "sl-placed", `data-row="${ri}" data-index="${ci}"`)).join("")
           + `</div>`
           + `</div>`;
       }).join("")
-      + (rows.length < profileMaxRows(profile) ? `<button class="sl-addrow" id="slAddRow">+ row</button>` : "");
+      + (!remote && rows.length < profileMaxRows(profile) ? `<button class="sl-addrow" id="slAddRow">+ row</button>` : "");
 
-    palette.innerHTML = SECTION_ORDER.map((sec) =>
-      `<div class="sl-palette-section">`
-      + `<div class="sl-section-label">${escapeHtml(SECTION_LABELS[sec])}</div>`
-      + `<div class="sl-palette-chips">`
-      + paletteChipsFor(sec).map((type) => chipHtml(type, "sl-source")).join("")
-      + `</div></div>`
-    ).join("");
+    if (palette) {
+      palette.innerHTML = SECTION_ORDER.map((sec) =>
+        `<div class="sl-palette-section">`
+        + `<div class="sl-section-label">${escapeHtml(SECTION_LABELS[sec])}</div>`
+        + `<div class="sl-palette-chips">`
+        + paletteChipsFor(sec).map((type) => chipHtml(type, "sl-source")).join("")
+        + `</div></div>`
+      ).join("");
+    }
 
     wireChips();
     root.querySelector<HTMLButtonElement>("#slAddRow")?.addEventListener("click", () => {
@@ -191,6 +207,9 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   }
 
   function wireChips(): void {
+    // Read-only on the phone (updateSettings rejects there) - the bar shows
+    // the current layout with no drag/reorder affordance at all.
+    if (remote) return;
     root.querySelectorAll<HTMLElement>(".sl-pchip").forEach((chip) => {
       chip.addEventListener("pointerdown", (e) => startDrag(e, chip));
     });
@@ -286,7 +305,7 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   }
 
   // ── static wiring ──────────────────────────────────────────────────────────
-  hideZeroBox.addEventListener("change", () => {
+  hideZeroBox?.addEventListener("change", () => {
     hideZero = hideZeroBox.checked;
     void saveStatuslineHideZero(hideZero);
   });
@@ -303,7 +322,7 @@ export async function renderStatuslineView(root: HTMLElement): Promise<() => voi
   root.querySelector<HTMLButtonElement>("#slResetBtn")?.addEventListener("click", () => {
     rows = profileDefaultRows(profile);
     hideZero = true;
-    hideZeroBox.checked = true;
+    if (hideZeroBox) hideZeroBox.checked = true;
     void saveStatuslineHideZero(true);
     paint();
     persist();
