@@ -150,6 +150,38 @@ pub(super) async fn on_tool_batch(
         ctx.state.draft_store.remove_held(&q.session_id, *id);
     }
     sync_held_count(&ctx.state, &q.session_id);
+    // Live render rides the session's own chat-stream broadcast, not the
+    // global notifier below: `subscribe_global` silently drops frames under
+    // backpressure (`Err(Lagged(_)) => continue`, methods/lifecycle/notifier.rs),
+    // and a busy mid-turn session is exactly when that backpressure peaks - a
+    // reproduced live bug (todo 926), not a hypothetical. The per-session
+    // broadcast a live turn already streams on (attach.rs) self-heals instead:
+    // a lagged receiver gets an explicit `ChatEvent::EventsLagged` the frontend
+    // turns into a forced resync, rather than a silently missing frame.
+    //
+    // `remote_echo: true` for the same reason `lifecycle::teardown`'s send-echo
+    // helper sets it: the event-store's runner-channel listener
+    // (`event-store.ts`'s `ensureListener`) drops every OTHER live `user_message`
+    // on this channel outright (`claude -p --resume` replays history user lines
+    // on it too, unmarked) - only a marked echo survives to `deliver()`, whose
+    // existing sigOf/isLiveDuplicate gate then dedups it against the desktop's
+    // own optimistic bubble (if any) or the JSONL-recovered copy on reload.
+    // Content shape matches `chat::parser::parse_line`'s "attachment" arm
+    // exactly (one UserMessage, one block per delivered item) so those two
+    // never render as two separate rows.
+    if let Some(session) = ctx.state.sessions.get(&q.session_id).map(|s| s.clone()) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        crate::daemon::broadcast::publish(&session, crate::types::chat::ChatEvent::UserMessage {
+            content: delivered_blocks.clone(),
+            timestamp: now_ms,
+            remote_echo: true,
+            is_meta: false,
+            author_session_id: None,
+        });
+    }
     // Every surface drops these from its own held set and renders them as sent
     // user messages - without this the chip empties with nothing to show for
     // it, which reads as the message being thrown away.
@@ -199,6 +231,37 @@ mod tests {
         ContentBlock::Text { text: s.to_string() }
     }
 
+    /// A real throwaway child process for its `ChildStdin` - `Session::new`
+    /// requires a live one and there's no cross-platform stand-in. Same
+    /// pattern as `attach.rs`'s `spawn_fake_session` / `teardown.rs`'s
+    /// `end_session_drops_the_closed_chats_ask_threads` (Windows-only for the
+    /// same reason).
+    #[cfg(windows)]
+    async fn spawn_fake_session(map: &crate::daemon::session::SessionMap, session_id: &str) -> tokio::process::Child {
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "ping", "-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let pid = child.id().expect("pid");
+        let session = crate::daemon::session::Session::new(
+            session_id.to_string(),
+            std::env::temp_dir(),
+            "m".into(),
+            "high".into(),
+            pid,
+            stdin,
+            None,
+            None,
+            "acct".into(),
+        );
+        map.insert(session_id.to_string(), session);
+        child
+    }
+
     async fn body_text(resp: axum::response::Response) -> String {
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
@@ -230,6 +293,40 @@ mod tests {
         assert_eq!(c.state.draft_store.held_count("s1"), 0, "delivered items must not stay queued");
         // A second batch in the same turn must not re-deliver what it already got.
         assert_eq!(call(&c, "s1", "{}").await, "");
+    }
+
+    // todo 926: the live pane never showed a delivered held message because
+    // rendering rode ONLY the global notifier (`held_messages_delivered`),
+    // which drops frames under backpressure with no signal - exactly the
+    // conditions of a busy mid-turn session. This asserts the reliable half
+    // of the fix: the session's own chat-stream broadcast (what a live turn
+    // already streams assistant_delta/tool_use on) carries the delivery too,
+    // marked `remote_echo: true` so the frontend's runner-channel listener
+    // (which drops every unmarked live user_message as `--resume` history
+    // noise) actually lets it through - see event-store.ts's ensureListener.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn injects_and_broadcasts_a_live_user_message_on_the_chat_stream() {
+        let c = ctx();
+        let _child = spawn_fake_session(&c.state.sessions, "s1").await;
+        let mut rx = c.state.sessions.get("s1").unwrap().events.subscribe();
+        c.state.draft_store.add_held("s1", vec![text("BETA")]);
+
+        let _ = call(&c, "s1", "{}").await;
+
+        let ev = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("no timeout")
+            .expect("a UserMessage broadcast on the session's own chat stream");
+        match ev {
+            crate::types::chat::ChatEvent::UserMessage { content, is_meta, remote_echo, author_session_id, .. } => {
+                assert_eq!(content, vec![text("BETA")]);
+                assert!(!is_meta, "a real typed message must not be flagged is_meta");
+                assert!(remote_echo, "unmarked would be dropped as --resume history noise by event-store.ts");
+                assert_eq!(author_session_id, None);
+            }
+            other => panic!("expected UserMessage, got {other:?}"),
+        }
     }
 
     #[tokio::test]
