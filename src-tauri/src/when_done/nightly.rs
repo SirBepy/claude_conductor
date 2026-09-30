@@ -53,8 +53,13 @@ fn due_night(now: NaiveDateTime, at: NaiveTime, last_armed: Option<NaiveDate>) -
     })
 }
 
-/// Start the nightly scheduler loop. Runs for the app's lifetime.
+/// Start the nightly scheduler loop. Runs for the app's lifetime. Windows only:
+/// the away gate reads `daemon::idle::idle_secs`, which is 0 elsewhere, so a
+/// nightly arm there could never fire and would block every later night.
 pub fn spawn(app: AppHandle) {
+    if !cfg!(windows) {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         // In-memory on purpose: once a night is consumed (armed, or skipped
         // because something was already armed), cancelling it keeps it off

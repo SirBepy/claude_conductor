@@ -397,7 +397,7 @@ function template(autostart: boolean, nightly: NightlyWhenDone) {
           ${toggleRow({ label: "Launch at login", inputId: "launchAtLogin", checked: autostart })}
         </div>
 
-        ${isRemote() ? "" : nightlySection(nightly)}
+        ${isRemote() || !navigator.userAgent.includes("Windows") ? "" : nightlySection(nightly)}
 
         <div class="kit-section">
           <div class="kit-section-title">Shortcuts</div>
