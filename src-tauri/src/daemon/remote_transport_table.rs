@@ -205,6 +205,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // `ipc::git_diff` commands; pr_review.rs rejects any unknown `cwd`.
     ("get_range_files", P),
     ("get_file_diff", P),
+    // Read-only: turns hex words in a phone-rendered chat into commit links.
+    // pr_review.rs rejects any unknown `cwd`; candidates are hex-filtered.
+    ("resolve_commit_refs", P),
     // Read-only statusbar chips + location-picker scan (mirrors desktop's
     // `ipc::git` / `ipc::servers` / `ipc::claude_scopes` commands), path
     // params reject_unknown-gated in statusbar.rs. Missing here was the
@@ -343,7 +346,7 @@ mod tests {
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview",
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
-            "get_range_files", "get_file_diff",
+            "get_range_files", "get_file_diff", "resolve_commit_refs",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "push_commits", "list_project_files", "chat_drains", "list_project_servers",
             "list_claude_md_scopes",

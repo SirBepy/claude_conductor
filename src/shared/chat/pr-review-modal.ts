@@ -485,13 +485,21 @@ function buildCenterShell(tmpl: HTMLTemplateElement): {
 
 // ── entry point ─────────────────────────────────────────────────────────
 
-export function openPrPreviewModal(card: HTMLElement): void {
+export interface PrModalOptions {
+  /** The repo to diff against, when the caller knows it better than the
+   *  registered cwd provider (a chat pane that isn't the active session). */
+  cwd?: string;
+  /** A single commit rather than a PR: opens on Files Changed, commit icon. */
+  commit?: boolean;
+}
+
+export function openPrPreviewModal(card: HTMLElement, opts: PrModalOptions = {}): void {
   const tmpl = card.querySelector<HTMLTemplateElement>("template.pr-modal-tpl");
   if (!tmpl) return;
 
   closePrModal();
-  resetPrReviewData(card);
-  mSidebarTab = "commits";
+  resetPrReviewData(card, opts.cwd);
+  mSidebarTab = opts.commit ? "files" : "commits";
   mDrillSha = null;
   mTabs = [];
   mActiveTab = "desc";
@@ -507,7 +515,7 @@ export function openPrPreviewModal(card: HTMLElement): void {
   const title = card.dataset.prTitle ?? "PR Preview";
   const header = document.createElement("div");
   header.className = "pr-modal-header";
-  header.innerHTML = `<i class="ph ph-git-pull-request"></i><span class="pr-modal-title">${escapeHtml(title)}</span><button class="icon-btn-sq pr-modal-close" aria-label="Close"><i class="ph ph-x"></i></button>`;
+  header.innerHTML = `<i class="ph ${opts.commit ? "ph-git-commit" : "ph-git-pull-request"}"></i><span class="pr-modal-title">${escapeHtml(title)}</span><button class="icon-btn-sq pr-modal-close" aria-label="Close"><i class="ph ph-x"></i></button>`;
   header.querySelector<HTMLButtonElement>(".pr-modal-close")!.addEventListener("click", closePrModal);
 
   const main = document.createElement("div");

@@ -147,6 +147,8 @@ export class HttpTransport implements Transport {
           to: args.to,
           path: args.path,
         });
+      case "resolve_commit_refs":
+        return this.rpc<T>("resolve_commit_refs", { cwd: args.cwd, candidates: args.candidates });
       // Session-statusbar git/servers chips + location-picker scan (mirrors
       // desktop's `ipc::git` / `ipc::servers` / `ipc::claude_scopes`
       // commands). Missing here was the confirmed root cause of the phone's

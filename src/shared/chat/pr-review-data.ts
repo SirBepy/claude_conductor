@@ -59,9 +59,9 @@ export function parseCommits(card: HTMLElement): PrCommit[] {
  *  (pass null) when the modal closes. Always bumps the generation counter,
  *  so any load already in flight for the previous card/close can never write
  *  into the state this call establishes. */
-export function resetPrReviewData(card: HTMLElement | null): void {
+export function resetPrReviewData(card: HTMLElement | null, cwdOverride?: string): void {
   gen++;
-  cwd = card ? (cwdProvider?.() ?? null) : null;
+  cwd = card ? (cwdOverride ?? cwdProvider?.() ?? null) : null;
   commits = card ? parseCommits(card) : [];
   commitStats = new Map();
   allFiles = null;

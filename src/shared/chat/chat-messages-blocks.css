@@ -119,6 +119,25 @@
   outline-offset: 2px;
 }
 
+/* A sha confirmed as a commit in the session's repo (commit-refs.ts) reads as
+   a link; an unconfirmed .commit-ref span stays plain text. */
+.msg .commit-ref.resolved {
+  cursor: pointer;
+  color: var(--color-primary);
+  border-bottom: 1px dotted color-mix(in srgb, var(--color-primary) 50%, transparent);
+  border-radius: 2px;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.msg .commit-ref.resolved:hover {
+  color: var(--color-text);
+  border-bottom-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+.msg .commit-ref.resolved:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .copy-btn {
   position: absolute;
   top: 6px;

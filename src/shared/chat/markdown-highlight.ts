@@ -37,6 +37,30 @@ export function linkifyInlineCodeUrls(html: string, inst: MarkdownIt): string {
   });
 }
 
+// Commit-sha candidates, confirmed against the repo later by commit-refs.ts.
+// Lowercase hex, 7-40 chars, standing alone: not part of a longer word, a
+// path, a uuid segment (`-`), a colour (`#`), a `sha256:` digest or a url.
+// A sentence-ending `.` is allowed; `.x` (a filename extension) is not.
+const SHA_WORD_RE = /(?<![\w#\-/.:@&])([0-9a-f]{7,40})(?![\w\-/@]|\.\w)/g;
+
+// Protected spans whose text must never be rewritten: fenced code and links.
+// Inline <code> IS scanned, since `8a180b5` in backticks is the common case.
+const PROTECTED_RE = /(<(pre|a)(?:\s[^>]*)?>[\s\S]*?<\/\2>)/gi;
+
+export function markCommitCandidates(html: string): string {
+  return html
+    .split(PROTECTED_RE)
+    .map((part, i) => {
+      // split() with two capture groups yields [text, whole, tagName, text, ...].
+      if (i % 3 !== 0) return i % 3 === 1 ? part : "";
+      return part
+        .split(/(<[^>]*>)/)
+        .map((seg) => (seg.startsWith("<") ? seg : seg.replace(SHA_WORD_RE, '<span class="commit-ref" data-sha="$1">$1</span>')))
+        .join("");
+    })
+    .join("");
+}
+
 // @file-path token for the composer backdrop, unconditional (no registry
 // gate). Combined with the slash pattern in one regex.replace so the @
 // branch can't re-scan HTML the slash branch already emitted in the same

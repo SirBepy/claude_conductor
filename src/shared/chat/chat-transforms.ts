@@ -5,7 +5,7 @@ import { parseFileEdit } from "./file-edits";
 import { renderEditWindow } from "./edit-window";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
-import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions } from "./markdown-highlight";
+import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions, markCommitCandidates } from "./markdown-highlight";
 export { highlightSlashMentions, highlightComposerInput } from "./markdown-highlight";
 import {
   type RenderedMessage,
@@ -173,7 +173,7 @@ function attachmentChipHtml(path: string, name: string): string {
 
 /** UTF-8-safe base64 (btoa is Latin1-only). Chunked to avoid arg-count limits
  * on large pastes. */
-function utf8ToBase64(s: string): string {
+export function utf8ToBase64(s: string): string {
   const bytes = new TextEncoder().encode(s);
   let bin = "";
   const CHUNK = 0x8000;
@@ -333,7 +333,7 @@ export function renderMessage(m: RenderedMessage): string {
 
 export function renderMarkdown(text: string, breaks = false): string {
   const inst = breaks ? mdBreaks : md;
-  return highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst)));
+  return markCommitCandidates(highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst))));
 }
 
 export function wrapBlockquotes(container: HTMLElement): void {

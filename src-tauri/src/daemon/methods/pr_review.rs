@@ -48,6 +48,24 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
 
+    {
+        let state = state.clone();
+        router.register("resolve_commit_refs", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String, candidates: Vec<String> }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                let refs = crate::ipc::git_commit_refs::resolve_commit_refs(p.cwd, p.candidates)
+                    .await
+                    .map_err(RpcError::internal)?;
+                Ok(json!(refs))
+            }
+        });
+    }
+
     router.register("get_file_diff", move |params, _ctx| {
         let state = state.clone();
         async move {

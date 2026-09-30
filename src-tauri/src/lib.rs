@@ -309,6 +309,7 @@ pub fn run() {
             ipc::push_commits,
             ipc::get_range_files,
             ipc::get_file_diff,
+            ipc::git_commit_refs::resolve_commit_refs,
             context_status::commands::session_live_cwd,
             context_status::commands::context_status,
             ipc::count_ai_todos,

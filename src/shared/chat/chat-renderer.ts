@@ -1,4 +1,5 @@
 import type { ChatEvent } from "../../types/ipc.generated";
+import { handleCommitRefClick, handleCommitRefKeydown } from "./commit-refs";
 import { invoke } from "../ipc";
 import { sessionEvents } from "./event-store";
 import { RenderedMessage } from "./chat-transforms";
@@ -325,6 +326,8 @@ export class ChatRenderer {
     this.container.addEventListener("click", handleAuqAnswerClick);
     this.container.addEventListener("click", handleTableFullscreen);
     this.container.addEventListener("click", handlePrPreviewClick);
+    this.container.addEventListener("click", handleCommitRefClick);
+    this.container.addEventListener("keydown", handleCommitRefKeydown);
     this.container.addEventListener("click", createHandleToolChipClick(this));
     this.container.addEventListener("click", createHandlePreviewCardClick(this));
     this.container.addEventListener("click", createHandleDraftCardClick(this));

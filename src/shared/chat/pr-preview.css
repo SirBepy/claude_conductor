@@ -498,6 +498,13 @@
   color: var(--color-text);
 }
 
+/* Author · date · sha line under a single commit's title (commit-refs.ts). */
+.pr-modal-body-content .commit-ref-meta {
+  margin: 0 0 16px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
 .pr-img-placeholder {
   display: flex;
   align-items: center;
