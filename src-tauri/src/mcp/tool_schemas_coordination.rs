@@ -49,7 +49,7 @@ pub fn coordination_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_READ_MESSAGES,
-            "description": "Check this before editing or committing, alongside list_peers: messages posted to this project's channel since you last called this tool (see post_message) - each message is delivered once, so a second call with nothing new returns empty, not a repeat of the backlog.",
+            "description": "Check this before editing or committing, alongside list_peers: messages posted to this project's channel by OTHER sessions since you last called this tool (see post_message) - you never see your own posts back. Each message is delivered once, so a call with nothing new returns empty, not a repeat of the backlog. The first call in a new session returns only the most recent 15 messages, not the whole backlog.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}

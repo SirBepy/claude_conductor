@@ -46,6 +46,13 @@ const MAX_MESSAGES: usize = 50;
 /// blow up the store or the text every peer gets woken with.
 pub(crate) const MAX_TEXT_LEN: usize = 2000;
 
+/// A session's first-ever `list_unread_at` call (no cursor yet) returns only
+/// the newest this-many visible messages, not the whole retained backlog.
+/// `FIRST_READ_WINDOW * MAX_TEXT_LEN` (30k chars) stays well under the
+/// ~25k-token MCP tool-result cap where a result gets diverted to a file
+/// instead of returned inline.
+const FIRST_READ_WINDOW: usize = 15;
+
 /// Serialize read-modify-write within a process, same rationale as
 /// `scheduled_items::WRITE_LOCK` - cross-process integrity comes from the
 /// atomic rename, not this lock.
@@ -102,9 +109,10 @@ pub fn forget_session(session_id: &str) {
     cursors.retain(|(_, sid), _| sid != session_id);
 }
 
-/// Messages posted since `session_id` last called this for `project_id`,
-/// oldest first; advances that session's cursor to the newest message
-/// returned. First call for a given session returns the full backlog.
+/// Messages posted by someone else since `session_id` last called this for
+/// `project_id`, oldest first; advances that session's cursor to the newest
+/// visible message. First call for a given session returns only the newest
+/// `FIRST_READ_WINDOW` messages, not the full backlog.
 pub fn list_unread(project_id: &str, session_id: &str) -> Vec<ChannelMessage> {
     let Some(path) = store_path_for(project_id) else { return Vec::new() };
     list_unread_at(&path, session_id)
@@ -113,25 +121,35 @@ pub fn list_unread(project_id: &str, session_id: &str) -> Vec<ChannelMessage> {
 /// `pub(crate)`: the tempdir-injectable form real unit tests use, same
 /// rationale as `post_at`/`list_at`.
 pub(crate) fn list_unread_at(path: &Path, session_id: &str) -> Vec<ChannelMessage> {
-    // Filtered BEFORE the cursor math below: a direct message addressed to
-    // someone else must never count as "seen" by this reader, and must never
-    // occupy a slot the cursor could otherwise skip past.
+    // Both filtered BEFORE the cursor math below, so neither a DM addressed
+    // to someone else nor the reader's own post ever counts as "seen" by
+    // this reader or occupies a slot the cursor could otherwise skip past.
     let all: Vec<ChannelMessage> = list_at(path)
         .into_iter()
         .filter(|m| m.to_session_id.is_none() || m.to_session_id.as_deref() == Some(session_id))
+        .filter(|m| m.session_id != session_id)
         .collect();
     let key = (path.to_path_buf(), session_id.to_string());
     let mut cursors = cursors().lock().unwrap_or_else(|e| e.into_inner());
     // No cursor, or the cursor's message aged out of MAX_MESSAGES retention:
     // both fail open to "everything currently retained" rather than silently
-    // dropping messages this session has never actually seen.
+    // dropping messages this session has never actually seen - except a
+    // genuinely first-ever call (`None`), which is bounded to the newest
+    // `FIRST_READ_WINDOW` instead of dumping the whole backlog at once.
     let unread = match cursors.get(&key) {
         Some(last_id) => match all.iter().position(|m| &m.id == last_id) {
             Some(idx) => all[idx + 1..].to_vec(),
             None => all,
         },
-        None => all,
+        None => {
+            let start = all.len().saturating_sub(FIRST_READ_WINDOW);
+            all[start..].to_vec()
+        }
     };
+    // `unread`'s last element is always `all`'s last element too (the window
+    // above only trims from the front), so the cursor still lands on the
+    // newest visible message overall, not just the newest of a truncated
+    // slice - a later call never re-delivers anything skipped by the window.
     if let Some(newest) = unread.last() {
         cursors.insert(key, newest.id.clone());
     }
@@ -249,14 +267,64 @@ mod tests {
     }
 
     #[test]
-    fn list_unread_returns_the_full_backlog_on_a_sessions_first_call() {
+    fn list_unread_returns_the_full_backlog_on_a_sessions_first_call_when_under_the_window() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("proj-cursor-1.json");
         post_at(Some(&path), "s1", "Alice", "one", None);
         post_at(Some(&path), "s1", "Alice", "two", None);
 
         let unread = list_unread_at(&path, "reader-a");
-        assert_eq!(unread.len(), 2);
+        assert_eq!(unread.len(), 2, "2 messages is under FIRST_READ_WINDOW, so nothing is trimmed");
+    }
+
+    #[test]
+    fn list_unread_bounds_a_sessions_first_call_to_the_first_read_window() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-cursor-window.json");
+        for i in 0..FIRST_READ_WINDOW + 5 {
+            post_at(Some(&path), "s1", "Alice", &format!("msg {i}"), None);
+        }
+
+        let unread = list_unread_at(&path, "reader-window");
+        assert_eq!(unread.len(), FIRST_READ_WINDOW);
+        assert_eq!(unread[0].text, "msg 5", "oldest 5 must be skipped, never delivered");
+        assert_eq!(unread[FIRST_READ_WINDOW - 1].text, format!("msg {}", FIRST_READ_WINDOW + 4));
+
+        // The window must not just be delayed - the skipped messages are gone
+        // for good, not queued behind the cursor for a later call.
+        assert_eq!(list_unread_at(&path, "reader-window").len(), 0);
+    }
+
+    #[test]
+    fn list_unread_never_returns_the_readers_own_posts() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-own-posts.json");
+        post_at(Some(&path), "author-a", "Alice", "mine", None);
+
+        assert_eq!(list_unread_at(&path, "author-a").len(), 0, "a poster never sees its own post");
+        assert_eq!(
+            list_unread_at(&path, "someone-else").len(),
+            1,
+            "a different reader still sees it"
+        );
+    }
+
+    #[test]
+    fn list_unread_advances_the_posters_own_cursor_past_its_own_post() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-own-cursor.json");
+        post_at(Some(&path), "author-a", "Alice", "one", None);
+        post_at(Some(&path), "author-b", "Bob", "two", None);
+
+        let first = list_unread_at(&path, "author-a");
+        assert_eq!(first.len(), 1, "a sees only b's post, not its own");
+        assert_eq!(first[0].text, "two");
+
+        assert_eq!(
+            list_unread_at(&path, "author-a").len(),
+            0,
+            "a's cursor must have advanced past everything, not gotten stuck on its own filtered-out post"
+        );
     }
 
     #[test]
@@ -332,6 +400,20 @@ mod tests {
         let unread = list_unread_at(&path, "bob");
         assert_eq!(unread.len(), 1);
         assert_eq!(unread[0].text, "direct follow-up");
+    }
+
+    #[test]
+    fn direct_messages_sender_never_reads_its_own_dm_back() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-direct-own.json");
+        post_at(Some(&path), "alice", "Alice", "just for bob", Some("bob"));
+
+        assert_eq!(
+            list_unread_at(&path, "alice").len(),
+            0,
+            "the DM's own sender must never read it back"
+        );
+        assert_eq!(list_unread_at(&path, "bob").len(), 1, "the addressee still sees it");
     }
 
     #[test]
