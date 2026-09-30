@@ -7,10 +7,10 @@ use crate::settings::{self, paths};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
-pub fn get_hook_registration_state(
-    state: State<AppState>,
+pub async fn get_hook_registration_state(
+    state: State<'_, AppState>,
     app: AppHandle,
-) -> serde_json::Value {
+) -> Result<serde_json::Value, String> {
     // Self-heal: if global settings already contain our hook entries
     // (e.g. app-data was wiped on reinstall but ~/.claude/settings.json
     // survived), flip the local flag so the consent modal stops
@@ -51,16 +51,16 @@ pub fn get_hook_registration_state(
         }
     }
     let s = state.settings.lock().unwrap();
-    serde_json::json!({
+    Ok(serde_json::json!({
         "registered": s.hooks_registered,
         "declined": s.hook_registration_declined,
         "port": s.hook_port,
-    })
+    }))
 }
 
 #[tauri::command]
-pub fn register_hooks_globally(
-    state: State<AppState>,
+pub async fn register_hooks_globally(
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let port = {
@@ -81,8 +81,8 @@ pub fn register_hooks_globally(
 }
 
 #[tauri::command]
-pub fn skip_hook_registration(
-    state: State<AppState>,
+pub async fn skip_hook_registration(
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let path = paths::settings_file().map_err(|e| e.to_string())?;

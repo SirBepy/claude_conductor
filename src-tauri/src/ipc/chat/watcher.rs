@@ -214,7 +214,7 @@ pub async fn watch_session_transcript(
 
 /// Stop the file watcher for `session_id`. No-op if not currently watching.
 #[tauri::command]
-pub fn unwatch_session_transcript(session_id: String) {
+pub async fn unwatch_session_transcript(session_id: String) {
     bump_generation(&session_id);
     stop_watcher(&session_id);
 }

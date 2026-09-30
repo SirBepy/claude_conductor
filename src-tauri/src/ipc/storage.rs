@@ -9,7 +9,7 @@ use crate::settings::{self, paths};
 use crate::state::AppState;
 use crate::storage::{self, Dataset, RetentionPolicy};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 /// Frontend handle for a dataset. Mirrors `storage::Dataset` but lives in the
@@ -106,7 +106,7 @@ fn total_db_bytes() -> u64 {
 /// Per-dataset record counts, date ranges, retention policies, and total DB
 /// file size for the Settings > Data section.
 #[tauri::command]
-pub fn get_storage_info(state: State<AppState>) -> Result<Vec<DatasetInfo>, String> {
+pub async fn get_storage_info(state: State<'_, AppState>) -> Result<Vec<DatasetInfo>, String> {
     let total_db_bytes = total_db_bytes();
     let mgr = state.db.lock().unwrap();
     let conn = mgr.conn();
@@ -129,10 +129,10 @@ pub fn get_storage_info(state: State<AppState>) -> Result<Vec<DatasetInfo>, Stri
 /// Persists a new retention policy for `dataset`, then immediately prunes that
 /// dataset so the dropdown change takes effect right away.
 #[tauri::command]
-pub fn set_retention_policy(
+pub async fn set_retention_policy(
     dataset: DatasetId,
     policy: RetentionPolicy,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     // Update + persist settings.
@@ -160,8 +160,19 @@ pub fn set_retention_policy(
 
 /// Empties a dataset (`DELETE FROM <table>` + `VACUUM`). No confirmation: sole
 /// user, recoverable by re-collecting data.
+///
+/// `VACUUM` rewrites the whole companion DB file, so it runs on the blocking
+/// pool rather than just being marked `async` (an async fn that blocks still
+/// blocks a runtime worker). `rusqlite::Connection` is `!Send`, so the guard
+/// can't cross the `spawn_blocking` boundary - `app` (Send) goes in instead
+/// and re-resolves `AppState` inside the closure.
 #[tauri::command]
-pub fn clear_dataset(dataset: DatasetId, state: State<AppState>) -> Result<(), String> {
-    let mgr = state.db.lock().unwrap();
-    storage::clear_dataset(mgr.conn(), dataset.into()).map_err(|e| format!("{e:#}"))
+pub async fn clear_dataset(dataset: DatasetId, app: AppHandle) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mgr = state.db.lock().unwrap();
+        storage::clear_dataset(mgr.conn(), dataset.into()).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

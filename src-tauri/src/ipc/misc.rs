@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager};
 /// the live Instance instead). None for chats that closed before the store
 /// existed.
 #[tauri::command]
-pub fn get_session_config(session_id: String) -> Option<crate::sessions::chat_config::ChatConfig> {
+pub async fn get_session_config(session_id: String) -> Option<crate::sessions::chat_config::ChatConfig> {
     crate::sessions::chat_config::get(&session_id)
 }
 
@@ -19,7 +19,7 @@ pub fn get_session_config(session_id: String) -> Option<crate::sessions::chat_co
 /// restart. Read-only local file read (writes go through `set_auto_accept`,
 /// which forwards to the daemon as the sole writer).
 #[tauri::command]
-pub fn list_auto_accept() -> Vec<String> {
+pub async fn list_auto_accept() -> Vec<String> {
     crate::sessions::chat_config::list_auto_accept()
 }
 
@@ -27,12 +27,12 @@ pub fn list_auto_accept() -> Vec<String> {
 /// a freshly-opened window (no in-memory dedup state yet) judge whether a
 /// cached session may have moved on without it. None if never recorded.
 #[tauri::command]
-pub fn get_chat_state(session_id: String) -> Option<crate::sessions::chat_state::ChatState> {
+pub async fn get_chat_state(session_id: String) -> Option<crate::sessions::chat_state::ChatState> {
     crate::sessions::chat_state::get(&session_id)
 }
 
 #[tauri::command]
-pub fn quit_app(app: AppHandle) {
+pub async fn quit_app(app: AppHandle) {
     use std::sync::atomic::Ordering;
     if let Some(state) = app.try_state::<crate::state::AppState>() {
         state.should_quit.store(true, Ordering::SeqCst);
@@ -46,7 +46,7 @@ pub fn quit_app(app: AppHandle) {
 /// was queued while the webview was still loading (see `pending_main_nav`).
 /// Idempotent; safe to call from every page load.
 #[tauri::command]
-pub fn frontend_ready(app: AppHandle, window: tauri::Window) {
+pub async fn frontend_ready(app: AppHandle, window: tauri::Window) {
     use std::sync::atomic::Ordering;
     use tauri::{Emitter, Manager};
     // Every window sends this, so it doubles as the per-window ready gate in
@@ -78,7 +78,7 @@ pub fn frontend_ready(app: AppHandle, window: tauri::Window) {
 /// compositor stops presenting frames. Only bumps the timestamp when the
 /// tick actually changes, so a frozen tick reads as increasingly stale.
 #[tauri::command]
-pub fn frontend_ping(app: AppHandle, raf_tick: u64) {
+pub async fn frontend_ping(app: AppHandle, raf_tick: u64) {
     if let Some(state) = app.try_state::<crate::state::AppState>() {
         *state.last_frontend_ping.lock().unwrap() = Some(std::time::Instant::now());
         let mut raf = state.last_frontend_raf.lock().unwrap();
@@ -89,7 +89,7 @@ pub fn frontend_ping(app: AppHandle, raf_tick: u64) {
 }
 
 #[tauri::command]
-pub fn get_platform() -> String {
+pub async fn get_platform() -> String {
     match std::env::consts::OS {
         "macos" => "darwin".into(),
         "windows" => "win32".into(),
@@ -98,7 +98,7 @@ pub fn get_platform() -> String {
 }
 
 #[tauri::command]
-pub fn get_app_version(app: AppHandle) -> String {
+pub async fn get_app_version(app: AppHandle) -> String {
     if option_env!("CI").is_none() {
         return "local-build".to_string();
     }
@@ -116,7 +116,7 @@ pub struct VersionInfo {
 
 #[tauri::command]
 pub async fn get_version_info(app: AppHandle) -> VersionInfo {
-    let version = get_app_version(app.clone());
+    let version = get_app_version(app.clone()).await;
     let base_date = option_env!("BUILD_DATE").unwrap_or("unknown").to_string();
     let build_date = if base_date == "unknown" {
         base_date

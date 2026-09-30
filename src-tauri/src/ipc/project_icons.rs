@@ -120,7 +120,7 @@ fn detect_tech_at(root: &Path) -> Option<&'static str> {
 /// reading as undetected. Cheap (a handful of file-existence checks per
 /// level); the frontend caches per path.
 #[tauri::command]
-pub fn get_project_tech(root: String) -> Option<String> {
+pub async fn get_project_tech(root: String) -> Option<String> {
     ancestors_upto_repo_root(Path::new(&root), 8)
         .iter()
         .find_map(|dir| detect_tech_at(dir))
@@ -194,8 +194,8 @@ mod tests {
     /// A subfolder with its OWN marker (e.g. `frontend/package.json` in a
     /// Rust+Node monorepo) must keep reading as its own tech, not the repo
     /// root's - closest dir wins.
-    #[test]
-    fn subfolder_with_own_marker_is_not_overridden_by_repo_root() {
+    #[tokio::test]
+    async fn subfolder_with_own_marker_is_not_overridden_by_repo_root() {
         let root = tempdir().unwrap();
         std::fs::write(root.path().join(".git"), "").unwrap();
         std::fs::write(root.path().join("pyproject.toml"), "").unwrap();
@@ -204,19 +204,19 @@ mod tests {
         std::fs::write(frontend.join("package.json"), "{}").unwrap();
 
         assert_eq!(
-            get_project_tech(frontend.to_string_lossy().to_string()),
+            get_project_tech(frontend.to_string_lossy().to_string()).await,
             Some("node".to_string())
         );
         assert_eq!(
-            get_project_tech(root.path().to_string_lossy().to_string()),
+            get_project_tech(root.path().to_string_lossy().to_string()).await,
             Some("python".to_string())
         );
     }
 
     /// A subfolder with NO markers of its own (e.g. `docs/`) inherits the
     /// repo root's detected tech instead of reading as undetected.
-    #[test]
-    fn subfolder_with_no_markers_inherits_repo_root_tech() {
+    #[tokio::test]
+    async fn subfolder_with_no_markers_inherits_repo_root_tech() {
         let root = tempdir().unwrap();
         std::fs::write(root.path().join(".git"), "").unwrap();
         std::fs::write(root.path().join("Cargo.toml"), "").unwrap();
@@ -224,7 +224,7 @@ mod tests {
         std::fs::create_dir_all(&docs).unwrap();
 
         assert_eq!(
-            get_project_tech(docs.to_string_lossy().to_string()),
+            get_project_tech(docs.to_string_lossy().to_string()).await,
             Some("rust".to_string())
         );
     }
@@ -264,8 +264,8 @@ mod tests {
 
     /// The walk-up must not escape the repo boundary: a `.git`-bearing dir is
     /// the last one checked, even if its own parent also has a marker.
-    #[test]
-    fn walk_up_stops_at_repo_root() {
+    #[tokio::test]
+    async fn walk_up_stops_at_repo_root() {
         let outer = tempdir().unwrap();
         std::fs::write(outer.path().join("Cargo.toml"), "").unwrap();
         let repo = outer.path().join("repo");
@@ -274,6 +274,6 @@ mod tests {
         let sub = repo.join("sub");
         std::fs::create_dir_all(&sub).unwrap();
 
-        assert_eq!(get_project_tech(sub.to_string_lossy().to_string()), None);
+        assert_eq!(get_project_tech(sub.to_string_lossy().to_string()).await, None);
     }
 }

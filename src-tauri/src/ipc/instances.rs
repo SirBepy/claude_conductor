@@ -7,8 +7,8 @@ use crate::state::AppState;
 use tauri::State;
 
 #[tauri::command]
-pub fn list_instances(state: State<AppState>) -> Vec<crate::types::Instance> {
-    state.cached_instances.lock().unwrap().clone()
+pub async fn list_instances(state: State<'_, AppState>) -> Result<Vec<crate::types::Instance>, String> {
+    Ok(state.cached_instances.lock().unwrap().clone())
 }
 
 #[tauri::command]
@@ -17,31 +17,36 @@ pub async fn is_daemon_connected(state: State<'_, AppState>) -> Result<bool, ()>
 }
 
 #[tauri::command]
-pub fn list_instances_for_project(
+pub async fn list_instances_for_project(
     project_id: String,
-    state: State<AppState>,
-) -> Vec<crate::types::Instance> {
-    state
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::types::Instance>, String> {
+    Ok(state
         .cached_instances
         .lock()
         .unwrap()
         .iter()
         .filter(|i| i.project_id == project_id)
         .cloned()
-        .collect()
+        .collect())
 }
 
 #[tauri::command]
-pub fn phone_link(session_id: String, state: State<AppState>) -> Option<String> {
-    let inst = state
+pub async fn phone_link(session_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Some(inst) = state
         .cached_instances
         .lock()
         .unwrap()
         .iter()
         .find(|i| i.session_id == session_id)
-        .cloned()?;
-    let bridge = inst.bridge_session_id?;
-    Some(format!("https://claude.ai/code/{bridge}"))
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let Some(bridge) = inst.bridge_session_id else {
+        return Ok(None);
+    };
+    Ok(Some(format!("https://claude.ai/code/{bridge}")))
 }
 
 /// The only transcript a session-keyed stats call may read: the recorded path,

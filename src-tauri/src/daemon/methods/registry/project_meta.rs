@@ -74,7 +74,7 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 reject_unknown(&state, &p.root)?;
-                Ok(json!(crate::ipc::project_icons::get_project_tech(p.root)))
+                Ok(json!(crate::ipc::project_icons::get_project_tech(p.root).await))
             }
         });
     }
