@@ -332,3 +332,197 @@ async fn fire_now_spawns_scheduled_new_chat() {
         "expected an assistant_message/turn_usage/session_ended event from the fire_now-spawned session (events_seen={events_seen})"
     );
 }
+
+/// Like `drain_for_reply`, but also reconstructs the assistant's full turn
+/// text so callers can assert on what the model actually said, not just that
+/// some event arrived. A live `delta: true` attach (this test's client) only
+/// ever emits text via `AssistantDelta` chunks mid-turn - `AssistantMessage`
+/// is the JSONL-history-replay shape (`types/chat.rs`'s own doc comment on
+/// the `AssistantDelta` variant) and never appears on this wire. `snapshot:
+/// true` deltas replace a block's buffer instead of appending (a resync
+/// frame carries the FULL accumulated text for that block); this test
+/// attaches before sending, so a resync should not occur, but the guard costs
+/// nothing.
+async fn drain_capturing_text(rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>, timeout: Duration) -> (usize, String) {
+    let mut events_seen = 0usize;
+    let mut saw_reply = false;
+    let mut blocks: std::collections::BTreeMap<u64, String> = std::collections::BTreeMap::new();
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await {
+            Ok(Some(notif)) => {
+                events_seen += 1;
+                let event = notif.pointer("/params/event");
+                let variant = event
+                    .and_then(|v| v.as_object())
+                    .and_then(|o| o.get("type"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
+                eprintln!("notif #{events_seen}: variant={variant:?}");
+                if variant.as_deref() == Some("assistant_delta") {
+                    if let Some(obj) = event.and_then(|v| v.as_object()) {
+                        let block = obj.get("block").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let chunk = obj.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        let snapshot = obj.get("snapshot").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let entry = blocks.entry(block).or_default();
+                        if snapshot {
+                            *entry = chunk.to_string();
+                        } else {
+                            entry.push_str(chunk);
+                        }
+                    }
+                }
+                if let Some(k) = variant.as_deref() {
+                    if k == "assistant_message" || k == "turn_usage" || k == "session_ended" {
+                        saw_reply = true;
+                        if k == "turn_usage" || k == "session_ended" {
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                eprintln!("timeout waiting for next event; events_seen={events_seen}");
+                if saw_reply {
+                    break;
+                }
+            }
+        }
+    }
+    let text: String = blocks.into_values().collect();
+    (events_seen, text)
+}
+
+/// Reads `store` directly (this out-of-process test has no
+/// `CC_DAEMON_INSTANCE` of its own, so it can't go through
+/// `scheduled_items::list()`) and returns the single item whose prompt
+/// contains `marker`, or `None`. Panics on more than one hit - the marker is
+/// minted fresh per test run precisely so this can assert "exactly one" up
+/// front rather than "at least one".
+fn find_by_marker(store: &std::path::Path, marker: &str) -> Option<scheduled_items::ScheduledItem> {
+    let raw = std::fs::read_to_string(store).ok()?;
+    let map: std::collections::HashMap<String, scheduled_items::ScheduledItem> = serde_json::from_str(&raw).ok()?;
+    let mut hits: Vec<scheduled_items::ScheduledItem> =
+        map.into_values().filter(|it| it.prompt.contains(marker)).collect();
+    match hits.len() {
+        0 => None,
+        1 => hits.pop(),
+        n => panic!("expected exactly one item containing marker {marker:?}, found {n}"),
+    }
+}
+
+/// Test 3: the `schedule` MCP tool's own round trip inside a real session -
+/// distinct from tests 1/2 above, which drive the *fire* paths
+/// (`daemon::schedule`'s tick loop / `schedule_fire_now`) via the desktop RPC
+/// surface directly. This one proves the tool is actually reachable and
+/// correct from inside a live `claude` turn: `add` writes a real item via the
+/// MCP child's `/schedule/write` POST (`schedule_mcp::add`/`build_item`), the
+/// `UserPromptSubmit` turn-hook injects that item's `[scheduled]` block with a
+/// real short id into a later turn (`schedule_mcp::inject::render_for_
+/// injection`), and `cancel` by that printed short id resolves and deletes it
+/// (`schedule_mcp::resolve_id`/`resolve_unique_prefix`). Does NOT cover firing
+/// a scheduled `NewChat` - `fire_now_spawns_scheduled_new_chat` above already
+/// covers that path; this test only ever uses `target: "this_chat"` so it
+/// never spawns a second session.
+#[tokio::test(flavor = "current_thread")]
+#[ignore]
+async fn schedule_mcp_tool_add_inject_cancel_live() {
+    const INSTANCE: &str = "test-schedule-mcp";
+    let Some(account_id) = test_account_id() else {
+        eprintln!("SKIP: no accounts registered - add one before running this suite");
+        return;
+    };
+    let (_daemon_guard, pipe_name) = spawn_test_daemon(INSTANCE).await;
+
+    let client = PersistentClient::connect(&pipe_name).await.expect("connect");
+
+    let cwd = std::env::temp_dir();
+    let cwd_str = cwd.to_string_lossy().to_string();
+    // auto_accept: true - unlike tests 1/2 above, this turn calls the real
+    // `schedule` MCP tool, which is not in claude_config's PRETRUSTED_TOOLS
+    // list and so goes through the blocking permission relay
+    // (hooks_server/permission.rs::on_permission_request). That relay only
+    // server-side auto-accepts a non-question-shaped tool call when this
+    // session's persisted auto_accept flag is set; false here would leave the
+    // tool call blocked on a human answer this test never provides, hanging
+    // until PROMPT_TIMEOUT (3600s). Confirmed live: the first run of this
+    // test with auto_accept=false stalled after one tool_use with no
+    // tool_result until the test's own 120s drain deadline.
+    let session_id = client
+        .start_session(&cwd_str, "haiku", "low", None, Some(&account_id), true, None)
+        .await
+        .expect("start_session");
+    eprintln!("started session {session_id}");
+
+    let mut rx = client.attach_session(&session_id).await.expect("attach");
+    let store = store_path(INSTANCE);
+
+    let marker = format!("sched-e2e-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+
+    // in_minutes 60: far enough out that the ~30s tick loop must not fire it
+    // during this test (default grace window aside, nothing here calls
+    // fire_now either).
+    let add_prompt = format!(
+        "Call the `schedule` MCP tool right now with action \"add\", target \"this_chat\", \
+         prompt \"{marker}\", and in_minutes 60. After the tool call returns, reply with the \
+         single word done and stop."
+    );
+    client.send_message(&session_id, &add_prompt).await.expect("send add prompt");
+    let (add_events, add_text) = drain_capturing_text(&mut rx, Duration::from_secs(120)).await;
+    eprintln!("---- ADD TURN REPLY (events_seen={add_events}) ----\n{add_text}\n----------------------------------------");
+
+    let mut matching = find_by_marker(&store, &marker);
+    let poll_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while matching.is_none() && std::time::Instant::now() < poll_deadline {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        matching = find_by_marker(&store, &marker);
+    }
+    let item = matching.unwrap_or_else(|| {
+        panic!("expected exactly one Pending item containing marker {marker:?} in {store:?} after the add turn (model reply: {add_text:?})")
+    });
+    eprintln!("scheduled item written: id={} status={:?}", item.id, item.status);
+    let _cleanup = ScheduledItemGuard { id: item.id.clone(), store: store.clone() };
+    assert_eq!(item.status, ScheduledStatus::Pending, "newly added item must start Pending");
+    assert!(item.prompt.contains(&marker), "stored prompt must round-trip the marker, got {:?}", item.prompt);
+
+    let short_id = &item.id[..8.min(item.id.len())];
+
+    let cancel_prompt = format!(
+        "Look in your context for the [scheduled] block listing queued prompts. Find the entry \
+         whose text contains \"{marker}\" and read its short id shown in brackets before it, \
+         like [xxxxxxxx]. First reply with that exact short id by itself on its own line. Then \
+         call the `schedule` MCP tool with action \"cancel\" and id set to that short id, and \
+         confirm the cancellation succeeded."
+    );
+    client.send_message(&session_id, &cancel_prompt).await.expect("send cancel prompt");
+    let (cancel_events, cancel_text) = drain_capturing_text(&mut rx, Duration::from_secs(120)).await;
+    eprintln!("---- CANCEL TURN REPLY (events_seen={cancel_events}) ----\n{cancel_text}\n----------------------------------------");
+
+    let _ = client.end_session(&session_id).await;
+    drop(client);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        cancel_text.contains(short_id),
+        "expected the model's reply to echo the injected short id {short_id:?} \
+         (proves the [scheduled] block rendered into a real turn); got {cancel_text:?}"
+    );
+
+    let mut still_there = scheduled_items::get_at(&store, &item.id);
+    let poll_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while still_there.is_some() && std::time::Instant::now() < poll_deadline {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        still_there = scheduled_items::get_at(&store, &item.id);
+    }
+    eprintln!("post-cancel store lookup: {still_there:?}");
+    assert!(
+        still_there.is_none(),
+        "expected the item to be gone from the store after cancel by short id {short_id:?}, still present: {still_there:?}"
+    );
+
+    eprintln!(
+        "NOTE: this test does not cover firing a scheduled NewChat item - \
+         fire_now_spawns_scheduled_new_chat above already covers that path."
+    );
+}
