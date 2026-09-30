@@ -28,6 +28,7 @@ pub mod chats;
 pub mod jarvis;
 pub mod preview;
 pub mod schedule;
+mod webview_visibility;
 
 // Glob re-exports (not a named shim - see the tauri::command gotcha) so
 // pre-split callers (bootstrap.rs, tray::menu, state.rs) keep resolving via
@@ -99,6 +100,7 @@ fn attach_hide_to_tray_with(
     window: &tauri::WebviewWindow,
     on_hidden: impl Fn(&AppHandle) + Send + 'static,
 ) {
+    webview_visibility::attach(window);
     let w = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
