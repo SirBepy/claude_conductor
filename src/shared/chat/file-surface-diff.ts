@@ -111,32 +111,65 @@ export function renderUnifiedDiffHtml(rows: DiffRow[]): string {
   return `<table class="fs-udiff">${trs}</table>`;
 }
 
-export function renderSplitDiffHtml(rows: DiffRow[]): string {
-  const left: string[] = [];
-  const right: string[] = [];
-  const rowDiv = (line: number | undefined, text: string, cls: string, ri: number): string =>
-    `<div class="fs-srow ${cls}"><span class="fs-ln" data-no-search="1">${line ?? ""}</span>` +
-    `<span class="fs-code" data-ri="${ri}">${text.length ? escapeHtml(text) : "&#8203;"}</span></div>`;
-  const padDiv = (): string =>
-    `<div class="fs-srow fs-pad"><span class="fs-ln" data-no-search="1"></span><span class="fs-code"></span></div>`;
-  rows.forEach((r, i) => {
-    if (r.kind === "hunk") {
-      left.push(`<div class="fs-hunk">${escapeHtml(r.text)}</div>`);
-      right.push(`<div class="fs-hunk">&nbsp;</div>`);
-      return;
+export interface SplitCell {
+  row: DiffRow;
+  ri: number;
+}
+export type SplitLine = { hunk: SplitCell } | { left: SplitCell | null; right: SplitCell | null };
+
+/** Lays rows out as side-by-side lines the way VS Code does: a run of
+ *  deletions and the additions that follow it share lines pairwise (a changed
+ *  line sits across from its replacement), and only the longer side's surplus
+ *  gets a blank partner. */
+export function pairSplitRows(rows: DiffRow[]): SplitLine[] {
+  const out: SplitLine[] = [];
+  let dels: SplitCell[] = [];
+  let adds: SplitCell[] = [];
+  const flush = (): void => {
+    for (let i = 0; i < Math.max(dels.length, adds.length); i++) {
+      out.push({ left: dels[i] ?? null, right: adds[i] ?? null });
     }
-    if (r.kind === "ctx") {
-      left.push(rowDiv(r.oldLine, r.text, "", i));
-      right.push(rowDiv(r.newLine, r.text, "", i));
-    } else if (r.kind === "del") {
-      left.push(rowDiv(r.oldLine, r.text, "fs-del", i));
-      right.push(padDiv());
+    dels = [];
+    adds = [];
+  };
+  rows.forEach((row, ri) => {
+    if (row.kind === "del") {
+      if (adds.length) flush(); // a new deletion after additions starts a new change block
+      dels.push({ row, ri });
+    } else if (row.kind === "add") {
+      adds.push({ row, ri });
     } else {
-      left.push(padDiv());
-      right.push(rowDiv(r.newLine, r.text, "fs-add", i));
+      flush();
+      out.push(row.kind === "hunk" ? { hunk: { row, ri } } : { left: { row, ri }, right: { row, ri } });
     }
   });
-  return `<div class="fs-sdiff"><div class="fs-side">${left.join("")}</div><div class="fs-side">${right.join("")}</div></div>`;
+  flush();
+  return out;
+}
+
+// One table row per line, both sides in it, so the two halves can never drift
+// apart - a wrapped long line grows its whole row, not one side.
+export function renderSplitDiffHtml(rows: DiffRow[]): string {
+  const half = (cell: SplitCell | null, side: "old" | "new"): string => {
+    if (!cell) return `<td class="fs-ln fs-pad" data-no-search="1"></td><td class="fs-code fs-pad"></td>`;
+    const { row, ri } = cell;
+    const cls = row.kind === "ctx" ? "" : ` fs-${row.kind}`;
+    const line = side === "old" ? row.oldLine : row.newLine;
+    const text = row.text.length ? escapeHtml(row.text) : "&#8203;";
+    return (
+      `<td class="fs-ln${cls}" data-no-search="1">${line ?? ""}</td>` +
+      `<td class="fs-code${cls}" data-ri="${ri}" data-side="${side}">${text}</td>`
+    );
+  };
+  const trs = pairSplitRows(rows).map((l) =>
+    "hunk" in l
+      ? `<tr class="fs-hunk"><td colspan="4">${escapeHtml(l.hunk.row.text)}</td></tr>`
+      : `<tr>${half(l.left, "old")}${half(l.right, "new")}</tr>`,
+  );
+  return (
+    `<table class="fs-sdiff"><colgroup><col class="fs-col-ln"><col><col class="fs-col-ln"><col></colgroup>` +
+    `${trs.join("")}</table>`
+  );
 }
 
 // ── syntax highlighting (lazy post-pass, mirrors diff-enhancer.ts's one-call-
@@ -196,22 +229,16 @@ function indexCellsByRi(scope: Element): Map<number, HTMLElement> {
   return cells;
 }
 
-function applyMapToScope(scope: Element, rows: DiffRow[], map: Map<DiffRow, string>): void {
-  const cells = indexCellsByRi(scope);
-  rows.forEach((row, i) => {
-    const html = map.get(row);
-    const cell = cells.get(i);
-    if (html !== undefined && cell) cell.innerHTML = html;
-  });
-}
-
 // Applies highlighted markup in place over already-rendered plain markup
-// (renderUnifiedDiffHtml or renderSplitDiffHtml output), keyed by data-ri.
+// (renderUnifiedDiffHtml or renderSplitDiffHtml output), keyed by data-ri. In
+// the split table a context row appears twice, told apart by data-side.
 export function applyDiffHighlight(container: HTMLElement, rows: DiffRow[], maps: DiffHighlightMaps): void {
-  const [left, right] = Array.from(container.querySelectorAll<HTMLElement>(".fs-side"));
-  if (left && right) {
-    applyMapToScope(left, rows, maps.old);
-    applyMapToScope(right, rows, maps.new);
+  if (container.querySelector("table.fs-sdiff")) {
+    for (const cell of Array.from(container.querySelectorAll<HTMLElement>(".fs-code[data-ri][data-side]"))) {
+      const row = rows[Number(cell.dataset.ri)];
+      const html = row && (cell.dataset.side === "old" ? maps.old : maps.new).get(row);
+      if (html) cell.innerHTML = html;
+    }
     return;
   }
   const cells = indexCellsByRi(container);

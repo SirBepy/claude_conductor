@@ -193,10 +193,18 @@ pub async fn get_range_files(cwd: String, from: Option<String>, to: String) -> R
 }
 
 /// Returns the raw unified diff for a single file in the range `(lower, to]`,
-/// with the same lower-bound resolution as `get_range_files`. Truncates at a
-/// line boundary before 1MB with a trailing marker.
+/// with the same lower-bound resolution as `get_range_files`. `context` is
+/// git's `-U<n>` (lines kept around each change); a caller wanting the whole
+/// file passes a large one. Truncates at a line boundary before 1MB with a
+/// trailing marker.
 #[tauri::command]
-pub async fn get_file_diff(cwd: String, from: Option<String>, to: String, path: String) -> Result<String, String> {
+pub async fn get_file_diff(
+    cwd: String,
+    from: Option<String>,
+    to: String,
+    path: String,
+    context: Option<u32>,
+) -> Result<String, String> {
     const MAX_BYTES: usize = 1_000_000;
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -204,9 +212,10 @@ pub async fn get_file_diff(cwd: String, from: Option<String>, to: String, path: 
         reject_option_like("path", &path)?;
         if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
         let lower = resolve_lower_bound(&cwd, &from, &to);
+        let unified = format!("-U{}", context.unwrap_or(3));
 
         let mut cmd = std::process::Command::new("git");
-        cmd.arg("-C").arg(&cwd).args(["diff", &lower, &to, "--", &path]);
+        cmd.arg("-C").arg(&cwd).args(["diff", &unified, &lower, &to, "--", &path]);
         crate::util::process::hide_console(&mut cmd);
         let output = cmd.output().map_err(|e| format!("failed to run git: {e}"))?;
         if !output.status.success() {
@@ -296,5 +305,65 @@ mod range_files_tests {
         assert_eq!(f.old_path.as_deref(), Some("src/old_dir/file.rs"));
         assert_eq!(f.added, 4);
         assert_eq!(f.removed, 1);
+    }
+}
+
+/// A file's content as of revision `rev` (`git show <rev>:<path>`), for the
+/// file view of a past commit, where the working tree would show the wrong
+/// version. Capped like `read_text_file`, lossy UTF-8.
+#[tauri::command]
+pub async fn get_file_at_rev(cwd: String, rev: String, path: String) -> Result<crate::ipc::files::TextFileData, String> {
+    const MAX_BYTES: usize = 2 * 1024 * 1024;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        reject_option_like("rev", &rev)?;
+        reject_option_like("path", &path)?;
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C").arg(&cwd).args(["show", &format!("{rev}:{path}")]);
+        crate::util::process::hide_console(&mut cmd);
+        let output = cmd.output().map_err(|e| format!("failed to run git: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if stderr.is_empty() { "git command failed".to_string() } else { stderr });
+        }
+        let truncated = output.stdout.len() > MAX_BYTES;
+        let bytes = if truncated { &output.stdout[..MAX_BYTES] } else { &output.stdout[..] };
+        Ok(crate::ipc::files::TextFileData { content: String::from_utf8_lossy(bytes).into_owned(), truncated })
+    })
+    .await
+    .map_err(|e| format!("get_file_at_rev join error: {e}"))?
+}
+
+#[cfg(test)]
+mod rev_tests {
+    use super::*;
+
+    // Repo root, not the test's src-tauri cwd: diff pathspecs are cwd-relative.
+    fn cwd() -> String {
+        let here = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        run_git(&here, &["rev-parse", "--show-toplevel"]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn file_at_rev_reads_the_committed_blob() {
+        let data = get_file_at_rev(cwd(), "HEAD".into(), "package.json".into()).await.unwrap();
+        assert!(data.content.contains("\"name\""));
+        assert!(!data.truncated);
+    }
+
+    #[tokio::test]
+    async fn file_at_rev_refuses_option_like_input() {
+        assert!(get_file_at_rev(cwd(), "--output=x".into(), "a".into()).await.is_err());
+        assert!(get_file_at_rev(cwd(), "HEAD".into(), "-x".into()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_large_context_keeps_every_line_of_the_file() {
+        // 469a502f changes 5 lines of project-detail.ts; with full context
+        // the diff carries the whole file, far more lines than -U3 does.
+        let path = "src/views/project-detail/project-detail.ts".to_string();
+        let full = get_file_diff(cwd(), None, "469a502f".into(), path.clone(), Some(1_000_000)).await.unwrap();
+        let short = get_file_diff(cwd(), None, "469a502f".into(), path, None).await.unwrap();
+        assert!(full.lines().count() > short.lines().count() + 50, "full {} vs short {}", full.lines().count(), short.lines().count());
     }
 }

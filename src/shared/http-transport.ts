@@ -146,7 +146,10 @@ export class HttpTransport implements Transport {
           from: args.from ?? null,
           to: args.to,
           path: args.path,
+          context: args.context ?? null,
         });
+      case "get_file_at_rev":
+        return this.rpc<T>("get_file_at_rev", { cwd: args.cwd, rev: args.rev, path: args.path });
       case "get_ticket_tracker":
         return this.rpc<T>("get_ticket_tracker", { cwd: args.cwd });
       case "resolve_commit_refs":

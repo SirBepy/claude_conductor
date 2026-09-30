@@ -8,7 +8,7 @@
 
 import { invoke } from "../ipc";
 import { base64ToUtf8 } from "./chat-transforms";
-import type { PrFileChange } from "../../types/ipc.generated";
+import type { PrFileChange, TextFileData } from "../../types/ipc.generated";
 import type { SurfaceFile } from "./file-surface";
 
 export interface PrCommit {
@@ -95,12 +95,25 @@ export function commitScope(sha: string): Scope {
   return { from: null, to: sha };
 }
 
+// Big enough that git keeps every line of any file this viewer would render.
+const FULL_FILE_CONTEXT = 1_000_000;
+
 export function toSurfaceFile(f: PrFileChange, scope: Scope): SurfaceFile {
+  const base = cwd ? cwd.replace(/[\\/]+$/, "") : null;
   return {
     path: f.path,
+    absPath: base ? `${base}/${f.path}` : undefined,
     added: f.added,
     removed: f.removed,
-    gitDiff: () => invoke<string>("get_file_diff", { cwd, from: scope.from, to: scope.to, path: f.path }),
+    gitDiff: ({ full }) =>
+      invoke<string>("get_file_diff", {
+        cwd, from: scope.from, to: scope.to, path: f.path, context: full ? FULL_FILE_CONTEXT : null,
+      }),
+    // A file the range deleted only exists in the commit before it.
+    fileAtRev: () =>
+      invoke<TextFileData>("get_file_at_rev", {
+        cwd, rev: f.status.startsWith("D") ? `${scope.to}^` : scope.to, path: f.path,
+      }),
   };
 }
 

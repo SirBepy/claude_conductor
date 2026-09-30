@@ -66,17 +66,35 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
 
+    {
+        let state = state.clone();
+        router.register("get_file_at_rev", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String, rev: String, path: String }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                let data = crate::ipc::git_diff::get_file_at_rev(p.cwd, p.rev, p.path)
+                    .await
+                    .map_err(RpcError::internal)?;
+                Ok(json!(data))
+            }
+        });
+    }
+
     router.register("get_file_diff", move |params, _ctx| {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
-            struct P { cwd: String, from: Option<String>, to: String, path: String }
+            struct P { cwd: String, from: Option<String>, to: String, path: String, #[serde(default)] context: Option<u32> }
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             if !is_known_cwd(&state, &p.cwd) {
                 return Err(RpcError::invalid_params("unknown cwd".to_string()));
             }
-            let diff = crate::ipc::git_diff::get_file_diff(p.cwd, p.from, p.to, p.path)
+            let diff = crate::ipc::git_diff::get_file_diff(p.cwd, p.from, p.to, p.path, p.context)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(json!(diff))

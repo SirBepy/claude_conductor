@@ -30,11 +30,18 @@ import type { TextFileData } from "../../types/ipc.generated";
 
 export interface SurfaceFile {
   path: string;
+  /** Absolute path for Open in VS Code / edit / the working-tree file view,
+   *  when `path` is repo-relative (git sources). Defaults to `path`. */
+  absPath?: string;
   added?: number;
   removed?: number;
   // Diff sources - at most one is set:
   sessionEdits?: FileEditView[]; // this session's edits -> renderStackedDiff (inline only)
-  gitDiff?: () => Promise<string>; // raw unified git diff text (parsed + rendered by the surface)
+  /** Raw unified git diff text; `full` asks for the whole file as context. */
+  gitDiff?: (opts: { full: boolean }) => Promise<string>;
+  /** The file as of the diffed revision. Set for a past commit, where the
+   *  working tree would show the wrong content; such a file is not editable. */
+  fileAtRev?: () => Promise<TextFileData>;
 }
 
 export interface FileSurfaceOptions {
@@ -81,6 +88,13 @@ const BAR_HTML =
   `<div class="fs-bar">` +
   `<div class="fs-mode"><i class="ph"></i><span class="fs-mode-label"></span><span class="fs-counts"></span></div>` +
   `<div class="fs-right">` +
+  `<div class="fs-diff-controls">` +
+  `<div class="fs-seg" role="group" aria-label="Diff layout">` +
+  `<button type="button" class="fs-seg-btn" data-mode="inline" title="Inline diff"><i class="ph ph-rows"></i><span>Inline</span></button>` +
+  `<button type="button" class="fs-seg-btn" data-mode="split" title="Side by side"><i class="ph ph-columns"></i><span>Side by side</span></button>` +
+  `</div>` +
+  `<button type="button" class="fs-btn fs-full-btn" title="Show the whole file, not just the changed hunks" aria-pressed="false"><i class="ph ph-arrows-out-line-vertical"></i><span>Full file</span></button>` +
+  `</div>` +
   `<div class="fs-search">` +
   `<i class="ph ph-magnifying-glass"></i>` +
   `<input type="text" class="fs-search-input" placeholder="Search" />` +
@@ -101,14 +115,16 @@ const BAR_HTML =
   `<div class="fs-mi" data-act="view-diff"><i class="ph ph-git-diff"></i><span>View as diff</span><i class="ph ph-check fs-chk"></i></div>` +
   `<div class="fs-mi" data-act="view-file"><i class="ph ph-file-text"></i><span>View as file</span><i class="ph ph-check fs-chk"></i></div>` +
   `<div class="fs-sep"></div>` +
-  `<div class="fs-mi" data-act="mode-inline"><i class="ph ph-rows"></i><span>Inline diff</span><i class="ph ph-check fs-chk"></i></div>` +
-  `<div class="fs-mi" data-act="mode-split"><i class="ph ph-columns"></i><span>Side by side</span><i class="ph ph-check fs-chk"></i></div>` +
-  `<div class="fs-sep"></div>` +
   `<div class="fs-mi" data-act="edit"><i class="ph ph-pencil-simple"></i><span>Edit file</span></div>` +
   `<div class="fs-mi" data-act="vscode"><i class="ph ph-arrow-square-out"></i><span>Open in VS Code</span></div>` +
   `</div>` +
   `</div>` +
   `<div class="fs-body"></div>`;
+
+// Layout choices carry across files and openings in this window, like VS Code's
+// diff editor; nothing earns persisting them across restarts yet.
+let preferredDiffMode: "inline" | "split" = "inline";
+let preferredFull = false;
 
 export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): FileSurfaceHandle {
   host.innerHTML = BAR_HTML;
@@ -131,13 +147,17 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     nextBtn: host.querySelector<HTMLButtonElement>(".fs-next")!,
     menuBtn: host.querySelector<HTMLButtonElement>(".fs-menu-btn")!,
     menu: host.querySelector<HTMLElement>(".fs-menu")!,
+    diffControls: host.querySelector<HTMLElement>(".fs-diff-controls")!,
+    segBtns: Array.from(host.querySelectorAll<HTMLButtonElement>(".fs-seg-btn")),
+    fullBtn: host.querySelector<HTMLButtonElement>(".fs-full-btn")!,
     body: host.querySelector<HTMLElement>(".fs-body")!,
   };
 
   const state = {
     file: null as SurfaceFile | null,
     view: "file" as "diff" | "file",
-    diffMode: "inline" as "inline" | "split",
+    diffMode: preferredDiffMode,
+    full: preferredFull,
     editing: false,
     wantEdit: false,
     saving: false,
@@ -145,7 +165,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     loaded: null as TextFileData | null,
     loadedForPath: null as string | null,
     gitDiffRows: null as DiffRow[] | null,
-    gitDiffForPath: null as string | null,
+    gitDiffKey: null as string | null,
     gitDiffError: null as string | null,
     sessionDiffRows: null as DiffRow[] | null,
     sessionDiffRowsForPath: null as string | null,
@@ -326,20 +346,6 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
           onViewChanged();
         }
         break;
-      case "mode-inline":
-        if (state.view === "diff" && state.diffMode !== "inline") {
-          state.diffMode = "inline";
-          updateBar();
-          void renderBody();
-        }
-        break;
-      case "mode-split":
-        if (state.view === "diff" && state.diffMode !== "split") {
-          state.diffMode = "split";
-          updateBar();
-          void renderBody();
-        }
-        break;
       case "edit":
         // Disallow entering edit mode for an already-loaded truncated file.
         if (state.loadedForPath === state.file.path && state.loaded?.truncated) break;
@@ -352,7 +358,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
         }
         break;
       case "vscode":
-        void invoke<void>("open_in_editor", { path: state.file.path }).catch((err) =>
+        void invoke<void>("open_in_editor", { path: state.file.absPath ?? state.file.path }).catch((err) =>
           console.error("[file-surface] open_in_editor failed", err),
         );
         break;
@@ -360,6 +366,21 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
         break;
     }
   }
+
+  for (const btn of el.segBtns) {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.mode === "split" ? "split" : "inline";
+      if (state.diffMode === mode) return;
+      state.diffMode = preferredDiffMode = mode;
+      updateBar();
+      void renderBody();
+    });
+  }
+  el.fullBtn.addEventListener("click", () => {
+    state.full = preferredFull = !state.full;
+    updateBar();
+    void renderBody();
+  });
 
   el.cancelBtn.addEventListener("click", () => {
     state.editing = false;
@@ -391,8 +412,18 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     const hasDiff = hasDiffSource(file);
     setMenuItem("view-diff", isDiff, !hasDiff);
     setMenuItem("view-file", !isDiff, false);
-    setMenuItem("mode-inline", state.diffMode === "inline", !isDiff);
-    setMenuItem("mode-split", state.diffMode === "split", !isDiff);
+    setMenuItem("edit", false, !!file.fileAtRev);
+    el.diffControls.classList.toggle("fs-hidden", !isDiff);
+    for (const btn of el.segBtns) {
+      const on = btn.dataset.mode === state.diffMode;
+      btn.classList.toggle("fs-on", on);
+      btn.setAttribute("aria-pressed", String(on));
+    }
+    // Whole-file context only exists for git sources; session edits carry
+    // just the edited strings.
+    el.fullBtn.classList.toggle("fs-hidden", !file.gitDiff);
+    el.fullBtn.classList.toggle("fs-on", state.full);
+    el.fullBtn.setAttribute("aria-pressed", String(state.full));
 
     if (opts.nav) {
       const list = opts.nav.list();
@@ -462,7 +493,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     state.saving = true;
     updateBar();
     try {
-      await invoke<void>("write_text_file", { path: state.file.path, content });
+      await invoke<void>("write_text_file", { path: state.file.absPath ?? state.file.path, content });
     } catch (err) {
       state.saving = false;
       updateBar();
@@ -481,7 +512,9 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     if (state.loaded && state.loadedForPath === file.path) return true;
     el.body.innerHTML = `<div class="fs-loading">Loading...</div>`;
     try {
-      state.loaded = await invoke<TextFileData>("read_text_file", { path: file.path });
+      state.loaded = file.fileAtRev
+        ? await file.fileAtRev()
+        : await invoke<TextFileData>("read_text_file", { path: file.absPath ?? file.path });
       state.loadedForPath = file.path;
     } catch (err) {
       if (token !== state.token) return false;
@@ -548,20 +581,23 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     }
 
     if (file.gitDiff) {
-      if (state.gitDiffForPath !== file.path) {
+      const key = `${file.path}|${state.full}`;
+      if (state.gitDiffKey !== key) {
         el.body.innerHTML = `<div class="fs-loading">Loading diff...</div>`;
         try {
-          const text = await file.gitDiff();
+          const text = await file.gitDiff({ full: state.full });
           if (token !== state.token) return;
           state.gitDiffRows = parseUnifiedDiff(text);
-          state.gitDiffForPath = file.path;
+          state.gitDiffKey = key;
           state.gitDiffError = null;
         } catch (err) {
           if (token !== state.token) return;
           state.gitDiffRows = null;
-          state.gitDiffForPath = file.path;
+          state.gitDiffKey = key;
           state.gitDiffError = String(err);
         }
+        // New rows, new identities: the highlight maps key on row objects.
+        state.diffHighlightForPath = null;
       }
       if (token !== state.token) return;
       if (state.gitDiffError) {
@@ -638,7 +674,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     state.token++;
     state.file = file;
     state.view = resolveView(file, view);
-    state.diffMode = "inline";
+    state.diffMode = preferredDiffMode;
+    state.full = preferredFull;
     state.editing = false;
     state.wantEdit = false;
     state.saving = false;
@@ -646,9 +683,9 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
       state.loaded = null;
       state.loadedForPath = null;
     }
-    if (state.gitDiffForPath !== file.path) {
+    if (!state.gitDiffKey?.startsWith(`${file.path}|`)) {
       state.gitDiffRows = null;
-      state.gitDiffForPath = null;
+      state.gitDiffKey = null;
       state.gitDiffError = null;
     }
     if (state.sessionDiffRowsForPath !== file.path) {
