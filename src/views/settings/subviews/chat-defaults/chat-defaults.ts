@@ -36,7 +36,7 @@ function template(
               <option value="status" ?selected=${sort === "status"}>Status</option>
               <option value="recent" ?selected=${sort === "recent"}>Recent</option>
               <option value="name" ?selected=${sort === "name"}>Name</option>
-              ${isRemote() ? "" : html`<option value="drain" ?selected=${sort === "drain"}>Token drain</option>`}
+              <option value="drain" ?selected=${sort === "drain"}>Token drain</option>
             </select>
           </div>
           ${isRemote() ? "" : toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}

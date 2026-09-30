@@ -167,6 +167,14 @@ export class HttpTransport implements Transport {
       // as P (remote_transport_table.rs:218); only this frontend case was missing.
       case "push_commits":
         return this.rpc<T>("push_commits", { cwd: args.cwd, publish: args.publish });
+      // `@`-mention file autocomplete popup (todo 1022): daemon gates an
+      // unknown project_dir via reject_unknown, same as the git/servers chips.
+      case "list_project_files":
+        return this.rpc<T>("list_project_files", { project_dir: args.projectDir ?? args.project_dir });
+      // Sidebar token-drain sort (todo 1022): daemon reuses the same
+      // leaderboard math as desktop (ipc::drain::drain_board).
+      case "chat_drains":
+        return this.rpc<T>("chat_drains", { session_ids: args.sessionIds ?? args.session_ids });
       case "list_project_servers":
         return this.rpc<T>("list_project_servers", { cwd: args.cwd });
       case "list_claude_md_scopes":

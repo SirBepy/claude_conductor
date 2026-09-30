@@ -216,6 +216,15 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Write action off the commits chip's push button (path gated by
     // reject_unknown in statusbar.rs, same as the worktree writes above).
     ("push_commits", P),
+    // Read-only `@`-mention file-autocomplete popup source (todo 1022, split
+    // from todo 1007's reachability table). Gated by reject_unknown(cwd) in
+    // files.rs, same as the statusbar/worktree/pr_review reads above - without
+    // it a remote client could point `git ls-files` at any path on disk.
+    ("list_project_files", P),
+    // Read-only sidebar token-drain-sort leaderboard (todo 1022, split from
+    // todo 1007). Aggregate token counts only, ids validated against a strict
+    // charset before touching disk (daemon/methods/drain.rs).
+    ("chat_drains", P),
     ("list_project_servers", P),
     ("list_claude_md_scopes", P),
     // Cross-surface draft sync: composer text, AUQ answers, held messages.
@@ -336,7 +345,7 @@ mod tests {
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
             "get_range_files", "get_file_diff",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
-            "push_commits", "list_project_servers",
+            "push_commits", "list_project_files", "chat_drains", "list_project_servers",
             "list_claude_md_scopes",
             "get_session_drafts", "set_composer_draft", "clear_composer_draft",
             "set_auq_draft", "clear_auq_draft", "add_held_message",

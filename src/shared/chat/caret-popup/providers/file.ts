@@ -1,5 +1,4 @@
 import { invoke } from "../../../ipc";
-import { isRemote } from "../../../transport";
 import { insertAtCaret } from "../insert-at-caret";
 import { matchFiles } from "../match-files";
 import type { SuggestProvider } from "../types";
@@ -20,9 +19,6 @@ export class FileProvider implements SuggestProvider<string> {
   }
 
   shouldTrigger({ textBefore }: { textBefore: string; caretPos: number }): boolean {
-    // No daemon RPC for list_project_files (todo 1007): never open the popup on
-    // the phone, rather than showing a dead, permanently-empty suggestion list.
-    if (isRemote()) return false;
     return /(^|\s)@[^\s]*$/.test(textBefore);
   }
 

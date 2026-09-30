@@ -304,6 +304,19 @@ describe("HttpTransport.call mapping", () => {
     expect(body().params.offset).toBeNull();
   });
 
+  // todo 1022: the daemon now has a chat_drains/list_project_files RPC
+  // (remote_transport_table.rs), so these cases replace the previous
+  // RemoteUnavailableError degrade.
+  it("forwards list_project_files to the rpc, mapping projectDir -> project_dir", async () => {
+    await new HttpTransport().call("list_project_files", { projectDir: "/repo" });
+    expect(body()).toEqual({ method: "list_project_files", params: { project_dir: "/repo" } });
+  });
+
+  it("forwards chat_drains to the rpc, mapping sessionIds -> session_ids", async () => {
+    await new HttpTransport().call("chat_drains", { sessionIds: ["s1", "s2"] });
+    expect(body()).toEqual({ method: "chat_drains", params: { session_ids: ["s1", "s2"] } });
+  });
+
   // Todos panel (todo 1007): the daemon already allowlists these as P
   // (remote_transport_table.rs); these cases were the only missing piece.
   it("forwards list_user_todos and set_user_todo_state to the rpc", async () => {

@@ -25,31 +25,31 @@ const SEVEN_DAYS: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// capacity barely moves window to window, so a slightly stale ruler is fine.
 const RECALIBRATE_AFTER: Duration = Duration::from_secs(60);
 
-/// Resolves `(cwd, main_transcript)` for a session id the way
-/// `instance_token_stats` / `context_status` do: the live instance cache first,
-/// then a scan of `~/.claude/projects/*/<id>.jsonl` for history-only sessions.
-fn resolve_session(session_id: &str, state: &AppState) -> Option<(PathBuf, PathBuf)> {
-    // 1. Live instance cache.
-    if let Some(inst) = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|i| i.session_id == session_id)
-        .cloned()
-    {
-        let transcript = match inst.transcript_path.as_ref() {
-            Some(p) if p.exists() => Some(p.clone()),
-            _ => tokens::transcript_for_session(&inst.cwd, session_id)
-                .or_else(|| tokens::latest_transcript_for_cwd(&inst.cwd)),
-        };
-        if let Some(t) = transcript {
-            return Some((inst.cwd.clone(), t));
-        }
+/// Given one already-matched instance's cwd + registered transcript path,
+/// resolve the real transcript file to use: the registered path if it still
+/// exists, else a fresh lookup by session id or the cwd's latest transcript.
+/// Shared by the desktop `resolve_session` (below, reading
+/// `AppState.cached_instances`) and the daemon RPC (reading `state.registry`
+/// - see `daemon/methods/drain.rs`), which resolve the SAME live-instance
+/// case against two different instance sources.
+pub(crate) fn resolve_instance_transcript(
+    cwd: &Path,
+    session_id: &str,
+    transcript_path: Option<&Path>,
+) -> Option<PathBuf> {
+    match transcript_path {
+        Some(p) if p.exists() => Some(p.to_path_buf()),
+        _ => tokens::transcript_for_session(cwd, session_id)
+            .or_else(|| tokens::latest_transcript_for_cwd(cwd)),
     }
+}
 
-    // 2. History-only fallback: scan every project dir for <session_id>.jsonl and
-    //    decode the dir name back to the real cwd.
+/// History-only fallback: scan every project dir for `<session_id>.jsonl` and
+/// decode the dir name back to the real cwd. Shared by the desktop
+/// `resolve_session` and the daemon RPC (`daemon/methods/drain.rs`) - neither
+/// has a way to resolve a session that isn't live, so both fall back to the
+/// same on-disk scan.
+pub(crate) fn resolve_session_from_history(session_id: &str) -> Option<(PathBuf, PathBuf)> {
     let projects = tokens::claude_projects_dir()?;
     let target = format!("{session_id}.jsonl");
     for entry in std::fs::read_dir(&projects).ok()?.flatten() {
@@ -70,19 +70,46 @@ fn resolve_session(session_id: &str, state: &AppState) -> Option<(PathBuf, PathB
     None
 }
 
+/// Resolves `(cwd, main_transcript)` for a session id the way
+/// `instance_token_stats` / `context_status` do: the live instance cache first,
+/// then a scan of `~/.claude/projects/*/<id>.jsonl` for history-only sessions.
+fn resolve_session(session_id: &str, state: &AppState) -> Option<(PathBuf, PathBuf)> {
+    // 1. Live instance cache.
+    if let Some(inst) = state
+        .cached_instances
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|i| i.session_id == session_id)
+        .cloned()
+    {
+        if let Some(t) = resolve_instance_transcript(&inst.cwd, session_id, inst.transcript_path.as_deref()) {
+            return Some((inst.cwd.clone(), t));
+        }
+    }
+
+    // 2. History-only fallback.
+    resolve_session_from_history(session_id)
+}
+
 /// One window's live state from the usage snapshot: utilization percent and the
 /// start of the current rolling window (`resets_at - window length`). Either
 /// field is `None` when there's no snapshot or `resets_at` won't parse.
+/// `pub(crate)`: named in `drain_board`'s signature below, which the daemon
+/// RPC (`daemon/methods/drain.rs`) also calls.
 #[derive(Clone, Copy)]
-struct WindowCtx {
+pub(crate) struct WindowCtx {
     util: Option<f64>,
     start: Option<SystemTime>,
 }
 
-/// The 5h and weekly window contexts from the latest usage snapshot.
-fn windows_from_state(state: &AppState) -> (WindowCtx, WindowCtx) {
-    let snap = state.current_usage.lock().unwrap();
-    match snap.as_ref() {
+/// The 5h and weekly window contexts from a usage snapshot, or the "unknown"
+/// pair when there is none. Pure (no `AppState`) so both the desktop
+/// `windows_from_state` below and the daemon RPC (which reads the DB-backed
+/// snapshot instead of `AppState.current_usage`) share the exact same
+/// resets_at -> window-start math.
+pub(crate) fn windows_from_snapshot(snap: Option<&crate::types::UsageSnapshot>) -> (WindowCtx, WindowCtx) {
+    match snap {
         Some(s) => (
             WindowCtx {
                 util: Some(s.five_hour.utilization),
@@ -98,6 +125,12 @@ fn windows_from_state(state: &AppState) -> (WindowCtx, WindowCtx) {
             WindowCtx { util: None, start: None },
         ),
     }
+}
+
+/// The 5h and weekly window contexts from the latest usage snapshot.
+fn windows_from_state(state: &AppState) -> (WindowCtx, WindowCtx) {
+    let snap = state.current_usage.lock().unwrap();
+    windows_from_snapshot(snap.as_ref())
 }
 
 /// Resolves the capacity-estimate file for one account dimension:
@@ -265,6 +298,34 @@ pub struct DrainBoard {
     pub chats: HashMap<String, ChatDrain>, // per session: tokens + size %, messages EMPTY
 }
 
+/// Leaderboard math for MANY chats (messages omitted): capacity estimate +
+/// per-session window-size percents. Pure and blocking-safe (file parsing),
+/// shared by the desktop `chat_drains` Tauri command below and the daemon RPC
+/// (`daemon/methods/drain.rs`) - the `account_id: None` capacity dimension
+/// (legacy/default file) matches desktop's behaviour exactly, since neither
+/// caller threads a real account selection through yet (see
+/// `compute_capacities`'s doc comment).
+pub(crate) fn drain_board(
+    resolved: &[(String, PathBuf, PathBuf)],
+    five: &WindowCtx,
+    weekly: &WindowCtx,
+) -> DrainBoard {
+    let (cap_5h, cap_weekly) = compute_capacities(resolved, five, weekly, None);
+    let mut chats = HashMap::new();
+    for (id, cwd, transcript) in resolved {
+        let lifetime = drain_engine::drain_units_for_session(cwd, id, None);
+        let cd = build_chat_drain(
+            id,
+            transcript,
+            size_pct(lifetime, cap_5h),
+            size_pct(lifetime, cap_weekly),
+            Vec::new(),
+        );
+        chats.insert(id.clone(), cd);
+    }
+    DrainBoard { chats }
+}
+
 /// Leaderboard payload for MANY chats. messages omitted (empty) for the cheap path.
 #[tauri::command]
 pub async fn chat_drains(
@@ -283,24 +344,9 @@ pub async fn chat_drains(
 
     let (five, weekly) = windows_from_state(&state);
 
-    let board = tokio::task::spawn_blocking(move || {
-        let (cap_5h, cap_weekly) = compute_capacities(&resolved, &five, &weekly, None);
-        let mut chats = HashMap::new();
-        for (id, cwd, transcript) in &resolved {
-            let lifetime = drain_engine::drain_units_for_session(cwd, id, None);
-            let cd = build_chat_drain(
-                id,
-                transcript,
-                size_pct(lifetime, cap_5h),
-                size_pct(lifetime, cap_weekly),
-                Vec::new(),
-            );
-            chats.insert(id.clone(), cd);
-        }
-        DrainBoard { chats }
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let board = tokio::task::spawn_blocking(move || drain_board(&resolved, &five, &weekly))
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(board)
 }
