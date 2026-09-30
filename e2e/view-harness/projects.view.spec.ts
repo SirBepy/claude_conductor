@@ -119,9 +119,10 @@ test.describe("view-harness / projects", () => {
     await expect(liveTag).toHaveAttribute("aria-label", "2 live");
     await expect(liveTag).toHaveAttribute("title", "2 live");
 
-    // Remote + automated: Phosphor icon + short text label, never emoji.
+    // Phone + automated: Phosphor icon + short text label, never emoji.
     const remoteTag = page.locator('.project-card:has-text("Gamma") .proj-tag');
-    await expect(remoteTag).toContainText("remote");
+    await expect(remoteTag).toContainText("phone");
+    await expect(remoteTag).toHaveAttribute("title", "started from phone");
     await expect(remoteTag.locator("i.ph-device-mobile")).toBeAttached();
 
     const autoTag = page.locator('.project-card:has-text("Delta") .proj-tag');
