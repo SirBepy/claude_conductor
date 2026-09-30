@@ -10,7 +10,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
-pub fn list_accounts() -> Result<Vec<Account>, String> {
+pub async fn list_accounts() -> Result<Vec<Account>, String> {
     let path = paths::accounts_file().map_err(|e| e.to_string())?;
     Ok(accounts_store::load(&path))
 }
@@ -20,7 +20,7 @@ pub fn list_accounts() -> Result<Vec<Account>, String> {
 /// chrome profile dir, and its stored cookie. Clears `default_account_id` if
 /// it pointed at the removed account.
 #[tauri::command]
-pub fn remove_account(account_id: String, state: State<AppState>, app: AppHandle) -> Result<(), String> {
+pub async fn remove_account(account_id: String, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
     let mut accounts = accounts_store::load(&accounts_path);
     let idx = accounts
@@ -80,7 +80,7 @@ pub fn remove_account(account_id: String, state: State<AppState>, app: AppHandle
 /// profile dir intact (CLI credentials untouched); chats simply stop
 /// spawning for it until the cookie is recaptured. Never touches app data.
 #[tauri::command]
-pub fn logout_account(account_id: String, state: State<AppState>, app: AppHandle) -> Result<(), String> {
+pub async fn logout_account(account_id: String, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     let session_file = paths::account_session_file(&account_id).map_err(|e| e.to_string())?;
     crate::auth::session::clear(&session_file).map_err(|e| e.to_string())?;
     // Tray only re-renders on "settings-changed"/"usage-updated" - without
@@ -98,13 +98,13 @@ pub fn logout_account(account_id: String, state: State<AppState>, app: AppHandle
 /// field left `None` is left untouched. Never touches identity, credentials,
 /// or the cookie.
 #[tauri::command]
-pub fn update_account(
+pub async fn update_account(
     account_id: String,
     label: Option<String>,
     colour: Option<String>,
     icon: Option<String>,
     fleet_eligible: Option<bool>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Account, String> {
     let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;

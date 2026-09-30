@@ -66,10 +66,10 @@ pub enum LoginCheckOutcome {
 /// via `add_account_start_cli_login` when the dir has no credentials yet.
 /// `slug` defaults to a slugified `label` when omitted.
 #[tauri::command]
-pub fn add_account_create(
+pub async fn add_account_create(
     label: String,
     slug: Option<String>,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<AddAccountSession, String> {
     let slug = slug.unwrap_or_else(|| slugify(&label));
     if slug.trim().is_empty() {
@@ -126,9 +126,9 @@ pub fn add_account_create(
 /// Idempotent-ish: calling again just spawns another terminal (matches the
 /// reauth behavior); the watch baseline resets each call.
 #[tauri::command]
-pub fn add_account_start_cli_login(
+pub async fn add_account_start_cli_login(
     session_id: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
     let (config_dir, slug) = {
         let sessions = state.account_wizard_sessions.lock().unwrap();
@@ -218,9 +218,9 @@ fn resolve_login_outcome(
 /// Call repeatedly until it stops returning `Pending` (or the user cancels /
 /// a frontend-owned timeout fires `add_account_cancel`).
 #[tauri::command]
-pub fn add_account_check_login(
+pub async fn add_account_check_login(
     session_id: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<LoginCheckOutcome, String> {
     let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
     let registered = accounts_store::load(&accounts_path);
@@ -327,7 +327,7 @@ pub async fn add_account_capture_cookie(
 /// Cancel an in-progress wizard run. Deletes the profile dir ONLY if this
 /// wizard run created it fresh (never an adopted pre-existing dir).
 #[tauri::command]
-pub fn add_account_cancel(session_id: String, state: State<AppState>) -> Result<(), String> {
+pub async fn add_account_cancel(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let session = state.account_wizard_sessions.lock().unwrap().remove(&session_id);
     if let Some(session) = session {
         if session.created_new_dir {

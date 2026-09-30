@@ -10,7 +10,7 @@ use tauri::AppHandle;
 /// The terminal's observed identity (`~/.claude.json`, HOME dir, not inside
 /// `~/.claude`). Read-only - the terminal is never an app account.
 #[tauri::command]
-pub fn get_terminal_identity() -> Option<OauthAccountInfo> {
+pub async fn get_terminal_identity() -> Option<OauthAccountInfo> {
     let home = dirs::home_dir()?;
     crate::accounts::terminal_identity(&home)
 }
@@ -33,7 +33,7 @@ pub struct AccountIdentity {
 }
 
 #[tauri::command]
-pub fn get_account_identity(account_id: String) -> Result<AccountIdentity, String> {
+pub async fn get_account_identity(account_id: String) -> Result<AccountIdentity, String> {
     let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
     let accounts = accounts_store::load(&accounts_path);
     let account = accounts
@@ -66,7 +66,7 @@ pub fn get_account_identity(account_id: String) -> Result<AccountIdentity, Strin
 /// identity has drifted or the token needs a fresh interactive login - the
 /// account record, colour, icon, and cookie are untouched.
 #[tauri::command]
-pub fn reauth_account(account_id: String) -> Result<(), String> {
+pub async fn reauth_account(account_id: String) -> Result<(), String> {
     let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
     let accounts = accounts_store::load(&accounts_path);
     let account = accounts

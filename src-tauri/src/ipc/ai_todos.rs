@@ -25,7 +25,7 @@ fn is_backlog_entry(e: &std::fs::DirEntry) -> bool {
 /// Count backlog .md files in `<cwd>/.claude/todos/`. Returns 0 if the
 /// directory does not exist.
 #[tauri::command]
-pub fn count_ai_todos(cwd: String) -> usize {
+pub async fn count_ai_todos(cwd: String) -> usize {
     let dir = ai_todos_dir(&cwd);
     std::fs::read_dir(&dir)
         .map(|rd| rd.filter_map(|e| e.ok()).filter(is_backlog_entry).count())
@@ -35,7 +35,7 @@ pub fn count_ai_todos(cwd: String) -> usize {
 /// List backlog .md files in `<cwd>/.claude/todos/`, sorted by name. Returns
 /// an empty vec if the directory does not exist.
 #[tauri::command]
-pub fn list_ai_todos(cwd: String) -> Vec<AiTodoEntry> {
+pub async fn list_ai_todos(cwd: String) -> Vec<AiTodoEntry> {
     let dir = ai_todos_dir(&cwd);
     let mut entries: Vec<AiTodoEntry> = std::fs::read_dir(&dir)
         .map(|rd| {

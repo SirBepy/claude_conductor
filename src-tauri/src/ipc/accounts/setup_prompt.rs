@@ -21,7 +21,7 @@ pub struct AccountsSetupPromptState {
 /// empties the legacy-file condition) both stop the prompt on their own, so
 /// there's no separate "seen" flag beyond the explicit dismiss.
 #[tauri::command]
-pub fn get_accounts_setup_prompt_state(state: State<AppState>) -> Result<AccountsSetupPromptState, String> {
+pub async fn get_accounts_setup_prompt_state(state: State<'_, AppState>) -> Result<AccountsSetupPromptState, String> {
     let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
     let registry_empty = crate::accounts::store::load(&accounts_path).is_empty();
     let legacy_session_exists = paths::session_file().map(|p| p.exists()).unwrap_or(false);
@@ -41,7 +41,7 @@ pub fn get_accounts_setup_prompt_state(state: State<AppState>) -> Result<Account
 /// effectively permanent for this install, matching `hook_registration_
 /// declined`'s pattern (`ipc::projects::skip_hook_registration`).
 #[tauri::command]
-pub fn dismiss_accounts_setup_prompt(state: State<AppState>, app: AppHandle) -> Result<(), String> {
+pub async fn dismiss_accounts_setup_prompt(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     let snapshot = {
         let mut s = state.settings.lock().unwrap();
         s.accounts_setup_prompt_dismissed = true;
