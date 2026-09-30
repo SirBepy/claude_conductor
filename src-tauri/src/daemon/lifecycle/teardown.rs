@@ -219,6 +219,9 @@ pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     let mut stdin = session.stdin.lock().await;
     stdin.write_all(&line).await?;
     stdin.flush().await?;
+    // The held-answer rescue (todo 926) reaches the daemon only through here, so
+    // this line is what tells a rescued wedge apart from one that self-resolved.
+    log::info!("daemon: cancel_turn sent an interrupt to session {session_id}");
     Ok(())
 }
 
