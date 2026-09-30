@@ -142,11 +142,9 @@ fn do_mint_pairing_code(app_data: &std::path::Path) -> Result<String, String> {
         .as_secs()
         + 120;
     let body = serde_json::json!({ "code_hash": sha256_hex(&code), "expires_at": expires_at });
-    std::fs::write(
-        app_data.join("remote-pairing.json"),
-        serde_json::to_string_pretty(&body).unwrap_or_default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&body).unwrap_or_default();
+    crate::util::write_json_atomic(&app_data.join("remote-pairing.json"), &json)
+        .map_err(|e| e.to_string())?;
     Ok(code)
 }
 

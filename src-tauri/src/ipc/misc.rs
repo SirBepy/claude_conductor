@@ -181,6 +181,9 @@ async fn fetch_build_datetime(version: &str, base_date: &str, data_dir: &std::pa
         Some(datetime) => {
             let cache = BuildTimeCache { version: version.to_string(), datetime: datetime.clone() };
             if let Ok(json) = serde_json::to_string(&cache) {
+                // Exempt from write_json_atomic: already fire-and-forget
+                // (`let _ =`), and a torn cache just re-fetches from GitHub
+                // next time.
                 let _ = std::fs::write(&cache_path, json);
             }
             datetime
@@ -209,6 +212,8 @@ fn load_or_record_install_date(current_version: &str) -> Option<String> {
     let today = chrono::Utc::now().format("%Y-%m-%d %H:%M").to_string();
     let info = InstallInfo { version: current_version.to_string(), installed_at: today.clone() };
     if let Ok(json) = serde_json::to_string(&info) {
+        // Exempt from write_json_atomic: already fire-and-forget (`let _ =`),
+        // and a torn write here just re-records the install date next launch.
         let _ = std::fs::write(&path, json);
     }
     Some(today)

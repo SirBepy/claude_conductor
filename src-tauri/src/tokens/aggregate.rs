@@ -11,11 +11,11 @@ pub fn load_history(path: &Path) -> Vec<TokenRecord> {
 }
 
 pub fn save_history(path: &Path, history: &[TokenRecord]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
     let json = serde_json::to_string_pretty(history).context("serialising token history")?;
-    std::fs::write(path, json).with_context(|| format!("writing {}", path.display()))?;
+    // write_json_atomic creates the parent dir itself; a plain fs::write left a
+    // window where a crash mid-write truncated the history in place.
+    crate::util::write_json_atomic(path, &json)
+        .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
 }
 

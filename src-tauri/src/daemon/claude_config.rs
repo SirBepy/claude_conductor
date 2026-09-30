@@ -132,7 +132,11 @@ fn write_mcp_config_inner(turn_id: &str, tracking_id: &str, is_jarvis: bool) -> 
     });
     let path = mcp_dir.join(format!("{turn_id}.json"));
     let body = serde_json::to_string(&config).map_err(|e| format!("serialize failed: {e}"))?;
-    std::fs::write(&path, &body).map_err(|e| format!("write to {} failed: {e}", path.display()))?;
+    // Atomic tmp-then-rename: this file is handed straight to `claude` as
+    // `--mcp-config`, and a torn write here is todo 907's failure mode (claude
+    // dies on its first permission check with no useful stderr).
+    crate::util::write_json_atomic(&path, &body)
+        .map_err(|e| format!("write to {} failed: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -280,7 +284,10 @@ pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<Pa
         }
     });
     let path = dir.join(format!("{turn_id}.settings.json"));
-    std::fs::write(&path, serde_json::to_string(&config).ok()?).ok()?;
+    let body = serde_json::to_string(&config).ok()?;
+    // Same atomicity rationale as write_mcp_config_inner above: this file is
+    // handed to `claude` via `--settings`.
+    crate::util::write_json_atomic(&path, &body).ok()?;
     Some(path)
 }
 
@@ -296,7 +303,13 @@ pub(crate) fn gc_temp_files() {
     crate::util::sweep_dir_older_than(
         &dir,
         std::time::Duration::from_secs(7 * 24 * 60 * 60),
-        |path| path.extension().and_then(|e| e.to_str()) == Some("json"),
+        |path| {
+            // "tmp" also catches a write_json_atomic tmp sibling stranded by a
+            // crash mid-rename (e.g. "<turn_id>.json.tmp"): with_extension
+            // appends ".json.tmp" as a literal suffix, so Path::extension()
+            // (last dot-segment only) sees "tmp", never "json".
+            matches!(path.extension().and_then(|e| e.to_str()), Some("json") | Some("tmp"))
+        },
         false,
     );
 }
@@ -405,6 +418,8 @@ mod tests {
         assert_eq!(server["args"], serde_json::json!(["--mcp-permission"]));
         assert_eq!(server["env"]["CC_SESSION_ID"], serde_json::json!("sess-1"));
         assert!(server["env"].get("CC_JARVIS").is_none(), "non-jarvis session must not set CC_JARVIS");
+        // write_json_atomic must have renamed its tmp sibling away.
+        assert!(!path.with_extension("json.tmp").exists());
     }
 
     #[test]

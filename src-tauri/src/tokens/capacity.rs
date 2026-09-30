@@ -41,14 +41,12 @@ pub fn load(path: &Path) -> CapacityEstimate {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
-/// Persists the estimate, creating the parent dir if needed.
+/// Persists the estimate atomically (tmp-then-rename via `write_json_atomic`,
+/// which also creates the parent dir if needed).
 pub fn save(path: &Path, c: &CapacityEstimate) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
     let json = serde_json::to_string_pretty(c)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(path, json)
+    crate::util::write_json_atomic(path, &json)
 }
 
 /// EWMA one window's capacity toward its instantaneous estimate. Below the
@@ -100,6 +98,9 @@ mod tests {
         assert_eq!(back.capacity_5h_units, 12.5);
         assert_eq!(back.capacity_weekly_units, 300.0);
         assert_eq!(back.samples, 7);
+        // write_json_atomic renames its tmp sibling away on success; a leftover
+        // here would mean the write never completed atomically.
+        assert!(!path.with_extension("json.tmp").exists());
     }
 
     #[test]
