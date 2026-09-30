@@ -124,10 +124,18 @@ mod command_thread_tests {
             let text = std::fs::read_to_string(&file).unwrap();
             let lines: Vec<&str> = text.lines().collect();
             for (i, line) in lines.iter().enumerate() {
-                if line.trim() != "#[tauri::command]" {
+                let trimmed = line.trim();
+                if !trimmed.starts_with("#[tauri::command") {
                     continue;
                 }
                 checked += 1;
+                // `#[tauri::command(async)]` forces the command onto the async
+                // runtime via the macro arg even when the fn itself is written as
+                // plain `fn` (see ipc/window/mod.rs's module doc) - already safe,
+                // whatever other args ride alongside it.
+                if trimmed.contains("async") {
+                    continue;
+                }
                 let Some(sig) = lines[i + 1..].iter().find(|l| l.contains("fn ")) else {
                     continue;
                 };
