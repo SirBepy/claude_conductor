@@ -33,6 +33,7 @@ import {
 import { loadHiddenSessions } from "./sessions-helpers";
 import { isAutoAccept } from "./permission-modal";
 import { invoke } from "../../shared/ipc";
+import { isRemote } from "../../shared/transport";
 
 let _whenDoneSubMenu: HTMLElement | null = null;
 
@@ -133,49 +134,54 @@ const viewMenu = createMoreMenu<[]>({
     menu.appendChild(schedBtn);
 
     // ── When done ▸ submenu parent ─────────────────────────────────────────
-    const whenDoneParent = document.createElement("button");
-    whenDoneParent.className = "smore-item smore-has-sub" + (whenDoneArmed() ? " is-on" : "");
-    whenDoneParent.dataset.whenDoneParent = "1";
-    whenDoneParent.innerHTML =
-      `<i class="ph ph-moon-stars"></i>` +
-      `<span class="when-done-parent-text">${_whenDoneParentText()}</span>` +
-      `<i class="ph ph-caret-right smore-sub-caret"></i>` +
-      (whenDoneArmed() ? `<span class="smore-check-dot"></span>` : "");
-    menu.appendChild(whenDoneParent);
+    // No daemon RPC for get/arm/cancel_when_done (todo 1007): the hydrate read
+    // fails silently on the phone and the menu would show both toggles "off",
+    // indistinguishable from "nothing armed" - hide the item there instead.
+    if (!isRemote()) {
+      const whenDoneParent = document.createElement("button");
+      whenDoneParent.className = "smore-item smore-has-sub" + (whenDoneArmed() ? " is-on" : "");
+      whenDoneParent.dataset.whenDoneParent = "1";
+      whenDoneParent.innerHTML =
+        `<i class="ph ph-moon-stars"></i>` +
+        `<span class="when-done-parent-text">${_whenDoneParentText()}</span>` +
+        `<i class="ph ph-caret-right smore-sub-caret"></i>` +
+        (whenDoneArmed() ? `<span class="smore-check-dot"></span>` : "");
+      menu.appendChild(whenDoneParent);
 
-    whenDoneParent.addEventListener("click", (e) => {
-      e.stopPropagation();
+      whenDoneParent.addEventListener("click", (e) => {
+        e.stopPropagation();
 
-      if (_whenDoneSubMenu) {
-        closeWhenDoneSub();
-        return;
-      }
-
-      const sub = document.createElement("div");
-      sub.className = "session-more-menu smore-submenu";
-      sub.innerHTML = whenDoneMenuHtml();
-      document.body.appendChild(sub);
-      _whenDoneSubMenu = sub;
-
-      // Position the submenu to the right (or left if no room) of the parent item.
-      positionSubmenu(sub, whenDoneParent);
-
-      sub.addEventListener("click", (ev) => {
-        const target = ev.target as HTMLElement;
-        const cancelBtn = target.closest("[data-when-done-cancel]");
-        if (cancelBtn) {
-          void cancelWhenDone();
+        if (_whenDoneSubMenu) {
           closeWhenDoneSub();
           return;
         }
-        const toggle = target.closest<HTMLButtonElement>("[data-when-done]");
-        if (toggle) {
-          const action = toggle.dataset.whenDone as TerminalAction;
-          void armOrToggleWhenDone(action);
-          closeWhenDoneSub();
-        }
+
+        const sub = document.createElement("div");
+        sub.className = "session-more-menu smore-submenu";
+        sub.innerHTML = whenDoneMenuHtml();
+        document.body.appendChild(sub);
+        _whenDoneSubMenu = sub;
+
+        // Position the submenu to the right (or left if no room) of the parent item.
+        positionSubmenu(sub, whenDoneParent);
+
+        sub.addEventListener("click", (ev) => {
+          const target = ev.target as HTMLElement;
+          const cancelBtn = target.closest("[data-when-done-cancel]");
+          if (cancelBtn) {
+            void cancelWhenDone();
+            closeWhenDoneSub();
+            return;
+          }
+          const toggle = target.closest<HTMLButtonElement>("[data-when-done]");
+          if (toggle) {
+            const action = toggle.dataset.whenDone as TerminalAction;
+            void armOrToggleWhenDone(action);
+            closeWhenDoneSub();
+          }
+        });
       });
-    });
+    }
 
     // ── "This chat" section: only when a session or draft is active ─────────
     const hasLive = !!state.selectedId;

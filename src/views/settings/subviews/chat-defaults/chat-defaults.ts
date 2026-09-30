@@ -1,6 +1,7 @@
 import { html, render } from "lit-html";
 import { getSettings } from "../../../../shared/state";
 import { updateSettings } from "../../../../shared/settings-update";
+import { isRemote } from "../../../../shared/transport";
 import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
 import type { SessionSort } from "../../../sessions/sessions-helpers";
 import { readModels, readDefaultFlags } from "../../../../shared/effort-presets";
@@ -35,7 +36,7 @@ function template(
               <option value="status" ?selected=${sort === "status"}>Status</option>
               <option value="recent" ?selected=${sort === "recent"}>Recent</option>
               <option value="name" ?selected=${sort === "name"}>Name</option>
-              <option value="drain" ?selected=${sort === "drain"}>Token drain</option>
+              ${isRemote() ? "" : html`<option value="drain" ?selected=${sort === "drain"}>Token drain</option>`}
             </select>
           </div>
           ${toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}

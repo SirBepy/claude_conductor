@@ -23,9 +23,20 @@ vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   clearAuqDraft: vi.fn().mockResolvedValue({ cleared: true }),
 }));
 
+// todo 1007: canRemember must be false on the phone, since save_settings
+// (the "Always Allow" rule write) is deliberately unreachable there. Partial
+// mock: the question card's composer also pulls getTransport() (SlashProvider),
+// which a bare { isRemote } stub would leave undefined.
+let remote = false;
+vi.mock("../src/shared/transport.ts", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, isRemote: () => remote };
+});
+
 const { showPermissionCard } = await import("../src/views/sessions/permission-modal/permission-card.ts");
 const { renderQuestionUI } = await import("../src/views/sessions/permission-modal/question-ui.ts");
 const { dismissQuestionCard, getActiveCardId } = await import("../src/views/sessions/permission-modal/question-state.ts");
+const { state } = await import("../src/views/sessions/state.ts");
 
 function permissionPayload(overrides = {}) {
   return { id: "perm-1", tool_name: "Bash", input: { command: "echo hi" }, session_id: "s-perm", ...overrides };
@@ -63,6 +74,7 @@ beforeEach(() => {
   invokeMock.mockClear();
   getSessionDrafts.mockReset().mockResolvedValue({ composer: null, auq: null, held: [], held_updated_at: null });
   liveDocListeners = [];
+  remote = false;
   document.addEventListener = function (type, handler, opts) {
     liveDocListeners.push({ type, handler });
     return origAdd.call(this, type, handler, opts);
@@ -117,5 +129,25 @@ describe("a permission card swapped away by ensureHost()", () => {
       liveDocListeners.some((x) => x.type === l.type && x.handler === l.handler)
     );
     expect(leaked).toEqual([]);
+  });
+});
+
+describe("the Always Allow button on the phone (todo 1007)", () => {
+  afterEach(() => { state.sessions = []; });
+
+  it("does not render when isRemote() is true, even with a rememberable rule", () => {
+    remote = true;
+    state.sessions = [{ session_id: "s-perm", cwd: "/repo" }];
+    showPermissionCard(permissionPayload());
+    expect(document.querySelector('[data-act="allow"]')).not.toBeNull();
+    expect(document.querySelector('[data-act="deny"]')).not.toBeNull();
+    expect(document.querySelector('[data-act="always"]')).toBeNull();
+  });
+
+  it("renders it on desktop for the identical, otherwise-rememberable payload", () => {
+    remote = false;
+    state.sessions = [{ session_id: "s-perm", cwd: "/repo" }];
+    showPermissionCard(permissionPayload());
+    expect(document.querySelector('[data-act="always"]')).not.toBeNull();
   });
 });

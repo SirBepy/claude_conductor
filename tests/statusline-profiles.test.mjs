@@ -23,13 +23,21 @@ vi.mock("../src/shared/mobile-viewport.ts", () => ({
   onMobileViewportChange: () => () => {},
 }));
 
+// todo 1007: migrateStatuslineToV2 must not attempt save_settings on the
+// phone - the daemon deliberately refuses it, so the write would just retry
+// and fail forever.
+let remote = false;
+vi.mock("../src/shared/transport.ts", () => ({
+  isRemote: () => remote,
+}));
+
 const {
   loadStatuslineRows, saveStatuslineRows, activeProfile, profileMaxRows, profileDefaultRows,
   migrateStatuslineToV2,
 } = await import("../src/views/sessions/session-statusbar-helpers.ts");
 const { DEFAULT_ROWS, DEFAULT_MOBILE_ROWS, MOBILE_MAX_ROWS } = await import("../src/views/sessions/statusline-catalog.ts");
 
-beforeEach(() => { store.settings = {}; mobile = false; });
+beforeEach(() => { store.settings = {}; mobile = false; remote = false; });
 
 describe("statusline desktop/mobile profiles", () => {
   it("writes each profile to its own settings key", async () => {
@@ -105,6 +113,16 @@ describe("statusline desktop/mobile profiles", () => {
     await migrateStatuslineToV2();
     expect(store.settings.theme).toBe("glacier");
     expect(store.settings.statuslineHideZero).toBe(false);
+  });
+
+  // todo 1007: on the phone this used to retry-and-fail on every load,
+  // forever, since save_settings always rejects for the remote transport.
+  it("never attempts the settings write on the phone", async () => {
+    remote = true;
+    store.settings = { statuslineRows: [["model", "branch", "repo", "commits"]] };
+    await migrateStatuslineToV2();
+    expect(store.settings.statuslineRows).toEqual([["model", "branch", "repo", "commits"]]);
+    expect(store.settings.statuslineRowsV2Applied).toBeUndefined();
   });
 
   it("keeps the two defaults to a single row that can never wrap on a phone", () => {

@@ -278,6 +278,32 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "list_claude_md_scopes", params: { worktree_path: "/repo/wt" } });
   });
 
+  // todo 1007: the daemon already allowlists push_commits as P
+  // (remote_transport_table.rs:218); this case was the only missing piece.
+  it("forwards push_commits to the rpc with cwd and publish", async () => {
+    await new HttpTransport().call("push_commits", { cwd: "/repo", publish: true });
+    expect(body()).toEqual({ method: "push_commits", params: { cwd: "/repo", publish: true } });
+  });
+
+  // todo 1007: same story as push_commits - daemon already allowlists
+  // tail_waiting_log as P (remote_transport_table.rs:238).
+  it("forwards tail_waiting_log to the rpc, mapping sessionId -> session_id", async () => {
+    await new HttpTransport().call("tail_waiting_log", {
+      sessionId: "sess-w",
+      path: "/tmp/out.log",
+      offset: 128,
+    });
+    expect(body()).toEqual({
+      method: "tail_waiting_log",
+      params: { session_id: "sess-w", path: "/tmp/out.log", offset: 128 },
+    });
+  });
+
+  it("defaults tail_waiting_log's offset to null on the first poll", async () => {
+    await new HttpTransport().call("tail_waiting_log", { sessionId: "sess-w", path: "/tmp/out.log" });
+    expect(body().params.offset).toBeNull();
+  });
+
   // Multi-machine federation (H1): start_session forwards the picker's chosen
   // machineId (null = spawn on this/the daemon's own machine, same as omitting it).
   it("forwards start_session's machineId as machine_id, and a follow-up send_message for the prompt", async () => {

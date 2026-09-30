@@ -1,5 +1,6 @@
 import { invoke } from "../../shared/ipc";
 import { updateSettings } from "../../shared/settings-update";
+import { isRemote } from "../../shared/transport";
 import type { SessionMeta } from "../../shared/chat/chat-renderer";
 import type { GitInfo, ContextStatus, ChatDrain } from "../../types/ipc.generated";
 import { modelLabel } from "../../shared/model-name";
@@ -78,6 +79,9 @@ const V2_FLAG = "statuslineRowsV2Applied";
  * so that a load stays a pure read.
  */
 export async function migrateStatuslineToV2(): Promise<void> {
+  // The daemon deliberately refuses save_settings from the phone (remote_transport_table.rs:152-153),
+  // so this write would reject and retry on every load, forever - never even get_settings first.
+  if (isRemote()) return;
   try {
     const s = await invoke<Record<string, unknown>>("get_settings");
     if (s[V2_FLAG] === true) return;

@@ -163,11 +163,24 @@ export class HttpTransport implements Transport {
           offset: args.offset ?? 0,
           limit: args.limit ?? 30,
         });
+      // Commits chip's push button (todo 1007): daemon already allowlists this
+      // as P (remote_transport_table.rs:218); only this frontend case was missing.
+      case "push_commits":
+        return this.rpc<T>("push_commits", { cwd: args.cwd, publish: args.publish });
       case "list_project_servers":
         return this.rpc<T>("list_project_servers", { cwd: args.cwd });
       case "list_claude_md_scopes":
         return this.rpc<T>("list_claude_md_scopes", {
           worktree_path: args.worktreePath ?? args.worktree_path,
+        });
+      // Waiting-on chip's live-tail popover (todo 1007): daemon already
+      // allowlists this as P (remote_transport_table.rs:238); only this
+      // frontend case was missing.
+      case "tail_waiting_log":
+        return this.rpc<T>("tail_waiting_log", {
+          session_id: args.sessionId ?? args.session_id,
+          path: args.path,
+          offset: args.offset ?? null,
         });
       case "start_session": {
         // Daemon expects snake_case; tolerate camelCase from callers (matches

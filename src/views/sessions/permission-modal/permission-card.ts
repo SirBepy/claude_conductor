@@ -1,5 +1,6 @@
 import { invoke } from "../../../shared/ipc";
 import { updateSettings } from "../../../shared/settings-update";
+import { isRemote } from "../../../shared/transport";
 import { escapeHtml } from "../../../shared/escape-html";
 import { buildRule, describeRule, isDestructive, withAddedRule } from "../permission-rules";
 import { clearHost, ensureHost, renderCardShell } from "./host";
@@ -66,7 +67,10 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
   const { host } = ensureHost();
   const cwd = resolveCwdForSession(payload.session_id);
   const rule = buildRule(payload.tool_name, payload.input);
-  const canRemember = cwd !== null && !isDestructive(payload.tool_name, payload.input);
+  // The phone can never write the desktop's settings blob (save_settings is
+  // deliberately absent from http-transport.ts), so an "Always Allow" rule
+  // would silently fail to persist - drop the button rather than lie.
+  const canRemember = cwd !== null && !isDestructive(payload.tool_name, payload.input) && !isRemote();
 
   const respond = async (behavior: "allow" | "deny") => {
     clearHost();
