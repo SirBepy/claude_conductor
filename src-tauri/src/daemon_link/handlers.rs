@@ -50,8 +50,7 @@ pub(super) async fn handle_instances_changed(app: &tauri::AppHandle, params: ser
                 (stale_attached_sessions(&attached, &parsed), respawned_attached_sessions(&attached, &parsed))
             };
             if !stale.is_empty() {
-                let guard = state.daemon_client.lock().await;
-                if let Some(client) = guard.as_ref() {
+                if let Some(client) = state.client().await {
                     for id in &stale {
                         let _ = client.detach_session(id).await;
                     }

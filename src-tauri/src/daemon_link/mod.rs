@@ -65,6 +65,7 @@ pub async fn run_app_subscription(app_handle: tauri::AppHandle) {
                 }
             }
             {
+                // Writes the slot itself (todo 1006) - keeps the lock.
                 let mut slot = state.daemon_client.lock().await;
                 *slot = Some(client);
             }
@@ -77,6 +78,7 @@ pub async fn run_app_subscription(app_handle: tauri::AppHandle) {
             log::warn!("daemon connection lost (generation {generation}); respawning + reconnecting");
             {
                 use tauri::Emitter;
+                // Writes the slot itself (todo 1006) - keeps the lock.
                 *state.daemon_client.lock().await = None;
                 let _ = app_handle.emit("daemon-status-changed", serde_json::json!({"connected": false}));
             }
@@ -189,8 +191,7 @@ fn spawn_pending_prompt_poll(app_handle: tauri::AppHandle) {
 /// No-op (logged) if the daemon isn't connected yet - the next successful
 /// handshake will push the latest snapshot anyway.
 pub async fn push_settings_to_daemon(state: &crate::state::AppState, settings: &crate::types::Settings) {
-    let guard = state.daemon_client.lock().await;
-    if let Some(client) = guard.as_ref() {
+    if let Some(client) = state.client().await {
         if let Err(e) = client.push_settings(settings).await {
             log::warn!("push_settings (post-save) failed: {e}");
         }
@@ -202,8 +203,7 @@ pub async fn push_settings_to_daemon(state: &crate::state::AppState, settings: &
 /// `characters::cache::invalidate()` in `ipc::invalidate_characters_cache`.
 /// No-op (logged) if the daemon isn't connected - its cache is empty anyway then.
 pub async fn invalidate_daemon_characters_cache(state: &crate::state::AppState) {
-    let guard = state.daemon_client.lock().await;
-    if let Some(client) = guard.as_ref() {
+    if let Some(client) = state.client().await {
         if let Err(e) = client.invalidate_characters_cache().await {
             log::warn!("invalidate_characters_cache (daemon) failed: {e}");
         }

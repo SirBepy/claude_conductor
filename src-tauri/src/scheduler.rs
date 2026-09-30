@@ -187,8 +187,7 @@ pub async fn poll_once_scoped(
         // Fire-and-forget: no daemon connection just means the widget falls
         // back to polling `companion.db` instead.
         let state = app.state::<AppState>();
-        let guard = state.daemon_client.lock().await;
-        if let Some(client) = guard.as_ref() {
+        if let Some(client) = state.client().await {
             if let Err(e) = client.notify_usage_snapshot(snap).await {
                 log::warn!("notify_usage_snapshot failed: {e}");
             }

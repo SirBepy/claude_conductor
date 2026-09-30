@@ -9,15 +9,16 @@ use tauri::{AppHandle, Manager};
 /// with the first/default option. Logs each auto-answer to COMMENTS_FOR_BEPY.md.
 pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let prompts = {
-        let guard = state.daemon_client.lock().await;
-        match guard.as_ref() {
-            Some(c) => c.list_pending_prompts().await.ok(),
-            None => None,
-        }
+    let prompts = match state.client().await {
+        Some(c) => c.list_pending_prompts().await.ok(),
+        None => None,
     };
     let Some(prompts) = prompts else { return };
     let Some(arr) = prompts.as_array() else { return };
+
+    // Clone once outside the loop (todo 1006) - reused for every prompt so
+    // the outer mutex isn't reacquired per iteration.
+    let Some(client) = state.client().await else { return };
 
     for p in arr {
         let event = p.get("event").and_then(|v| v.as_str()).unwrap_or("");
@@ -29,8 +30,6 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
             Some(id) => id.to_string(),
             None => continue,
         };
-        let guard = state.daemon_client.lock().await;
-        let Some(client) = guard.as_ref() else { return };
 
         match event {
             "permission-requested" => {
@@ -96,8 +95,7 @@ pub(super) fn default_question_answers(questions: Option<&serde_json::Value>) ->
 /// Inject `/close` into a single session via the daemon.
 pub(super) async fn inject_close(app: &AppHandle, session_id: &str) -> bool {
     let state = app.state::<AppState>();
-    let guard = state.daemon_client.lock().await;
-    let Some(client) = guard.as_ref() else {
+    let Some(client) = state.client().await else {
         return false;
     };
     match client.send_message(session_id, "/close").await {
