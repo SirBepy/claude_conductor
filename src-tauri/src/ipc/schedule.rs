@@ -23,7 +23,7 @@ use tauri::State;
 /// All scheduled items. Direct file read (see module doc); ordering is left
 /// to the frontend.
 #[tauri::command]
-pub fn schedule_list() -> Vec<ScheduledItem> {
+pub async fn schedule_list() -> Vec<ScheduledItem> {
     crate::sessions::scheduled_items::list()
 }
 
@@ -113,7 +113,7 @@ struct ScheduleOnceSidecar {
 }
 
 #[tauri::command]
-pub fn schedule_list_external() -> Vec<ExternalScheduledJob> {
+pub async fn schedule_list_external() -> Vec<ExternalScheduledJob> {
     list_external_jobs()
 }
 

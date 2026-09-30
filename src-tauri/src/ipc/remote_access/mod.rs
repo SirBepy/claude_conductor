@@ -175,36 +175,50 @@ pub struct RemoteAccessStatus {
 /// http://127.0.0.1:27183`; when disabling, runs `tailscale serve --https=443
 /// off`. Persists the flag either way (even if the serve call fails, so the UI
 /// reflects intent and a later boot/retry can re-apply).
+///
+/// `persist_enabled` (a settings-file write) runs before the blocking pool
+/// hand-off, and only `enabled` (owned, `Copy`) crosses into the closure, so
+/// no state guard lives across the `.await`.
 #[tauri::command]
-pub fn set_remote_access_enabled(
+pub async fn set_remote_access_enabled(
     enabled: bool,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     persist_enabled(enabled, &state, &app);
-    if enabled {
-        serve_enable()
-    } else {
-        serve_disable()
-    }
+    tokio::task::spawn_blocking(move || {
+        if enabled {
+            serve_enable()
+        } else {
+            serve_disable()
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-/// Current remote-access status for the Settings UI.
+/// Current remote-access status for the Settings UI. `tailscale_dnsname`/
+/// `serve_running` each shell out to `tailscale.exe`, so they run on the
+/// blocking pool; only the `enabled` bool (read from state first) crosses in.
 #[tauri::command]
-pub fn remote_access_status(state: State<AppState>) -> RemoteAccessStatus {
+pub async fn remote_access_status(state: State<'_, AppState>) -> Result<RemoteAccessStatus, String> {
     let enabled = state.settings.lock().unwrap().remote_access_enabled;
-    let dnsname = tailscale_dnsname();
-    RemoteAccessStatus {
-        enabled,
-        tailscale_up: dnsname.is_some(),
-        serve_running: serve_running(),
-        url: dnsname.map(|d| format!("https://{d}/")),
-    }
+    tokio::task::spawn_blocking(move || {
+        let dnsname = tailscale_dnsname();
+        RemoteAccessStatus {
+            enabled,
+            tailscale_up: dnsname.is_some(),
+            serve_running: serve_running(),
+            url: dnsname.map(|d| format!("https://{d}/")),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// No-op kept for backward compatibility. Use remote_access_qr() instead.
 #[tauri::command]
-pub fn regenerate_remote_token() -> Result<String, String> {
+pub async fn regenerate_remote_token() -> Result<String, String> {
     Ok(String::new())
 }
 
@@ -222,57 +236,68 @@ fn build_pairing_url(dnsname: Option<&str>, iroh_id: Option<&str>, code: &str) -
     }
 }
 
-/// Mint a fresh pairing code, return SVG QR + URL.
-/// Both encode the same code, so only one IPC call is needed per QR refresh.
+/// Mint a fresh pairing code, return SVG QR + URL. Both encode the same code,
+/// so only one IPC call is needed per QR refresh. `tailscale_dnsname` shells
+/// out to `tailscale.exe`, so the whole body runs on the blocking pool.
 #[tauri::command]
-pub fn remote_access_qr() -> Result<PairingQrResult, String> {
-    use qrcode::render::svg;
-    use qrcode::QrCode;
+pub async fn remote_access_qr() -> Result<PairingQrResult, String> {
+    tokio::task::spawn_blocking(|| {
+        use qrcode::render::svg;
+        use qrcode::QrCode;
 
-    let app_data = paths::data_dir().map_err(|e| e.to_string())?;
-    let dnsname = tailscale_dnsname();
-    let iroh_id = crate::daemon::iroh_tunnel::endpoint_id_from_disk(&app_data).map(|id| id.to_string());
-    let code = do_mint_pairing_code(&app_data)?;
-    let url = build_pairing_url(dnsname.as_deref(), iroh_id.as_deref(), &code)?;
-    let qr = QrCode::new(url.as_bytes()).map_err(|e| format!("QR encode failed: {e}"))?;
-    let svg = qr.render::<svg::Color>().min_dimensions(220, 220).build();
-    Ok(PairingQrResult { svg, url, iroh: iroh_id })
+        let app_data = paths::data_dir().map_err(|e| e.to_string())?;
+        let dnsname = tailscale_dnsname();
+        let iroh_id = crate::daemon::iroh_tunnel::endpoint_id_from_disk(&app_data).map(|id| id.to_string());
+        let code = do_mint_pairing_code(&app_data)?;
+        let url = build_pairing_url(dnsname.as_deref(), iroh_id.as_deref(), &code)?;
+        let qr = QrCode::new(url.as_bytes()).map_err(|e| format!("QR encode failed: {e}"))?;
+        let svg = qr.render::<svg::Color>().min_dimensions(220, 220).build();
+        Ok(PairingQrResult { svg, url, iroh: iroh_id })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-/// Return just the pairing URL (re-mints a code). Prefer remote_access_qr() to get both.
+/// Return just the pairing URL (re-mints a code). Prefer remote_access_qr() to
+/// get both. `tailscale_dnsname` shells out to `tailscale.exe`, so the body
+/// runs on the blocking pool.
 #[tauri::command]
-pub fn generate_pairing_url() -> Result<String, String> {
-    let dnsname = tailscale_dnsname()
-        .ok_or_else(|| "tailscale is not connected".to_string())?;
-    let app_data = paths::data_dir().map_err(|e| e.to_string())?;
-    let code = do_mint_pairing_code(&app_data)?;
-    Ok(format!("https://{dnsname}/?pair={code}"))
+pub async fn generate_pairing_url() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        let dnsname = tailscale_dnsname()
+            .ok_or_else(|| "tailscale is not connected".to_string())?;
+        let app_data = paths::data_dir().map_err(|e| e.to_string())?;
+        let code = do_mint_pairing_code(&app_data)?;
+        Ok(format!("https://{dnsname}/?pair={code}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// List all paired devices (no token hashes).
 #[tauri::command]
-pub fn list_remote_devices() -> Result<Vec<crate::daemon::device_registry::RemoteDevice>, String> {
+pub async fn list_remote_devices() -> Result<Vec<crate::daemon::device_registry::RemoteDevice>, String> {
     let app_data = paths::data_dir().map_err(|e| e.to_string())?;
     Ok(crate::daemon::device_registry::DeviceRegistry::list_devices(&app_data))
 }
 
 /// Revoke a device by id. Returns true if the device existed and was removed.
 #[tauri::command]
-pub fn revoke_remote_device(id: String) -> Result<bool, String> {
+pub async fn revoke_remote_device(id: String) -> Result<bool, String> {
     let app_data = paths::data_dir().map_err(|e| e.to_string())?;
     crate::daemon::device_registry::DeviceRegistry::revoke_device(&id, &app_data)
 }
 
 /// Toggle the kill switch. When false, the daemon returns 503 for all remote requests.
 #[tauri::command]
-pub fn set_remote_kill_switch(enabled: bool) -> Result<(), String> {
+pub async fn set_remote_kill_switch(enabled: bool) -> Result<(), String> {
     let app_data = paths::data_dir().map_err(|e| e.to_string())?;
     crate::daemon::device_registry::DeviceRegistry::set_enabled(enabled, &app_data)
 }
 
 /// True = server active (not blocked); false = kill switch engaged.
 #[tauri::command]
-pub fn get_remote_kill_switch() -> Result<bool, String> {
+pub async fn get_remote_kill_switch() -> Result<bool, String> {
     let app_data = paths::data_dir().map_err(|e| e.to_string())?;
     Ok(crate::daemon::device_registry::DeviceRegistry::is_enabled(&app_data))
 }
@@ -282,7 +307,7 @@ pub fn get_remote_kill_switch() -> Result<bool, String> {
 /// the phone carries; desktop has no `rc_token` in localStorage, so it reads it
 /// here. Errors if no token is provisioned yet.
 #[tauri::command]
-pub fn get_remote_access_token() -> Result<String, String> {
+pub async fn get_remote_access_token() -> Result<String, String> {
     let path = token_file()?;
     read_plaintext_token(&path).ok_or_else(|| "no remote-access token provisioned".to_string())
 }

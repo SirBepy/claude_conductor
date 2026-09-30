@@ -16,12 +16,12 @@ fn source_label(kind: Option<crate::sessions::kinds::InstanceKind>) -> &'static 
 /// burned per source. Rows with no `kind` (written before this field existed)
 /// land in "unknown" rather than being guessed at.
 #[tauri::command]
-pub fn token_stats_by_source(state: State<AppState>) -> serde_json::Value {
+pub async fn token_stats_by_source(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let history = {
         let mgr = state.db.lock().unwrap();
         crate::storage::token_store::get_token_records(mgr.conn(), 0).unwrap_or_default()
     };
-    serde_json::json!({ "buckets": aggregate_by_source(&history) })
+    Ok(serde_json::json!({ "buckets": aggregate_by_source(&history) }))
 }
 
 /// `history` must arrive newest-first, as `get_token_records` returns it.

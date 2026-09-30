@@ -85,13 +85,13 @@ pub mod legacy_import_test_helpers {
 }
 
 #[tauri::command]
-pub fn list_projects(state: State<AppState>) -> Vec<ProjectConfig> {
-    projects_test_helpers::list_from(&state.settings.lock().unwrap())
+pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<ProjectConfig>, String> {
+    Ok(projects_test_helpers::list_from(&state.settings.lock().unwrap()))
 }
 
 #[tauri::command]
-pub fn get_project(id: String, state: State<AppState>) -> Option<ProjectConfig> {
-    projects_test_helpers::get_from(&state.settings.lock().unwrap(), &id)
+pub async fn get_project(id: String, state: State<'_, AppState>) -> Result<Option<ProjectConfig>, String> {
+    Ok(projects_test_helpers::get_from(&state.settings.lock().unwrap(), &id))
 }
 
 /// Resolves the account a new chat under `cwd` should spawn on: the matching
@@ -99,12 +99,12 @@ pub fn get_project(id: String, state: State<AppState>) -> Option<ProjectConfig> 
 /// `cwd` is a worktree with no binding of its own. Replaces the frontend's
 /// old raw-path `.find()` (see `settings::identity::resolve_effective_preferred_account_id`).
 #[tauri::command]
-pub fn resolve_project_account(cwd: String, state: State<AppState>) -> Option<String> {
+pub async fn resolve_project_account(cwd: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
     let guard = state.settings.lock().unwrap();
-    crate::settings::identity::resolve_effective_preferred_account_id(
+    Ok(crate::settings::identity::resolve_effective_preferred_account_id(
         &guard.projects,
         std::path::Path::new(&cwd),
-    )
+    ))
 }
 
 /// Ensures a `ProjectConfig` exists for the given cwd. If one is already
@@ -114,9 +114,9 @@ pub fn resolve_project_account(cwd: String, state: State<AppState>) -> Option<St
 /// seen only via token-stats (never hooked) and thus absent from
 /// `settings.projects`.
 #[tauri::command]
-pub fn ensure_project(
+pub async fn ensure_project(
     cwd: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ProjectConfig, String> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -141,10 +141,10 @@ pub fn ensure_project(
 }
 
 #[tauri::command]
-pub fn update_project(
+pub async fn update_project(
     id: String,
     patch: serde_json::Value,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
@@ -164,9 +164,9 @@ pub fn update_project(
 }
 
 #[tauri::command]
-pub fn delete_project(
+pub async fn delete_project(
     id: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
@@ -182,9 +182,9 @@ pub fn delete_project(
 }
 
 #[tauri::command]
-pub fn set_projects_sort_by(
+pub async fn set_projects_sort_by(
     sort_by: ProjectsSortBy,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
@@ -201,8 +201,8 @@ pub fn set_projects_sort_by(
 /// the user has already handled the prompt (accept or decline) in a prior
 /// session, if there is no legacy file on disk, or if it lacks a vault_path.
 #[tauri::command]
-pub fn import_legacy_obsidian_config(
-    state: State<AppState>,
+pub async fn import_legacy_obsidian_config(
+    state: State<'_, AppState>,
 ) -> Result<Option<crate::types::ProjectConfig>, String> {
     {
         let guard = state.settings.lock().unwrap();
@@ -225,9 +225,9 @@ pub fn import_legacy_obsidian_config(
 /// true, the legacy config is actually imported into settings. Either way,
 /// the handled flag is set so the banner never shows again on future loads.
 #[tauri::command]
-pub fn confirm_legacy_obsidian_import(
+pub async fn confirm_legacy_obsidian_import(
     accept: bool,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
