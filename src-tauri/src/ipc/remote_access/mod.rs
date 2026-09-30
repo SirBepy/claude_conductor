@@ -10,57 +10,27 @@
 //! plaintext token is also stored in `remote-access.json` under a `"token"`
 //! field so the QR can be shown anytime. The daemon keeps validating against the
 //! `"hash"` field, which we always write in lockstep.
-
-use std::path::{Path, PathBuf};
+//!
+//! Split by concern so no single file mixes unrelated helpers: `tailscale` -
+//! shelling out to `tailscale.exe` (serve on/off, status, dnsname); `token` -
+//! reading the plaintext token off disk; `pairing` - minting a pairing code
+//! and building the pairing URL. All `#[tauri::command]` fns stay here so
+//! `lib.rs`'s `generate_handler!` list keeps working unchanged (a named
+//! re-export of a `#[tauri::command]` fn breaks the macro; only the plain
+//! helpers move out).
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::settings::{self, paths};
 use crate::state::AppState;
-use crate::util::{sha256_hex, to_hex};
 
+mod pairing;
 mod tailscale;
+mod token;
+use pairing::{build_pairing_url, do_mint_pairing_code};
 use tailscale::{serve_disable, serve_enable, serve_running, tailscale_dnsname};
-
-// ── Token storage (mirrors daemon::remote_server, plaintext added) ────────────
-
-fn token_file() -> Result<PathBuf, String> {
-    Ok(paths::data_dir().map_err(|e| e.to_string())?.join("remote-access.json"))
-}
-
-/// Read the current plaintext token for the QR.
-///
-/// Two writers provision the token and they disagree on format: the APP
-/// (`write_token`) stores `{ hash, token }` in `remote-access.json`, while the
-/// DAEMON's `ensure_token` writes a hash-only `remote-access.json` plus the
-/// plaintext in a sibling `remote-access-token.txt`. When the daemon minted the
-/// live token (e.g. after a fresh install, or the json was deleted to force a
-/// re-pair), the json has no `"token"` field, so reading only the json returned
-/// None and the QR/re-pair flow broke even though the plaintext existed on disk.
-/// So: prefer the json `"token"`, then fall back to the daemon's sibling
-/// `remote-access-token.txt`. Returns None only when neither carries a token.
-fn read_plaintext_token(path: &Path) -> Option<String> {
-    if let Ok(raw) = std::fs::read_to_string(path) {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(tok) = v.get("token").and_then(|t| t.as_str()) {
-                let tok = tok.trim();
-                if !tok.is_empty() {
-                    return Some(tok.to_string());
-                }
-            }
-        }
-    }
-    // Fall back to the daemon-written plaintext handoff file (hash-only json case).
-    let handoff = path.with_file_name("remote-access-token.txt");
-    let tok = std::fs::read_to_string(handoff).ok()?;
-    let tok = tok.trim();
-    if tok.is_empty() {
-        None
-    } else {
-        Some(tok.to_string())
-    }
-}
+use token::{read_plaintext_token, token_file};
 
 // ── Settings persistence ──────────────────────────────────────────────────────
 
@@ -126,26 +96,6 @@ pub fn start_tailscale_watcher(app: AppHandle) {
             }
         }
     });
-}
-
-// ── Pairing code helpers ──────────────────────────────────────────────────────
-
-/// Mint a fresh pairing code, write hash + TTL to remote-pairing.json,
-/// return the plaintext code. TTL: 2 minutes.
-fn do_mint_pairing_code(app_data: &std::path::Path) -> Result<String, String> {
-    let mut bytes = [0u8; 32];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    let code: String = to_hex(&bytes);
-    let expires_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        + 120;
-    let body = serde_json::json!({ "code_hash": sha256_hex(&code), "expires_at": expires_at });
-    let json = serde_json::to_string_pretty(&body).unwrap_or_default();
-    crate::util::write_json_atomic(&app_data.join("remote-pairing.json"), &json)
-        .map_err(|e| e.to_string())?;
-    Ok(code)
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -218,20 +168,6 @@ pub async fn remote_access_status(state: State<'_, AppState>) -> Result<RemoteAc
 #[tauri::command]
 pub async fn regenerate_remote_token() -> Result<String, String> {
     Ok(String::new())
-}
-
-/// Pure URL construction so the four branches unit-test without tailscale, a
-/// daemon or disk. The `conductor://` form is the android client's fallback
-/// for when tailscale is down, which is the whole point of the iroh tunnel.
-fn build_pairing_url(dnsname: Option<&str>, iroh_id: Option<&str>, code: &str) -> Result<String, String> {
-    match (dnsname, iroh_id) {
-        (Some(d), Some(id)) => Ok(format!("https://{d}/?pair={code}&iroh={id}")),
-        (Some(d), None) => Ok(format!("https://{d}/?pair={code}")),
-        (None, Some(id)) => Ok(format!("conductor://pair?iroh={id}&pair={code}")),
-        (None, None) => {
-            Err("neither tailscale nor iroh is available (run `tailscale up`, or wait for the daemon to finish starting)".to_string())
-        }
-    }
 }
 
 /// Mint a fresh pairing code, return SVG QR + URL. Both encode the same code,
@@ -312,86 +248,7 @@ pub async fn get_remote_access_token() -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::tempdir;
-
-    #[test]
-    fn read_plaintext_token_none_for_hash_only_legacy_file() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("remote-access.json");
-        // A daemon-written file from before plaintext persistence: hash only,
-        // and no sibling handoff file -> nothing to read.
-        std::fs::write(&path, r#"{"hash":"deadbeef"}"#).unwrap();
-        assert!(read_plaintext_token(&path).is_none());
-    }
-
-    #[test]
-    fn read_plaintext_token_falls_back_to_daemon_handoff_file() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("remote-access.json");
-        // Daemon-written: hash-only json + plaintext in the sibling .txt. The QR
-        // must still recover the token from the handoff file.
-        std::fs::write(&path, r#"{"hash":"deadbeef"}"#).unwrap();
-        std::fs::write(dir.path().join("remote-access-token.txt"), "cafebabe\n").unwrap();
-        assert_eq!(read_plaintext_token(&path).as_deref(), Some("cafebabe"));
-    }
-
-    #[test]
-    fn read_plaintext_token_prefers_json_token_over_handoff() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("remote-access.json");
-        let body = serde_json::json!({ "hash": sha256_hex("from_json"), "token": "from_json" });
-        std::fs::write(&path, serde_json::to_string_pretty(&body).unwrap()).unwrap();
-        // A stale handoff file must NOT shadow the app-written json token.
-        std::fs::write(dir.path().join("remote-access-token.txt"), "stale_handoff").unwrap();
-        assert_eq!(read_plaintext_token(&path).as_deref(), Some("from_json"));
-    }
-
-    #[test]
-    fn mint_pairing_code_writes_hash_and_ttl() {
-        let dir = tempdir().unwrap();
-        let code = do_mint_pairing_code(dir.path()).unwrap();
-        assert_eq!(code.len(), 64);
-        let raw = std::fs::read_to_string(dir.path().join("remote-pairing.json")).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(v["code_hash"].as_str().unwrap(), sha256_hex(&code));
-        let expires_at = v["expires_at"].as_u64().unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        assert!(expires_at > now);
-        assert!(expires_at <= now + 120);
-    }
-
-    #[test]
-    fn build_pairing_url_tailscale_only_is_byte_identical_to_before_iroh() {
-        assert_eq!(
-            build_pairing_url(Some("box.tailnet.ts.net"), None, "abc123").unwrap(),
-            "https://box.tailnet.ts.net/?pair=abc123"
-        );
-    }
-
-    #[test]
-    fn build_pairing_url_tailscale_and_iroh_matches_android_contract() {
-        assert_eq!(
-            build_pairing_url(Some("box.tailnet.ts.net"), Some("deadbeef"), "abc123").unwrap(),
-            "https://box.tailnet.ts.net/?pair=abc123&iroh=deadbeef"
-        );
-    }
-
-    #[test]
-    fn build_pairing_url_iroh_only_matches_android_contract() {
-        assert_eq!(
-            build_pairing_url(None, Some("deadbeef"), "abc123").unwrap(),
-            "conductor://pair?iroh=deadbeef&pair=abc123"
-        );
-    }
-
-    #[test]
-    fn build_pairing_url_errs_when_neither_transport_is_available() {
-        assert!(build_pairing_url(None, None, "abc123").is_err());
-    }
 
     #[test]
     fn list_remote_devices_returns_empty_without_registry() {
