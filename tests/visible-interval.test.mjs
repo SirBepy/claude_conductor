@@ -73,6 +73,46 @@ describe("visibleInterval", () => {
     dispose();
   });
 
+  it("clears the underlying timer while hidden, so a hidden window pays nothing", () => {
+    const fn = vi.fn();
+    const dispose = visibleInterval(fn, 1000);
+    expect(vi.getTimerCount()).toBe(1);
+
+    setVisibility("hidden");
+    expect(vi.getTimerCount()).toBe(0);
+
+    setVisibility("visible");
+    expect(vi.getTimerCount()).toBe(1);
+
+    dispose();
+  });
+
+  it("does not flush after a hide shorter than one period", () => {
+    const fn = vi.fn();
+    const dispose = visibleInterval(fn, 1000);
+    fn.mockClear();
+
+    setVisibility("hidden");
+    vi.advanceTimersByTime(400);
+    setVisibility("visible");
+    expect(fn).not.toHaveBeenCalled();
+
+    dispose();
+  });
+
+  it("starts paused when created while hidden, and flushes on first show", () => {
+    setVisibility("hidden");
+    const fn = vi.fn();
+    const dispose = visibleInterval(fn, 1000);
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.advanceTimersByTime(1500);
+    setVisibility("visible");
+    expect(fn).toHaveBeenCalledTimes(1);
+
+    dispose();
+  });
+
   it("keeps ticking while hidden when whileHidden is set", () => {
     const fn = vi.fn();
     const dispose = visibleInterval(fn, 1000, { whileHidden: true, reason: "test: must reach the user" });
