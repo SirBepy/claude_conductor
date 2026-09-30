@@ -147,6 +147,12 @@
 
 .sb-history-mark { font-size: 0.8rem; flex-shrink: 0; }
 
+/* Rows open that commit's files and diff (git-card.ts openCommit). */
+.sb-history-row[data-sha] { cursor: pointer; }
+.sb-history-row[data-sha]:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.sb-history-row.unpushed[data-sha]:hover { background: rgba(74, 222, 128, 0.12); }
+.sb-history-row[data-sha]:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
 .sb-history-age {
   flex-shrink: 0;
   font-size: 0.68rem;

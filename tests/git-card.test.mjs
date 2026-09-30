@@ -211,6 +211,42 @@ describe("git card history", () => {
   });
 });
 
+describe("git card commit rows", () => {
+  it("clicking a row resolves the short sha, closes the card and opens that commit", async () => {
+    const calls = [];
+    const ref = { query: "sha1", sha: "sha1" + "0".repeat(36), subject: "commit 1", body: "", author: "Joe", date: "2026-09-30T10:00:00Z" };
+    ipcMock.impl = ipc((cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "get_commit_history") return { entries: entries(0, 3, true), has_more: false, has_upstream: true };
+      if (cmd === "resolve_commit_refs") return [ref];
+      return [];
+    });
+    // jsdom has no scrollIntoView; the PR modal's tab strip calls it.
+    Element.prototype.scrollIntoView ??= () => {};
+    const p = new GitCard();
+    open(p);
+    await flush();
+
+    rows()[1].click();
+    await flush();
+
+    expect(calls).toContainEqual(["resolve_commit_refs", { cwd: CWD, candidates: ["sha1"] }]);
+    expect(pop()).toBeNull();
+    expect(document.querySelector(".pr-modal-title")?.textContent).toBe("commit 1");
+  });
+
+  it("rows are keyboard-reachable buttons", async () => {
+    ipcMock.impl = ipc((cmd) =>
+      cmd === "get_commit_history" ? { entries: entries(0, 1, false), has_more: false, has_upstream: true } : null);
+    const p = new GitCard();
+    open(p);
+    await flush();
+    const row = rows()[0];
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.tabIndex).toBe(0);
+  });
+});
+
 describe("git card branch mode", () => {
   const BRANCHES = [
     { name: "master", current: true, short_sha: "aaa1111", upstream: "origin/master" },

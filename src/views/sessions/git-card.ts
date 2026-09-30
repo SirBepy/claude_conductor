@@ -9,7 +9,8 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { timeAgo } from "../../shared/time";
 import { PopoverShell } from "./statusbar-popover-shell";
-import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitSync, GitInfo } from "../../types/ipc.generated";
+import { openCommitModal } from "../../shared/chat/commit-refs";
+import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitRef, CommitSync, GitInfo } from "../../types/ipc.generated";
 
 const PAGE_SIZE = 30;
 /** Distance from the list's bottom edge that triggers the next page. */
@@ -161,10 +162,36 @@ export class GitCard {
     }
     const list = el.querySelector<HTMLElement>(".sb-commit-history");
     if (!list) return;
+    const activate = (e: Event) => {
+      const row = (e.target as Element).closest<HTMLElement>(".sb-history-row[data-sha]");
+      if (!row?.dataset.sha) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void this.openCommit(row.dataset.sha);
+    };
+    list.addEventListener("click", activate);
+    list.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") activate(e);
+    });
     list.addEventListener("scroll", () => {
       if (list.scrollTop + list.clientHeight >= list.scrollHeight - LOAD_MARGIN_PX) void this.loadPage();
     });
     this.fillViewport(list);
+  }
+
+  /** The history row only carries the short sha; the modal needs the full
+   *  commit (sha, author, date, body), which resolve_commit_refs returns. */
+  private async openCommit(shortSha: string): Promise<void> {
+    const cwd = this.cwd;
+    if (!cwd) return;
+    try {
+      const [ref] = await invoke<CommitRef[]>("resolve_commit_refs", { cwd, candidates: [shortSha] });
+      if (!ref) return;
+      this.close();
+      openCommitModal(ref, cwd);
+    } catch (err) {
+      console.error("[git-card] resolve_commit_refs failed", err);
+    }
   }
 
   private setMode(mode: Mode): void {
@@ -271,7 +298,7 @@ export class GitCard {
     const icon = c.pushed ? "ph-check" : "ph-arrow-up";
     const age = c.timestamp ? timeAgo(new Date(Number(c.timestamp) * 1000).toISOString()) : "";
     const title = c.pushed ? "Pushed to upstream" : "Not pushed yet";
-    return `<div class="sb-git-pop-commit sb-history-row ${state}" title="${title}">`
+    return `<div class="sb-git-pop-commit sb-history-row ${state}" role="button" tabindex="0" data-sha="${escapeHtml(c.short_sha)}" title="${title}">`
       + `<i class="ph ${icon} sb-history-mark"></i>`
       + `<span class="sb-git-pop-sha">${escapeHtml(c.short_sha)}</span>`
       + `<span class="sb-git-pop-msg">${escapeHtml(c.message)}</span>`
