@@ -4,7 +4,7 @@
 use tauri::AppHandle;
 
 #[tauri::command]
-pub fn piper_status() -> crate::notifications::piper::PiperStatus {
+pub async fn piper_status() -> crate::notifications::piper::PiperStatus {
     crate::notifications::piper::status()
 }
 
@@ -14,13 +14,13 @@ pub async fn piper_install_voice(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn piper_speak_preview(app: AppHandle, text: String, voice_name: Option<String>) -> Result<(), String> {
+pub async fn piper_speak_preview(app: AppHandle, text: String, voice_name: Option<String>) -> Result<(), String> {
     crate::notifications::speak_public(&app, &text, voice_name.as_deref());
     Ok(())
 }
 
 #[tauri::command]
-pub fn play_sound_preview(app: AppHandle, filename: String) -> Result<(), String> {
+pub async fn play_sound_preview(app: AppHandle, filename: String) -> Result<(), String> {
     if filename.is_empty()
         || filename.contains('/')
         || filename.contains('\\')

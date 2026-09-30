@@ -10,8 +10,8 @@ use tauri::{AppHandle, State};
 
 /// Get the whitelist for a specific project.
 #[tauri::command]
-pub fn get_project_whitelist(project_id: String, state: State<AppState>) -> CharacterWhitelist {
-    state
+pub async fn get_project_whitelist(project_id: String, state: State<'_, AppState>) -> Result<CharacterWhitelist, String> {
+    Ok(state
         .settings
         .lock()
         .unwrap()
@@ -19,7 +19,7 @@ pub fn get_project_whitelist(project_id: String, state: State<AppState>) -> Char
         .iter()
         .find(|p| p.id == project_id)
         .map(|p| p.whitelist.clone())
-        .unwrap_or(CharacterWhitelist::Default)
+        .unwrap_or(CharacterWhitelist::Default))
 }
 
 /// Set the whitelist for a specific project.
@@ -45,8 +45,8 @@ pub async fn set_project_whitelist(
 
 /// Get the settings-level default whitelist.
 #[tauri::command]
-pub fn get_default_whitelist(state: State<AppState>) -> CharacterWhitelist {
-    state.settings.lock().unwrap().default_character_whitelist.clone()
+pub async fn get_default_whitelist(state: State<'_, AppState>) -> Result<CharacterWhitelist, String> {
+    Ok(state.settings.lock().unwrap().default_character_whitelist.clone())
 }
 
 /// Set the settings-level default whitelist.
@@ -70,7 +70,7 @@ pub async fn set_default_whitelist(
 /// Resolve the effective whitelist for a project to a list of Character objects.
 /// Used by the modal's "Whitelisted" tab.
 #[tauri::command]
-pub fn resolve_whitelist_characters(project_id: String, state: State<AppState>) -> Vec<Character> {
+pub async fn resolve_whitelist_characters(project_id: String, state: State<'_, AppState>) -> Result<Vec<Character>, String> {
     let s = state.settings.lock().unwrap();
     let proj_wl = s
         .projects
@@ -84,8 +84,8 @@ pub fn resolve_whitelist_characters(project_id: String, state: State<AppState>) 
     let all = characters::list();
     let resolved_ids = whitelist::resolve(&proj_wl, &default_wl, &all);
     // Map ids back to Character, preserving the sorted order from resolve().
-    resolved_ids
+    Ok(resolved_ids
         .iter()
         .filter_map(|id| characters::get(id))
-        .collect()
+        .collect())
 }

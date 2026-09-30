@@ -21,7 +21,7 @@ mod sound_commands;
 pub use sound_commands::*;
 
 #[tauri::command]
-pub fn list_characters() -> Vec<Character> {
+pub async fn list_characters() -> Vec<Character> {
     characters::list()
 }
 
@@ -60,13 +60,13 @@ pub async fn assign_character(
 }
 
 #[tauri::command]
-pub fn character_asset_url(character_id: String, file: String) -> Option<String> {
+pub async fn character_asset_url(character_id: String, file: String) -> Option<String> {
     let c = characters::get(&character_id)?;
     characters::assets::file_data_url_at(&c.asset_path(&file))
 }
 
 #[tauri::command]
-pub fn get_characters_dir() -> Result<String, String> {
+pub async fn get_characters_dir() -> Result<String, String> {
     paths::characters_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| e.to_string())
@@ -264,6 +264,6 @@ pub async fn reroll_session_character(
 /// `reroll_session_character`), which is where the map's growth is actually
 /// bounded. Mirrors the daemon's read-only `list_session_characters` RPC.
 #[tauri::command]
-pub fn list_session_characters(state: State<AppState>) -> HashMap<String, String> {
-    state.settings.lock().unwrap().session_characters.clone()
+pub async fn list_session_characters(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
+    Ok(state.settings.lock().unwrap().session_characters.clone())
 }

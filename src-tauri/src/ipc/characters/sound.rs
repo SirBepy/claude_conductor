@@ -8,11 +8,11 @@ use crate::state::AppState;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
-pub fn play_character_slot(
+pub async fn play_character_slot(
     character_id: String,
     slot: Slot,
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let settings = state.settings.lock().unwrap().clone();
     if settings.mute_all() || settings.mute_sounds() {
@@ -40,10 +40,10 @@ pub fn play_character_slot(
 }
 
 #[tauri::command]
-pub fn preview_character_file(
+pub async fn preview_character_file(
     character_id: String,
     file: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
     let Some(c) = characters::get(&character_id) else {
@@ -58,6 +58,7 @@ pub fn preview_character_file(
 }
 
 #[tauri::command]
-pub fn stop_character_preview(state: State<AppState>) {
+pub async fn stop_character_preview(state: State<'_, AppState>) -> Result<(), String> {
     state.preview.stop();
+    Ok(())
 }

@@ -37,6 +37,6 @@ pub async fn hide_terminal(project_id: String, state: State<'_, AppState>) -> Re
 }
 
 #[tauri::command]
-pub fn list_channels(state: State<AppState>) -> Vec<serde_json::Value> {
-    state.cached_channels.lock().unwrap().clone()
+pub async fn list_channels(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    Ok(state.cached_channels.lock().unwrap().clone())
 }

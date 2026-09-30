@@ -4,6 +4,6 @@ use tauri_kit_audio::AudioOutputDevice;
 /// `tauri_kit_audio::list_audio_output_devices` (keeps authorization via
 /// `generate_handler`, no plugin ACL needed).
 #[tauri::command]
-pub fn list_audio_output_devices() -> Vec<AudioOutputDevice> {
+pub async fn list_audio_output_devices() -> Vec<AudioOutputDevice> {
     tauri_kit_audio::list_audio_output_devices()
 }
