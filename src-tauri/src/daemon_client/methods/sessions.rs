@@ -87,6 +87,14 @@ impl PersistentClient {
         Ok(())
     }
 
+    /// Debug builds only: sleeps `ms` (clamped to 10s server-side) and
+    /// returns. Exists to measure client-side lock contention on
+    /// `AppState.daemon_client` (todo 1006). The daemon rejects this method
+    /// in release builds.
+    pub async fn debug_sleep(&self, ms: u64) -> Result<Value, ClientError> {
+        self.call("debug_sleep", json!({"ms": ms})).await
+    }
+
     /// Fork `session_id`'s transcript onto `target_account_id`: spawns a new
     /// session id resumed from the old one on the new account, replays the
     /// pending rate-limit resume prompt (if any) into it, then retires the

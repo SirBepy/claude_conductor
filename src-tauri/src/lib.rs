@@ -281,6 +281,7 @@ pub fn run() {
             ipc::freeze_session,
             ipc::unfreeze_session,
             ipc::simulate_rate_limit,
+            ipc::debug_daemon_sleep,
             ipc::load_history,
             ipc::load_history_page,
             ipc::transcript_stats,

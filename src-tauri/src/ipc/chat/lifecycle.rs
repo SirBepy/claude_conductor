@@ -181,6 +181,21 @@ pub async fn simulate_rate_limit(
         .map_err(|e| e.to_string())
 }
 
+/// Debug builds only: holds `daemon_client`'s guard across a controllable
+/// server-side sleep. Written in the exact shape of the 74 sites todo 1006
+/// is measuring (lock, `as_ref()`, call, await, guard held throughout) so it
+/// stands in for them for a before/after lock-contention measurement. The
+/// daemon rejects `debug_sleep` in release builds, so this errors there too.
+#[tauri::command]
+pub async fn debug_daemon_sleep(
+    ms: u64,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let guard = state.daemon_client.lock().await;
+    let client = guard.as_ref().ok_or_else(|| "daemon client not connected".to_string())?;
+    client.debug_sleep(ms).await.map_err(|e| e.to_string())
+}
+
 /// Resolve model+effort for takeover from settings.extra:
 /// 1. projectLastChoice[cwd_path] -> {model, effort}
 /// 2. fall back to ("opus", "high")

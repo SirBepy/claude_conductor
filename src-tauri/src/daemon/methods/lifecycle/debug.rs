@@ -26,6 +26,13 @@ struct SimulateRateLimitParams {
     kind: Option<String>,
 }
 
+/// Debug-only: see the `debug_sleep` RPC.
+#[cfg(debug_assertions)]
+#[derive(Debug, Deserialize)]
+struct DebugSleepParams {
+    ms: u64,
+}
+
 #[cfg(debug_assertions)]
 pub fn register_debug(router: &mut Router, state: Arc<DaemonState>) {
     let map = state.sessions.clone();
@@ -56,4 +63,15 @@ pub fn register_debug(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // Debug builds only: sleeps for `ms` (clamped to 10s) and returns. Exists
+    // to measure client-side contention on `AppState.daemon_client`'s outer
+    // mutex (todo 1006) - a real daemon RPC never has a controllable, fixed
+    // wait long enough to see the stall reliably.
+    router.register("debug_sleep", move |params, _ctx| async move {
+        let p: DebugSleepParams = serde_json::from_value(params.unwrap_or(Value::Null))
+            .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+        let ms = p.ms.min(10_000);
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        Ok(json!({"slept_ms": ms}))
+    });
 }
