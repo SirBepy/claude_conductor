@@ -15,9 +15,11 @@ use tokio::net::UnixListener;
 /// instance_suffix()` so callers can probe a DIFFERENT identity than the one
 /// this process would otherwise use. The single place that builds the Unix
 /// socket path string - ai_todo 267.
+///
+/// Rooted at `daemon::app_data_dir()` so a `CC_DATA_DIR`-scoped daemon's
+/// socket lands in its own data dir; the client calls this same function.
 pub fn socket_path_for_suffix(suffix: &str) -> PathBuf {
-    let mut p = dirs::data_dir().unwrap_or_else(std::env::temp_dir);
-    p.push("claude-conductor");
+    let mut p = crate::daemon::app_data_dir();
     p.push(format!("cc-conductor-daemon{suffix}.sock"));
     p
 }

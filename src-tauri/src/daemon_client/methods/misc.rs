@@ -62,11 +62,10 @@ mod tests {
         // (ai_todo 267), rather than a hand-rolled copy of the string format.
         let pipe_name = crate::daemon::transport_windows::pipe_name_for_suffix(&format!("-{INSTANCE}"));
 
-        // Clear only THIS instance's stale lockfile.
-        if let Some(app_data) = dirs::data_dir() {
-            let lock = app_data.join("claude-conductor").join(format!("daemon-{INSTANCE}.lock"));
-            let _ = std::fs::remove_file(&lock);
-        }
+        // Clear only THIS instance's stale lockfile, resolved exactly as the
+        // daemon resolves it so a `CC_DATA_DIR` run still hits the right file.
+        let lock = crate::daemon::app_data_dir().join(format!("daemon-{INSTANCE}.lock"));
+        let _ = std::fs::remove_file(&lock);
 
         // Retry the build: a just-killed prior test daemon (or a concurrently
         // rebuilding `cargo tauri dev` watcher) can hold the old

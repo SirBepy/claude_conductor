@@ -84,7 +84,13 @@ fn resolve_app_data_dir(override_: Option<&str>) -> PathBuf {
 /// Roots the lockfile, push keys, iroh key and the remote-access device
 /// registry / token / pairing files, so an isolated `CC_DATA_DIR` daemon
 /// must never fall through to the real user's copies of those.
-fn app_data_dir() -> PathBuf {
+///
+/// `pub(crate)`: also the single source for the Unix socket path
+/// (`transport_unix.rs`) and a client-side test lockfile path
+/// (`daemon_client/methods/misc.rs`) that must resolve identically to this,
+/// or a `CC_DATA_DIR`-scoped daemon binds a path its own client can't attach
+/// to.
+pub(crate) fn app_data_dir() -> PathBuf {
     resolve_app_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref())
 }
 
