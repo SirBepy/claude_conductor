@@ -353,6 +353,20 @@ pub(crate) fn daemon_hook_port() -> u16 {
 /// until it receives the first user message, which would otherwise deadlock).
 ///
 /// `fork` is only meaningful with `resume_id`; it is ignored for a new session.
+/// Adds a per-chat paragraph (e.g. the project's ticket-link rule) to the
+/// `--append-system-prompt` value `base_claude_args` set, so only chats it
+/// applies to pay for it.
+pub(crate) fn append_system_prompt(args: &mut [String], extra: &str) {
+    if let Some(i) = args.iter().position(|a| a == "--append-system-prompt") {
+        if let Some(p) = args.get_mut(i + 1) {
+            p.push_str("
+
+");
+            p.push_str(extra);
+        }
+    }
+}
+
 pub(crate) fn base_claude_args(resume_id: Option<&str>, session_id: &str, model: &str, effort: &str, fork: bool) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),

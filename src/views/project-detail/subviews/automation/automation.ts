@@ -8,6 +8,9 @@ import type { Avatar } from "../../subview-header";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import { accountIconBadgeHtml } from "../../../../shared/account-chip";
+import { invoke } from "../../../../shared/ipc";
+import { forgetTicketTracker } from "../../../../shared/chat/ticket-refs";
+import type { TicketTracker, TrackerInfo } from "../../../../types/ipc.generated";
 import "../../../../shared/account-chip.css";
 import "./automation.css";
 
@@ -24,6 +27,7 @@ interface ProjectCfg {
   automation?: Automation | null;
   preferred_account_id?: string | null;
   claude_ai_connectors?: boolean;
+  tracker?: TicketTracker | null;
 }
 
 /** Which account new chats in this project spawn under (multi-account
@@ -129,6 +133,57 @@ async function renderConnectorsRow(): Promise<void> {
   };
 }
 
+const TRACKER_LABEL: Record<string, string> = { shortcut: "Shortcut", linear: "Linear" };
+
+/** Where this project's tickets live, so chat mentions link to them. Unset
+ *  means "infer from the git remote", shown as that inferred answer. */
+async function renderTrackerRow(): Promise<void> {
+  const cwd = getProjectDetailState().cwd;
+  const control = document.getElementById("trackerControl");
+  if (!cwd || !control) return;
+  const projects = (await api.listProjects()) as unknown as ProjectCfg[];
+  const proj = projects.find((p) => p.path === cwd);
+  const own = proj?.tracker ?? null;
+  let inferred: TrackerInfo | null = null;
+  if (!own) inferred = await invoke<TrackerInfo | null>("get_ticket_tracker", { cwd }).catch(() => null);
+  const autoLabel = inferred ? `Auto (${TRACKER_LABEL[inferred.kind]}, ${inferred.workspace})` : "Auto (none found)";
+  const kind = own?.kind ?? "";
+  const workspace = own?.workspace ?? inferred?.workspace ?? "";
+  const opt = (v: string, label: string) => `<option value="${v}"${v === kind ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  control.innerHTML = `
+    <select id="trackerKind" class="inline-select">
+      ${opt("", autoLabel)}${opt("shortcut", "Shortcut")}${opt("linear", "Linear")}${opt("off", "None")}
+    </select>
+    <input id="trackerWorkspace" class="inline-input" type="text" placeholder="workspace" value="${escapeHtml(workspace)}"${kind === "shortcut" || kind === "linear" ? "" : " hidden"}>
+  `;
+  const select = document.getElementById("trackerKind") as HTMLSelectElement | null;
+  const input = document.getElementById("trackerWorkspace") as HTMLInputElement | null;
+  if (!select || !input) return;
+  const save = async () => {
+    const k = select.value;
+    if ((k === "shortcut" || k === "linear") && !input.value.trim()) {
+      input.hidden = false;
+      input.focus();
+      return;
+    }
+    select.disabled = true;
+    try {
+      const id = proj?.id ?? (await api.ensureProject(cwd)).id;
+      const tracker = k ? { kind: k, workspace: k === "off" ? "" : input.value.trim() } : null;
+      await api.updateProject(id, { tracker });
+      forgetTicketTracker(cwd);
+      showToast("Ticket links updated for new messages and turns.");
+    } catch (e) {
+      console.error("[automation] update tracker failed", e);
+      showToast(`Could not update ticket tracker: ${e}`);
+    } finally {
+      await renderTrackerRow();
+    }
+  };
+  select.onchange = () => void save();
+  input.onchange = () => void save();
+}
+
 async function renderAutomationForm(): Promise<void> {
   const cwd = getProjectDetailState().cwd;
   if (!cwd) return;
@@ -225,6 +280,7 @@ export async function renderAutomationView(
   await renderAutomationForm();
   await renderAccountRow();
   await renderConnectorsRow();
+  await renderTrackerRow();
 
   return () => { /* no teardown */ };
 }
@@ -252,6 +308,15 @@ function template(avatar: Avatar, title: string, projectPath?: string) {
               <div class="option-label">Use your claude.ai connectors (Google Drive etc.) in this project's chats</div>
             </span>
             <label class="switch"><input type="checkbox" id="connectorsEnabled"><span class="slider"></span></label>
+          </div>
+        </section>
+        <section class="automation-section" id="trackerSection" style="margin-top:16px">
+          <div class="section-title">Tickets</div>
+          <div class="option">
+            <span class="oi">
+              <div class="option-label">Where this project's tickets live, so ticket ids in chat link to them</div>
+            </span>
+            <span class="acc-row-control" id="trackerControl"></span>
           </div>
         </section>
         <section class="automation-section" id="automationSection" style="margin-top:16px">

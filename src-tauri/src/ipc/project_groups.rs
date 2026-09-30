@@ -393,6 +393,7 @@ mod build_groups_tests {
             last_worktree_path: None,
             last_start_folder_rel: None,
             claude_ai_connectors: false,
+            tracker: None,
         }];
         let groups = build_groups(&projects, &history, &[], 0);
         assert_eq!(groups.len(), 1);

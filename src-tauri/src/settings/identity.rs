@@ -142,6 +142,15 @@ pub fn resolve_claude_ai_connectors(
     resolve_project_setting(projects, path, |p| p.claude_ai_connectors.then_some(())).is_some()
 }
 
+/// The ticket tracker set on the project owning `path` (or its parent repo).
+/// `None` means unset, not "off" - the caller falls back to the git remote.
+pub fn resolve_project_tracker(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> Option<crate::tickets::TicketTracker> {
+    resolve_project_setting(projects, path, |p| p.tracker.clone())
+}
+
 fn resolve_project_setting<T>(
     projects: &[crate::types::ProjectConfig],
     path: &std::path::Path,
@@ -272,6 +281,7 @@ mod tests {
             last_worktree_path: None,
             last_start_folder_rel: None,
             claude_ai_connectors: false,
+            tracker: None,
         }
     }
 

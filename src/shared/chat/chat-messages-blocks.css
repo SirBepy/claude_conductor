@@ -138,6 +138,57 @@
   outline-offset: 2px;
 }
 
+/* Hover card for a ticket link (ticket-refs.ts). Body-appended, so not
+   scoped under .msg; same surface as .info-tooltip. */
+.ticket-card {
+  position: fixed;
+  z-index: 1000;
+  width: 280px;
+  padding: 8px 10px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  pointer-events: none;
+}
+.ticket-card-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--color-text-muted);
+}
+.ticket-card-title {
+  margin: 2px 0 6px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.ticket-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ticket-card-chip {
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+/* Shortcut's story_type arrives lowercase ("bug"); a state name is already cased. */
+.ticket-card-type {
+  text-transform: capitalize;
+}
+.ticket-card-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-text-muted);
+}
+.ticket-card-loading,
+.ticket-card-error {
+  color: var(--color-text-muted);
+}
+
 .copy-btn {
   position: absolute;
   top: 6px;

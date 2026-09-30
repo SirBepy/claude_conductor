@@ -147,6 +147,8 @@ export class HttpTransport implements Transport {
           to: args.to,
           path: args.path,
         });
+      case "get_ticket_tracker":
+        return this.rpc<T>("get_ticket_tracker", { cwd: args.cwd });
       case "resolve_commit_refs":
         return this.rpc<T>("resolve_commit_refs", { cwd: args.cwd, candidates: args.candidates });
       // Session-statusbar git/servers chips + location-picker scan (mirrors

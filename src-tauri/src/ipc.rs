@@ -15,6 +15,7 @@ pub mod misc;
 pub mod git;
 pub mod git_diff;
 pub mod git_commit_refs;
+pub mod tickets;
 pub mod git_sync;
 pub mod ai_todos;
 pub mod models;

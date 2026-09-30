@@ -9,6 +9,7 @@ import { wrapBlockquotes, RenderedMessage, renderMessage } from "./chat-transfor
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { hydrateAttachments } from "./attachment-hydrator";
 import { resolveCommitRefs } from "./commit-refs";
+import { linkifyTickets } from "./ticket-refs";
 import { toolSummary } from "./tool-meta";
 import { groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
@@ -104,6 +105,7 @@ export function flushRender(r: ChatRenderer): void {
     wrapBlockquotes(el);
     highlightInlineCode(el);
     void resolveCommitRefs(el, r.paginator.cwdHint);
+    void linkifyTickets(el, r.paginator.cwdHint);
   }
   if (appendedAny) clampUserMessages(r.messages, r.messageEls);
 }

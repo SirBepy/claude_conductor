@@ -19,6 +19,7 @@ use claude_conductor_lib::ipc::worktrees::WorktreeDetail;
 use claude_conductor_lib::ipc::claude_scopes::ClaudeMdScope;
 use claude_conductor_lib::ipc::git_diff::PrFileChange;
 use claude_conductor_lib::ipc::git_commit_refs::CommitRef;
+use claude_conductor_lib::tickets::{TicketSummary, TicketTracker, TrackerInfo, TrackerKind};
 use claude_conductor_lib::ipc::git_sync::{CommitEntry, CommitHistory, CommitHistoryEntry, CommitSync};
 use claude_conductor_lib::ipc::files::TextFileData;
 use claude_conductor_lib::ipc::schedule::ExternalScheduledJob;
@@ -115,6 +116,10 @@ fn emit_ipc_types() {
     out.push_str(&decl::<CommitHistory>());
     out.push_str(&decl::<PrFileChange>());
     out.push_str(&decl::<CommitRef>());
+    out.push_str(&decl::<TrackerKind>());
+    out.push_str(&decl::<TicketTracker>());
+    out.push_str(&decl::<TrackerInfo>());
+    out.push_str(&decl::<TicketSummary>());
     out.push_str(&decl::<TextFileData>());
     out.push_str(&decl::<AiTodoEntry>());
     out.push_str(&decl::<ServerInfo>());

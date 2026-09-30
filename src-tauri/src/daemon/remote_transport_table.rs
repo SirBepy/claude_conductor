@@ -118,6 +118,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only account-pin resolution, gated by reject_unknown(cwd) in the
     // handler (registry.rs) since cwd is client-supplied.
     ("resolve_project_account", P),
+    // Read-only tracker lookup for linking ticket ids in a phone-rendered chat,
+    // reject_unknown(cwd)-gated in project_meta.rs. Never returns a token.
+    ("get_ticket_tracker", P),
     // Read-only, gated by reject_unknown(root) in registry.rs (todo 656).
     ("get_project_tech", P),
     // Read-only fs read + base64 return; gated by reject_unknown(root) in
@@ -346,7 +349,7 @@ mod tests {
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview",
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
-            "get_range_files", "get_file_diff", "resolve_commit_refs",
+            "get_range_files", "get_file_diff", "resolve_commit_refs", "get_ticket_tracker",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "push_commits", "list_project_files", "chat_drains", "list_project_servers",
             "list_claude_md_scopes",

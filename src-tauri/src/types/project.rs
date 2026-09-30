@@ -81,6 +81,10 @@ pub struct ProjectConfig {
     /// user-scope servers whose failed auth broke MCP init (todo 867).
     #[serde(default)]
     pub claude_ai_connectors: bool,
+    /// Where this project's tickets live, so chat mentions link to them.
+    /// `None` infers from the git remote (`tickets::infer_from_remote`).
+    #[serde(default)]
+    pub tracker: Option<crate::tickets::TicketTracker>,
 }
 
 /// Which paired peer machine an `Instance` row is mirrored from, and
@@ -307,6 +311,7 @@ mod tests {
             last_worktree_path: None,
             last_start_folder_rel: None,
             claude_ai_connectors: false,
+            tracker: None,
         };
         let raw = serde_json::to_string(&p).unwrap();
         let back: ProjectConfig = serde_json::from_str(&raw).unwrap();

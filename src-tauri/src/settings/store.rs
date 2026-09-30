@@ -186,6 +186,7 @@ pub fn upsert_project_for_cwd(
         last_worktree_path: None,
         last_start_folder_rel: None,
         claude_ai_connectors: false,
+        tracker: None,
     });
     settings.bump_generation();
     (id, true)
@@ -231,6 +232,7 @@ pub fn upsert_project_with_id_for_cwd(
         last_worktree_path: None,
         last_start_folder_rel: None,
         claude_ai_connectors: false,
+        tracker: None,
     });
     settings.bump_generation();
 }

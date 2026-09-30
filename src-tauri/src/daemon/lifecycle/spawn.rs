@@ -1,5 +1,5 @@
 use crate::chat::billing::check_metered_billing;
-use crate::daemon::claude_config::{base_claude_args, write_hook_settings, write_mcp_config};
+use crate::daemon::claude_config::{append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config};
 use crate::daemon::pump::run_stdout_pump;
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
@@ -117,13 +117,23 @@ pub async fn spawn_session(
     let claude = crate::util::claude_bin::resolve()
         .map_err(|e| LifecycleError::ClaudeNotFound(e.to_string()))?;
     let mut cmd = Command::new(&claude);
-    cmd.args(base_claude_args(
+    let mut args = base_claude_args(
         params.resume_id.as_deref(),
         &session_id,
         &params.model,
         &params.effort,
         params.fork,
-    ));
+    );
+    let projects = state.settings.snapshot().projects;
+    let cwd = params.cwd.clone();
+    let tracker = tokio::task::spawn_blocking(move || crate::tickets::effective_tracker(&projects, &cwd))
+        .await
+        .ok()
+        .flatten();
+    if let Some(line) = tracker.and_then(|(t, _)| crate::tickets::prompt_line(&t)) {
+        append_system_prompt(&mut args, &line);
+    }
+    cmd.args(args);
     if let Some(ref mcp_path) = mcp_config_path {
         cmd.arg("--permission-prompt-tool")
            .arg("mcp__cc_conductor__approval_prompt")

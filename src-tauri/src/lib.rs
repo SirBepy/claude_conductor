@@ -33,6 +33,7 @@ pub mod tray;
 pub mod types;
 pub mod util;
 pub mod when_done;
+pub mod tickets;
 
 use crate::settings::paths;
 use crate::state::AppState;
@@ -310,6 +311,8 @@ pub fn run() {
             ipc::get_range_files,
             ipc::get_file_diff,
             ipc::git_commit_refs::resolve_commit_refs,
+            ipc::tickets::get_ticket_tracker,
+            ipc::tickets::get_ticket_summary,
             context_status::commands::session_live_cwd,
             context_status::commands::context_status,
             ipc::count_ai_todos,

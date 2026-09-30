@@ -62,6 +62,23 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    {
+        let state = state.clone();
+        // Mirrors `get_ticket_tracker` (params: cwd) -> Option<TrackerInfo>, so a
+        // phone-rendered chat links ticket ids too. `cwd` is client-supplied.
+        router.register("get_ticket_tracker", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                let projects = state.settings.snapshot().projects;
+                Ok(json!(crate::tickets::tracker_info(projects, p.cwd).await))
+            }
+        });
+    }
     // Mirrors `get_project_tech` (params: root) -> Option<String>. `root` is
     // client-supplied, so reject_unknown must run before any fs access.
     {

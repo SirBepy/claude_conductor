@@ -21,6 +21,7 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         last_worktree_path: None,
         last_start_folder_rel: None,
         claude_ai_connectors: false,
+        tracker: None,
     }
 }
 
