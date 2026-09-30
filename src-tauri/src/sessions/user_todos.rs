@@ -63,7 +63,7 @@ fn store_dir() -> Option<PathBuf> {
 }
 
 fn store_path_for(project_id: &str) -> Option<PathBuf> {
-    Some(store_dir()?.join(format!("{project_id}.json")))
+    Some(store_dir()?.join(crate::util::project_store_file_name(project_id)))
 }
 
 fn load(path: &Path) -> Vec<UserTodo> {
@@ -434,6 +434,21 @@ mod tests {
         let ids: Vec<String> = list_at(&path).into_iter().map(|t| t.id).collect();
         assert_eq!(ids, vec![a.id, b.id]);
         assert_eq!(clear_archived_at(&path), 0, "second call is a no-op");
+    }
+
+    /// The store's own write/read cycle for an `ephemeral:<key>` project id
+    /// (an ephemeral-root cwd, e.g. under `%TEMP%`) - the id `store_path_for`
+    /// used to interpolate straight into a file name, producing an illegal
+    /// `:` on Windows and a silently dropped write.
+    #[test]
+    fn ephemeral_project_id_round_trips_through_the_sanitized_file_name() {
+        let dir = tempdir().unwrap();
+        let name = crate::util::project_store_file_name("ephemeral:c:\\tmp\\probe");
+        let path = dir.path().join(name);
+        let todo = add_at(Some(&path), "s1", "chat A", "grab a token");
+        let loaded = list_at(&path);
+        assert_eq!(loaded.len(), 1, "write must have actually landed on disk");
+        assert_eq!(loaded[0].id, todo.id);
     }
 
     #[test]

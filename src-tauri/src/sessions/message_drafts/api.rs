@@ -312,6 +312,21 @@ mod tests {
         assert_eq!(list("nonexistent-project-id-xyz"), Vec::new());
     }
 
+    /// The store's own write/read cycle for an `ephemeral:<key>` project id
+    /// (an ephemeral-root cwd, e.g. under `%TEMP%`) - the id `store_path_for`
+    /// used to interpolate straight into a file name, producing an illegal
+    /// `:` on Windows and a silently dropped write.
+    #[test]
+    fn ephemeral_project_id_round_trips_through_the_sanitized_file_name() {
+        let dir = tempdir().unwrap();
+        let name = crate::util::project_store_file_name("ephemeral:c:\\tmp\\probe");
+        let path = dir.path().join(name);
+        let d = add_at(&path, new_draft("Sprint slip", "Bruno", "hey bruno")).unwrap();
+        let loaded = store_at(&path);
+        assert_eq!(loaded.drafts.len(), 1, "write must have actually landed on disk");
+        assert_eq!(loaded.drafts[0].id, d.id);
+    }
+
     #[test]
     fn add_creates_one_variant_at_v1() {
         let dir = tempdir().unwrap();

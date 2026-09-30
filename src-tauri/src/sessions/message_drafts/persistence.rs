@@ -15,7 +15,7 @@ pub(super) static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 pub(super) fn store_path_for(project_id: &str) -> Option<PathBuf> {
     let dir = crate::settings::paths::data_dir().ok()?.join("message-drafts");
-    Some(dir.join(format!("{project_id}.json")))
+    Some(dir.join(crate::util::project_store_file_name(project_id)))
 }
 
 pub(super) fn load(path: &Path) -> Store {

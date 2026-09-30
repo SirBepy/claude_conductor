@@ -37,6 +37,24 @@ pub(crate) fn sha256_hex(s: &str) -> String {
     to_hex(&h.finalize())
 }
 
+/// File name for a per-project store (`user_todos`, `message_drafts`,
+/// `repo_channel`). A real project id (uuid) maps unchanged to `"{id}.json"`,
+/// so existing store files keep their names. An `ephemeral:<cwd>` id can
+/// carry `:`, `\` or `/`, which NTFS rejects (os error 123, and the stores
+/// only log write failures), so it hashes to a safe name instead.
+pub(crate) fn project_store_file_name(project_id: &str) -> String {
+    let is_plain_id = !project_id.is_empty()
+        && project_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if is_plain_id {
+        format!("{project_id}.json")
+    } else {
+        // Truncated hash, not the raw id: deterministic (same id, same file,
+        // so reads and writes agree) and collision-resistant across the
+        // small number of distinct ephemeral cwds a machine actually has.
+        format!("ephemeral-{}.json", &sha256_hex(project_id)[..16])
+    }
+}
+
 /// Write `json` to `path` atomically via a `.json.tmp` sibling and rename.
 /// Creates the parent directory if absent (non-fatal). Returns an error if
 /// the write or rename fails.
@@ -81,5 +99,37 @@ pub(crate) fn sweep_dir_older_than(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod project_store_file_name_tests {
+    use super::project_store_file_name;
+
+    #[test]
+    fn a_real_uuid_project_id_maps_to_the_unchanged_file_name() {
+        let id = "3fa5c9e0-1b2d-4a6e-9c3f-8e2d1a7b6c5d";
+        assert_eq!(project_store_file_name(id), format!("{id}.json"));
+    }
+
+    #[test]
+    fn an_ephemeral_id_produces_no_windows_illegal_characters() {
+        let name = project_store_file_name(r"ephemeral:c:\tmp\x");
+        assert!(!name.contains(':'), "got {name}");
+        assert!(!name.contains('\\'), "got {name}");
+        assert!(!name.contains('/'), "got {name}");
+    }
+
+    #[test]
+    fn the_same_ephemeral_id_always_maps_to_the_same_name() {
+        let id = r"ephemeral:c:\tmp\probe";
+        assert_eq!(project_store_file_name(id), project_store_file_name(id));
+    }
+
+    #[test]
+    fn two_different_ephemeral_ids_map_to_different_names() {
+        let a = project_store_file_name(r"ephemeral:c:\tmp\a");
+        let b = project_store_file_name(r"ephemeral:c:\tmp\b");
+        assert_ne!(a, b);
     }
 }

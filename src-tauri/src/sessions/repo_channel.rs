@@ -63,7 +63,7 @@ fn store_dir() -> Option<PathBuf> {
 }
 
 fn store_path_for(project_id: &str) -> Option<PathBuf> {
-    Some(store_dir()?.join(format!("{project_id}.json")))
+    Some(store_dir()?.join(crate::util::project_store_file_name(project_id)))
 }
 
 fn load(path: &Path) -> Vec<ChannelMessage> {
@@ -414,6 +414,20 @@ mod tests {
             "the DM's own sender must never read it back"
         );
         assert_eq!(list_unread_at(&path, "bob").len(), 1, "the addressee still sees it");
+    }
+
+    /// Same rationale as `user_todos`'s equivalent test: an ephemeral-root
+    /// cwd's `ephemeral:<key>` project id must still land a real file on
+    /// disk, not silently fail on an illegal `:` in the file name.
+    #[test]
+    fn ephemeral_project_id_round_trips_through_the_sanitized_file_name() {
+        let dir = tempdir().unwrap();
+        let name = crate::util::project_store_file_name("ephemeral:c:\\tmp\\probe");
+        let path = dir.path().join(name);
+        let msg = post_at(Some(&path), "s1", "Alice", "hello", None);
+        let loaded = list_at(&path);
+        assert_eq!(loaded.len(), 1, "write must have actually landed on disk");
+        assert_eq!(loaded[0].id, msg.id);
     }
 
     #[test]
