@@ -182,6 +182,76 @@ export class HttpTransport implements Transport {
           path: args.path,
           offset: args.offset ?? null,
         });
+      // Todos panel (todo 1007): the phone's FAB dial mounts it unconditionally
+      // (fab-dial.ts has no isRemote() guard); it reads and edits the same
+      // user-todo board as desktop. Daemon already allowlists these as P
+      // (remote_transport_table.rs) - only these frontend cases were missing.
+      case "list_user_todos":
+        return this.rpc<T>("list_user_todos", { session_id: args.sessionId ?? args.session_id });
+      case "set_user_todo_state":
+        return this.rpc<T>("set_user_todo_state", {
+          session_id: args.sessionId ?? args.session_id,
+          id: args.id,
+          next: args.next,
+        });
+      case "mark_todos_seen":
+        return this.rpc<T>("mark_todos_seen", {
+          session_id: args.sessionId ?? args.session_id,
+          origin_session_id: args.originSessionId ?? args.origin_session_id,
+        });
+      case "set_todo_columns":
+        return this.rpc<T>("set_todo_columns", {
+          session_id: args.sessionId ?? args.session_id,
+          columns: args.columns,
+        });
+      case "clear_archived_todos":
+        return this.rpc<T>("clear_archived_todos", { session_id: args.sessionId ?? args.session_id });
+      // Ask panel (todo 1007): same fab-dial reachability as Todos above.
+      case "ask_list_threads":
+        return this.rpc<T>("ask_list_threads", { session_id: args.sessionId ?? args.session_id });
+      case "ask_send":
+        return this.rpc<T>("ask_send", {
+          session_id: args.sessionId ?? args.session_id,
+          thread_id: args.threadId ?? args.thread_id ?? null,
+          question: args.question,
+          cwd: args.cwd ?? null,
+        });
+      case "ask_delete_thread":
+        return this.rpc<T>("ask_delete_thread", {
+          session_id: args.sessionId ?? args.session_id,
+          thread_id: args.threadId ?? args.thread_id,
+        });
+      // Drafts panel (todo 1007): same fab-dial reachability as Todos above.
+      // A DIFFERENT command namespace than the already-working
+      // get_session_drafts/set_composer_draft (composer/AUQ draft sync, PM
+      // below) - this is the Drafts panel's own store.
+      case "list_message_drafts":
+        return this.rpc<T>("list_message_drafts", { session_id: args.sessionId ?? args.session_id });
+      case "set_draft_body":
+        return this.rpc<T>("set_draft_body", {
+          session_id: args.sessionId ?? args.session_id,
+          id: args.id,
+          recipient: args.recipient ?? "",
+          body: args.body,
+        });
+      case "set_draft_version":
+        return this.rpc<T>("set_draft_version", {
+          session_id: args.sessionId ?? args.session_id,
+          id: args.id,
+          recipient: args.recipient ?? "",
+          n: args.n,
+        });
+      case "set_draft_state":
+        return this.rpc<T>("set_draft_state", {
+          session_id: args.sessionId ?? args.session_id,
+          id: args.id,
+          next: args.next,
+        });
+      case "delete_draft":
+        return this.rpc<T>("delete_draft", {
+          session_id: args.sessionId ?? args.session_id,
+          id: args.id,
+        });
       case "start_session": {
         // Daemon expects snake_case; tolerate camelCase from callers (matches
         // the set_session_effort normalization pattern above). Params forwarded

@@ -236,6 +236,28 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // against the session's OWN registered cwd at the point the daemon
     // actually opens the file (methods/registry/waiting_tail.rs).
     ("tail_waiting_log", P),
+    // Todos panel: the phone's FAB dial mounts it unconditionally (no
+    // isRemote() guard in fab-dial.ts); read and edit the same user-todo
+    // board as desktop (todo 1007). Backend handlers already existed
+    // (methods/user_todos.rs) - only the allowlist entry was missing.
+    ("list_user_todos", P),
+    ("set_user_todo_state", P),
+    ("mark_todos_seen", P),
+    ("set_todo_columns", P),
+    ("clear_archived_todos", P),
+    // Ask panel: same fab-dial reachability as Todos above (todo 1007).
+    ("ask_list_threads", P),
+    ("ask_send", P),
+    ("ask_delete_thread", P),
+    // Drafts panel: same fab-dial reachability as Todos above (todo 1007).
+    // A DIFFERENT command namespace than get_session_drafts/set_composer_draft
+    // (composer/AUQ draft sync, PM above) - this is the Drafts panel's own
+    // list/edit/delete store (methods/drafts_store/routes.rs).
+    ("list_message_drafts", P),
+    ("set_draft_body", P),
+    ("set_draft_version", P),
+    ("set_draft_state", P),
+    ("delete_draft", P),
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),
@@ -320,6 +342,11 @@ mod tests {
             "set_auq_draft", "clear_auq_draft", "add_held_message",
             "update_held_message", "remove_held_message", "clear_held_messages",
             "tail_waiting_log",
+            "list_user_todos", "set_user_todo_state", "mark_todos_seen",
+            "set_todo_columns", "clear_archived_todos",
+            "ask_list_threads", "ask_send", "ask_delete_thread",
+            "list_message_drafts", "set_draft_body", "set_draft_version",
+            "set_draft_state", "delete_draft",
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }

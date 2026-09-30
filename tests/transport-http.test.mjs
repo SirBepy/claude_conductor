@@ -304,6 +304,92 @@ describe("HttpTransport.call mapping", () => {
     expect(body().params.offset).toBeNull();
   });
 
+  // Todos panel (todo 1007): the daemon already allowlists these as P
+  // (remote_transport_table.rs); these cases were the only missing piece.
+  it("forwards list_user_todos and set_user_todo_state to the rpc", async () => {
+    await new HttpTransport().call("list_user_todos", { sessionId: "s1" });
+    expect(body()).toEqual({ method: "list_user_todos", params: { session_id: "s1" } });
+    await new HttpTransport().call("set_user_todo_state", { sessionId: "s1", id: "t1", next: "done" });
+    expect(body(1)).toEqual({
+      method: "set_user_todo_state",
+      params: { session_id: "s1", id: "t1", next: "done" },
+    });
+  });
+
+  it("forwards mark_todos_seen, set_todo_columns and clear_archived_todos to the rpc", async () => {
+    await new HttpTransport().call("mark_todos_seen", { sessionId: "s1", originSessionId: "s2" });
+    expect(body()).toEqual({
+      method: "mark_todos_seen",
+      params: { session_id: "s1", origin_session_id: "s2" },
+    });
+    await new HttpTransport().call("set_todo_columns", { sessionId: "s1", columns: ["open", "done"] });
+    expect(body(1)).toEqual({
+      method: "set_todo_columns",
+      params: { session_id: "s1", columns: ["open", "done"] },
+    });
+    await new HttpTransport().call("clear_archived_todos", { sessionId: "s1" });
+    expect(body(2)).toEqual({ method: "clear_archived_todos", params: { session_id: "s1" } });
+  });
+
+  // Ask panel (todo 1007): same fab-dial reachability as Todos above.
+  it("forwards ask_list_threads, ask_send and ask_delete_thread to the rpc", async () => {
+    await new HttpTransport().call("ask_list_threads", { sessionId: "s1" });
+    expect(body()).toEqual({ method: "ask_list_threads", params: { session_id: "s1" } });
+    await new HttpTransport().call("ask_send", {
+      sessionId: "s1",
+      threadId: "th1",
+      question: "what now?",
+      cwd: "/repo",
+    });
+    expect(body(1)).toEqual({
+      method: "ask_send",
+      params: { session_id: "s1", thread_id: "th1", question: "what now?", cwd: "/repo" },
+    });
+    await new HttpTransport().call("ask_delete_thread", { sessionId: "s1", threadId: "th1" });
+    expect(body(2)).toEqual({
+      method: "ask_delete_thread",
+      params: { session_id: "s1", thread_id: "th1" },
+    });
+  });
+
+  it("defaults ask_send's threadId to null when starting a new thread", async () => {
+    await new HttpTransport().call("ask_send", { sessionId: "s1", question: "hi" });
+    expect(body().params.thread_id).toBeNull();
+  });
+
+  // Drafts panel (todo 1007): same fab-dial reachability as Todos above. A
+  // different command namespace than get_session_drafts/set_composer_draft
+  // (composer/AUQ draft sync, tested elsewhere in this file).
+  it("forwards list_message_drafts and set_draft_body to the rpc", async () => {
+    await new HttpTransport().call("list_message_drafts", { sessionId: "s1" });
+    expect(body()).toEqual({ method: "list_message_drafts", params: { session_id: "s1" } });
+    await new HttpTransport().call("set_draft_body", {
+      sessionId: "s1",
+      id: "d1",
+      recipient: "slack",
+      body: "hello",
+    });
+    expect(body(1)).toEqual({
+      method: "set_draft_body",
+      params: { session_id: "s1", id: "d1", recipient: "slack", body: "hello" },
+    });
+  });
+
+  it("forwards set_draft_version, set_draft_state and delete_draft to the rpc", async () => {
+    await new HttpTransport().call("set_draft_version", { sessionId: "s1", id: "d1", recipient: "slack", n: 2 });
+    expect(body()).toEqual({
+      method: "set_draft_version",
+      params: { session_id: "s1", id: "d1", recipient: "slack", n: 2 },
+    });
+    await new HttpTransport().call("set_draft_state", { sessionId: "s1", id: "d1", next: "ready" });
+    expect(body(1)).toEqual({
+      method: "set_draft_state",
+      params: { session_id: "s1", id: "d1", next: "ready" },
+    });
+    await new HttpTransport().call("delete_draft", { sessionId: "s1", id: "d1" });
+    expect(body(2)).toEqual({ method: "delete_draft", params: { session_id: "s1", id: "d1" } });
+  });
+
   // Multi-machine federation (H1): start_session forwards the picker's chosen
   // machineId (null = spawn on this/the daemon's own machine, same as omitting it).
   it("forwards start_session's machineId as machine_id, and a follow-up send_message for the prompt", async () => {
