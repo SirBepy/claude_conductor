@@ -8,6 +8,9 @@
 //!      each close turn to finish.
 //!   3. Counts down 30s, then fires the terminal action (sleep / shutdown).
 //!
+//! A nightly arm (`nightly.rs`, `ArmMode::Nightly`) skips the prompt
+//! auto-resolve and the `/close` step, and also waits for the user to be away.
+//!
 //! Cancellation, per-session timeouts, and a no-progress runaway guard keep the
 //! task from spinning forever. Every tick emits the current `ProtocolState` to
 //! all windows on the `when-done-state` event.
@@ -16,21 +19,29 @@ mod protocol;
 mod actions;
 mod engine;
 mod idle;
+mod nightly;
 
-pub use protocol::{TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner};
+pub use protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner};
+pub use nightly::spawn as spawn_nightly_scheduler;
 use engine::run_engine;
 
 use crate::state::AppState;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Arm the protocol: set the action, spawn the engine task (aborting any
 /// existing one first), and return the new state.
 #[tauri::command]
 pub async fn arm_when_done(
     action: TerminalAction,
-    state: tauri::State<'_, AppState>,
     app: AppHandle,
 ) -> Result<ProtocolState, String> {
+    Ok(arm(&app, action, ArmMode::Manual))
+}
+
+/// Shared by the manual command and the nightly scheduler: reset to a fresh
+/// Watching state, spawn the engine in `mode`, emit, and return the new state.
+pub(crate) fn arm(app: &AppHandle, action: TerminalAction, mode: ArmMode) -> ProtocolState {
+    let state = app.state::<AppState>();
     // Abort any existing engine task and reset to a fresh Watching state.
     let new_state = {
         let mut inner = state.when_done.lock().unwrap();
@@ -48,7 +59,7 @@ pub async fn arm_when_done(
 
     let app_for_task = app.clone();
     let handle = tauri::async_runtime::spawn(async move {
-        run_engine(app_for_task, action).await;
+        run_engine(app_for_task, action, mode).await;
     });
     {
         let mut inner = state.when_done.lock().unwrap();
@@ -56,7 +67,7 @@ pub async fn arm_when_done(
     }
 
     let _ = app.emit("when-done-state", new_state.clone());
-    Ok(new_state)
+    new_state
 }
 
 /// Cancel the protocol: abort the engine task, reset to Disarmed, emit, return.

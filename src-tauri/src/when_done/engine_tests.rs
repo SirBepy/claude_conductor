@@ -314,6 +314,13 @@ struct World {
     /// The engine's stored ProtocolState, mutated by mutate_and_emit exactly
     /// as the real AppState-held copy would be.
     state: ProtocolState,
+    /// What the user-idle seam reports (seconds since last input).
+    user_idle_secs: u64,
+    /// How many times the engine auto-resolved prompts.
+    resolved: usize,
+    /// When true, mutate_and_emit simulates the user touching the mouse once
+    /// the countdown has ticked (user_idle_secs drops to 0), then clears itself.
+    user_returns_on_countdown: bool,
 }
 
 impl Default for World {
@@ -326,6 +333,9 @@ impl Default for World {
             cancelled: false,
             cancel_on_countdown: false,
             state: ProtocolState::disarmed(),
+            user_idle_secs: 0,
+            resolved: 0,
+            user_returns_on_countdown: false,
         }
     }
 }
@@ -355,6 +365,7 @@ fn deps_for(
     let w_emit = world.clone();
     let w_cancel = world.clone();
     let w_term = world.clone();
+    let w_user = world.clone();
 
     EngineDeps {
         busy_map: Box::new(move || {
@@ -373,10 +384,9 @@ fn deps_for(
                 .collect()
         }),
         auto_resolve: Box::new(move || {
-            let _w = w_resolve.clone();
-            Box::pin(async move {
-                // No-op for the test; the real seam talks to the daemon.
-            })
+            // Records the call only; the real seam talks to the daemon.
+            w_resolve.lock().unwrap().resolved += 1;
+            Box::pin(async move {})
         }),
         inject_close: Box::new(move |session_id| {
             let w = w_close.clone();
@@ -403,6 +413,13 @@ fn deps_for(
             {
                 g.cancelled = true;
             }
+            if g.user_returns_on_countdown
+                && phase == ProtocolPhase::CountingDown
+                && g.state.countdown_remaining_secs.unwrap_or(COUNTDOWN_SECS) < COUNTDOWN_SECS
+            {
+                g.user_idle_secs = 0;
+                g.user_returns_on_countdown = false;
+            }
             g.state.clone()
         }),
         is_cancelled: Box::new(move || w_cancel.lock().unwrap().cancelled),
@@ -410,6 +427,7 @@ fn deps_for(
             w_term.lock().unwrap().terminal_calls.push(action);
             Ok(())
         }),
+        user_idle_secs: Box::new(move || w_user.lock().unwrap().user_idle_secs),
     }
 }
 
@@ -444,7 +462,7 @@ async fn full_run_progresses_through_phases_and_fires_terminal_once() {
         }));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Sleep).await;
+    run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Manual).await;
 
     let g = world.lock().unwrap();
     // Phase progression: Watching -> Closing -> CountingDown -> Firing.
@@ -487,7 +505,7 @@ async fn cancel_mid_countdown_short_circuits_and_terminal_never_fires() {
         Arc::new(Mutex::new(|_w: &mut World| {}));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Shutdown).await;
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual).await;
 
     let g = world.lock().unwrap();
     // The countdown was entered (proving this is a mid-countdown cancel, not
@@ -509,4 +527,73 @@ async fn cancel_mid_countdown_short_circuits_and_terminal_never_fires() {
         "Firing phase must not be reached after cancel, phases: {:?}",
         g.phases
     );
+}
+
+/// A nightly run leaves every chat as-is: no /close, no auto-answered prompts,
+/// and it holds in Watching while the user is still at the PC even though every
+/// chat is already idle.
+#[tokio::test(start_paused = true)]
+async fn nightly_run_skips_close_and_waits_for_the_user_to_be_away() {
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![("s1".to_string(), false)],
+        ..Default::default()
+    }));
+
+    let reads = Arc::new(Mutex::new(0u32));
+    let reads_for_tick = reads.clone();
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> =
+        Arc::new(Mutex::new(move |w: &mut World| {
+            let mut n = reads_for_tick.lock().unwrap();
+            *n += 1;
+            if *n == 3 {
+                w.user_idle_secs = NIGHTLY_AWAY_SECS;
+            }
+        }));
+
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Nightly).await;
+
+    let g = world.lock().unwrap();
+    assert_eq!(
+        g.phases,
+        vec![ProtocolPhase::Watching, ProtocolPhase::CountingDown, ProtocolPhase::Firing],
+        "no Closing phase on a nightly run"
+    );
+    assert!(g.closed.is_empty(), "nightly must not /close chats, got {:?}", g.closed);
+    assert_eq!(g.resolved, 0, "nightly must not auto-resolve prompts");
+    assert_eq!(*reads.lock().unwrap(), 3, "held in Watching until the user was away");
+    assert_eq!(g.terminal_calls, vec![TerminalAction::Shutdown]);
+}
+
+/// The user coming back mid-countdown drops a nightly run back to Watching
+/// instead of shutting the PC down under them; it fires once they leave again.
+#[tokio::test(start_paused = true)]
+async fn nightly_countdown_returns_to_watching_when_the_user_comes_back() {
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![],
+        user_idle_secs: NIGHTLY_AWAY_SECS,
+        user_returns_on_countdown: true,
+        ..Default::default()
+    }));
+
+    // Every Watching tick after the interruption sees the user away again.
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> =
+        Arc::new(Mutex::new(|w: &mut World| w.user_idle_secs = NIGHTLY_AWAY_SECS));
+
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Nightly).await;
+
+    let g = world.lock().unwrap();
+    assert_eq!(
+        g.phases,
+        vec![
+            ProtocolPhase::Watching,
+            ProtocolPhase::CountingDown,
+            ProtocolPhase::Watching,
+            ProtocolPhase::CountingDown,
+            ProtocolPhase::Firing,
+        ],
+        "interrupted countdown restarts from Watching"
+    );
+    assert_eq!(g.terminal_calls, vec![TerminalAction::Sleep], "fires exactly once");
 }

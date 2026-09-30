@@ -10,6 +10,16 @@ pub enum TerminalAction {
     Shutdown,
 }
 
+/// How the protocol was armed. `Nightly` is the unattended scheduled arm: it
+/// leaves every chat exactly as it is (no `/close`, no auto-answered prompts) so
+/// they are all still there after boot, never gives up on a long turn, and also
+/// waits for the user to have stepped away from the PC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArmMode {
+    Manual,
+    Nightly,
+}
+
 /// Where the protocol currently is in its lifecycle.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]

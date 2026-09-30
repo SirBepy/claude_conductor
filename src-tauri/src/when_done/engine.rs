@@ -1,4 +1,4 @@
-pub use super::protocol::{TerminalAction, ProtocolPhase, ProtocolState};
+pub use super::protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState};
 use super::actions::{auto_resolve_prompts, inject_close};
 use super::idle::{
     all_sessions_idle, close_turn_complete, live_busy_map, live_session_ids, log_comment,
@@ -19,6 +19,9 @@ const TICK_MS: u64 = 1000;
 pub(super) const COUNTDOWN_SECS: u32 = 30;
 const PER_SESSION_TIMEOUT: Duration = Duration::from_secs(180);
 const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(180);
+/// A nightly arm only fires once there has been no keyboard/mouse input for this
+/// long, so it never shuts the PC down under someone still using it.
+pub(super) const NIGHTLY_AWAY_SECS: u64 = 15 * 60;
 
 /// Read the current ProtocolState under the lock, mutate it via `f`, store it,
 /// and emit `when-done-state` with the new value. Returns the new state.
@@ -52,24 +55,26 @@ fn is_cancelled(app: &AppHandle) -> bool {
 struct EngineDeps {
     /// Snapshot of the live (not-ended) `(session_id, busy)` pairs. Mirrors
     /// `live_busy_map` in production; a test can mutate its source between ticks.
-    busy_map: Box<dyn Fn() -> Vec<(String, bool)> + Send>,
+    busy_map: Box<dyn Fn() -> Vec<(String, bool)> + Send + Sync>,
     /// Whether every live session is idle. Mirrors the inline
     /// `all_sessions_idle(&cached_instances)` check.
-    all_idle: Box<dyn Fn() -> bool + Send>,
+    all_idle: Box<dyn Fn() -> bool + Send + Sync>,
     /// Live (not-ended) session ids, in order. Mirrors `live_session_ids`.
-    live_ids: Box<dyn Fn() -> Vec<String> + Send>,
+    live_ids: Box<dyn Fn() -> Vec<String> + Send + Sync>,
     /// Auto-resolve every pending daemon prompt (permission/question). Async.
-    auto_resolve: Box<dyn Fn() -> BoxFut<'static, ()> + Send>,
+    auto_resolve: Box<dyn Fn() -> BoxFut<'static, ()> + Send + Sync>,
     /// Inject `/close` into one session; true on a successful send. Async.
-    inject_close: Box<dyn Fn(String) -> BoxFut<'static, bool> + Send>,
+    inject_close: Box<dyn Fn(String) -> BoxFut<'static, bool> + Send + Sync>,
     /// Mutate the stored ProtocolState and emit `when-done-state`. Mirrors
     /// `update_and_emit`; returns the new state.
-    mutate_and_emit: Box<dyn Fn(&mut dyn FnMut(&mut ProtocolState)) -> ProtocolState + Send>,
+    mutate_and_emit: Box<dyn Fn(&mut dyn FnMut(&mut ProtocolState)) -> ProtocolState + Send + Sync>,
     /// Whether cancel was requested (stored phase forced to Disarmed).
-    is_cancelled: Box<dyn Fn() -> bool + Send>,
+    is_cancelled: Box<dyn Fn() -> bool + Send + Sync>,
     /// Perform the terminal action (sleep/shutdown). Returns its Result so the
     /// caller logs a failure exactly as the production path does.
-    terminal: Box<dyn Fn(TerminalAction) -> Result<(), String> + Send>,
+    terminal: Box<dyn Fn(TerminalAction) -> Result<(), String> + Send + Sync>,
+    /// Seconds since the last keyboard/mouse input anywhere in the session.
+    user_idle_secs: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
 impl EngineDeps {
@@ -106,61 +111,49 @@ impl EngineDeps {
                 TerminalAction::Sleep => crate::system_control::sleep_pc(),
                 TerminalAction::Shutdown => crate::system_control::shutdown_pc(),
             }),
+            user_idle_secs: Box::new(crate::daemon::idle::idle_secs),
         }
     }
 }
 
 /// The engine task. Thin production wiring: build the real seams, then run the
 /// phase machine. All behavior lives in `run_engine_with_deps`.
-pub(super) async fn run_engine(app: AppHandle, action: TerminalAction) {
-    run_engine_with_deps(EngineDeps::production(app), action).await;
+pub(super) async fn run_engine(app: AppHandle, action: TerminalAction, mode: ArmMode) {
+    run_engine_with_deps(EngineDeps::production(app), action, mode).await;
+}
+
+/// Outcome of the CountingDown phase.
+enum Countdown {
+    Finished,
+    Cancelled,
+    /// Nightly only: the user came back or a chat went busy mid-countdown, so
+    /// the engine drops back to Watching instead of firing.
+    Interrupted,
+}
+
+/// Whether the engine may leave Watching (or keep counting down). A nightly arm
+/// additionally needs the user to have been away for `NIGHTLY_AWAY_SECS`.
+fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
+    (deps.all_idle)()
+        && (mode == ArmMode::Manual || (deps.user_idle_secs)() >= NIGHTLY_AWAY_SECS)
 }
 
 /// The phase machine: Watching -> Closing -> CountingDown -> Firing. Drives only
 /// through `deps`, so it is identical for production and tests. Runs until the
-/// action fires, the protocol is cancelled, or the runaway guard trips.
-async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
-    // --- Phase: Watching. Wait for all sessions idle, auto-resolving prompts. ---
-    let mut no_progress_since = Instant::now();
-    let mut last_idle_signature: Option<Vec<(String, bool)>> = None;
-
+/// action fires, the protocol is cancelled, or the runaway guard trips. A
+/// nightly run skips Closing and drops back to Watching if interrupted.
+async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction, mode: ArmMode) {
     loop {
-        if (deps.is_cancelled)() {
+        if !watch(&deps, mode).await {
             return;
         }
-        tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
-        if (deps.is_cancelled)() {
+        if mode == ArmMode::Manual && !close_all(&deps).await {
             return;
         }
-
-        (deps.auto_resolve)().await;
-
-        let busy_map = (deps.busy_map)();
-        let waiting: Vec<String> = waiting_on_ids(&busy_map);
-
-        (deps.mutate_and_emit)(&mut |s| {
-            s.phase = ProtocolPhase::Watching;
-            s.waiting_on = waiting.clone();
-        });
-
-        // Runaway guard: if the busy signature is unchanged for too long, bail.
-        let sig = Some(busy_map.clone());
-        if sig != last_idle_signature {
-            last_idle_signature = sig;
-            no_progress_since = Instant::now();
-        } else if no_progress_since.elapsed() > NO_PROGRESS_LIMIT {
-            log_comment(
-                "[when-done] aborted: no progress in Watching for 3 min (sessions never went idle); disarming",
-            );
-            (deps.mutate_and_emit)(&mut |s| {
-                *s = ProtocolState::disarmed();
-            });
-            return;
-        }
-
-        // All live sessions idle? (Empty list counts as idle: nothing to wait on.)
-        if (deps.all_idle)() {
-            break;
+        match countdown(&deps, mode).await {
+            Countdown::Finished => break,
+            Countdown::Cancelled => return,
+            Countdown::Interrupted => continue,
         }
     }
 
@@ -168,7 +161,78 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
         return;
     }
 
-    // --- Phase: Closing. Inject /close into each live session, wait for each. ---
+    // --- Phase: Firing. Emit, then perform the terminal action. ---
+    (deps.mutate_and_emit)(&mut |s| {
+        s.phase = ProtocolPhase::Firing;
+        s.countdown_remaining_secs = Some(0);
+    });
+
+    let result = (deps.terminal)(action);
+    if let Err(e) = result {
+        log_comment(&format!("[when-done] terminal action failed: {e}"));
+        log::error!("when_done: terminal action failed: {e}");
+    }
+}
+
+/// Phase: Watching. Wait until `ready_to_fire`, auto-resolving prompts on a
+/// manual arm. False when cancelled or the runaway guard disarmed the protocol.
+async fn watch(deps: &EngineDeps, mode: ArmMode) -> bool {
+    let mut no_progress_since = Instant::now();
+    let mut last_idle_signature: Option<Vec<(String, bool)>> = None;
+
+    loop {
+        if (deps.is_cancelled)() {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
+        if (deps.is_cancelled)() {
+            return false;
+        }
+
+        if mode == ArmMode::Manual {
+            (deps.auto_resolve)().await;
+        }
+
+        let busy_map = (deps.busy_map)();
+        let waiting: Vec<String> = waiting_on_ids(&busy_map);
+
+        (deps.mutate_and_emit)(&mut |s| {
+            s.phase = ProtocolPhase::Watching;
+            s.countdown_remaining_secs = None;
+            s.waiting_on = waiting.clone();
+        });
+
+        // Runaway guard: if the busy signature is unchanged for too long, bail.
+        // Not on a nightly arm: nobody is there to re-arm it, and staying armed
+        // only keeps the PC on, which is what would happen without it anyway.
+        let sig = Some(busy_map.clone());
+        if sig != last_idle_signature {
+            last_idle_signature = sig;
+            no_progress_since = Instant::now();
+        } else if mode == ArmMode::Manual && no_progress_since.elapsed() > NO_PROGRESS_LIMIT {
+            log_comment(
+                "[when-done] aborted: no progress in Watching for 3 min (sessions never went idle); disarming",
+            );
+            (deps.mutate_and_emit)(&mut |s| {
+                *s = ProtocolState::disarmed();
+            });
+            return false;
+        }
+
+        // All live sessions idle? (Empty list counts as idle: nothing to wait on.)
+        if ready_to_fire(deps, mode) {
+            return true;
+        }
+    }
+}
+
+/// Phase: Closing. Inject /close into each live session, wait for each. False
+/// when cancelled.
+async fn close_all(deps: &EngineDeps) -> bool {
+    if (deps.is_cancelled)() {
+        return false;
+    }
+
     let targets = (deps.live_ids)();
     (deps.mutate_and_emit)(&mut |s| {
         s.phase = ProtocolPhase::Closing;
@@ -177,7 +241,7 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
 
     for session_id in &targets {
         if (deps.is_cancelled)() {
-            return;
+            return false;
         }
         let sent = (deps.inject_close)(session_id.clone()).await;
         if !sent {
@@ -195,7 +259,7 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
         let mut saw_busy = false;
         loop {
             if (deps.is_cancelled)() {
-                return;
+                return false;
             }
             tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
             // Keep auto-resolving prompts during close turns (e.g. /close that
@@ -224,11 +288,15 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
         });
     }
 
+    true
+}
+
+/// Phase: CountingDown. 30s, decrement + emit each second.
+async fn countdown(deps: &EngineDeps, mode: ArmMode) -> Countdown {
     if (deps.is_cancelled)() {
-        return;
+        return Countdown::Cancelled;
     }
 
-    // --- Phase: CountingDown. 30s, decrement + emit each second. ---
     (deps.mutate_and_emit)(&mut |s| {
         s.phase = ProtocolPhase::CountingDown;
         s.countdown_remaining_secs = Some(COUNTDOWN_SECS);
@@ -238,11 +306,14 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
     let mut remaining = COUNTDOWN_SECS;
     while let Some(next) = next_countdown(remaining) {
         if (deps.is_cancelled)() {
-            return;
+            return Countdown::Cancelled;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
         if (deps.is_cancelled)() {
-            return;
+            return Countdown::Cancelled;
+        }
+        if mode == ArmMode::Nightly && !ready_to_fire(deps, mode) {
+            return Countdown::Interrupted;
         }
         remaining = next;
         (deps.mutate_and_emit)(&mut |s| {
@@ -251,20 +322,9 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction) {
     }
 
     if (deps.is_cancelled)() {
-        return;
+        return Countdown::Cancelled;
     }
-
-    // --- Phase: Firing. Emit, then perform the terminal action. ---
-    (deps.mutate_and_emit)(&mut |s| {
-        s.phase = ProtocolPhase::Firing;
-        s.countdown_remaining_secs = Some(0);
-    });
-
-    let result = (deps.terminal)(action);
-    if let Err(e) = result {
-        log_comment(&format!("[when-done] terminal action failed: {e}"));
-        log::error!("when_done: terminal action failed: {e}");
-    }
+    Countdown::Finished
 }
 
 #[cfg(test)]
