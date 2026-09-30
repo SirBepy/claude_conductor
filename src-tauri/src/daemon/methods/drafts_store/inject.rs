@@ -3,6 +3,7 @@
 
 use super::publish_changed;
 use crate::daemon::methods::channel::caller_project;
+use crate::daemon::methods::injection_util::{append_capped, short};
 use crate::daemon::state::DaemonState;
 use crate::sessions::message_drafts::{self as store, DraftState, MessageDraft};
 use std::sync::Arc;
@@ -13,11 +14,6 @@ const MAX_INJECTED: usize = 12;
 /// this the block names them and stops, rather than growing without bound.
 const MAX_DIFFED: usize = 2;
 const DIFF_EXCERPT: usize = 600;
-const SHORT_ID_LEN: usize = 8;
-
-fn short(id: &str) -> String {
-    id.chars().take(SHORT_ID_LEN).collect()
-}
 
 fn excerpt(body: &str) -> String {
     let cut: String = body.chars().take(DIFF_EXCERPT).collect();
@@ -68,13 +64,7 @@ pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -
     );
     if !open.is_empty() {
         out.push_str(&format!("Open ({}):\n", open.len()));
-        for d in open.iter().take(MAX_INJECTED) {
-            out.push_str(&open_line(d));
-            out.push('\n');
-        }
-        if open.len() > MAX_INJECTED {
-            out.push_str(&format!("...and {} more.\n", open.len() - MAX_INJECTED));
-        }
+        append_capped(&mut out, &open, MAX_INJECTED, |d| open_line(d));
     }
     if !edited.is_empty() {
         out.push_str(

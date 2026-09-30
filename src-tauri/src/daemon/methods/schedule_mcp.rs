@@ -15,6 +15,7 @@
 //! costs nothing when the list is empty and hands the model real ids without
 //! a round trip.
 
+use super::injection_util::{append_capped, short};
 use super::spawn_chat;
 use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{
@@ -26,9 +27,6 @@ use std::sync::Arc;
 
 /// Cap on injected rows, mirroring `user_todos::MAX_INJECTED`.
 const MAX_INJECTED: usize = 10;
-/// Matches `user_todos`'s short-id convention so both injected lists read the
-/// same way and `resolve_id` can accept either form.
-const SHORT_ID_LEN: usize = 8;
 
 /// One `add`/`cancel` call. Every field is optional at this boundary because
 /// the MCP relay omits absent keys rather than sending nulls; the per-action
@@ -180,7 +178,7 @@ fn cancel(state: &Arc<DaemonState>, args: &ScheduleArgs) -> Result<Value, String
         .map(str::trim)
         .filter(|i| !i.is_empty())
         .ok_or("cancel needs an id")?;
-    let full = resolve_id(wanted).ok_or_else(|| format!("no scheduled item matching {wanted:?}"))?;
+    let full = resolve_id(wanted)?;
     let existed = scheduled_items::delete(&full);
     if existed {
         super::schedule::publish_changed(state);
@@ -274,16 +272,38 @@ fn resolve_recurrence(
     Ok(Some(Recurrence { time, rule }))
 }
 
-fn short(id: &str) -> String {
-    id.chars().take(SHORT_ID_LEN).collect()
+/// Accepts the short id the injected list prints, or a full uuid. Restricted
+/// to `Pending` items because that's the only status `render_for_injection`
+/// ever hands the model an id for; a `cancel` against a `Sent`/`Missed` item's
+/// id (or its prefix) should read as "not found", not resurrect it.
+fn resolve_id(wanted: &str) -> Result<String, String> {
+    let pending = scheduled_items::list()
+        .into_iter()
+        .filter(|it| matches!(it.status, ScheduledStatus::Pending))
+        .map(|it| it.id);
+    resolve_unique_prefix(pending, wanted)
 }
 
-/// Accepts the short id the injected list prints, or a full uuid.
-fn resolve_id(wanted: &str) -> Option<String> {
-    scheduled_items::list()
-        .into_iter()
-        .map(|it| it.id)
-        .find(|id| id == wanted || id.starts_with(wanted))
+/// Pure over an id iterator so the ambiguity rule is unit-testable without
+/// touching the real `scheduled-items.json`. Exact match wins outright, even
+/// over a second item that merely starts with `wanted` - can't happen with
+/// uuids in practice, but keeps the rule simple to state. Otherwise requires
+/// EXACTLY ONE prefix hit: taking the first of several would let `cancel`
+/// silently delete a different item than the one the model meant.
+fn resolve_unique_prefix(ids: impl Iterator<Item = String>, wanted: &str) -> Result<String, String> {
+    let ids: Vec<String> = ids.collect();
+    if let Some(exact) = ids.iter().find(|id| id.as_str() == wanted) {
+        return Ok(exact.clone());
+    }
+    let hits: Vec<&String> = ids.iter().filter(|id| id.starts_with(wanted)).collect();
+    match hits.as_slice() {
+        [] => Err(format!("no scheduled item matching {wanted:?}")),
+        [one] => Ok((*one).clone()),
+        many => Err(format!(
+            "{} scheduled items match {wanted:?} - use more characters to narrow it down",
+            many.len()
+        )),
+    }
 }
 
 /// Pending items this session can act on: anything firing into this session,
@@ -313,13 +333,7 @@ pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -
          something one of these already covers. Cancel with the `schedule` tool's \
          `cancel` action and the id below.\n",
     );
-    for it in mine.iter().take(MAX_INJECTED) {
-        out.push_str(&line_for(it));
-        out.push('\n');
-    }
-    if mine.len() > MAX_INJECTED {
-        out.push_str(&format!("...and {} more.\n", mine.len() - MAX_INJECTED));
-    }
+    append_capped(&mut out, &mine, MAX_INJECTED, |it| line_for(it));
     Some(out)
 }
 
@@ -461,6 +475,45 @@ mod tests {
     #[test]
     fn short_id_is_the_injected_prefix() {
         assert_eq!(short("0123456789abcdef"), "01234567");
+    }
+
+    // --- resolve_unique_prefix: the ambiguity rule, pure over an id
+    // list so none of these touch the real scheduled-items.json ---
+
+    fn ids(raw: &[&str]) -> impl Iterator<Item = String> {
+        raw.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter()
+    }
+
+    #[test]
+    fn two_items_sharing_a_prefix_is_refused_not_the_first_one() {
+        let err = resolve_unique_prefix(ids(&["abcd1111", "abcd2222"]), "abcd").unwrap_err();
+        assert!(err.contains('2'), "got {err}");
+        assert!(err.contains("more characters"), "got {err}");
+    }
+
+    #[test]
+    fn a_one_character_id_matching_several_is_refused() {
+        let err = resolve_unique_prefix(ids(&["a111", "a222", "a333"]), "a").unwrap_err();
+        assert!(err.contains('3'), "got {err}");
+    }
+
+    #[test]
+    fn an_exact_full_uuid_resolves_even_if_it_also_prefixes_another_id() {
+        assert_eq!(
+            resolve_unique_prefix(ids(&["abcd1111", "abcd2222"]), "abcd1111").unwrap(),
+            "abcd1111"
+        );
+    }
+
+    #[test]
+    fn a_unique_prefix_still_resolves() {
+        assert_eq!(resolve_unique_prefix(ids(&["abcd1111", "zzzz9999"]), "abcd").unwrap(), "abcd1111");
+    }
+
+    #[test]
+    fn no_match_keeps_the_original_error_wording() {
+        let err = resolve_unique_prefix(ids(&["abcd1111"]), "zzzz").unwrap_err();
+        assert_eq!(err, "no scheduled item matching \"zzzz\"");
     }
 
     // --- build_item: the whole decision surface, pure (no store I/O), so

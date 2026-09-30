@@ -4,6 +4,7 @@
 //! calls these directly, with no Router in scope.
 
 use super::channel::{caller_project, display_name};
+use super::injection_util::{append_capped, short};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use crate::sessions::user_todos::{TodoState, UserTodo};
@@ -13,8 +14,6 @@ use std::sync::Arc;
 
 /// Hard ceiling: this text is rebuilt into EVERY turn of every session here.
 const MAX_INJECTED: usize = 20;
-/// Full uuids would cost ~36 chars per card; `resolve_id` accepts either form.
-const SHORT_ID_LEN: usize = 8;
 
 /// Tells every window this project's cards moved. The panel also refetches on
 /// open and on window focus, per `project_daemon_notifier_broadcast_lossy` -
@@ -160,10 +159,6 @@ pub(crate) fn clear_archived_todos(state: &Arc<DaemonState>, session_id: &str) -
     Ok(json!({"ok": true, "removed": removed}))
 }
 
-fn short(id: &str) -> String {
-    id.chars().take(SHORT_ID_LEN).collect()
-}
-
 fn line_for(todo: &UserTodo, viewer_session_id: &str) -> String {
     let scope = if todo.origin_session_id == viewer_session_id {
         "this chat".to_string()
@@ -198,13 +193,7 @@ pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -
     );
     if !open.is_empty() {
         out.push_str(&format!("Open ({}):\n", open.len()));
-        for t in open.iter().take(MAX_INJECTED) {
-            out.push_str(&line_for(t, session_id));
-            out.push('\n');
-        }
-        if open.len() > MAX_INJECTED {
-            out.push_str(&format!("...and {} more.\n", open.len() - MAX_INJECTED));
-        }
+        append_capped(&mut out, &open, MAX_INJECTED, |t| line_for(t, session_id));
     }
     if !changed.is_empty() {
         out.push_str("Changed by him since your last turn:\n");
