@@ -178,17 +178,7 @@ export function openProjectPickerModal(
 
     // ── Favourite slots 1-9 (desktop only) ──────────────────────────────────
     let favorites: FavoriteSlots = readFavorites();
-    // What the pointer is currently carrying: a project path dragged off a
-    // list row, or a slot index dragged off the rail. Tracked here rather than
-    // read back from dataTransfer on dragover, because Chromium only exposes
-    // getData() on drop - a dragover handler can see the TYPE but not the
-    // value, which is not enough to paint the right hover state.
-    let dragging: { kind: "row"; path: string } | { kind: "slot"; index: number } | null = null;
     let dragOverSlot: number | null = null;
-    // Set by a slot's own drop handler so dragend can tell "landed on another
-    // slot" (a move/swap, already applied) from "released anywhere else",
-    // which is the remove gesture.
-    let slotDropHandled = false;
 
     // Stored root wins over the inference; see projects-root.ts. Read once per
     // open, refreshed when the user repoints it.
@@ -414,8 +404,84 @@ export function openProjectPickerModal(
     // ── The favourites rail (placement P4: inline in the footer) ───────────
     // Drop semantics live in project-favorites.ts; this only wires the
     // gestures to them. A tile released anywhere that is NOT another tile is
-    // the remove gesture, which is why dragend checks slotDropHandled rather
-    // than relying on a dropzone that covers "outside".
+    // the remove gesture.
+    //
+    // Pointer events, not HTML5 drag-and-drop: Tauri's native file-drop
+    // handler (on by default, and the path that drops files into the chat
+    // composer) owns the Windows webview's drop target, so an in-page drag
+    // never gets dragover/drop - the cursor just shows no-drop. Synthetic
+    // DragEvents in the view harness passed regardless, which is how two
+    // earlier fixes shipped without working.
+    const startFavoriteDrag = (
+      e: PointerEvent,
+      payload: { kind: "row"; path: string } | { kind: "slot"; index: number },
+    ): void => {
+      if (e.button !== 0 || isRemote() || machineField.machineId !== null) return;
+      // Stops text selection and focus theft (the search box keeps its caret);
+      // the click that follows a no-move press still fires.
+      e.preventDefault();
+      const { pointerId, clientX: startX, clientY: startY } = e;
+      let ghost: HTMLElement | null = null;
+
+      const slotAt = (x: number, y: number): number | null => {
+        const el = document.elementFromPoint(x, y)?.closest<HTMLElement>(".pp-fav-slot");
+        return el?.dataset.slot !== undefined ? Number(el.dataset.slot) : null;
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
+          const path = payload.kind === "row" ? payload.path : favorites[payload.index];
+          const p = path ? projectByPath(path) : undefined;
+          ghost = document.createElement("div");
+          ghost.className = "pp-drag-ghost";
+          ghost.innerHTML = p
+            ? `<span class="pp-fav-face">${renderAvatar(p.avatar, p.path)}</span>`
+            : "";
+          if (p) ghost.append(p.name);
+          document.body.append(ghost);
+          document.body.classList.add("pp-dragging");
+          void hydrateProjectTechIcons(ghost);
+          void hydrateCharacterAvatars(ghost);
+        }
+        ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 12}px)`;
+        const over = slotAt(ev.clientX, ev.clientY);
+        if (over !== dragOverSlot) { dragOverSlot = over; renderModal(); }
+      };
+
+      const end = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
+        if (!ghost) return;
+        ghost.remove();
+        document.body.classList.remove("pp-dragging");
+        dragOverSlot = null;
+        // A release over the row it started on would otherwise click it and
+        // open that project.
+        const swallow = (c: MouseEvent) => { c.stopPropagation(); c.preventDefault(); };
+        window.addEventListener("click", swallow, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+        if (resolved) return;
+        const target = ev.type === "pointerup" ? slotAt(ev.clientX, ev.clientY) : null;
+        if (target !== null) {
+          persistFavorites(payload.kind === "row"
+            ? assignSlot(favorites, target, payload.path)
+            : moveSlot(favorites, payload.index, target));
+        } else if (payload.kind === "slot" && ev.type === "pointerup") {
+          persistFavorites(clearSlot(favorites, payload.index));
+        } else {
+          renderModal();
+        }
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
+    };
+
     const renderFavoriteRail = () => {
       if (isRemote() || machineField.machineId !== null) return "";
       return html`
@@ -434,41 +500,9 @@ export function openProjectPickerModal(
                 data-slot=${i}
                 title=${p ? `${p.name} - press ctrl+${i + 1}` : (path ?? `Empty - drag a project here for ctrl+${i + 1}`)}
                 aria-label=${label}
-                draggable=${path !== null}
                 @click=${() => { if (path) openFavorite(path); }}
-                @dragstart=${(e: DragEvent) => {
-                  if (path === null) return;
-                  dragging = { kind: "slot", index: i };
-                  slotDropHandled = false;
-                  e.dataTransfer?.setData("text/plain", `slot:${i}`);
-                  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-                }}
-                @dragend=${() => {
-                  // Released off the rail: that is how a favourite is removed.
-                  if (dragging?.kind === "slot" && !slotDropHandled) {
-                    persistFavorites(clearSlot(favorites, dragging.index));
-                  }
-                  dragging = null;
-                  dragOverSlot = null;
-                  renderModal();
-                }}
-                @dragover=${(e: DragEvent) => {
-                  if (!dragging) return;
-                  e.preventDefault();
-                  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-                  if (dragOverSlot !== i) { dragOverSlot = i; renderModal(); }
-                }}
-                @dragleave=${() => { if (dragOverSlot === i) { dragOverSlot = null; renderModal(); } }}
-                @drop=${(e: DragEvent) => {
-                  e.preventDefault();
-                  slotDropHandled = true;
-                  dragOverSlot = null;
-                  if (!dragging) { renderModal(); return; }
-                  const next = dragging.kind === "row"
-                    ? assignSlot(favorites, i, dragging.path)
-                    : moveSlot(favorites, dragging.index, i);
-                  dragging = null;
-                  persistFavorites(next);
+                @pointerdown=${(e: PointerEvent) => {
+                  if (path !== null) startFavoriteDrag(e, { kind: "slot", index: i });
                 }}
               >
                 <span class="pp-num">${i + 1}</span>
@@ -618,17 +652,7 @@ export function openProjectPickerModal(
                         class="project-picker-row ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${missing ? "project-picker-row--missing" : ""}"
                         data-row-idx=${i}
                         style="position:relative"
-                        draggable="true"
-                        @dragstart=${(e: DragEvent) => {
-                          dragging = { kind: "row", path: p.path };
-                          e.dataTransfer?.setData("text/plain", `row:${p.path}`);
-                          // Must include "move" - the favourite slot's dragover always
-                          // requests dropEffect "move" (it's shared with slot-to-slot
-                          // reordering). "copy" alone rejects the drop outright and shows
-                          // the no-drop cursor the whole time, even though drop is wired up.
-                          if (e.dataTransfer) e.dataTransfer.effectAllowed = "copyMove";
-                        }}
-                        @dragend=${() => { dragging = null; dragOverSlot = null; renderModal(); }}
+                        @pointerdown=${(e: PointerEvent) => startFavoriteDrag(e, { kind: "row", path: p.path })}
                         @mouseenter=${() => {
                           if (selectedIdx !== i) {
                             selectedIdx = i;

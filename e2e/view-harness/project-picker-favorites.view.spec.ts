@@ -59,41 +59,28 @@ async function readSlots(page: Page): Promise<(string | null)[]> {
   return page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? "null"), FAVORITES_KEY);
 }
 
-/** Playwright's dragTo does not drive HTML5 drag-and-drop in Chromium, so the
- *  gesture is dispatched explicitly with a shared DataTransfer - the same
- *  object must reach dragstart and drop for the handlers to pair up.
+/** Drives the gesture with real mouse input, so it exercises the same pointer
+ *  events a person produces. The rail used to be HTML5 drag-and-drop, which
+ *  synthetic DragEvents "passed" while the real app (Tauri's native file-drop
+ *  handler owns the webview's drop target) never delivered a drop at all.
  *
- *  Selectors here run through `document.querySelector`, NOT Playwright's
- *  engine, so `:has-text()` and friends are unavailable - `row:<name>` is the
- *  escape hatch for picking a list row by its visible project name. */
-async function html5Drag(page: Page, fromSel: string, toSel: string): Promise<void> {
-  await page.evaluate(([from, to]) => {
-    const find = (sel: string): Element | null => {
-      if (!sel.startsWith("row:")) return document.querySelector(sel);
-      const name = sel.slice(4);
-      return [...document.querySelectorAll(".project-picker-row")]
-        .find((r) => r.querySelector(".project-picker-name")?.textContent?.trim() === name) ?? null;
-    };
-    const src = find(from);
-    const dst = find(to);
-    if (!src || !dst) throw new Error(`drag endpoints missing: ${from} -> ${to}`);
-    const dt = new DataTransfer();
-    src.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
-    dst.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
-    dst.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
-    src.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
-  }, [fromSel, toSel] as const);
+ *  `row:<name>` picks a list row by its visible project name. */
+async function center(page: Page, sel: string): Promise<{ x: number; y: number }> {
+  const loc = sel.startsWith("row:")
+    ? page.locator(".project-picker-row", { has: page.locator(".project-picker-name", { hasText: sel.slice(4) }) })
+    : page.locator(sel);
+  const box = await loc.boundingBox();
+  if (!box) throw new Error(`drag endpoint missing: ${sel}`);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** The remove gesture: picked up, released somewhere that is not a slot. */
-async function html5DragToNowhere(page: Page, fromSel: string): Promise<void> {
-  await page.evaluate((from) => {
-    const src = document.querySelector(from);
-    if (!src) throw new Error(`drag source missing: ${from}`);
-    const dt = new DataTransfer();
-    src.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
-    src.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
-  }, fromSel);
+async function pointerDrag(page: Page, fromSel: string, to: string | { x: number; y: number }): Promise<void> {
+  const a = await center(page, fromSel);
+  const b = typeof to === "string" ? await center(page, to) : to;
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  await page.mouse.up();
 }
 
 test.describe("view-harness / project picker favourites rail", () => {
@@ -120,7 +107,7 @@ test.describe("view-harness / project picker favourites rail", () => {
   test("dragging a list row onto a slot assigns it and persists", async ({ page }) => {
     await openPicker(page);
 
-    await html5Drag(page, "row:countoff", '[data-slot="2"]');
+    await pointerDrag(page, "row:countoff", '[data-slot="2"]');
 
     expect(await readSlots(page)).toEqual(
       [null, null, "C:/Projects/countoff", null, null, null, null, null, null],
@@ -133,7 +120,7 @@ test.describe("view-harness / project picker favourites rail", () => {
   test("dragging a tile onto an occupied slot SWAPS, destroying neither", async ({ page }) => {
     await openPicker(page, ["C:/Projects/zng-app", "C:/Projects/countoff", null, null, null, null, null, null, null]);
 
-    await html5Drag(page, '[data-slot="0"]', '[data-slot="1"]');
+    await pointerDrag(page, '[data-slot="0"]', '[data-slot="1"]');
 
     const slots = await readSlots(page);
     expect(slots[0]).toBe("C:/Projects/countoff");
@@ -143,7 +130,7 @@ test.describe("view-harness / project picker favourites rail", () => {
   test("dragging a tile onto an empty slot moves it", async ({ page }) => {
     await openPicker(page, ["C:/Projects/zng-app", null, null, null, null, null, null, null, null]);
 
-    await html5Drag(page, '[data-slot="0"]', '[data-slot="4"]');
+    await pointerDrag(page, '[data-slot="0"]', '[data-slot="4"]');
 
     const slots = await readSlots(page);
     expect(slots[0]).toBeNull();
@@ -153,7 +140,7 @@ test.describe("view-harness / project picker favourites rail", () => {
   test("dragging a tile off the rail removes that favourite", async ({ page }) => {
     await openPicker(page, ["C:/Projects/zng-app", "C:/Projects/countoff", null, null, null, null, null, null, null]);
 
-    await html5DragToNowhere(page, '[data-slot="0"]');
+    await pointerDrag(page, '[data-slot="0"]', "#project-picker-search");
 
     const slots = await readSlots(page);
     expect(slots[0]).toBeNull();
@@ -164,12 +151,43 @@ test.describe("view-harness / project picker favourites rail", () => {
   test("a project cannot hold two numbers at once", async ({ page }) => {
     await openPicker(page, ["C:/Projects/zng-app", null, null, null, null, null, null, null, null]);
 
-    await html5Drag(page, "row:zng-app", '[data-slot="5"]');
+    await pointerDrag(page, "row:zng-app", '[data-slot="5"]');
 
     const slots = await readSlots(page);
     expect(slots[0]).toBeNull();
     expect(slots[5]).toBe("C:/Projects/zng-app");
     expect(slots.filter((s) => s === "C:/Projects/zng-app")).toHaveLength(1);
+  });
+
+  test("a drag released back over its own row does not open that project", async ({ page }) => {
+    await openPicker(page);
+
+    const start = await center(page, "row:fibo");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x, start.y - 40, { steps: 4 });
+    await page.mouse.move(start.x, start.y, { steps: 4 });
+    await page.mouse.up();
+
+    await expect(page.locator(".project-picker-modal")).toHaveCount(1);
+    expect(await readSlots(page)).toBeNull();
+  });
+
+  test("a drag in flight paints its target slot, and a plain click still opens a row", async ({ page }) => {
+    await openPicker(page);
+
+    const a = await center(page, "row:countoff");
+    const b = await center(page, '[data-slot="3"]');
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 8 });
+    await expect(page.locator('[data-slot="3"]')).toHaveClass(/is-target/);
+    await expect(page.locator(".pp-drag-ghost")).toContainText("countoff");
+    await page.mouse.up();
+    await expect(page.locator(".pp-drag-ghost")).toHaveCount(0);
+
+    await page.locator(".project-picker-row", { hasText: "zng-app" }).click();
+    await expect(page.locator(".project-picker-modal")).toHaveCount(0);
   });
 
   test("ctrl+number opens the slot, skipping the Location step", async ({ page }) => {

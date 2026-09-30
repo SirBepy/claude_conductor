@@ -308,6 +308,28 @@
   border-color: var(--color-primary, #4c9eff);
   background: color-mix(in srgb, var(--color-primary, #4c9eff) 12%, transparent);
 }
+/* Follows the pointer during a favourite drag. Above the modal card (2501). */
+.pp-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2600;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-primary, #4c9eff);
+  background: var(--color-surface-alt, #15151e);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.35);
+}
+body.pp-dragging,
+body.pp-dragging * {
+  cursor: grabbing !important;
+}
 /* The slot's project left the registry. Keeps its number rather than
    vanishing - renumbering would silently repoint every key below it. */
 .pp-fav-slot.is-unresolved {
