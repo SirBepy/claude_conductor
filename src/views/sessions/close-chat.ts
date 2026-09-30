@@ -4,9 +4,15 @@ import { state } from "./state";
 import { characterForSession } from "./session-characters";
 import { askConfirm } from "../../shared/confirm";
 
+/** True when closing this chat first asks the user to discard a running turn,
+ *  so a caller must not start any irreversible close UI before that answer. */
+export function closeNeedsConfirm(sessionId: string): boolean {
+  return state.sessions.find((s) => s.session_id === sessionId)?.busy === true;
+}
+
 export async function closeChat(sessionId: string): Promise<void> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
-  if (sess?.busy) {
+  if (closeNeedsConfirm(sessionId)) {
     const ok = await askConfirm("A turn is in progress. Close and discard it?", { confirmLabel: "Discard" });
     if (!ok) return;
     try { await invoke<void>("cancel_turn", { sessionId }); } catch { /* best-effort */ }

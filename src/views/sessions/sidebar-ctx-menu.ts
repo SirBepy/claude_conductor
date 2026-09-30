@@ -13,6 +13,7 @@ import {
 } from "./sessions-helpers";
 import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
 import { isAutoAccept } from "./permission-modal";
+import { closeNeedsConfirm } from "./close-chat";
 import {
   buildChatMenuBlock,
   closeActiveChatSubmenu,
@@ -110,9 +111,13 @@ export function openCtxMenu(
   const block = buildChatMenuBlock(ctx, closeCtxMenu);
 
   // Wire exit animation for Close (capture so it runs before chat-menu's close).
+  // A busy chat asks "discard the turn?" first, and a sticky exit can't be
+  // undone, so a Cancel would hide the still-open chat from the sidebar for
+  // good. That case leaves the exit to the reconcile once clear_session lands.
   const closeBtn = block.querySelector<HTMLButtonElement>(".smore-item.smore-danger");
   if (closeBtn) {
     closeBtn.addEventListener("click", () => {
+      if (closeNeedsConfirm(sessionId)) return;
       const listEl = anchor.closest<HTMLElement>("#sessions-list");
       if (listEl && loadAnimEnabled()) markSessionExiting(listEl, sessionId);
     }, true);

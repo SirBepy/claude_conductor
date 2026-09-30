@@ -263,6 +263,15 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
     const closeItem = await $(".session-ctx-menu .smore-item.smore-danger");
     await closeItem.waitForExist({ timeout: 5000 });
     await closeItem.click();
+    // B is often still mid-turn here (haiku's no-visible-output retries keep
+    // it busy for tens of seconds), and closing a busy chat asks to discard
+    // the turn first. Unanswered, that overlay covers the sidebar and every
+    // later step fails on an unclickable row (todo 926).
+    const discard = await $(".app-confirm-ok");
+    if (await discard.waitForExist({ timeout: 2000 }).catch(() => false)) {
+      note("info", "chat B was mid-turn at close; confirmed Discard", { bId });
+      await discard.click();
+    }
 
     await browser.waitUntil(
       async () => !(await sidebarSessionIds()).includes(bId),
