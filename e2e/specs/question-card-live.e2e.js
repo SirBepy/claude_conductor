@@ -58,21 +58,18 @@ async function sendMessage(text) {
   await (await $(".session-composer .composer-send")).click();
 }
 
-// Selects the option matching `optionPattern`, then submits. supportsExtras
-// on both card flows (c306a4b4) makes even a lone question a two-step
-// Next -> review-panel Submit. Asserts the review button's label
-// ("Answer" vs "Submit"), the button-text half of the gate distinction.
+// Selects the option matching `optionPattern`, then submits. A lone question
+// has no review panel (9bf2f9c3), so the primary button is already the submit
+// button. Asserts its label ("Answer" vs "Submit"), the button-text half of
+// the gate distinction.
 async function answerSingleQuestion(optionPattern, expectedLabel) {
   await browser.execute((p) => {
     const re = new RegExp(p, "i");
     const opt = Array.from(document.querySelectorAll(".prompt-opt")).find((el) => re.test(el.textContent));
     opt?.querySelector("input")?.click();
   }, optionPattern);
-  const nextLabel = await browser.execute(() => {
-    document.querySelector('.prompt-card [data-act="primary"]')?.click();
-    return document.querySelector('.prompt-card [data-act="primary"]')?.textContent?.trim();
-  });
-  assert.strictEqual(nextLabel, expectedLabel, `primary button after Next should read "${expectedLabel}", got "${nextLabel}"`);
+  const submitLabel = await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.textContent?.trim());
+  assert.strictEqual(submitLabel, expectedLabel, `primary button should read "${expectedLabel}", got "${submitLabel}"`);
   await browser.execute(() => document.querySelector('.prompt-card [data-act="primary"]')?.click());
 }
 
@@ -95,7 +92,9 @@ describe("AskUserQuestion full real-path (BILLED)", () => {
   it("real claude turn cannot call the disallowed builtin AskUserQuestion tool - canary that the app-wide disallow is still enforced (todo 905)", async () => {
     await startHaikuChat();
     await installConsoleHook();
-    await sendMessage("Use the AskUserQuestion tool to ask me whether I prefer tabs or spaces. Do nothing else but call that tool.");
+    // With the builtin gone the model reaches for our MCP ask tool instead,
+    // which renders a legitimate card, so the prompt forbids that fallback.
+    await sendMessage("Use the built-in AskUserQuestion tool to ask me whether I prefer tabs or spaces. If that exact tool is not available to you, tell me UNAVAILABLE and do not ask through any other question tool, such as mcp__cc_conductor__ask_user_question.");
 
     // `--disallowedTools AskUserQuestion` (claude_config.rs) means the model
     // can never emit this call at all - it must resolve entirely in text.
