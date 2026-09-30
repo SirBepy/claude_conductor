@@ -45,10 +45,9 @@ export function disarmSetupStallTimer(): void {
 
 /** Shows the setup indicator, kicks off the initial sessions/daemon-status
  * fetch, and best-effort restores the queued-chat / history-resume /
- * last-selected session. Must not throw past its own try/catch: the click
- * and event listeners wired after this in renderSessionsView must still be
- * registered even if restore fails (see the "I can't click any of the
- * chats" failure mode noted inline below). */
+ * last-selected session. Must not throw past its own try/catch: the event
+ * listeners wired after this in renderSessionsView must still be registered
+ * even if restore fails. */
 export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLElement, myMount: number): Promise<void> {
   // Show setup indicator immediately (daemonConnected = null → centered
   // "Setting up..." in the pane; the sidebar stays blank until connected).
@@ -76,10 +75,10 @@ export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLEleme
     rateLimitBanner.update(state.sessions);
   }
 
-  // Queued-chat / restore-selection flow. MUST NOT abort the mount: the click
-  // and event listeners below are registered after this block, so an exception
-  // here would leave the sidebar rendered but permanently unclickable (the
-  // "I can't click any of the chats" failure). Restore is best-effort.
+  // Queued-chat / restore-selection flow. MUST NOT abort the mount: the
+  // registry/daemon-status listeners are registered after this returns, so an
+  // exception here would leave the sidebar frozen on this first snapshot.
+  // Restore is best-effort.
   try {
     // If a new chat was queued (e.g. project-detail "+"), launch it now. Takes
     // precedence over history-resume / last-selected restore.
