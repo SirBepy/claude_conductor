@@ -65,10 +65,51 @@ use crate::daemon::state::DaemonState;
 use crate::types::Settings;
 use std::path::PathBuf;
 
-fn app_data_dir() -> PathBuf {
+/// Pure over the `CC_DATA_DIR` value so tests never mutate process env that
+/// parallel `--lib` tests read. The unset case stays on `dirs::data_dir()`
+/// rather than `settings::paths::data_dir()`'s `dirs::config_dir()`: same
+/// path on Windows, different on Linux/macOS, where sharing it would move
+/// the daemon's existing on-disk root.
+fn resolve_app_data_dir(override_: Option<&str>) -> PathBuf {
+    if let Some(v) = override_ {
+        if !v.is_empty() {
+            return PathBuf::from(v);
+        }
+    }
     let mut p = dirs::data_dir().expect("data_dir");
     p.push("claude-conductor");
     p
+}
+
+/// Roots the lockfile, push keys, iroh key and the remote-access device
+/// registry / token / pairing files, so an isolated `CC_DATA_DIR` daemon
+/// must never fall through to the real user's copies of those.
+fn app_data_dir() -> PathBuf {
+    resolve_app_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref())
+}
+
+#[cfg(test)]
+mod app_data_dir_tests {
+    use super::resolve_app_data_dir;
+    use std::path::PathBuf;
+
+    #[test]
+    fn override_set_wins() {
+        let d = resolve_app_data_dir(Some("C:/tmp/cc-test-app-data"));
+        assert_eq!(d, PathBuf::from("C:/tmp/cc-test-app-data"));
+    }
+
+    #[test]
+    fn override_unset_falls_back_to_default() {
+        let d = resolve_app_data_dir(None);
+        assert!(d.ends_with("claude-conductor"));
+    }
+
+    #[test]
+    fn override_empty_falls_back_to_default() {
+        let d = resolve_app_data_dir(Some(""));
+        assert!(d.ends_with("claude-conductor"));
+    }
 }
 
 fn load_initial_settings() -> Settings {
