@@ -58,6 +58,9 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
   // defaultPrevented: the slash popup's own Tab/arrow handling already ran on
   // the textarea before this document-level listener.
   if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || !host.isConnected) return false;
+  // Minimized, the collapsed bar shows a fixed question - paging from its
+  // Restore button would move activeTab invisibly under it.
+  if (!host.querySelector(".prompt-card")) return false;
   const target = e.target as HTMLElement | null;
   if (!target) return false;
   const isReview = () => hasSummary && state.activeTab === questions.length;

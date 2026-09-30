@@ -121,6 +121,16 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     await expect(card.locator('.prompt-panel[data-panel="0"] input:checked')).toHaveCount(0);
   });
 
+  test("arrows do nothing while the card is minimized", async ({ page }) => {
+    await mountView(page);
+    await openCard(page);
+    await page.locator('.prompt-card [data-act="minimize"]').click();
+    await page.locator('.prompt-collapsed [data-act="restore"]').focus();
+    await page.keyboard.press("ArrowRight");
+    await page.locator('.prompt-collapsed [data-act="restore"]').click();
+    expect(await activeTab(page)).toBe(0);
+  });
+
   test("Down off the last option reaches the answer box, Up from its start returns", async ({ page }) => {
     await mountView(page);
     await openCard(page);
