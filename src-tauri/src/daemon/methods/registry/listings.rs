@@ -84,6 +84,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 let shim = std::sync::Mutex::new(state.settings.snapshot());
                 let sid = crate::chat::takeover::takeover(p.manual_pid, &p.model, &p.effort, &p.account_id, &state.registry, &shim)
+                    .await
                     .map_err(|e| RpcError::internal(e.to_string()))?;
                 crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);

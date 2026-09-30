@@ -70,7 +70,7 @@ fn attach_dock_back_on_close(window: &tauri::WebviewWindow, session_id: &str) {
 /// Command-based (not the JS window-close API), same shape as
 /// `reattach_window`. Never builds, so stays a plain sync command.
 #[tauri::command]
-pub fn close_preview_window(app: AppHandle) -> Result<(), String> {
+pub async fn close_preview_window(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("session-preview") {
         win.close().map_err(|e| e.to_string())?;
     }

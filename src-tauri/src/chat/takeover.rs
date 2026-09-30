@@ -20,7 +20,7 @@ pub enum TakeoverError {
 /// Returns the resolved session_id on success. Caller's frontend then
 /// switches the chat pane to bind to this id; the next `send_message`
 /// call will issue `claude -p --resume <session_id>`.
-pub fn takeover(
+pub async fn takeover(
     manual_pid: u32,
     model: &str,
     effort: &str,
@@ -64,7 +64,9 @@ pub fn takeover(
     // tearing down the child's pipes; brief grace prevents a JSONL race
     // if the user immediately fires send_message. 250ms is enough on
     // typical hardware without making the takeover UX feel laggy.
-    std::thread::sleep(std::time::Duration::from_millis(250));
+    // No guard is held across this await: `entry`/`session_id`/`cwd` above are
+    // owned values, and `registry`/`settings` are plain references, not locks.
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
     // 4. Promote registry entry to Interactive (upsert-with-takeover:
     //    project_id/pid preserved, kind/busy/ended_at/end_reason reset).
@@ -99,16 +101,16 @@ mod tests {
         Mutex::new(Settings::default())
     }
 
-    #[test]
-    fn takeover_returns_not_found_for_unknown_pid() {
+    #[tokio::test]
+    async fn takeover_returns_not_found_for_unknown_pid() {
         let registry = Registry::new();
         let settings = fresh_settings();
-        let r = takeover(99999, "opus", "high", "acct-a", &registry, &settings);
+        let r = takeover(99999, "opus", "high", "acct-a", &registry, &settings).await;
         assert!(matches!(r, Err(TakeoverError::NotFound(99999))));
     }
 
-    #[test]
-    fn takeover_promotes_external_to_interactive() {
+    #[tokio::test]
+    async fn takeover_promotes_external_to_interactive() {
         let registry = Registry::new();
         let settings = fresh_settings();
         // Pre-register as External (Manual session).
@@ -130,7 +132,7 @@ mod tests {
 
         // Takeover. (kill_tree on a non-existent pid is a no-op silent
         // failure - safe for tests.)
-        let result = takeover(manual_pid, "opus", "high", "acct-work", &registry, &settings);
+        let result = takeover(manual_pid, "opus", "high", "acct-work", &registry, &settings).await;
         assert!(result.is_ok());
         let new_id = result.unwrap();
         assert_eq!(new_id, "abc-session-1");

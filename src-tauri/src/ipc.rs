@@ -93,3 +93,63 @@ pub use ready::*;
 // `claude_conductor_lib::ipc::legacy_import_test_helpers`.
 pub use projects::projects_test_helpers;
 pub use projects::legacy_import_test_helpers;
+
+#[cfg(test)]
+mod command_thread_tests {
+    use std::path::{Path, PathBuf};
+
+    fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// A plain sync `#[tauri::command]` runs on the UI thread in Tauri 2, so any
+    /// IO in it freezes the window (todo 1005 found it in nine files after the
+    /// first fix). Every command must be `async fn`, `#[tauri::command(async)]`,
+    /// or carry a `// sync-command: <why>` comment directly above it.
+    #[test]
+    fn every_sync_tauri_command_is_justified() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        let mut checked = 0;
+        let mut offenders = Vec::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if line.trim() != "#[tauri::command]" {
+                    continue;
+                }
+                checked += 1;
+                let Some(sig) = lines[i + 1..].iter().find(|l| l.contains("fn ")) else {
+                    continue;
+                };
+                if sig.contains("async fn") {
+                    continue;
+                }
+                let justified = lines[..i]
+                    .iter()
+                    .rev()
+                    .take_while(|l| l.trim_start().starts_with("//"))
+                    .any(|l| l.contains("// sync-command:"));
+                if !justified {
+                    offenders.push(format!("{}:{}: {}", file.display(), i + 1, sig.trim()));
+                }
+            }
+        }
+        assert!(checked > 100, "expected to scan every command, only saw {checked}");
+        assert!(
+            offenders.is_empty(),
+            "sync #[tauri::command]s with no `// sync-command:` reason (make them async, \
+             or say why they cannot block):\n{}",
+            offenders.join("\n")
+        );
+    }
+}

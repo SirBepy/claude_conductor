@@ -4,31 +4,31 @@ use std::collections::HashMap;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
-pub fn get_current_usage(state: State<AppState>) -> Option<UsageSnapshot> {
-    state.current_usage.lock().unwrap().clone()
+pub async fn get_current_usage(state: State<'_, AppState>) -> Result<Option<UsageSnapshot>, String> {
+    Ok(state.current_usage.lock().unwrap().clone())
 }
 
 /// Per-account current usage, keyed by `Account.id` (multi-account milestone
 /// 03). Empty while no registered account has a stored web cookie (the
 /// legacy single-cookie poll populates only `get_current_usage`).
 #[tauri::command]
-pub fn get_usage_map(state: State<AppState>) -> HashMap<String, UsageSnapshot> {
-    state.current_usage_by_account.lock().unwrap().clone()
+pub async fn get_usage_map(state: State<'_, AppState>) -> Result<HashMap<String, UsageSnapshot>, String> {
+    Ok(state.current_usage_by_account.lock().unwrap().clone())
 }
 
 /// Per-account auth state, keyed by `Account.id`. An account absent from the
 /// map has not been polled yet this run.
 #[tauri::command]
-pub fn get_auth_state_map(state: State<AppState>) -> HashMap<String, AuthState> {
-    state.auth_state_by_account.lock().unwrap().clone()
+pub async fn get_auth_state_map(state: State<'_, AppState>) -> Result<HashMap<String, AuthState>, String> {
+    Ok(state.auth_state_by_account.lock().unwrap().clone())
 }
 
 #[tauri::command]
-pub fn get_history(
-    state: State<AppState>,
+pub async fn get_history(
+    state: State<'_, AppState>,
     limit: Option<u32>,
     account_id: Option<String>,
-) -> Vec<UsageSnapshot> {
+) -> Result<Vec<UsageSnapshot>, String> {
     // Snapshots come back ascending by timestamp (same order the legacy JSONL
     // file produced), so a `limit` keeps the newest N by trimming the front.
     // `account_id` (new, optional - existing callers omit it and see every
@@ -44,7 +44,7 @@ pub fn get_history(
         let start = all.len().saturating_sub(n as usize);
         all = all.split_off(start);
     }
-    all
+    Ok(all)
 }
 
 #[tauri::command]

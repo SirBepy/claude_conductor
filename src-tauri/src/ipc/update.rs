@@ -79,12 +79,14 @@ pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
     }
 }
 
+// sync-command: does no IO (restart exits the process), and tray/menu.rs calls
+// it synchronously, where an async fn would be a silently dropped Future.
 #[tauri::command]
 pub fn install_update(app: AppHandle) {
     app.restart();
 }
 
 #[tauri::command]
-pub fn get_update_state(app: AppHandle) -> serde_json::Value {
+pub async fn get_update_state(app: AppHandle) -> serde_json::Value {
     app.state::<crate::state::AppState>().update_state.lock().unwrap().clone()
 }

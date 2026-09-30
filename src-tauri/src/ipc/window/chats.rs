@@ -85,7 +85,7 @@ pub fn open_chats_for_session(app: AppHandle, session_id: String, mode: String) 
 /// Drain the pending "open this session" request (set by `open_chats_for_session`
 /// when it creates the window). Returns `(session_id, mode)` or null.
 #[tauri::command]
-pub fn take_pending_chat_open(app: AppHandle) -> Option<(String, String)> {
+pub async fn take_pending_chat_open(app: AppHandle) -> Option<(String, String)> {
     let state = app.try_state::<crate::state::AppState>()?;
     let mut pending = state.pending_chat_open.lock().ok()?;
     pending.take()
@@ -158,7 +158,7 @@ pub fn open_chats_new_chat(
 /// Drain the pending "start a new chat" request (set by `open_chats_new_chat`
 /// when it creates the window). Returns the full `PendingNewChat` config or null.
 #[tauri::command]
-pub fn take_pending_new_chat(app: AppHandle) -> Option<PendingNewChat> {
+pub async fn take_pending_new_chat(app: AppHandle) -> Option<PendingNewChat> {
     let state = app.try_state::<crate::state::AppState>()?;
     let mut pending = state.pending_new_chat.lock().ok()?;
     pending.take()
