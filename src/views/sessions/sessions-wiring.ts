@@ -15,6 +15,7 @@ import { dropRetainedChat } from "./chat-pane-cache";
 import { getTransport, isRemote } from "../../shared/transport";
 import { findSuccessorToFollow, markFollowed } from "./successor-follow";
 import { freezePane } from "./pane-freeze";
+import { visibleInterval } from "../../shared/visible-interval";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -201,7 +202,7 @@ export async function wireInstancesChangedListener(
   pane: HTMLElement,
   myMount: number,
   ensuredSessionIds: Set<string>,
-): Promise<ReturnType<typeof setInterval> | null> {
+): Promise<(() => void) | null> {
   const syncInstances = async (): Promise<void> => {
     if (state.mountId !== myMount) return;
     // See reconcileEndedSessions for why previousIds is snapshotted before
@@ -342,13 +343,19 @@ export async function wireInstancesChangedListener(
   // so a dropped instances_changed frame used to freeze a row's busy/awaiting
   // until an unrelated event happened to fire another broadcast. This heals
   // any dropped frame within 15s. Desktop-only: remote runs its own degrade-poll.
+  // KEEP-RUNNING (todo 1008): directly drives the sidebar's busy/awaiting
+  // badges and (via favicon-badge/tray) the unread-session indicator, which
+  // must keep updating while the window is hidden.
   if (ev?.listen) {
     let pollInFlight = false;
-    return setInterval(() => {
+    return visibleInterval(() => {
       if (pollInFlight || state.mountId !== myMount) return;
       pollInFlight = true;
       void syncInstances().finally(() => { pollInFlight = false; });
-    }, 15_000);
+    }, 15_000, {
+      whileHidden: true,
+      reason: "heals a dropped instances_changed notifier frame that drives the sidebar's busy/awaiting badges and the tray unread indicator, which must keep updating while the window is hidden",
+    });
   }
   return null;
 }
@@ -386,14 +393,24 @@ export function wireChatRecoveryHeartbeat(myMount: number): () => void {
       void sessionEvents.reconcileLatest(sid, cwd);
     }
   };
-  const timer = setInterval(recover, 15_000);
+  // KEEP-RUNNING (todo 1008): a dead chat listener never re-arms itself; if
+  // this paused while hidden, a phone-driven or backgrounded turn's
+  // completion could be silently lost until refocus, defeating notifications
+  // that depend on it. The onVisibilityChange recover() below is unrelated to
+  // pausing (visibleInterval's whileHidden path adds no visibility listener
+  // of its own) - it's an immediate correction on regain rather than waiting
+  // out the rest of the 15s tick, so it stays.
+  const dispose = visibleInterval(recover, 15_000, {
+    whileHidden: true,
+    reason: "a dead chat listener never re-arms itself; pausing while hidden could silently drop a phone-driven or backgrounded turn's completion until refocus",
+  });
   const onVisibilityChange = (): void => {
     if (document.visibilityState === "visible") recover();
   };
   window.addEventListener("focus", recover);
   document.addEventListener("visibilitychange", onVisibilityChange);
   return () => {
-    clearInterval(timer);
+    dispose();
     window.removeEventListener("focus", recover);
     document.removeEventListener("visibilitychange", onVisibilityChange);
   };

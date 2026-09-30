@@ -7,6 +7,7 @@ import { RemoteUnavailableError } from "../../shared/http-transport";
 import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge";
 import { sessionEvents } from "../../shared/chat/event-store";
+import { visibleInterval } from "../../shared/visible-interval";
 import {
   countsCache, ctxStatusCache, fetchGitInfo,
   type SessionCounts,
@@ -113,8 +114,10 @@ export async function resolveLiveCwd(sessionId: string, fallback: string): Promi
 }
 
 /** Servers are external processes with no event stream, so poll on a light
- *  interval; the caller only re-renders when the list changes. */
-export function startServersPoll(refresh: () => void, intervalMs = 8000): ReturnType<typeof setInterval> {
+ *  interval; the caller only re-renders when the list changes. Paused while
+ *  the window is hidden (todo 1008): the servers popover has nothing to show
+ *  a hidden window, and visibleInterval flushes once on return. */
+export function startServersPoll(refresh: () => void, intervalMs = 8000): () => void {
   refresh();
-  return setInterval(refresh, intervalMs);
+  return visibleInterval(refresh, intervalMs);
 }

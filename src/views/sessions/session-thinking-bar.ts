@@ -1,4 +1,5 @@
 import { state } from "./state";
+import { visibleInterval } from "../../shared/visible-interval";
 
 let _progressN: number | null = null;
 let _progressM: number = 0;
@@ -16,13 +17,13 @@ let _pane: HTMLElement | null = null;
 const NOT_RESPONDING_MS = 120_000;
 let _lastEventAt = 0;
 let _wasBusy = false;
-let _silenceTick: ReturnType<typeof setInterval> | null = null;
+let _silenceTick: (() => void) | null = null;
 
 export function initThinkingBar(pane: HTMLElement | null): void {
   // Teardown passes null while a turn may still be busy. updateThinkingBar
   // returns early on a missing pane, so it can never disarm the timer itself.
   if (_silenceTick !== null) {
-    clearInterval(_silenceTick);
+    _silenceTick();
     _silenceTick = null;
   }
   _wasBusy = false;
@@ -126,9 +127,9 @@ export function updateThinkingBar(): void {
   if (busy && !_wasBusy) _lastEventAt = Date.now();
   _wasBusy = busy;
   if (busy && _silenceTick === null) {
-    _silenceTick = setInterval(updateThinkingBar, 5000);
+    _silenceTick = visibleInterval(updateThinkingBar, 5000);
   } else if (!busy && _silenceTick !== null) {
-    clearInterval(_silenceTick);
+    _silenceTick();
     _silenceTick = null;
   }
   const hasHeld = !!state.heldMessages?.hasItemsForActive();

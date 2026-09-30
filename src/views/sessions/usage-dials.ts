@@ -14,6 +14,7 @@ import { getSettings } from "../../shared/state";
 import "../overlay/overlay.css";
 import { cellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
 import { buildOverlayRows } from "../overlay/overlay-logic";
+import { visibleInterval } from "../../shared/visible-interval";
 
 const POLL_MS = 60_000;
 const RESET_TICK_MS = 1_000;
@@ -71,16 +72,20 @@ export function mountUsageDials(host: HTMLElement): () => void {
   };
   host.addEventListener("click", onClick);
 
-  const timer = window.setInterval(() => void renderUsageDials(host), POLL_MS);
-  const tickTimer = window.setInterval(() => tickOverlayResetPopups(host), RESET_TICK_MS);
+  // PAUSE-WHEN-HIDDEN (todo 1008): this header row has nothing to show a
+  // hidden window. The existing onVisible below already re-renders on regain
+  // (unconditionally, not gated on a full hidden period), so it stays - it
+  // is not an exact duplicate of visibleInterval's own flush-on-return.
+  const disposeRender = visibleInterval(() => void renderUsageDials(host), POLL_MS);
+  const disposeTick = visibleInterval(() => tickOverlayResetPopups(host), RESET_TICK_MS);
   const onVisible = () => {
     if (document.visibilityState === "visible") void renderUsageDials(host);
   };
   document.addEventListener("visibilitychange", onVisible);
 
   return () => {
-    window.clearInterval(timer);
-    window.clearInterval(tickTimer);
+    disposeRender();
+    disposeTick();
     document.removeEventListener("visibilitychange", onVisible);
     host.removeEventListener("click", onClick);
   };

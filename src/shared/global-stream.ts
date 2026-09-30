@@ -13,6 +13,7 @@
 
 import type { Transport } from "./transport";
 import { remoteToken } from "./http-transport";
+import { visibleInterval } from "./visible-interval";
 
 type GlobalCallback = (payload: unknown) => void;
 
@@ -54,8 +55,8 @@ let globalWsStopped = true;
 let globalRetryDelay = 1000;
 let globalLastFrameAt = 0;
 const globalListeners = new Map<string, Set<GlobalCallback>>();
-let globalWatchdogTimer: ReturnType<typeof setInterval> | undefined;
-let globalDegradePollTimer: ReturnType<typeof setInterval> | undefined;
+let globalWatchdogTimer: (() => void) | undefined;
+let globalDegradePollTimer: (() => void) | undefined;
 let globalDegradePollInFlight = false;
 /** The Transport instance that registered the currently-active global
  *  listeners. Only its `call()` can be used for the degrade-path poll (it
@@ -96,7 +97,7 @@ export function removeGlobalListener(event: string, cb: GlobalCallback): void {
  *  (WS is the fast path, poll is only the fallback while it's down/stale). */
 function stopGlobalDegradePoll(): void {
   if (globalDegradePollTimer) {
-    clearInterval(globalDegradePollTimer);
+    globalDegradePollTimer();
     globalDegradePollTimer = undefined;
   }
 }
@@ -106,9 +107,16 @@ function stopGlobalDegradePoll(): void {
  *  only - that is the one event with a documented safe poll substitute
  *  (the others have no equivalent single-RPC resync and simply go stale
  *  until the WS reconnects). */
+// KEEP-RUNNING (todo 1008): this is the degrade path for the same global
+// event stream that drives the taskbar/tray unread indicators and
+// session-completion signals - those must keep working while the window is
+// hidden, which is the whole point of a taskbar icon.
+const DEGRADE_POLL_REASON =
+  "feeds the taskbar/tray unread indicator and session-completion signals via instances-changed, which must keep working while the window is hidden";
+
 function startGlobalDegradePoll(): void {
   if (globalDegradePollTimer) return;
-  globalDegradePollTimer = setInterval(() => {
+  globalDegradePollTimer = visibleInterval(() => {
     if (globalDegradePollInFlight || !globalStreamOwner) return;
     const cbs = globalListeners.get("instances-changed");
     if (!cbs || cbs.size === 0) return;
@@ -118,12 +126,18 @@ function startGlobalDegradePoll(): void {
       .then(() => { fireGlobal("instances-changed", undefined); })
       .catch(() => { /* network blip - skip this tick */ })
       .finally(() => { globalDegradePollInFlight = false; });
-  }, GLOBAL_DEGRADE_POLL_MS);
+  }, GLOBAL_DEGRADE_POLL_MS, { whileHidden: true, reason: DEGRADE_POLL_REASON });
 }
+
+// KEEP-RUNNING (todo 1008): same reasoning as its degrade-poll companion - a
+// stuck detector while hidden means the tray/badge silently goes stale with
+// no self-heal until the window is refocused.
+const WATCHDOG_REASON =
+  "detects a zombie global WebSocket so the degrade poll above (tray/badge unread + session-completion signals) can self-heal while the window is hidden";
 
 function ensureGlobalWatchdog(): void {
   if (globalWatchdogTimer) return;
-  globalWatchdogTimer = setInterval(() => {
+  globalWatchdogTimer = visibleInterval(() => {
     if (globalWsStopped) return;
     if (Date.now() - globalLastFrameAt > GLOBAL_STALE_MS) {
       // Stale: assume the socket is a zombie (half-open, no clean close).
@@ -134,7 +148,7 @@ function ensureGlobalWatchdog(): void {
         try { globalWs.close(); } catch { /* ignore */ }
       }
     }
-  }, GLOBAL_WATCHDOG_INTERVAL_MS);
+  }, GLOBAL_WATCHDOG_INTERVAL_MS, { whileHidden: true, reason: WATCHDOG_REASON });
 }
 
 function connectGlobalStream(): void {
@@ -192,7 +206,7 @@ export function ensureGlobalStream(owner: Transport): void {
  *  closes the socket). */
 export function teardownGlobalStream(): void {
   globalWsStopped = true;
-  if (globalWatchdogTimer) { clearInterval(globalWatchdogTimer); globalWatchdogTimer = undefined; }
+  if (globalWatchdogTimer) { globalWatchdogTimer(); globalWatchdogTimer = undefined; }
   stopGlobalDegradePoll();
   if (globalWs) {
     try { globalWs.close(); } catch { /* ignore */ }

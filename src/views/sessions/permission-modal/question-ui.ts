@@ -18,6 +18,7 @@ import {
 import { flushAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
 import { invoke } from "../../../shared/ipc";
 import { isTextEntryElement } from "../../../shared/text-entry";
+import { visibleInterval } from "../../../shared/visible-interval";
 
 // Cadence for the live cross-device reconcile poll below - matches the order
 // of magnitude of the phone's 700ms poll and the Rust adaptive poll (500-2000ms).
@@ -202,11 +203,16 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
   // Live cross-device sync: piggybacks get_session_drafts instead of a new
   // transport, while this card is open only - stopped on teardown below.
-  let livePollTimer: ReturnType<typeof setInterval> | null = null;
+  // PAUSE-WHEN-HIDDEN (todo 1008): nothing to sync into while the card isn't
+  // on screen. visibilityHandler above already reconciles once on regaining
+  // visibility (unconditionally, not gated on a full hidden period) and also
+  // flushes the debounced push on hidden - a distinct concern from this
+  // poll's own pause/flush, so it stays.
+  let disposeLivePoll: (() => void) | null = null;
   if (draftSyncTargets.sessionId && draftSyncTargets.promptId) {
     const sid = draftSyncTargets.sessionId;
     const pid = draftSyncTargets.promptId;
-    livePollTimer = setInterval(() => {
+    disposeLivePoll = visibleInterval(() => {
       void fetchFreshestAuqDraft(sid, pid).then((fresh) => {
         if (fresh) mergeFreshDraft(fresh);
       });
@@ -227,7 +233,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     clearHost();
     document.removeEventListener("keydown", keydownHandler);
     document.removeEventListener("visibilitychange", visibilityHandler);
-    if (livePollTimer !== null) clearInterval(livePollTimer);
+    if (disposeLivePoll !== null) disposeLivePoll();
     cancelAuqPush();
     if (state.resizeObs) { try { state.resizeObs.disconnect(); } catch { /* ignore */ } state.resizeObs = null; }
     if (state.panelResizeObs) { try { state.panelResizeObs.disconnect(); } catch { /* ignore */ } state.panelResizeObs = null; }

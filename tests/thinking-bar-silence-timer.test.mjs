@@ -71,4 +71,21 @@ describe("thinking-bar silence timer", () => {
     mod.updateThinkingBar();
     expect(clearSpy).toHaveBeenCalledWith(id);
   });
+
+  // todo 1008: the 5s silence tick now goes through visibleInterval
+  // (PAUSE-WHEN-HIDDEN) instead of a bare setInterval.
+  it("pauses the 5s silence tick while hidden, and resumes on return", () => {
+    mountBusyPane();
+    const [id] = armedIds();
+    clearSpy.mockClear();
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(clearSpy).toHaveBeenCalledWith(id);
+
+    setSpy.mockClear();
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(armedIds()).toHaveLength(1);
+  });
 });

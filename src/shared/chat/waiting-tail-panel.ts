@@ -5,6 +5,7 @@
 
 import { openAnchoredPopover } from "./anchored-popover";
 import { invoke } from "../ipc";
+import { visibleInterval } from "../visible-interval";
 
 const POLL_MS = 1500;
 const MAX_CHARS = 32_000; // cap DOM growth for a long-running tail
@@ -32,13 +33,13 @@ export function openWaitingTailPanel(anchor: HTMLElement, sessionId: string, pat
   document.body.appendChild(pop);
 
   let offset: number | undefined;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let disposeTimer: (() => void) | null = null;
 
   const popover = openAnchoredPopover({
     anchor,
     el: pop,
     onClose: () => {
-      if (timer !== null) clearInterval(timer);
+      if (disposeTimer !== null) disposeTimer();
       pop.remove();
     },
   });
@@ -61,5 +62,5 @@ export function openWaitingTailPanel(anchor: HTMLElement, sessionId: string, pat
   }
 
   void poll();
-  timer = setInterval(() => void poll(), POLL_MS);
+  disposeTimer = visibleInterval(() => void poll(), POLL_MS);
 }

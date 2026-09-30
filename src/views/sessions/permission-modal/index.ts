@@ -17,6 +17,7 @@
  */
 
 import { getTransport } from "../../../shared/transport";
+import { visibleInterval } from "../../../shared/visible-interval";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
 import { getActiveCardId, isActiveCardId } from "./question-state";
@@ -307,7 +308,13 @@ function startRemotePromptPoll(): void {
     reconcilePendingPrompts(prompts, emitted, cb);
   };
   void tick();
-  setInterval(() => void tick(), 700);
+  // KEEP-RUNNING (todo 1008): AskUserQuestion + permission prompts raised
+  // during a phone-driven turn must reach the user while they look
+  // elsewhere - that's the whole point of this poll.
+  visibleInterval(() => void tick(), 700, {
+    whileHidden: true,
+    reason: "AskUserQuestion + permission prompts raised during a phone-driven turn must reach the user while they look elsewhere",
+  });
 }
 
 let installed = false;

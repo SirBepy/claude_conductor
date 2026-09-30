@@ -14,6 +14,7 @@ import {
 } from "./turn-footer-format";
 import { renderStatusChip } from "./turn-status-chip";
 import type { TurnFooterState, TurnUsageTotals } from "./turn-chips";
+import { visibleInterval } from "../visible-interval";
 
 /** Build tooltip text for the settled token breakdown. */
 export function buildTooltip(totals: TurnUsageTotals): string {
@@ -79,7 +80,7 @@ export function ensureLiveMetaRow(
   buildMetaRow(st);
   st.turnStartMs = turnStartMs;
   st.timeTextNode!.nodeValue = formatTurnDuration(Date.now() - turnStartMs);
-  st.tickTimer = setInterval(() => {
+  st.tickTimer = visibleInterval(() => {
     const cur = getCurrent();
     if (!cur || cur.settled || !cur.timeTextNode) return;
     cur.timeTextNode.nodeValue = formatTurnDuration(Date.now() - cur.turnStartMs);
@@ -127,7 +128,7 @@ export function settleMetaRow(st: TurnFooterState, totals: TurnUsageTotals): voi
   st.settled = true;
   st.lastTotals = totals;
   if (st.tickTimer !== null) {
-    clearInterval(st.tickTimer);
+    st.tickTimer();
     st.tickTimer = null;
   }
   if (totals.durationMs > 0) {
@@ -155,7 +156,7 @@ export function cancelMetaRow(st: TurnFooterState): void {
   if (st.settled || !st.metaRow) return;
   st.settled = true;
   if (st.tickTimer !== null) {
-    clearInterval(st.tickTimer);
+    st.tickTimer();
     st.tickTimer = null;
   }
   if (st.turnStartMs > 0) {

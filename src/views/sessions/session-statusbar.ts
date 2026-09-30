@@ -48,6 +48,7 @@ import { GitCard } from "./git-card";
 import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
 import { onMobileViewportChange } from "../../shared/mobile-viewport";
+import { visibleInterval } from "../../shared/visible-interval";
 export {
   loadStatuslineRows,
   saveStatuslineRows,
@@ -104,7 +105,7 @@ export class SessionStatusbar {
   private onConfig: ((model: string | null, effort: string, effortEditable: boolean) => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
   private hideZero: boolean;
-  private durationTimer: ReturnType<typeof setInterval> | null = null;
+  private durationTimer: (() => void) | null = null;
   private animatedKeys = new Set<string>();
   private toolTally: ToolTally = { byType: [] };
   // Per-tool chips delegate their drill-down popover to this controller.
@@ -115,7 +116,7 @@ export class SessionStatusbar {
   private aiTodosPopover = new AiTodosPopover();
   private serversPopover = new ServersPopover();
   // Polls the server_supervisor for this project's running dev servers.
-  private serversTimer: ReturnType<typeof setInterval> | null = null;
+  private serversTimer: (() => void) | null = null;
   private imagesPopover = new ImagesPopover();
   private gitCard = new GitCard();
   private overflowPopover = new OverflowPopover();
@@ -397,8 +398,8 @@ export class SessionStatusbar {
   }
 
   destroy(): void {
-    if (this.durationTimer) { clearInterval(this.durationTimer); this.durationTimer = null; }
-    if (this.serversTimer) { clearInterval(this.serversTimer); this.serversTimer = null; }
+    if (this.durationTimer) { this.durationTimer(); this.durationTimer = null; }
+    if (this.serversTimer) { this.serversTimer(); this.serversTimer = null; }
     if (this.mobileUnsub) { this.mobileUnsub(); this.mobileUnsub = null; }
     this.tally.destroy();
     this.closeChipPopovers();
@@ -412,7 +413,7 @@ export class SessionStatusbar {
   }
 
   private startTimer(): void {
-    this.durationTimer = setInterval(() => tickTimer(this.container, this.startedAt), 1000);
+    this.durationTimer = visibleInterval(() => tickTimer(this.container, this.startedAt), 1000);
   }
 
   /** Assemble the read-only snapshot + callback params statusbar-chips.ts's

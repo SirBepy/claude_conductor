@@ -16,12 +16,13 @@
 import { invoke } from "../../shared/ipc";
 import type { ProtocolState, TerminalAction } from "../../types/ipc.generated";
 import { state } from "./state";
+import { visibleInterval } from "../../shared/visible-interval";
 
 type Listener = (s: ProtocolState | null) => void;
 
 const listeners = new Set<Listener>();
 let unlistenEvent: (() => void) | null = null;
-let smoothTimer: number | null = null;
+let smoothTimer: (() => void) | null = null;
 
 function emit(): void {
   for (const l of listeners) {
@@ -54,7 +55,7 @@ function apply(next: ProtocolState | null): void {
  *  value back to the server's truth via apply(). */
 function startSmoothing(): void {
   if (smoothTimer !== null) return;
-  smoothTimer = window.setInterval(() => {
+  smoothTimer = visibleInterval(() => {
     const s = state.whenDone;
     if (!isCounting(s) || s == null || s.countdown_remaining_secs == null) {
       stopSmoothing();
@@ -68,7 +69,7 @@ function startSmoothing(): void {
 
 function stopSmoothing(): void {
   if (smoothTimer !== null) {
-    window.clearInterval(smoothTimer);
+    smoothTimer();
     smoothTimer = null;
   }
 }

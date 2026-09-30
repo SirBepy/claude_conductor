@@ -10,16 +10,16 @@ import { initThinkingBar } from "./session-thinking-bar";
 import { state, setActiveSession } from "./state";
 import { backgroundRetainedChat, isRetainedRenderer } from "./chat-pane-cache";
 
-/** Poll-fallback timer for the lossy instances-changed broadcast (see the
- * setInterval at the listener registration site). Cleared in teardownState. */
-let instancesPollTimer: ReturnType<typeof setInterval> | null = null;
+/** Poll-fallback disposer for the lossy instances-changed broadcast (see the
+ * visibleInterval at the listener registration site). Cleared in teardownState. */
+let instancesPollTimer: (() => void) | null = null;
 
 /** Dispose function for the chat live-channel recovery heartbeat (see
  * wireChatRecoveryHeartbeat). Shared by both entry points; cleared in
  * teardownState. */
 let chatHeartbeatDispose: (() => void) | null = null;
 
-export function setInstancesPollTimer(timer: ReturnType<typeof setInterval> | null): void {
+export function setInstancesPollTimer(timer: (() => void) | null): void {
   instancesPollTimer = timer;
 }
 
@@ -49,7 +49,7 @@ export function teardownState(): void {
     state.unlistenHeldDelivered = null;
   }
   if (instancesPollTimer !== null) {
-    clearInterval(instancesPollTimer);
+    instancesPollTimer();
     instancesPollTimer = null;
   }
   if (chatHeartbeatDispose) {

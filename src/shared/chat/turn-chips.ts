@@ -86,7 +86,7 @@ export interface TurnFooterState {
   /** Settle-only status chip (question/working/waiting/done). Never created
    *  for a live/ticking row - see settleMetaRow. */
   statusChip: HTMLElement | null;
-  tickTimer: ReturnType<typeof setInterval> | null;
+  tickTimer: (() => void) | null;
   /** Wall-clock ms when the live turn started (for the ticking elapsed time). */
   turnStartMs: number;
   /** True once real usage totals landed. Stops the tick + the ~estimate, but
@@ -169,7 +169,7 @@ export class TurnFooterRegistry {
     const dest = this.turns.get(destKey);
     if (!src || !dest || src === dest) return false;
     if (src.tickTimer !== null) {
-      clearInterval(src.tickTimer);
+      src.tickTimer();
       src.tickTimer = null;
     }
     absorbFooterContents(src.footer, dest.footer);
@@ -333,7 +333,7 @@ export class TurnFooterRegistry {
   /** Remove every footer and clear all timers (renderer detach / bulk reset). */
   clear(): void {
     for (const st of this.turns.values()) {
-      if (st.tickTimer !== null) clearInterval(st.tickTimer);
+      if (st.tickTimer !== null) st.tickTimer();
       st.footer.remove();
     }
     this.turns.clear();
