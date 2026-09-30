@@ -231,36 +231,11 @@ mod tests {
         ContentBlock::Text { text: s.to_string() }
     }
 
-    /// A real throwaway child process for its `ChildStdin` - `Session::new`
-    /// requires a live one and there's no cross-platform stand-in. Same
-    /// pattern as `attach.rs`'s `spawn_fake_session` / `teardown.rs`'s
-    /// `end_session_drops_the_closed_chats_ask_threads` (Windows-only for the
-    /// same reason).
+    // Shared with `attach.rs`'s `relay_tests` / `teardown.rs`'s
+    // `end_session_drops_the_closed_chats_ask_threads` - see its own doc for
+    // why it's Windows-only.
     #[cfg(windows)]
-    async fn spawn_fake_session(map: &crate::daemon::session::SessionMap, session_id: &str) -> tokio::process::Child {
-        let mut child = tokio::process::Command::new("cmd")
-            .args(["/C", "ping", "-n", "30", "127.0.0.1"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .expect("spawn probe child");
-        let stdin = child.stdin.take().expect("piped stdin");
-        let pid = child.id().expect("pid");
-        let session = crate::daemon::session::Session::new(
-            session_id.to_string(),
-            std::env::temp_dir(),
-            "m".into(),
-            "high".into(),
-            pid,
-            stdin,
-            None,
-            None,
-            "acct".into(),
-        );
-        map.insert(session_id.to_string(), session);
-        child
-    }
+    use crate::daemon::session_test_support::spawn_fake_session;
 
     async fn body_text(resp: axum::response::Response) -> String {
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();

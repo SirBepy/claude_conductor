@@ -222,7 +222,7 @@ mod relay_tests {
     use crate::daemon::device_registry::DeviceRegistry;
     use crate::daemon::machines::registry::PeerMachine;
     use crate::daemon::rpc::{ConnectionContext, Request};
-    use crate::daemon::session::{new_session_map, Session};
+    use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::sessions::kinds::InstanceKind;
     use crate::types::chat::ChatEvent;
@@ -269,35 +269,11 @@ mod relay_tests {
         }
     }
 
-    /// A real throwaway child process for its `ChildStdin` - same pattern as
-    /// `lifecycle::teardown`'s `end_session_drops_the_closed_chats_ask_threads`
-    /// (Windows-only for the same reason: there's no cross-platform stand-in
-    /// for a live `ChildStdin`, and `Session::new` requires one).
+    // Shared with `hooks_server::nudge`'s tests / `lifecycle::teardown`'s
+    // `end_session_drops_the_closed_chats_ask_threads` - see its own doc for
+    // why it's Windows-only.
     #[cfg(windows)]
-    async fn spawn_fake_session(map: &crate::daemon::session::SessionMap, session_id: &str) -> tokio::process::Child {
-        let mut child = tokio::process::Command::new("cmd")
-            .args(["/C", "ping", "-n", "30", "127.0.0.1"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .expect("spawn probe child");
-        let stdin = child.stdin.take().expect("piped stdin");
-        let pid = child.id().expect("pid");
-        let session = Session::new(
-            session_id.to_string(),
-            std::env::temp_dir(),
-            "m".into(),
-            "high".into(),
-            pid,
-            stdin,
-            None,
-            None,
-            "acct".into(),
-        );
-        map.insert(session_id.to_string(), session);
-        child
-    }
+    use crate::daemon::session_test_support::spawn_fake_session;
 
     fn dummy_ctx() -> (ConnectionContext, tokio::sync::mpsc::Receiver<Value>) {
         let (tx, rx) = tokio::sync::mpsc::channel(64);

@@ -43,6 +43,8 @@ pub mod schedule;
 mod schedule_fire;
 pub mod session;
 pub(crate) mod session_registration;
+#[cfg(test)]
+pub(crate) mod session_test_support;
 pub mod settings_cache;
 pub mod spawn_self;
 pub mod start_tokens;
