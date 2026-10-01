@@ -21,6 +21,16 @@ describe("fab card memory", () => {
     expect(recallCard("a")?.rect).toBeNull();
   });
 
+  it("recalls a snap zone, and drops an unknown one", () => {
+    rememberCard("a", "drafts", { x: 8, y: 8, w: 400, h: 784 }, "w");
+    expect(recallCard("a")?.snap).toBe("w");
+    localStorage.setItem(
+      "cc.fabCard.chats",
+      JSON.stringify({ a: { panel: "ask", rect: null, snap: "middle", at: 1 } }),
+    );
+    expect(recallCard("a")?.snap).toBeNull();
+  });
+
   it("forgets a chat whose card was closed", () => {
     rememberCard("a", "todos", null);
     forgetCard("a");

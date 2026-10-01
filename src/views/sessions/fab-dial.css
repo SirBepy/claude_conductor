@@ -164,6 +164,41 @@
   user-select: none;
 }
 
+/* Dropped into a snap zone: glide the last stretch instead of jumping. */
+.fab-card.is-snapping {
+  transition:
+    left 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    top 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms ease-out,
+    border-color 180ms ease-out;
+}
+
+/* Where the card will land while the pointer sits in a snap zone. Morphs
+   between zones as the pointer moves along an edge. */
+.fab-dial-host > .fab-snap-ghost {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 10px;
+  border: 1.5px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  opacity: 0;
+  transform: scale(0.97);
+  transition:
+    opacity 140ms ease-out,
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    left 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    top 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fab-dial-host > .fab-snap-ghost.is-on {
+  opacity: 1;
+  transform: none;
+}
+
 .fab-card.is-entering {
   animation: fab-card-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -334,6 +369,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .fab-card,
+  .fab-card.is-snapping,
+  .fab-dial-host > .fab-snap-ghost,
   .fab-spine-grip,
   .fab-rz::after {
     transition: none;

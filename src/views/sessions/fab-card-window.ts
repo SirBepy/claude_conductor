@@ -2,7 +2,9 @@
 // default, dragged by its spine, resized from any edge or corner, with the
 // transcript still live behind it. fab-dial.ts rebuilds the card on every
 // render, so this owns only the geometry and re-binds to whatever card is
-// current.
+// current. Snapping to a corner or side lives in fab-card-snap.ts.
+
+import { snapRect, snapZoneAt, type SnapZone } from "./fab-card-snap";
 
 export interface CardRect {
   x: number;
@@ -22,6 +24,8 @@ const SIZE_KEY = "cc.fabCard.size";
 const DEFAULT_SIZE = { w: 620, h: 540 };
 const MIN_W = 320;
 const MIN_H = 260;
+/** How long the drop into a snap zone glides; matches .is-snapping in CSS. */
+const SNAP_GLIDE_MS = 240;
 /** Gap kept between the card and the pane edge, so a shadow and a grab
  *  handle stay reachable however far it is dragged. */
 const MARGIN = 8;
@@ -87,11 +91,15 @@ export class CardWindow {
   private card: HTMLElement | null = null;
   /** null until the first gesture, meaning "centred at the stored size". */
   private rect: CardRect | null = null;
+  /** Set while the card sits in a snap zone, so a pane resize re-fits it to
+   *  the zone (a side column stays full height) instead of just clamping. */
+  private snap: SnapZone | null = null;
+  private ghostWanted = false;
   private obs: ResizeObserver | null = null;
-  private onCommit: (rect: CardRect) => void;
+  private onCommit: (rect: CardRect, snap: SnapZone | null) => void;
 
   /** `onCommit` fires once per finished drag or resize, never per frame. */
-  constructor(host: HTMLElement, onCommit: (rect: CardRect) => void = () => {}) {
+  constructor(host: HTMLElement, onCommit: (rect: CardRect, snap: SnapZone | null) => void = () => {}) {
     this.host = host;
     this.onCommit = onCommit;
     if (typeof ResizeObserver !== "undefined") {
@@ -115,9 +123,14 @@ export class CardWindow {
     return this.rect;
   }
 
+  getSnap(): SnapZone | null {
+    return this.snap;
+  }
+
   /** null re-centres at the stored size. Applied on the next bind. */
-  setRect(rect: CardRect | null): void {
+  setRect(rect: CardRect | null, snap: SnapZone | null = null): void {
     this.rect = rect;
+    this.snap = snap;
   }
 
   destroy(): void {
@@ -136,6 +149,7 @@ export class CardWindow {
   }
 
   private current(b: Bounds): CardRect {
+    if (this.snap) return clampRect(snapRect(this.snap, b, MARGIN), b);
     return this.rect ? clampRect(this.rect, b) : centredRect(loadSize(), b);
   }
 
@@ -164,6 +178,42 @@ export class CardWindow {
     });
   }
 
+  /** The drop into a zone eases into place rather than jumping. */
+  private glide(card: HTMLElement, r: CardRect): void {
+    card.classList.add("is-snapping");
+    this.paint(card, r);
+    setTimeout(() => card.classList.remove("is-snapping"), SNAP_GLIDE_MS);
+  }
+
+  /** Outline of where the card will land, shown while the pointer is in a
+   *  snap zone. Painted OVER the card, since the card being dragged usually
+   *  already covers the zone it is about to land in; it never takes input. */
+  private showGhost(r: CardRect | null): void {
+    let ghost = this.host.querySelector<HTMLElement>(".fab-snap-ghost");
+    this.ghostWanted = !!r;
+    if (!r) {
+      ghost?.classList.remove("is-on");
+      return;
+    }
+    if (!ghost) {
+      ghost = document.createElement("div");
+      ghost.className = "fab-snap-ghost";
+      ghost.setAttribute("aria-hidden", "true");
+      this.host.appendChild(ghost);
+    }
+    Object.assign(ghost.style, {
+      left: `${Math.round(r.x)}px`,
+      top: `${Math.round(r.y)}px`,
+      width: `${Math.round(r.w)}px`,
+      height: `${Math.round(r.h)}px`,
+    });
+    // Next frame, so a freshly inserted ghost transitions in instead of popping.
+    const g = ghost;
+    requestAnimationFrame(() => {
+      if (this.ghostWanted) g.classList.add("is-on");
+    });
+  }
+
   private onPointerDown = (ev: PointerEvent): void => {
     if (ev.button !== 0 || this.compact()) return;
     const el = ev.target as HTMLElement;
@@ -182,6 +232,9 @@ export class CardWindow {
     const start = this.current(b);
     const sx = ev.clientX;
     const sy = ev.clientY;
+    const origin = this.host.getBoundingClientRect();
+    let zone: SnapZone | null = null;
+    let moved = false;
     const target = ev.target as Element;
     target.setPointerCapture?.(ev.pointerId);
     card.classList.add(gesture.kind === "move" ? "is-moving" : "is-resizing");
@@ -190,11 +243,18 @@ export class CardWindow {
     const move = (e: PointerEvent): void => {
       const dx = e.clientX - sx;
       const dy = e.clientY - sy;
+      moved = true;
       this.rect =
         gesture.kind === "move"
           ? clampRect({ ...start, x: start.x + dx, y: start.y + dy }, b)
           : resizeRect(start, gesture.dir, dx, dy, b);
       this.paint(card, this.rect);
+      if (gesture.kind !== "move") return;
+      const next = snapZoneAt(e.clientX - origin.left, e.clientY - origin.top, b);
+      if (next !== zone) {
+        zone = next;
+        this.showGhost(zone ? clampRect(snapRect(zone, b, MARGIN), b) : null);
+      }
     };
     const up = (e: PointerEvent): void => {
       target.releasePointerCapture?.(e.pointerId);
@@ -203,9 +263,18 @@ export class CardWindow {
       target.removeEventListener("pointercancel", up as EventListener);
       card.classList.remove("is-moving", "is-resizing");
       rz?.classList.remove("is-active");
-      if (!this.rect) return;
+      this.showGhost(null);
+      // A press on the spine that never moved is a click, not a re-placement.
+      if (!moved || !this.rect) return;
+      if (zone) {
+        this.snap = zone;
+        this.rect = this.current(b);
+        this.glide(card, this.rect);
+      } else {
+        this.snap = null;
+      }
       if (gesture.kind === "resize") saveSize(this.rect);
-      this.onCommit(this.rect);
+      this.onCommit(this.rect, this.snap);
     };
     target.addEventListener("pointermove", move as EventListener);
     target.addEventListener("pointerup", up as EventListener);

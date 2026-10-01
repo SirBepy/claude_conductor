@@ -135,6 +135,47 @@ test("a chat keeps its card where it was left, and closing it forgets", async ({
   await expect(page.locator(".fab-card")).toHaveCount(0);
 });
 
+test("dragging into a corner or onto a side edge snaps the card there", async ({ page }) => {
+  await mountFab(page);
+  await page.locator(".fab-dial-fab").click();
+  await page.locator('[data-dial="drafts"]').click();
+  const start = await box(page);
+
+  // Bottom-right corner: a small window parked in that corner.
+  let gx = start.x + 20;
+  let gy = start.y + start.height - 80;
+  await page.mouse.move(gx, gy);
+  await page.mouse.down();
+  await page.mouse.move(1276, 796, { steps: 8 });
+  await expect(page.locator(".fab-snap-ghost.is-on")).toBeVisible();
+  await page.mouse.up();
+  await expect(page.locator(".fab-snap-ghost.is-on")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  const corner = await box(page);
+  expect(Math.round(corner.x + corner.width)).toBe(1272);
+  expect(Math.round(corner.y + corner.height)).toBe(792);
+  expect(corner.width).toBeLessThan(640);
+  expect(corner.height).toBeLessThan(400);
+
+  // Left edge, mid-height: a full-height column, not too wide.
+  gx = corner.x + 20;
+  gy = corner.y + corner.height - 60;
+  await page.mouse.move(gx, gy);
+  await page.mouse.down();
+  await page.mouse.move(2, 400, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const column = await box(page);
+  expect(Math.round(column.x)).toBe(8);
+  expect(Math.round(column.y)).toBe(8);
+  expect(Math.round(column.height)).toBe(784);
+  expect(column.width).toBeLessThanOrEqual(480);
+
+  // The snap rides along with the per-chat memory.
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("cc.fabCard.chats") ?? "{}")["sess-A"]);
+  expect(kept.snap).toBe("w");
+});
+
 test("Revise opens its preset menu over the draft editor", async ({ page }) => {
   await mountFab(page);
   await page.locator(".fab-dial-fab").click();

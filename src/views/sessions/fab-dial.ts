@@ -11,6 +11,7 @@ import type { PreviewController } from "./preview-panel";
 import type { Unlisten } from "../../shared/transport";
 import { watchDrafts } from "./fab-dial-drafts-watch";
 import { CardWindow, type CardRect } from "./fab-card-window";
+import type { SnapZone } from "./fab-card-snap";
 import { forgetCard, recallCard, rememberCard } from "./fab-card-memory";
 import "./fab-dial.css";
 
@@ -68,7 +69,7 @@ class FabDial implements FabDialHandle {
     this.deps = deps;
     this.host = document.createElement("div");
     this.host.className = "fab-dial-host";
-    this.cardWindow = new CardWindow(this.host, (rect) => this.remember(rect));
+    this.cardWindow = new CardWindow(this.host, (rect, snap) => this.remember(rect, snap));
     this.host.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
     // Auto-open predicate lives in fab-dial-drafts-watch.ts; this just wires
@@ -147,7 +148,7 @@ class FabDial implements FabDialHandle {
       // Coming back to a chat is not an open; the card is simply still there.
       this.painted = "card";
     }
-    this.cardWindow.setRect(kept?.rect ?? null);
+    this.cardWindow.setRect(kept?.rect ?? null, kept?.snap ?? null);
     this.attach();
     this.render();
   }
@@ -178,11 +179,11 @@ class FabDial implements FabDialHandle {
     this.panel = panel;
     this.surface = "card";
     this.render();
-    this.remember(this.cardWindow.getRect());
+    this.remember(this.cardWindow.getRect(), this.cardWindow.getSnap());
   }
 
-  private remember(rect: CardRect | null): void {
-    if (this.surface === "card" && this.sessionId) rememberCard(this.sessionId, this.panel, rect);
+  private remember(rect: CardRect | null, snap: SnapZone | null): void {
+    if (this.surface === "card" && this.sessionId) rememberCard(this.sessionId, this.panel, rect, snap);
   }
 
   private onClick = (ev: MouseEvent): void => {
