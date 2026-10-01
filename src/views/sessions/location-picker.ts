@@ -7,6 +7,17 @@ import { restoreFocus } from "./restore-focus";
 import type { ProjectGroup, ClaudeMdScope } from "../../types/ipc.generated";
 import "./location-picker.css";
 
+/// Shared by resolveRememberedLocation and openLocationModal's initial
+/// worktree: the project's own path/name unless last_worktree_path matches
+/// one of its worktrees, in which case that worktree wins.
+function rememberedWorktree(project: ProjectGroup): { path: string; name: string } {
+  if (project.last_worktree_path) {
+    const match = project.worktrees.find((w) => w.path === project.last_worktree_path);
+    if (match) return { path: match.path, name: match.name };
+  }
+  return { path: project.path, name: project.name };
+}
+
 /// Replaces the direct worktree-picker call in the project picker's row
 /// click for EVERY project (not just ones with worktrees): resolves a
 /// worktree (reusing the existing new/existing/default sub-picker
@@ -16,19 +27,16 @@ import "./location-picker.css";
 /// CLAUDE.md) - same auto-skip principle the worktree picker already used.
 /// The favourites fast path (keys 1-9) deliberately skips this whole modal,
 /// so it needs the location the modal WOULD have pre-selected without any UI
-/// or IPC. Both fields are already on ProjectGroup, persisted by
-/// persistAndFinish below, so this re-reads the same remembered choice rather
-/// than deriving a second answer that could disagree with it.
+/// or IPC. It shares rememberedWorktree with openLocationModal's own initial
+/// pick, so the two cannot drift apart - only the start-folder join below is
+/// unique to this path, since the modal's own path uses the user's live
+/// scope selection instead of the persisted one.
 ///
 /// Does NOT re-scan for CLAUDE.md files: a project the user has opened before
 /// has last_start_folder_rel set, and one they have not falls back to the
 /// worktree root, which is exactly what the modal defaults to on a first open.
 export function resolveRememberedLocation(project: ProjectGroup): { path: string; name: string } {
-  let wt = { path: project.path, name: project.name };
-  if (project.last_worktree_path) {
-    const match = project.worktrees.find((w) => w.path === project.last_worktree_path);
-    if (match) wt = { path: match.path, name: match.name };
-  }
+  const wt = rememberedWorktree(project);
   const rel = project.last_start_folder_rel;
   if (!rel) return wt;
   return { path: `${wt.path}\\${rel.replace(/\//g, "\\")}`, name: wt.name };
@@ -52,15 +60,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
       resolve(val);
     };
 
-    const resolveInitialWorktree = (): { path: string; name: string } => {
-      if (project.last_worktree_path) {
-        const match = project.worktrees.find((w) => w.path === project.last_worktree_path);
-        if (match) return { path: match.path, name: match.name };
-      }
-      return { path: project.path, name: project.name };
-    };
-
-    let currentWt = resolveInitialWorktree();
+    let currentWt = rememberedWorktree(project);
     let scopes: ClaudeMdScope[] | null = null;
     let scopesError: string | null = null;
     let currentScopeRel = "";

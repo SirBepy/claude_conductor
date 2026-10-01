@@ -216,15 +216,20 @@ test.describe("view-harness / project picker favourites rail", () => {
 
   test("ctrl+number opens the slot, skipping the Location step", async ({ page }) => {
     // fibo has a worktree AND more than one CLAUDE.md scope, so the normal
-    // click path would stop at the Location card. The shortcut must not.
+    // click path would stop at the Location card. The shortcut must not. It
+    // also has last_worktree_path/last_start_folder_rel set, so this doubles
+    // as the resolved-path regression guard from todo 986: the fast path and
+    // the Location modal's own pre-selection share one lookup
+    // (rememberedWorktree in location-picker.ts) and must not diverge.
+    const FIBO = proj("p-fib", "fibo", "C:/Projects/fibo", {
+      worktrees: [{ path: "C:/Projects/fibo/wt-a", name: "wt-a", tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }],
+      last_worktree_path: "C:/Projects/fibo/wt-a",
+      last_start_folder_rel: "packages/app",
+    });
     await mountView(page, {
       invoke: {
         ...BASE_INVOKE,
-        list_project_groups: [
-          proj("p-fib", "fibo", "C:/Projects/fibo", {
-            worktrees: [{ path: "C:/Projects/fibo/wt-a", name: "wt-a", tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }],
-          }),
-        ],
+        list_project_groups: [FIBO],
         list_claude_md_scopes: [
           { rel_path: "", label: "Repo root", nested: false },
           { rel_path: "packages/app", label: "packages/app", nested: true },
@@ -242,6 +247,17 @@ test.describe("view-harness / project picker favourites rail", () => {
 
     await expect(page.locator(".project-picker-modal")).toHaveCount(0);
     await expect(page.locator(".loc-picker-modal, .loc-field")).toHaveCount(0);
+
+    // The RESOLVED path, not just "no modal appeared" - calls the same
+    // production function the fast path itself invokes (project-picker.ts's
+    // openFavorite), so a future divergence between it and the modal's own
+    // pre-selection fails here instead of only showing up as a silent UI
+    // difference.
+    const resolved = await page.evaluate(async (project) => {
+      const mod = await import("/views/sessions/location-picker.ts");
+      return mod.resolveRememberedLocation(project as never);
+    }, FIBO);
+    expect(resolved).toEqual({ path: "C:/Projects/fibo/wt-a\\packages\\app", name: "wt-a" });
   });
 
   test("a bare number key is always a literal character, even once the search box has text", async ({ page }) => {
