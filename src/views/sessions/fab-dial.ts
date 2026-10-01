@@ -10,7 +10,8 @@ import { mountDraftsPanel, type DraftsPanelHandle } from "./drafts-panel";
 import type { PreviewController } from "./preview-panel";
 import type { Unlisten } from "../../shared/transport";
 import { watchDrafts } from "./fab-dial-drafts-watch";
-import { CardWindow } from "./fab-card-window";
+import { CardWindow, type CardRect } from "./fab-card-window";
+import { forgetCard, recallCard, rememberCard } from "./fab-card-memory";
 import "./fab-dial.css";
 
 /** What the card can hold. Preview is reachable from the dial but never lives
@@ -47,6 +48,8 @@ class FabDial implements FabDialHandle {
   private host: HTMLElement;
   private deps: FabDialDeps;
   private surface: Surface = "rest";
+  /** What the last render painted, so only a real open plays the entrance. */
+  private painted: Surface = "rest";
   private panel: CardPanel = "ask";
   private sessionId: string | null = null;
   private cwd: string | null = null;
@@ -65,7 +68,7 @@ class FabDial implements FabDialHandle {
     this.deps = deps;
     this.host = document.createElement("div");
     this.host.className = "fab-dial-host";
-    this.cardWindow = new CardWindow(this.host);
+    this.cardWindow = new CardWindow(this.host, (rect) => this.remember(rect));
     this.host.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
     // Auto-open predicate lives in fab-dial-drafts-watch.ts; this just wires
@@ -134,9 +137,17 @@ class FabDial implements FabDialHandle {
       this.host.remove();
       return;
     }
-    // Always land closed: a card carried across a switch would be showing the
-    // previous chat's threads. render() remounts the body at the new scope.
-    this.surface = "rest";
+    // Land the way he left THIS chat: its own card, where he parked it, or
+    // closed. render() remounts the body at the new scope, so nothing from the
+    // previous chat's card carries over.
+    const kept = recallCard(sessionId);
+    this.surface = kept ? "card" : "rest";
+    if (kept) {
+      this.panel = kept.panel;
+      // Coming back to a chat is not an open; the card is simply still there.
+      this.painted = "card";
+    }
+    this.cardWindow.setRect(kept?.rect ?? null);
     this.attach();
     this.render();
   }
@@ -158,6 +169,7 @@ class FabDial implements FabDialHandle {
 
   close(): void {
     if (this.surface === "rest") return;
+    if (this.surface === "card" && this.sessionId) forgetCard(this.sessionId);
     this.surface = "rest";
     this.render();
   }
@@ -166,6 +178,11 @@ class FabDial implements FabDialHandle {
     this.panel = panel;
     this.surface = "card";
     this.render();
+    this.remember(this.cardWindow.getRect());
+  }
+
+  private remember(rect: CardRect | null): void {
+    if (this.surface === "card" && this.sessionId) rememberCard(this.sessionId, this.panel, rect);
   }
 
   private onClick = (ev: MouseEvent): void => {
@@ -229,9 +246,14 @@ class FabDial implements FabDialHandle {
     this.disposeBodies();
     if (this.surface === "card") {
       const card = this.host.querySelector<HTMLElement>(".fab-card");
-      if (card) this.cardWindow.bind(card);
+      if (card) {
+        // Spine switches re-render too; only an actual open earns the entrance.
+        if (this.painted !== "card") card.classList.add("is-entering");
+        this.cardWindow.bind(card);
+      }
       this.mountBody();
     }
+    this.painted = this.surface;
     // The FAB node above is brand new, so the last measurement is stale.
     this.syncLift();
   }

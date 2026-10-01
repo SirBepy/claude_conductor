@@ -147,8 +147,32 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 10px;
-  overflow: hidden;
+  /* No overflow clip here: the resize strips reach past the border so an edge
+     is easy to hit. The spine and body round their own corners instead. */
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.62);
+  transition: box-shadow 180ms ease-out, border-color 180ms ease-out;
+}
+
+/* Picked up: the card lifts while it moves, then settles when dropped. */
+.fab-card.is-moving {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.72);
+}
+
+.fab-card.is-moving,
+.fab-card.is-resizing {
+  user-select: none;
+}
+
+.fab-card.is-entering {
+  animation: fab-card-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fab-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
 }
 
 .fab-spine {
@@ -158,44 +182,167 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 4px 0 7px;
+  padding: 5px 0 7px;
   background: var(--color-background);
   border-right: 1px solid var(--color-border);
+  border-radius: 9px 0 0 9px;
   cursor: grab;
   touch-action: none;
 }
 
-.fab-spine-grip {
-  color: var(--color-text-muted);
-  opacity: 0.6;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.fab-card.is-dragging,
-.fab-card.is-dragging .fab-spine {
+.fab-card.is-moving .fab-spine {
   cursor: grabbing;
-  user-select: none;
 }
 
-/* Invisible grab strips on every edge and corner; corners sit above edges. */
+/* The obvious place to grab. The whole spine drags; this just says so. */
+.fab-spine-grip {
+  width: 32px;
+  height: 26px;
+  margin-bottom: 2px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-surface-alt) 55%, transparent);
+  color: var(--color-text-muted);
+  opacity: 0.75;
+  font-size: 1.4rem;
+  transition: background-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
+}
+
+.fab-spine:hover .fab-spine-grip,
+.fab-card.is-moving .fab-spine-grip {
+  opacity: 1;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+
+/* ── Resize strips ──
+   Each strip straddles the border, mostly OUTSIDE it (8px out, 3px in), so
+   the target is generous without stealing the body's scrollbar. Corners sit
+   above edges. The visible cue is a 2px accent line drawn exactly on the
+   border, grown from the middle; the short delay keeps it from flickering
+   when the pointer just crosses an edge on its way somewhere else. */
 .fab-rz {
   position: absolute;
   z-index: 2;
   touch-action: none;
 }
 
-.fab-rz-n, .fab-rz-s { left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
-.fab-rz-e, .fab-rz-w { top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
-.fab-rz-n { top: 0; }
-.fab-rz-s { bottom: 0; }
-.fab-rz-e { right: 0; }
-.fab-rz-w { left: 0; }
-.fab-rz-ne, .fab-rz-nw, .fab-rz-se, .fab-rz-sw { width: 12px; height: 12px; z-index: 3; }
-.fab-rz-nw { top: 0; left: 0; cursor: nwse-resize; }
-.fab-rz-se { bottom: 0; right: 0; cursor: nwse-resize; }
-.fab-rz-ne { top: 0; right: 0; cursor: nesw-resize; }
-.fab-rz-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.fab-rz-n, .fab-rz-s { left: 16px; right: 16px; height: 11px; cursor: ns-resize; }
+.fab-rz-e, .fab-rz-w { top: 16px; bottom: 16px; width: 11px; cursor: ew-resize; }
+.fab-rz-n { top: -8px; }
+.fab-rz-s { bottom: -8px; }
+.fab-rz-e { right: -8px; }
+.fab-rz-w { left: -8px; }
+
+.fab-rz-ne, .fab-rz-nw, .fab-rz-se, .fab-rz-sw { width: 24px; height: 24px; z-index: 3; }
+.fab-rz-nw { top: -8px; left: -8px; cursor: nwse-resize; }
+.fab-rz-se { bottom: -8px; right: -8px; cursor: nwse-resize; }
+.fab-rz-ne { top: -8px; right: -8px; cursor: nesw-resize; }
+.fab-rz-sw { bottom: -8px; left: -8px; cursor: nesw-resize; }
+
+.fab-rz::after {
+  content: "";
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease-out,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fab-rz:hover::after,
+.fab-rz.is-active::after {
+  opacity: 1;
+  transform: none;
+  transition-delay: 70ms;
+}
+
+.fab-rz.is-active::after {
+  transition-delay: 0ms;
+}
+
+/* Edges: a line over the 1px border (offset 7px = the 8px overhang, less 1px
+   so the 2px line centres on the border). */
+.fab-rz-n::after, .fab-rz-s::after {
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  transform: scaleX(0.3);
+}
+
+.fab-rz-n::after { top: 7px; }
+.fab-rz-s::after { bottom: 7px; }
+
+.fab-rz-e::after, .fab-rz-w::after {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  transform: scaleY(0.3);
+}
+
+.fab-rz-e::after { right: 7px; }
+.fab-rz-w::after { left: 7px; }
+
+/* Corners: an L bracket that follows the card's 10px rounding. */
+.fab-rz-nw::after, .fab-rz-ne::after, .fab-rz-se::after, .fab-rz-sw::after {
+  width: 22px;
+  height: 22px;
+  border: 0 solid var(--color-primary);
+  transform: scale(0.6);
+}
+
+.fab-rz-nw::after {
+  top: 7px;
+  left: 7px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+  border-top-left-radius: 11px;
+  transform-origin: top left;
+}
+
+.fab-rz-ne::after {
+  top: 7px;
+  right: 7px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+  border-top-right-radius: 11px;
+  transform-origin: top right;
+}
+
+.fab-rz-se::after {
+  bottom: 7px;
+  right: 7px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+  border-bottom-right-radius: 11px;
+  transform-origin: bottom right;
+}
+
+.fab-rz-sw::after {
+  bottom: 7px;
+  left: 7px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+  border-bottom-left-radius: 11px;
+  transform-origin: bottom left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab-card,
+  .fab-spine-grip,
+  .fab-rz::after {
+    transition: none;
+  }
+
+  .fab-card.is-entering {
+    animation: none;
+  }
+}
 
 .fab-spine-btn {
   width: 28px;
@@ -239,6 +386,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border-radius: 0 9px 9px 0;
 }
 
 /* ── Phone ───────────────────────────────────────────────────────────────── */

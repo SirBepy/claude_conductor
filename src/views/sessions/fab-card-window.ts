@@ -88,9 +88,12 @@ export class CardWindow {
   /** null until the first gesture, meaning "centred at the stored size". */
   private rect: CardRect | null = null;
   private obs: ResizeObserver | null = null;
+  private onCommit: (rect: CardRect) => void;
 
-  constructor(host: HTMLElement) {
+  /** `onCommit` fires once per finished drag or resize, never per frame. */
+  constructor(host: HTMLElement, onCommit: (rect: CardRect) => void = () => {}) {
     this.host = host;
+    this.onCommit = onCommit;
     if (typeof ResizeObserver !== "undefined") {
       this.obs = new ResizeObserver(() => this.apply());
       this.obs.observe(host);
@@ -106,6 +109,15 @@ export class CardWindow {
     );
     card.addEventListener("pointerdown", this.onPointerDown);
     this.apply();
+  }
+
+  getRect(): CardRect | null {
+    return this.rect;
+  }
+
+  /** null re-centres at the stored size. Applied on the next bind. */
+  setRect(rect: CardRect | null): void {
+    this.rect = rect;
   }
 
   destroy(): void {
@@ -172,7 +184,8 @@ export class CardWindow {
     const sy = ev.clientY;
     const target = ev.target as Element;
     target.setPointerCapture?.(ev.pointerId);
-    card.classList.add("is-dragging");
+    card.classList.add(gesture.kind === "move" ? "is-moving" : "is-resizing");
+    rz?.classList.add("is-active");
 
     const move = (e: PointerEvent): void => {
       const dx = e.clientX - sx;
@@ -188,8 +201,11 @@ export class CardWindow {
       target.removeEventListener("pointermove", move as EventListener);
       target.removeEventListener("pointerup", up as EventListener);
       target.removeEventListener("pointercancel", up as EventListener);
-      card.classList.remove("is-dragging");
-      if (gesture.kind === "resize" && this.rect) saveSize(this.rect);
+      card.classList.remove("is-moving", "is-resizing");
+      rz?.classList.remove("is-active");
+      if (!this.rect) return;
+      if (gesture.kind === "resize") saveSize(this.rect);
+      this.onCommit(this.rect);
     };
     target.addEventListener("pointermove", move as EventListener);
     target.addEventListener("pointerup", up as EventListener);

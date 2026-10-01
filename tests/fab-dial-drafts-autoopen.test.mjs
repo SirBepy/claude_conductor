@@ -52,6 +52,9 @@ describe("a new draft opens the FAB's Drafts card", () => {
 
   beforeEach(async () => {
     document.body.innerHTML = "";
+    // Each chat remembers its open card in localStorage; a card one test
+    // opened must not come back open in the next.
+    localStorage.clear();
     opened.length = 0;
     listeners.clear();
     pane = document.createElement("div");

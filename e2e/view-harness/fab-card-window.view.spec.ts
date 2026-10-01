@@ -45,6 +45,7 @@ async function mountFab(page: Page): Promise<void> {
   await page.evaluate(
     async ({ draft, viewer }) => {
       localStorage.removeItem("cc.fabCard.size");
+      localStorage.removeItem("cc.fabCard.chats");
       const tauri = (window as any).__TAURI__;
       const passthrough = tauri.core.invoke;
       tauri.core.invoke = (cmd: string, args: any) =>
@@ -63,6 +64,8 @@ async function mountFab(page: Page): Promise<void> {
 }
 
 async function box(page: Page) {
+  // The open plays a short rise-in; measure the settled card, not a frame of it.
+  await page.locator(".fab-card").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   const b = await page.locator(".fab-card").boundingBox();
   if (!b) throw new Error("no card");
   return b;
@@ -102,6 +105,34 @@ test("the card opens centred, drags by its spine and resizes from a corner", asy
   // The new size is what the next launch opens at.
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("cc.fabCard.size") ?? "null"));
   expect(saved).toEqual({ w: Math.round(grown.width), h: Math.round(grown.height) });
+});
+
+test("a chat keeps its card where it was left, and closing it forgets", async ({ page }) => {
+  await mountFab(page);
+  await page.locator(".fab-dial-fab").click();
+  await page.locator('[data-dial="todos"]').click();
+  const start = await box(page);
+  const grabX = start.x + 20;
+  const grabY = start.y + start.height - 80;
+  await page.mouse.move(grabX, grabY);
+  await page.mouse.down();
+  await page.mouse.move(grabX + 200, grabY - 120, { steps: 5 });
+  await page.mouse.up();
+  const parked = await box(page);
+
+  // Away to a chat with no card, then back.
+  await page.evaluate(() => (window as any).__fab.setSessionScope("sess-B", "/proj"));
+  await expect(page.locator(".fab-card")).toHaveCount(0);
+  await page.evaluate(() => (window as any).__fab.setSessionScope("sess-A", "/proj"));
+  await expect(page.locator(".fab-spine-btn.on")).toHaveAttribute("data-spine", "todos");
+  const back = await box(page);
+  expect(Math.round(back.x)).toBe(Math.round(parked.x));
+  expect(Math.round(back.y)).toBe(Math.round(parked.y));
+
+  await page.locator("[data-card-close]").click();
+  await page.evaluate(() => (window as any).__fab.setSessionScope("sess-B", "/proj"));
+  await page.evaluate(() => (window as any).__fab.setSessionScope("sess-A", "/proj"));
+  await expect(page.locator(".fab-card")).toHaveCount(0);
 });
 
 test("Revise opens its preset menu over the draft editor", async ({ page }) => {
