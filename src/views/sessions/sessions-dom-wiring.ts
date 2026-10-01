@@ -4,7 +4,7 @@
 
 import { invoke } from "../../shared/ipc";
 import * as shortcuts from "../../shared/shortcuts";
-import { renderPreview, type PreviewController } from "./preview-panel";
+import { mountPreviewTab, type PreviewController } from "./preview-panel";
 import { mountFabDial } from "./fab-dial";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumeParkedDraft } from "./pending-flow";
@@ -45,25 +45,20 @@ function discardStuckPending(pane: HTMLElement): void {
   })();
 }
 
-/** Docked HTML preview panel (ai_todo 138): a snapshot store rendered as a
- * right-rail sibling of the pane, scoped to whichever chat is active (see
- * state.ts's setActiveSession -> previewController.setSessionScope). */
+/** The chat pane's windows: Ask / Todos / Drafts / Preview, summoned from the
+ * FAB and floating, snapped or docked beside the chat (Joe, 2026-10-01).
+ * Preview's window is the old right-hand rail, so its controller is what the
+ * rest of the view still drives Preview through. Owns its own host element
+ * because active-session.ts rewrites the pane's innerHTML on every switch. */
 export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewController | null {
-  const previewRoot = root.querySelector<HTMLElement>("#preview-panel-host");
-  const previewController: PreviewController | null =
-    previewRoot ? renderPreview(previewRoot, { mode: "panel" }) : null;
-  state.previewController = previewController;
-  previewController?.setSessionScope(state.selectedId);
-
-  // Ask / Todos / Preview, summoned from the chat pane rather than docked
-  // (Joe, 2026-08-24). Owns its own host element because active-session.ts
-  // rewrites the pane's innerHTML on every switch.
   state.fabDial = mountFabDial(pane, {
     onDraft: (text) => {
       state.composer?.setDraftText(text, false);
     },
-    preview: previewController,
+    mountPreview: mountPreviewTab,
   });
+  const previewController = state.fabDial.previewController();
+  state.previewController = previewController;
   state.fabDial.setSessionScope(state.selectedId, null);
   initHeaderMerge(root);
   state.launchNewChatCallback = (project, config) => { void launchNewSession(pane, project, config); };

@@ -6,6 +6,7 @@ vi.mock("../src/views/sessions/ask-panel", () => ({ mountAskPanel: () => ({ setC
 vi.mock("../src/views/sessions/todos-panel", () => ({ mountTodosPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/drafts-panel", () => ({ mountDraftsPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
 
+const stubPreview = () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} });
 const { mountFabDial } = await import("../src/views/sessions/fab-dial.ts");
 
 describe("fab dial survives a pane rebuild", () => {
@@ -17,7 +18,7 @@ describe("fab dial survives a pane rebuild", () => {
   });
 
   it("mounts a host once a session is scoped", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, preview: null });
+    const fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     expect(pane.querySelector(".fab-dial-host")).not.toBeNull();
     expect(pane.querySelector("[data-fab-toggle]")).not.toBeNull();
@@ -27,7 +28,7 @@ describe("fab dial survives a pane rebuild", () => {
   // setSessionScope has run, which orphans the host - the reason the dial was
   // invisible in the shipped app despite being mounted.
   it("reattaches after pane.innerHTML wipes it", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, preview: null });
+    const fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
 
     pane.innerHTML = `<div class="session-messages"></div>`;
@@ -39,7 +40,7 @@ describe("fab dial survives a pane rebuild", () => {
   });
 
   it("stays gone when no session is scoped", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, preview: null });
+    const fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
     fab.setSessionScope(null, null);
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).toBeNull();

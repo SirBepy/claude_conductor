@@ -210,25 +210,27 @@ export async function mountSessionsList(
 export interface SessionsLayoutOptions {
   /** Add the `.view-header` band (back button, title, dial host, kebab). */
   header?: boolean;
-  /** Open the docked preview panel instead of leaving it closed. */
+  /** Open Preview's window instead of leaving it closed. */
   openPanel?: boolean;
-  /** Mount the chat pane's FAB dial, wired to the docked preview controller. */
+  /** Accepted for older callers; the FAB always mounts now, since Preview
+   *  lives in its windows. */
   fab?: boolean;
 }
 
-/** Rebuilds `.sessions-layout` from template.ts markup and docks a preview panel
- *  into it: the sessions view is not the default route and booting it needs a
- *  long tail of mocks. The stylesheet is global, so the real cascade applies.
- *  Call {@link mountView} (with `list_previews` mocked) first. */
+/** Rebuilds `.sessions-layout` from template.ts markup and mounts the chat
+ *  pane's FAB, whose windows host Preview: the sessions view is not the
+ *  default route and booting it needs a long tail of mocks. The stylesheet is
+ *  global, so the real cascade applies. Call {@link mountView} (with
+ *  `list_previews` mocked) first. Exposes `window.__fab` and
+ *  `window.__preview` for specs that drive them directly. */
 export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOptions = {}): Promise<void> {
   const cfg = {
     header: opts.header ?? false,
     openPanel: opts.openPanel ?? false,
-    fab: opts.fab ?? false,
   };
   await page.evaluate(async (o) => {
     const pv = await import("/views/sessions/preview-panel.ts");
-    document.querySelector("#preview-panel-host")?.remove();
+    const { mountFabDial } = await import("/views/sessions/fab-dial.ts");
 
     const view = document.createElement("div");
     view.className = "view view-sessions";
@@ -246,22 +248,19 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
       <div class="view-body sessions-layout" style="flex:1">
         <aside class="sessions-sidebar"></aside>
         <main class="session-pane" id="session-pane"></main>
-        <div id="preview-panel-host" hidden></div>
       </div>`;
     document.body.appendChild(view);
 
-    const host = view.querySelector<HTMLElement>("#preview-panel-host")!;
-    const controller = pv.renderPreview(host, { mode: "panel" });
-    controller.setSessionScope("sess-1");
+    const fab = mountFabDial(view.querySelector<HTMLElement>("#session-pane")!, {
+      onDraft: () => {},
+      mountPreview: pv.mountPreviewTab,
+    });
+    fab.setSessionScope("sess-1", "/proj");
+    const controller = fab.previewController();
     if (o.openPanel) controller.open();
-    if (o.fab) {
-      const { mountFabDial } = await import("/views/sessions/fab-dial.ts");
-      const fab = mountFabDial(view.querySelector<HTMLElement>("#session-pane")!, {
-        onDraft: () => {},
-        preview: controller,
-      });
-      fab.setSessionScope("sess-1", "/proj");
-    }
+    const w = window as unknown as Record<string, unknown>;
+    w.__fab = fab;
+    w.__preview = controller;
   }, cfg);
 }
 

@@ -15,12 +15,11 @@ import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
 import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
 import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./preview-panel-composer";
-import { mountRail, type RailController, type RailMode, type RailTabDeps, type RailTabHandle } from "./rail-panel";
+import { mountPreviewWindowShell, type RailController, type RailTabDeps, type RailTabHandle } from "./rail-panel";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
-export type { RailMode as PreviewMode } from "./rail-panel";
-/** The rail is what callers hold onto; the name predates the tab split. */
+/** What callers drive Preview through, in a pane window or the pop-out. */
 export type PreviewController = RailController;
 
 class PreviewTab implements RailTabHandle {
@@ -370,15 +369,10 @@ class PreviewTab implements RailTabHandle {
   }
 }
 
-/** The rail's Preview tab, mounted by rail-panel.ts into its own tab body. */
+/** Preview's body, mounted into a pane window (pane-windows/panels.ts) or the
+ *  pop-out window's shell. */
 export function mountPreviewTab(root: HTMLElement, deps: RailTabDeps): RailTabHandle {
   return new PreviewTab(root, deps);
-}
-
-/** Rail with the Preview tab wired in; `mode: "window"` is the todo 290
- *  pop-out, mounted via `mountPreviewWindow` below. */
-export function renderPreview(root: HTMLElement, opts: { mode: RailMode }): PreviewController {
-  return mountRail(root, { mode: opts.mode, mountPreview: mountPreviewTab });
 }
 
 /** Pop-out window bootstrap (todo 290), called from main.ts's boot branch.
@@ -387,7 +381,7 @@ export function renderPreview(root: HTMLElement, opts: { mode: RailMode }): Prev
 export async function mountPreviewWindow(root: HTMLElement, sessionId: string): Promise<PreviewController> {
   const { refreshSessions } = await import("./sidebar");
   await refreshSessions();
-  const controller = renderPreview(root, { mode: "window" });
+  const controller = mountPreviewWindowShell(root, mountPreviewTab);
   controller.setSessionScope(sessionId);
   controller.open();
   return controller;

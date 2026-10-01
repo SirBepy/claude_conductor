@@ -1,0 +1,519 @@
+/* The chat pane's in-app windows (pane-windows/): a title bar, a spine of
+   tabs when a window holds more than one, and the panel body. Floating and
+   corner windows get inline left/top/width/height from manager.ts; docked
+   ones fill their side, with the pane padded so the chat itself shrinks. */
+
+/* Click-through, like the host: only the windows themselves take input. */
+.fab-dial-host > .pw-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pw-layer > .pw-window {
+  pointer-events: auto;
+}
+
+/* The prompt card in a read-only pane spans the pane; keep it in the chat
+   column, clear of the docks. */
+.session-pane #prompt-card-host.prompt-card-host--pane {
+  left: calc(var(--pw-dock-l, 0px) + 12px);
+  right: calc(var(--pw-dock-r, 0px) + 12px);
+}
+
+/* ── The window ───────────────────────────────────────────────────────────── */
+/* right/bottom/size are only the pre-measure fallback; the phone block below
+   lays it out as a sheet instead. */
+.fab-card {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 400px;
+  height: 390px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  /* No overflow clip: the resize strips reach past the border so an edge is
+     easy to hit. The bar and the body round their own corners instead. */
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.62);
+  transition: box-shadow 180ms ease-out, border-color 180ms ease-out;
+}
+
+/* An author display:flex above beats the UA [hidden] rule. */
+.fab-card[hidden] {
+  display: none;
+}
+
+/* Docked: part of the layout now, so it sheds the floating chrome. */
+.fab-card[data-placement="dock"] {
+  border-radius: 0;
+  border-top: none;
+  border-bottom: none;
+  box-shadow: none;
+}
+
+.fab-card[data-placement="dock"][data-side="left"] { border-left: none; }
+.fab-card[data-placement="dock"][data-side="right"] { border-right: none; }
+
+/* Picked up: the window lifts while it moves, then settles when dropped. */
+.fab-card.is-moving {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.72);
+}
+
+.fab-card.is-moving,
+.fab-card.is-resizing {
+  user-select: none;
+}
+
+/* Dropped into a corner or a dock: glide the last stretch instead of jumping. */
+.fab-card.is-snapping {
+  transition:
+    left 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    top 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms ease-out,
+    border-color 180ms ease-out;
+}
+
+/* A tab or window held over this one's bar or spine merges into it. */
+.fab-card.pw-drop-target {
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-primary) 35%, transparent),
+    0 16px 44px rgba(0, 0, 0, 0.62);
+}
+
+/* ── Title bar ────────────────────────────────────────────────────────────── */
+/* The whole empty stretch drags; the grip only says so. */
+.pw-bar {
+  flex: none;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px 0 6px;
+  background: var(--color-background);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 9px 9px 0 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.fab-card[data-placement="dock"] .pw-bar {
+  border-radius: 0;
+}
+
+.fab-card.is-moving .pw-bar {
+  cursor: grabbing;
+}
+
+.pw-grip {
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+  font-size: 1.25rem;
+  transition: background-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
+}
+
+.pw-bar:hover .pw-grip,
+.fab-card.is-moving .pw-grip {
+  opacity: 1;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+
+.pw-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pw-title i {
+  color: var(--color-primary);
+  font-size: 0.9rem;
+}
+
+.pw-grow {
+  flex: 1;
+  align-self: stretch;
+}
+
+.pw-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.pw-btn:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+.pw-btn.pw-x:hover {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  color: var(--color-danger);
+}
+
+/* ── Spine + body ─────────────────────────────────────────────────────────── */
+.pw-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.fab-spine {
+  flex: none;
+  width: 40px;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 0;
+  background: var(--color-background);
+  border-right: 1px solid var(--color-border);
+  border-radius: 0 0 0 9px;
+}
+
+.fab-card.has-spine .fab-spine {
+  display: flex;
+}
+
+.fab-spine-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  flex: none;
+  touch-action: none;
+}
+
+.fab-spine-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+
+.fab-spine-btn.on {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.fab-card-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0 0 9px 9px;
+}
+
+.fab-card.has-spine .fab-card-body {
+  border-radius: 0 0 9px 0;
+}
+
+.fab-card[data-placement="dock"] .fab-card-body,
+.fab-card[data-placement="dock"] .fab-spine {
+  border-radius: 0;
+}
+
+.pw-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pw-panel[hidden] {
+  display: none;
+}
+
+.pw-popped-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.pw-popped-note i { font-size: 1.6rem; opacity: 0.6; }
+.pw-popped-note p { margin: 0; font-size: 0.8rem; }
+
+/* ── Resize strips ──
+   Each strip straddles the border, mostly OUTSIDE it (8px out, 3px in), so
+   the target is generous without stealing the body's scrollbar. Corners sit
+   above edges. The visible cue is a 2px accent line drawn exactly on the
+   border, grown from the middle; the short delay keeps it from flickering
+   when the pointer just crosses an edge on its way somewhere else. */
+.fab-rz {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.fab-rz-n, .fab-rz-s { left: 16px; right: 16px; height: 11px; cursor: ns-resize; }
+.fab-rz-e, .fab-rz-w { top: 16px; bottom: 16px; width: 11px; cursor: ew-resize; }
+.fab-rz-n { top: -8px; }
+.fab-rz-s { bottom: -8px; }
+.fab-rz-e { right: -8px; }
+.fab-rz-w { left: -8px; }
+
+.fab-rz-ne, .fab-rz-nw, .fab-rz-se, .fab-rz-sw { width: 24px; height: 24px; z-index: 3; }
+.fab-rz-nw { top: -8px; left: -8px; cursor: nwse-resize; }
+.fab-rz-se { bottom: -8px; right: -8px; cursor: nwse-resize; }
+.fab-rz-ne { top: -8px; right: -8px; cursor: nesw-resize; }
+.fab-rz-sw { bottom: -8px; left: -8px; cursor: nesw-resize; }
+
+/* Docked: only the inner edge resizes, and it is the split's divider. */
+.fab-card[data-placement="dock"] .fab-rz { display: none; }
+.fab-card[data-placement="dock"][data-side="left"] .fab-rz-e,
+.fab-card[data-placement="dock"][data-side="right"] .fab-rz-w {
+  display: block;
+  top: 0;
+  bottom: 0;
+}
+
+.fab-card[data-placement="dock"][data-side="left"] .fab-rz-e { right: -6px; width: 9px; }
+.fab-card[data-placement="dock"][data-side="right"] .fab-rz-w { left: -6px; width: 9px; }
+
+.fab-rz::after {
+  content: "";
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease-out,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fab-rz:hover::after,
+.fab-rz.is-active::after {
+  opacity: 1;
+  transform: none;
+  transition-delay: 70ms;
+}
+
+.fab-rz.is-active::after {
+  transition-delay: 0ms;
+}
+
+/* Edges: a line over the 1px border (offset 7px = the 8px overhang, less 1px
+   so the 2px line centres on the border). */
+.fab-rz-n::after, .fab-rz-s::after {
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  transform: scaleX(0.3);
+}
+
+.fab-rz-n::after { top: 7px; }
+.fab-rz-s::after { bottom: 7px; }
+
+.fab-rz-e::after, .fab-rz-w::after {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  transform: scaleY(0.3);
+}
+
+.fab-rz-e::after { right: 7px; }
+.fab-rz-w::after { left: 7px; }
+
+/* A dock divider's line sits on the seam: 6px overhang, less 1px. */
+.fab-card[data-placement="dock"][data-side="left"] .fab-rz-e::after { right: 5px; }
+.fab-card[data-placement="dock"][data-side="right"] .fab-rz-w::after { left: 5px; }
+
+/* Corners: an L bracket that follows the window's 10px rounding. */
+.fab-rz-nw::after, .fab-rz-ne::after, .fab-rz-se::after, .fab-rz-sw::after {
+  width: 22px;
+  height: 22px;
+  border: 0 solid var(--color-primary);
+  transform: scale(0.6);
+}
+
+.fab-rz-nw::after {
+  top: 7px;
+  left: 7px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+  border-top-left-radius: 11px;
+  transform-origin: top left;
+}
+
+.fab-rz-ne::after {
+  top: 7px;
+  right: 7px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+  border-top-right-radius: 11px;
+  transform-origin: top right;
+}
+
+.fab-rz-se::after {
+  bottom: 7px;
+  right: 7px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+  border-bottom-right-radius: 11px;
+  transform-origin: bottom right;
+}
+
+.fab-rz-sw::after {
+  bottom: 7px;
+  left: 7px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+  border-bottom-left-radius: 11px;
+  transform-origin: bottom left;
+}
+
+/* ── Drag feedback ────────────────────────────────────────────────────────── */
+/* Where a window will land while the pointer sits in a corner or dock zone.
+   Painted over the windows, since the one being dragged usually already
+   covers the zone it is about to land in. */
+.pw-layer > .fab-snap-ghost {
+  position: absolute;
+  z-index: 900;
+  pointer-events: none;
+  border-radius: 10px;
+  border: 1.5px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  opacity: 0;
+  transform: scale(0.97);
+  transition:
+    opacity 140ms ease-out,
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    left 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    top 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pw-layer > .fab-snap-ghost.is-on {
+  opacity: 1;
+  transform: none;
+}
+
+/* The tab being torn off, following the pointer. */
+.pw-layer > .pw-tab-ghost {
+  position: absolute;
+  z-index: 950;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+
+.pw-tab-ghost i { color: var(--color-primary); }
+
+.fab-card.is-entering {
+  animation: fab-card-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fab-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab-card,
+  .fab-card.is-snapping,
+  .pw-layer > .fab-snap-ghost,
+  .pw-grip,
+  .fab-rz::after {
+    transition: none;
+  }
+
+  .fab-card.is-entering {
+    animation: none;
+  }
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────── */
+/* One window at a time, as a sheet; Preview as a full cover, so a trip to it
+   keeps the transcript's scroll position. No drag, dock or tear-off. */
+@media (max-width: 768px) {
+  .fab-rz,
+  .pw-grip,
+  .pw-btn[data-pw-act="dock"],
+  .pw-btn[data-pw-act="popout"] {
+    display: none;
+  }
+
+  .pw-bar {
+    cursor: default;
+  }
+
+  .fab-card {
+    left: 10px;
+    right: 10px;
+    bottom: 14px;
+    width: auto;
+    max-width: none;
+    height: 62%;
+    min-height: 300px;
+  }
+
+  .fab-card[data-active="preview"] {
+    inset: 0;
+    height: auto;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .fab-card[data-active="preview"] .pw-bar,
+  .fab-card[data-active="preview"] .fab-card-body {
+    border-radius: 0;
+  }
+}

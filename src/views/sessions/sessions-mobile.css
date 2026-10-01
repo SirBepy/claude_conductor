@@ -46,20 +46,6 @@
     display: none;
   }
 
-  /* ── Preview: a full-screen cover, not a second page (Joe, 2026-09-04) ──
-     Covers rather than replaces, so the transcript keeps its scroll position.
-     `!important` beats applyWidth's inline width and preview-panel.css's
-     `display: none !important` under 860px; z-index clears .fab-dial-host's 30. */
-  .view-sessions[data-mobile-pane="chat"] #preview-panel-host:not([hidden]) {
-    display: flex !important;
-    position: absolute;
-    inset: 0;
-    z-index: 40;
-    flex: 1 1 100% !important;
-    min-width: 100%;
-    border-left: none;
-  }
-
   /* Nothing to drag against once the rail owns the whole screen, and pop-out
      would open an OS window on the desktop the phone is driving. The strip
      itself stays: its X is now the only way back to the chat. */

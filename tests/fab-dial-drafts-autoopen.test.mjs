@@ -36,6 +36,7 @@ vi.mock("../src/shared/transport", () => ({
   }),
 }));
 
+const stubPreview = () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} });
 const { mountFabDial } = await import("../src/views/sessions/fab-dial.ts");
 
 /** The constructor's listen() is awaited, so the callback lands a microtask
@@ -59,7 +60,7 @@ describe("a new draft opens the FAB's Drafts card", () => {
     listeners.clear();
     pane = document.createElement("div");
     document.body.appendChild(pane);
-    fab = mountFabDial(pane, { onDraft() {}, preview: null });
+    fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     await settle();
   });

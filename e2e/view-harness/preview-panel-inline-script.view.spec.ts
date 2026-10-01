@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mountView } from "./harness";
+import { mountSessionsLayout, mountView } from "./harness";
 
 // Regression for a bug where a pushed preview's inline <script> never ran in
 // the panel's iframe (srcdoc inherits+intersects the parent app's CSP; fixed
@@ -28,16 +28,9 @@ test.fixme("preview panel iframe executes a pushed snapshot's inline script", as
     },
   });
 
-  await page.evaluate(async () => {
-    const mod = await import("/views/sessions/preview-panel.ts");
-    const root = document.createElement("div");
-    root.id = "preview-panel-host";
-    document.body.appendChild(root);
-    const controller = mod.renderPreview(root, { mode: "panel" });
-    controller.setSessionScope("sess-1");
-    controller.open("snap-1");
-  });
+  await mountSessionsLayout(page);
+  await page.evaluate(() => (window as unknown as { __preview: { open(id: string): void } }).__preview.open("snap-1"));
 
-  const frame = page.frameLocator("#preview-panel-host iframe.pv-iframe");
+  const frame = page.frameLocator('.pw-window[data-active="preview"] iframe.pv-iframe');
   await expect(frame.locator("#stage p")).toHaveText("rendered");
 });

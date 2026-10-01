@@ -58,7 +58,7 @@ export function template() {
         <button
           class="smore-item"
           id="previewToggleBtn"
-          title="Toggle HTML preview panel"
+          title="Toggle the HTML preview window"
         >
           <i class="ph ph-monitor-play"></i>Preview
         </button>
@@ -80,7 +80,6 @@ export function template() {
         <main class="session-pane" id="session-pane">
           <div class="session-empty session-empty--setup"><i class="ph ph-spinner"></i><span>Setting up...</span></div>
         </main>
-        <div id="preview-panel-host" hidden></div>
       </div>
     </div>
   `;

@@ -1,5 +1,6 @@
-/* FAB + dial + floating card. Anchors to .session-pane, which is already
-   position:relative (sessions.css:91), so nothing outside this file moves. */
+/* FAB + dial. The windows they open live in pane-windows/pane-windows.css.
+   Anchors to .session-pane, which is already position:relative
+   (sessions.css:91), so nothing outside this file moves. */
 
 /* Overlay covers the pane but stays click-through; only the real controls
    take pointer events, so the transcript underneath keeps working. */
@@ -14,15 +15,24 @@
   pointer-events: auto;
 }
 
+/* Holds the dial and FAB without a box of its own, so both keep positioning
+   against the host. Paints after the window layer, so they sit on top. */
+.fab-dial-chrome {
+  display: contents;
+}
+
 /* ── The button ──────────────────────────────────────────────────────────── */
 /* Not `+`: that glyph already means "new chat" on .sessions-fab, and this
    button opens things that already exist. */
 /* --fab-lift is the composer's own height, written by syncLift() only when the
  * FAB's resting box actually intersects it. Without it the 40px circle lands
  * on the composer's Send split and wins the hit test at z-index 30. */
+/* --pw-dock-r is a right-docked window's width (pane-windows/manager.ts):
+   the FAB rides the chat column's corner, never inside the dock. */
 .fab-dial-fab {
   position: absolute;
-  right: 14px;
+  z-index: 1000;
+  right: calc(var(--pw-dock-r, 0px) + 14px);
   bottom: calc(var(--fab-lift, 0px) + 14px);
   width: 40px;
   height: 40px;
@@ -51,16 +61,17 @@
   border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
-/* The card carries its own close, and a card dragged to the corner would
-   have the FAB sitting on top of its input row. */
-.fab-dial-host[data-surface="card"] .fab-dial-fab {
-  display: none;
+/* A window lying over the FAB's spot wins: its own footer buttons sit right
+   where the FAB rests. manager.ts sets the flag from real geometry. */
+.fab-dial-host[data-fab-covered]:not([data-surface="dial"]) .fab-dial-fab {
+  visibility: hidden;
 }
 
 /* ── The dial ────────────────────────────────────────────────────────────── */
 .fab-dial {
   position: absolute;
-  right: 14px;
+  z-index: 1000;
+  right: calc(var(--pw-dock-r, 0px) + 14px);
   bottom: calc(var(--fab-lift, 0px) + 62px);
   display: none;
   flex-direction: column-reverse;
@@ -94,13 +105,6 @@
   text-align: right;
 }
 
-.fab-dial-side {
-  display: block;
-  font-size: 0.62rem;
-  font-weight: 400;
-  color: var(--color-text-muted);
-}
-
 .fab-dial-ic {
   width: 34px;
   height: 34px;
@@ -120,8 +124,8 @@
   border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
-/* Preview toggles the docked rail rather than opening in the card, so its ring
-   is dashed when off and solid+lit when on - a state, not an action. */
+/* Preview is a toggle in the dial rather than an open, so its ring is dashed
+   when off and solid+lit when on - a state, not an action. */
 .fab-dial-item.is-toggle .fab-dial-ic {
   border-style: dashed;
 }
@@ -132,304 +136,8 @@
   border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
-/* ── The card ────────────────────────────────────────────────────────────── */
-/* right/bottom/size here are only the pre-measure fallback and the phone
-   layout: on desktop fab-card-window.ts writes left/top/width/height inline. */
-.fab-card {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  width: 400px;
-  max-width: calc(100% - 28px);
-  height: 390px;
-  max-height: calc(100% - 28px);
-  display: flex;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  /* No overflow clip here: the resize strips reach past the border so an edge
-     is easy to hit. The spine and body round their own corners instead. */
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.62);
-  transition: box-shadow 180ms ease-out, border-color 180ms ease-out;
-}
-
-/* Picked up: the card lifts while it moves, then settles when dropped. */
-.fab-card.is-moving {
-  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.72);
-}
-
-.fab-card.is-moving,
-.fab-card.is-resizing {
-  user-select: none;
-}
-
-/* Dropped into a snap zone: glide the last stretch instead of jumping. */
-.fab-card.is-snapping {
-  transition:
-    left 240ms cubic-bezier(0.16, 1, 0.3, 1),
-    top 240ms cubic-bezier(0.16, 1, 0.3, 1),
-    width 240ms cubic-bezier(0.16, 1, 0.3, 1),
-    height 240ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 180ms ease-out,
-    border-color 180ms ease-out;
-}
-
-/* Where the card will land while the pointer sits in a snap zone. Morphs
-   between zones as the pointer moves along an edge. */
-.fab-dial-host > .fab-snap-ghost {
-  position: absolute;
-  pointer-events: none;
-  border-radius: 10px;
-  border: 1.5px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
-  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  opacity: 0;
-  transform: scale(0.97);
-  transition:
-    opacity 140ms ease-out,
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    left 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    top 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    width 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    height 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.fab-dial-host > .fab-snap-ghost.is-on {
-  opacity: 1;
-  transform: none;
-}
-
-.fab-card.is-entering {
-  animation: fab-card-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes fab-card-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.985);
-  }
-}
-
-.fab-spine {
-  flex: none;
-  width: 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 0 7px;
-  background: var(--color-background);
-  border-right: 1px solid var(--color-border);
-  border-radius: 9px 0 0 9px;
-  cursor: grab;
-  touch-action: none;
-}
-
-.fab-card.is-moving .fab-spine {
-  cursor: grabbing;
-}
-
-/* The obvious place to grab. The whole spine drags; this just says so. */
-.fab-spine-grip {
-  width: 32px;
-  height: 26px;
-  margin-bottom: 2px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-surface-alt) 55%, transparent);
-  color: var(--color-text-muted);
-  opacity: 0.75;
-  font-size: 1.4rem;
-  transition: background-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
-}
-
-.fab-spine:hover .fab-spine-grip,
-.fab-card.is-moving .fab-spine-grip {
-  opacity: 1;
-  color: var(--color-text);
-  background: var(--color-surface-alt);
-}
-
-/* ── Resize strips ──
-   Each strip straddles the border, mostly OUTSIDE it (8px out, 3px in), so
-   the target is generous without stealing the body's scrollbar. Corners sit
-   above edges. The visible cue is a 2px accent line drawn exactly on the
-   border, grown from the middle; the short delay keeps it from flickering
-   when the pointer just crosses an edge on its way somewhere else. */
-.fab-rz {
-  position: absolute;
-  z-index: 2;
-  touch-action: none;
-}
-
-.fab-rz-n, .fab-rz-s { left: 16px; right: 16px; height: 11px; cursor: ns-resize; }
-.fab-rz-e, .fab-rz-w { top: 16px; bottom: 16px; width: 11px; cursor: ew-resize; }
-.fab-rz-n { top: -8px; }
-.fab-rz-s { bottom: -8px; }
-.fab-rz-e { right: -8px; }
-.fab-rz-w { left: -8px; }
-
-.fab-rz-ne, .fab-rz-nw, .fab-rz-se, .fab-rz-sw { width: 24px; height: 24px; z-index: 3; }
-.fab-rz-nw { top: -8px; left: -8px; cursor: nwse-resize; }
-.fab-rz-se { bottom: -8px; right: -8px; cursor: nwse-resize; }
-.fab-rz-ne { top: -8px; right: -8px; cursor: nesw-resize; }
-.fab-rz-sw { bottom: -8px; left: -8px; cursor: nesw-resize; }
-
-.fab-rz::after {
-  content: "";
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    opacity 120ms ease-out,
-    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.fab-rz:hover::after,
-.fab-rz.is-active::after {
-  opacity: 1;
-  transform: none;
-  transition-delay: 70ms;
-}
-
-.fab-rz.is-active::after {
-  transition-delay: 0ms;
-}
-
-/* Edges: a line over the 1px border (offset 7px = the 8px overhang, less 1px
-   so the 2px line centres on the border). */
-.fab-rz-n::after, .fab-rz-s::after {
-  left: 0;
-  right: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--color-primary);
-  transform: scaleX(0.3);
-}
-
-.fab-rz-n::after { top: 7px; }
-.fab-rz-s::after { bottom: 7px; }
-
-.fab-rz-e::after, .fab-rz-w::after {
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--color-primary);
-  transform: scaleY(0.3);
-}
-
-.fab-rz-e::after { right: 7px; }
-.fab-rz-w::after { left: 7px; }
-
-/* Corners: an L bracket that follows the card's 10px rounding. */
-.fab-rz-nw::after, .fab-rz-ne::after, .fab-rz-se::after, .fab-rz-sw::after {
-  width: 22px;
-  height: 22px;
-  border: 0 solid var(--color-primary);
-  transform: scale(0.6);
-}
-
-.fab-rz-nw::after {
-  top: 7px;
-  left: 7px;
-  border-top-width: 2px;
-  border-left-width: 2px;
-  border-top-left-radius: 11px;
-  transform-origin: top left;
-}
-
-.fab-rz-ne::after {
-  top: 7px;
-  right: 7px;
-  border-top-width: 2px;
-  border-right-width: 2px;
-  border-top-right-radius: 11px;
-  transform-origin: top right;
-}
-
-.fab-rz-se::after {
-  bottom: 7px;
-  right: 7px;
-  border-bottom-width: 2px;
-  border-right-width: 2px;
-  border-bottom-right-radius: 11px;
-  transform-origin: bottom right;
-}
-
-.fab-rz-sw::after {
-  bottom: 7px;
-  left: 7px;
-  border-bottom-width: 2px;
-  border-left-width: 2px;
-  border-bottom-left-radius: 11px;
-  transform-origin: bottom left;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .fab-card,
-  .fab-card.is-snapping,
-  .fab-dial-host > .fab-snap-ghost,
-  .fab-spine-grip,
-  .fab-rz::after {
-    transition: none;
-  }
-
-  .fab-card.is-entering {
-    animation: none;
-  }
-}
-
-.fab-spine-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: 0.95rem;
-  flex: none;
-}
-
-/* border, background, color, cursor, border-radius, layout all come from .icon-btn-sq */
-.fab-spine-close {
-  width: 28px;
-  height: 28px;
-  font-size: 0.95rem;
-}
-
-.fab-spine-btn:hover {
-  color: var(--color-text);
-  background: var(--color-surface-alt);
-}
-
-.fab-spine-btn.on {
-  color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-}
-
-.fab-spine-grow {
-  flex: 1;
-}
-
-.fab-card-body {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 0 9px 9px 0;
-}
-
 /* ── Phone ───────────────────────────────────────────────────────────────── */
-/* Same breakpoint as sessions-mobile.css. The card spans the pane, and both
-   card and FAB clear the bottom tab bar rather than sitting under it. */
+/* Same breakpoint as sessions-mobile.css. */
 @media (max-width: 768px) {
   .fab-dial-fab {
     bottom: calc(var(--fab-lift, 0px) + 12px);
@@ -444,23 +152,5 @@
    * reachable while a card is waiting for an answer anyway. */
   .session-pane:has(#prompt-card-host .prompt-card) .fab-dial-host {
     display: none;
-  }
-
-  .fab-rz,
-  .fab-spine-grip {
-    display: none;
-  }
-
-  .fab-spine {
-    cursor: default;
-  }
-
-  .fab-card {
-    left: 10px;
-    right: 10px;
-    width: auto;
-    max-width: none;
-    height: 62%;
-    min-height: 300px;
   }
 }

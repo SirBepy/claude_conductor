@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { mountSessionsLayout, mountView } from "./harness";
 
 // Joe, 2026-09-04: preview on a phone is a full-screen cover, opened from the
-// chat pane's FAB dial and closed by the rail strip's X. It replaced a
+// chat pane's FAB dial and closed by its window's X. It replaced a
 // scroll-snap pager whose bottom tab bar existed only to be a swipe surface
 // the preview iframe could not swallow.
 
@@ -13,13 +13,14 @@ async function mountPhone(page: Page, opts: { fab?: boolean } = {}): Promise<voi
   await mountSessionsLayout(page, { header: true, fab: opts.fab });
 }
 
-const railBox = (page: Page) => page.locator("#preview-panel-host").boundingBox();
+const PREVIEW = '.pw-window[data-active="preview"]';
+const railBox = (page: Page) => page.locator(PREVIEW).boundingBox();
 
 test("the rail stays closed until something opens it", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page);
 
-  await expect(page.locator("#preview-panel-host")).toBeHidden();
+  await expect(page.locator(PREVIEW)).toBeHidden();
   await expect(page.locator(".session-pane")).toBeVisible();
   // The bar and its snap pages are gone, not merely hidden.
   await expect(page.locator(".mobile-tabbar")).toHaveCount(0);
@@ -46,12 +47,12 @@ test("an open rail covers the whole phone screen", async ({ page }) => {
   const coversFab = await page.evaluate(() => {
     const fab = document.querySelector<HTMLElement>(".fab-dial-fab")!.getBoundingClientRect();
     const hit = document.elementFromPoint(fab.x + fab.width / 2, fab.y + fab.height / 2);
-    return !!hit?.closest("#preview-panel-host");
+    return !!hit?.closest('.pw-window[data-active="preview"]');
   });
   expect(coversFab).toBe(true);
 });
 
-test("the FAB dial opens preview and the rail strip's X is the way back", async ({ page }) => {
+test("the FAB dial opens preview and its window's X is the way back", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page, { fab: true });
 
@@ -59,14 +60,13 @@ test("the FAB dial opens preview and the rail strip's X is the way back", async 
   await page.locator('[data-dial="preview"]').click();
   await expect(page.locator('[data-tab-body="preview"]')).toBeVisible();
 
-  // The strip was hidden while the bottom bar owned the exit; without it the
-  // cover would be a dead end.
-  await expect(page.locator(".rail-strip")).toBeVisible();
+  // Without the bar the cover would be a dead end.
+  await expect(page.locator(`${PREVIEW} .pw-bar`)).toBeVisible();
   // Pop-out would open an OS window on the machine the phone is driving.
-  await expect(page.locator('.rail-strip [data-act="popout"]')).toBeHidden();
-  await page.locator('.rail-strip [data-act="close"]').click();
+  await expect(page.locator(`${PREVIEW} [data-pw-act="popout"]`)).toBeHidden();
+  await page.locator(`${PREVIEW} [data-pw-act="close"]`).click();
 
-  await expect(page.locator("#preview-panel-host")).toBeHidden();
+  await expect(page.locator(PREVIEW)).toBeHidden();
   await expect(page.locator(".fab-dial-fab")).toBeVisible();
 });
 
@@ -89,7 +89,7 @@ test("the transcript keeps its scroll position across a trip to preview", async 
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="preview"]').click();
   await expect(page.locator('[data-tab-body="preview"]')).toBeVisible();
-  await page.locator('.rail-strip [data-act="close"]').click();
+  await page.locator(`${PREVIEW} [data-pw-act="close"]`).click();
 
   const top = await page.evaluate(() => document.querySelector("#spec-scroller")!.scrollTop);
   expect(top).toBe(900);
@@ -171,17 +171,21 @@ test("a failed merge degrades to the old layout rather than losing the back butt
   await expect(page.locator("#sessionsBackBtn")).toBeAttached();
 });
 
-test("desktop keeps the side-by-side split, and an open rail does not cover the chat", async ({ page }) => {
+test("desktop keeps the side-by-side split: docked Preview shrinks the chat instead of covering it", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await mountPhone(page, { fab: true });
 
-  await expect(page.locator("#preview-panel-host")).toBeHidden();
+  await expect(page.locator(PREVIEW)).toBeHidden();
   await expect(page.locator(".view-sessions .view-header h2")).toBeVisible();
 
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="preview"]').click();
 
   const rail = (await railBox(page))!;
-  const pane = (await page.locator(".session-pane").boundingBox())!;
-  expect(rail.x).toBeGreaterThanOrEqual(pane.x + pane.width - 1);
+  // The chat column is the pane's content box; the dock is its padding.
+  const chatRight = await page.evaluate(() => {
+    const pane = document.querySelector<HTMLElement>(".session-pane")!;
+    return pane.getBoundingClientRect().right - parseFloat(getComputedStyle(pane).paddingRight);
+  });
+  expect(chatRight).toBeLessThanOrEqual(rail.x + 1);
 });

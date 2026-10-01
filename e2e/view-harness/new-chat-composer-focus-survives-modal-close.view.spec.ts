@@ -70,7 +70,8 @@ async function confirmModelEffort(page: Page): Promise<void> {
 }
 
 async function assertComposerHoldsFocus(page: Page): Promise<void> {
-  const ta = page.locator("#session-pane .composer-textarea");
+  // Scoped to the chat's own composer: Preview's reply box lives in the pane too.
+  const ta = page.locator("#session-pane .session-composer .composer-textarea");
   await ta.waitFor();
   // Give any deferred unlock every chance to have already run if it were
   // going to win the race honestly - this is not testing a narrow first-tick

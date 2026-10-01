@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { mountView, invokeCalls, sessionInstance } from "./harness";
+import { mountSessionsLayout, mountView, invokeCalls, sessionInstance } from "./harness";
 
 // Preview panel reply composer (ai_todo composer-unification, task 5): a
 // compact composer docked at the bottom of the panel sends a user message to
 // whichever session pushed the currently-viewed snapshot, auto-tagged with a
 // reference to it. Mirrors preview-panel-inline-script.view.spec.ts's mount
-// pattern (renderPreview directly, no full sessions-view boot), but also
+// pattern (the pane's Preview window, no full sessions-view boot), but also
 // seeds src/views/sessions/state.ts's `state.sessions` directly - the send
 // path resolves the owning session's `cwd` from there, same as the main
 // composer's send_message call.
@@ -30,17 +30,11 @@ test("typing in the preview reply composer and pressing Enter sends a tagged mes
   await page.evaluate(async (session) => {
     const stateMod = await import("/views/sessions/state.ts");
     stateMod.state.sessions.push(session);
-
-    const mod = await import("/views/sessions/preview-panel.ts");
-    const root = document.createElement("div");
-    root.id = "preview-panel-host";
-    document.body.appendChild(root);
-    const controller = mod.renderPreview(root, { mode: "panel" });
-    controller.setSessionScope("sess-1");
-    controller.open("snap-1");
   }, sessionInstance({ session_id: "sess-1", cwd: "/fake/project" }));
+  await mountSessionsLayout(page);
+  await page.evaluate(() => (window as unknown as { __preview: { open(id: string): void } }).__preview.open("snap-1"));
 
-  const root = page.locator("#preview-panel-host");
+  const root = page.locator('.pw-window[data-active="preview"]');
   const input = root.locator(".pv-composer-input");
   await expect(input).toBeVisible();
   await input.fill("looks off on mobile");

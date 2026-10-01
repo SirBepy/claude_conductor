@@ -1,22 +1,5 @@
-/* Docked HTML preview panel (ai_todo 138). Right-rail sibling of
-   .session-pane inside .sessions-layout — see template.ts + preview-panel.ts.
-   Layout/visual language follows .for_bepy/preview-window-mockup.html,
-   translated onto the project's existing CSS custom properties. */
-
-#preview-panel-host {
-  flex-shrink: 0;
-  display: flex;
-  border-left: 1px solid var(--color-border);
-  background: var(--color-surface);
-  position: relative;
-  min-width: 0;
-}
-
-/* `display: flex` above would otherwise beat the UA `[hidden] { display: none }`
-   rule, so the panel needs an explicit hidden guard (id+attr specificity wins). */
-#preview-panel-host[hidden] {
-  display: none;
-}
+/* HTML preview (ai_todo 138): its body, shown in a pane window
+   (pane-windows/) or the pop-out OS window (rail-panel.ts). */
 
 .preview-panel {
   display: flex;
@@ -26,24 +9,16 @@
   min-width: 0;
 }
 
-.pv-resize-handle {
-  position: absolute;
-  left: -3px;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  cursor: col-resize;
-  z-index: 2;
-}
-
-.pv-resize-handle:hover {
-  background: var(--color-primary);
-  opacity: 0.4;
+/* In a pane window it is a flex child, not a sized box. */
+.pw-panel > .preview-panel {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 /* ── Rail strip (todo 692) ──────────────────────────────────────────────── */
-/* Rail-wide controls only: pop-out and close act on the whole rail. Preview's
-   own kebab stays down in .pv-head because it acts on the content alone. */
+/* The pop-out window's own strip (restore, close). Preview's kebab stays
+   down in .pv-head because it acts on the content alone. */
 
 .rail-strip {
   flex-shrink: 0;
@@ -340,21 +315,6 @@
   background: var(--color-surface-alt);
   border-radius: 4px;
   padding: 1px 5px;
-}
-
-/* Docked mode only - the pop-out window (todo 290) is always its own OS
-   window regardless of width, never the collapsed-sidebar layout below. */
-@media (max-width: 860px) {
-  #preview-panel-host:has(.preview-panel[data-mode="panel"]) {
-    display: none !important;
-  }
-}
-
-/* ── Pop-out window mode (todo 290) ────────────────────────────────────── */
-/* Fills the standalone window edge-to-edge - no resize handle (nothing to
-   drag against) and no host-level flex/width sizing to fight. */
-.preview-panel[data-mode="window"] .pv-resize-handle {
-  display: none;
 }
 
 /* ── Reply composer ────────────────────────────────────────────────────── */
