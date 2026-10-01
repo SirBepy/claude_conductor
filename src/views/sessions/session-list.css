@@ -311,6 +311,15 @@
   background: color-mix(in srgb, var(--chat-state-needs-input) 12%, transparent);
   box-shadow: inset 3px 0 0 var(--chat-state-needs-input);
 }
+/* The auto-frozen variant (.is-frozen-bg.is-auto) is itself a same-specificity
+   rule as the one above, so a frozen-and-auto chat that also needs attention
+   would otherwise tie on their relative position in this file rather than on
+   a real priority (code-check, 2026-10-01). Bumped the same way as the
+   active-triple below. */
+.sessions-list li.needs-attention.is-frozen-bg.is-auto {
+  background: color-mix(in srgb, var(--chat-state-needs-input) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--chat-state-needs-input);
+}
 /* All three at once (selected + needs-attention + frozen) ties the two rules
    above at equal specificity - without this 4-class override, source order
    would let the needs-attention red win over selection, breaking "selection
