@@ -17,6 +17,7 @@
 
 mod protocol;
 mod actions;
+mod deps;
 mod engine;
 mod idle;
 mod nightly;

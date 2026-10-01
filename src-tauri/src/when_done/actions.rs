@@ -106,3 +106,7 @@ pub(super) async fn inject_close(app: &AppHandle, session_id: &str) -> bool {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "actions_tests.rs"]
+mod tests;

@@ -131,3 +131,7 @@ pub(super) fn live_busy_map(app: &AppHandle) -> Vec<(String, bool)> {
         .map(|i| (i.session_id.clone(), !instance_is_idle(i)))
         .collect()
 }
+
+#[cfg(test)]
+#[path = "idle_tests.rs"]
+mod tests;
