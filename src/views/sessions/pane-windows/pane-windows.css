@@ -1,5 +1,5 @@
-/* The chat pane's in-app windows (pane-windows/): a title bar, a spine of
-   tabs when a window holds more than one, and the panel body. Floating and
+/* The chat pane's in-app windows (pane-windows/): a title bar carrying
+   browser-style tabs when a window holds more than one panel, and the body. Floating and
    corner windows get inline left/top/width/height from manager.ts; docked
    ones fill their side, with the pane padded so the chat itself shrinks. */
 
@@ -79,7 +79,7 @@
     border-color 180ms ease-out;
 }
 
-/* A tab or window held over this one's bar or spine merges into it. */
+/* A tab or window held over this one's title bar merges into it. */
 .fab-card.pw-drop-target {
   border-color: var(--color-primary);
   box-shadow:
@@ -154,6 +154,66 @@
   align-self: stretch;
 }
 
+/* ── Tabs (Joe picked browser tabs, 2026-10-01) ──
+   The active tab joins the body below it: it takes the window's surface
+   colour and sits 1px over the bar's bottom border, hiding it under itself.
+   The rest stay back in the bar. */
+.fab-card.has-tabs .pw-bar {
+  align-items: flex-end;
+}
+
+.fab-card.has-tabs .pw-bar > :not(.pw-tabs):not(.pw-grow) {
+  align-self: center;
+}
+
+.pw-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 2px;
+}
+
+.pw-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 29px;
+  padding: 0 12px;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: none;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.pw-tab i {
+  font-size: 0.9rem;
+}
+
+.pw-tab:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface-alt) 60%, transparent);
+}
+
+.pw-tab.on {
+  height: 30px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.pw-tab.on i {
+  color: var(--color-primary);
+}
+
 .pw-btn {
   width: 28px;
   height: 28px;
@@ -178,56 +238,7 @@
   color: var(--color-danger);
 }
 
-/* ── Spine + body ─────────────────────────────────────────────────────────── */
-.pw-main {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-.fab-spine {
-  flex: none;
-  width: 40px;
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 7px 0;
-  background: var(--color-background);
-  border-right: 1px solid var(--color-border);
-  border-radius: 0 0 0 9px;
-}
-
-.fab-card.has-spine .fab-spine {
-  display: flex;
-}
-
-.fab-spine-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  font-size: 0.95rem;
-  flex: none;
-  touch-action: none;
-}
-
-.fab-spine-btn:hover {
-  color: var(--color-text);
-  background: var(--color-surface-alt);
-}
-
-.fab-spine-btn.on {
-  color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-}
-
+/* ── Body ─────────────────────────────────────────────────────────────── */
 .fab-card-body {
   position: relative;
   flex: 1;
@@ -239,12 +250,7 @@
   border-radius: 0 0 9px 9px;
 }
 
-.fab-card.has-spine .fab-card-body {
-  border-radius: 0 0 9px 0;
-}
-
-.fab-card[data-placement="dock"] .fab-card-body,
-.fab-card[data-placement="dock"] .fab-spine {
+.fab-card[data-placement="dock"] .fab-card-body {
   border-radius: 0;
 }
 

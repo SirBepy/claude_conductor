@@ -1,5 +1,5 @@
-// One pane window's DOM: a title bar (grip, name, actions, X), a spine of
-// tabs when it holds more than one, and the body the panels live in. The body
+// One pane window's DOM: a title bar (grip, browser-style tabs - or just the
+// name when it holds one panel - actions, X) and the body the panels live in. The body
 // element is created once and never rebuilt, so a panel inside it (Preview's
 // iframe above all) is never re-parented by a chrome update.
 
@@ -15,7 +15,7 @@ export interface FrameEvents {
   /** A press on the bar's empty stretch: start a move. */
   barDown(id: string, ev: PointerEvent): void;
   resizeDown(id: string, dir: ResizeDir, ev: PointerEvent): void;
-  /** A press on a spine tab: a click switches, a drag tears it off. */
+  /** A press on a tab: a click switches, a drag tears it off. */
   tabDown(id: string, panel: PanelKey, ev: PointerEvent): void;
   action(id: string, act: "close" | "dock" | "popout"): void;
 }
@@ -24,7 +24,6 @@ export class Frame {
   readonly el: HTMLElement;
   readonly body: HTMLElement;
   private bar: HTMLElement;
-  private spine: HTMLElement;
   private id: string;
   /** What the chrome was last painted from. A press inside the window brings
    *  it forward, which re-renders; rewriting the bar then would replace the
@@ -38,14 +37,9 @@ export class Frame {
     this.el.dataset.win = win.id;
     this.bar = document.createElement("div");
     this.bar.className = "pw-bar";
-    const main = document.createElement("div");
-    main.className = "pw-main";
-    this.spine = document.createElement("div");
-    this.spine.className = "fab-spine";
     this.body = document.createElement("div");
     this.body.className = "fab-card-body";
-    main.append(this.spine, this.body);
-    this.el.append(this.bar, main);
+    this.el.append(this.bar, this.body);
     this.el.insertAdjacentHTML(
       "beforeend",
       DIRS.map((d) => `<span class="fab-rz fab-rz-${d}" data-rz="${d}" aria-hidden="true"></span>`).join(""),
@@ -55,7 +49,7 @@ export class Frame {
     this.update(win, { canPopOut: false, popped: false });
   }
 
-  /** Repaints the bar and spine only; the body and its panels stay put. */
+  /** Repaints the bar only; the body and its panels stay put. */
   update(win: PaneWindow, opts: { canPopOut: boolean; popped: boolean }): void {
     const sig = JSON.stringify([win.tabs, win.active, win.placement.kind, opts]);
     if (sig === this.painted && this.el.dataset.side === (win.placement.kind === "dock" ? win.placement.side : undefined)) return;
@@ -65,8 +59,22 @@ export class Frame {
     if (win.placement.kind === "dock") this.el.dataset.side = win.placement.side;
     else delete this.el.dataset.side;
     this.el.dataset.active = win.active;
-    this.el.classList.toggle("has-spine", win.tabs.length > 1);
+    const tabbed = win.tabs.length > 1;
+    this.el.classList.toggle("has-tabs", tabbed);
     const meta = PANEL_META[win.active];
+    // data-spine names the tab's panel; tests and the tear-off both key on it.
+    const head = tabbed
+      ? `<span class="pw-tabs">` +
+        win.tabs
+          .map(
+            (t) =>
+              `<button type="button" class="pw-tab${t === win.active ? " on" : ""}" data-spine="${t}" ` +
+                `title="${PANEL_META[t].label} - drag out for its own window">` +
+                `<i class="ph ${PANEL_META[t].icon}"></i>${escapeHtml(PANEL_META[t].label)}</button>`,
+          )
+          .join("") +
+        `</span>`
+      : `<span class="pw-title"><i class="ph ${meta.icon}"></i>${escapeHtml(meta.label)}</span>`;
     const popout =
       win.active === "preview" && opts.canPopOut && !opts.popped
         ? `<button type="button" class="pw-btn" data-pw-act="popout" title="Pop out into its own window">` +
@@ -74,7 +82,7 @@ export class Frame {
         : "";
     this.bar.innerHTML =
       `<span class="pw-grip" aria-hidden="true"><i class="ph ph-dots-six"></i></span>` +
-      `<span class="pw-title"><i class="ph ${meta.icon}"></i>${escapeHtml(meta.label)}</span>` +
+      head +
       `<span class="pw-grow"></span>` +
       popout +
       `<button type="button" class="pw-btn" data-pw-act="dock" ` +
@@ -82,29 +90,19 @@ export class Frame {
         `<i class="ph ${docked ? "ph-arrows-out-simple" : "ph-square-split-horizontal"}"></i></button>` +
       `<button type="button" class="pw-btn pw-x" data-pw-act="close" data-card-close title="Close">` +
         `<i class="ph ph-x"></i></button>`;
-    this.spine.innerHTML = win.tabs
-      .map(
-        (t) =>
-          `<button type="button" class="fab-spine-btn${t === win.active ? " on" : ""}" data-spine="${t}" ` +
-            `title="${PANEL_META[t].label} - drag out for its own window">` +
-            `<i class="ph ${PANEL_META[t].icon}"></i></button>`,
-      )
-      .join("");
   }
 
-  /** The bar and spine, where a dragged tab or window can be dropped in. */
+  /** The bar, where a dragged tab or window can be dropped in. */
   dropRect(): DOMRect[] {
-    const out = [this.bar.getBoundingClientRect()];
-    if (this.el.classList.contains("has-spine")) out.push(this.spine.getBoundingClientRect());
-    return out;
+    return [this.bar.getBoundingClientRect()];
   }
 
-  /** Spine index the pointer is over, so a dropped tab lands where aimed. */
-  spineIndexAt(clientY: number): number | undefined {
-    const btns = [...this.spine.querySelectorAll<HTMLElement>("[data-spine]")];
-    if (!btns.length) return undefined;
-    const i = btns.findIndex((b) => clientY < b.getBoundingClientRect().top + b.offsetHeight / 2);
-    return i < 0 ? btns.length : i;
+  /** Tab slot the pointer is over, so a dropped tab lands where aimed. */
+  tabIndexAt(clientX: number): number | undefined {
+    const tabs = [...this.bar.querySelectorAll<HTMLElement>("[data-spine]")];
+    if (!tabs.length) return undefined;
+    const i = tabs.findIndex((t) => clientX < t.getBoundingClientRect().left + t.offsetWidth / 2);
+    return i < 0 ? tabs.length : i;
   }
 
   destroy(): void {

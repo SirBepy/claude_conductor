@@ -120,7 +120,7 @@ test("Preview is a toggle in the dial and opens in its own window, not Ask's", a
   await expect(page.locator('.pw-window[data-active="preview"]')).toBeHidden();
 });
 
-test("the spine switches panels without closing the card", async ({ page }) => {
+test("the tabs switch panels without closing the card", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="ask"]').click();

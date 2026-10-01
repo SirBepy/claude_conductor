@@ -177,7 +177,7 @@ test("a corner drop parks a small window there, and pulling it off a dock floats
   expect(await page.locator(".session-pane").evaluate((el) => getComputedStyle(el).paddingRight)).toBe("0px");
 });
 
-test("a spine tab dragged out becomes its own window, and dropped on another window's bar joins it", async ({ page }) => {
+test("a tab dragged out of the bar becomes its own window, and dropped on another window's bar joins it", async ({ page }) => {
   await mountPane(page);
   await openFromDial(page, "ask");
   await expect(page.locator(".fab-card:visible")).toHaveCount(1);
@@ -193,9 +193,9 @@ test("a spine tab dragged out becomes its own window, and dropped on another win
   await expect(win(page, "todos")).toBeVisible();
   await expect(win(page, "ask").locator('[data-spine="todos"]')).toHaveCount(0);
 
-  // Back in: drag the Todos window by its bar onto Ask's bar.
-  const askBar = (await win(page, "ask").locator(".pw-title").boundingBox())!;
-  await dragBar(page, "todos", { x: askBar.x + askBar.width + 30, y: askBar.y + askBar.height / 2 });
+  // Back in: drag the Todos window by its bar onto Ask's bar, past its tabs.
+  const askTabs = (await win(page, "ask").locator(".pw-tabs").boundingBox())!;
+  await dragBar(page, "todos", { x: askTabs.x + askTabs.width + 30, y: askTabs.y + askTabs.height / 2 });
   await expect(page.locator(".fab-card:visible")).toHaveCount(1);
   await expect(page.locator('.fab-card:visible [data-spine="todos"]')).toHaveCount(1);
 });

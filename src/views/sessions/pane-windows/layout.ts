@@ -162,7 +162,7 @@ export function tearOff(l: PaneLayout, panel: PanelKey, placement: Placement): P
   return next;
 }
 
-/** Drops a tab into another window at spine position `index`, else last. */
+/** Drops a tab into another window at tab slot `index`, else last. */
 export function moveTab(l: PaneLayout, panel: PanelKey, targetId: string, index?: number): PaneLayout {
   const next = clone(l);
   const target = next.windows.find((w) => w.id === targetId);

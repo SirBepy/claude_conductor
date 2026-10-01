@@ -434,7 +434,7 @@ export class PaneWindows {
 
   /** Pointer capture plus move/up wiring shared by every gesture. Captured
    *  on the frame, not the pressed element: a render mid-drag can replace the
-   *  bar's or spine's children, and a detached element loses the capture. */
+   *  bar's children, and a detached element loses the capture. */
   private track(
     target: HTMLElement,
     ev: PointerEvent,
@@ -543,7 +543,7 @@ export class PaneWindows {
     );
   }
 
-  /** A press on a spine tab: released in place it switches tabs; dragged past
+  /** A press on a tab: released in place it switches tabs; dragged past
    *  the slop it tears the tab out, into another window or a new one. */
   private tabGesture(id: string, panel: PanelKey, ev: PointerEvent): void {
     const f = this.frames.get(id);
@@ -597,7 +597,7 @@ export class PaneWindows {
     );
   }
 
-  /** Another window's bar or spine merges; an edge or corner places. The
+  /** Another window's bar merges; an edge or corner places. The
    *  window being dragged (`exclude`) is under the pointer, so frames are hit
    *  by rect, not elementFromPoint. */
   private dropTargetAt(e: PointerEvent, exclude: string | null, b: Bounds): DropTarget {
@@ -606,7 +606,7 @@ export class PaneWindows {
       const f = this.frames.get(w.id);
       if (!f || f.el.hidden || w.id === exclude) continue;
       const hit = f.dropRect().some((r) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom);
-      if (hit) return { kind: "merge", id: w.id, index: f.spineIndexAt(e.clientY) };
+      if (hit) return { kind: "merge", id: w.id, index: f.tabIndexAt(e.clientX) };
     }
     const origin = this.layer.getBoundingClientRect();
     const zone = dropZoneAt(e.clientX - origin.left, e.clientY - origin.top, b);
