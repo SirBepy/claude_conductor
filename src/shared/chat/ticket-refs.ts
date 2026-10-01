@@ -6,7 +6,17 @@
 
 import { invoke } from "../ipc";
 import { escapeHtml } from "../escape-html";
+import { isRemote } from "../transport";
 import type { TicketSummary, TrackerInfo, TrackerKind } from "../../types/ipc.generated";
+
+// Registry env name per tracker kind - mirrors src-tauri/src/api_keys.rs's
+// REGISTRY and the error text tickets.rs::token_for formats when unset
+// ("{key} is not set in ~/.claude/.env"), so a missing-token error can offer
+// the right modal instead of a dead-end message.
+const TOKEN_ENV_FOR_KIND: Record<Exclude<TrackerKind, "off">, string> = {
+  shortcut: "SHORTCUT_API_TOKEN",
+  linear: "LINEAR_API_KEY",
+};
 
 // ── tracker per repo ──────────────────────────────────────────────────
 
@@ -175,7 +185,28 @@ async function showCard(anchor: HTMLAnchorElement): Promise<void> {
     el.innerHTML = ticketCardHtml(s);
   } catch (err) {
     if (card !== el) return;
-    el.innerHTML = `<div class="ticket-card-id">${escapeHtml(ref.id)}</div><div class="ticket-card-error">${escapeHtml(String(err))}</div>`;
+    const msg = err instanceof Error ? err.message : String(err);
+    // parseTicketUrl only ever returns "shortcut"/"linear" (the regexes above
+    // match those two URL shapes only) - "off" is a TrackerKind value this
+    // function can't produce, so the lookup below is always defined in
+    // practice; the guard keeps the registry type honest regardless.
+    const envName = ref.kind === "off" ? undefined : TOKEN_ENV_FOR_KIND[ref.kind];
+    // Only the backend's own missing-token wording (tickets.rs::token_for)
+    // gets the "Add key" action - any other failure (network, bad id, rate
+    // limit) is just an error, nothing a key modal would fix.
+    const missingToken = !isRemote() && !!envName && msg.includes(`${envName} is not set`);
+    el.innerHTML = `<div class="ticket-card-id">${escapeHtml(ref.id)}</div><div class="ticket-card-error">${escapeHtml(msg)}</div>${missingToken ? `<button type="button" class="ticket-card-add-key-btn"><i class="ph ph-key"></i> Add key</button>` : ""}`;
+    if (missingToken && envName) {
+      el.querySelector<HTMLButtonElement>(".ticket-card-add-key-btn")?.addEventListener("click", () => {
+        void (async () => {
+          const { openApiKeyModal } = await import("../api-key-modal");
+          const saved = await openApiKeyModal(envName);
+          // Retry the summary once the key is in, so the card updates itself
+          // instead of leaving the stale error up until the next hover.
+          if (saved && card === el) void showCard(anchor);
+        })();
+      });
+    }
   }
   place(anchor, el);
 }

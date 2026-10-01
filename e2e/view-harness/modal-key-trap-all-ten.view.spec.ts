@@ -4,9 +4,11 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 // Todo 834: mechanizes the one remaining acceptance item, "with each of the
 // nine modals open, typing plain characters leaves the composer unchanged" -
 // previously a live/manual check only. Four share the modal-host
-// (src/shared/modal.ts); five own-backdrop, guarded via modal-input-lock.ts.
+// (src/shared/modal.ts); six own-backdrop, guarded via modal-input-lock.ts.
 // Todo 982 dropped new-project-modal (orphaned from the product, deleted)
 // from the original ten - the count/name here follow that removal.
+// Todo 1043 added a new own-backdrop modal (api-key-modal.ts), bringing the
+// own-backdrop count back to six and the total to ten.
 
 const MARKER = "MARKER";
 
@@ -41,6 +43,12 @@ const BASE_INVOKE = {
   list_claude_md_scopes: [{ rel_path: "", label: "Repo root", nested: false }],
   list_worktree_details: WORKTREE_DETAILS,
   list_accounts: [ACCOUNT],
+  list_api_keys: [{
+    env_name: "SHORTCUT_API_TOKEN", label: "Shortcut API token",
+    purpose: "Ticket hover cards", used_by: "Ticket hover cards",
+    create_url: "https://app.shortcut.com/settings/account/api-tokens",
+    is_set: false, save_path: "C:/Users/tecno/.claude/.env",
+  }],
 };
 
 /** Mounts the sessions view, opens the one session's pane, and marks the
@@ -140,7 +148,15 @@ async function openEditAccountModal(page: Page): Promise<void> {
   await page.locator(".aem-modal").waitFor();
 }
 
-test.describe("view-harness / modal-open must swallow every keystroke (all nine call sites)", () => {
+async function openApiKeyModal(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const mod = await import("/shared/api-key-modal.ts");
+    void mod.openApiKeyModal("SHORTCUT_API_TOKEN");
+  });
+  await page.locator(".aikm-modal").waitFor();
+}
+
+test.describe("view-harness / modal-open must swallow every keystroke (all ten call sites)", () => {
   test("shared-host: project-picker", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openProjectPicker(page);
@@ -195,6 +211,12 @@ test.describe("view-harness / modal-open must swallow every keystroke (all nine 
   test("own-backdrop: edit-account-modal", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openEditAccountModal(page);
+    await assertKeySwallowed(page, composer);
+  });
+
+  test("own-backdrop: api-key-modal", async ({ page }) => {
+    const composer = await mountWithComposer(page);
+    await openApiKeyModal(page);
     await assertKeySwallowed(page, composer);
   });
 });

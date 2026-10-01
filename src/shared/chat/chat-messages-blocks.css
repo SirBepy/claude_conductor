@@ -189,6 +189,24 @@
   color: var(--color-text-muted);
 }
 
+.ticket-card-add-key-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--fs-micro);
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.ticket-card-add-key-btn:hover {
+  border-color: var(--color-primary);
+}
+
 .copy-btn {
   position: absolute;
   top: 6px;

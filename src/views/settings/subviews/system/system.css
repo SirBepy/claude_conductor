@@ -198,6 +198,31 @@
   min-width: 110px;
 }
 
+/* ── API keys section (todo 1043) ───────────────────────────────────────── */
+
+.api-keys-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.api-key-row {
+  gap: 10px;
+}
+
+.api-key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  flex-shrink: 0;
+}
+
+.api-key-status.is-set {
+  color: var(--color-success, #4fd69c);
+}
+
 .data-card .btn-danger.data-clear {
   padding: 4px 12px;
   font-size: var(--fs-body);

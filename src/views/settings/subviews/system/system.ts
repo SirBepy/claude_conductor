@@ -5,7 +5,7 @@ import { api } from "../../../../shared/api";
 import * as shortcuts from "../../../../shared/shortcuts";
 import { normalizeEvent } from "../../../../shared/shortcuts";
 import type { ShortcutDef } from "../../../../shared/shortcuts";
-import type { DatasetInfo, DatasetId, RetentionPolicy } from "../../../../types/ipc.generated";
+import type { DatasetInfo, DatasetId, RetentionPolicy, ApiKeyStatus } from "../../../../types/ipc.generated";
 import { isRemote } from "../../../../shared/transport";
 import { askConfirm } from "../../../../shared/confirm";
 import { settingsHeader, toggleRow, selectHtml, escapeHtml } from "../../ui";
@@ -296,6 +296,46 @@ async function refreshDataSection(): Promise<void> {
   }
 }
 
+// ── API keys (Settings > System; todo 1043) ───────────────────────────────
+// Lists the registry (src-tauri/src/api_keys.rs) with set/not-set status;
+// Add/Replace opens the shared api-key-modal.ts, which does the actual write.
+// Desktop-only - hidden on the phone transport in template() below, matching
+// the modal itself (set_api_key is never called over the phone transport).
+
+function apiKeyRowHtml(k: ApiKeyStatus): string {
+  return `
+    <div class="kit-row api-key-row" data-env="${escapeHtml(k.env_name)}">
+      <span class="kit-row-label">${escapeHtml(k.label)}</span>
+      <span class="api-key-status${k.is_set ? " is-set" : ""}"><i class="ph ${k.is_set ? "ph-check-circle" : "ph-circle-dashed"}"></i>${k.is_set ? "Set" : "Not set"}</span>
+      <button type="button" class="btn-secondary api-key-btn" data-env="${escapeHtml(k.env_name)}">${k.is_set ? "Replace" : "Add"}</button>
+    </div>`;
+}
+
+let apiKeysWired = false;
+
+async function refreshApiKeysSection(): Promise<void> {
+  const list = document.getElementById("apiKeysList");
+  if (!list) return;
+  const keys = await api.listApiKeys();
+  list.innerHTML = keys.map(apiKeyRowHtml).join("");
+
+  // Delegated listener bound once to the stable container, same pattern as
+  // refreshDataSection() above.
+  if (!apiKeysWired) {
+    apiKeysWired = true;
+    list.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement)?.closest<HTMLButtonElement>("button.api-key-btn");
+      const env = btn?.dataset.env;
+      if (!env) return;
+      void (async () => {
+        const { openApiKeyModal } = await import("../../../../shared/api-key-modal");
+        const saved = await openApiKeyModal(env);
+        if (saved) await refreshApiKeysSection();
+      })();
+    });
+  }
+}
+
 // ── View ────────────────────────────────────────────────────────────────
 
 export async function renderSystemView(root: HTMLElement): Promise<() => void> {
@@ -312,6 +352,12 @@ export async function renderSystemView(root: HTMLElement): Promise<() => void> {
   dataWired = false;
   try { await refreshDataSection(); }
   catch (e) { console.error("[settings-system data] render failed", e); }
+
+  if (!isRemote()) {
+    apiKeysWired = false;
+    try { await refreshApiKeysSection(); }
+    catch (e) { console.error("[settings-system api-keys] render failed", e); }
+  }
 
   return () => {
     cleanupShortcuts();
@@ -335,6 +381,13 @@ function template(autostart: boolean, nightly: NightlyWhenDone) {
           <div class="kit-section-title">Shortcuts</div>
           <div id="system-shortcuts-container"></div>
         </div>
+
+        ${isRemote() ? "" : html`
+          <div class="kit-section" id="apiKeysSection">
+            <div class="kit-section-title">API keys</div>
+            <div id="apiKeysList" class="api-keys-list"></div>
+          </div>
+        `}
 
         <div class="kit-section" id="dataSection">
           <div class="kit-section-title">Data &amp; storage</div>

@@ -22,9 +22,10 @@ import type {
   LoginCheckOutcome,
   OauthAccountInfo,
   AuthState,
+  ApiKeyStatus,
 } from "../types/ipc.generated";
 
-export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, OauthAccountInfo, AuthState };
+export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, OauthAccountInfo, AuthState, ApiKeyStatus };
 
 // ── Backend snapshot shape ────────────────────────────────────────────────
 
@@ -452,6 +453,16 @@ export const api = {
     try { await invoke("clear_dataset", { dataset }); }
     catch (e) { console.error("clear_dataset failed", e); throw e; }
   },
+
+  // --- API keys (Settings > API keys, the ticket hover card's missing-token
+  // action) - the value itself never comes back from either call. ---
+  listApiKeys: async (): Promise<ApiKeyStatus[]> => {
+    try { return (await invoke<ApiKeyStatus[]>("list_api_keys")) || []; }
+    catch (e) { console.error("list_api_keys failed", e); return []; }
+  },
+  // Throws (not swallowed) so the modal can show the backend's error text.
+  setApiKey: (name: string, value: string): Promise<ApiKeyStatus> =>
+    invoke<ApiKeyStatus>("set_api_key", { name, value }),
 
   // --- Projects ---
   listProjects: (): Promise<ProjectConfig[]> => invoke("list_projects"),
