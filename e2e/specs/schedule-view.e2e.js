@@ -88,8 +88,20 @@ describe("Schedule view", () => {
     // same mechanism the other specs use and avoids a race on that listener).
     await browser.execute(() => window.showView("schedule"));
 
+    // +1h lands on tomorrow when the run starts after 23:00, so select the
+    // fire day's cell rather than relying on today being selected on mount.
+    // Its key matches schedule-recurrence.ts's dayKeyOf (local date).
+    const dayKey = await browser.execute((iso) => {
+      const d = new Date(iso);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }, fireAtIso);
+    const dayCell = await $(`.cal-cell[data-day="${dayKey}"]`);
+    await dayCell.waitForExist({ timeout: 10000 });
+    await dayCell.click();
+
     // The redesign (todo 322) moved rows to `li.agenda-row[data-id]`
-    // (schedule.ts:231). +1h puts it on today, the day selected on mount.
+    // (schedule.ts:231).
     const row = await $(`li.agenda-row[data-id="${item.id}"]`);
     await row.waitForExist({ timeout: 15000 });
     await expect(row).toExist();
