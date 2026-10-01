@@ -57,9 +57,14 @@ export function openCommitModal(ref: CommitRef, cwd: string): void {
   const card = document.createElement("div");
   card.dataset.prTitle = ref.subject;
   card.dataset.prCommits = utf8ToBase64(JSON.stringify([{ sha: ref.sha, msg: ref.subject }]));
-  const meta = `${escapeHtml(ref.author)} · ${escapeHtml(new Date(ref.date).toLocaleString())} · <code>${escapeHtml(ref.sha)}</code>`;
-  const body = ref.body ? renderMarkdown(ref.body) : "";
-  card.innerHTML = `<template class="pr-modal-tpl"><div class="pr-modal-body-content"><h1 class="pr-body-title">${escapeHtml(ref.subject)}</h1><p class="commit-ref-meta">${meta}</p>${body}</div></template>`;
+  // No h1 here: the modal header (pr-review-modal.ts, built from dataset.prTitle
+  // above) already shows this same subject - a second copy right below it was
+  // pure duplication for the single-commit case.
+  const shaShort = escapeHtml(ref.sha.slice(0, 7));
+  const shaFull = escapeHtml(ref.sha);
+  const meta = `${escapeHtml(ref.author)} · ${escapeHtml(new Date(ref.date).toLocaleString())} · <code title="${shaFull}">${shaShort}</code>`;
+  const body = ref.body ? renderMarkdown(ref.body) : `<p class="commit-ref-nobody">No description</p>`;
+  card.innerHTML = `<template class="pr-modal-tpl"><div class="pr-modal-body-content"><p class="commit-ref-meta">${meta}</p>${body}</div></template>`;
   openPrPreviewModal(card, { cwd, commit: true });
 }
 

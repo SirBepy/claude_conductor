@@ -18,7 +18,7 @@
 
 .fs-bar {
   display: flex;
-  gap: 2px;
+  gap: 6px;
   padding: 5px 12px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
@@ -87,6 +87,17 @@
   width: 28px;
   padding: 0;
   font-size: 15px;
+}
+
+/* Groups the file-step carets + position behind a divider, so they don't
+   read as a continuation of the search prev/next pair right before them -
+   same shapes, different meaning. */
+.fs-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
 }
 
 .fs-navpos {

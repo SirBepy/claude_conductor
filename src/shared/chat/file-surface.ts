@@ -102,9 +102,13 @@ const BAR_HTML =
   `<button type="button" class="fs-btn fs-sq fs-search-prev" title="Previous match"><i class="ph ph-caret-up"></i></button>` +
   `<button type="button" class="fs-btn fs-sq fs-search-next" title="Next match"><i class="ph ph-caret-down"></i></button>` +
   `</div>` +
+  // Own group + divider: unlabeled, so without one these carets read as a
+  // continuation of the search prev/next pair right before them.
+  `<div class="fs-nav-group">` +
   `<span class="fs-navpos"></span>` +
   `<button type="button" class="fs-btn fs-sq fs-prev" title="Previous file (k)"><i class="ph ph-caret-up"></i></button>` +
   `<button type="button" class="fs-btn fs-sq fs-next" title="Next file (j)"><i class="ph ph-caret-down"></i></button>` +
+  `</div>` +
   `<button type="button" class="fs-btn fs-sq fs-menu-btn" title="View options" aria-haspopup="true"><i class="ph ph-dots-three-vertical"></i></button>` +
   `</div>` +
   `<div class="fs-edit-actions fs-hidden">` +
@@ -142,6 +146,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     searchCount: host.querySelector<HTMLElement>(".fs-search-count")!,
     searchPrev: host.querySelector<HTMLButtonElement>(".fs-search-prev")!,
     searchNext: host.querySelector<HTMLButtonElement>(".fs-search-next")!,
+    navGroup: host.querySelector<HTMLElement>(".fs-nav-group")!,
     navpos: host.querySelector<HTMLElement>(".fs-navpos")!,
     prevBtn: host.querySelector<HTMLButtonElement>(".fs-prev")!,
     nextBtn: host.querySelector<HTMLButtonElement>(".fs-next")!,
@@ -429,13 +434,9 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
       const list = opts.nav.list();
       const pos = list.findIndex((f) => f.path === file.path);
       el.navpos.textContent = pos >= 0 ? `${pos + 1} / ${list.length}` : `- / ${list.length}`;
-      el.navpos.classList.remove("fs-hidden");
-      el.prevBtn.classList.remove("fs-hidden");
-      el.nextBtn.classList.remove("fs-hidden");
+      el.navGroup.classList.remove("fs-hidden");
     } else {
-      el.navpos.classList.add("fs-hidden");
-      el.prevBtn.classList.add("fs-hidden");
-      el.nextBtn.classList.add("fs-hidden");
+      el.navGroup.classList.add("fs-hidden");
     }
 
     el.right.classList.toggle("fs-hidden", state.editing);

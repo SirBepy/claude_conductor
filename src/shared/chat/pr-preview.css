@@ -268,7 +268,6 @@
   padding: 8px 12px;
   font-size: 10.5px;
   color: var(--color-text-muted);
-  font-style: italic;
 }
 
 .pr-sb-muted {
@@ -502,6 +501,14 @@
 .pr-modal-body-content .commit-ref-meta {
   margin: 0 0 16px;
   font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+/* Commit has no body (commit-refs.ts): one quiet line instead of a blank pane. */
+.pr-modal-body-content .commit-ref-nobody {
+  margin: 0;
+  font-size: 0.8rem;
+  font-style: italic;
   color: var(--color-text-muted);
 }
 
