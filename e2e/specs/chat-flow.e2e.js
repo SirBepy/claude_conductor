@@ -149,11 +149,21 @@ async function sendMessage(text) {
   await (await $(".session-composer .composer-send")).click();
 }
 
-// Wait until the assistant-final count reaches `target`.
-async function waitForAssistantFinal(target, timeout = 120000) {
+// Sends `text` and waits for its own user bubble and a new final reply,
+// relative to the counts just before the send. A quiet-mode turn can paint
+// two assistant rows (a text reply plus a send_message bubble), and a reopen's
+// chat-resync rebuild can add more, so an absolute `assistantFinal >= N` can
+// already hold before the message is even sent.
+async function sendAndAwaitReply(text, timeout = 120000) {
+  const before = await msgCounts();
+  await sendMessage(text);
   await browser.waitUntil(
-    async () => (await msgCounts()).assistantFinal >= target,
-    { timeout, interval: 1000, timeoutMsg: `assistant-final never reached ${target}` }
+    async () => (await msgCounts()).user > before.user,
+    { timeout: 20000, interval: 250, timeoutMsg: `"${text}" never rendered as a user bubble (counts before send: ${JSON.stringify(before)})` }
+  );
+  await browser.waitUntil(
+    async () => (await msgCounts()).assistantFinal > before.assistantFinal,
+    { timeout, interval: 1000, timeoutMsg: `no new final assistant reply to "${text}"` }
   );
 }
 
@@ -175,8 +185,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
   it("chat A: first message gets a reply", async () => {
     await startHaikuChat();
     await drainConsole("A-start");
-    await sendMessage("Reply with only the word ALPHA and nothing else.");
-    await waitForAssistantFinal(1);
+    await sendAndAwaitReply("Reply with only the word ALPHA and nothing else.");
     await drainConsole("A-msg1");
 
     const c = await msgCounts();
@@ -190,8 +199,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
   });
 
   it("chat A: second message in same chat (multi-turn)", async () => {
-    await sendMessage("Now reply with only the word BETA and nothing else.");
-    await waitForAssistantFinal(2);
+    await sendAndAwaitReply("Now reply with only the word BETA and nothing else.");
     await drainConsole("A-msg2");
 
     const c = await msgCounts();
@@ -203,8 +211,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
   it("chat B: new chat, send a message", async () => {
     await startHaikuChat();
     await drainConsole("B-start");
-    await sendMessage("Reply with only the word GAMMA and nothing else.");
-    await waitForAssistantFinal(1);
+    await sendAndAwaitReply("Reply with only the word GAMMA and nothing else.");
     await drainConsole("B-msg1");
 
     bId = await activeSessionId();
@@ -296,8 +303,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
     );
     await drainConsole("reopen-A");
 
-    await sendMessage("Finally, reply with only the word DELTA and nothing else.");
-    await waitForAssistantFinal(3);
+    await sendAndAwaitReply("Finally, reply with only the word DELTA and nothing else.");
     await drainConsole("A-msg3");
 
     const c = await msgCounts();

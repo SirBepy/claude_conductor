@@ -138,7 +138,12 @@ describe("AskUserQuestion full real-path (BILLED)", () => {
       throw new Error(`CARD NEVER APPEARED.\nactiveBefore=${activeBefore}\ndiag=${JSON.stringify(diag)}\nperm logs:\n${relevant.join("\n") || "<none>"}\nall logs tail:\n${logs.slice(-15).join("\n")}`);
     }
 
-    const cardText = await card.getText();
+    // The card fades in from opacity 0 (prompt-card-in, 0.16s), and WebDriver's
+    // getText returns "" for an element it doesn't consider shown yet.
+    let cardText = "";
+    await browser
+      .waitUntil(async () => /tabs/i.test((cardText = await card.getText())) && /spaces/i.test(cardText), { timeout: 5000, interval: 100 })
+      .catch(() => {});
     assert.ok(/tabs/i.test(cardText) && /spaces/i.test(cardText), `card missing options: ${cardText}`);
 
     // Gate-vs-fire-and-forget: handleQuestionRequested logs "...question-
