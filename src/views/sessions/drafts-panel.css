@@ -8,6 +8,7 @@
 }
 
 .drafts-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -275,6 +276,71 @@
 
 .dr-btn:hover { border-color: var(--color-primary); }
 .dr-btn.on { color: var(--color-success); }
+
+.dr-btn.open { border-color: var(--color-primary); color: var(--color-primary); }
+.dr-caret { font-size: 10px; opacity: 0.7; }
+
+/* ── Revise menu ──────────────────────────────────────────────────────────── */
+/* Opens upward from the foot, anchored to the panel so it is never clipped by
+   the body scroller. */
+.dr-rv-host:empty { display: none; }
+
+.dr-rv-menu {
+  position: absolute;
+  left: 8px;
+  bottom: 46px;
+  z-index: 5;
+  width: 230px;
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.dr-rv-scope {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  padding: 4px 7px 5px;
+}
+
+.dr-rv-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.dr-rv-item i { color: var(--color-primary); font-size: 13px; }
+.dr-rv-item:hover { background: var(--color-surface-alt); }
+
+/* Two classes to outrank widgets.css's input[type="text"]. */
+.dr-rv-menu .dr-rv-input {
+  margin-top: 4px;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  color: var(--color-text);
+  outline: none;
+}
+
+.dr-rv-menu .dr-rv-input:focus { border-style: solid; border-color: var(--color-primary); }
 
 .dr-primary {
   background: var(--color-primary);

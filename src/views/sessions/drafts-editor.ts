@@ -8,6 +8,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
 import type { MessageDraft, DraftVariant } from "../../types/ipc.generated";
+import { buildRevisionPrompt, presetAsk, reviseMenuHtml, sendRevision } from "./drafts-revise";
 
 /** Long enough that a normal sentence pause does not round-trip to the daemon;
  *  the store coalesces anyway, so this only trades chattiness for latency. */
@@ -49,6 +50,10 @@ export class DraftsEditor {
   /** Consecutive failed autosaves. One toast at the 3rd, not one per retry
    *  (the timer keeps retrying every AUTOSAVE_MS while the user keeps typing). */
   private autosaveFailures = 0;
+  private reviseOpen = false;
+  /** The body selection at the moment Revise was pressed; opening the menu
+   *  moves focus, so it cannot be read later. */
+  private reviseScope = "";
 
   constructor(root: HTMLElement, draft: MessageDraft, deps: DraftsEditorDeps) {
     this.root = root;
@@ -59,6 +64,8 @@ export class DraftsEditor {
     this.root.addEventListener("click", this.onClick);
     this.root.addEventListener("input", this.onInput);
     this.root.addEventListener("change", this.onChange);
+    this.root.addEventListener("pointerdown", this.onPointerDown);
+    this.root.addEventListener("keydown", this.onKeydown);
   }
 
   /** A live refresh must not yank the caret or clobber what is being typed, so
@@ -66,7 +73,8 @@ export class DraftsEditor {
   update(draft: MessageDraft): void {
     this.draft = draft;
     const body = this.bodyEl();
-    if (body && document.activeElement === body) {
+    const typing = document.activeElement === body || !!document.activeElement?.closest(".dr-rv-menu");
+    if (body && typing) {
       this.renderChrome();
       return;
     }
@@ -78,6 +86,9 @@ export class DraftsEditor {
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("input", this.onInput);
     this.root.removeEventListener("change", this.onChange);
+    this.root.removeEventListener("pointerdown", this.onPointerDown);
+    this.root.removeEventListener("keydown", this.onKeydown);
+    document.removeEventListener("pointerdown", this.onOutside, true);
   }
 
   /** Writes any pending edit now. Called on teardown and before navigating
@@ -141,7 +152,8 @@ export class DraftsEditor {
           `<i class="ph ph-quotes"></i></button>` +
       `</div>` +
       `<div class="dr-body" contenteditable="true" spellcheck="true">${renderMarkdown(markdown)}</div>` +
-      this.footHtml();
+      this.footHtml() +
+      `<div class="dr-rv-host">${this.reviseOpen ? reviseMenuHtml(!!this.reviseScope) : ""}</div>`;
   }
 
   /** Repaints everything except the contenteditable, so a live update can land
@@ -193,6 +205,9 @@ export class DraftsEditor {
     return (
       `<div class="dr-foot">` +
         `<button type="button" class="dr-btn dr-primary" data-copy><i class="ph ph-copy"></i> Copy</button>` +
+        `<button type="button" class="dr-btn${this.reviseOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
+          `title="Ask Claude to rework it - the highlighted part, or the whole draft">` +
+          `<i class="ph ph-magic-wand"></i> Revise <i class="ph ph-caret-up dr-caret"></i></button>` +
         `<span class="dr-grow"></span>` +
         `<button type="button" class="dr-btn${ready ? " on" : ""}" data-ready>` +
           `<i class="ph ${ready ? "ph-check-circle" : "ph-circle"}"></i> Ready</button>` +
@@ -244,6 +259,16 @@ export class DraftsEditor {
       this.copy(el.closest("[data-copy]") as HTMLElement);
       return;
     }
+    if (el.closest("[data-revise]")) {
+      this.setReviseOpen(!this.reviseOpen);
+      return;
+    }
+    const preset = el.closest<HTMLElement>("[data-revise-preset]");
+    if (preset) {
+      const ask = presetAsk(preset.dataset.revisePreset ?? "");
+      if (ask) this.revise(ask);
+      return;
+    }
     if (el.closest("[data-ready]")) {
       this.setState(this.draft.state === "ready" ? "needs-you" : "ready");
       return;
@@ -262,7 +287,76 @@ export class DraftsEditor {
     }
   };
 
+  /** Keeps the body's selection alive through the Revise click and records
+   *  it, since a focused button or menu input would collapse it. */
+  private onPointerDown = (ev: PointerEvent): void => {
+    if (!(ev.target as HTMLElement).closest("[data-revise]") || this.reviseOpen) return;
+    ev.preventDefault();
+    const sel = window.getSelection();
+    const body = this.bodyEl();
+    const inBody = !!sel && sel.rangeCount > 0 && !!body?.contains(sel.getRangeAt(0).commonAncestorContainer);
+    this.reviseScope = inBody && !sel!.isCollapsed ? sel!.toString() : "";
+  };
+
+  private onKeydown = (ev: KeyboardEvent): void => {
+    const input = (ev.target as HTMLElement).closest<HTMLInputElement>("[data-revise-free]");
+    if (!input) return;
+    if (ev.key === "Escape") {
+      ev.stopPropagation();
+      this.setReviseOpen(false);
+    } else if (ev.key === "Enter" && input.value.trim()) {
+      ev.preventDefault();
+      this.revise(input.value);
+    }
+  };
+
+  private onOutside = (ev: PointerEvent): void => {
+    const el = ev.target as HTMLElement;
+    if (el.closest(".dr-rv-menu") || el.closest("[data-revise]")) return;
+    this.setReviseOpen(false);
+  };
+
+  private setReviseOpen(open: boolean): void {
+    this.reviseOpen = open;
+    if (!open) this.reviseScope = "";
+    const host = this.root.querySelector(".dr-rv-host");
+    if (host) host.innerHTML = open ? reviseMenuHtml(!!this.reviseScope) : "";
+    this.root.querySelector("[data-revise]")?.classList.toggle("open", open);
+    if (open) document.addEventListener("pointerdown", this.onOutside, true);
+    else document.removeEventListener("pointerdown", this.onOutside, true);
+  }
+
   // ── Actions ─────────────────────────────────────────────────────────────
+
+  /** Saves the open edit first so the chat revises what is on screen, not
+   *  the last autosave. */
+  private revise(instruction: string): void {
+    const body = this.bodyEl();
+    const variant = this.variant();
+    if (!body || !variant) return;
+    this.flush();
+    const text = buildRevisionPrompt(
+      {
+        topic: this.draft.topic,
+        handle: handleOf(variant),
+        version: currentVersion(variant)?.n ?? 1,
+        body: htmlToMarkdown(body),
+        selection: this.reviseScope,
+      },
+      instruction,
+    );
+    this.setReviseOpen(false);
+    void sendRevision(this.draft.origin_session_id, this.deps.sessionId, text).then((sent) => {
+      if (!sent) return;
+      const icon = this.root.querySelector("[data-revise] i");
+      if (!icon) return;
+      icon.className = "ph ph-check";
+      setTimeout(() => {
+        const back = this.root.querySelector("[data-revise] i");
+        if (back) back.className = "ph ph-magic-wand";
+      }, 1500);
+    });
+  }
 
   /** No execCommand for inline code, so the selection is wrapped by hand. */
   private wrapCode(): void {
