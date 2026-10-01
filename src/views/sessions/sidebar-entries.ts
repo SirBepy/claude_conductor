@@ -234,7 +234,7 @@ export function buildSidebarEntries(
   };
 
   // "Waiting" (5) renders right after "In Progress" (2). "Closing" (3) alone
-  // defers past Hidden below - see the renderSeg(3) call at the bottom.
+  // defers to just above Hidden - see the renderSeg(3) call below.
   for (const seg of [0, 1, 2, 5, 4, 6, 7]) {
     renderSeg(seg);
   }
@@ -249,7 +249,11 @@ export function buildSidebarEntries(
     });
   }
 
-  // Hidden section - always at the bottom
+  // Closing (transient) sits just above Hidden, so Hidden stays the true bottom.
+  renderSeg(3);
+
+  // Hidden section - always at the bottom; its header's margin-top:auto
+  // (session-list.css) pins it to the sidebar's bottom edge when there's room.
   if (hiddenSessions.length > 0) {
     const hiddenCollapsed = loadHiddenCollapsed();
     const chevronCls = hiddenCollapsed ? "ph-caret-right" : "ph-caret-down";
@@ -271,9 +275,6 @@ export function buildSidebarEntries(
       }
     }
   }
-
-  // Closing (transient, so it stays the true bottom).
-  renderSeg(3);
 
   state.sortedSessionIds = kbdOrderIds;
 

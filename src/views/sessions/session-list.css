@@ -50,6 +50,9 @@
 
 @media (max-width: 640px) {
   .sessions-fab { display: flex; }
+  /* Clears the floating "new chat" CTA so the last chat row can always
+     scroll out from under it. */
+  .sessions-list { padding-bottom: 84px; }
 }
 
 .sessions-fab:hover {
@@ -101,9 +104,11 @@
 .sessions-list {
   list-style: none;
   margin: 0;
-  /* Bottom padding clears the floating "new chat" CTA so the last chat row can
-     always scroll out from under it. */
-  padding: 0 0 84px;
+  padding: 0;
+  /* Column flex so the Hidden group can margin-top:auto onto the bottom edge
+     while there's spare height, and simply scroll last when there isn't. */
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   /* Keep scroll momentum inside the chat list; don't chain to the page
      (pulling down past the top row was triggering the browser's refresh). */
@@ -154,6 +159,9 @@
 .sessions-list li.session-group-hidden-toggle {
   pointer-events: auto;
   cursor: pointer;
+  margin-top: auto;
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
 }
 
 .sessions-list li.session-group-hidden-toggle:hover {
