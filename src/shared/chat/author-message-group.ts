@@ -8,6 +8,8 @@ import { authorTagFor } from "./author-tag-source";
 import { basename } from "../path-utils";
 import { hydrateCharacterAvatars } from "../projects";
 import { ensureMainStrip } from "./tool-strip";
+import type { ChannelMessage } from "../../types/ipc.generated";
+import { textsFor } from "./peer-channel";
 
 const PALETTE_SIZE = 6;
 
@@ -46,6 +48,13 @@ const AUTHOR_KEY = "peer-msgs";
  *  single element. */
 const FOLD_MARKER_ATTR = "authoredFoldMarker";
 
+/** Friendly fallback for a run entry whose author has a loaded (fetched, not
+ *  undefined) channel backlog but no message surviving in it - either it
+ *  aged out past repo_channel's MAX_MESSAGES cap, or this particular
+ *  coalesced wake has more entries than that author has retained posts.
+ *  Still visible text, never a blank row (todo 893 acceptance). */
+const AGED_OUT_HTML = `<span class="author-group-row-aged-out">Message text unavailable - it aged out of the retained history.</span>`;
+
 /** Full rebuild each call that the authored-message set in range actually
  *  changed (same idempotence as the custom-view buckets), so a late-arriving
  *  peer message just grows the count - but an unrelated tool flush with no
@@ -56,6 +65,13 @@ export function foldAuthoredIntoStrip(
   start: number,
   end: number,
   stripHost: HTMLElement,
+  // Todo 893: the real repo-channel backlog for this session, fetched once
+  // per hydrate (chat-renderer.ts's loadFromStore, alongside skip marks).
+  // `undefined` means "not fetched yet for this render" - falls back to the
+  // zero-peer-bytes wake placeholder (`m.content`), same as before this
+  // param existed, which is why every pre-893 call site (and test) that
+  // omits this argument keeps its original behavior unchanged.
+  channelMessages?: ChannelMessage[],
 ): void {
   const run: RenderedMessage[] = [];
   for (let i = start; i < end; i++) {
@@ -99,13 +115,26 @@ export function foldAuthoredIntoStrip(
     `<span class="author-group-avatars">${seen.slice(0, 3).map((id) => avatarHtml(id, colorClassFor(id))).join("")}</span>` +
     `<span class="tool-chip-label">${escapeHtml(label)}</span>${count}`;
 
+  // Per-author occurrence index, so two run entries from the same author
+  // each claim a DISTINCT real message in channel order rather than both
+  // showing the author's first retained post.
+  const occurrence = new Map<string, number>();
   bucket.innerHTML = run
     .map((m) => {
       const id = m.authorSessionId!;
       const colorClass = colorClassFor(id);
+      const idx = occurrence.get(id) ?? 0;
+      occurrence.set(id, idx + 1);
+      let bodyHtml: string;
+      if (channelMessages === undefined) {
+        bodyHtml = renderBlocks(m.content ?? [], true, true);
+      } else {
+        const real = textsFor(channelMessages, id)[idx];
+        bodyHtml = real !== undefined ? escapeHtml(real) : AGED_OUT_HTML;
+      }
       return `<div class="author-group-row">${avatarHtml(id, colorClass)}` +
         `<div class="author-group-row-body"><div class="author-group-row-name ${colorClass}">${escapeHtml(nameFor(id))}</div>` +
-        `<div class="author-group-row-text">${renderBlocks(m.content ?? [], true, true)}</div></div></div>`;
+        `<div class="author-group-row-text">${bodyHtml}</div></div></div>`;
     })
     .join("");
 

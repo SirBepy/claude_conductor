@@ -14,6 +14,8 @@ import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
 import { ChatPaginator } from "./chat-pagination";
 import { normalizeSkipMarks, type SkipMark } from "./skip-marks";
+import { fetchChannelMessages } from "./peer-channel";
+import type { ChannelMessage } from "../../types/ipc.generated";
 import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
 import { buildMessageEl, revealTranscript } from "./chat-dom-renderer";
 import { foldClosedRange } from "./chat-turn-fold";
@@ -103,6 +105,11 @@ export class ChatRenderer {
   // fires flushRender() against a renderer reused for a different session.
   _flushTimer: ReturnType<typeof setTimeout> | null = null;
   sessionId: string | null = null;
+  // Todo 893: the real repo-channel backlog for this session's project,
+  // fetched once per hydrate (loadFromStore, alongside skip marks) so the
+  // peer-message chip's inline panel can show real text instead of the wake
+  // placeholder. `undefined` until that fetch resolves for THIS sessionId.
+  channelMessages?: ChannelMessage[] = undefined;
   _bulkGen = 0;
   meta: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
   _cumulative: CumulativeUsage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
@@ -364,6 +371,7 @@ export class ChatRenderer {
     this.liveBuffer = null;
     this.meta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
     this._cumulative = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
+    this.channelMessages = undefined;
     this.fileEdits = [];
     this.lastActivity = null;
     this.activityIdle = false;
@@ -483,12 +491,16 @@ export class ChatRenderer {
     if (!this.sessionId) return;
     const sid = this.sessionId;
     this.paginator.cwdHint = cwd;
-    // Skip marks (todo 661) fetched once per hydrate, alongside the history
-    // page, and cached on the paginator so both the bulk-load fold and the
-    // older-page fold read the same list.
-    const [events, marks] = await Promise.all([sessionEvents.loadInitial(sid, cwd), fetchSkipMarks(sid)]);
+    // Skip marks (todo 661) and the real repo-channel backlog (todo 893)
+    // both fetched once per hydrate, alongside the history page.
+    const [events, marks, channelMessages] = await Promise.all([
+      sessionEvents.loadInitial(sid, cwd),
+      fetchSkipMarks(sid),
+      fetchChannelMessages(sid),
+    ]);
     if (this.sessionId !== sid) return;
     this.paginator.skipMarks = marks;
+    this.channelMessages = channelMessages;
     await bulkLoadEvents(this, [...events], opts);
     if (this.sessionId !== sid) return;
     this.paginator.install();

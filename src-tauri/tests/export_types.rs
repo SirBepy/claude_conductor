@@ -19,6 +19,7 @@ use claude_conductor_lib::ipc::worktrees::WorktreeDetail;
 use claude_conductor_lib::ipc::claude_scopes::ClaudeMdScope;
 use claude_conductor_lib::ipc::git_diff::PrFileChange;
 use claude_conductor_lib::ipc::git_commit_refs::CommitRef;
+use claude_conductor_lib::ipc::api_keys::ApiKeyStatus;
 use claude_conductor_lib::tickets::{TicketSummary, TicketTracker, TrackerInfo, TrackerKind};
 use claude_conductor_lib::ipc::git_sync::{CommitEntry, CommitHistory, CommitHistoryEntry, CommitSync};
 use claude_conductor_lib::ipc::files::TextFileData;
@@ -26,6 +27,7 @@ use claude_conductor_lib::ipc::schedule::ExternalScheduledJob;
 use claude_conductor_lib::notifications::piper::{PiperStatus, VoiceEntry};
 use claude_conductor_lib::sessions::kinds::InstanceKind;
 use claude_conductor_lib::ask::{AskMessage, AskThread};
+use claude_conductor_lib::sessions::repo_channel::ChannelMessage;
 use claude_conductor_lib::sessions::message_drafts::{
     DraftAuthor, DraftReceipt, DraftState, DraftVariant, DraftVersion, MessageDraft,
 };
@@ -192,9 +194,15 @@ fn emit_ipc_types() {
     out.push_str(&decl::<DraftVariant>());
     out.push_str(&decl::<MessageDraft>());
 
+    // repo-channel peer chip inline panel (todo 893)
+    out.push_str(&decl::<ChannelMessage>());
+
     // ask
     out.push_str(&decl::<AskMessage>());
     out.push_str(&decl::<AskThread>());
+
+    // API key registry (todo 1043)
+    out.push_str(&decl::<ApiKeyStatus>());
 
     let path = output_path();
     if let Some(parent) = path.parent() {

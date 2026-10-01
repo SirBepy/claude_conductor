@@ -276,6 +276,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("set_draft_version", P),
     ("set_draft_state", P),
     ("delete_draft", P),
+    // Peer-message chip's inline panel (todo 893): a read-only, non-consuming
+    // backlog fetch for the caller's own project, same shared-SPA
+    // reachability as the Drafts panel above - it renders identically on the
+    // phone PWA and the desktop webview. Registered by
+    // `methods::channel::register_channel_rpc`.
+    ("list_channel_messages", P),
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),

@@ -129,7 +129,7 @@ export function foldClosedRange(
       .some((m) => m.kind === "tool_use" || m.kind === "tool_result"
         || (m.kind === "user" && !!m.authorSessionId));
     if (!totals && !hasToolRows && !metaRow) {
-      applyTurnCollapse(r.messages, r.messageEls, start, end, null);
+      applyTurnCollapse(r.messages, r.messageEls, start, end, null, r.channelMessages);
       return;
     }
     key = ++r._chipKeySeq;
@@ -165,7 +165,7 @@ export function foldClosedRange(
       if (el) el.dataset[FOOTER_KEY_ATTR] = String(key);
     }
   }
-  applyTurnCollapse(r.messages, r.messageEls, start, end, footer);
+  applyTurnCollapse(r.messages, r.messageEls, start, end, footer, r.channelMessages);
 }
 
 /** Combined totals for two turns rendered as one footer. Input is the LATEST
@@ -295,7 +295,7 @@ export function processTurnCloseQueue(r: ChatRenderer): void {
         r.turnFooters.cancelMetaRow(chipKey);
       }
     }
-    applyTurnCollapse(r.messages, r.messageEls, start, end, footer);
+    applyTurnCollapse(r.messages, r.messageEls, start, end, footer, r.channelMessages);
     // After the collapse, so every chip/screenshot this turn produced exists
     // before it moves house.
     if (chipKey !== null && mergeIntoKey !== null) {

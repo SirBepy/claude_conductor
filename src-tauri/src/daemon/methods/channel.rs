@@ -82,6 +82,19 @@ pub(crate) fn read_messages(state: &Arc<DaemonState>, session_id: &str) -> Resul
     Ok(json!({"messages": messages}))
 }
 
+/// `list_channel_messages` RPC (todo 893): the desktop/phone UI's read for
+/// the peer-chip inline panel - the FULL retained backlog of the caller's
+/// own project (every author, not just unread-to-this-caller), via
+/// `repo_channel::list_all`'s non-consuming read. Unlike `read_messages`
+/// above, this never reads or advances any session's cursor, so it's safe to
+/// call from a passive UI surface without stealing a delivery from whichever
+/// session's own `read_messages` would otherwise have seen it exactly once.
+pub(crate) fn list_channel_messages(state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
+    let project_id = caller_project(state, session_id)?;
+    let messages = repo_channel::list_all(&project_id);
+    Ok(json!({"messages": messages}))
+}
+
 /// `post_message` tool: appends `text` to this project's channel, then wakes
 /// either every OTHER live session in the project or, if `target` names ids,
 /// only those (see `repo_channel_wake::resolve_targets` for the security
@@ -214,6 +227,21 @@ pub(crate) async fn post_message_or_forward(
 /// `params.from`'s `name` field's implied machine - a payload cannot forge
 /// which machine it claims to be from.
 pub fn register_channel_rpc(router: &mut Router, state: Arc<DaemonState>) {
+    // Desktop/phone UI read (todo 893), not peer-to-peer like
+    // `peer_channel_post` below - `P` in `remote_transport_table` because the
+    // peer-chip panel renders in the same shared SPA on both surfaces.
+    router.register("list_channel_messages", {
+        let state = state.clone();
+        move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p = params.unwrap_or(Value::Null);
+                let session_id = p.get("session_id").and_then(Value::as_str).unwrap_or_default();
+                list_channel_messages(&state, session_id).map_err(RpcError::invalid_params)
+            }
+        }
+    });
+
     router.register("peer_channel_post", move |params, ctx| {
         let state = state.clone();
         async move {
@@ -289,6 +317,39 @@ mod tests {
             "notified": notified,
             "delivered": notified > 0,
         }))
+    }
+
+    #[test]
+    fn list_channel_messages_returns_every_authors_post_without_advancing_any_cursor() {
+        // Real (non-tempdir) app data, randomized project id so repeated
+        // `cargo test` runs on this machine never collide - same tradeoff
+        // `register_channel_rpc`'s own cross-machine test documents.
+        let state = test_state();
+        let project_id = format!("proj-893-{}", uuid::Uuid::new_v4());
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), &project_id, "2026-10-01T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), &project_id, "2026-10-01T00:00:00Z");
+
+        repo_channel::post(&project_id, "s1", "Alice", "touching foo.rs", None);
+        repo_channel::post(&project_id, "s2", "Bob", "touching bar.rs", None);
+
+        let v = list_channel_messages(&state, "s1").unwrap();
+        let messages = v["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 2, "sees every author's post, including the caller's own");
+        assert_eq!(messages[0]["text"], "touching foo.rs");
+        assert_eq!(messages[1]["text"], "touching bar.rs");
+
+        // Unlike read_messages/list_unread, this read must never advance a
+        // cursor: s2's own unread list still has Alice's post waiting.
+        let unread = repo_channel::list_unread(&project_id, "s2");
+        assert_eq!(unread.len(), 1, "s2's read_messages cursor must be untouched by the UI read");
+        assert_eq!(unread[0].text, "touching foo.rs");
+    }
+
+    #[test]
+    fn list_channel_messages_rejects_an_unknown_caller() {
+        let state = test_state();
+        let r = list_channel_messages(&state, "ghost");
+        assert_eq!(r, Err("unknown session: ghost".to_string()));
     }
 
     #[test]

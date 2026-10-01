@@ -3,6 +3,7 @@
 // with nested strips for subagent children.
 
 import type { RenderedMessage } from "./chat-transforms";
+import type { ChannelMessage } from "../../types/ipc.generated";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { CUSTOM_VIEW_TOOLS, renderCustomToolView } from "./tool-views";
 import { foldAuthoredIntoStrip } from "./author-message-group";
@@ -164,6 +165,9 @@ export function groupToolRange(
   end: number,
   groups: Map<string, ToolGroup>,
   stripHost?: HTMLElement | null,
+  // Todo 893: threaded straight through to foldAuthoredIntoStrip - see its
+  // own doc for what `undefined` vs a loaded (possibly empty) array means.
+  channelMessages?: ChannelMessage[],
 ): void {
   if (end <= start) return;
 
@@ -313,7 +317,7 @@ export function groupToolRange(
     rebuildCustomBucket(bucket, key, messages, start, end);
   }
 
-  if (stripHost) foldAuthoredIntoStrip(messages, messageEls, start, end, stripHost);
+  if (stripHost) foldAuthoredIntoStrip(messages, messageEls, start, end, stripHost, channelMessages);
 
   if (stripHost && strip) {
     mountScreenshotsForRange(stripHost, messages, start, end, strip, panel!, groups);
@@ -380,9 +384,10 @@ export function applyTurnCollapse(
   start: number,
   end: number,
   stripHost?: HTMLElement | null,
+  channelMessages?: ChannelMessage[],
 ): void {
   if (end <= start) return;
 
   const recovered = recoverGroupsFromDom(messageEls, start, end, stripHost);
-  groupToolRange(messages, messageEls, start, end, recovered, stripHost);
+  groupToolRange(messages, messageEls, start, end, recovered, stripHost, channelMessages);
 }

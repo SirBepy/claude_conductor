@@ -1,5 +1,6 @@
 pub mod usage;
 pub mod accounts;
+pub mod api_keys;
 pub mod settings;
 pub mod projects;
 pub mod token_source;
@@ -47,6 +48,7 @@ pub mod ready;
 pub mod instances;
 pub mod hook_registration;
 pub mod external_launchers;
+pub mod repo_channel;
 
 pub use usage::*;
 pub use accounts::*;

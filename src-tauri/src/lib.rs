@@ -1,5 +1,6 @@
 mod bootstrap;
 pub mod accounts;
+pub mod api_keys;
 pub mod ask;
 pub mod channels;
 pub mod characters;
@@ -238,6 +239,7 @@ pub fn run() {
             ipc::hook_registration::get_hook_registration_state,
             ipc::hook_registration::register_hooks_globally,
             ipc::hook_registration::skip_hook_registration,
+            ipc::repo_channel::list_channel_messages,
             ipc::list_project_groups,
             ipc::project_last_activity_at,
             ipc::list_worktree_details,
@@ -314,6 +316,8 @@ pub fn run() {
             ipc::git_commit_refs::resolve_commit_refs,
             ipc::tickets::get_ticket_tracker,
             ipc::tickets::get_ticket_summary,
+            ipc::api_keys::list_api_keys,
+            ipc::api_keys::set_api_key,
             context_status::commands::session_live_cwd,
             context_status::commands::context_status,
             ipc::count_ai_todos,

@@ -20,7 +20,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct ChannelMessage {
     pub id: String,
     pub session_id: String,
@@ -116,6 +117,16 @@ pub fn forget_session(session_id: &str) {
 pub fn list_unread(project_id: &str, session_id: &str) -> Vec<ChannelMessage> {
     let Some(path) = store_path_for(project_id) else { return Vec::new() };
     list_unread_at(&path, session_id)
+}
+
+/// Todo 893: the full retained backlog for `project_id`, oldest first,
+/// EVERY message regardless of sender or `to_session_id` - unlike
+/// `list_unread`, no cursor is read or advanced, so this is safe to call
+/// from a read-only UI surface (the peer-chip inline panel) without
+/// disturbing any session's own `read_messages` delivery-once guarantee.
+pub fn list_all(project_id: &str) -> Vec<ChannelMessage> {
+    let Some(path) = store_path_for(project_id) else { return Vec::new() };
+    list_at(&path)
 }
 
 /// `pub(crate)`: the tempdir-injectable form real unit tests use, same
@@ -428,6 +439,21 @@ mod tests {
         let loaded = list_at(&path);
         assert_eq!(loaded.len(), 1, "write must have actually landed on disk");
         assert_eq!(loaded[0].id, msg.id);
+    }
+
+    #[test]
+    fn list_all_returns_everything_including_the_callers_own_posts() {
+        // Unlike list_unread_at, list_all has no reading session - it must
+        // not filter out anyone's posts, including a would-be reader's own.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-list-all.json");
+        post_at(Some(&path), "s1", "Alice", "one", None);
+        post_at(Some(&path), "s2", "Bob", "two", Some("s1"));
+
+        let all = list_at(&path);
+        assert_eq!(all.len(), 2, "list_all's own underlying read (list_at) sees every retained message");
+        assert_eq!(all[0].text, "one");
+        assert_eq!(all[1].text, "two");
     }
 
     #[test]

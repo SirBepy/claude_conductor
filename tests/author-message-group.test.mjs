@@ -159,6 +159,54 @@ describe("todo 807: fold is a no-op when the authored-message set in range is un
   });
 });
 
+// Todo 893: the placeholder `m.content` (`wake_notice`'s zero-peer-bytes
+// string) is never what Joe actually wants to read - once the real channel
+// backlog is fetched, the panel must show the real back-and-forth instead.
+describe("todo 893: real channel messages replace the wake placeholder", () => {
+  it("renders the fetched channel text instead of the placeholder content", () => {
+    const host = footer();
+    const placeholder = "1 new peer message from session peer-a. Call read_messages to view.";
+    const messages = [userMsg("peer-a", placeholder)];
+    const messageEls = [authoredEl()];
+    document.body.append(...messageEls);
+    const channelMessages = [
+      { id: "m1", session_id: "peer-a", author: "Alice (peer)", text: "actually touching file.rs now", posted_at: "2026-10-01T00:00:00Z", to_session_id: null },
+    ];
+
+    foldAuthoredIntoStrip(messages, messageEls, 0, 1, host, channelMessages);
+
+    const row = host.querySelector(".author-group-row-text");
+    expect(row.textContent).toBe("actually touching file.rs now");
+    expect(row.textContent).not.toContain("Call read_messages to view");
+  });
+
+  it("a session with no retained messages (aged past the 50-cap) degrades visibly instead of rendering blank", () => {
+    const host = footer();
+    const messages = [userMsg("peer-a", "1 new peer message from session peer-a. Call read_messages to view.")];
+    const messageEls = [authoredEl()];
+    document.body.append(...messageEls);
+
+    // Backlog fetched successfully, but nothing from peer-a survived the cap.
+    foldAuthoredIntoStrip(messages, messageEls, 0, 1, host, []);
+
+    const row = host.querySelector(".author-group-row-text");
+    expect(row.textContent.trim().length).toBeGreaterThan(0);
+    expect(row.textContent).not.toContain("Call read_messages to view");
+  });
+
+  it("falls back to the placeholder when the backlog hasn't loaded yet (no 6th arg)", () => {
+    const host = footer();
+    const messages = [userMsg("peer-a", "1 new peer message from session peer-a. Call read_messages to view.")];
+    const messageEls = [authoredEl()];
+    document.body.append(...messageEls);
+
+    foldAuthoredIntoStrip(messages, messageEls, 0, 1, host);
+
+    const row = host.querySelector(".author-group-row-text");
+    expect(row.textContent).toContain("Call read_messages to view");
+  });
+});
+
 describe("todo 790: avatar palette mapping is stable", () => {
   const golden = [
     ["peer-a", "author-color-4"],

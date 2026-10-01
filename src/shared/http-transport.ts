@@ -242,6 +242,10 @@ export class HttpTransport implements Transport {
       // below) - this is the Drafts panel's own store.
       case "list_message_drafts":
         return this.rpc<T>("list_message_drafts", { session_id: args.sessionId ?? args.session_id });
+      // Peer-message chip's inline panel (todo 893): read-only repo-channel
+      // backlog fetch, same shared-SPA reachability as the Drafts panel above.
+      case "list_channel_messages":
+        return this.rpc<T>("list_channel_messages", { session_id: args.sessionId ?? args.session_id });
       case "set_draft_body":
         return this.rpc<T>("set_draft_body", {
           session_id: args.sessionId ?? args.session_id,
