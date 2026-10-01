@@ -12,13 +12,13 @@ import type { PreviewController } from "../preview-panel";
 import { Frame, type FrameEvents } from "./frame";
 import { mountPanel, type MountedPanels, type PanelDeps, type PanelHandle } from "./panels";
 import {
-  centredRect, clampRect, cornerRect, dockRect, dockWidths, dropZoneAt, loadSize, MIN_CHAT, MIN_W, resizeRect,
-  saveSize, zoneRect, type Bounds, type DropZone, type ResizeDir,
+  centredRect, clampRect, cornerRect, dockRect, dockWidths, dropZoneAt, loadSize, MIN_CHAT, MIN_STACK_H, MIN_W,
+  resizeRect, saveSize, stackRects, zoneRect, type Bounds, type DropZone, type ResizeDir,
 } from "./geometry";
 import {
-  closeWindow, dockedWindow, focusWindow, isShowing, mergeWindows, moveTab, openPanel, PANEL_KEYS, PANEL_META,
-  place, setActive, setDockShare, tearOff, windowOf, type DockSide, type PaneLayout, type PaneWindow, type PanelKey,
-  type Placement, type Rect,
+  appendDock, closeWindow, dockStack, focusWindow, isShowing, mergeWindows, moveTab, openPanel, PANEL_KEYS,
+  PANEL_META, place, setActive, setDockShare, setWeights, stackInto, tearOff, weightOf, windowOf, type DockSide,
+  type PaneLayout, type PaneWindow, type PanelKey, type Placement, type Rect,
 } from "./layout";
 import { recallLayout, rememberLayout } from "./memory";
 
@@ -37,7 +37,12 @@ export interface PaneWindowsDeps {
   onChange(): void;
 }
 
-type DropTarget = { kind: "merge"; id: string; index?: number } | { kind: "zone"; zone: DropZone } | null;
+type DropTarget =
+  | { kind: "merge"; id: string; index?: number }
+  | { kind: "zone"; zone: DropZone }
+  /** Onto a docked window's upper or lower half: stack above or below it. */
+  | { kind: "split"; id: string; where: "before" | "after" }
+  | null;
 
 export class PaneWindows {
   private layout: PaneLayout;
@@ -382,17 +387,24 @@ export class PaneWindows {
     return { w: box.width, h: box.height };
   }
 
+  /** The windows on screen in `side`'s stack, top to bottom. */
+  private column(side: DockSide): PaneWindow[] {
+    return dockStack(this.layout, side).filter((w) => this.visible(w));
+  }
+
   private dockPx(b: Bounds, also?: DockSide): { left: number; right: number } {
-    const on = (side: DockSide) => {
-      const w = dockedWindow(this.layout, side);
-      return side === also || (!!w && this.visible(w));
-    };
+    const on = (side: DockSide) => side === also || this.column(side).length > 0;
     return dockWidths(b.w, { left: on("left"), right: on("right") }, this.layout.dockShare);
   }
 
   private rectFor(w: PaneWindow, b: Bounds, dock: { left: number; right: number }): Rect {
     const p = w.placement;
-    if (p.kind === "dock") return dockRect(p.side, dock[p.side], b);
+    if (p.kind === "dock") {
+      const col = this.column(p.side);
+      const i = col.indexOf(w);
+      if (i < 0) return dockRect(p.side, dock[p.side], b);
+      return stackRects(p.side, dock[p.side], b, col.map(weightOf))[i]!;
+    }
     if (p.kind === "snap") return cornerRect(p.corner, b);
     return p.rect ? clampRect(p.rect, b) : centredRect(loadSize(), b);
   }
@@ -410,6 +422,8 @@ export class PaneWindows {
     for (const w of this.layout.windows) {
       const f = this.frames.get(w.id);
       if (!f || f.el.hidden) continue;
+      const above = !off && w.placement.kind === "dock" && this.column(w.placement.side).indexOf(w) > 0;
+      f.el.toggleAttribute("data-stack-above", above);
       if (off) {
         for (const k of ["left", "top", "width", "height"] as const) f.el.style.removeProperty(k);
         continue;
@@ -450,10 +464,10 @@ export class PaneWindows {
       if (act === "close") this.commit(closeWindow(this.layout, id));
       else if (act === "popout") this.popOut();
       else if (w.placement.kind === "dock") this.commit(place(this.layout, id, { kind: "float", rect: null }));
-      else {
-        const side: DockSide = dockedWindow(this.layout, "right") ? (dockedWindow(this.layout, "left") ? "right" : "left") : "right";
-        this.commit(place(this.layout, id, { kind: "dock", side }));
-      }
+      // An empty side first; with both taken it joins the bottom of the right stack.
+      else if (!this.column("right").length) this.commit(place(this.layout, id, { kind: "dock", side: "right" }));
+      else if (!this.column("left").length) this.commit(place(this.layout, id, { kind: "dock", side: "left" }));
+      else this.commit(appendDock(this.layout, id, "right"));
     },
   };
 
@@ -520,6 +534,7 @@ export class PaneWindows {
         if (!moved) return;
         const t = target as DropTarget;
         if (t?.kind === "merge") this.commit(mergeWindows(this.layout, id, t.id));
+        else if (t?.kind === "split") this.glide(f, () => this.commit(stackInto(this.layout, id, t.id, t.where)));
         else if (t?.kind === "zone") this.glide(f, () => this.commit(place(this.layout, id, zonePlacement(t))));
         else this.commit(place(this.layout, id, { kind: "float", rect }));
       },
@@ -530,6 +545,7 @@ export class PaneWindows {
     const f = this.frames.get(id);
     const w = this.layout.windows.find((x) => x.id === id);
     if (!f || !w || this.compact()) return;
+    if (w.placement.kind === "dock" && dir === "n") return this.stackDividerGesture(f, w, w.placement.side, ev);
     const b = this.bounds();
     const start = this.rectFor(w, b, this.dockPx(b));
     const rz = (ev.target as HTMLElement).closest<HTMLElement>("[data-rz]");
@@ -564,6 +580,36 @@ export class PaneWindows {
         }
         saveSize(rect);
         this.commit(place(this.layout, id, { kind: "float", rect }));
+      },
+    );
+  }
+
+  /** The divider between a stacked window and the one above it: the pair
+   *  trades height, every other window in the stack stays put. */
+  private stackDividerGesture(f: Frame, w: PaneWindow, side: DockSide, ev: PointerEvent): void {
+    const col = this.column(side);
+    const i = col.indexOf(w);
+    const up = col[i - 1];
+    if (i < 1 || !up) return;
+    const rects = stackRects(side, 1, this.bounds(), col.map(weightOf));
+    const upH = rects[i - 1]!.h;
+    const pairH = upH + rects[i]!.h;
+    const pairW = weightOf(up) + weightOf(w);
+    const rz = (ev.target as HTMLElement).closest<HTMLElement>("[data-rz]");
+    rz?.classList.add("is-active");
+    f.el.classList.add("is-resizing");
+    this.track(
+      f.el,
+      ev,
+      (e) => {
+        const h = Math.min(Math.max(upH + e.clientY - ev.clientY, MIN_STACK_H), Math.max(MIN_STACK_H, pairH - MIN_STACK_H));
+        this.layout = setWeights(this.layout, { [up.id]: (pairW * h) / pairH, [w.id]: (pairW * (pairH - h)) / pairH });
+        this.paint();
+      },
+      () => {
+        rz?.classList.remove("is-active");
+        f.el.classList.remove("is-resizing");
+        this.commit(this.layout);
       },
     );
   }
@@ -612,6 +658,13 @@ export class PaneWindows {
           this.commit(tearOff(this.layout, panel, zonePlacement(target)));
           return;
         }
+        if (target?.kind === "split") {
+          // A window's only tab dropped on its own half has nowhere new to go.
+          if (target.id === id && windowOf(this.layout, panel)?.tabs.length === 1) return;
+          const torn = tearOff(this.layout, panel, { kind: "float", rect: null });
+          this.commit(stackInto(torn, torn.windows[torn.windows.length - 1]!.id, target.id, target.where));
+          return;
+        }
         const size = loadSize();
         const rect = clampRect(
           { x: e.clientX - origin.left - 40, y: e.clientY - origin.top - 18, w: size.w, h: size.h },
@@ -622,9 +675,9 @@ export class PaneWindows {
     );
   }
 
-  /** Another window's bar merges; an edge or corner places. The
-   *  window being dragged (`exclude`) is under the pointer, so frames are hit
-   *  by rect, not elementFromPoint. */
+  /** Another window's bar merges; an edge or corner places; a docked
+   *  window's body splits its stack. The window being dragged (`exclude`) is
+   *  under the pointer, so frames are hit by rect, not elementFromPoint. */
   private dropTargetAt(e: PointerEvent, exclude: string | null, b: Bounds): DropTarget {
     const frontFirst = [...this.layout.windows].reverse();
     for (const w of frontFirst) {
@@ -635,18 +688,41 @@ export class PaneWindows {
     }
     const origin = this.layer.getBoundingClientRect();
     const zone = dropZoneAt(e.clientX - origin.left, e.clientY - origin.top, b);
-    return zone ? { kind: "zone", zone } : null;
+    if (zone) return { kind: "zone", zone };
+    for (const w of frontFirst) {
+      const f = this.frames.get(w.id);
+      if (!f || f.el.hidden || w.id === exclude || w.placement.kind !== "dock") continue;
+      const r = f.el.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) continue;
+      return { kind: "split", id: w.id, where: e.clientY < r.top + r.height / 2 ? "before" : "after" };
+    }
+    return null;
+  }
+
+  /** What a split drop will take: the target's upper or lower half. */
+  private splitRect(t: { id: string; where: "before" | "after" }): Rect | null {
+    const f = this.frames.get(t.id);
+    if (!f) return null;
+    const r = f.el.getBoundingClientRect();
+    const origin = this.layer.getBoundingClientRect();
+    const h = r.height / 2;
+    return { x: r.left - origin.left, y: r.top - origin.top + (t.where === "after" ? h : 0), w: r.width, h };
   }
 
   private showTarget(t: DropTarget, b: Bounds): void {
     for (const f of this.frames.values()) f.el.classList.toggle("pw-drop-target", t?.kind === "merge" && f.el.dataset.win === t.id);
-    if (t?.kind !== "zone") {
+    let r: Rect | null = null;
+    if (t?.kind === "zone") {
+      const side = t.zone.kind === "dock" ? t.zone.side : undefined;
+      r = zoneRect(t.zone, b, side ? this.dockPx(b, side)[side] : 0);
+    } else if (t?.kind === "split") {
+      r = this.splitRect(t);
+    }
+    if (!r) {
       this.ghostWanted = false;
       this.ghost?.classList.remove("is-on");
       return;
     }
-    const side = t.zone.kind === "dock" ? t.zone.side : undefined;
-    const r = zoneRect(t.zone, b, side ? this.dockPx(b, side)[side] : 0);
     if (!this.ghost || !this.ghost.isConnected) {
       this.ghost = document.createElement("div");
       this.ghost.className = "fab-snap-ghost";

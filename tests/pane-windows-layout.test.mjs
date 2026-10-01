@@ -49,14 +49,62 @@ describe("layout", () => {
     expect(tabsOf(l).main).toEqual(["todos", "drafts", "preview"]);
   });
 
-  it("keeps one window per docked side: the old occupant floats out", () => {
+  it("a drop on a side's edge takes the whole side: the old occupants float out", () => {
     let l = L.tearOff(L.defaultLayout(), "preview", { kind: "dock", side: "right" });
     const pv = l.windows.at(-1).id;
     l = L.tearOff(l, "drafts", { kind: "dock", side: "right" });
-    expect(L.dockedWindow(L.openPanel(l, "drafts"), "right").tabs).toEqual(["drafts"]);
+    expect(L.dockStack(L.openPanel(l, "drafts"), "right").map((w) => w.tabs)).toEqual([["drafts"]]);
     expect(l.windows.find((w) => w.id === pv).placement.kind).toBe("float");
     l = L.place(l, "main", { kind: "dock", side: "left" });
-    expect(L.dockedWindow(l, "left").id).toBe("main");
+    expect(L.dockStack(l, "left")[0].id).toBe("main");
+  });
+
+  it("stacks a window above or below a docked one, splitting that one's height", () => {
+    // Joe's flow: Preview torn out and docked right, the other three stacked under it.
+    let l = L.tearOff(L.defaultLayout(), "preview", { kind: "dock", side: "right" });
+    const pv = l.windows.at(-1).id;
+    l = L.stackInto(l, "main", pv, "after");
+    const stack = L.dockStack(l, "right");
+    expect(stack.map((w) => w.id)).toEqual([pv, "main"]);
+    expect(stack.map(L.weightOf)).toEqual([0.5, 0.5]);
+
+    const torn = L.tearOff(l, "drafts", { kind: "float", rect: null });
+    const dr = torn.windows.at(-1).id;
+    l = L.stackInto(torn, dr, pv, "before");
+    expect(L.dockStack(l, "right").map((w) => w.id)).toEqual([dr, pv, "main"]);
+    expect(L.dockStack(l, "right").map(L.weightOf)).toEqual([0.25, 0.25, 0.5]);
+    expect(L.dockStack(l, "right").map((w) => w.placement.slot)).toEqual([0, 1, 2]);
+  });
+
+  it("stacking a window onto itself changes nothing", () => {
+    const l = L.place(L.defaultLayout(), "main", { kind: "dock", side: "left" });
+    expect(L.stackInto(l, "main", "main", "before")).toBe(l);
+  });
+
+  it("appends a window to the bottom of a stack at an equal share", () => {
+    let l = L.tearOff(L.defaultLayout(), "preview", { kind: "dock", side: "right" });
+    const pv = l.windows.at(-1).id;
+    l = L.appendDock(l, "main", "right");
+    expect(L.dockStack(l, "right").map((w) => w.id)).toEqual([pv, "main"]);
+    expect(L.weightOf(L.dockStack(l, "right")[1])).toBe(1);
+  });
+
+  it("a closed window leaves its stack's open list, and returns to its slot when reopened", () => {
+    let l = L.tearOff(L.defaultLayout(), "preview", { kind: "dock", side: "right" });
+    const pv = l.windows.at(-1).id;
+    l = L.stackInto(l, "main", pv, "after");
+    l = L.closeWindow(l, pv);
+    expect(L.dockStack(l, "right").map((w) => w.id)).toEqual(["main"]);
+    l = L.openPanel(l, "preview");
+    expect(L.dockStack(l, "right").map((w) => w.id)).toEqual([pv, "main"]);
+  });
+
+  it("setWeights trades height between docked windows only", () => {
+    let l = L.tearOff(L.defaultLayout(), "preview", { kind: "dock", side: "right" });
+    const pv = l.windows.at(-1).id;
+    l = L.stackInto(l, "main", pv, "after");
+    l = L.setWeights(l, { [pv]: 0.7, main: 0.3, nope: 5 });
+    expect(L.dockStack(l, "right").map(L.weightOf)).toEqual([0.7, 0.3]);
   });
 
   it("keeps a stored layout from the old default, Preview docked on its own", () => {
@@ -68,20 +116,21 @@ describe("layout", () => {
       dockShare: { left: null, right: null },
     });
     expect(tabsOf(l)).toEqual({ main: ["ask", "todos", "drafts"], preview: ["preview"] });
-    expect(L.dockedWindow(l, "right").id).toBe("preview");
+    expect(L.dockStack(l, "right")[0].id).toBe("preview");
   });
 
-  it("normalize repairs a stored layout: duplicates, unknown panels, two windows on one dock", () => {
+  it("normalize repairs a stored layout: duplicates, unknown panels, a stack's slots and weights", () => {
     const l = L.normalize({
       windows: [
-        { id: "a", tabs: ["ask", "bogus", "ask"], active: "nope", placement: { kind: "dock", side: "left" }, open: true },
-        { id: "b", tabs: ["drafts"], active: "drafts", placement: { kind: "dock", side: "left" }, open: false },
+        { id: "a", tabs: ["ask", "bogus", "ask"], active: "nope", placement: { kind: "dock", side: "left", slot: 9, weight: -2 }, open: true },
+        { id: "b", tabs: ["drafts"], active: "drafts", placement: { kind: "dock", side: "left", slot: 3, weight: 0.4 }, open: false },
       ],
       dockShare: { left: 7, right: 0.3 },
     });
     expect(tabsOf(l)).toEqual({ a: ["ask"], b: ["drafts"], main: ["todos", "preview"] });
     expect(l.windows.find((w) => w.id === "a").active).toBe("ask");
-    expect(l.windows.find((w) => w.id === "b").placement.kind).toBe("float");
+    expect(l.windows.find((w) => w.id === "a").placement).toEqual({ kind: "dock", side: "left", slot: 1, weight: 1 });
+    expect(l.windows.find((w) => w.id === "b").placement).toEqual({ kind: "dock", side: "left", slot: 0, weight: 0.4 });
     expect(l.dockShare).toEqual({ left: null, right: 0.3 });
   });
 
@@ -109,6 +158,12 @@ describe("geometry", () => {
     const both = G.dockWidths(1200, { left: true, right: true }, { left: null, right: null });
     expect(1200 - both.left - both.right).toBeGreaterThanOrEqual(G.MIN_CHAT);
     expect(both.left).toBe(both.right);
+  });
+
+  it("stacks a side's windows by weight, edge to edge", () => {
+    const rects = G.stackRects("right", 400, PANE, [1, 1, 2]);
+    expect(rects.map((r) => [r.x, r.y, r.h])).toEqual([[800, 0, 200], [800, 200, 200], [800, 400, 400]]);
+    expect(G.stackRects("left", 400, PANE, [1])[0]).toEqual({ x: 0, y: 0, w: 400, h: 800 });
   });
 
   it("keeps a dragged dock share", () => {

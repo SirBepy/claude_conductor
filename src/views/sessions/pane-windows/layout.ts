@@ -1,7 +1,8 @@
 // The chat pane's window layout (Joe, 2026-10-01): Ask / Todos / Drafts /
 // Preview live as tabs in one or more in-app windows. Each window floats,
-// snaps to a corner, or docks to the left or right as a real split, and any
-// tab can be torn out into its own window or dropped into another one.
+// snaps to a corner, or docks to the left or right as a real split, where
+// any number of windows stack top to bottom; any tab can be torn out into
+// its own window or dropped into another one.
 // Pure data in, data out - manager.ts owns the DOM.
 
 export type PanelKey = "ask" | "todos" | "drafts" | "preview";
@@ -19,7 +20,10 @@ export type Placement =
   /** rect null = centred at the remembered size. */
   | { kind: "float"; rect: Rect | null }
   | { kind: "snap"; corner: Corner }
-  | { kind: "dock"; side: DockSide };
+  /** `slot` orders a side's stack top to bottom; `weight` is the window's
+   *  share of the side's height, relative to the other OPEN windows there,
+   *  so closing one lets the rest grow. Both are filled in by normalize. */
+  | { kind: "dock"; side: DockSide; slot?: number; weight?: number };
 
 export interface PaneWindow {
   id: string;
@@ -82,7 +86,23 @@ function toFront(l: PaneLayout, id: string): void {
   l.windows.push(w!);
 }
 
-/** One window per docked side: whoever held the side floats out, centred. */
+const slotOf = (w: PaneWindow) => (w.placement.kind === "dock" ? (w.placement.slot ?? 0) : 0);
+export const weightOf = (w: PaneWindow) => (w.placement.kind === "dock" ? (w.placement.weight ?? 1) : 1);
+
+/** Every window docked on `side`, open or not, top to bottom. */
+function column(l: PaneLayout, side: DockSide): PaneWindow[] {
+  return l.windows
+    .filter((w) => w.placement.kind === "dock" && w.placement.side === side)
+    .sort((a, b) => slotOf(a) - slotOf(b));
+}
+
+function renumber(l: PaneLayout, side: DockSide): void {
+  column(l, side).forEach((w, i) => {
+    if (w.placement.kind === "dock") w.placement = { ...w.placement, slot: i };
+  });
+}
+
+/** A drop on a side's edge takes the whole side: whoever held it floats out, centred. */
 function vacate(l: PaneLayout, side: DockSide, except: string): void {
   for (const w of l.windows) {
     if (w.id !== except && w.placement.kind === "dock" && w.placement.side === side) {
@@ -185,25 +205,68 @@ export function mergeWindows(l: PaneLayout, fromId: string, toId: string): PaneL
   return setActive(next, toId, from.active);
 }
 
+/** Docks window `id` into `targetId`'s stack, just above or below it, taking
+ *  half of the target's height. */
+export function stackInto(l: PaneLayout, id: string, targetId: string, where: "before" | "after"): PaneLayout {
+  if (id === targetId) return l;
+  const next = clone(l);
+  const w = next.windows.find((x) => x.id === id);
+  const target = next.windows.find((x) => x.id === targetId);
+  if (!w || !target || target.placement.kind !== "dock") return l;
+  const side = target.placement.side;
+  const half = weightOf(target) / 2;
+  target.placement = { ...target.placement, weight: half };
+  const at = slotOf(target) + (where === "before" ? -0.5 : 0.5);
+  w.placement = { kind: "dock", side, slot: at, weight: half };
+  w.open = true;
+  renumber(next, side);
+  toFront(next, id);
+  return next;
+}
+
+/** Docks window `id` at the bottom of `side`'s stack, an equal share tall. */
+export function appendDock(l: PaneLayout, id: string, side: DockSide): PaneLayout {
+  const next = clone(l);
+  const w = next.windows.find((x) => x.id === id);
+  if (!w) return l;
+  const open = column(next, side).filter((x) => x.open && x.id !== id);
+  const weight = open.length ? open.reduce((n, x) => n + weightOf(x), 0) / open.length : 1;
+  w.placement = { kind: "dock", side, slot: Infinity, weight };
+  w.open = true;
+  renumber(next, side);
+  toFront(next, id);
+  return next;
+}
+
+/** New height shares for docked windows, e.g. both sides of a dragged divider. */
+export function setWeights(l: PaneLayout, weights: Record<string, number>): PaneLayout {
+  const next = clone(l);
+  for (const w of next.windows) {
+    const n = weights[w.id];
+    if (n !== undefined && n > 0 && w.placement.kind === "dock") w.placement = { ...w.placement, weight: n };
+  }
+  return next;
+}
+
 export function setDockShare(l: PaneLayout, side: DockSide, share: number): PaneLayout {
   const next = clone(l);
   next.dockShare[side] = share;
   return next;
 }
 
-export function dockedWindow(l: PaneLayout, side: DockSide): PaneWindow | undefined {
-  return l.windows.find((w) => w.open && w.placement.kind === "dock" && w.placement.side === side);
+/** The open windows docked on `side`, top to bottom. */
+export function dockStack(l: PaneLayout, side: DockSide): PaneWindow[] {
+  return column(l, side).filter((w) => w.open);
 }
 
 /** Repairs a stored or hand-edited layout: every available panel in exactly
- *  one window, no empty windows, at most one window per docked side, and
+ *  one window, no empty windows, each side's stack numbered 0..n, and
  *  panels this pane cannot host (Preview in a window with no preview) gone. */
 export function normalize(l: PaneLayout | null | undefined, panels: readonly PanelKey[] = PANEL_KEYS): PaneLayout {
   const base = defaultLayout(panels);
   if (!l || !Array.isArray(l.windows)) return base;
   const seen = new Set<PanelKey>();
   const windows: PaneWindow[] = [];
-  const docked = new Set<DockSide>();
   for (const raw of l.windows) {
     if (!raw || typeof raw.id !== "string" || !Array.isArray(raw.tabs)) continue;
     const tabs: PanelKey[] = [];
@@ -213,11 +276,7 @@ export function normalize(l: PaneLayout | null | undefined, panels: readonly Pan
       tabs.push(t);
     }
     if (tabs.length === 0) continue;
-    let placement = validPlacement(raw.placement);
-    if (placement.kind === "dock") {
-      if (docked.has(placement.side)) placement = { kind: "float", rect: null };
-      else docked.add(placement.side);
-    }
+    const placement = validPlacement(raw.placement);
     windows.push({
       id: raw.id,
       tabs,
@@ -235,13 +294,24 @@ export function normalize(l: PaneLayout | null | undefined, panels: readonly Pan
     else windows.push({ ...home, tabs: [p], active: p });
   }
   const share = (n: unknown) => (typeof n === "number" && n > 0 && n < 1 ? n : null);
-  return { windows, dockShare: { left: share(l.dockShare?.left), right: share(l.dockShare?.right) } };
+  const out: PaneLayout = { windows, dockShare: { left: share(l.dockShare?.left), right: share(l.dockShare?.right) } };
+  renumber(out, "left");
+  renumber(out, "right");
+  return out;
 }
 
 function validPlacement(p: unknown): Placement {
   const o = p as Placement | null;
   if (o?.kind === "snap" && ["nw", "ne", "sw", "se"].includes(o.corner)) return { kind: "snap", corner: o.corner };
-  if (o?.kind === "dock" && (o.side === "left" || o.side === "right")) return { kind: "dock", side: o.side };
+  if (o?.kind === "dock" && (o.side === "left" || o.side === "right")) {
+    const n = (v: unknown, ok: (x: number) => boolean, d: number) => (typeof v === "number" && ok(v) ? v : d);
+    return {
+      kind: "dock",
+      side: o.side,
+      slot: n(o.slot, Number.isFinite, 0),
+      weight: n(o.weight, (x) => Number.isFinite(x) && x > 0, 1),
+    };
+  }
   if (o?.kind === "float") {
     const r = o.rect;
     const ok = !!r && [r.x, r.y, r.w, r.h].every((n) => Number.isFinite(n));

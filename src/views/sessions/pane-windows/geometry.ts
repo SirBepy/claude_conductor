@@ -15,6 +15,8 @@ export type DropZone = { kind: "snap"; corner: Corner } | { kind: "dock"; side: 
 
 export const MIN_W = 320;
 export const MIN_H = 260;
+/** A stacked dock window keeps at least its bar and a few lines of body. */
+export const MIN_STACK_H = 140;
 /** Gap kept between a floating window and the pane edge, so a shadow and a
  *  grab strip stay reachable however far it is dragged. */
 export const MARGIN = 8;
@@ -112,6 +114,20 @@ export function dockWidths(
 /** Where a docked window sits inside the pane-sized host. */
 export function dockRect(side: DockSide, width: number, b: Bounds): Rect {
   return { x: side === "left" ? 0 : b.w - width, y: 0, w: width, h: b.h };
+}
+
+/** A side's stacked windows, top to bottom, each as tall as its weight's
+ *  share of the side; edges are rounded so neighbours meet without a gap. */
+export function stackRects(side: DockSide, width: number, b: Bounds, weights: readonly number[]): Rect[] {
+  const x = side === "left" ? 0 : b.w - width;
+  const total = weights.reduce((n, w) => n + w, 0) || 1;
+  let acc = 0;
+  return weights.map((wt) => {
+    const top = Math.round((acc / total) * b.h);
+    acc += wt;
+    const bottom = Math.round((acc / total) * b.h);
+    return { x, y: top, w: width, h: bottom - top };
+  });
 }
 
 /** Where a float/snap/dock drop would put a window - what the landing

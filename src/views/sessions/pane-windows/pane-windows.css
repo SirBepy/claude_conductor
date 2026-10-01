@@ -378,6 +378,23 @@
 .fab-card[data-placement="dock"][data-side="left"] .fab-rz-e::after { right: 5px; }
 .fab-card[data-placement="dock"][data-side="right"] .fab-rz-w::after { left: 5px; }
 
+/* Stacked on one side: the lower window's top edge is the divider between the
+   two. Kept inside its own frame, since the window above may paint over an
+   overhang. */
+.fab-card[data-placement="dock"][data-stack-above] {
+  border-top: 1px solid var(--color-border);
+}
+
+.fab-card[data-placement="dock"][data-stack-above] .fab-rz-n {
+  display: block;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.fab-card[data-placement="dock"][data-stack-above] .fab-rz-n::after { top: -1px; }
+
 /* Corners: an L bracket that follows the window's 10px rounding. */
 .fab-rz-nw::after, .fab-rz-ne::after, .fab-rz-se::after, .fab-rz-sw::after {
   width: 22px;

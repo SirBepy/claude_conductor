@@ -175,6 +175,56 @@ test("both sides dock at once, Preview right and Drafts left, with the chat in b
   expect(chat.width).toBeGreaterThanOrEqual(360);
 });
 
+test("a window dropped on a docked window's lower half stacks under it; the seam resizes both, and closing one gives the other the side", async ({ page }) => {
+  await mountPane(page);
+  await openFromDial(page, "preview");
+  await dragTab(page, "preview", { x: 1278, y: 400 });
+  await openFromDial(page, "ask");
+  await box(page, "ask");
+  await dragBar(page, "ask", { x: 1100, y: 600 });
+
+  const top = await box(page, "preview");
+  const bottom = await box(page, "ask");
+  expect(Math.round(top.y)).toBe(0);
+  expect(Math.round(top.height)).toBe(400);
+  expect(Math.round(bottom.y)).toBe(400);
+  expect(Math.round(bottom.y + bottom.height)).toBe(800);
+  expect(Math.round(bottom.x)).toBe(Math.round(top.x));
+  expect(Math.round(top.x + top.width)).toBe(1280);
+  const chat = (await page.locator("#chat-col").boundingBox())!;
+  expect(chat.x + chat.width).toBeLessThanOrEqual(top.x + 1);
+
+  // The seam is the lower window's top edge.
+  await page.mouse.move(bottom.x + bottom.width / 2, bottom.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(bottom.x + bottom.width / 2, bottom.y - 97, { steps: 5 });
+  await page.mouse.up();
+  expect(Math.round((await box(page, "preview")).height)).toBe(300);
+  expect(Math.round((await box(page, "ask")).height)).toBe(500);
+
+  await win(page, "preview").locator('[data-pw-act="close"]').click();
+  const alone = await box(page, "ask");
+  expect(Math.round(alone.y)).toBe(0);
+  expect(Math.round(alone.height)).toBe(800);
+});
+
+test("a tab dropped on a docked window's upper half tears out and stacks above it", async ({ page }) => {
+  await mountPane(page);
+  await openFromDial(page, "ask");
+  await dragBar(page, "ask", { x: 1278, y: 400 });
+  // Let the dock glide finish, or the press lands where the tab used to be.
+  await box(page, "ask");
+  await dragTab(page, "drafts", { x: 1100, y: 200 });
+
+  await expect(page.locator(".fab-card:visible")).toHaveCount(2);
+  const top = await box(page, "drafts");
+  const bottom = await box(page, "ask");
+  expect(Math.round(top.y)).toBe(0);
+  expect(Math.round(top.height)).toBe(400);
+  expect(Math.round(bottom.y)).toBe(400);
+  await expect(win(page, "ask").locator('[data-spine="drafts"]')).toHaveCount(0);
+});
+
 test("opening Preview from the dial loads the chat's latest snapshot", async ({ page }) => {
   const now = new Date().toISOString();
   const html = "<p id='hello'>hi from the snapshot</p>";
