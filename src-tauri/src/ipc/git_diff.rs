@@ -359,11 +359,27 @@ mod rev_tests {
 
     #[tokio::test]
     async fn a_large_context_keeps_every_line_of_the_file() {
-        // 469a502f changes 5 lines of project-detail.ts; with full context
-        // the diff carries the whole file, far more lines than -U3 does.
-        let path = "src/views/project-detail/project-detail.ts".to_string();
-        let full = get_file_diff(cwd(), None, "469a502f".into(), path.clone(), Some(1_000_000)).await.unwrap();
-        let short = get_file_diff(cwd(), None, "469a502f".into(), path, None).await.unwrap();
+        // A throwaway repo, not this one's history: CI's test job checks out
+        // depth 1, so no older commit sha resolves there.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_string_lossy().to_string();
+        let git = |args: &[&str]| run_git(&repo, args).unwrap();
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "test"]);
+        let lines: Vec<String> = (0..200).map(|i| format!("line {i}")).collect();
+        std::fs::write(dir.path().join("big.txt"), lines.join("\n")).unwrap();
+        git(&["add", "big.txt"]);
+        git(&["commit", "-q", "-m", "base"]);
+        let mut edited = lines.clone();
+        edited[100] = "changed".into();
+        std::fs::write(dir.path().join("big.txt"), edited.join("\n")).unwrap();
+        git(&["commit", "-q", "-am", "edit"]);
+
+        // One changed line: full context carries the whole file, -U3 only ~7 lines.
+        let path = "big.txt".to_string();
+        let full = get_file_diff(repo.clone(), None, "HEAD".into(), path.clone(), Some(1_000_000)).await.unwrap();
+        let short = get_file_diff(repo, None, "HEAD".into(), path, None).await.unwrap();
         assert!(full.lines().count() > short.lines().count() + 50, "full {} vs short {}", full.lines().count(), short.lines().count());
     }
 }
