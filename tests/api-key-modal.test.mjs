@@ -6,6 +6,9 @@
 // typed value, the input is cleared right after a successful save, the typed
 // value never survives into the rendered DOM past that point, and a backend
 // error surfaces as text instead of silently failing.
+//
+// Rebuilt onto the shared modal-host chain (src/shared/modal.ts) - the modal
+// lives at #modal-host .aikm-modal-card instead of its own overlay div.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 
@@ -35,11 +38,14 @@ const STATUS_UNSET = {
 const STATUS_SET = { ...STATUS_UNSET, is_set: true };
 
 function overlay() {
-  return document.querySelector(".aikm-overlay");
+  return document.querySelector("#modal-host .aikm-modal-card");
 }
 
 afterEach(() => {
-  document.querySelectorAll(".aikm-overlay").forEach((el) => el.remove());
+  // Every test already drives a real Escape close, which hands the shared
+  // #modal-host's teardown back to closeHostCard() itself (modal.ts) - same
+  // singleton host the app reuses across repeat opens, nothing to tear down
+  // by hand here.
   listApiKeys.mockReset();
   setApiKey.mockReset();
 });

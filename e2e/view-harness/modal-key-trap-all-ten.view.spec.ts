@@ -3,12 +3,14 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Todo 834: mechanizes the one remaining acceptance item, "with each of the
 // nine modals open, typing plain characters leaves the composer unchanged" -
-// previously a live/manual check only. Four share the modal-host
-// (src/shared/modal.ts); six own-backdrop, guarded via modal-input-lock.ts.
+// previously a live/manual check only. Five share the modal-host
+// (src/shared/modal.ts); five own-backdrop, guarded via modal-input-lock.ts.
 // Todo 982 dropped new-project-modal (orphaned from the product, deleted)
 // from the original ten - the count/name here follow that removal.
-// Todo 1043 added a new own-backdrop modal (api-key-modal.ts), bringing the
-// own-backdrop count back to six and the total to ten.
+// Todo 1043 added api-key-modal.ts as a sixth own-backdrop modal; a later
+// pass rebuilt it onto the shared modal-host (matching characters.ts's
+// openNewCharacterModal shell), moving it into the shared-host group below
+// and bringing that group's count to five.
 
 const MARKER = "MARKER";
 
@@ -96,7 +98,15 @@ async function openModelEffortModal(page: Page): Promise<void> {
   await page.locator(".model-effort-modal-card").waitFor();
 }
 
-// ── the six own-backdrop call sites (lockInputToHost directly) ────────────
+async function openApiKeyModal(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const mod = await import("/shared/api-key-modal.ts");
+    void mod.openApiKeyModal("SHORTCUT_API_TOKEN");
+  });
+  await page.locator(".aikm-modal-card").waitFor();
+}
+
+// ── the five own-backdrop call sites (lockInputToHost directly) ───────────
 
 /** Isolated, not chained through the picker flow - askConfirm's own guard is
  * the thing under test, and its `cancelBtn.focus()` is what surfaces the
@@ -148,14 +158,6 @@ async function openEditAccountModal(page: Page): Promise<void> {
   await page.locator(".aem-modal").waitFor();
 }
 
-async function openApiKeyModal(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const mod = await import("/shared/api-key-modal.ts");
-    void mod.openApiKeyModal("SHORTCUT_API_TOKEN");
-  });
-  await page.locator(".aikm-modal").waitFor();
-}
-
 test.describe("view-harness / modal-open must swallow every keystroke (all ten call sites)", () => {
   test("shared-host: project-picker", async ({ page }) => {
     const composer = await mountWithComposer(page);
@@ -178,6 +180,12 @@ test.describe("view-harness / modal-open must swallow every keystroke (all ten c
   test("shared-host: model-effort-modal", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openModelEffortModal(page);
+    await assertKeySwallowed(page, composer);
+  });
+
+  test("shared-host: api-key-modal", async ({ page }) => {
+    const composer = await mountWithComposer(page);
+    await openApiKeyModal(page);
     await assertKeySwallowed(page, composer);
   });
 
@@ -211,12 +219,6 @@ test.describe("view-harness / modal-open must swallow every keystroke (all ten c
   test("own-backdrop: edit-account-modal", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openEditAccountModal(page);
-    await assertKeySwallowed(page, composer);
-  });
-
-  test("own-backdrop: api-key-modal", async ({ page }) => {
-    const composer = await mountWithComposer(page);
-    await openApiKeyModal(page);
     await assertKeySwallowed(page, composer);
   });
 });

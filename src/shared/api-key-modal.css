@@ -1,140 +1,90 @@
 /* ── API key add/replace modal (todo 1043) ──────────────────────────────── */
+/* Shell (.modal/.modal-card/.modal-header/.modal-body/.modal-actions) comes
+ * from styles/widgets.css and the #modal-host chain in shared/modal.css -
+ * only this modal's own data rows and states are styled here. */
 
-.aikm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.aikm-overlay .aikm-modal {
-  width: 380px;
-  max-width: 95vw;
-  background: var(--color-surface, #1c1c24);
-  color: var(--color-text, #e8e8ee);
-  border: 1px solid var(--color-border, #2a2a36);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
-}
-
-.aikm-overlay .aikm-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 15px 16px 0;
-}
-.aikm-overlay .aikm-head .t { flex: 1; font-weight: 700; font-size: var(--fs-heading); }
-.aikm-overlay .aikm-close { width: 28px; height: 28px; font-size: 16px; }
-
-.aikm-overlay .aikm-body { padding: 14px 16px; }
-
-.aikm-overlay .aikm-purpose {
-  margin: 0 0 12px;
-  font-size: var(--fs-body);
+.aikm-modal-card .field { margin: 0 0 10px; }
+.aikm-modal-card .field label {
+  display: block;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
-  line-height: 1.4;
+  margin-bottom: 6px;
+}
+/* Fill/border/focus come from input[type="password"] in styles/widgets.css -
+ * only the width this card's layout needs lives here. */
+.aikm-modal-card input.aikm-field {
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.aikm-overlay .aikm-meta-row {
+.aikm-modal-card .aikm-meta-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
   margin-bottom: 6px;
   font-size: var(--fs-micro);
 }
-.aikm-overlay .aikm-meta-label {
+.aikm-modal-card .aikm-meta-label {
   flex-shrink: 0;
   width: 62px;
   color: var(--sb-muted);
 }
-.aikm-overlay .aikm-code {
+.aikm-modal-card .aikm-code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   word-break: break-all;
 }
-.aikm-overlay .aikm-path { font-size: 0.72rem; }
+.aikm-modal-card .aikm-path { font-size: 0.72rem; }
 
-.aikm-overlay .aikm-create-link {
+.aikm-modal-card .aikm-create-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin: 2px 0 14px;
   font-size: var(--fs-micro);
-  color: var(--color-primary, #6e8fff);
+  color: var(--color-primary);
 }
-.aikm-overlay .aikm-create-link:hover { text-decoration: underline; }
+.aikm-modal-card .aikm-create-link:hover { text-decoration: underline; }
 
-.aikm-overlay .field { margin: 0 0 10px; }
-.aikm-overlay .field label {
-  display: block;
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-  margin-bottom: 6px;
-}
-.aikm-overlay .aikm-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 9px 11px;
-  background: var(--color-background, #0e0e14);
-  border: 1px solid var(--color-border, #2a2a36);
-  border-radius: 8px;
-  color: var(--color-text, #e8e8ee);
-  font: inherit;
-  font-size: var(--fs-body);
-}
-
-.aikm-overlay .aikm-status {
+.aikm-modal-card .aikm-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: var(--fs-micro);
   color: var(--sb-muted);
 }
-.aikm-overlay .aikm-status.is-set { color: var(--color-success, #4fd69c); }
+.aikm-modal-card .aikm-status.is-set { color: var(--color-success); }
 
-.aikm-overlay .aikm-error {
+.aikm-modal-card .aikm-error {
   display: flex;
   align-items: flex-start;
   gap: 7px;
   padding: 9px 11px;
   border-radius: 8px;
   font-size: var(--fs-micro);
-  color: var(--color-danger, #ff6b6b);
-  background: color-mix(in srgb, var(--color-danger, #ff6b6b) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-danger, #ff6b6b) 35%, transparent);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
   margin-top: 10px;
 }
 
-.aikm-overlay .aikm-saved {
+.aikm-modal-card .aikm-saved {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: var(--fs-micro);
-  color: var(--color-success, #4fd69c);
+  color: var(--color-success);
   margin-top: 10px;
 }
 
-.aikm-overlay .aikm-spin {
+/* Reuses base.css's icon-btn-spin keyframe instead of defining a second one. */
+.aikm-modal-card .aikm-spin {
   display: inline-block;
-  animation: aikm-spin 1s linear infinite;
-}
-@keyframes aikm-spin {
-  to { transform: rotate(360deg); }
+  animation: icon-btn-spin 0.8s linear infinite;
 }
 
-.aikm-overlay .aikm-loading {
-  padding: 28px 16px;
+.aikm-modal-card .aikm-loading {
+  padding: 14px 0;
   text-align: center;
   color: var(--sb-muted);
   font-size: var(--fs-body);
-}
-
-.aikm-overlay .aikm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px 16px;
 }
