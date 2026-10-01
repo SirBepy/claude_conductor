@@ -435,6 +435,12 @@
   min-width: 0;
 }
 
+/* Gave-up status line (todo 894): dimmer than the live-armed chip above, so
+ * "it tried and gave up" doesn't read as "still actively watching". */
+.when-done-chip-gaveup .when-done-chip-text {
+  color: var(--color-text-muted);
+}
+
 .when-done-cancel {
   display: inline-flex;
   align-items: center;

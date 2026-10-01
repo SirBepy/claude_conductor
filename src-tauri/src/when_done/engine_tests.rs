@@ -4,11 +4,17 @@ use super::*;
 //
 // Drives the whole phase machine through recording stubs instead of the real
 // AppHandle / daemon / system_control. tokio's paused clock makes the 1s
-// ticks + 30s countdown resolve instantly (the std::time::Instant runaway and
-// per-session timeout guards use wall-clock, so they stay un-tripped). The
-// stubs RECORD calls; the terminal stub never actually sleeps/shuts down.
+// ticks + 30s countdown resolve instantly (the per-session Closing timeout
+// still uses wall-clock Instant::now() directly and so stays un-tripped, same
+// as before). The Watching no-progress runaway guard now reads `deps.now`
+// instead of `std::time::Instant::now()` directly (todo 894), so a test can
+// drive a synthetic World::clock past NO_PROGRESS_LIMIT without a real
+// wall-clock wait; tests that don't care about it just leave the clock
+// untouched and it never trips. The stubs RECORD calls; the terminal stub
+// never actually sleeps/shuts down.
 
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Mutable world the test drives between engine ticks: the live
 /// `(session_id, busy)` snapshot the seams read, plus the recorded effects.
@@ -38,6 +44,11 @@ struct World {
     /// When true, mutate_and_emit simulates the user touching the mouse once
     /// the countdown has ticked (user_idle_secs drops to 0), then clears itself.
     user_returns_on_countdown: bool,
+    /// Synthetic clock the `now` seam reads. Starts at the real "now" (an
+    /// Instant has no zero/default value) and only moves when a test
+    /// deliberately advances it - so tests that ignore it never trip the
+    /// no-progress guard, matching the old un-seamed behavior.
+    clock: Instant,
 }
 
 impl Default for World {
@@ -53,6 +64,7 @@ impl Default for World {
             user_idle_secs: 0,
             resolved: 0,
             user_returns_on_countdown: false,
+            clock: Instant::now(),
         }
     }
 }
@@ -83,6 +95,7 @@ fn deps_for(
     let w_cancel = world.clone();
     let w_term = world.clone();
     let w_user = world.clone();
+    let w_now = world.clone();
 
     EngineDeps {
         busy_map: Box::new(move || {
@@ -145,6 +158,7 @@ fn deps_for(
             Ok(())
         }),
         user_idle_secs: Box::new(move || w_user.lock().unwrap().user_idle_secs),
+        now: Box::new(move || w_now.lock().unwrap().clock),
     }
 }
 
@@ -313,4 +327,43 @@ async fn nightly_countdown_returns_to_watching_when_the_user_comes_back() {
         "interrupted countdown restarts from Watching"
     );
     assert_eq!(g.terminal_calls, vec![TerminalAction::Sleep], "fires exactly once");
+}
+
+/// todo 894: when the Watching loop's no-progress runaway guard trips (the
+/// busy signature never changes for NO_PROGRESS_LIMIT), the protocol must not
+/// silently collapse back to a plain Disarmed state - it persists a distinct
+/// GaveUp phase carrying why and which session ids were still blocking.
+#[tokio::test(start_paused = true)]
+async fn no_progress_guard_gives_up_with_a_distinct_phase_and_blocking_ids() {
+    let world = Arc::new(Mutex::new(World {
+        // A session that never goes idle: busy_map's signature never changes.
+        busy_map: vec![("stuck".to_string(), true)],
+        ..Default::default()
+    }));
+
+    // Every busy_map read (once per Watching tick) advances the synthetic
+    // clock past NO_PROGRESS_LIMIT (180s), so the guard trips on the second
+    // tick without a real wall-clock wait.
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> = Arc::new(Mutex::new(|w: &mut World| {
+        w.clock += std::time::Duration::from_secs(181);
+    }));
+
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual).await;
+
+    let g = world.lock().unwrap();
+    assert_eq!(
+        g.phases,
+        vec![ProtocolPhase::Watching, ProtocolPhase::GaveUp],
+        "gives up from Watching, never reaches Closing/CountingDown/Firing"
+    );
+    assert!(g.terminal_calls.is_empty(), "must never fire the terminal action");
+    assert_eq!(g.state.phase, ProtocolPhase::GaveUp);
+    assert_eq!(g.state.action, Some(TerminalAction::Shutdown), "keeps the armed action for the UI label");
+    assert_eq!(g.state.waiting_on, vec!["stuck".to_string()], "names the blocking session id");
+    assert!(
+        g.state.gave_up_reason.as_deref().is_some_and(|r| !r.is_empty()),
+        "carries a human-readable reason, got {:?}",
+        g.state.gave_up_reason
+    );
 }

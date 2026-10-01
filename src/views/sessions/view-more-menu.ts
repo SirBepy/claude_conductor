@@ -65,6 +65,10 @@ function _whenDoneParentText(): string {
     return `${label} in ${s.countdown_remaining_secs}s`;
   }
   if (s.phase === "firing") return `${label} now...`;
+  // Aborted without firing (todo 894): quietly named in the collapsed parent
+  // row too, not just the opened submenu, so it reads differently from a
+  // currently-armed "{label} when done" at a glance.
+  if (s.phase === "gaveUp") return `${label}: gave up`;
   return `${label} when done`;
 }
 

@@ -41,6 +41,7 @@ function ps(overrides = {}) {
     phase: "disarmed",
     countdown_remaining_secs: null,
     waiting_on: [],
+    gave_up_reason: null,
     ...overrides,
   };
 }
@@ -128,6 +129,44 @@ describe("whenDoneMenuHtml - per-phase markup", () => {
     state.whenDone = ps({ action: "sleep", phase: "watching" });
     expect(whenDoneArmed()).toBe(true);
     expect(whenDoneAction()).toBe("sleep");
+  });
+
+  // todo 894: an aborted (no-progress-guard) run persists a distinct GaveUp
+  // phase instead of silently reverting to plain Disarmed, so it must read
+  // differently from both "watching/armed" and "never armed" - visible, but
+  // quiet (a single muted line, not a loud badge).
+  it("gaveUp: toggle items are NOT shown as armed (distinguishable from a live arm)", () => {
+    state.whenDone = ps({
+      action: "shutdown",
+      phase: "gaveUp",
+      waiting_on: ["s1", "s2"],
+      gave_up_reason: "no progress in Watching for 3 min (sessions never went idle)",
+    });
+    const html = whenDoneMenuHtml();
+    expect(html).not.toContain("is-on");
+    expect(html).not.toContain("smore-check-dot");
+  });
+
+  it("gaveUp: renders a muted line naming the reason and the blocking session count", () => {
+    state.whenDone = ps({
+      action: "shutdown",
+      phase: "gaveUp",
+      waiting_on: ["s1", "s2"],
+      gave_up_reason: "no progress in Watching for 3 min (sessions never went idle)",
+    });
+    const html = whenDoneMenuHtml();
+    expect(html).toContain("when-done-chip-gaveup");
+    expect(html).toContain("gave up");
+    expect(html).toContain("no progress in Watching for 3 min");
+    expect(html).toContain("2 sessions");
+    // Still clearable (re-arm or dismiss), distinguishable from a never-armed state.
+    expect(html).toContain("data-when-done-cancel");
+  });
+
+  it("gaveUp: whenDoneArmed() is false (not indistinguishable-from-armed)", () => {
+    expect(whenDoneArmed()).toBe(false);
+    state.whenDone = ps({ action: "sleep", phase: "gaveUp", gave_up_reason: "x" });
+    expect(whenDoneArmed()).toBe(false);
   });
 });
 

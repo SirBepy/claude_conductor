@@ -54,6 +54,7 @@ pub(crate) fn arm(app: &AppHandle, action: TerminalAction, mode: ArmMode) -> Pro
             phase: ProtocolPhase::Watching,
             countdown_remaining_secs: None,
             waiting_on: Vec::new(),
+            gave_up_reason: None,
         };
         inner.state.clone()
     };

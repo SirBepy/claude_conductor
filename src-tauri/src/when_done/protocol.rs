@@ -30,6 +30,10 @@ pub enum ProtocolPhase {
     Closing,
     CountingDown,
     Firing,
+    /// Aborted without firing: the Watching no-progress guard gave up (todo
+    /// 894). Distinct from `Disarmed` so the UI can tell "it tried and gave
+    /// up" from "it was never armed" - the two used to be byte-identical.
+    GaveUp,
 }
 
 /// Snapshot of the protocol, emitted to the frontend each tick.
@@ -39,8 +43,14 @@ pub struct ProtocolState {
     pub action: Option<TerminalAction>,
     pub phase: ProtocolPhase,
     pub countdown_remaining_secs: Option<u32>,
-    /// Session ids not yet idle/closed.
+    /// Session ids not yet idle/closed. In the `GaveUp` phase, this is instead
+    /// the set of session ids that were still blocking progress when the
+    /// Watching loop gave up.
     pub waiting_on: Vec<String>,
+    /// Why the protocol gave up, set only when `phase == GaveUp`. `None` for
+    /// every other phase.
+    #[serde(default)]
+    pub gave_up_reason: Option<String>,
 }
 
 impl ProtocolState {
@@ -50,6 +60,20 @@ impl ProtocolState {
             phase: ProtocolPhase::Disarmed,
             countdown_remaining_secs: None,
             waiting_on: Vec::new(),
+            gave_up_reason: None,
+        }
+    }
+
+    /// Aborted without firing: carries the action that was armed (so the UI
+    /// can still name it), why it gave up, and which session ids were still
+    /// blocking progress.
+    pub fn gave_up(action: TerminalAction, reason: impl Into<String>, blocking: Vec<String>) -> Self {
+        Self {
+            action: Some(action),
+            phase: ProtocolPhase::GaveUp,
+            countdown_remaining_secs: None,
+            waiting_on: blocking,
+            gave_up_reason: Some(reason.into()),
         }
     }
 }

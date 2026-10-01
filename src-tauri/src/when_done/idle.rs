@@ -8,10 +8,21 @@ use tauri::{AppHandle, Manager};
 /// Path to the repo-root COMMENTS_FOR_BEPY.md. `CARGO_MANIFEST_DIR` is
 /// `src-tauri/`, so the repo root is its parent. Compile-time embedded, which is
 /// how the dev app (Joe's run mode) resolves it.
+///
+/// Under `cfg(test)` this redirects to a scratch file in the system temp dir
+/// instead: the real file is tracked in git and shared with other sessions'
+/// WIP, and a test exercising an abort path (todo 894) must not append to it.
 fn comments_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("COMMENTS_FOR_BEPY.md")
+    #[cfg(test)]
+    {
+        return std::env::temp_dir().join("when_done_test_COMMENTS_FOR_BEPY.md");
+    }
+    #[cfg(not(test))]
+    {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("COMMENTS_FOR_BEPY.md")
+    }
 }
 
 /// Append a one-line entry to COMMENTS_FOR_BEPY.md, creating it with a header if

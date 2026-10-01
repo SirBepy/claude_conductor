@@ -10,6 +10,7 @@ use super::protocol::{ProtocolState, TerminalAction};
 use crate::state::AppState;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Instant;
 use tauri::{AppHandle, Manager};
 
 /// A boxed, owned future the engine seams hand back. The phase machine awaits
@@ -46,6 +47,11 @@ pub(super) struct EngineDeps {
     pub(super) terminal: Box<dyn Fn(TerminalAction) -> Result<(), String> + Send + Sync>,
     /// Seconds since the last keyboard/mouse input anywhere in the session.
     pub(super) user_idle_secs: Box<dyn Fn() -> u64 + Send + Sync>,
+    /// Current time, for the Watching loop's no-progress runaway guard
+    /// (todo 894). Mirrors `std::time::Instant::now`; a test can drive a
+    /// synthetic clock through this seam instead of waiting out the real
+    /// `NO_PROGRESS_LIMIT` wall-clock duration.
+    pub(super) now: Box<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl EngineDeps {
@@ -78,11 +84,45 @@ impl EngineDeps {
             }),
             mutate_and_emit: Box::new(move |f| update_and_emit(&app_emit, f)),
             is_cancelled: Box::new(move || is_cancelled(&app_cancel)),
-            terminal: Box::new(|action| match action {
-                TerminalAction::Sleep => crate::system_control::sleep_pc(),
-                TerminalAction::Shutdown => crate::system_control::shutdown_pc(),
+            terminal: Box::new(|action| {
+                let dry_run = dry_run_enabled(std::env::var("CC_WHEN_DONE_DRY_RUN").ok().as_deref());
+                run_terminal_action(action, dry_run)
             }),
             user_idle_secs: Box::new(crate::daemon::idle::idle_secs),
+            now: Box::new(Instant::now),
         }
     }
 }
+
+/// Whether `CC_WHEN_DONE_DRY_RUN` is enabled, given its raw value (`None` when
+/// the var is unset). Factored out of the production env read so a test can
+/// exercise the switch without mutating process environment, which is shared
+/// across parallel test threads (todo 888).
+pub(super) fn dry_run_enabled(raw: Option<&str>) -> bool {
+    raw.is_some_and(|v| !v.is_empty())
+}
+
+/// Perform (or, in dry-run, log and skip) the terminal action. Lets the live
+/// "fires with such a session open" check in todo 888's Decided run end to
+/// end without actually sleeping/shutting down this machine: every other step
+/// of the Firing path (the state mutation + `when-done-state` emit in
+/// `run_engine_with_deps`) runs exactly as it would for a real fire, only this
+/// last seam is swapped.
+pub(super) fn run_terminal_action(action: TerminalAction, dry_run: bool) -> Result<(), String> {
+    if dry_run {
+        let verb = match action {
+            TerminalAction::Sleep => "sleep",
+            TerminalAction::Shutdown => "shutdown",
+        };
+        log::warn!("when_done: dry-run, would {verb}");
+        return Ok(());
+    }
+    match action {
+        TerminalAction::Sleep => crate::system_control::sleep_pc(),
+        TerminalAction::Shutdown => crate::system_control::shutdown_pc(),
+    }
+}
+
+#[cfg(test)]
+#[path = "deps_tests.rs"]
+mod tests;

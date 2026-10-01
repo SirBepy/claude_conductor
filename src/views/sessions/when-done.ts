@@ -31,11 +31,17 @@ function emit(): void {
 }
 
 function isArmed(s: ProtocolState | null): boolean {
-  return !!s && s.phase !== "disarmed";
+  return !!s && s.phase !== "disarmed" && s.phase !== "gaveUp";
 }
 
 function isCounting(s: ProtocolState | null): boolean {
   return !!s && s.phase === "countingDown";
+}
+
+/** Aborted without firing (the Watching no-progress guard gave up, todo 894).
+ *  Distinct from both "armed" and "never armed" so the UI can say so. */
+function isGaveUp(s: ProtocolState | null): boolean {
+  return !!s && s.phase === "gaveUp";
 }
 
 /** Apply a fresh authoritative ProtocolState, restart the smoothing timer as
@@ -187,6 +193,9 @@ export function whenDoneMenuHtml(): string {
   if (isArmed(s) && s && action) {
     items.push(`<div class="smore-sep"></div>`);
     items.push(whenDoneStatusHtml(s, action));
+  } else if (isGaveUp(s) && s && action) {
+    items.push(`<div class="smore-sep"></div>`);
+    items.push(whenDoneGaveUpHtml(s, action));
   }
 
   return items.join("");
@@ -210,6 +219,25 @@ function whenDoneStatusHtml(s: ProtocolState, action: TerminalAction): string {
     `<div class="when-done-chip">` +
     `<span class="when-done-chip-text">${text}</span>` +
     `<button class="when-done-cancel" data-when-done-cancel><i class="ph ph-x"></i>Cancel</button>` +
+    `</div>`
+  );
+}
+
+/** One muted line naming why the protocol gave up and which sessions were
+ *  still blocking it, plus a dismiss control (same cancel_when_done path, so
+ *  it is also clearable by simply re-arming). Keeps the gave-up signal
+ *  reachable from the UI without a loud badge (todo 894). */
+function whenDoneGaveUpHtml(s: ProtocolState, action: TerminalAction): string {
+  const label = ACTION_LABEL[action];
+  const n = s.waiting_on.length;
+  const sess = n === 1 ? "session" : "sessions";
+  const reason = s.gave_up_reason ?? "gave up";
+  const blocked = n > 0 ? ` (${n} ${sess} still blocking)` : "";
+  const text = `${esc(label)} when done gave up: ${esc(reason)}${esc(blocked)}`;
+  return (
+    `<div class="when-done-chip when-done-chip-gaveup">` +
+    `<span class="when-done-chip-text">${text}</span>` +
+    `<button class="when-done-cancel" data-when-done-cancel><i class="ph ph-x"></i>Dismiss</button>` +
     `</div>`
   );
 }

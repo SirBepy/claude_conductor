@@ -65,7 +65,7 @@ fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
 /// nightly run skips Closing and drops back to Watching if interrupted.
 async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction, mode: ArmMode) {
     loop {
-        if !watch(&deps, mode).await {
+        if !watch(&deps, mode, action).await {
             return;
         }
         if mode == ArmMode::Manual && !close_all(&deps).await {
@@ -96,9 +96,10 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction, mode: Ar
 }
 
 /// Phase: Watching. Wait until `ready_to_fire`, auto-resolving prompts on a
-/// manual arm. False when cancelled or the runaway guard disarmed the protocol.
-async fn watch(deps: &EngineDeps, mode: ArmMode) -> bool {
-    let mut no_progress_since = Instant::now();
+/// manual arm. False when cancelled or the runaway guard gave up on the
+/// protocol (todo 894: distinct from a plain cancel, see `ProtocolState::gave_up`).
+async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction) -> bool {
+    let mut no_progress_since = (deps.now)();
     let mut last_idle_signature: Option<Vec<(String, bool)>> = None;
 
     loop {
@@ -129,13 +130,14 @@ async fn watch(deps: &EngineDeps, mode: ArmMode) -> bool {
         let sig = Some(busy_map.clone());
         if sig != last_idle_signature {
             last_idle_signature = sig;
-            no_progress_since = Instant::now();
-        } else if mode == ArmMode::Manual && no_progress_since.elapsed() > NO_PROGRESS_LIMIT {
-            log_comment(
-                "[when-done] aborted: no progress in Watching for 3 min (sessions never went idle); disarming",
-            );
+            no_progress_since = (deps.now)();
+        } else if mode == ArmMode::Manual
+            && (deps.now)().duration_since(no_progress_since) > NO_PROGRESS_LIMIT
+        {
+            const REASON: &str = "no progress in Watching for 3 min (sessions never went idle)";
+            log_comment(&format!("[when-done] gave up: {REASON}; disarming"));
             (deps.mutate_and_emit)(&mut |s| {
-                *s = ProtocolState::disarmed();
+                *s = ProtocolState::gave_up(action, REASON, waiting.clone());
             });
             return false;
         }
