@@ -22,7 +22,6 @@ import "./project-picker.css";
 import "./worktree-picker.css";
 import "./model-effort-modal.css";
 import "./model-effort-slider.css";
-import "./new-project-modal.css";
 import "./preview-panel.css";
 import { startNewSession, loadAndRestorePendingSession, loadAndRestoreParkedDrafts } from "./pending-flow";
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";

@@ -2,9 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Todo 834: mechanizes the one remaining acceptance item, "with each of the
-// ten modals open, typing plain characters leaves the composer unchanged" -
+// nine modals open, typing plain characters leaves the composer unchanged" -
 // previously a live/manual check only. Four share the modal-host
-// (src/shared/modal.ts); six own-backdrop, guarded via modal-input-lock.ts.
+// (src/shared/modal.ts); five own-backdrop, guarded via modal-input-lock.ts.
+// Todo 982 dropped new-project-modal (orphaned from the product, deleted)
+// from the original ten - the count/name here follow that removal.
 
 const MARKER = "MARKER";
 
@@ -115,14 +117,6 @@ async function openChangeCharacterModal(page: Page): Promise<void> {
   await page.locator(".cc-modal-card").waitFor();
 }
 
-async function openNewProjectModal(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const mod = await import("/views/sessions/new-project-modal.ts");
-    void mod.openNewProjectModal();
-  });
-  await page.locator(".new-project-card").waitFor();
-}
-
 async function openPrReviewModal(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const mod = await import("/shared/chat/pr-review-modal.ts");
@@ -146,7 +140,7 @@ async function openEditAccountModal(page: Page): Promise<void> {
   await page.locator(".aem-modal").waitFor();
 }
 
-test.describe("view-harness / modal-open must swallow every keystroke (all ten call sites)", () => {
+test.describe("view-harness / modal-open must swallow every keystroke (all nine call sites)", () => {
   test("shared-host: project-picker", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openProjectPicker(page);
@@ -189,12 +183,6 @@ test.describe("view-harness / modal-open must swallow every keystroke (all ten c
   test("own-backdrop: change-character-modal", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openChangeCharacterModal(page);
-    await assertKeySwallowed(page, composer);
-  });
-
-  test("own-backdrop: new-project-modal", async ({ page }) => {
-    const composer = await mountWithComposer(page);
-    await openNewProjectModal(page);
     await assertKeySwallowed(page, composer);
   });
 
