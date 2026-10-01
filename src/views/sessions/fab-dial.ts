@@ -1,6 +1,7 @@
 // The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Preview, pick one,
 // and it opens in a card floating OVER the transcript (Joe, 2026-08-24 - the
-// rail stealing layout width was the complaint). Preview is the odd one out: it
+// rail stealing layout width was the complaint), movable and resizable like a
+// window (fab-card-window.ts). Preview is the odd one out: it
 // toggles the docked rail instead, so the dial is one door to all four.
 
 import { mountAskPanel, type AskPanelHandle } from "./ask-panel";
@@ -9,6 +10,7 @@ import { mountDraftsPanel, type DraftsPanelHandle } from "./drafts-panel";
 import type { PreviewController } from "./preview-panel";
 import type { Unlisten } from "../../shared/transport";
 import { watchDrafts } from "./fab-dial-drafts-watch";
+import { CardWindow } from "./fab-card-window";
 import "./fab-dial.css";
 
 /** What the card can hold. Preview is reachable from the dial but never lives
@@ -52,6 +54,7 @@ class FabDial implements FabDialHandle {
   private todos: TodosPanelHandle | null = null;
   private drafts: DraftsPanelHandle | null = null;
   private liftObs: ResizeObserver | null = null;
+  private cardWindow: CardWindow;
   private draftsUnlisten: Unlisten | null = null;
   /** The draft the card should land on once it mounts, set by the auto-open
    *  below. `mountBody` runs a render tick later, so it cannot read the event. */
@@ -62,6 +65,7 @@ class FabDial implements FabDialHandle {
     this.deps = deps;
     this.host = document.createElement("div");
     this.host.className = "fab-dial-host";
+    this.cardWindow = new CardWindow(this.host);
     this.host.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
     // Auto-open predicate lives in fab-dial-drafts-watch.ts; this just wires
@@ -223,7 +227,11 @@ class FabDial implements FabDialHandle {
         `aria-label="Ask, Todos, Drafts, Preview"><i class="ph ph-list"></i></button>`;
 
     this.disposeBodies();
-    if (this.surface === "card") this.mountBody();
+    if (this.surface === "card") {
+      const card = this.host.querySelector<HTMLElement>(".fab-card");
+      if (card) this.cardWindow.bind(card);
+      this.mountBody();
+    }
     // The FAB node above is brand new, so the last measurement is stale.
     this.syncLift();
   }
@@ -236,7 +244,9 @@ class FabDial implements FabDialHandle {
     ).join("");
     return (
       `<div class="fab-card">` +
-        `<div class="fab-spine">${spine}<span class="fab-spine-grow"></span>` +
+        `<div class="fab-spine" title="Drag to move">` +
+          `<span class="fab-spine-grip" aria-hidden="true"><i class="ph ph-dots-six"></i></span>` +
+          `${spine}<span class="fab-spine-grow"></span>` +
           `<button type="button" class="icon-btn-sq fab-spine-close" data-card-close title="Close">` +
             `<i class="ph ph-x"></i></button>` +
         `</div>` +
@@ -276,6 +286,7 @@ class FabDial implements FabDialHandle {
 
   destroy(): void {
     this.disposeBodies();
+    this.cardWindow.destroy();
     this.liftObs?.disconnect();
     this.liftObs = null;
     if (this.draftsUnlisten) {

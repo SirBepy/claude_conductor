@@ -51,8 +51,8 @@
   border-color: color-mix(in srgb, var(--color-primary) 55%, transparent);
 }
 
-/* The card carries its own close, and the FAB's resting spot sits under the
-   card's input row - leaving it there would cover the control it overlaps. */
+/* The card carries its own close, and a card dragged to the corner would
+   have the FAB sitting on top of its input row. */
 .fab-dial-host[data-surface="card"] .fab-dial-fab {
   display: none;
 }
@@ -133,6 +133,8 @@
 }
 
 /* ── The card ────────────────────────────────────────────────────────────── */
+/* right/bottom/size here are only the pre-measure fallback and the phone
+   layout: on desktop fab-card-window.ts writes left/top/width/height inline. */
 .fab-card {
   position: absolute;
   right: 14px;
@@ -156,10 +158,44 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 7px 0;
+  padding: 4px 0 7px;
   background: var(--color-background);
   border-right: 1px solid var(--color-border);
+  cursor: grab;
+  touch-action: none;
 }
+
+.fab-spine-grip {
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.fab-card.is-dragging,
+.fab-card.is-dragging .fab-spine {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* Invisible grab strips on every edge and corner; corners sit above edges. */
+.fab-rz {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.fab-rz-n, .fab-rz-s { left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+.fab-rz-e, .fab-rz-w { top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+.fab-rz-n { top: 0; }
+.fab-rz-s { bottom: 0; }
+.fab-rz-e { right: 0; }
+.fab-rz-w { left: 0; }
+.fab-rz-ne, .fab-rz-nw, .fab-rz-se, .fab-rz-sw { width: 12px; height: 12px; z-index: 3; }
+.fab-rz-nw { top: 0; left: 0; cursor: nwse-resize; }
+.fab-rz-se { bottom: 0; right: 0; cursor: nwse-resize; }
+.fab-rz-ne { top: 0; right: 0; cursor: nesw-resize; }
+.fab-rz-sw { bottom: 0; left: 0; cursor: nesw-resize; }
 
 .fab-spine-btn {
   width: 28px;
@@ -222,6 +258,15 @@
    * reachable while a card is waiting for an answer anyway. */
   .session-pane:has(#prompt-card-host .prompt-card) .fab-dial-host {
     display: none;
+  }
+
+  .fab-rz,
+  .fab-spine-grip {
+    display: none;
+  }
+
+  .fab-spine {
+    cursor: default;
   }
 
   .fab-card {
