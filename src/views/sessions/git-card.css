@@ -41,6 +41,12 @@
 
 .sb-git-pop-row.current { background: rgba(74, 222, 128, 0.06); }
 
+.sb-git-pop-row.pick { cursor: pointer; }
+.sb-git-pop-row.pick:hover { background: rgba(255, 255, 255, 0.06); }
+.sb-git-pop-row.pick:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.sb-git-pop-row.pick.busy { cursor: default; opacity: 0.75; }
+.gc-row-spin { flex-shrink: 0; font-size: 0.75rem; color: var(--sb-muted); }
+
 .sb-git-pop-check { color: #4ade80; font-size: 0.8rem; flex-shrink: 0; }
 .sb-git-pop-check-pad { display: inline-block; width: 0.8rem; flex-shrink: 0; }
 
@@ -189,6 +195,26 @@
 .sb-git-pop-push-btn:hover:not(:disabled) { background: rgba(74, 222, 128, 0.18); }
 .sb-git-pop-push-btn:disabled { opacity: 0.7; cursor: default; }
 
+.sb-git-pop-pull-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 5px;
+  background: rgba(96, 165, 250, 0.08);
+  color: #60a5fa;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.sb-git-pop-pull-btn:hover:not(:disabled) { background: rgba(96, 165, 250, 0.18); }
+.sb-git-pop-pull-btn:disabled { opacity: 0.7; cursor: default; }
+
 .sb-git-pop-publish {
   padding: 4px 12px 10px;
 }
@@ -289,6 +315,19 @@
   color: var(--sb-muted);
   font-size: 0.66rem;
 }
+
+/* Both warn rows match .gc-away-foot's shape (icon + line, top border) since
+   all three are the card's "one more thing before you act" slot. */
+.gc-dirty-warn, .gc-peer-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-warning);
+  font-size: 0.68rem;
+}
+.gc-dirty-warn i, .gc-peer-warn i { font-size: 0.82rem; flex-shrink: 0; }
 
 /* Drift footer: the card is always about the chat's own repo, so this line is
    the only place the repo the AI moved into is named, and it reads last. */

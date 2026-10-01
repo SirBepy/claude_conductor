@@ -310,6 +310,8 @@ pub fn run() {
             ipc::get_commit_sync,
             ipc::get_commit_history,
             ipc::push_commits,
+            ipc::checkout_branch,
+            ipc::pull_commits,
             ipc::get_range_files,
             ipc::get_file_diff,
             ipc::git_diff::get_file_at_rev,

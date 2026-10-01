@@ -535,6 +535,7 @@ export class SessionStatusbar {
       ...this.popoverBundle(),
       cwd: this.cwd,
       liveCwd: this.liveCwd,
+      sessionId: this.sessionId,
       gitInfo: this.gitInfo,
       gitCwd: this.gitCwd,
       effortAnchor: this.modelEffort.effortAnchor,

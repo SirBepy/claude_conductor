@@ -86,6 +86,7 @@ export function reanchorConfigPopover(
 export interface ChipPopoverWireCtx extends StatusbarPopovers {
   cwd: string | null;
   liveCwd: string | null;
+  sessionId: string | null;
   gitInfo: GitInfo;
   gitCwd: string | null;
   effortAnchor: HTMLElement | null;
@@ -161,6 +162,7 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
         // actually ran there - the off-repo fallback (gitCwd back on the
         // spawn cwd) would otherwise misname a non-repo folder (todo 921).
         awayLabel: driftLabel(ctx.cwd, ctx.liveCwd, ctx.gitCwd === ctx.liveCwd ? ctx.gitInfo.repo : null) || null,
+        sessionId: ctx.sessionId,
         onPushed: () => ctx.refreshGitInfo(),
       });
     });

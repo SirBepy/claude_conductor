@@ -48,7 +48,7 @@ function ipc(extra) {
 }
 
 function open(card, over = {}) {
-  card.open(anchor(), { cwd: CWD, awayLabel: null, onPushed: () => {}, ...over });
+  card.open(anchor(), { cwd: CWD, awayLabel: null, sessionId: null, onPushed: () => {}, ...over });
 }
 
 beforeEach(() => {
@@ -305,6 +305,239 @@ describe("git card branch mode", () => {
     expect(names).toEqual(["feat/claim-state", "fix/claim-retry"]);
     // Same node, so the caret position survived the filter.
     expect(pop().querySelector(".gc-search input")).toBe(input);
+    p.close();
+  });
+
+  function pick(name) {
+    return pop().querySelector(`.sb-git-pop-row.pick[data-branch="${name}"]`);
+  }
+
+  it("non-current branch rows are keyboard-reachable buttons, the current row is not", async () => {
+    ipcMock.impl = branchIpc();
+    const p = new GitCard();
+    open(p);
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    const row = pick("feat/claim-state");
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.tabIndex).toBe(0);
+    const current = pop().querySelector(".sb-git-pop-row.current");
+    expect(current.getAttribute("role")).toBeNull();
+    p.close();
+  });
+
+  it("checks out a branch on click, closes branch mode and repaints on it", async () => {
+    const calls = [];
+    ipcMock.impl = async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "get_recent_branches") return BRANCHES;
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [];
+      if (cmd === "checkout_branch") return null;
+      if (cmd === "get_git_info") return { ...INFO, branch: "feat/claim-state" };
+      if (cmd === "get_commit_sync") return { ahead: [], behind: [], has_upstream: true };
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p);
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    pick("feat/claim-state").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    await flush();
+
+    expect(calls).toContainEqual(["checkout_branch", { cwd: CWD, name: "feat/claim-state" }]);
+    expect(pop().querySelector(".gc-branchline .bname").textContent).toBe("feat/claim-state");
+    p.close();
+  });
+
+  it("Enter and Space on a focused branch row check it out", async () => {
+    const calls = [];
+    ipcMock.impl = async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "get_recent_branches") return BRANCHES;
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [];
+      if (cmd === "checkout_branch") return null;
+      if (cmd === "get_git_info") return INFO;
+      if (cmd === "get_commit_sync") return SYNC_AHEAD;
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p);
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    pick("fix/claim-retry").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flush();
+    await flush();
+    expect(calls).toContainEqual(["checkout_branch", { cwd: CWD, name: "fix/claim-retry" }]);
+    p.close();
+  });
+
+  it("surfaces git's refusal text instead of forcing the checkout", async () => {
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_recent_branches") return BRANCHES;
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [];
+      if (cmd === "checkout_branch") throw new Error("error: Your local changes to the following files would be overwritten by checkout");
+      if (cmd === "get_git_info") return INFO;
+      if (cmd === "get_commit_sync") return SYNC_AHEAD;
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p);
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    pick("feat/claim-state").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    await flush();
+
+    // Still in branch mode (checkout failed, nothing to repaint onto).
+    expect(pop().querySelector(".sb-git-pop-error").textContent).toContain("would be overwritten");
+    p.close();
+  });
+
+  it("shows the dirty-tree warning before the user picks a branch", async () => {
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_recent_branches") return BRANCHES;
+      if (cmd === "get_git_dirty") return ["a.txt", "b.txt", "c.txt"];
+      if (cmd === "list_instances") return [];
+      if (cmd === "get_git_info") return INFO;
+      if (cmd === "get_commit_sync") return SYNC_AHEAD;
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p);
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    expect(pop().querySelector(".gc-dirty-warn").textContent).toContain("3 uncommitted files will come with you");
+    p.close();
+  });
+
+  it("warns, but does not block, when another session is live in the same repo", async () => {
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_recent_branches") return BRANCHES;
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [
+        { session_id: "peer-session", pid: 1, cwd: CWD, project_id: "p", kind: "interactive", is_remote: false, started_at: "now", transcript_path: null, bridge_session_id: null, name: null, ended_at: null, end_reason: null },
+      ];
+      if (cmd === "get_git_info") return INFO;
+      if (cmd === "get_commit_sync") return SYNC_AHEAD;
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p, { sessionId: "own-session" });
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    expect(pop().querySelector(".gc-peer-warn").textContent).toContain("Another Conductor session is active in this repo");
+    // Pick is still a live control - decided: warn, don't block.
+    expect(pick("feat/claim-state").getAttribute("role")).toBe("button");
+    p.close();
+  });
+
+  it("does not warn when the only instance in this cwd is this chat's own session", async () => {
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_recent_branches") return BRANCHES;
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [
+        { session_id: "own-session", pid: 1, cwd: CWD, project_id: "p", kind: "interactive", is_remote: false, started_at: "now", transcript_path: null, bridge_session_id: null, name: null, ended_at: null, end_reason: null },
+      ];
+      if (cmd === "get_git_info") return INFO;
+      if (cmd === "get_commit_sync") return SYNC_AHEAD;
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p, { sessionId: "own-session" });
+    await flush();
+    pop().querySelector(".gc-branchline").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    expect(pop().querySelector(".gc-peer-warn")).toBeNull();
+    p.close();
+  });
+});
+
+describe("git card pull", () => {
+  it("shows no Pull button when nothing is behind", async () => {
+    ipcMock.impl = ipc((cmd) =>
+      cmd === "get_commit_history" ? { entries: entries(0, 1, true), has_more: false, has_upstream: true } : null);
+    const p = new GitCard();
+    open(p);
+    await flush();
+    expect(pop().querySelector(".sb-git-pop-pull-btn")).toBeNull();
+    p.close();
+  });
+
+  it("shows Pull N only when behind.length > 0, and pulling refreshes sync + history", async () => {
+    let pulled = false;
+    let historyCalls = 0;
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_git_info") return { ...INFO, ahead: 0, behind: pulled ? 0 : 1 };
+      if (cmd === "get_commit_sync") {
+        return pulled
+          ? { ahead: [], behind: [], has_upstream: true }
+          : { ahead: [], behind: [{ short_sha: "sha9", message: "incoming" }], has_upstream: true };
+      }
+      if (cmd === "pull_commits") { pulled = true; return null; }
+      if (cmd === "get_commit_history") {
+        historyCalls += 1;
+        return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      }
+      return null;
+    };
+    const p = new GitCard();
+    open(p);
+    await flush();
+
+    const btn = pop().querySelector(".sb-git-pop-pull-btn");
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toContain("Pull");
+
+    btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    await flush();
+
+    expect(historyCalls).toBe(2);
+    expect(pop().querySelector(".sb-git-pop-pull-btn")).toBeNull();
+    p.close();
+  });
+
+  it("surfaces a non-fast-forward refusal instead of silently merging", async () => {
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_git_info") return { ...INFO, ahead: 0, behind: 1 };
+      if (cmd === "get_commit_sync") return { ahead: [], behind: [{ short_sha: "sha9", message: "incoming" }], has_upstream: true };
+      if (cmd === "pull_commits") throw new Error("fatal: Not possible to fast-forward, aborting.");
+      if (cmd === "get_commit_history") return { entries: entries(0, 1, true), has_more: false, has_upstream: true };
+      return null;
+    };
+    const p = new GitCard();
+    open(p);
+    await flush();
+
+    pop().querySelector(".sb-git-pop-pull-btn").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    expect(pop().querySelector(".sb-git-pop-error").textContent).toContain("fast-forward");
+    // Still showing the Pull button - the pull did not silently succeed.
+    expect(pop().querySelector(".sb-git-pop-pull-btn")).toBeTruthy();
     p.close();
   });
 });

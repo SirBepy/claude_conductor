@@ -10,7 +10,7 @@ import { invoke } from "../../shared/ipc";
 import { timeAgo } from "../../shared/time";
 import { PopoverShell } from "./statusbar-popover-shell";
 import { openCommitModal } from "../../shared/chat/commit-refs";
-import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitRef, CommitSync, GitInfo } from "../../types/ipc.generated";
+import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitRef, CommitSync, GitInfo, Instance } from "../../types/ipc.generated";
 
 const PAGE_SIZE = 30;
 /** Distance from the list's bottom edge that triggers the next page. */
@@ -21,8 +21,19 @@ export interface GitCardOpenOpts {
   cwd: string;
   /** Repo the AI has moved into, or null while it is still in `cwd`'s repo. */
   awayLabel: string | null;
-  /** Refresh the chip's own counts once a push lands. */
+  /** This chat's own session id, so the peer-session warning can exclude it
+   *  from `list_instances`'s rows for this cwd. */
+  sessionId: string | null;
+  /** Refresh the chip's own counts once a push or pull lands. */
   onPushed: () => void;
+}
+
+/** Dirty-file count and peer-session flag fetched once per branches-mode
+ *  entry (todo 889), not on every card open - only the risky checkout path
+ *  needs either. */
+interface BranchContext {
+  dirty: string[];
+  peerActive: boolean;
 }
 
 type Mode = "history" | "branches";
@@ -32,6 +43,7 @@ export class GitCard {
   private anchor: HTMLElement | null = null;
   private cwd: string | null = null;
   private awayLabel: string | null = null;
+  private sessionId: string | null = null;
   private onPushed: (() => void) | null = null;
   private mode: Mode = "history";
 
@@ -39,6 +51,8 @@ export class GitCard {
   private sync: CommitSync | null = null;
   private pushing = false;
   private pushError: string | null = null;
+  private pulling = false;
+  private pullError: string | null = null;
   private popEl: HTMLElement | null = null;
 
   private history: CommitHistoryEntry[] = [];
@@ -50,6 +64,9 @@ export class GitCard {
 
   private branches: BranchEntry[] | null = null;
   private branchFilter = "";
+  private branchContext: BranchContext | null = null;
+  private checkingOut: string | null = null;
+  private checkoutError: string | null = null;
 
   get isOpen(): boolean { return this.shell.isOpen; }
 
@@ -57,14 +74,20 @@ export class GitCard {
     this.anchor = anchor;
     this.cwd = opts.cwd;
     this.awayLabel = opts.awayLabel;
+    this.sessionId = opts.sessionId;
     this.onPushed = opts.onPushed;
     this.mode = "history";
     this.pushing = false;
     this.pushError = null;
+    this.pulling = false;
+    this.pullError = null;
     this.info = null;
     this.sync = null;
     this.branches = null;
     this.branchFilter = "";
+    this.branchContext = null;
+    this.checkingOut = null;
+    this.checkoutError = null;
     this.resetHistory();
     this.rebuild();
     void this.loadHead();
@@ -149,6 +172,26 @@ export class GitCard {
       e.stopPropagation();
       void this.doPush(true);
     });
+    el.querySelector<HTMLElement>(".sb-git-pop-pull-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.doPull();
+    });
+    // Attached to the list container, not per-row: paintBranchList() swaps
+    // only its innerHTML on filter, and this listener must survive that.
+    const branchList = el.querySelector<HTMLElement>(".sb-git-pop-list");
+    if (this.mode === "branches" && branchList) {
+      const activateBranch = (e: Event) => {
+        const row = (e.target as Element).closest<HTMLElement>(".sb-git-pop-row.pick[data-branch]");
+        if (!row?.dataset.branch || this.checkingOut) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void this.checkoutBranch(row.dataset.branch);
+      };
+      branchList.addEventListener("click", activateBranch);
+      branchList.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") activateBranch(e);
+      });
+    }
     const search = el.querySelector<HTMLInputElement>(".gc-search input");
     if (search) {
       search.addEventListener("input", () => {
@@ -197,7 +240,87 @@ export class GitCard {
   private setMode(mode: Mode): void {
     if (this.mode === mode) return;
     this.mode = mode;
+    if (mode === "branches" && this.branchContext === null) void this.loadBranchContext();
     this.rebuild();
+  }
+
+  /** Dirty files and a same-cwd peer session are only relevant to the
+   *  checkout path, so they're fetched lazily on entering branches mode
+   *  rather than on every card open. Reuses `list_instances`, the same
+   *  live-sessions source the sidebar already polls - no new MCP call. */
+  private async loadBranchContext(): Promise<void> {
+    const cwd = this.cwd;
+    if (!cwd) return;
+    const sessionId = this.sessionId;
+    try {
+      const [dirty, instances] = await Promise.all([
+        invoke<string[]>("get_git_dirty", { cwd }).then((d) => d ?? []),
+        invoke<Instance[]>("list_instances").then((i) => i ?? []).catch(() => [] as Instance[]),
+      ]);
+      if (this.cwd !== cwd) return;
+      const peerActive = instances.some((i) => i.cwd === cwd && i.session_id !== sessionId && i.ended_at === null);
+      this.branchContext = { dirty, peerActive };
+      this.rebuild();
+    } catch (err) {
+      console.error("[git-card] branch context load failed", err);
+      if (this.cwd !== cwd) return;
+      this.branchContext = { dirty: [], peerActive: false };
+      this.rebuild();
+    }
+  }
+
+  /** Checks out a branch row. Dirty-tree handling is entirely git's own
+   *  (see checkout_branch's doc comment) - this just surfaces the result. */
+  private async checkoutBranch(name: string): Promise<void> {
+    if (this.checkingOut || !this.cwd) return;
+    const cwd = this.cwd;
+    this.checkingOut = name;
+    this.checkoutError = null;
+    this.rebuild();
+    try {
+      await invoke<void>("checkout_branch", { cwd, name });
+      if (this.cwd !== cwd) return;
+      this.checkingOut = null;
+      this.branchContext = null;
+      this.mode = "history";
+      this.branches = null;
+      this.onPushed?.();
+      this.resetHistory();
+      this.rebuild();
+      void this.loadHead();
+      void this.loadPage();
+    } catch (e) {
+      if (this.cwd !== cwd) return;
+      this.checkingOut = null;
+      this.checkoutError = e instanceof Error ? e.message : String(e);
+      this.rebuild();
+    }
+  }
+
+  private async doPull(): Promise<void> {
+    if (this.pulling || !this.cwd) return;
+    const cwd = this.cwd;
+    this.pulling = true;
+    this.pullError = null;
+    this.rebuild();
+    try {
+      await invoke<void>("pull_commits", { cwd });
+      const fresh = await invoke<CommitSync>("get_commit_sync", { cwd });
+      if (this.cwd !== cwd) return; // card moved on (session switch) mid-pull
+      this.sync = fresh;
+      this.pulling = false;
+      this.onPushed?.();
+      void this.loadHead();
+      // Pulled commits rewrite what's reachable from HEAD - refetch instead of patching.
+      this.resetHistory();
+      this.rebuild();
+      void this.loadPage();
+    } catch (e) {
+      if (this.cwd !== cwd) return;
+      this.pulling = false;
+      this.pullError = e instanceof Error ? e.message : String(e);
+      this.rebuild();
+    }
   }
 
   /** Filtering repaints only the rows, so the caret position in the search box
@@ -367,7 +490,13 @@ export class GitCard {
       const rows = sync.behind.map((c) =>
         `<div class="sb-git-pop-commit"><span class="sb-git-pop-sha">${escapeHtml(c.short_sha)}</span><span class="sb-git-pop-msg">${escapeHtml(c.message)}</span></div>`
       ).join("");
-      parts.push(`<div class="sb-git-pop-section behind"><i class="ph ph-arrow-down"></i>Incoming <span class="sb-git-pop-count">${sync.behind.length}</span></div><div class="sb-git-pop-list">${rows}</div>`);
+      const pullBtn = this.pulling
+        ? `<button class="sb-git-pop-pull-btn" disabled><i class="ph ph-spinner-gap sb-git-pop-spin"></i></button>`
+        : `<button class="sb-git-pop-pull-btn"><i class="ph ph-cloud-arrow-down"></i> Pull</button>`;
+      parts.push(`<div class="sb-git-pop-section behind"><i class="ph ph-arrow-down"></i>Incoming <span class="sb-git-pop-count">${sync.behind.length}</span>${pullBtn}</div><div class="sb-git-pop-list">${rows}</div>`);
+    }
+    if (this.pullError) {
+      parts.push(`<div class="sb-git-pop-error"><i class="ph ph-warning"></i>${escapeHtml(this.pullError)}</div>`);
     }
     return parts.join("");
   }
@@ -384,17 +513,36 @@ export class GitCard {
       const check = b.current ? `<i class="ph ph-check sb-git-pop-check"></i>` : `<span class="sb-git-pop-check-pad"></span>`;
       const sha = b.short_sha ? `<span class="sb-git-pop-sha">${escapeHtml(b.short_sha)}</span>` : "";
       const up = b.upstream ? `<span class="sb-git-pop-upstream">${escapeHtml(b.upstream)}</span>` : "";
-      return `<div class="sb-git-pop-row${b.current ? " current" : ""}">${check}<span class="sb-git-pop-name">${escapeHtml(b.name)}</span>${sha}${up}</div>`;
+      if (b.current) {
+        return `<div class="sb-git-pop-row current">${check}<span class="sb-git-pop-name">${escapeHtml(b.name)}</span>${sha}${up}</div>`;
+      }
+      const busy = this.checkingOut === b.name;
+      const spin = busy ? `<i class="ph ph-spinner-gap sb-git-pop-spin gc-row-spin"></i>` : "";
+      return `<div class="sb-git-pop-row pick${busy ? " busy" : ""}" role="button" tabindex="0" data-branch="${escapeHtml(b.name)}"${busy ? ` aria-busy="true"` : ""}>`
+        + `${check}<span class="sb-git-pop-name">${escapeHtml(b.name)}</span>${sha}${up}${spin}</div>`;
     }).join("");
   }
 
   private buildHtml(): string {
     const repo = escapeHtml(this.repoLabel());
     if (this.mode === "branches") {
+      const peerWarnHtml = this.branchContext?.peerActive
+        ? `<div class="gc-peer-warn"><i class="ph ph-users"></i><span>Another Conductor session is active in this repo</span></div>`
+        : "";
+      const dirtyCount = this.branchContext?.dirty.length ?? 0;
+      const dirtyWarnHtml = dirtyCount > 0
+        ? `<div class="gc-dirty-warn"><i class="ph ph-warning-circle"></i><span>${dirtyCount} uncommitted file${dirtyCount === 1 ? "" : "s"} will come with you</span></div>`
+        : "";
+      const checkoutErrorHtml = this.checkoutError
+        ? `<div class="sb-git-pop-error"><i class="ph ph-warning"></i>${escapeHtml(this.checkoutError)}</div>`
+        : "";
       return `<div class="sb-git-pop-header gc-back" role="button" tabindex="0"><i class="ph ph-arrow-left"></i>Branches${repo ? ` &mdash; ${repo}` : ""}</div>`
         + `<div class="gc-search"><i class="ph ph-magnifying-glass"></i><input value="${escapeHtml(this.branchFilter)}" spellcheck="false" placeholder="Filter branches" aria-label="Filter branches"></div>`
         + `<div class="sb-git-pop-list">${this.branchRowsHtml()}</div>`
-        + `<div class="gc-hint">Esc to go back</div>`;
+        + peerWarnHtml
+        + dirtyWarnHtml
+        + checkoutErrorHtml
+        + `<div class="gc-hint">Esc to go back &bull; Enter to check out</div>`;
     }
     const errorHtml = this.pushError
       ? `<div class="sb-git-pop-error"><i class="ph ph-warning"></i>${escapeHtml(this.pushError)}</div>`
