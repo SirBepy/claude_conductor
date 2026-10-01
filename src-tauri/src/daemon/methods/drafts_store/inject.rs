@@ -109,7 +109,12 @@ pub(crate) fn mark_drafts_seen(state: &Arc<DaemonState>, session_id: &str) -> us
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::methods::drafts_store::write_draft;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
     use crate::sessions::message_drafts::{DraftAuthor, DraftVariant, DraftVersion};
+    use crate::types::Settings;
+    use serde_json::json;
 
     fn variant(recipient: &str, n: u32, bodies: &[(&str, DraftAuthor)]) -> DraftVariant {
         let versions: Vec<DraftVersion> = bodies
@@ -165,5 +170,75 @@ mod tests {
         let cut = excerpt(&long);
         assert!(cut.ends_with("..."));
         assert_eq!(cut.chars().count(), DIFF_EXCERPT + 3);
+    }
+
+    /// Two sessions in one project, one draft each: `render_for_injection`
+    /// scopes the Open list to the caller's own chat (todo 984, pins
+    /// `b896fbaa`'s `d.origin_session_id == session_id` clause). Fresh uuids
+    /// for session and project ids per
+    /// `project_lib_tests_shared_static_session_ids_collide` - the store
+    /// writes real on-disk state under `<app-data>/message-drafts/<project_id>.json`.
+    fn two_sessions_one_project() -> (Arc<DaemonState>, String, String, String) {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let project_id = format!("proj-inject-scope-{}", uuid::Uuid::new_v4());
+        let s1 = format!("s1-{}", uuid::Uuid::new_v4());
+        let s2 = format!("s2-{}", uuid::Uuid::new_v4());
+        state.registry.upsert_interactive(&s1, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
+        state.registry.upsert_interactive(&s2, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
+        write_draft(
+            &state,
+            &s1,
+            "add",
+            &json!({"topic": "s1 topic", "recipient": "Bruno", "body": "hi from s1"}),
+        )
+        .expect("s1 can write a draft");
+        write_draft(
+            &state,
+            &s2,
+            "add",
+            &json!({"topic": "s2 topic", "recipient": "Ana", "body": "hi from s2"}),
+        )
+        .expect("s2 can write a draft");
+        (state, project_id, s1, s2)
+    }
+
+    #[test]
+    fn render_for_injection_only_lists_the_callers_own_open_draft() {
+        let (state, _project_id, s1, _s2) = two_sessions_one_project();
+
+        let block = render_for_injection(&state, &s1).expect("s1 wrote an open draft");
+        assert!(block.contains("s1 topic"), "got {block}");
+        assert!(!block.contains("s2 topic"), "got {block}");
+    }
+
+    #[test]
+    fn render_for_injection_is_symmetric_for_the_other_session() {
+        let (state, _project_id, _s1, s2) = two_sessions_one_project();
+
+        let block = render_for_injection(&state, &s2).expect("s2 wrote an open draft");
+        assert!(block.contains("s2 topic"), "got {block}");
+        assert!(!block.contains("s1 topic"), "got {block}");
+    }
+
+    #[test]
+    fn a_session_with_no_drafts_of_its_own_gets_no_block_even_with_a_peer_open_one() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let project_id = format!("proj-inject-scope-{}", uuid::Uuid::new_v4());
+        let author = format!("author-{}", uuid::Uuid::new_v4());
+        let bystander = format!("bystander-{}", uuid::Uuid::new_v4());
+        state.registry.upsert_interactive(&author, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
+        state.registry.upsert_interactive(&bystander, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
+        write_draft(
+            &state,
+            &author,
+            "add",
+            &json!({"topic": "someone else's topic", "recipient": "Bruno", "body": "hi"}),
+        )
+        .expect("author can write a draft");
+
+        assert!(
+            render_for_injection(&state, &bystander).is_none(),
+            "a chat that never wrote a draft must get no block, not an empty one"
+        );
     }
 }
