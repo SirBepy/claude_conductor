@@ -132,6 +132,65 @@ function Test-ProcAlive($procId) {
     return [bool](Get-Process -Id $procId -ErrorAction SilentlyContinue)
 }
 
+# Best-effort identity snapshot for a just-started process, saved alongside its PID so `down`
+# can tell "still ours" from "PID got reused" (todo 1047). Null fields are expected when the
+# CIM lookup races a process that exits immediately after Start-Process.
+function Get-ProcIdentity([int]$procId) {
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
+    if (-not $cim) { return $null }
+    return [PSCustomObject]@{
+        CreationTime = $cim.CreationDate.ToString('o')
+        ExePath      = $cim.ExecutablePath
+    }
+}
+
+# Compares a live PID against the identity recorded at `up`. 'gone' = no such process anymore
+# (nothing to kill). 'unverifiable' = state predates this field (old state file) - never kill
+# blindly. 'mismatch' = PID is alive but is not the process we started (reused PID). 'match' =
+# safe to kill. Exe path is a secondary check: only enforced when BOTH sides have it, since a
+# locked-down live process can legitimately report a null ExecutablePath.
+function Test-ProcIdentity {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcId,
+        [string]$RecordedCreationTime,
+        [string]$RecordedExePath
+    )
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
+    if (-not $cim) { return 'gone' }
+    if (-not $RecordedCreationTime) { return 'unverifiable' }
+    $liveCreationTime = $cim.CreationDate.ToString('o')
+    if ($liveCreationTime -ne $RecordedCreationTime) { return 'mismatch' }
+    if ($RecordedExePath -and $cim.ExecutablePath -and ($RecordedExePath -ne $cim.ExecutablePath)) {
+        return 'mismatch'
+    }
+    return 'match'
+}
+
+# Single choke point for every teardown kill: resolves identity first, taskkills only on
+# 'match', and prints a clear reason on every other outcome instead of killing blindly.
+function Stop-RigTrackedProcess {
+    param(
+        [string]$Role,
+        [int]$ProcId,
+        [string]$RecordedCreationTime,
+        [string]$RecordedExePath
+    )
+    if (-not $ProcId) { return }
+    $identity = Test-ProcIdentity -ProcId $ProcId -RecordedCreationTime $RecordedCreationTime -RecordedExePath $RecordedExePath
+    switch ($identity) {
+        'gone' { return }
+        'unverifiable' {
+            Write-Warning "stale state for $Role pid ${ProcId}: old-format state file has no recorded creation time, unverifiable, skipped"
+        }
+        'mismatch' {
+            Write-Warning "stale state for $Role pid ${ProcId}: not ours, skipped"
+        }
+        'match' {
+            taskkill /F /T /PID $ProcId | Out-Null
+        }
+    }
+}
+
 function Test-HttpUp([string]$url) {
     try {
         $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
@@ -305,14 +364,22 @@ switch ($Command) {
 
         if ($Monitor -gt 0) { Move-RigWindowToMonitor $appProc.Id $Monitor }
 
+        $appIdentity = Get-ProcIdentity $appProc.Id
+        $viteIdentity = $null
+        if ($vitePid) { $viteIdentity = Get-ProcIdentity $vitePid }
+
         Save-RigState @{
-            Port           = $Port
-            InstanceLabel  = $InstanceLabel
-            WebView2Folder = $webview2Folder
-            ExePath        = $exePath
-            AppPid         = $appProc.Id
-            VitePid        = $vitePid
-            StartedAt      = (Get-Date).ToString('o')
+            Port             = $Port
+            InstanceLabel    = $InstanceLabel
+            WebView2Folder   = $webview2Folder
+            ExePath          = $exePath
+            AppPid           = $appProc.Id
+            AppCreationTime  = $(if ($appIdentity) { $appIdentity.CreationTime } else { $null })
+            AppExePath       = $(if ($appIdentity) { $appIdentity.ExePath } else { $null })
+            VitePid          = $vitePid
+            ViteCreationTime = $(if ($viteIdentity) { $viteIdentity.CreationTime } else { $null })
+            ViteExePath      = $(if ($viteIdentity) { $viteIdentity.ExePath } else { $null })
+            StartedAt        = (Get-Date).ToString('o')
         }
 
         Write-Host "up: CDP port $Port"
@@ -360,12 +427,8 @@ switch ($Command) {
         }
 
         Write-Host "Tearing down live-verify instance (label=$($state.InstanceLabel), appPid=$($state.AppPid))..."
-        if (Test-ProcAlive $state.AppPid) {
-            taskkill /F /T /PID $state.AppPid | Out-Null
-        }
-        if ($state.VitePid -and (Test-ProcAlive $state.VitePid)) {
-            taskkill /F /T /PID $state.VitePid | Out-Null
-        }
+        Stop-RigTrackedProcess -Role 'app' -ProcId $state.AppPid -RecordedCreationTime $state.AppCreationTime -RecordedExePath $state.AppExePath
+        Stop-RigTrackedProcess -Role 'vite' -ProcId $state.VitePid -RecordedCreationTime $state.ViteCreationTime -RecordedExePath $state.ViteExePath
         Remove-Item -Path $statePath -Force -ErrorAction SilentlyContinue
 
         # Proof of teardown: only OUR PID should be gone; any other claude-conductor.exe
