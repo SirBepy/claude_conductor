@@ -104,15 +104,15 @@ test("FAB rests closed, fans out to four, and opens Ask in a floating card", asy
   await expect(fab).toBeVisible();
 });
 
-test("Preview is a toggle in the dial and opens in its own window, not Ask's", async ({ page }) => {
+test("Preview is a toggle in the dial and opens as a tab of the one shared window", async ({ page }) => {
   await mountFab(page, []);
   await page.locator(".fab-dial-fab").click();
 
   const preview = page.locator('[data-dial="preview"]');
   await expect(preview).toHaveClass(/is-toggle/);
   await preview.click();
-  await expect(page.locator('.pw-window[data-active="preview"]')).toBeVisible();
-  await expect(page.locator('.pw-window[data-win="main"]')).toBeHidden();
+  await expect(page.locator('.pw-window[data-win="main"][data-active="preview"]')).toBeVisible();
+  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
 
   await page.locator(".fab-dial-fab").click();
   await expect(page.locator('[data-dial="preview"]')).toHaveClass(/is-on/);

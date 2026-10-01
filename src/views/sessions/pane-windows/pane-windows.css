@@ -214,6 +214,15 @@
   color: var(--color-primary);
 }
 
+/* A push landed while this window was busy on another tab. */
+.pw-tab.has-unseen::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
 .pw-btn {
   width: 28px;
   height: 28px;

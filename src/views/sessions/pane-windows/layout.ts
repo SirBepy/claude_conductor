@@ -52,17 +52,12 @@ export function newWindowId(): string {
   return `w${Date.now().toString(36)}${seq.toString(36)}`;
 }
 
-/** Ask / Todos / Drafts share one floating window; Preview has its own,
- *  docked right where the old Preview side panel used to sit. */
+/** Every panel starts as a tab of one floating window; tearing a tab out is
+ *  how any of them gets a window of its own. */
 export function defaultLayout(panels: readonly PanelKey[] = PANEL_KEYS): PaneLayout {
-  const main = panels.filter((p) => p !== "preview");
-  const windows: PaneWindow[] = [];
-  if (main.length) {
-    windows.push({ id: "main", tabs: main, active: main[0]!, placement: { kind: "float", rect: null }, open: false });
-  }
-  if (panels.includes("preview")) {
-    windows.push({ id: "preview", tabs: ["preview"], active: "preview", placement: { kind: "dock", side: "right" }, open: false });
-  }
+  const windows: PaneWindow[] = panels.length
+    ? [{ id: "main", tabs: [...panels], active: panels[0]!, placement: { kind: "float", rect: null }, open: false }]
+    : [];
   return { windows, dockShare: { left: null, right: null } };
 }
 

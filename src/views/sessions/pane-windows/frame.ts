@@ -46,11 +46,11 @@ export class Frame {
     );
     this.el.addEventListener("pointerdown", this.onPointerDown);
     this.el.addEventListener("click", this.onClick);
-    this.update(win, { canPopOut: false, popped: false });
+    this.update(win, { canPopOut: false, popped: false, unseen: null });
   }
 
   /** Repaints the bar only; the body and its panels stay put. */
-  update(win: PaneWindow, opts: { canPopOut: boolean; popped: boolean }): void {
+  update(win: PaneWindow, opts: { canPopOut: boolean; popped: boolean; unseen: PanelKey | null }): void {
     const sig = JSON.stringify([win.tabs, win.active, win.placement.kind, opts]);
     if (sig === this.painted && this.el.dataset.side === (win.placement.kind === "dock" ? win.placement.side : undefined)) return;
     this.painted = sig;
@@ -68,7 +68,8 @@ export class Frame {
         win.tabs
           .map(
             (t) =>
-              `<button type="button" class="pw-tab${t === win.active ? " on" : ""}" data-spine="${t}" ` +
+              `<button type="button" class="pw-tab${t === win.active ? " on" : ""}` +
+                `${t === opts.unseen && t !== win.active ? " has-unseen" : ""}" data-spine="${t}" ` +
                 `title="${PANEL_META[t].label} - drag out for its own window">` +
                 `<i class="ph ${PANEL_META[t].icon}"></i>${escapeHtml(PANEL_META[t].label)}</button>`,
           )

@@ -60,8 +60,11 @@ export class PaneWindows {
   /** Whether Preview was on screen after the last render; its body only
    *  fetches when it comes into view (or on a push), so the edge matters. */
   private previewShown = false;
-  /** The snapshot an open asked for, applied on that open's first fetch. */
+  /** The snapshot an open asked for, applied when Preview next comes into view. */
   private pendingSnapshot: string | undefined;
+  /** A push landed while Preview's window was busy on another tab: its tab
+   *  carries a dot until it is shown, rather than yanking that tab away. */
+  private previewUnseen = false;
 
   constructor(
     private pane: HTMLElement,
@@ -86,6 +89,9 @@ export class PaneWindows {
     if (changed) {
       this.popped = !!sessionId && !!this.deps.mountPreview && loadPopped(sessionId);
       this.layout = sessionId ? recallLayout(sessionId, this.panels) : recallLayout("", this.panels);
+      // Read before render() rewrites the flag from what is on screen.
+      this.previewUnseen = !!sessionId && !this.popped && loadPreviewOpen(sessionId) && this.previewBusyElsewhere();
+      this.pendingSnapshot = undefined;
     }
     // Before scoping: a panel mounted by render() picks the new scope up below.
     this.render(changed);
@@ -188,6 +194,12 @@ export class PaneWindows {
       if (this.sessionId) savePreviewOpen(this.sessionId, true);
       return;
     }
+    if (this.previewBusyElsewhere()) {
+      this.previewUnseen = true;
+      if (snapshotId) this.pendingSnapshot = snapshotId;
+      this.render();
+      return;
+    }
     if (this.previewShown) {
       this.openPanel("preview");
       this.mounted.preview?.refresh(snapshotId ? { selectId: snapshotId } : {});
@@ -197,12 +209,22 @@ export class PaneWindows {
     this.openPanel("preview");
   }
 
+  /** Preview shares an open window that is showing one of the other tabs. */
+  private previewBusyElsewhere(): boolean {
+    const w = windowOf(this.layout, "preview");
+    return !!w && w.open && w.active !== "preview";
+  }
+
   private popOut(): void {
     const sid = this.sessionId;
     if (!sid) return;
     this.popped = true;
     savePopped(sid, true);
     savePreviewOpen(sid, true);
+    // A shared window on Preview goes too, as a Preview-only one would; its
+    // other tabs were behind Preview anyway.
+    const w = windowOf(this.layout, "preview");
+    if (w && w.open && w.active === "preview") this.layout = closeWindow(this.layout, w.id);
     this.render();
     void invoke("open_preview_window", { sessionId: sid }).catch((err) => {
       console.error("[pane-windows] open_preview_window failed", err);
@@ -297,7 +319,7 @@ export class PaneWindows {
         this.frames.set(w.id, f);
         this.layer.appendChild(f.el);
       }
-      f.update(w, { canPopOut: !compact, popped: this.popped });
+      f.update(w, { canPopOut: !compact, popped: this.popped, unseen: this.previewUnseen ? "preview" : null });
       // z-index, never DOM order: re-appending a frame would reload Preview's iframe.
       f.el.style.zIndex = String(i + 1);
       const wasHidden = f.el.hidden;
@@ -320,7 +342,10 @@ export class PaneWindows {
       const id = this.pendingSnapshot;
       this.mounted.preview?.refresh(id ? { selectId: id } : {});
     }
-    this.pendingSnapshot = undefined;
+    if (shown) {
+      this.pendingSnapshot = undefined;
+      this.previewUnseen = false;
+    }
     this.previewShown = shown;
     if (this.sessionId) {
       rememberLayout(this.sessionId, this.layout);

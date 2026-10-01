@@ -70,7 +70,10 @@ function reconcilePreview(layout: PaneLayout, sessionId: string): PaneLayout {
   const pv = windowOf(layout, "preview");
   if (!pv) return layout;
   const want = loadPreviewOpen(sessionId);
-  if (want && !isShowing(layout, "preview")) return openPanel(layout, "preview");
+  if (want && !isShowing(layout, "preview")) {
+    // A shared window left on another tab keeps it; the manager dots Preview's tab.
+    return pv.open ? layout : openPanel(layout, "preview");
+  }
   // Closed elsewhere: only a window Preview has to itself closes with it.
   if (!want && pv.open && pv.tabs.length === 1) pv.open = false;
   return layout;

@@ -8,11 +8,11 @@ const G = await import("../src/views/sessions/pane-windows/geometry.ts");
 const tabsOf = (l) => Object.fromEntries(l.windows.map((w) => [w.id, w.tabs]));
 
 describe("layout", () => {
-  it("defaults to one window for Ask/Todos/Drafts and Preview docked right on its own", () => {
+  it("defaults to one closed floating window holding all four panels as tabs", () => {
     const l = L.defaultLayout();
-    expect(tabsOf(l)).toEqual({ main: ["ask", "todos", "drafts"], preview: ["preview"] });
-    expect(l.windows.find((w) => w.id === "preview").placement).toEqual({ kind: "dock", side: "right" });
-    expect(l.windows.every((w) => !w.open)).toBe(true);
+    expect(tabsOf(l)).toEqual({ main: ["ask", "todos", "drafts", "preview"] });
+    expect(l.windows[0].placement).toEqual({ kind: "float", rect: null });
+    expect(l.windows[0].open).toBe(false);
   });
 
   it("opening a panel opens its window on that tab, in front", () => {
@@ -28,29 +28,47 @@ describe("layout", () => {
     const torn = l.windows.at(-1);
     expect(torn.tabs).toEqual(["drafts"]);
     expect(torn.open).toBe(true);
-    expect(l.windows.find((w) => w.id === "main").tabs).toEqual(["ask", "todos"]);
+    expect(l.windows.find((w) => w.id === "main").tabs).toEqual(["ask", "todos", "preview"]);
   });
 
   it("tearing a window's only tab just moves that window", () => {
-    const l = L.tearOff(L.defaultLayout(), "preview", { kind: "snap", corner: "se" });
-    expect(tabsOf(l).preview).toEqual(["preview"]);
-    expect(l.windows.find((w) => w.id === "preview").placement).toEqual({ kind: "snap", corner: "se" });
+    const torn = L.tearOff(L.defaultLayout(), "preview", { kind: "float", rect: null });
+    const id = torn.windows.at(-1).id;
+    const l = L.tearOff(torn, "preview", { kind: "snap", corner: "se" });
+    expect(l.windows.find((w) => w.id === id).placement).toEqual({ kind: "snap", corner: "se" });
+    expect(l.windows).toHaveLength(2);
   });
 
-  it("moves a tab into another window at the aimed spine slot, and drops an emptied window", () => {
-    let l = L.moveTab(L.defaultLayout(), "preview", "main", 1);
+  it("moves a tab into another window at the aimed tab slot, and drops an emptied window", () => {
+    const torn = L.tearOff(L.defaultLayout(), "preview", { kind: "float", rect: null });
+    const pv = torn.windows.at(-1).id;
+    let l = L.moveTab(torn, "preview", "main", 1);
     expect(tabsOf(l)).toEqual({ main: ["ask", "preview", "todos", "drafts"] });
     expect(l.windows[0].active).toBe("preview");
-    l = L.mergeWindows(L.tearOff(L.defaultLayout(), "ask", { kind: "float", rect: null }), "preview", "main");
+    l = L.mergeWindows(L.tearOff(torn, "ask", { kind: "float", rect: null }), pv, "main");
     expect(tabsOf(l).main).toEqual(["todos", "drafts", "preview"]);
   });
 
   it("keeps one window per docked side: the old occupant floats out", () => {
-    let l = L.tearOff(L.defaultLayout(), "drafts", { kind: "dock", side: "right" });
+    let l = L.tearOff(L.defaultLayout(), "preview", { kind: "dock", side: "right" });
+    const pv = l.windows.at(-1).id;
+    l = L.tearOff(l, "drafts", { kind: "dock", side: "right" });
     expect(L.dockedWindow(L.openPanel(l, "drafts"), "right").tabs).toEqual(["drafts"]);
-    expect(l.windows.find((w) => w.id === "preview").placement.kind).toBe("float");
+    expect(l.windows.find((w) => w.id === pv).placement.kind).toBe("float");
     l = L.place(l, "main", { kind: "dock", side: "left" });
     expect(L.dockedWindow(l, "left").id).toBe("main");
+  });
+
+  it("keeps a stored layout from the old default, Preview docked on its own", () => {
+    const l = L.normalize({
+      windows: [
+        { id: "main", tabs: ["ask", "todos", "drafts"], active: "ask", placement: { kind: "float", rect: null }, open: false },
+        { id: "preview", tabs: ["preview"], active: "preview", placement: { kind: "dock", side: "right" }, open: true },
+      ],
+      dockShare: { left: null, right: null },
+    });
+    expect(tabsOf(l)).toEqual({ main: ["ask", "todos", "drafts"], preview: ["preview"] });
+    expect(L.dockedWindow(l, "right").id).toBe("preview");
   });
 
   it("normalize repairs a stored layout: duplicates, unknown panels, two windows on one dock", () => {
@@ -61,7 +79,7 @@ describe("layout", () => {
       ],
       dockShare: { left: 7, right: 0.3 },
     });
-    expect(tabsOf(l)).toEqual({ a: ["ask"], b: ["drafts"], main: ["todos"], preview: ["preview"] });
+    expect(tabsOf(l)).toEqual({ a: ["ask"], b: ["drafts"], main: ["todos", "preview"] });
     expect(l.windows.find((w) => w.id === "a").active).toBe("ask");
     expect(l.windows.find((w) => w.id === "b").placement.kind).toBe("float");
     expect(l.dockShare).toEqual({ left: null, right: 0.3 });

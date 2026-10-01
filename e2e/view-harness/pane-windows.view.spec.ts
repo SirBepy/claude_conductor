@@ -94,6 +94,15 @@ async function dragBar(page: Page, panel: string, to: { x: number; y: number }):
   await page.mouse.up();
 }
 
+/** Drags a tab out of its window's bar and drops it at `to`. */
+async function dragTab(page: Page, panel: string, to: { x: number; y: number }): Promise<void> {
+  const tab = (await page.locator(`.pw-window:visible [data-spine="${panel}"]`).boundingBox())!;
+  await page.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 10 });
+  await page.mouse.up();
+}
+
 const chatWidth = (page: Page) => page.locator("#chat-col").evaluate((el) => el.getBoundingClientRect().width);
 
 test("a window opens centred with a title bar and its X top-right, and drags by the bar", async ({ page }) => {
@@ -134,9 +143,23 @@ test("dropping on the right edge docks it as a split: the chat shrinks, and the 
   expect(Math.round(await chatWidth(page))).toBe(Math.round(full - wider.width));
 });
 
+test("Preview opens as a tab of the one window; torn out to the right edge it docks there on its own", async ({ page }) => {
+  await mountPane(page);
+  await openFromDial(page, "preview");
+  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(4);
+
+  await dragTab(page, "preview", { x: 1278, y: 400 });
+  await expect(page.locator(".fab-card:visible")).toHaveCount(2);
+  const preview = await box(page, "preview");
+  expect(Math.round(preview.x + preview.width)).toBe(1280);
+  await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(0);
+});
+
 test("both sides dock at once, Preview right and Drafts left, with the chat in between", async ({ page }) => {
   await mountPane(page);
   await openFromDial(page, "preview");
+  await dragTab(page, "preview", { x: 1278, y: 400 });
   const preview = await box(page, "preview");
   expect(Math.round(preview.x + preview.width)).toBe(1280);
 

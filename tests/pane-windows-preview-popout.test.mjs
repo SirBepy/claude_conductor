@@ -113,6 +113,45 @@ describe("pop-out window is never a one-way door", () => {
   });
 });
 
+// Preview shares the default window with Ask/Todos/Drafts (Joe, 2026-10-01):
+// a push must never yank that window off a tab in use, a draft mid-edit above all.
+describe("a push into a window busy on another tab", () => {
+  const tab = (layer, panel) => layer.querySelector(`[data-spine="${panel}"]`);
+
+  it("stays on the tab and dots Preview's until Preview is shown", () => {
+    const { layer, windows, preview } = mountPane();
+    windows.openPanel("drafts");
+    preview.open("snap-1");
+    const win = tab(layer, "drafts").closest(".pw-window");
+    expect(win.dataset.active).toBe("drafts");
+    expect(tab(layer, "preview").classList.contains("has-unseen")).toBe(true);
+    expect(preview.isOpen()).toBe(false);
+
+    windows.openPanel("preview");
+    expect(win.dataset.active).toBe("preview");
+    windows.openPanel("drafts");
+    expect(tab(layer, "preview").classList.contains("has-unseen")).toBe(false);
+  });
+
+  it("still opens a closed window straight onto Preview", () => {
+    const { layer, preview } = mountPane();
+    preview.open("snap-1");
+    expect(previewWindow(layer).hidden).toBe(false);
+    expect(tab(layer, "preview").classList.contains("has-unseen")).toBe(false);
+  });
+
+  it("a background chat's push to a chat left on Drafts dots instead of switching", () => {
+    const { layer, windows } = mountPane();
+    windows.setSessionScope("sess-B", "/repo");
+    windows.openPanel("drafts");
+    windows.setSessionScope("sess-A", "/repo");
+    localStorage.setItem("cc_preview_panel_open:sess-B", "1");
+    windows.setSessionScope("sess-B", "/repo");
+    expect(tab(layer, "drafts").closest(".pw-window").dataset.active).toBe("drafts");
+    expect(tab(layer, "preview").classList.contains("has-unseen")).toBe(true);
+  });
+});
+
 describe("pop-out window strip", () => {
   function mountShell() {
     const host = document.createElement("div");

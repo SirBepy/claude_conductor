@@ -171,7 +171,7 @@ test("a failed merge degrades to the old layout rather than losing the back butt
   await expect(page.locator("#sessionsBackBtn")).toBeAttached();
 });
 
-test("desktop keeps the side-by-side split: docked Preview shrinks the chat instead of covering it", async ({ page }) => {
+test("desktop keeps the side-by-side split: docking Preview shrinks the chat instead of covering it", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await mountPhone(page, { fab: true });
 
@@ -180,6 +180,8 @@ test("desktop keeps the side-by-side split: docked Preview shrinks the chat inst
 
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="preview"]').click();
+  await page.locator(`${PREVIEW} [data-pw-act="dock"]`).click();
+  await page.waitForTimeout(280);
 
   const rail = (await railBox(page))!;
   // The chat column is the pane's content box; the dock is its padding.
