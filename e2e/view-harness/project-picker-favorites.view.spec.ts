@@ -113,8 +113,32 @@ test.describe("view-harness / project picker favourites rail", () => {
       [null, null, "C:/Projects/countoff", null, null, null, null, null, null],
     );
     await expect(page.locator('[data-slot="2"]')).not.toHaveClass(/is-empty/);
-    // The row now advertises which key opens it.
-    await expect(page.locator('.project-picker-row:has-text("countoff") .pp-row-fav')).toHaveText("3");
+    // The row only carries a quiet dot; the key shows on hover, on the rail.
+    const row = page.locator(".project-picker-row", { hasText: "countoff" });
+    await expect(row.locator(".pp-row-fav-dot")).toHaveCount(1);
+    await expect(page.locator(".project-picker-row", { hasText: "fibo" }).locator(".pp-row-fav-dot")).toHaveCount(0);
+  });
+
+  test("hovering a favourite row lights its tile and shows its key under it", async ({ page }) => {
+    await openPicker(page, [null, null, "C:/Projects/countoff", null, null, null, null, null, null]);
+
+    await page.locator(".project-picker-row", { hasText: "countoff" }).hover();
+    await expect(page.locator('[data-slot="2"]')).toHaveClass(/is-hinted/);
+    const hint = page.locator(".pp-fav-hint");
+    await expect(hint).toHaveText("Ctrl 3");
+    const tile = await page.locator('[data-slot="2"]').boundingBox();
+    const tip = await hint.boundingBox();
+    expect(tip!.y).toBeGreaterThan(tile!.y + tile!.height);
+    expect(Math.abs((tip!.x + tip!.width / 2) - (tile!.x + tile!.width / 2))).toBeLessThan(2);
+
+    // A non-favourite row clears it, and so does leaving the list.
+    await page.locator(".project-picker-row", { hasText: "fibo" }).hover();
+    await expect(hint).toHaveCount(0);
+    await page.locator(".project-picker-row", { hasText: "countoff" }).hover();
+    await expect(hint).toHaveCount(1);
+    await page.locator("#project-picker-search").hover();
+    await expect(hint).toHaveCount(0);
+    await expect(page.locator(".pp-fav-slot.is-hinted")).toHaveCount(0);
   });
 
   test("dragging a tile onto an occupied slot SWAPS, destroying neither", async ({ page }) => {

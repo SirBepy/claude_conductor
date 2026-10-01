@@ -308,6 +308,28 @@
   border-color: var(--color-primary, #4c9eff);
   background: color-mix(in srgb, var(--color-primary, #4c9eff) 12%, transparent);
 }
+/* The favourite row under the mouse points at its own tile. */
+.pp-fav-slot.is-hinted {
+  border-color: var(--color-primary, #4c9eff);
+  box-shadow: 0 0 0 1px var(--color-primary, #4c9eff);
+}
+/* Hangs below the hinted tile. Fixed and outside the card, whose
+   overflow:hidden would clip it; left/top are set from the tile's rect. */
+.pp-fav-hint {
+  position: fixed;
+  z-index: 2600;
+  transform: translateX(-50%);
+  pointer-events: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #2e2e40);
+  background: var(--color-surface-alt, #15151e);
+  color: var(--color-text);
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
 /* Follows the pointer during a favourite drag. Above the modal card (2501). */
 .pp-drag-ghost {
   position: fixed;
@@ -366,21 +388,16 @@ body.pp-dragging * {
 }
 .pp-fav-face .proj-face { font-size: 12px; }
 
-/* The key that opens a row, shown on the row itself so the rail is not the
-   only place that state is visible. */
-.pp-row-fav {
-  flex-shrink: 0;
-  min-width: 15px;
-  text-align: center;
-  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1;
-  padding: 3px 5px;
-  border-radius: 4px;
-  color: var(--color-text-muted, #8a8aa0);
-  background: var(--color-surface-alt, #15151e);
-  border: 1px solid var(--color-border, #2e2e40);
+/* Marks a favourite row. Deliberately quiet: the number already lives on the
+   rail, and hovering the row lights its tile up there. */
+.pp-row-fav-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--color-primary, #4c9eff);
 }
 
 /* ── Add a project, inline in the empty-results state ─────────────────────

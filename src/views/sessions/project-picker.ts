@@ -179,6 +179,8 @@ export function openProjectPickerModal(
     // ── Favourite slots 1-9 (desktop only) ──────────────────────────────────
     let favorites: FavoriteSlots = readFavorites();
     let dragOverSlot: number | null = null;
+    // The rail tile of the favourite row under the mouse, lit up with its key.
+    let hoverFavSlot: number | null = null;
 
     // Stored root wins over the inference; see projects-root.ts. Read once per
     // open, refreshed when the user repoints it.
@@ -496,7 +498,7 @@ export function openProjectPickerModal(
             const label = p ? p.name : (path ? "(missing)" : `Empty slot ${i + 1}`);
             return html`
               <div
-                class="pp-fav-slot${path === null ? " is-empty" : ""}${unresolved ? " is-unresolved" : ""}${dragOverSlot === i ? " is-target" : ""}"
+                class="pp-fav-slot${path === null ? " is-empty" : ""}${unresolved ? " is-unresolved" : ""}${dragOverSlot === i ? " is-target" : ""}${hoverFavSlot === i && dragOverSlot === null ? " is-hinted" : ""}"
                 data-slot=${i}
                 title=${p ? `${p.name} - press ctrl+${i + 1}` : (path ?? `Empty - drag a project here for ctrl+${i + 1}`)}
                 aria-label=${label}
@@ -527,6 +529,8 @@ export function openProjectPickerModal(
         return;
       }
       const rows = computeRows();
+      // A drag paints its own target; the hover hint would fight it.
+      const hintSlot = document.body.classList.contains("pp-dragging") ? null : hoverFavSlot;
       const tpl = html`
         <div
           class="modal-card project-picker-modal"
@@ -635,7 +639,9 @@ export function openProjectPickerModal(
                 }
               }}
             />
-            <ul class="project-picker-list">
+            <ul class="project-picker-list" @mouseleave=${() => {
+              if (hoverFavSlot !== null) { hoverFavSlot = null; renderModal(); }
+            }}>
               ${(() => {
                 if (machineField.machineId !== null && remoteProjectsState.loading) {
                   return html`<li class="project-picker-empty"><i class="ph ph-circle-notch"></i> Loading&hellip;</li>`;
@@ -654,8 +660,11 @@ export function openProjectPickerModal(
                         style="position:relative"
                         @pointerdown=${(e: PointerEvent) => startFavoriteDrag(e, { kind: "row", path: p.path })}
                         @mouseenter=${() => {
-                          if (selectedIdx !== i) {
+                          const fav = slotOf(favorites, p.path);
+                          const nextHover = fav >= 0 ? fav : null;
+                          if (selectedIdx !== i || hoverFavSlot !== nextHover) {
                             selectedIdx = i;
+                            hoverFavSlot = nextHover;
                             renderModal();
                           }
                         }}
@@ -663,19 +672,17 @@ export function openProjectPickerModal(
                       >
                         <div class="project-picker-avatar">${unsafeHTML(renderAvatar(p.avatar, p.path))}</div>
                         <div class="project-picker-info">
-                          <span class="project-picker-name">${p.name}</span>
+                          <span class="project-picker-name">${p.name}${(() => {
+                            // Only marks that the row is a favourite. Which key
+                            // opens it shows on hover, on the rail itself.
+                            const fav = slotOf(favorites, p.path);
+                            return fav >= 0
+                              ? html`<span class="pp-row-fav-dot" role="img" aria-label="Favourite, ctrl+${fav + 1}"></span>`
+                              : "";
+                          })()}</span>
                           <span class="project-picker-path">${p.path}</span>
                           ${missing ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
                         </div>
-                        ${(() => {
-                          // Which key opens this row, when it has one. Without
-                          // it the rail's tiles are the only place that state
-                          // lives, and you cannot tell whether dragging a row
-                          // up would add a favourite or just move an existing
-                          // one to a different number.
-                          const fav = slotOf(favorites, p.path);
-                          return fav >= 0 ? html`<span class="pp-row-fav" title="Press ${fav + 1}">${fav + 1}</span>` : "";
-                        })()}
                         ${p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}
                         ${showTodos && todoCount > 0 ? html`<span class="project-picker-todo-badge">${todoCount}</span>` : ""}
                       </li>
@@ -689,8 +696,21 @@ export function openProjectPickerModal(
             <button class="btn btn-secondary" @click=${() => finish(null)}>Cancel</button>
           </footer>
         </div>
+        ${hintSlot !== null ? html`<div class="pp-fav-hint">Ctrl ${hintSlot + 1}</div>` : ""}
       `;
       render(tpl, slot);
+      // A sibling of the card rather than a child, because the card's
+      // overflow:hidden would clip a tooltip hanging below its bottom edge.
+      const hint = slot.querySelector<HTMLElement>(".pp-fav-hint");
+      const hintTile = hintSlot !== null ? host.querySelector<HTMLElement>(`.pp-fav-slot[data-slot="${hintSlot}"]`) : null;
+      if (hint && hintTile) {
+        const r = hintTile.getBoundingClientRect();
+        hint.style.left = `${r.left + r.width / 2}px`;
+        hint.style.top = `${r.bottom + 6}px`;
+      } else if (hint) {
+        // No rail (phone, or a peer machine's list) means nothing to point at.
+        hint.style.display = "none";
+      }
       attachMachineFieldHandlers(host, machineField, pickMachine);
       hydrateProjectTechIcons(host).catch(() => {});
       hydrateCharacterAvatars(host).catch(() => {});
