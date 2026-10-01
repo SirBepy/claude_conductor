@@ -83,6 +83,17 @@ function buildRowOptions(args: {
   dotClass: string;
   isRemote: boolean;
   isAutopilot: boolean;
+  /** Whether this row is the selected/active one. Suppresses the frozen row
+   *  tint below - active already paints its own background, and resolving
+   *  "which background wins" via CSS combinator overrides for every
+   *  frozen x needs-attention x active combination doesn't terminate (3
+   *  code-check rounds kept finding one more same-specificity tie one level
+   *  up). Mutual exclusion in JS instead: at most one background-setting
+   *  class ever reaches the DOM. */
+  isActive: boolean;
+  /** Same reasoning as `isActive` - a row with a parked attention prompt
+   *  shows that tint, never the frozen one, instead of a CSS tie-break. */
+  needsAttention: boolean;
   frozen: boolean;
   autoFrozen: boolean;
   scheduledCount: number | undefined;
@@ -102,7 +113,7 @@ function buildRowOptions(args: {
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
-    liClasses: `${args.identity.liClasses}${frozenRowClass(args.frozen, args.autoFrozen)}`,
+    liClasses: `${args.identity.liClasses}${(args.isActive || args.needsAttention) ? "" : frozenRowClass(args.frozen, args.autoFrozen)}`,
     liExtraAttrs: args.identity.liExtraAttrs,
     charId: args.charId,
     cwd: args.cwd,
@@ -166,6 +177,8 @@ export function sessionRowOptions(
     dotClass,
     isRemote: !!s.is_remote,
     isAutopilot: !!s.autopilot,
+    isActive: ctx.isActive,
+    needsAttention,
     frozen: !!s.frozen,
     autoFrozen: !!s.auto_frozen,
     scheduledCount: ctx.scheduledCountMap.get(s.session_id),
@@ -202,6 +215,8 @@ export function draftRowOptions(
     // A draft has no session yet, so it was never started from a phone.
     isRemote: false,
     isAutopilot: false,
+    isActive,
+    needsAttention: false,
     frozen: false,
     autoFrozen: false,
     scheduledCount: undefined,
@@ -229,6 +244,8 @@ export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptio
     // Same as draftRowOptions - a parked draft has no session yet.
     isRemote: false,
     isAutopilot: false,
+    isActive: false,
+    needsAttention: false,
     frozen: false,
     autoFrozen: false,
     scheduledCount: undefined,
