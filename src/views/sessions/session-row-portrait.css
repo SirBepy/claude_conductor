@@ -127,6 +127,18 @@
 .session-model-battery i { font-size: 1rem; line-height: 1; }
 .sessions-list li.active .session-model-battery { color: var(--color-background); opacity: 0.85; }
 
+/* Frozen-chat marker: bare snowflake, same slot/sizing as the battery above.
+   --auto reuses the "waiting" hue since a rate-limit auto-freeze IS a
+   waiting state (see sessions.css's --chat-state-waiting). */
+.frozen-chip {
+  display: inline-flex;
+  align-items: center;
+  color: var(--frozen-badge);
+}
+.frozen-chip i { font-size: 0.85rem; line-height: 1; }
+.frozen-chip--auto { color: var(--chat-state-waiting); }
+.sessions-list li.active .frozen-chip { color: var(--color-background); opacity: 0.85; }
+
 /* Portrait row: the devicon moves from the bottom corner to the middle of the
    portrait's right border, so it lines up with the project name. It straddles
    the strip edge; the row's 15px flex gap is what keeps it from touching the

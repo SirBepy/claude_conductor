@@ -277,31 +277,47 @@
   line-height: 1.6;
 }
 
-/* Frozen-chat chip, same shape as .autopilot-badge. --auto reuses the
-   "waiting" hue since a rate-limit auto-freeze IS a waiting state. */
-.frozen-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: 5px;
-  padding: 0 4px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--frozen-badge);
-  background: color-mix(in srgb, var(--frozen-badge) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--frozen-badge) 35%, transparent);
-  border-radius: 3px;
-  vertical-align: middle;
-  flex-shrink: 0;
-  line-height: 1.6;
+/* Frozen-chat marker: a bare snowflake in the chips slot (sizing/active-row
+   override live next to .session-model-battery in session-row-portrait.css,
+   the component it shares that slot with) plus the row-wash rules below.
+   Replaced the old uppercase text chip (Joe, 2026-10-01: it ate into a
+   portrait row's one text line and could truncate the project name). */
+.sessions-list li.is-frozen-bg {
+  background: color-mix(in srgb, var(--frozen-badge) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--frozen-badge);
 }
-.frozen-badge i { font-size: 0.75em; }
-.frozen-badge--auto {
-  color: var(--chat-state-waiting);
-  background: color-mix(in srgb, var(--chat-state-waiting) 12%, transparent);
-  border-color: color-mix(in srgb, var(--chat-state-waiting) 35%, transparent);
+.sessions-list li.is-frozen-bg:hover {
+  background: color-mix(in srgb, var(--frozen-badge) 18%, transparent);
+}
+.sessions-list li.is-frozen-bg.is-auto {
+  background: color-mix(in srgb, var(--chat-state-waiting) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--chat-state-waiting);
+}
+.sessions-list li.is-frozen-bg.is-auto:hover {
+  background: color-mix(in srgb, var(--chat-state-waiting) 18%, transparent);
+}
+/* Selection wins outright - same precedent as .needs-attention.active
+   (session-avatar.css). */
+.sessions-list li.is-frozen-bg.active {
+  background: var(--color-primary);
+  box-shadow: none;
+}
+/* needs-attention (red, actionable now) outranks the frozen tint when a row
+   is somehow both - a parked prompt can still land on a rate-limit-frozen
+   chat. Without this, two same-specificity rules split across this file and
+   session-avatar.css would fight on raw import order instead, which already
+   disagrees between sessions.ts and history.ts (code-check, 2026-10-01). */
+.sessions-list li.needs-attention.is-frozen-bg {
+  background: color-mix(in srgb, var(--chat-state-needs-input) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--chat-state-needs-input);
+}
+/* All three at once (selected + needs-attention + frozen) ties the two rules
+   above at equal specificity - without this 4-class override, source order
+   would let the needs-attention red win over selection, breaking "selection
+   wins outright" for the one combo neither two-way rule alone covers. */
+.sessions-list li.active.needs-attention.is-frozen-bg {
+  background: var(--color-primary);
+  box-shadow: none;
 }
 
 .session-held-count {

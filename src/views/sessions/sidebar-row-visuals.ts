@@ -69,12 +69,22 @@ export function projBadgeHtml(cwd: string | null, cls: string): string {
   return `<span class="${cls}"><span class="proj-face" data-proj-face="${escapeHtml(cwd)}"><i class="ph ph-folder"></i></span></span>`;
 }
 
-/** Frozen-chat marker (styled like `.autopilot-badge`) - "Frozen" for a
- *  manual Chat-menu freeze, "Auto-frozen" for a rate-limit auto-freeze. */
-export function frozenBadgeHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "title" | "data-tip"): string {
+/** Frozen-chat marker: a bare snowflake in the chips slot (same slot as
+ *  `modelBatteryHtml`), plus `frozenRowClass` tinting the whole row - replaces
+ *  the old uppercase text chip, which ate into a portrait row's one text line
+ *  and could truncate the project name (Joe, 2026-10-01). */
+export function frozenChipHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "title" | "data-tip"): string {
   if (!frozen) return "";
   const title = autoFrozen ? "Frozen - waiting for your usage limit to reset" : "Frozen - click Unfreeze chat to resume";
-  return `<span class="frozen-badge${autoFrozen ? " frozen-badge--auto" : ""}" ${tipAttr}="${title}"><i class="ph-bold ph-snowflake"></i>${autoFrozen ? "Auto-frozen" : "Frozen"}</span>`;
+  return `<span class="frozen-chip${autoFrozen ? " frozen-chip--auto" : ""}" ${tipAttr}="${title}"><i class="ph-bold ph-snowflake"></i></span>`;
+}
+
+/** Row-level tint class for a frozen chat - `""` when not frozen. Auto-frozen
+ *  reuses the "waiting" hue (same bind as `frozen-chip--auto` above) since a
+ *  rate-limit auto-freeze IS a waiting state. */
+export function frozenRowClass(frozen: boolean, autoFrozen: boolean): string {
+  if (!frozen) return "";
+  return autoFrozen ? " is-frozen-bg is-auto" : " is-frozen-bg";
 }
 
 /** Wrap an avatar strip + optional project badge in the positioning wrapper. */

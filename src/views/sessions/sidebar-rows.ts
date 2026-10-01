@@ -7,7 +7,8 @@ import type { SessionSort } from "./sessions-helpers";
 import type { PendingNewSession, ParkedDraft } from "./state";
 import {
   drainChipHtml,
-  frozenBadgeHtml,
+  frozenChipHtml,
+  frozenRowClass,
   leadingVisual,
   scheduledCornerHtml,
   heldCornerHtml,
@@ -97,11 +98,11 @@ function buildRowOptions(args: {
   const machineBadge = args.machine
     ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>`
     : "";
-  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Started from phone"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${frozenBadgeHtml(args.frozen, args.autoFrozen, tipAttr)}${machineBadge}`;
+  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Started from phone"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${machineBadge}`;
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
-    liClasses: args.identity.liClasses,
+    liClasses: `${args.identity.liClasses}${frozenRowClass(args.frozen, args.autoFrozen)}`,
     liExtraAttrs: args.identity.liExtraAttrs,
     charId: args.charId,
     cwd: args.cwd,
@@ -115,7 +116,7 @@ function buildRowOptions(args: {
     title: escapeHtml(args.title),
     projectLabel: escapeHtml(args.projectLabel),
     badges,
-    portraitSecondary: `${modelBatteryHtml(args.model)}${args.drainChip}`,
+    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
   };
 }
 

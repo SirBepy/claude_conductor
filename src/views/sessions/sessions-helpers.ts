@@ -208,7 +208,7 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
  *  `is_remote`, which only means "reached over remote transport").
  *  Closing wins over Scheduled; auto_frozen wins over plain rate-limited (it
  *  already has a resume queued, see rate_limit.rs). `frozen` is a row chip
- *  now (`frozenBadgeHtml`), not a segment - see sidebar-row-visuals.ts. */
+ *  now (`frozenChipHtml`), not a segment - see sidebar-row-visuals.ts. */
 export function sessionSegment(
   s: Instance,
   unread: Set<string>,
