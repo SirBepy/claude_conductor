@@ -9,9 +9,17 @@ export class FileProvider implements SuggestProvider<string> {
   private projectDir: string | null = null;
   private inflight: Promise<void> | null = null;
   private fetchedThisOpen = false;
+  // Set by the popup at mount time; invoked once refetch() lands so a
+  // keystroke that queried against the still-empty cache gets re-evaluated
+  // instead of leaving the popup closed (todo 1037).
+  private notify: (() => void) | null = null;
 
   start(projectDir: string | null): void {
     this.projectDir = projectDir;
+  }
+
+  onReady(notify: () => void): void {
+    this.notify = notify;
   }
 
   stop(): void {
@@ -70,6 +78,10 @@ export class FileProvider implements SuggestProvider<string> {
         console.error("[FileProvider] list_project_files failed", e);
         this.cache = [];
       }
+      // Re-run the pipeline even on failure/empty: a keystroke that is still
+      // live and no longer matches anything should close, not stay stuck
+      // open from a stale render.
+      this.notify?.();
     })();
     await this.inflight;
     this.inflight = null;

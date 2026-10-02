@@ -25,6 +25,13 @@ export class CaretSuggestPopup {
       }
     };
     document.addEventListener("mousedown", this.onDocMouseDown);
+
+    // A provider whose cache is still loading answers the triggering
+    // keystroke with no results, which closes the popup; this lets it re-run
+    // the pipeline once its fetch lands (slow over the phone's /api/rpc).
+    for (const p of opts.providers) {
+      p.onReady?.(() => this.handleInput());
+    }
   }
 
   isOpen(): boolean {
