@@ -492,7 +492,13 @@ export class SessionStatusbar {
     `;
 
     this.container.querySelectorAll<HTMLElement>(".sb-row").forEach((row, i) => {
-      if (scrollLefts[i]) row.scrollLeft = scrollLefts[i];
+      if (!scrollLefts[i]) return;
+      // Right after the innerHTML rebuild, the new row's scrollable width
+      // isn't established yet; writing scrollLeft here clamps to 0 on some
+      // runs (todo 988, Playwright: "Expected 40, Received 0"). Reading a
+      // layout-dependent property first forces that pending layout to settle.
+      void row.offsetWidth;
+      row.scrollLeft = scrollLefts[i];
     });
 
     this.container.querySelector<HTMLElement>(".sb-folder-btn")?.addEventListener("click", () => {
