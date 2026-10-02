@@ -274,10 +274,9 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
             let _ = app.emit("held-messages-delivered", params);
         }
         // A draft message was written or edited (`methods::drafts_store`). Pure
-        // forward: the Drafts panel re-reads via `list_message_drafts`, and the
-        // FAB opens itself when the payload carries `added` for the chat on
-        // screen. Without this arm the match dropped the event outright, so the
-        // panel only ever refreshed on open and on window focus.
+        // forward: the Drafts panel and the inline draft cards re-read via
+        // `list_message_drafts`. Without this arm the match dropped the event
+        // outright, so the panel only ever refreshed on open and on window focus.
         "message_drafts_changed" => {
             let _ = app.emit("message-drafts-changed", params);
         }

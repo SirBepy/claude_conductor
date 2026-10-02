@@ -3,8 +3,6 @@
 // rail stealing layout width was the complaint). Windows float, snap to a
 // corner, dock beside the chat as a split, and trade tabs: pane-windows/.
 
-import type { Unlisten } from "../../shared/transport";
-import { watchDrafts } from "./fab-dial-drafts-watch";
 import { PaneWindows } from "./pane-windows/manager";
 import { PANEL_META, type PanelKey } from "./pane-windows/layout";
 import type { PanelDeps } from "./pane-windows/panels";
@@ -42,7 +40,6 @@ class FabDial implements FabDialHandle {
   private hasPreview: boolean;
   private sessionId: string | null = null;
   private liftObs: ResizeObserver | null = null;
-  private draftsUnlisten: Unlisten | null = null;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
     this.pane = pane;
@@ -62,12 +59,6 @@ class FabDial implements FabDialHandle {
       mountPreview: deps.mountPreview,
       onChange: () => this.renderChrome(),
     });
-    // Auto-open predicate lives in fab-dial-drafts-watch.ts; "open" here means
-    // the window Drafts lives in is up, on whatever tab he left it.
-    void watchDrafts(
-      () => ({ sessionId: this.sessionId, cardOpen: this.windows.isWindowOpen("drafts") }),
-      (draftId) => this.windows.openDraft(draftId),
-    ).then((unlisten) => { this.draftsUnlisten = unlisten; });
     this.renderChrome();
   }
 
@@ -203,10 +194,6 @@ class FabDial implements FabDialHandle {
     this.windows.destroy();
     this.liftObs?.disconnect();
     this.liftObs = null;
-    if (this.draftsUnlisten) {
-      try { this.draftsUnlisten(); } catch { /* ignore */ }
-      this.draftsUnlisten = null;
-    }
     this.chrome.removeEventListener("click", this.onClick);
     document.removeEventListener("keydown", this.onKeydown);
     this.host.remove();

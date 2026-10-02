@@ -123,11 +123,6 @@ export class PaneWindows {
     return isShowing(this.layout, panel);
   }
 
-  /** Whether the window holding `panel` is open, whatever tab it is on. */
-  isWindowOpen(panel: PanelKey): boolean {
-    return !!windowOf(this.layout, panel)?.open;
-  }
-
   openDraft(id: string): void {
     this.openPanel("drafts");
     this.mounted.drafts?.openDraft(id);
