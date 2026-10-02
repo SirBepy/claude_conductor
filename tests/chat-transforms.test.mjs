@@ -567,3 +567,40 @@ describe("renderBlocks — AUQ answer chip", () => {
     expect(html).toContain("voice-input-chip");
   });
 });
+
+describe("renderMessage - PR preview card parses raw assistant text (todo 911)", () => {
+  // Settled by todo 911: the /create-pr card markers are parsed client-side
+  // off raw assistant text blocks (detectPrPreviewToken, invoked here at the
+  // "assistant" case gated on !m.streaming), not off a send_message payload.
+  // ContentBlock only models text/image (src/types/ipc.generated.ts) - a
+  // tool_use call like the per-turn-mandatory report_turn_status is always
+  // its own RenderedMessage, never a block mixed into the assistant content
+  // array, so it cannot block or interfere with the scan below.
+  const title = "Fix flaky test";
+  const bodyB64 = Buffer.from("## Summary\n- fixed a flaky test\n", "utf8").toString("base64");
+  const commitsB64 = Buffer.from(JSON.stringify([{ sha: "abc1234", msg: "fix: flaky test" }]), "utf8").toString("base64");
+  const markerText = `Here is the PR.\n<cc-pr-title:${title}>\n<cc-pr-body:${bodyB64}>\n<cc-pr-commits:${commitsB64}>`;
+
+  const reportTurnStatusCall = { kind: "tool_use", tool: "report_turn_status", input: { status: "done" }, id: "tu-1", ts: 1 };
+
+  it("renders the pr-preview-card and hides the raw markers once the turn is finalized", () => {
+    const html = renderMessage({ kind: "assistant", content: [{ type: "text", text: markerText }], streaming: false, ts: 0 });
+    expect(html).toContain("pr-preview-card");
+    expect(html).toContain("Fix flaky test");
+    expect(html).not.toContain("cc-pr-title");
+    expect(html).not.toContain("cc-pr-body");
+    expect(html).not.toContain("cc-pr-commits");
+    expect(html).not.toContain(bodyB64);
+
+    // The report_turn_status call mandatory on every turn renders as its own
+    // RenderedMessage, independent of and unaffected by the card above.
+    const toolHtml = renderMessage(reportTurnStatusCall);
+    expect(toolHtml).toContain("report_turn_status");
+  });
+
+  it("renders no card yet while the same marker text is still streaming", () => {
+    const html = renderMessage({ kind: "assistant", content: [{ type: "text", text: markerText }], streaming: true, ts: 0 });
+    expect(html).not.toContain("pr-preview-card");
+    expect(html).not.toContain("cc-pr-title");
+  });
+});
