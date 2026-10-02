@@ -173,6 +173,21 @@ pub fn register_create_project(router: &mut Router, state: Arc<DaemonState>) {
             .map_err(|e| RpcError::internal(format!("join: {e}")))?;
             outcome.map_err(RpcError::invalid_params)?;
 
+            // Registered right away, the same way a session spawn registers its
+            // cwd: every cwd-gated RPC the new-chat screen calls next (file
+            // list, git info, slash commands, account) rejects an unknown cwd,
+            // and the phone has no ensure_project to do it itself.
+            let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let (project_id, created_new) =
+                state.settings.upsert_project_for_cwd(std::path::Path::new(&full_path), &now);
+            if created_new {
+                state.notifier.publish("project_created", json!({
+                    "project_id": project_id,
+                    "cwd": full_path,
+                    "now": now,
+                }));
+            }
+
             Ok(json!({ "path": full_path }))
         }
     });
@@ -347,6 +362,25 @@ mod tests {
         assert!(created.is_dir());
         let returned = resp.result.unwrap()["path"].as_str().unwrap().to_string();
         assert_eq!(std::path::Path::new(&returned), created);
+    }
+
+    #[tokio::test]
+    async fn registers_the_created_folder_as_a_known_project() {
+        // Not tempdir(): upsert_project_for_cwd never registers a cwd under the OS temp dir.
+        let dir = crate::settings::identity::test_support::non_ephemeral_tempdir();
+        let mut settings = Settings::default();
+        settings.extra.insert(
+            "newProjectLastParent".to_string(),
+            json!(dir.path().to_string_lossy()),
+        );
+        let state = state_with_settings(settings);
+        let resp = call(state.clone(), json!({"name": "fresh"})).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        let returned = resp.result.unwrap()["path"].as_str().unwrap().to_string();
+        assert!(
+            crate::daemon::methods::pr_review::is_known_cwd(&state, &returned),
+            "a just-created project must pass the cwd gate the new-chat RPCs use"
+        );
     }
 
     #[tokio::test]
