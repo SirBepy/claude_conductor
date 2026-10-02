@@ -63,6 +63,47 @@ test.describe("view-harness / sidebar Hidden group pinned to the bottom", () => 
     expect(pad).toBe("0px");
   });
 
+  test("toggling Hidden never flashes a scrollbar while the rows animate", async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.addInitScript(() => {
+      localStorage.setItem("cc_hidden_sessions", JSON.stringify(["h1", "h2", "h3"]));
+    });
+    const rows = sessions(2).slice(0, 2);
+    for (let i = 1; i <= 3; i++) {
+      rows.push(sessionInstance({ session_id: `h${i}`, pid: 900 + i, name: `Hidden ${i}`, cwd: `C:/Projects/h${i}` }));
+    }
+    await mountSessionsList(page, rows);
+    const toggle = page.locator("#sessions-list li.session-group-hidden-toggle");
+    await expect(toggle).toContainText("Hidden (3)");
+
+    // Samples every frame for 800ms after the click. Headless Chromium draws
+    // overlay scrollbars that take no width, so "a scrollbar would show" is an
+    // axis that both overflows and is still allowed to scroll.
+    const sampleAfterClick = () =>
+      page.evaluate(async () => {
+        const list = document.querySelector<HTMLElement>("#sessions-list")!;
+        list.querySelector<HTMLElement>("[data-hidden-toggle]")!.click();
+        let vertical = 0;
+        let horizontal = 0;
+        const end = performance.now() + 800;
+        while (performance.now() < end) {
+          await new Promise(requestAnimationFrame);
+          const cs = getComputedStyle(list);
+          if (cs.overflowY !== "hidden" && list.scrollHeight > list.clientHeight) vertical++;
+          if (cs.overflowX !== "hidden" && list.scrollWidth > list.clientWidth) horizontal++;
+        }
+        return { vertical, horizontal };
+      });
+
+    const opening = await sampleAfterClick();
+    await expect(page.locator("#sessions-list li[data-session-id='h3']")).toBeVisible();
+    const closing = await sampleAfterClick();
+    await expect(page.locator("#sessions-list li[data-session-id='h3']")).toHaveCount(0);
+
+    expect(opening).toEqual({ vertical: 0, horizontal: 0 });
+    expect(closing).toEqual({ vertical: 0, horizontal: 0 });
+  });
+
   test("short window: rows keep their height and Hidden scrolls in last", async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 360 });
     await seedHidden(page);

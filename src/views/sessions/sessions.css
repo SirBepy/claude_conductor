@@ -829,6 +829,17 @@
   pointer-events: none;
 }
 
+/* Rows ellipsize, so nothing needs horizontal scroll: without this the slide-in
+   overshoot and a rising row's scale(1.036) flash a horizontal scrollbar. */
+.sessions-list {
+  overflow-x: hidden;
+}
+
+/* Set by sidebar-anim.ts only while rows animate in a list that fits. */
+.sessions-list.anim-settling {
+  overflow-y: hidden;
+}
+
 #sessions-list.kbd-hint-active li[data-kbd-hint]::before {
   content: attr(data-kbd-hint);
   position: absolute;

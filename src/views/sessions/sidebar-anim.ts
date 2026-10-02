@@ -92,6 +92,25 @@ function beginExit(li: HTMLLIElement): void {
   beginExitAt(li, li.offsetTop + flipDy, li.offsetLeft, li.offsetWidth, li.offsetHeight);
 }
 
+// > the longest row motion: a rising FLIP row's 0.34s lift + 0.15s settle.
+const SETTLE_MS = 600;
+const settleTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
+// Overshooting slides and FLIPs briefly push rows past the list's edges (the
+// Hidden header pinned to the bottom bounces below it), which flashes a
+// scrollbar for a list that fits. Suppress vertical scrolling for the duration,
+// but only when the settled layout fits, so a genuine scrollbar never vanishes.
+function suppressTransientScrollbar(listEl: HTMLElement): void {
+  const inFlow = listEl.querySelectorAll<HTMLLIElement>("li:not(.row-exiting)");
+  const last = inFlow[inFlow.length - 1];
+  const contentBottom = last ? last.offsetTop + last.offsetHeight : 0;
+  const pad = parseFloat(getComputedStyle(listEl).paddingBottom) || 0;
+  if (contentBottom + pad > listEl.clientHeight) return;
+  listEl.classList.add("anim-settling");
+  clearTimeout(settleTimers.get(listEl));
+  settleTimers.set(listEl, setTimeout(() => listEl.classList.remove("anim-settling"), SETTLE_MS));
+}
+
 function updateNode(kept: HTMLLIElement, html: string): void {
   const tmp = document.createElement("ul");
   tmp.innerHTML = html;
@@ -193,6 +212,7 @@ export function markSessionExiting(listEl: HTMLElement, sessionId: string): void
   }
 
   beginExit(li);
+  suppressTransientScrollbar(listEl);
   flipNodes(survivors, before);
 }
 
@@ -315,5 +335,6 @@ export function reconcileList(
   // FLIP the surviving rows from their snapshotted positions to their new ones.
   // Rows that markSessionExiting already settled this frame measure dy<0.5 and
   // no-op, so a click-then-reconcile sequence never double-animates.
+  suppressTransientScrollbar(listEl);
   flipNodes(nodes, beforeRects);
 }
