@@ -10,25 +10,20 @@ import type { RailTabDeps } from "../rail-panel";
 import { loadPopped, savePopped, saveOpen as savePreviewOpen, loadOpen as loadPreviewOpen } from "../rail-panel";
 import type { PreviewController } from "../preview-panel";
 import { Frame, type FrameEvents } from "./frame";
+import { GestureController, paintRect, type GestureHost } from "./gestures";
 import { mountPanel, type MountedPanels, type PanelDeps, type PanelHandle } from "./panels";
 import {
-  centredRect, clampRect, cornerRect, dockRect, dockWidths, dropZoneAt, loadSize, MIN_CHAT, MIN_STACK_H, MIN_W,
-  resizeRect, saveSize, stackRects, zoneRect, type Bounds, type DropZone, type ResizeDir,
+  centredRect, clampRect, cornerRect, dockRect, dockWidths, loadSize, stackRects, type Bounds,
 } from "./geometry";
 import {
-  appendDock, closeWindow, dockStack, focusWindow, isShowing, mergeWindows, moveTab, openPanel, PANEL_KEYS,
-  PANEL_META, place, setActive, setDockShare, setWeights, stackInto, tearOff, weightOf, windowOf, type DockSide,
-  type PaneLayout, type PaneWindow, type PanelKey, type Placement, type Rect,
+  appendDock, closeWindow, dockStack, focusWindow, isShowing, openPanel, PANEL_KEYS, place, weightOf, windowOf,
+  type DockSide, type PaneLayout, type PaneWindow, type PanelKey, type Rect,
 } from "./layout";
 import { recallLayout, rememberLayout } from "./memory";
 
 /** Same breakpoint as sessions-mobile.css: on a phone each window is a sheet
  *  (Preview a full cover), one at a time, with no drag, dock or tear-off. */
 const COMPACT_QUERY = "(max-width: 768px)";
-/** Pointer travel before a press on a tab becomes a tear-off, not a click. */
-const DRAG_SLOP = 6;
-/** Matches .is-snapping's transition in pane-windows.css. */
-const GLIDE_MS = 240;
 
 export interface PaneWindowsDeps {
   onDraft(text: string): void;
@@ -37,18 +32,11 @@ export interface PaneWindowsDeps {
   onChange(): void;
 }
 
-type DropTarget =
-  | { kind: "merge"; id: string; index?: number }
-  | { kind: "zone"; zone: DropZone }
-  /** Onto a docked window's upper or lower half: stack above or below it. */
-  | { kind: "split"; id: string; where: "before" | "after" }
-  | null;
-
-export class PaneWindows {
-  private layout: PaneLayout;
+export class PaneWindows implements GestureHost {
+  layout: PaneLayout;
   private sessionId: string | null = null;
   private cwd: string | null = null;
-  private frames = new Map<string, Frame>();
+  frames = new Map<string, Frame>();
   private panelEls = new Map<PanelKey, HTMLElement>();
   private handles = new Map<PanelKey, PanelHandle>();
   private mounted: MountedPanels = { drafts: null, preview: null };
@@ -60,8 +48,6 @@ export class PaneWindows {
   private storageHandler: ((e: StorageEvent) => void) | null = null;
   private unlistenDocked: (() => void) | null = null;
   private destroyed = false;
-  private ghost: HTMLElement | null = null;
-  private ghostWanted = false;
   /** Whether Preview was on screen after the last render; its body only
    *  fetches when it comes into view (or on a push), so the edge matters. */
   private previewShown = false;
@@ -70,14 +56,18 @@ export class PaneWindows {
   /** A push landed while Preview's window was busy on another tab: its tab
    *  carries a dot until it is shown, rather than yanking that tab away. */
   private previewUnseen = false;
+  /** Drives moveGesture/resizeGesture/tabGesture through this manager as a
+   *  GestureHost (pane-windows/gestures.ts). */
+  private readonly gestures: GestureController;
 
   constructor(
     private pane: HTMLElement,
-    private layer: HTMLElement,
+    readonly layer: HTMLElement,
     private deps: PaneWindowsDeps,
   ) {
     this.panels = PANEL_KEYS.filter((p) => p !== "preview" || !!deps.mountPreview);
     this.layout = recallLayout("", this.panels);
+    this.gestures = new GestureController(this);
     if (typeof ResizeObserver !== "undefined") {
       this.obs = new ResizeObserver(() => this.paint());
       this.obs.observe(layer);
@@ -263,12 +253,19 @@ export class PaneWindows {
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  private commit(next: PaneLayout): void {
+  commit(next: PaneLayout): void {
     this.layout = next;
     this.render();
   }
 
-  private compact(): boolean {
+  /** GestureHost's mid-drag path: a dock resize or stack-divider drag repaints
+   *  every pointermove without the full render a commit would trigger. */
+  setLayoutLive(next: PaneLayout): void {
+    this.layout = next;
+    this.paint();
+  }
+
+  compact(): boolean {
     return typeof window.matchMedia === "function" && window.matchMedia(COMPACT_QUERY).matches;
   }
 
@@ -377,22 +374,22 @@ export class PaneWindows {
 
   // ── Geometry ─────────────────────────────────────────────────────────────
 
-  private bounds(): Bounds {
+  bounds(): Bounds {
     const box = this.layer.getBoundingClientRect();
     return { w: box.width, h: box.height };
   }
 
   /** The windows on screen in `side`'s stack, top to bottom. */
-  private column(side: DockSide): PaneWindow[] {
+  column(side: DockSide): PaneWindow[] {
     return dockStack(this.layout, side).filter((w) => this.visible(w));
   }
 
-  private dockPx(b: Bounds, also?: DockSide): { left: number; right: number } {
+  dockPx(b: Bounds, also?: DockSide): { left: number; right: number } {
     const on = (side: DockSide) => side === also || this.column(side).length > 0;
     return dockWidths(b.w, { left: on("left"), right: on("right") }, this.layout.dockShare);
   }
 
-  private rectFor(w: PaneWindow, b: Bounds, dock: { left: number; right: number }): Rect {
+  rectFor(w: PaneWindow, b: Bounds, dock: { left: number; right: number }): Rect {
     const p = w.placement;
     if (p.kind === "dock") {
       const col = this.column(p.side);
@@ -443,16 +440,18 @@ export class PaneWindows {
     host.toggleAttribute("data-fab-covered", covered);
   }
 
-  // ── Gestures ─────────────────────────────────────────────────────────────
+  // ── Frame wiring ─────────────────────────────────────────────────────────
+  // The gestures themselves (move/resize/tab drag) live in gestures.ts;
+  // this just routes a Frame's pointer events to them and to layout commits.
 
   private frameEvents: FrameEvents = {
     focus: (id) => {
       if (this.layout.windows[this.layout.windows.length - 1]?.id === id) return;
       this.commit(focusWindow(this.layout, id));
     },
-    barDown: (id, ev) => this.moveGesture(id, ev),
-    resizeDown: (id, dir, ev) => this.resizeGesture(id, dir, ev),
-    tabDown: (id, panel, ev) => this.tabGesture(id, panel, ev),
+    barDown: (id, ev) => this.gestures.moveGesture(id, ev),
+    resizeDown: (id, dir, ev) => this.gestures.resizeGesture(id, dir, ev),
+    tabDown: (id, panel, ev) => this.gestures.tabGesture(id, panel, ev),
     action: (id, act) => {
       const w = this.layout.windows.find((x) => x.id === id);
       if (!w) return;
@@ -466,278 +465,6 @@ export class PaneWindows {
     },
   };
 
-  /** Pointer capture plus move/up wiring shared by every gesture. Captured
-   *  on the frame, not the pressed element: a render mid-drag can replace the
-   *  bar's children, and a detached element loses the capture. */
-  private track(
-    target: HTMLElement,
-    ev: PointerEvent,
-    move: (e: PointerEvent) => void,
-    up: (e: PointerEvent) => void,
-  ): void {
-    ev.preventDefault();
-    target.setPointerCapture?.(ev.pointerId);
-    const onMove = (e: Event) => move(e as PointerEvent);
-    const onUp = (e: Event) => {
-      target.releasePointerCapture?.((e as PointerEvent).pointerId);
-      target.removeEventListener("pointermove", onMove);
-      target.removeEventListener("pointerup", onUp);
-      target.removeEventListener("pointercancel", onUp);
-      up(e as PointerEvent);
-    };
-    target.addEventListener("pointermove", onMove);
-    target.addEventListener("pointerup", onUp);
-    target.addEventListener("pointercancel", onUp);
-  }
-
-  private moveGesture(id: string, ev: PointerEvent): void {
-    const f = this.frames.get(id);
-    const w = this.layout.windows.find((x) => x.id === id);
-    if (!f || !w || this.compact()) return;
-    const b = this.bounds();
-    const origin = this.layer.getBoundingClientRect();
-    let start = this.rectFor(w, b, this.dockPx(b));
-    let sx = ev.clientX;
-    let sy = ev.clientY;
-    let moved = false;
-    let rect = start;
-    let target: DropTarget = null;
-    f.el.classList.add("is-moving");
-    this.track(
-      f.el,
-      ev,
-      (e) => {
-        if (!moved && Math.hypot(e.clientX - sx, e.clientY - sy) < 4) return;
-        if (!moved && w.placement.kind !== "float" && w.placement.kind !== "snap") {
-          // Pulled off a dock: it becomes its floating size, under the pointer.
-          const size = loadSize();
-          const px = e.clientX - origin.left;
-          start = clampRect({ x: px - size.w / 2, y: e.clientY - origin.top - 18, w: size.w, h: size.h }, b);
-          sx = e.clientX;
-          sy = e.clientY;
-          this.commit(place(this.layout, id, { kind: "float", rect: start }));
-        }
-        moved = true;
-        rect = clampRect({ ...start, x: start.x + e.clientX - sx, y: start.y + e.clientY - sy }, b);
-        paintRect(f.el, rect);
-        target = this.dropTargetAt(e, id, b);
-        this.showTarget(target, b);
-      },
-      () => {
-        f.el.classList.remove("is-moving");
-        this.showTarget(null, b);
-        if (!moved) return;
-        const t = target as DropTarget;
-        if (t?.kind === "merge") this.commit(mergeWindows(this.layout, id, t.id));
-        else if (t?.kind === "split") this.glide(f, () => this.commit(stackInto(this.layout, id, t.id, t.where)));
-        else if (t?.kind === "zone") this.glide(f, () => this.commit(place(this.layout, id, zonePlacement(t))));
-        else this.commit(place(this.layout, id, { kind: "float", rect }));
-      },
-    );
-  }
-
-  private resizeGesture(id: string, dir: ResizeDir, ev: PointerEvent): void {
-    const f = this.frames.get(id);
-    const w = this.layout.windows.find((x) => x.id === id);
-    if (!f || !w || this.compact()) return;
-    if (w.placement.kind === "dock" && dir === "n") return this.stackDividerGesture(f, w, w.placement.side, ev);
-    const b = this.bounds();
-    const start = this.rectFor(w, b, this.dockPx(b));
-    const rz = (ev.target as HTMLElement).closest<HTMLElement>("[data-rz]");
-    rz?.classList.add("is-active");
-    f.el.classList.add("is-resizing");
-    const p = w.placement;
-    let rect = start;
-    this.track(
-      f.el,
-      ev,
-      (e) => {
-        const dx = e.clientX - ev.clientX;
-        const dy = e.clientY - ev.clientY;
-        if (p.kind === "dock") {
-          // A docked window resizes from its inner edge only: the divider.
-          const width = p.side === "left" ? start.w + dx : start.w - dx;
-          const max = b.w - MIN_CHAT - (p.side === "left" ? this.dockPx(b).right : this.dockPx(b).left);
-          const clamped = Math.min(Math.max(width, MIN_W), Math.max(MIN_W, max));
-          this.layout = setDockShare(this.layout, p.side, clamped / b.w);
-          this.paint();
-          return;
-        }
-        rect = resizeRect(start, dir, dx, dy, b);
-        paintRect(f.el, rect);
-      },
-      () => {
-        rz?.classList.remove("is-active");
-        f.el.classList.remove("is-resizing");
-        if (p.kind === "dock") {
-          this.commit(this.layout);
-          return;
-        }
-        saveSize(rect);
-        this.commit(place(this.layout, id, { kind: "float", rect }));
-      },
-    );
-  }
-
-  /** The divider between a stacked window and the one above it: the pair
-   *  trades height, every other window in the stack stays put. */
-  private stackDividerGesture(f: Frame, w: PaneWindow, side: DockSide, ev: PointerEvent): void {
-    const col = this.column(side);
-    const i = col.indexOf(w);
-    const up = col[i - 1];
-    if (i < 1 || !up) return;
-    const rects = stackRects(side, 1, this.bounds(), col.map(weightOf));
-    const upH = rects[i - 1]!.h;
-    const pairH = upH + rects[i]!.h;
-    const pairW = weightOf(up) + weightOf(w);
-    const rz = (ev.target as HTMLElement).closest<HTMLElement>("[data-rz]");
-    rz?.classList.add("is-active");
-    f.el.classList.add("is-resizing");
-    this.track(
-      f.el,
-      ev,
-      (e) => {
-        const h = Math.min(Math.max(upH + e.clientY - ev.clientY, MIN_STACK_H), Math.max(MIN_STACK_H, pairH - MIN_STACK_H));
-        this.layout = setWeights(this.layout, { [up.id]: (pairW * h) / pairH, [w.id]: (pairW * (pairH - h)) / pairH });
-        this.paint();
-      },
-      () => {
-        rz?.classList.remove("is-active");
-        f.el.classList.remove("is-resizing");
-        this.commit(this.layout);
-      },
-    );
-  }
-
-  /** A press on a tab: released in place it switches tabs; dragged past
-   *  the slop it tears the tab out, into another window or a new one. */
-  private tabGesture(id: string, panel: PanelKey, ev: PointerEvent): void {
-    const f = this.frames.get(id);
-    if (!f) return;
-    const b = this.bounds();
-    let dragging = false;
-    let target: DropTarget = null;
-    let chip: HTMLElement | null = null;
-    const origin = this.layer.getBoundingClientRect();
-    this.track(
-      f.el,
-      ev,
-      (e) => {
-        if (!dragging && Math.hypot(e.clientX - ev.clientX, e.clientY - ev.clientY) < DRAG_SLOP) return;
-        if (this.compact()) return;
-        dragging = true;
-        if (!chip) {
-          chip = document.createElement("div");
-          chip.className = "pw-tab-ghost";
-          chip.innerHTML = `<i class="ph ${PANEL_META[panel].icon}"></i>${PANEL_META[panel].label}`;
-          this.layer.appendChild(chip);
-        }
-        chip.style.left = `${e.clientX - origin.left + 12}px`;
-        chip.style.top = `${e.clientY - origin.top + 10}px`;
-        target = this.dropTargetAt(e, null, b);
-        this.showTarget(target, b);
-      },
-      (e) => {
-        chip?.remove();
-        this.showTarget(null, b);
-        if (!dragging) {
-          this.commit(setActive(this.layout, id, panel));
-          return;
-        }
-        if (target?.kind === "merge") {
-          if (target.id !== id) this.commit(moveTab(this.layout, panel, target.id, target.index));
-          else if (target.index !== undefined) this.commit(moveTab(this.layout, panel, id, target.index));
-          return;
-        }
-        if (target?.kind === "zone") {
-          this.commit(tearOff(this.layout, panel, zonePlacement(target)));
-          return;
-        }
-        if (target?.kind === "split") {
-          // A window's only tab dropped on its own half has nowhere new to go.
-          if (target.id === id && windowOf(this.layout, panel)?.tabs.length === 1) return;
-          const torn = tearOff(this.layout, panel, { kind: "float", rect: null });
-          this.commit(stackInto(torn, torn.windows[torn.windows.length - 1]!.id, target.id, target.where));
-          return;
-        }
-        const size = loadSize();
-        const rect = clampRect(
-          { x: e.clientX - origin.left - 40, y: e.clientY - origin.top - 18, w: size.w, h: size.h },
-          b,
-        );
-        this.commit(tearOff(this.layout, panel, { kind: "float", rect }));
-      },
-    );
-  }
-
-  /** Another window's bar merges; an edge or corner places; a docked
-   *  window's body splits its stack. The window being dragged (`exclude`) is
-   *  under the pointer, so frames are hit by rect, not elementFromPoint. */
-  private dropTargetAt(e: PointerEvent, exclude: string | null, b: Bounds): DropTarget {
-    const frontFirst = [...this.layout.windows].reverse();
-    for (const w of frontFirst) {
-      const f = this.frames.get(w.id);
-      if (!f || f.el.hidden || w.id === exclude) continue;
-      const hit = f.dropRect().some((r) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom);
-      if (hit) return { kind: "merge", id: w.id, index: f.tabIndexAt(e.clientX) };
-    }
-    const origin = this.layer.getBoundingClientRect();
-    const zone = dropZoneAt(e.clientX - origin.left, e.clientY - origin.top, b);
-    if (zone) return { kind: "zone", zone };
-    for (const w of frontFirst) {
-      const f = this.frames.get(w.id);
-      if (!f || f.el.hidden || w.id === exclude || w.placement.kind !== "dock") continue;
-      const r = f.el.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) continue;
-      return { kind: "split", id: w.id, where: e.clientY < r.top + r.height / 2 ? "before" : "after" };
-    }
-    return null;
-  }
-
-  /** What a split drop will take: the target's upper or lower half. */
-  private splitRect(t: { id: string; where: "before" | "after" }): Rect | null {
-    const f = this.frames.get(t.id);
-    if (!f) return null;
-    const r = f.el.getBoundingClientRect();
-    const origin = this.layer.getBoundingClientRect();
-    const h = r.height / 2;
-    return { x: r.left - origin.left, y: r.top - origin.top + (t.where === "after" ? h : 0), w: r.width, h };
-  }
-
-  private showTarget(t: DropTarget, b: Bounds): void {
-    for (const f of this.frames.values()) f.el.classList.toggle("pw-drop-target", t?.kind === "merge" && f.el.dataset.win === t.id);
-    let r: Rect | null = null;
-    if (t?.kind === "zone") {
-      const side = t.zone.kind === "dock" ? t.zone.side : undefined;
-      r = zoneRect(t.zone, b, side ? this.dockPx(b, side)[side] : 0);
-    } else if (t?.kind === "split") {
-      r = this.splitRect(t);
-    }
-    if (!r) {
-      this.ghostWanted = false;
-      this.ghost?.classList.remove("is-on");
-      return;
-    }
-    if (!this.ghost || !this.ghost.isConnected) {
-      this.ghost = document.createElement("div");
-      this.ghost.className = "fab-snap-ghost";
-      this.ghost.setAttribute("aria-hidden", "true");
-      this.layer.appendChild(this.ghost);
-    }
-    const g = this.ghost;
-    paintRect(g, r);
-    this.ghostWanted = true;
-    requestAnimationFrame(() => {
-      if (this.ghostWanted) g.classList.add("is-on");
-    });
-  }
-
-  /** A drop into a zone eases into place rather than jumping. */
-  private glide(f: Frame, apply: () => void): void {
-    f.el.classList.add("is-snapping");
-    apply();
-    setTimeout(() => f.el.classList.remove("is-snapping"), GLIDE_MS);
-  }
 }
 
 function riseIn(el: HTMLElement): void {
@@ -746,15 +473,4 @@ function riseIn(el: HTMLElement): void {
   void el.offsetWidth;
   el.classList.add("is-entering");
   el.addEventListener("animationend", () => el.classList.remove("is-entering"), { once: true });
-}
-
-function zonePlacement(t: { kind: "zone"; zone: DropZone }): Placement {
-  return t.zone.kind === "snap" ? { kind: "snap", corner: t.zone.corner } : { kind: "dock", side: t.zone.side };
-}
-
-function paintRect(el: HTMLElement, r: Rect): void {
-  el.style.left = `${Math.round(r.x)}px`;
-  el.style.top = `${Math.round(r.y)}px`;
-  el.style.width = `${Math.round(r.w)}px`;
-  el.style.height = `${Math.round(r.h)}px`;
 }
