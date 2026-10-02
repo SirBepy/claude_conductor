@@ -17,6 +17,7 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
 const { renderNotificationsView } = await import(
   "../src/views/settings/subviews/notifications/notifications.ts"
 );
+const { NOTIF_TYPES } = await import("../src/shared/settings-save.ts");
 
 beforeEach(() => { remote = false; document.body.innerHTML = ""; });
 
@@ -43,6 +44,8 @@ describe("notifications settings screen on the phone", () => {
     const dispose = await renderNotificationsView(root);
     expect(root.querySelector("#muteAllSwitch")).not.toBeNull();
     expect(root.querySelector("#notifCards")).not.toBeNull();
+    // Hydration cloned one card per notification type into #notifCards.
+    expect(root.querySelectorAll("#notifCards .notif-card").length).toBe(NOTIF_TYPES.length);
     expect(root.querySelector("#voiceDictationSwitch")).not.toBeNull();
     expect(root.querySelector("#audioOutputDevice")).not.toBeNull();
     expect(root.querySelector("#characterSoundsSection")).not.toBeNull();
