@@ -203,6 +203,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_statusbar(&mut router, state.clone());
     methods::register_drain(&mut router, state.clone());
     methods::register_files(&mut router, state.clone());
+    methods::register_create_project(&mut router, state.clone());
     methods::register_drafts(&mut router, state.clone());
     methods::register_step_comments(&mut router, state.clone());
     methods::register_user_todos(&mut router, state.clone());

@@ -117,6 +117,12 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_accounts", null);
       case "list_project_groups":
         return this.rpc<T>("list_project_groups", null);
+      // Phone "Create <name>" new-project flow (todo 1058): the daemon
+      // resolves the projects root server-side (stored setting, else
+      // majority-parent inference) and creates <root>/<name> - the phone
+      // never sends a path, only a bare name (daemon/methods/create_project.rs).
+      case "create_project_folder":
+        return this.rpc<T>("create_project_folder", { name: args.name });
       // Worktree picker (ai_todo 434): mirrors the desktop `ipc::worktrees`
       // Tauri commands so the phone picker isn't silently empty/dead.
       case "list_worktree_details":

@@ -317,6 +317,13 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "chat_drains", params: { session_ids: ["s1", "s2"] } });
   });
 
+  // todo 1058: phone "Create <name>" new-project flow. The daemon resolves
+  // the root server-side - the phone sends only the bare name.
+  it("forwards create_project_folder to the rpc with just the name", async () => {
+    await new HttpTransport().call("create_project_folder", { name: "side-quest" });
+    expect(body()).toEqual({ method: "create_project_folder", params: { name: "side-quest" } });
+  });
+
   // Todos panel (todo 1007): the daemon already allowlists these as P
   // (remote_transport_table.rs); these cases were the only missing piece.
   it("forwards list_user_todos and set_user_todo_state to the rpc", async () => {

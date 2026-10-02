@@ -429,6 +429,17 @@ body.pp-dragging * {
   border-color: var(--color-primary, #4c9eff);
   outline: none;
 }
+/* No resolvable projects root on the phone (todo 1058): the row stays
+   visible (so the hint explaining why is legible) but inert. */
+.pp-act-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.pp-act-disabled:hover,
+.pp-act-disabled:focus-visible {
+  border-color: var(--color-border, #2e2e40);
+  outline: none;
+}
 .pp-act .pp-lead {
   font-size: 16px;
   flex-shrink: 0;

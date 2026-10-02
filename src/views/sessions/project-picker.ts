@@ -157,19 +157,22 @@ export function openProjectPickerModal(
         peerMachines = res.peers;
         if (peerMachines.length > 0) renderModal();
       }).catch(() => { /* machine federation unavailable - no chip row, same as zero peers */ });
-
-      // The projects root, if the user has ever set one explicitly. Absent,
-      // projectsRoot() infers it; this read only ever upgrades the answer, so
-      // the Create row is usable before it resolves.
-      void invoke<Record<string, unknown>>("get_settings").then((s) => {
-        if (resolved) return;
-        const v = s?.[PROJECTS_ROOT_SETTINGS_KEY];
-        if (typeof v === "string" && v.length > 0) {
-          projectsRootStored = v;
-          renderModal();
-        }
-      }).catch(() => { /* inference covers it */ });
     }
+
+    // The projects root, if the user has ever set one explicitly. Absent,
+    // projectsRoot() infers it; this read only ever upgrades the answer, so
+    // the Create row is usable before it resolves. Fetched on the phone too
+    // (todo 1058): the daemon resolves this SAME setting server-side when
+    // Create actually runs, so this is only for the row's enabled/disabled
+    // state and hint text to agree with what the RPC will do.
+    void invoke<Record<string, unknown>>("get_settings").then((s) => {
+      if (resolved) return;
+      const v = s?.[PROJECTS_ROOT_SETTINGS_KEY];
+      if (typeof v === "string" && v.length > 0) {
+        projectsRootStored = v;
+        renderModal();
+      }
+    }).catch(() => { /* inference covers it */ });
 
     let sort: SortChoice = readStoredSort();
     let showTodos: boolean = readShowTodos();
@@ -330,6 +333,22 @@ export function openProjectPickerModal(
     };
 
     const createProject = async (name: string): Promise<void> => {
+      const trimmed = name.trim();
+      if (isRemote()) {
+        // No native folder-picker dialog on the phone (pick_folder is
+        // Tauri-only), so the daemon resolves the root server-side instead
+        // (todo 1058) - renderNoMatches already disables this row until a
+        // root is resolvable, so this is never reached with none.
+        let result: { path: string };
+        try {
+          result = await invoke<{ path: string }>("create_project_folder", { name: trimmed });
+        } catch (e) {
+          alert(`Could not create folder: ${e}`);
+          return;
+        }
+        finish({ path: result.path, name: trimmed, machineId: null });
+        return;
+      }
       let root = projectsRoot();
       if (!root) {
         // No stored root and nothing to infer from - a first run. Ask for the
@@ -339,7 +358,7 @@ export function openProjectPickerModal(
         projectsRootStored = picked;
         root = picked;
       }
-      const fullPath = joinProjectPath(root, name.trim());
+      const fullPath = joinProjectPath(root, trimmed);
       try {
         await invoke("create_folder", { path: fullPath });
       } catch (e) {
@@ -349,7 +368,7 @@ export function openProjectPickerModal(
       try {
         await updateSettings((cur) => ({ ...cur, [PROJECTS_ROOT_SETTINGS_KEY]: root }));
       } catch { /* the folder exists either way; remembering is best-effort */ }
-      finish({ path: fullPath, name: name.trim(), machineId: null });
+      finish({ path: fullPath, name: trimmed, machineId: null });
     };
 
     const browseForProject = async (): Promise<void> => {
@@ -365,40 +384,60 @@ export function openProjectPickerModal(
     // offer lands there instead of in two permanent footer buttons.
     const renderNoMatches = () => {
       const typed = filter.trim();
-      const canCreate = isValidProjectName(typed) && !isRemote() && machineField.machineId === null;
-      const root = projectsRoot();
-      if (isRemote() || machineField.machineId !== null) {
+      if (machineField.machineId !== null) {
         return html`<li class="project-picker-empty">No matches</li>`;
       }
+      const validName = isValidProjectName(typed);
+      // The phone has no native folder-picker (pick_folder is Tauri-only), so
+      // Browse never renders remotely, and Create needs a server-resolvable
+      // root before it can do anything - with neither, an invalid/empty typed
+      // term leaves nothing actionable to offer (todo 1058).
+      if (isRemote() && !validName) {
+        return html`<li class="project-picker-empty">No matches</li>`;
+      }
+      const root = projectsRoot();
+      const remoteNoRoot = isRemote() && !root;
+      const canCreate = validName && !remoteNoRoot;
       return html`
         <li class="pp-inline-actions">
-          ${canCreate ? html`
-            <div class="pp-act" role="button" tabindex="0"
-              @click=${() => void createProject(typed)}
+          ${validName ? html`
+            <div class="pp-act${canCreate ? "" : " pp-act-disabled"}" role="button"
+              tabindex=${canCreate ? "0" : "-1"}
+              aria-disabled=${canCreate ? "false" : "true"}
+              @click=${() => { if (canCreate) void createProject(typed); }}
               @keydown=${(e: KeyboardEvent) => {
+                if (!canCreate) return;
                 if (e.key === "Enter" || e.key === " ") { e.preventDefault(); void createProject(typed); }
               }}
             >
               <i class="ph ph-folder-plus pp-lead"></i>
               <span class="pp-body">
                 <b>Create "${typed}"</b><br>
-                ${root
-                  // The path IS the control (wording L2): nothing to label, so
-                  // nothing to word ambiguously. It is a real <button>, which
-                  // is why the row above is a role="button" div - a button
-                  // inside a button gets ejected out by the HTML parser.
-                  ? html`<em>in </em><button class="pp-root-inline" title="Change where new projects are created"
-                      @click=${(e: Event) => { e.stopPropagation(); void repointProjectsRoot(); }}
-                    >${root} <i class="ph ph-pencil-simple"></i></button>`
-                  : html`<em>pick where to put it&hellip;</em>`}
+                ${remoteNoRoot
+                  ? html`<em>Set a projects root on the desktop first</em>`
+                  : root
+                    // The path IS the control on desktop (wording L2): nothing
+                    // to label, so nothing to word ambiguously. It is a real
+                    // <button>, which is why the row above is a role="button"
+                    // div - a button inside a button gets ejected out by the
+                    // HTML parser. The phone can't repoint it (no folder
+                    // dialog), so it's plain text there instead.
+                    ? html`<em>in </em>${isRemote()
+                        ? html`<span class="pp-root-inline">${root}</span>`
+                        : html`<button class="pp-root-inline" title="Change where new projects are created"
+                            @click=${(e: Event) => { e.stopPropagation(); void repointProjectsRoot(); }}
+                          >${root} <i class="ph ph-pencil-simple"></i></button>`}`
+                    : html`<em>pick where to put it&hellip;</em>`}
               </span>
             </div>
           ` : ""}
-          <button class="pp-act" @click=${() => void browseForProject()}>
-            <i class="ph ph-folder-open pp-lead"></i>
-            <span class="pp-body"><b>Browse for a folder&hellip;</b><br><em>pick one that already exists on disk</em></span>
-          </button>
-          ${canCreate ? "" : html`<span class="pp-inline-hint">No matches. Type a folder name to create one.</span>`}
+          ${isRemote() ? "" : html`
+            <button class="pp-act" @click=${() => void browseForProject()}>
+              <i class="ph ph-folder-open pp-lead"></i>
+              <span class="pp-body"><b>Browse for a folder&hellip;</b><br><em>pick one that already exists on disk</em></span>
+            </button>
+          `}
+          ${validName ? "" : html`<span class="pp-inline-hint">No matches. Type a folder name to create one.</span>`}
         </li>
       `;
     };

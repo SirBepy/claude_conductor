@@ -20,6 +20,10 @@ pub(crate) mod drafts_store;
 // Phone mirror of `ipc::drain::chat_drains` (todo 1022): named `drain` to
 // match `ipc/drain.rs`, distinct from the unrelated `tokens::drain` module.
 mod drain;
+// Phone "Create <name>" new-project flow (todo 1058): server-side root
+// resolution + name validation, since the phone has no native folder-picker
+// dialog to point `create_folder` (files.rs's desktop-only Tauri command) at.
+mod create_project;
 mod files;
 /// Shared mechanism (short-id truncation, capped-list overflow line) behind
 /// `user_todos`, `drafts_store::inject`, and `schedule_mcp`'s injected blocks.
@@ -68,6 +72,7 @@ pub use context::register_context;
 pub use drafts::register_drafts;
 pub use drafts_store::register_drafts_store;
 pub use drain::register_drain;
+pub use create_project::register_create_project;
 pub use files::register_files;
 pub use history::register_history;
 pub use jarvis::register_jarvis;

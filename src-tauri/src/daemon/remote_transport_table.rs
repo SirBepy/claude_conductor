@@ -234,6 +234,14 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // todo 1007). Aggregate token counts only, ids validated against a strict
     // charset before touching disk (daemon/methods/drain.rs).
     ("chat_drains", P),
+    // Write: phone's "Create <name>" new-project flow (todo 1058). Narrow:
+    // `name` is a single validated path segment (daemon/methods/create_project.rs
+    // rejects separators/"..`/drive letters and re-checks via a canonicalized
+    // prefix comparison), and the root is resolved SERVER-SIDE (stored
+    // setting or majority-parent inference) rather than trusted from the
+    // client - a paired phone can create exactly one folder, under the
+    // desktop's own projects root, never an arbitrary path on disk.
+    ("create_project_folder", P),
     ("list_project_servers", P),
     ("list_claude_md_scopes", P),
     // Cross-surface draft sync: composer text, AUQ answers, held messages.
@@ -360,7 +368,7 @@ mod tests {
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
             "get_range_files", "get_file_diff", "resolve_commit_refs", "get_ticket_tracker", "get_file_at_rev",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
-            "push_commits", "list_project_files", "chat_drains", "list_project_servers",
+            "push_commits", "list_project_files", "chat_drains", "create_project_folder", "list_project_servers",
             "list_claude_md_scopes",
             "get_session_drafts", "set_composer_draft", "clear_composer_draft",
             "set_auq_draft", "clear_auq_draft", "add_held_message",
