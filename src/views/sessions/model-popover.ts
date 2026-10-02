@@ -7,6 +7,14 @@ import { escapeHtml } from "../../shared/escape-html";
 import { readModels, modelDisplayLabel, modelFamilyFromId } from "../../shared/effort-presets";
 import { PopoverShell, wireCommitSlider } from "./statusbar-popover-shell";
 
+/** True when there is a real model to pick between. A single configured
+ *  model (an account limited to one family, or a pruned settings.models
+ *  list) is a confirmation, not a choice - mirrors the account-popover
+ *  precedent (todo 930: `listCachedAccounts().length <= 1`). */
+export function hasModelChoice(models: readonly string[]): boolean {
+  return models.length > 1;
+}
+
 export interface ModelOpenCtx {
   model: string;
   sessionId: string | null;
@@ -31,6 +39,15 @@ export class ModelPopover {
       return;
     }
     const models = readModels({});
+    // Exactly one model configured (an account limited to a single family,
+    // or a user-pruned settings.models list) is a confirmation, not a choice
+    // (todo 930, same reasoning as the account popover) - name it, no slider.
+    if (!hasModelChoice(models)) {
+      this.shell.open(anchor, `
+        <div class="sb-model-popover-name">${escapeHtml(modelDisplayLabel(models[0] ?? ctx.model))}</div>
+      `, { className: "sb-model-popover" });
+      return;
+    }
     const isDraft = !!ctx.onModelChange;
     // ctx.model is a full API id (e.g. "claude-sonnet-4-5-20250929") once a turn
     // has landed, but `models` is the canonical family list - compare families

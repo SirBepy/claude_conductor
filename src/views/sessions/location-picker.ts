@@ -7,6 +7,16 @@ import { restoreFocus } from "./restore-focus";
 import type { ProjectGroup, ClaudeMdScope } from "../../types/ipc.generated";
 import "./location-picker.css";
 
+/** True when there is a real worktree choice to make. `project.worktrees` is
+ *  the ADDITIONAL worktrees beyond the default, so zero of them means the
+ *  default is the only location there is - a confirmation, not a choice
+ *  (todo 930, same reasoning as the account popover: nothing to pick means
+ *  nothing to show). Two-or-more worktrees is unaffected: Default plus any
+ *  existing worktree is already a real decision. */
+export function hasWorktreeChoice(worktreeCount: number): boolean {
+  return worktreeCount > 0;
+}
+
 /// Shared by resolveRememberedLocation and openLocationModal's initial
 /// worktree: the project's own path/name unless last_worktree_path matches
 /// one of its worktrees, in which case that worktree wins.
@@ -158,7 +168,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     document.addEventListener("keydown", keydownHandler);
 
     const renderWorktreeField = () => {
-      if (project.worktrees.length === 0) return "";
+      if (!hasWorktreeChoice(project.worktrees.length)) return "";
       return html`
         <div class="loc-field">
           <span class="loc-field-label">Worktree</span>
@@ -251,7 +261,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
     // lazy-load pattern.
     const start = async () => {
       setBackdropCancel(() => finish(null));
-      if (project.worktrees.length === 0) {
+      if (!hasWorktreeChoice(project.worktrees.length)) {
         await loadScopes();
         if ((scopes?.length ?? 0) <= 1 && !scopesError) {
           finish({ path: currentWt.path, name: currentWt.name });
