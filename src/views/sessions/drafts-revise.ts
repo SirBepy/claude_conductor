@@ -8,7 +8,7 @@ import { showToast } from "../../shared/toast";
 import { currentVersion, handleOf } from "../../shared/message-draft-utils";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
 import type { ChatEvent, ContentBlock, DraftVariant, MessageDraft } from "../../types/ipc.generated";
-import { isCurrentSessionBusy } from "./session-thinking-bar";
+import { sendOrStage } from "./send-or-stage";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { state } from "./state";
 
@@ -72,19 +72,15 @@ export async function sendRevision(originId: string, fallbackId: string, text: s
   const sessionId = inst.session_id;
   const blocks: ContentBlock[] = [{ type: "text", text }];
   const onScreen = state.renderer?.currentSessionId() === sessionId;
-  if (onScreen && isCurrentSessionBusy()) {
-    state.heldMessages?.stage(blocks);
-    return true;
-  }
-  if (onScreen && state.heldMessages?.hasItemsForActive()) {
-    state.heldMessages.flushHeldWithDraft(blocks).catch((err) => {
-      console.error("[drafts-revise] flushHeldWithDraft rejected unexpectedly", err);
-    });
-    return true;
-  }
-  const optimistic = { type: "user_message", content: blocks, timestamp: BigInt(Date.now()) } as ChatEvent;
-  sessionEvents.pushSynthetic(sessionId, optimistic);
-  await sendWithFailureRecovery(sessionId, String(inst.cwd ?? "."), blocks, optimistic);
+  await sendOrStage(
+    blocks,
+    async () => {
+      const optimistic = { type: "user_message", content: blocks, timestamp: BigInt(Date.now()) } as ChatEvent;
+      sessionEvents.pushSynthetic(sessionId, optimistic);
+      await sendWithFailureRecovery(sessionId, String(inst.cwd ?? "."), blocks, optimistic);
+    },
+    { checkActive: onScreen },
+  );
   return true;
 }
 

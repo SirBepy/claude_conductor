@@ -11,7 +11,7 @@ import { SlashProvider } from "../../shared/chat/caret-popup/providers/slash";
 import type { SuggestProvider } from "../../shared/chat/caret-popup/types";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { showToast } from "../../shared/toast";
-import { isCurrentSessionBusy } from "./session-thinking-bar";
+import { sendOrStage } from "./send-or-stage";
 import { state } from "./state";
 
 export interface PvComposerDeps {
@@ -94,40 +94,28 @@ export async function sendPvReply(
   const sendBtn = root.querySelector<HTMLButtonElement>(".pv-composer-send");
   if (sendBtn) sendBtn.disabled = true;
 
-  if (isCurrentSessionBusy()) {
-    state.heldMessages?.stage(blocks);
-    return;
-  }
-  if (state.heldMessages?.hasItemsForActive()) {
-    // flushHeldWithDraft restages a failed send into the held queue itself
-    // (held-messages.ts), so a rejection here just needs logging, not a
-    // recovery path of its own.
-    state.heldMessages.flushHeldWithDraft(blocks).catch((err) => {
-      console.error("[preview-composer] flushHeldWithDraft rejected unexpectedly", err);
-    });
-    return;
-  }
-
-  const optimisticEvent = {
-    type: "user_message",
-    content: blocks,
-    timestamp: BigInt(Date.now()),
-  } as ChatEvent;
-  sessionEvents.pushSynthetic(sessionId, optimisticEvent);
-  try {
-    await invoke<string>("send_message", { sessionId, cwd: String(inst.cwd ?? "."), blocks });
-  } catch (err) {
-    // Refused mid-turn (todo 873): queue it like the busy branch above would
-    // have, instead of pushing the text back into the composer.
-    if (isSessionBusyError(err) && state.heldMessages?.stageFor(sessionId, blocks)) {
+  await sendOrStage(blocks, async () => {
+    const optimisticEvent = {
+      type: "user_message",
+      content: blocks,
+      timestamp: BigInt(Date.now()),
+    } as ChatEvent;
+    sessionEvents.pushSynthetic(sessionId, optimisticEvent);
+    try {
+      await invoke<string>("send_message", { sessionId, cwd: String(inst.cwd ?? "."), blocks });
+    } catch (err) {
+      // Refused mid-turn (todo 873): queue it like the busy branch above would
+      // have, instead of pushing the text back into the composer.
+      if (isSessionBusyError(err) && state.heldMessages?.stageFor(sessionId, blocks)) {
+        sessionEvents.removeSynthetic(sessionId, optimisticEvent);
+        return;
+      }
+      console.error("[preview-panel] send_message failed", err);
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
-      return;
+      ta.value = text;
+      composerCore?.autoResize();
+      composerCore?.updateHighlight();
+      showToast(`Send failed: ${err}`);
     }
-    console.error("[preview-panel] send_message failed", err);
-    sessionEvents.removeSynthetic(sessionId, optimisticEvent);
-    ta.value = text;
-    composerCore?.autoResize();
-    composerCore?.updateHighlight();
-    showToast(`Send failed: ${err}`);
-  }
+  });
 }
