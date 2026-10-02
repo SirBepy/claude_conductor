@@ -230,6 +230,7 @@ pub(crate) async fn run_stdout_pump(
                                         &pump_session,
                                         body,
                                         turn.is_live(),
+                                        pump_turn_gen,
                                     );
                                 }
                             }

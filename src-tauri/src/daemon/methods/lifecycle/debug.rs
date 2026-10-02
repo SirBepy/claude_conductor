@@ -58,7 +58,8 @@ pub fn register_debug(router: &mut Router, state: Arc<DaemonState>) {
                     "utilization": 100.0,
                 })
                 .to_string();
-                crate::daemon::rate_limit::handle_rate_limit_rejection(&state, &session, &body, false);
+                let gen = state.registry.current_turn_gen(&p.session_id);
+                crate::daemon::rate_limit::handle_rate_limit_rejection(&state, &session, &body, false, gen);
                 Ok(json!({"resets_at": resets_at, "rate_limit_type": kind}))
             }
         });

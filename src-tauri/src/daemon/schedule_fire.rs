@@ -119,7 +119,15 @@ async fn fire_message(
     };
     lifecycle::send_message(&session, &tag_schedule(prompt), true).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(session_id, None);
+    // todo 873 (2026-10-02 cycle 1): this gen-bump path logged nothing, unlike
+    // `send_message`'s own "turn_gen N -> N+1" line - a scheduled retry's
+    // respawn was invisible in the log when diagnosing a stuck-busy session.
+    let gen_before = state.registry.current_turn_gen(session_id);
     state.registry.set_busy_from_wake(session_id);
+    log::info!(
+        "daemon: fire_message {session_id}: turn_gen {gen_before} -> {} (scheduled respawn/wake)",
+        state.registry.current_turn_gen(session_id)
+    );
     crate::sessions::chat_state::set_busy(session_id, true);
     crate::daemon::machines::publish_instances_changed(&state);
     Ok(())
