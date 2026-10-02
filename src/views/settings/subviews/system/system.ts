@@ -341,10 +341,12 @@ function template(autostart: boolean, nightly: NightlyWhenDone) {
       ${settingsHeader("System")}
       <div class="view-body">
 
+        ${isRemote() ? "" : html`
         <div class="kit-section">
           <div class="kit-section-title">Startup</div>
           ${toggleRow({ label: "Launch at login", inputId: "launchAtLogin", checked: autostart })}
         </div>
+        `}
 
         ${isRemote() || !navigator.userAgent.includes("Windows") ? "" : nightlySection(nightly)}
 

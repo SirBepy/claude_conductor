@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { attachTooltips } from "../../../../shared/row-tooltip";
 import { saveSettings } from "../../../../shared/settings-save";
 import { getSettings, setSettings } from "../../../../shared/state";
+import { isRemote } from "../../../../shared/transport";
 import { LS_ANIM } from "../../../sessions/sidebar-anim";
 import { settingsHeader, toggleRow } from "../../ui";
 import { backgroundSection, hydrateBackgroundFx } from "./components/background/background";
@@ -123,6 +124,22 @@ function hydrateTheme(): void {
 
 async function hydrateUsageColorsAndInterface(): Promise<void> {
   const s = getSettings();
+
+  // Sidebar animations is a local-storage-only control (not a settings write),
+  // so it stays live on the phone even though the save_settings-backed
+  // sections below are gated out of the template there (todo 1023: the
+  // daemon refuses settings writes from the phone and saveSettings() just
+  // toasts "Couldn't save settings" every time).
+  const sidebarAnimations = $("sidebarAnimations") as HTMLInputElement | null;
+  if (sidebarAnimations) {
+    try { sidebarAnimations.checked = localStorage.getItem(LS_ANIM) !== "off"; }
+    catch { sidebarAnimations.checked = true; }
+    sidebarAnimations.addEventListener("change", () => {
+      try { localStorage.setItem(LS_ANIM, sidebarAnimations.checked ? "on" : "off"); }
+      catch { /* ignore */ }
+    });
+  }
+
   const colorApplyDashboard = $("colorApplyDashboard") as HTMLInputElement | null;
   const colorApplyOverlay = $("colorApplyOverlay") as HTMLInputElement | null;
   const paceBand = $("paceBand") as HTMLInputElement | null;
@@ -154,16 +171,6 @@ async function hydrateUsageColorsAndInterface(): Promise<void> {
   paceColorOver.addEventListener("change", saveSettings);
 
   attachTooltips(document.getElementById("app") || document.body, { placement: "above" });
-
-  const sidebarAnimations = $("sidebarAnimations") as HTMLInputElement | null;
-  if (sidebarAnimations) {
-    try { sidebarAnimations.checked = localStorage.getItem(LS_ANIM) !== "off"; }
-    catch { sidebarAnimations.checked = true; }
-    sidebarAnimations.addEventListener("change", () => {
-      try { localStorage.setItem(LS_ANIM, sidebarAnimations.checked ? "on" : "off"); }
-      catch { /* ignore */ }
-    });
-  }
 
   const hideInMeetingSwitch = $("hideInMeetingSwitch") as HTMLInputElement | null;
   if (hideInMeetingSwitch) {
@@ -210,6 +217,7 @@ function template() {
       ${settingsHeader("Appearance")}
       <div class="view-body">
 
+        ${isRemote() ? "" : html`
         <div class="kit-section">
           <div class="kit-section-title">Theme</div>
           <div class="kit-row" style="justify-content: space-between;">
@@ -277,13 +285,14 @@ function template() {
           ${toggleRow({ label: "Hide from screen capture", inputId: "hideInMeetingSwitch", checked: false })}
           <div style="font-size: var(--fs-micro);color:var(--sb-muted);padding:2px 0 4px">Hides app windows from screen shares and recordings during meetings. Windows only.</div>
         </div>
+        `}
 
         <div class="kit-section">
           <div class="kit-section-title">Interface</div>
           ${toggleRow({ label: "Sidebar animations", inputId: "sidebarAnimations", checked: true })}
         </div>
 
-        ${backgroundSection()}
+        ${isRemote() ? "" : backgroundSection()}
 
       </div>
     </div>

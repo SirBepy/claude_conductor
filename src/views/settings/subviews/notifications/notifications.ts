@@ -249,59 +249,68 @@ async function populateVoicePreview(): Promise<void> {
 
 async function hydrateNotifications(): Promise<void> {
   const s = getSettings();
-  const muteAllSwitch = $("muteAllSwitch") as HTMLInputElement | null;
-  const muteSoundsSwitch = $("muteSoundsSwitch") as HTMLInputElement | null;
-  const muteSystemSwitch = $("muteSystemSwitch") as HTMLInputElement | null;
-  const pauseInMeetingSwitch = $("pauseInMeetingSwitch") as HTMLInputElement | null;
-  const voicePreviewProjectRow = $("voicePreviewProjectRow");
-  if (!muteAllSwitch || !muteSoundsSwitch || !muteSystemSwitch) return;
 
-  muteAllSwitch.checked = !!s.muteAll;
-  muteSoundsSwitch.checked = !!s.muteSounds;
-  muteSystemSwitch.checked = !!s.muteSystemNotifications;
-  applyMuteAllVisual();
+  // Everything in this block persists via saveSettings(), which the daemon
+  // refuses from the phone (todo 1023) - the template omits these sections
+  // there, so run their wiring only when the elements can actually exist.
+  // Mic picker + push-to-talk below are local-storage-only and stay live.
+  if (!isRemote()) {
+    const muteAllSwitch = $("muteAllSwitch") as HTMLInputElement | null;
+    const muteSoundsSwitch = $("muteSoundsSwitch") as HTMLInputElement | null;
+    const muteSystemSwitch = $("muteSystemSwitch") as HTMLInputElement | null;
+    const pauseInMeetingSwitch = $("pauseInMeetingSwitch") as HTMLInputElement | null;
+    const voicePreviewProjectRow = $("voicePreviewProjectRow");
 
-  muteAllSwitch.addEventListener("change", () => { applyMuteAllVisual(); saveSettings(); });
-  muteSoundsSwitch.addEventListener("change", saveSettings);
+    if (muteAllSwitch && muteSoundsSwitch && muteSystemSwitch) {
+      muteAllSwitch.checked = !!s.muteAll;
+      muteSoundsSwitch.checked = !!s.muteSounds;
+      muteSystemSwitch.checked = !!s.muteSystemNotifications;
+      applyMuteAllVisual();
 
-  if (pauseInMeetingSwitch) {
-    // Default on when the key is absent.
-    pauseInMeetingSwitch.checked = s.pauseInMeeting !== false;
-    pauseInMeetingSwitch.addEventListener("change", saveSettings);
+      muteAllSwitch.addEventListener("change", () => { applyMuteAllVisual(); saveSettings(); });
+      muteSoundsSwitch.addEventListener("change", saveSettings);
+
+      if (pauseInMeetingSwitch) {
+        // Default on when the key is absent.
+        pauseInMeetingSwitch.checked = s.pauseInMeeting !== false;
+        pauseInMeetingSwitch.addEventListener("change", saveSettings);
+      }
+    }
+
+    buildNotifCards();
+    const notifs = (s.notifications as Record<string, Record<string, unknown>>) || {};
+    await Promise.all(NOTIF_TYPES.map((t) => renderNotifCard(t.key, notifs[t.key] || {})));
+    await populateVoicePreview();
+    await loadPiperVoices();
+    primeWebVoices();
+
+    if (voicePreviewProjectRow) voicePreviewProjectRow.style.display = "flex";
+
+    await populateDevicePicker();
+
+    // Per-slot character-sound toggles. Each defaults ON when its key is absent.
+    const slots = (s.characterSoundSlots as Record<string, boolean | undefined>) || {};
+    for (const [id, key] of CHARACTER_SLOT_SWITCHES) {
+      const el = $(id) as HTMLInputElement | null;
+      if (!el) continue;
+      el.checked = slots[key] !== false;
+      el.addEventListener("change", saveSettings);
+    }
+    const voiceSwitch = $("voiceDictationSwitch") as HTMLInputElement | null;
+    if (voiceSwitch) {
+      voiceSwitch.checked = s.voiceDictationEnabled === true;
+      voiceSwitch.addEventListener("change", saveSettings);
+    }
+    const selectOnClick = $("selectOnSessionClickSwitch") as HTMLInputElement | null;
+    if (selectOnClick) {
+      // Default off.
+      selectOnClick.checked = s.selectOnSessionClick === true;
+      selectOnClick.addEventListener("change", saveSettings);
+    }
   }
 
-  buildNotifCards();
-  const notifs = (s.notifications as Record<string, Record<string, unknown>>) || {};
-  await Promise.all(NOTIF_TYPES.map((t) => renderNotifCard(t.key, notifs[t.key] || {})));
-  await populateVoicePreview();
-  await loadPiperVoices();
-  primeWebVoices();
-
-  if (voicePreviewProjectRow) voicePreviewProjectRow.style.display = "flex";
-
-  await populateDevicePicker();
   await populateMicPicker();
   wirePttCapture();
-
-  // Per-slot character-sound toggles. Each defaults ON when its key is absent.
-  const slots = (s.characterSoundSlots as Record<string, boolean | undefined>) || {};
-  for (const [id, key] of CHARACTER_SLOT_SWITCHES) {
-    const el = $(id) as HTMLInputElement | null;
-    if (!el) continue;
-    el.checked = slots[key] !== false;
-    el.addEventListener("change", saveSettings);
-  }
-  const voiceSwitch = $("voiceDictationSwitch") as HTMLInputElement | null;
-  if (voiceSwitch) {
-    voiceSwitch.checked = s.voiceDictationEnabled === true;
-    voiceSwitch.addEventListener("change", saveSettings);
-  }
-  const selectOnClick = $("selectOnSessionClickSwitch") as HTMLInputElement | null;
-  if (selectOnClick) {
-    // Default off.
-    selectOnClick.checked = s.selectOnSessionClick === true;
-    selectOnClick.addEventListener("change", saveSettings);
-  }
 }
 
 async function populateDevicePicker(): Promise<void> {
@@ -480,6 +489,7 @@ function template() {
             Get a push on this phone when a chat needs a permission or a question answered and you've stepped away from the PC.
           </p>
         </div>
+        ${isRemote() ? "" : html`
         <div class="kit-section" id="muteSection">
           <div class="kit-section-title">Mute</div>
           <div class="kit-row">
@@ -551,9 +561,11 @@ function template() {
           <span class="kit-row-label notif-dim-label">Preview with project</span>
           <select id="voicePreviewProject" class="notif-preview-project-select"></select>
         </div>
+        `}
 
         <div class="kit-section">
           <div class="kit-section-title">Audio</div>
+          ${isRemote() ? "" : html`
           ${toggleRow({ label: "Voice dictation", inputId: "voiceDictationSwitch", checked: false })}
           <div class="settings-caption">Shows the mic and push-to-talk in chats. While on, opening a chat loads the speech model (about 1.4 GB of RAM) so the first recording starts instantly.</div>
           <div class="kit-row">
@@ -563,6 +575,7 @@ function template() {
             </select>
           </div>
           <div class="settings-caption">"System default" follows your computer's default output - if you switch the default device, sounds follow automatically.</div>
+          `}
           <div class="kit-row">
             <span class="kit-row-label">Microphone</span>
             <select id="audioInputDevice">
@@ -580,6 +593,7 @@ function template() {
           <div class="settings-caption">Hold this button (while Conductor is focused) to record voice, release to stop. Click Set, then press a key or mouse side-button. Tip: pick a mouse side-button or a non-printing key so it doesn't type into the box.</div>
         </div>
 
+        ${isRemote() ? "" : html`
         <div class="kit-section" id="characterSoundsSection">
           <div class="kit-section-title">Character sounds</div>
           ${characterSlotRow("soundSlotWorkFinished", "Work finished")}
@@ -591,6 +605,7 @@ function template() {
           <div class="settings-caption">Mute individual character voice-line slots. Off here silences that slot everywhere. The tray "Mute Notifications" overrides all of these.</div>
           ${toggleRow({ label: "Play \"select\" when clicking a session", inputId: "selectOnSessionClickSwitch", checked: false })}
         </div>
+        `}
       </div>
     </div>
   `;
