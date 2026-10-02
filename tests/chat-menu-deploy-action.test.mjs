@@ -8,17 +8,18 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const { invokeMock, sendMock, pushSyntheticMock } = vi.hoisted(() => ({
+const { invokeMock, sendMock, pushSyntheticMock, isRemoteMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   sendMock: vi.fn(),
   pushSyntheticMock: vi.fn(),
+  isRemoteMock: vi.fn(() => false),
 }));
 
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 vi.mock("../src/shared/http-transport.ts", () => ({
   RemoteUnavailableError: class RemoteUnavailableError extends Error {},
 }));
-vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => false }));
+vi.mock("../src/shared/transport.ts", () => ({ isRemote: isRemoteMock }));
 vi.mock("../src/views/sessions/permission-modal", () => ({
   isAutoAccept: () => false,
   setAutoAccept: () => {},
@@ -76,6 +77,7 @@ describe("chat-menu Deploy action", () => {
     invokeMock.mockReset();
     sendMock.mockReset().mockResolvedValue(undefined);
     pushSyntheticMock.mockReset();
+    isRemoteMock.mockReset().mockReturnValue(false);
   });
 
   it("injects the literal /deploy via sendWithFailureRecovery, never a second implementation", async () => {
@@ -127,5 +129,51 @@ describe("chat-menu Deploy action", () => {
 
     deployBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  // todo 910's one unmet Acceptance item: absent/disabled for a repo with no
+  // deploy.yml. `hasDeployWorkflow` is the resolved cache value a caller
+  // (view-more-menu.ts / sidebar-ctx-menu.ts) reads from
+  // deploy-workflow-gate.ts before building ctx - exercised here directly so
+  // this test stays deterministic (no filesystem/IPC involved).
+  it("is disabled with a tooltip when the repo has no deploy.yml", () => {
+    const block = buildChatMenuBlock(baseCtx({ hasDeployWorkflow: false }), vi.fn());
+    document.body.appendChild(block);
+
+    const deployBtn = openAgentAndFindDeploy(block);
+    expect(deployBtn).toBeTruthy();
+    expect(deployBtn.classList.contains("is-disabled")).toBe(true);
+    expect(deployBtn.title).toBe("No .github/workflows/deploy.yml in this repo");
+
+    deployBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("stays enabled when the repo has a deploy.yml", () => {
+    const block = buildChatMenuBlock(baseCtx({ hasDeployWorkflow: true }), vi.fn());
+    document.body.appendChild(block);
+
+    const deployBtn = openAgentAndFindDeploy(block);
+    expect(deployBtn.classList.contains("is-disabled")).toBe(false);
+  });
+
+  it("stays enabled while the gate hasn't resolved yet (undefined = not checked)", () => {
+    const block = buildChatMenuBlock(baseCtx({ hasDeployWorkflow: undefined }), vi.fn());
+    document.body.appendChild(block);
+
+    const deployBtn = openAgentAndFindDeploy(block);
+    expect(deployBtn.classList.contains("is-disabled")).toBe(false);
+  });
+
+  // The phone has no route to the file check, so its cache never fills and
+  // Deploy stays as it was: enabled, with /deploy's own preflight as the gate.
+  it("stays enabled on the phone, where the gate never resolves", () => {
+    isRemoteMock.mockReturnValue(true);
+    const block = buildChatMenuBlock(baseCtx({ hasDeployWorkflow: undefined }), vi.fn());
+    document.body.appendChild(block);
+
+    const deployBtn = openAgentAndFindDeploy(block);
+    expect(deployBtn).toBeDefined();
+    expect(deployBtn.classList.contains("is-disabled")).toBe(false);
   });
 });

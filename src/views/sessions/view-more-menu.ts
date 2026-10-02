@@ -34,6 +34,7 @@ import { loadHiddenSessions } from "./sessions-helpers";
 import { isAutoAccept } from "./permission-modal";
 import { invoke } from "../../shared/ipc";
 import { isRemote } from "../../shared/transport";
+import { cachedHasDeployWorkflow, refreshDeployWorkflowCache } from "./deploy-workflow-gate";
 
 let _whenDoneSubMenu: HTMLElement | null = null;
 
@@ -206,38 +207,44 @@ const viewMenu = createMoreMenu<[]>({
         const sid = state.selectedId;
         const sess = state.sessions.find(s => s.session_id === sid);
         const hiddenSet = loadHiddenSessions();
+        const cwd = sess?.cwd ? String(sess.cwd) : null;
         ctx = {
           kind: "live",
           sessionId: sid,
-          cwd: sess?.cwd ? String(sess.cwd) : null,
+          cwd,
           pid: sess?.pid ?? null,
           readOnly: sess?.kind === "external" || sess?.kind === "automated",
           autoAcceptOn: isAutoAccept(sid),
           isHidden: hiddenSet.has(sid),
           isJarvis: sess?.jarvis === true,
           isFrozen: sess?.frozen === true,
+          hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
           viewChanges: state.activeChatActions?.viewChanges,
           onAfterAction: () => close(),
         };
+        if (!isRemote()) void refreshDeployWorkflowCache(cwd);
       } else {
         // draft
         const pending = state.pendingNewSession!;
+        const cwd = pending.projectPath;
         ctx = {
           kind: "draft",
           sessionId: pending.realId,
-          cwd: pending.projectPath,
+          cwd,
           pid: null,
           readOnly: false,
           autoAcceptOn: false,
           isHidden: false,
           isJarvis: false,
           isFrozen: false,
+          hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
           onDiscard: () => {
             close();
             // Signal sessions.ts to handle draft discard.
             document.dispatchEvent(new CustomEvent("discard-pending-draft"));
           },
         };
+        if (!isRemote()) void refreshDeployWorkflowCache(cwd);
       }
 
       const block = buildChatMenuBlock(ctx, close);

@@ -19,6 +19,8 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
+import { isRemote } from "../../shared/transport";
+import { cachedHasDeployWorkflow, refreshDeployWorkflowCache } from "./deploy-workflow-gate";
 
 let activeCtxMenu: HTMLElement | null = null;
 let rerenderSidebar: (() => void) | null = null;
@@ -58,9 +60,11 @@ export function openDraftCtxMenu(
     isHidden: false,
     isJarvis: false,
     isFrozen: false,
+    hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
     onDiscard: () => { closeCtxMenu(); onDiscard(); },
     onAfterAction: () => closeCtxMenu(),
   };
+  if (!isRemote()) void refreshDeployWorkflowCache(cwd);
 
   const block = buildChatMenuBlock(ctx, closeCtxMenu);
   menu.appendChild(block);
@@ -89,17 +93,19 @@ export function openCtxMenu(
   // and the ChangesPanel is registered.
   const isActive = state.selectedId === sessionId;
   const viewChanges = isActive ? state.activeChatActions?.viewChanges : undefined;
+  const cwd = sess.cwd ? String(sess.cwd) : null;
 
   const ctx: ChatMenuCtx = {
     kind: "live",
     sessionId,
-    cwd: sess.cwd ? String(sess.cwd) : null,
+    cwd,
     pid: sess.pid ?? null,
     readOnly: sess.kind === "external" || sess.kind === "automated",
     autoAcceptOn: isAutoAccept(sessionId),
     isHidden,
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,
+    hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
     viewChanges,
     onAfterAction: () => {
       closeCtxMenu();
@@ -107,6 +113,7 @@ export function openCtxMenu(
     },
     onDiscard: undefined,
   };
+  if (!isRemote()) void refreshDeployWorkflowCache(cwd);
 
   const block = buildChatMenuBlock(ctx, closeCtxMenu);
 

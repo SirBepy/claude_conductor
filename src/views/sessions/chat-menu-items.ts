@@ -38,6 +38,11 @@ export interface ChatMenuCtx {
    *  only offered for Interactive sessions - callers gate that via `readOnly`
    *  (true for external/automated), same as every other agent-only action. */
   isFrozen?: boolean;
+  /** Cache read from deploy-workflow-gate.ts, keyed off `cwd`. Undefined (not
+   *  checked yet) or true -> Deploy stays enabled; false -> disabled with a
+   *  tooltip, same pattern as every other gated item in this submenu. Always
+   *  undefined on the phone, which has no route to the file check. */
+  hasDeployWorkflow?: boolean;
   viewChanges?: () => void;
   onAfterAction?: () => void;
   onDiscard?: () => void;
@@ -239,7 +244,7 @@ export function buildAgentItems(ctx: ChatMenuCtx): ItemDesc[] {
   const isDraft = ctx.kind === "draft";
   const sessionId = ctx.sessionId;
   const cwd = ctx.cwd;
-  return [
+  const items: ItemDesc[] = [
     {
       icon: "copy",
       label: "Copy PID",
@@ -259,14 +264,17 @@ export function buildAgentItems(ctx: ChatMenuCtx): ItemDesc[] {
           },
       disabledReason: isDraft ? "No active agent" : (!sessionId ? "No session" : undefined),
     },
-    {
+  ];
+
+  const gatedOff = ctx.hasDeployWorkflow === false;
+  items.push({
       // Injects the literal `/deploy` (never `/deploy go`) - the skill's own
       // step 2 shows the repo/branch/sha/subject and asks to confirm before
       // it does anything, so the confirmation lives there, with more context
       // than a menu item could show, not duplicated here.
       icon: "rocket-launch",
       label: "Deploy",
-      run: isDraft || !sessionId || ctx.readOnly
+      run: isDraft || !sessionId || ctx.readOnly || gatedOff
         ? undefined
         : async () => {
             const blocks: ContentBlock[] = [{ type: "text", text: "/deploy" }];
@@ -280,7 +288,9 @@ export function buildAgentItems(ctx: ChatMenuCtx): ItemDesc[] {
           },
       disabledReason: isDraft
         ? "No active agent"
-        : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" : undefined)),
-    },
-  ];
+        : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" :
+            (gatedOff ? "No .github/workflows/deploy.yml in this repo" : undefined))),
+  });
+
+  return items;
 }
