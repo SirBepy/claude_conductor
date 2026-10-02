@@ -10,7 +10,7 @@ import { mountView, invokeCalls } from "./harness";
 // The projects root shown in the Create row uses wording L2 - the path itself
 // is the control, so there is no label to word ambiguously.
 //
-// asserts: src/views/sessions/project-picker.ts, src/views/sessions/projects-root.ts
+// asserts: src/views/sessions/project-picker.ts, src/views/sessions/project-picker/add-project.ts, src/views/sessions/projects-root.ts
 
 const ROOT = "C:\\Users\\tecno\\Desktop\\Projects";
 

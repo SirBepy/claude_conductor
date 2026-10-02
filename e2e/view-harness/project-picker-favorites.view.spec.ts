@@ -8,7 +8,7 @@ import { mountView } from "./harness";
 // through the picker and skips the Location step, and that the drag gestures
 // (assign / move / remove) actually reach the model.
 //
-// asserts: src/views/sessions/project-picker.ts, src/views/sessions/project-favorites.ts
+// asserts: src/views/sessions/project-picker.ts, src/views/sessions/project-picker/favorites-rail.ts, src/views/sessions/project-favorites.ts
 
 const FAVORITES_KEY = "claude_companion_project_favorites";
 
