@@ -47,6 +47,22 @@ test.describe("view-harness / sidebar Hidden group pinned to the bottom", () => 
     expect(m.isLast).toBe(true);
   });
 
+  test("phone width: the list keeps its bottom clearance for the new-chat FAB", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await seedHidden(page);
+    await mountSessionsList(page, sessions(2));
+    const pad = await page.evaluate(() => getComputedStyle(document.querySelector("#sessions-list")!).paddingBottom);
+    expect(pad).toBe("84px");
+  });
+
+  test("desktop: no FAB, so no bottom clearance under Hidden", async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await seedHidden(page);
+    await mountSessionsList(page, sessions(2));
+    const pad = await page.evaluate(() => getComputedStyle(document.querySelector("#sessions-list")!).paddingBottom);
+    expect(pad).toBe("0px");
+  });
+
   test("short window: rows keep their height and Hidden scrolls in last", async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 360 });
     await seedHidden(page);

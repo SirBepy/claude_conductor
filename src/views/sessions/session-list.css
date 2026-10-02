@@ -50,9 +50,6 @@
 
 @media (max-width: 640px) {
   .sessions-fab { display: flex; }
-  /* Clears the floating "new chat" CTA so the last chat row can always
-     scroll out from under it. */
-  .sessions-list { padding-bottom: 84px; }
 }
 
 .sessions-fab:hover {
@@ -117,6 +114,12 @@
   /* Positioning context for exiting rows, which are pinned position:absolute
      and slid out of flow so survivors reflow up (see sidebar-anim.ts). */
   position: relative;
+}
+
+/* After the base rule, or its `padding: 0` wins. Clears the floating "new
+   chat" CTA so the last chat row can always scroll out from under it. */
+@media (max-width: 640px) {
+  .sessions-list { padding-bottom: 84px; }
 }
 
 .sessions-list li {
