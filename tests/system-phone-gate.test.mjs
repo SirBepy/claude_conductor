@@ -32,6 +32,29 @@ describe("system settings screen on the phone", () => {
     dispose();
   });
 
+  // get_storage_info has no remote case, so rendering this section on the
+  // phone only logged a RemoteUnavailableError over an empty card list.
+  it("hides Data & storage and never asks for storage info when remote", async () => {
+    remote = true;
+    const api = (await import("../src/shared/api.ts")).api;
+    const spy = vi.spyOn(api, "getStorageInfo");
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const dispose = await renderSystemView(root);
+    expect(root.querySelector("#dataSection")).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    dispose();
+  });
+
+  it("shows Data & storage when not remote", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const dispose = await renderSystemView(root);
+    expect(root.querySelector("#dataSection")).not.toBeNull();
+    dispose();
+  });
+
   it("shows the launch-at-login toggle when not remote", async () => {
     const root = document.createElement("div");
     document.body.appendChild(root);

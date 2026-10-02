@@ -319,12 +319,12 @@ export async function renderSystemView(root: HTMLElement): Promise<() => void> {
   const shortcutsContainer = root.querySelector<HTMLElement>("#system-shortcuts-container");
   const cleanupShortcuts = shortcutsContainer ? renderShortcutsSection(shortcutsContainer) : () => {};
 
-  // Fresh container each render -> rebind the delegated Data listeners.
-  dataWired = false;
-  try { await refreshDataSection(); }
-  catch (e) { console.error("[settings-system data] render failed", e); }
-
   if (!isRemote()) {
+    // Fresh container each render -> rebind the delegated Data listeners.
+    dataWired = false;
+    try { await refreshDataSection(); }
+    catch (e) { console.error("[settings-system data] render failed", e); }
+
     apiKeysWired = false;
     try { await refreshApiKeysSection(); }
     catch (e) { console.error("[settings-system api-keys] render failed", e); }
@@ -360,16 +360,16 @@ function template(autostart: boolean, nightly: NightlyWhenDone) {
             <div class="kit-section-title">API keys</div>
             <div id="apiKeysList" class="api-keys-list"></div>
           </div>
-        `}
 
-        <div class="kit-section" id="dataSection">
-          <div class="kit-section-title">Data &amp; storage</div>
-          <!-- Cards injected as a plain innerHTML string (NOT a lit .map):
-               production lit-html silently drops repeated/nested templates
-               containing a <select>. See project memory. -->
-          <div id="dataCards" class="data-cards"></div>
-          <div id="dataTotal" class="data-total"></div>
-        </div>
+          <div class="kit-section" id="dataSection">
+            <div class="kit-section-title">Data &amp; storage</div>
+            <!-- Cards injected as a plain innerHTML string (NOT a lit .map):
+                 production lit-html silently drops repeated/nested templates
+                 containing a <select>. See project memory. -->
+            <div id="dataCards" class="data-cards"></div>
+            <div id="dataTotal" class="data-total"></div>
+          </div>
+        `}
 
       </div>
     </div>
