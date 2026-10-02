@@ -27,6 +27,7 @@
 .EXAMPLE
   scripts\live-verify.ps1 up
   scripts\live-verify.ps1 up -Monitor 2
+  scripts\live-verify.ps1 up -SkipBuild
   scripts\live-verify.ps1 eval 0 "document.title"
   scripts\live-verify.ps1 eval 0 -File .for_bepy\probe.js
   scripts\live-verify.ps1 shot 0 .for_bepy\screenshots\795\window.png
@@ -51,7 +52,12 @@ param(
 
     # 1-based index into [System.Windows.Forms.Screen]::AllScreens, or 0 to
     # leave placement alone. Only ever applied to the PID this script started.
-    [int]$Monitor = 0
+    [int]$Monitor = 0,
+
+    # Launch the existing debug exe even if Rust sources are newer. The webview
+    # loads the frontend from vite, so a frontend-only check never needs the
+    # rebuild - useful when another session holds the exe and blocks one.
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -191,6 +197,15 @@ function Stop-RigTrackedProcess {
     }
 }
 
+# Every session shares one cargo target dir, so a debug instance launched straight from it (a
+# peer's `cargo tauri dev`, a wdio run, a daemon spawned by either) holds the exe open, and
+# cargo's relink then dies with a bare "Access is denied" that names nobody.
+function Get-ExeHolders([string]$path) {
+    $target = [System.IO.Path]::GetFullPath($path)
+    return (Get-CimInstance Win32_Process -Filter "Name='claude-conductor.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target) })
+}
+
 function Test-HttpUp([string]$url) {
     try {
         $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
@@ -305,10 +320,19 @@ switch ($Command) {
 
         if (-not (Test-Path $exePath)) {
             $exeStale = $true
+        } elseif ($SkipBuild) {
+            $exeStale = $false
         } else {
             $exeStale = (Get-Item $exePath).LastWriteTime -lt $newestSrc
         }
         if ($exeStale) {
+            # @() at the call site: PowerShell unrolls a one-element return, and a lone
+            # CimInstance reports no .Count.
+            $holders = @(Get-ExeHolders $exePath)
+            if ($holders.Count -gt 0) {
+                $list = ($holders | ForEach-Object { "  pid $($_.ProcessId): $($_.CommandLine)" }) -join "`n"
+                throw "Debug exe needs a rebuild but is held open by another process, so cargo cannot relink it:`n$list`nThese belong to another session; this script never stops them. Wait for them to exit, ask their owner, pass -SkipBuild for a frontend-only check, or set CARGO_TARGET_DIR to a private dir for this rig (a cold build)."
+            }
             Write-Host 'Debug exe stale or missing, building...'
             cargo build --manifest-path (Join-Path $repoRoot 'src-tauri\Cargo.toml')
             if ($LASTEXITCODE -ne 0) { throw "cargo build failed with exit code $LASTEXITCODE" }
@@ -316,6 +340,20 @@ switch ($Command) {
             Write-Host 'Debug exe up to date, skipping build.'
         }
         if (-not (Test-Path $exePath)) { throw "Debug exe still missing at $exePath after build" }
+
+        # The rig runs a private copy so it never holds the shared exe itself: the next rebuild,
+        # by any session, can always relink it. A fresh dir per launch because the rig's detached
+        # daemon can outlive `down` and keep its own copy locked; the sweep skips those.
+        $binRoot = Join-Path $stateDir 'bin'
+        if (Test-Path $binRoot) {
+            foreach ($old in Get-ChildItem -Path $binRoot -Directory) {
+                try { Remove-Item -Path $old.FullName -Recurse -Force -ErrorAction Stop } catch { }
+            }
+        }
+        $runDir = Join-Path $binRoot ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+        $runExe = Join-Path $runDir 'claude-conductor.exe'
+        Copy-Item -Path $exePath -Destination $runExe
 
         if ($Port -eq 0) {
             $Port = Get-Random -Minimum 49200 -Maximum 65500
@@ -356,7 +394,7 @@ switch ($Command) {
         $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
         $appOutLog = Join-Path $logDir 'app.out.log'
         $appErrLog = Join-Path $logDir 'app.err.log'
-        $appProc = Start-Process -FilePath $exePath -PassThru -WindowStyle Hidden `
+        $appProc = Start-Process -FilePath $runExe -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $appOutLog -RedirectStandardError $appErrLog
         Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
 
@@ -372,7 +410,7 @@ switch ($Command) {
             Port             = $Port
             InstanceLabel    = $InstanceLabel
             WebView2Folder   = $webview2Folder
-            ExePath          = $exePath
+            ExePath          = $runExe
             AppPid           = $appProc.Id
             AppCreationTime  = $(if ($appIdentity) { $appIdentity.CreationTime } else { $null })
             AppExePath       = $(if ($appIdentity) { $appIdentity.ExePath } else { $null })
