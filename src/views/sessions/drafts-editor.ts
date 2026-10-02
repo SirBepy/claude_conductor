@@ -7,8 +7,9 @@ import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
+import { currentVersion, handleOf, copyDualPayload } from "../../shared/message-draft-utils";
 import type { MessageDraft, DraftVariant } from "../../types/ipc.generated";
-import { buildRevisionPrompt, presetAsk, reviseMenuHtml, sendRevision } from "./drafts-revise";
+import { ReviseMenuController } from "./drafts-revise";
 
 /** Long enough that a normal sentence pause does not round-trip to the daemon;
  *  the store coalesces anyway, so this only trades chattiness for latency. */
@@ -30,14 +31,6 @@ const MARKS = [
   { cmd: "insertOrderedList", icon: "ph-list-numbers", title: "Numbered" },
 ] as const;
 
-export function currentVersion(variant: DraftVariant) {
-  return variant.versions.find((v) => v.n === variant.current) ?? variant.versions[variant.versions.length - 1];
-}
-
-export function handleOf(variant: DraftVariant): string {
-  return `${variant.recipient} #${variant.handle_n}`;
-}
-
 export class DraftsEditor {
   private root: HTMLElement;
   private deps: DraftsEditorDeps;
@@ -50,16 +43,21 @@ export class DraftsEditor {
   /** Consecutive failed autosaves. One toast at the 3rd, not one per retry
    *  (the timer keeps retrying every AUTOSAVE_MS while the user keeps typing). */
   private autosaveFailures = 0;
-  private reviseOpen = false;
-  /** The body selection at the moment Revise was pressed; opening the menu
-   *  moves focus, so it cannot be read later. */
-  private reviseScope = "";
+  private reviseMenu: ReviseMenuController;
 
   constructor(root: HTMLElement, draft: MessageDraft, deps: DraftsEditorDeps) {
     this.root = root;
     this.deps = deps;
     this.draft = draft;
     this.recipient = draft.variants[0]?.recipient ?? "";
+    this.reviseMenu = new ReviseMenuController({
+      root: this.root,
+      bodyEl: () => this.bodyEl(),
+      draft: () => this.draft,
+      variant: () => this.variant(),
+      sessionId: this.deps.sessionId,
+      flush: () => this.flush(),
+    });
     this.render();
     this.root.addEventListener("click", this.onClick);
     this.root.addEventListener("input", this.onInput);
@@ -88,7 +86,7 @@ export class DraftsEditor {
     this.root.removeEventListener("change", this.onChange);
     this.root.removeEventListener("pointerdown", this.onPointerDown);
     this.root.removeEventListener("keydown", this.onKeydown);
-    document.removeEventListener("pointerdown", this.onOutside, true);
+    this.reviseMenu.destroy();
   }
 
   /** Writes any pending edit now. Called on teardown and before navigating
@@ -153,7 +151,7 @@ export class DraftsEditor {
       `</div>` +
       `<div class="dr-body" contenteditable="true" spellcheck="true">${renderMarkdown(markdown)}</div>` +
       this.footHtml() +
-      `<div class="dr-rv-host">${this.reviseOpen ? reviseMenuHtml(!!this.reviseScope) : ""}</div>`;
+      `<div class="dr-rv-host">${this.reviseMenu.menuHtml()}</div>`;
   }
 
   /** Repaints everything except the contenteditable, so a live update can land
@@ -205,7 +203,7 @@ export class DraftsEditor {
     return (
       `<div class="dr-foot">` +
         `<button type="button" class="dr-btn dr-primary" data-copy><i class="ph ph-copy"></i> Copy</button>` +
-        `<button type="button" class="dr-btn${this.reviseOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
+        `<button type="button" class="dr-btn${this.reviseMenu.isOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
           `title="Ask Claude to rework it - the highlighted part, or the whole draft">` +
           `<i class="ph ph-magic-wand"></i> Revise <i class="ph ph-caret-up dr-caret"></i></button>` +
         `<span class="dr-grow"></span>` +
@@ -259,16 +257,7 @@ export class DraftsEditor {
       this.copy(el.closest("[data-copy]") as HTMLElement);
       return;
     }
-    if (el.closest("[data-revise]")) {
-      this.setReviseOpen(!this.reviseOpen);
-      return;
-    }
-    const preset = el.closest<HTMLElement>("[data-revise-preset]");
-    if (preset) {
-      const ask = presetAsk(preset.dataset.revisePreset ?? "");
-      if (ask) this.revise(ask);
-      return;
-    }
+    if (this.reviseMenu.handleClick(el)) return;
     if (el.closest("[data-ready]")) {
       this.setState(this.draft.state === "ready" ? "needs-you" : "ready");
       return;
@@ -287,76 +276,18 @@ export class DraftsEditor {
     }
   };
 
-  /** Keeps the body's selection alive through the Revise click and records
-   *  it, since a focused button or menu input would collapse it. */
+  /** Forwards to the Revise menu controller: it alone decides whether this
+   *  click is its own (the body's selection capture, right before a focused
+   *  button would collapse it). */
   private onPointerDown = (ev: PointerEvent): void => {
-    if (!(ev.target as HTMLElement).closest("[data-revise]") || this.reviseOpen) return;
-    ev.preventDefault();
-    const sel = window.getSelection();
-    const body = this.bodyEl();
-    const inBody = !!sel && sel.rangeCount > 0 && !!body?.contains(sel.getRangeAt(0).commonAncestorContainer);
-    this.reviseScope = inBody && !sel!.isCollapsed ? sel!.toString() : "";
+    this.reviseMenu.capturePointerDown(ev);
   };
 
   private onKeydown = (ev: KeyboardEvent): void => {
-    const input = (ev.target as HTMLElement).closest<HTMLInputElement>("[data-revise-free]");
-    if (!input) return;
-    if (ev.key === "Escape") {
-      ev.stopPropagation();
-      this.setReviseOpen(false);
-    } else if (ev.key === "Enter" && input.value.trim()) {
-      ev.preventDefault();
-      this.revise(input.value);
-    }
+    this.reviseMenu.handleKeydown(ev);
   };
-
-  private onOutside = (ev: PointerEvent): void => {
-    const el = ev.target as HTMLElement;
-    if (el.closest(".dr-rv-menu") || el.closest("[data-revise]")) return;
-    this.setReviseOpen(false);
-  };
-
-  private setReviseOpen(open: boolean): void {
-    this.reviseOpen = open;
-    if (!open) this.reviseScope = "";
-    const host = this.root.querySelector(".dr-rv-host");
-    if (host) host.innerHTML = open ? reviseMenuHtml(!!this.reviseScope) : "";
-    this.root.querySelector("[data-revise]")?.classList.toggle("open", open);
-    if (open) document.addEventListener("pointerdown", this.onOutside, true);
-    else document.removeEventListener("pointerdown", this.onOutside, true);
-  }
 
   // ── Actions ─────────────────────────────────────────────────────────────
-
-  /** Saves the open edit first so the chat revises what is on screen, not
-   *  the last autosave. */
-  private revise(instruction: string): void {
-    const body = this.bodyEl();
-    const variant = this.variant();
-    if (!body || !variant) return;
-    this.flush();
-    const text = buildRevisionPrompt(
-      {
-        topic: this.draft.topic,
-        handle: handleOf(variant),
-        version: currentVersion(variant)?.n ?? 1,
-        body: htmlToMarkdown(body),
-        selection: this.reviseScope,
-      },
-      instruction,
-    );
-    this.setReviseOpen(false);
-    void sendRevision(this.draft.origin_session_id, this.deps.sessionId, text).then((sent) => {
-      if (!sent) return;
-      const icon = this.root.querySelector("[data-revise] i");
-      if (!icon) return;
-      icon.className = "ph ph-check";
-      setTimeout(() => {
-        const back = this.root.querySelector("[data-revise] i");
-        if (back) back.className = "ph ph-magic-wand";
-      }, 1500);
-    });
-  }
 
   /** No execCommand for inline code, so the selection is wrapped by hand. */
   private wrapCode(): void {
@@ -373,32 +304,13 @@ export class DraftsEditor {
     this.onInput();
   }
 
-  /** Both payloads in one write: Slack and Google Chat read the tags, a plain
-   *  field gets the markdown rather than stripped mush. */
   private copy(btn: HTMLElement): void {
     const body = this.bodyEl();
     if (!body) return;
     this.flush();
     const html = body.innerHTML;
     const plain = htmlToMarkdown(body);
-    const done = () => {
-      const icon = btn.querySelector("i");
-      if (icon) icon.className = "ph ph-check";
-      setTimeout(() => {
-        const back = btn.querySelector("i");
-        if (back) back.className = "ph ph-copy";
-      }, 1500);
-      this.setState("copied");
-    };
-    void navigator.clipboard
-      .write([
-        new ClipboardItem({
-          "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([plain], { type: "text/plain" }),
-        }),
-      ])
-      .then(done)
-      .catch(() => void navigator.clipboard.writeText(plain).then(done));
+    copyDualPayload(html, plain, btn, () => this.setState("copied"));
   }
 
   private setState(next: string): void {

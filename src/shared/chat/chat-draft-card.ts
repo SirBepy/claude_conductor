@@ -13,6 +13,7 @@ import { invoke } from "../ipc";
 import { getTransport, type Unlisten } from "../transport";
 import { escapeHtml } from "../escape-html";
 import { asObj, strField } from "../obj-utils";
+import { currentVersion, handleOf, copyDualPayload } from "../message-draft-utils";
 import { renderMarkdown } from "./chat-transforms";
 import type { RenderedMessage } from "./chat-classifiers";
 import type { ContentBlock, MessageDraft, DraftVariant } from "../../types/ipc.generated";
@@ -26,17 +27,6 @@ export const DRAFT_OPEN_EVENT = "cc-draft-open";
  *  to markdown and losing whatever the round-trip cannot express. Keyed by
  *  element, so a row the renderer replaced drops out on its own. */
 const markdownOf = new WeakMap<HTMLElement, string>();
-
-/** Mirrors drafts-editor.ts's own helper. Duplicated rather than imported:
- *  `shared/chat` must not reach into `views/sessions`, and the panel module
- *  pulls in the whole contenteditable editor. */
-function currentVersion(variant: DraftVariant) {
-  return variant.versions.find((v) => v.n === variant.current) ?? variant.versions[variant.versions.length - 1];
-}
-
-function handleOf(variant: DraftVariant): string {
-  return `${variant.recipient} #${variant.handle_n}`;
-}
 
 /** The `kind:"draft"` row's own fields, read off the tool_use input. Shared by
  *  the live and scrollback paths so the two can never drift.
@@ -245,35 +235,18 @@ export async function ensureDraftCardsLive(): Promise<void> {
   }
 }
 
-/** Both payloads in one write, mirroring drafts-editor.ts's Copy: Slack and
- *  Google Chat read the tags, a plain field gets the markdown rather than
- *  stripped mush. Flips the draft to `copied`, which is also what drops it out
- *  of the per-turn injection. */
+/** Flips the draft to `copied`, which is also what drops it out of the
+ *  per-turn injection. */
 export function copyDraftCard(el: HTMLElement, btn: HTMLElement): void {
   const body = el.querySelector<HTMLElement>(".dc-body");
   if (!body) return;
   const html = body.innerHTML;
   const plain = markdownOf.get(el) ?? (body.textContent ?? "").trim();
-  const done = (): void => {
-    const icon = btn.querySelector("i");
-    if (icon) icon.className = "ph ph-check";
-    setTimeout(() => {
-      const back = btn.querySelector("i");
-      if (back) back.className = "ph ph-copy";
-    }, 1500);
+  copyDualPayload(html, plain, btn, () => {
     const id = el.dataset.draftId;
     const sessionId = el.dataset.draftSession;
     if (!id || !sessionId) return;
     void invoke("set_draft_state", { sessionId, id, next: "copied" })
       .catch((err) => console.error("[draft-card] set_draft_state failed", err));
-  };
-  void navigator.clipboard
-    .write([
-      new ClipboardItem({
-        "text/html": new Blob([html], { type: "text/html" }),
-        "text/plain": new Blob([plain], { type: "text/plain" }),
-      }),
-    ])
-    .then(done)
-    .catch(() => void navigator.clipboard.writeText(plain).then(done));
+  });
 }

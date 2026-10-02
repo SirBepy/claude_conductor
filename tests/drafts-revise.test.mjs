@@ -5,12 +5,25 @@
 // per-turn injection only has an excerpt) and, when text was highlighted,
 // confine the change to that span.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { invokeMock, sendMock } = vi.hoisted(() => ({ invokeMock: vi.fn(), sendMock: vi.fn() }));
+// sendRevision's own send path (sessionEvents + sendWithFailureRecovery) is
+// exercised for real; only the daemon-facing leaf is mocked. The Revise menu's
+// open/scope/send wiring (`ReviseMenuController`) now lives in drafts-revise.ts
+// itself, so a prior version of this test that mocked `sendRevision` as seen
+// by drafts-editor.ts's import no longer intercepts anything: the controller
+// calls the module-local `sendRevision` directly, not through its own export.
+const { invokeMock, sendWithFailureRecoveryMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  sendWithFailureRecoveryMock: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
+vi.mock("../src/views/sessions/send-with-failure-recovery.ts", () => ({
+  sendWithFailureRecovery: (...a) => sendWithFailureRecoveryMock(...a),
+}));
 
 const { buildRevisionPrompt, presetAsk, REVISE_PRESETS } = await import("../src/views/sessions/drafts-revise.ts");
+const { state } = await import("../src/views/sessions/state.ts");
 
 const target = {
   topic: "Deploy slip",
@@ -54,18 +67,24 @@ describe("presets", () => {
 });
 
 describe("DraftsEditor Revise menu", () => {
+  const priorSessions = state.sessions;
+
   beforeEach(() => {
-    vi.resetModules();
     invokeMock.mockReset().mockResolvedValue(undefined);
-    sendMock.mockReset().mockResolvedValue(true);
+    sendWithFailureRecoveryMock.mockReset().mockResolvedValue(undefined);
+    // The draft's origin_session_id ("origin") is deliberately absent, so
+    // sendRevision must fall back to the editor's own sessionId ("here") -
+    // exercising the same fallback this test exercised when `sendRevision`
+    // itself was mocked, before the Revise wiring moved into drafts-revise.ts.
+    state.sessions = [{ session_id: "here", cwd: "/tmp" }];
     document.body.innerHTML = "";
   });
 
+  afterEach(() => {
+    state.sessions = priorSessions;
+  });
+
   async function mountEditor() {
-    vi.doMock("../src/views/sessions/drafts-revise.ts", async (orig) => ({
-      ...(await orig()),
-      sendRevision: (...a) => sendMock(...a),
-    }));
     const { DraftsEditor } = await import("../src/views/sessions/drafts-editor.ts");
     const root = document.createElement("div");
     document.body.appendChild(root);
@@ -100,10 +119,10 @@ describe("DraftsEditor Revise menu", () => {
     expect(items.length).toBe(5);
 
     root.querySelector('[data-revise-preset="shorter"]').click();
-    expect(sendMock).toHaveBeenCalledTimes(1);
-    const [origin, fallback, text] = sendMock.mock.calls[0];
-    expect(origin).toBe("origin");
-    expect(fallback).toBe("here");
+    await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
+    const [sessionId, , blocks] = sendWithFailureRecoveryMock.mock.calls[0];
+    expect(sessionId).toBe("here");
+    const text = blocks[0].text;
     expect(text).toContain("[re: draft Bruno #2 v1 - Deploy slip]");
     expect(text).toContain("Make it shorter.");
     expect(root.querySelector(".dr-rv-menu")).toBeNull();
@@ -115,7 +134,38 @@ describe("DraftsEditor Revise menu", () => {
     const input = root.querySelector("[data-revise-free]");
     input.value = "Mention the Thursday date";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(sendMock).toHaveBeenCalledTimes(1);
-    expect(sendMock.mock.calls[0][2]).toContain("Mention the Thursday date");
+    await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
+    expect(sendWithFailureRecoveryMock.mock.calls[0][2][0].text).toContain("Mention the Thursday date");
+  });
+
+  it("closes on an outside click", async () => {
+    const root = await mountEditor();
+    root.querySelector("[data-revise]").click();
+    expect(root.querySelector(".dr-rv-menu")).not.toBeNull();
+
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    expect(root.querySelector(".dr-rv-menu")).toBeNull();
+    expect(root.querySelector("[data-revise]").classList.contains("open")).toBe(false);
+  });
+
+  it("scopes the prompt to the highlighted span, captured before the click collapses it", async () => {
+    const root = await mountEditor();
+    const body = root.querySelector(".dr-body");
+    const textNode = document.createTreeWalker(body, NodeFilter.SHOW_TEXT).nextNode();
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, "Hey".length);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    const reviseBtn = root.querySelector("[data-revise]");
+    reviseBtn.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    reviseBtn.click();
+    root.querySelector('[data-revise-preset="shorter"]').click();
+
+    await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
+    const text = sendWithFailureRecoveryMock.mock.calls[0][2][0].text;
+    expect(text).toContain("Only change this part, leave the rest as it is:\n> Hey");
   });
 });

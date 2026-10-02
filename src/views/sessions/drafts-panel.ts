@@ -5,7 +5,8 @@
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import { escapeHtml } from "../../shared/escape-html";
-import { DraftsEditor, handleOf, currentVersion } from "./drafts-editor";
+import { DraftsEditor } from "./drafts-editor";
+import { handleOf, currentVersion } from "../../shared/message-draft-utils";
 import type { MessageDraft } from "../../types/ipc.generated";
 import "./drafts-panel.css";
 
