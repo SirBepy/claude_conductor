@@ -32,6 +32,19 @@ use std::time::Duration;
 mod support;
 use support::ChildGuard;
 
+/// Each live test runs a real claude turn against its own daemon. Run in
+/// parallel (cargo's default), three daemons and three claude processes at
+/// once pushed replies past `drain_for_reply`'s budget, so every test holds
+/// this for its whole body and the documented command needs no
+/// `--test-threads=1`. Each test owns its runtime and thread, so a blocking
+/// std lock held across awaits stalls nothing else.
+static LIVE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serialize_live_test() -> std::sync::MutexGuard<'static, ()> {
+    // A panicking test poisons the lock; the next one should still run.
+    LIVE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn daemon_exe() -> std::path::PathBuf {
     // Derived from this test binary's own path, so a `CARGO_TARGET_DIR`
     // override (e.g. to dodge a running daemon's lock) is honored for free.
@@ -166,6 +179,7 @@ fn test_account_id() -> Option<String> {
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
 async fn scheduled_message_fires_via_tick_loop() {
+    let _serial = serialize_live_test();
     const INSTANCE: &str = "test-schedule-msg";
     let Some(account_id) = test_account_id() else {
         eprintln!("SKIP: no accounts registered - add one before running this suite");
@@ -248,6 +262,7 @@ async fn scheduled_message_fires_via_tick_loop() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
 async fn fire_now_spawns_scheduled_new_chat() {
+    let _serial = serialize_live_test();
     const INSTANCE: &str = "test-schedule-newchat";
     let Some(account_id) = test_account_id() else {
         eprintln!("SKIP: no accounts registered - add one before running this suite");
@@ -428,6 +443,7 @@ fn find_by_marker(store: &std::path::Path, marker: &str) -> Option<scheduled_ite
 #[tokio::test(flavor = "current_thread")]
 #[ignore]
 async fn schedule_mcp_tool_add_inject_cancel_live() {
+    let _serial = serialize_live_test();
     const INSTANCE: &str = "test-schedule-mcp";
     let Some(account_id) = test_account_id() else {
         eprintln!("SKIP: no accounts registered - add one before running this suite");
