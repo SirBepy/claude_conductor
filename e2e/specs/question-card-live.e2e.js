@@ -1,6 +1,6 @@
 // BILLED e2e proof (ai_todo 16, 681, 905), two real haiku turns each on a
 // fresh session: 1) a canary that the builtin AskUserQuestion tool is still
-// disallowed at spawn (`--disallowedTools AskUserQuestion`, claude_config.rs)
+// disallowed at spawn (`--disallowedTools AskUserQuestion`, claude_config/args.rs)
 // - it must resolve in plain text, never a card, since the model can never
 // even emit that call. The PreToolUse hook's own fallback-card behaviour for
 // a builtin call (redirect x2, degrade on the 3rd) is unreachable from a live
@@ -96,7 +96,7 @@ describe("AskUserQuestion full real-path (BILLED)", () => {
     // which renders a legitimate card, so the prompt forbids that fallback.
     await sendMessage("Use the built-in AskUserQuestion tool to ask me whether I prefer tabs or spaces. If that exact tool is not available to you, tell me UNAVAILABLE and do not ask through any other question tool, such as mcp__cc_conductor__ask_user_question.");
 
-    // `--disallowedTools AskUserQuestion` (claude_config.rs) means the model
+    // `--disallowedTools AskUserQuestion` (claude_config/args.rs) means the model
     // can never emit this call at all - it must resolve entirely in text.
     // This exists to catch a REGRESSION where the disallow silently stops
     // being passed at spawn; the PreToolUse hook's own fallback-card

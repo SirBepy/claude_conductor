@@ -5,7 +5,7 @@
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Mirrors main.rs's `--mcp-permission` branch: when this bin is the
-    // daemon, `claude_config.rs` builds the per-turn MCP server command from
+    // daemon, `daemon/claude_config/` builds the per-turn MCP server command from
     // `current_exe()`, so it resolves here. Checked before the runtime below
     // exists, because `run_stdio()` builds its own and nested runtimes panic.
     if std::env::args().any(|a| a == "--mcp-permission") {

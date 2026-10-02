@@ -439,16 +439,12 @@ async fn schedule_mcp_tool_add_inject_cancel_live() {
 
     let cwd = std::env::temp_dir();
     let cwd_str = cwd.to_string_lossy().to_string();
-    // auto_accept: true - unlike tests 1/2 above, this turn calls the real
-    // `schedule` MCP tool, which is not in claude_config's PRETRUSTED_TOOLS
-    // list and so goes through the blocking permission relay
-    // (hooks_server/permission.rs::on_permission_request). That relay only
-    // server-side auto-accepts a non-question-shaped tool call when this
-    // session's persisted auto_accept flag is set; false here would leave the
-    // tool call blocked on a human answer this test never provides, hanging
-    // until PROMPT_TIMEOUT (3600s). Confirmed live: the first run of this
-    // test with auto_accept=false stalled after one tool_use with no
-    // tool_result until the test's own 120s drain deadline.
+    // auto_accept: true - this turn calls the real `schedule` MCP tool, which
+    // is in claude_config's PRETRUSTED_TOOLS and so skips the blocking
+    // permission relay (hooks_server/permission.rs::on_permission_request).
+    // auto_accept stays on as a second guard: if `schedule` ever drops out of
+    // that list, a false here would block the tool call on a human answer this
+    // test never provides, stalling to the 120s drain deadline.
     let session_id = client
         .start_session(&cwd_str, "haiku", "low", None, Some(&account_id), true, None)
         .await
