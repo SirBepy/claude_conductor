@@ -5,6 +5,7 @@
 
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
+use crate::daemon::state::DaemonState;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -55,6 +56,37 @@ fn is_auto_accept_eligible(auto_accept: bool, input: &Value) -> bool {
     auto_accept && !super::question::is_question_shaped(input)
 }
 
+/// Serializes a second concurrent permission prompt for one session behind
+/// the first (todo 978). Unlike questions, permission prompts have no
+/// sibling-queue machinery anywhere - the daemon registered and published
+/// every one unconditionally, with zero exclusion against another one for
+/// the same session, and the frontend's permission modal only ever renders
+/// a single record, so a second concurrent approval request could end up
+/// silently unreachable. Whether Claude Code's CLI ever actually fires two
+/// concurrent `approval_prompt` calls in one turn could not be settled from
+/// this repo (todo 978's own finding); this guard makes the daemon safe
+/// either way instead of resting on the unverified belief.
+///
+/// Polls rather than a notify/condvar: this only ever runs behind an
+/// already-blocking HTTP call (the CLI hook's `curl`), so a few hundred ms
+/// of extra latency on the rare genuinely-concurrent pair is free. Bounded
+/// by `PROMPT_TIMEOUT` so a permanently-stuck first prompt (ghost, daemon
+/// restart) can't wedge the second one forever - it gives up and denies,
+/// the same shape as the ordinary `await_answer` timeout.
+///
+/// Returns `true` once the session has no open permission prompt (the slot
+/// is free), `false` if the wait timed out.
+async fn wait_for_permission_slot(state: &Arc<DaemonState>, session_id: &str) -> bool {
+    let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
+    while state.session_has_pending_permission(session_id).await {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    true
+}
+
 pub(super) async fn on_permission_request(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<PermRequestBody>,
@@ -75,6 +107,17 @@ pub(super) async fn on_permission_request(
             body.id, body.tool_name, body.session_id
         );
         return (StatusCode::OK, Json(json!({"behavior": "allow", "updatedInput": body.input})));
+    }
+    if let Some(sid) = body.session_id.as_deref() {
+        if !wait_for_permission_slot(&ctx.state, sid).await {
+            return (
+                StatusCode::OK,
+                Json(json!({
+                    "behavior": "deny",
+                    "message": "a prior permission prompt for this session never resolved",
+                })),
+            );
+        }
     }
     let payload = json!({
         "id": body.id,
@@ -235,5 +278,49 @@ mod tests {
         let tx = state.pending.lock().await.remove("p1").unwrap();
         tx.send(json!({"behavior": "allow"})).unwrap();
         handle.await.unwrap();
+    }
+
+    /// todo 978: a second concurrent permission prompt for the SAME session
+    /// used to register and publish immediately, right alongside the first -
+    /// zero mutual exclusion. It must now wait for the first to resolve
+    /// before it ever registers, so it can't end up silently unreachable
+    /// behind the frontend's single-record permission modal.
+    #[tokio::test]
+    async fn a_second_concurrent_permission_prompt_waits_then_surfaces_after_the_first_resolves() {
+        let state = state_with_busy_session("s1");
+        let ctx1 = Arc::new(HookCtx { state: state.clone() });
+        let ctx2 = Arc::new(HookCtx { state: state.clone() });
+
+        let handle1 = tokio::spawn(async move {
+            on_permission_request(AxState(ctx1), ValidatedJson(perm_body("s1"))).await;
+        });
+        await_pending(&state, "p1").await;
+
+        let body2 = PermRequestBody {
+            id: "p2".to_string(),
+            tool_name: "Bash".to_string(),
+            input: json!({ "command": "echo hi" }),
+            session_id: Some("s1".to_string()),
+        };
+        let handle2 = tokio::spawn(async move {
+            on_permission_request(AxState(ctx2), ValidatedJson(body2)).await;
+        });
+
+        // p2 must still be waiting for the slot, not registered, while p1 is open.
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        assert!(
+            !state.pending.lock().await.contains_key("p2"),
+            "a second concurrent prompt must wait for the first slot to free up, not register immediately"
+        );
+
+        // Resolve p1 - p2 must then surface (register + become answerable).
+        let tx1 = state.pending.lock().await.remove("p1").unwrap();
+        tx1.send(json!({"behavior": "allow"})).unwrap();
+        handle1.await.unwrap();
+
+        await_pending(&state, "p2").await;
+        let tx2 = state.pending.lock().await.remove("p2").unwrap();
+        tx2.send(json!({"behavior": "allow"})).unwrap();
+        handle2.await.unwrap();
     }
 }

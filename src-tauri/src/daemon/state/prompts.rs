@@ -35,6 +35,23 @@ impl DaemonState {
         })
     }
 
+    /// True if `session_id` still has an open `"permission-requested"`
+    /// prompt (todo 978). Unlike questions, permission prompts have no
+    /// sibling-queue machinery at all - `pending_prompts` tracks them with
+    /// zero mutual exclusion for the same session (see the
+    /// `permission_prompts_are_not_sibling_questions` test above, which pins
+    /// that on purpose for the `awaiting` check). This is the guard
+    /// `hooks_server::permission::on_permission_request` uses to serialize a
+    /// second concurrent approval request behind the first, instead of
+    /// registering/publishing both at once and having the frontend's
+    /// single-record permission modal silently drop the second.
+    pub async fn session_has_pending_permission(&self, session_id: &str) -> bool {
+        self.pending_prompts.lock().await.values().any(|v| {
+            v["event"].as_str() == Some("permission-requested")
+                && v["payload"]["session_id"].as_str() == Some(session_id)
+        })
+    }
+
     /// Clears `awaiting == "question"` for `session_id` ONLY IF no other
     /// question prompt is still open for it (todo 897 - a session sat in
     /// "input needed" for ~90 minutes; three call sites blindly cleared
