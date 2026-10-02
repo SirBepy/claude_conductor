@@ -136,21 +136,6 @@
   margin-top: 0;
 }
 
-.shortcut-group-header--sub {
-  margin-top: 6px;
-  opacity: 0.7;
-}
-
-/* Standalone description under the slot-mode kit-toggle row (the old
- * checkbox+label combo folded the description into the same <label>; the
- * kit-toggle row is now its own element, so the description renders below it). */
-.shortcut-slot-mode-desc-standalone {
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-  padding: 0 0 8px;
-  margin-top: -4px;
-}
-
 /* ── Data & storage section (ported from settings.css) ────────────────── */
 
 .data-cards {

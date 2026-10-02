@@ -27,11 +27,8 @@ function renderShortcutsSection(container: HTMLElement): () => void {
   const re = () => {
     const defs = shortcuts.getAll();
     const globalDefs = defs.filter(d => !d.context && !d.todo);
-    const chatsDefs = defs.filter(d => d.context === "sessions" && !d.todo && !d.id.startsWith("assign-slot-"));
-    const assignDefs = defs.filter(d => d.id.startsWith("assign-slot-") && !d.todo);
+    const chatsDefs = defs.filter(d => d.context === "sessions" && !d.todo);
     const todoDefs = defs.filter(d => !!d.todo);
-    const slotMode = shortcuts.getChatSlotMode();
-    const isManual = slotMode === "manual";
 
     function kbdHtml(id: string): string {
       const binding = shortcuts.getBinding(id);
@@ -78,35 +75,9 @@ function renderShortcutsSection(container: HTMLElement): () => void {
       ${globalDefs.map(rowHtml).join("")}
       <div class="shortcut-group-header">Chats</div>
       ${chatsDefs.map(rowHtml).join("")}
-      <div id="slot-mode-row"></div>
-      <div class="shortcut-slot-mode-desc-standalone">${isManual
-        ? "Ctrl+Shift+1-9 pins a chat to a slot. Ctrl+1-9 opens the pinned chat."
-        : "Ctrl+1-9 opens chats by their sorted position."
-      }</div>
-      ${isManual ? `<div class="shortcut-group-header shortcut-group-header--sub">Slot assignment keys</div>${assignDefs.map(rowHtml).join("")}` : ""}
       <div class="shortcut-group-header">Coming Soon</div>
       ${todoDefs.map(rowHtml).join("")}
     `;
-
-    // Slot-mode toggle is a shared kit-toggle (ui.ts), rendered via lit-html
-    // into its own placeholder - the rest of this section stays a plain
-    // innerHTML string rebuild, same as the ported original.
-    const slotModeRow = container.querySelector<HTMLElement>("#slot-mode-row");
-    if (slotModeRow) {
-      render(
-        toggleRow({
-          label: "Manual slot assignment",
-          inputId: "slot-mode-checkbox",
-          checked: isManual,
-          onChange: (e: Event) => {
-            const checked = (e.target as HTMLInputElement).checked;
-            shortcuts.setChatSlotMode(checked ? "manual" : "auto");
-            re();
-          },
-        }),
-        slotModeRow,
-      );
-    }
 
     container.querySelectorAll<HTMLButtonElement>("[data-rebind]").forEach(btn => {
       btn.addEventListener("click", () => {

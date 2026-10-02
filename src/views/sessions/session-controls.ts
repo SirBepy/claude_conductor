@@ -1,19 +1,16 @@
 /**
- * Session-control API: queue functions, select/assign/close shortcuts.
+ * Session-control API: queue functions, select/close shortcuts.
  * Extracted from sessions.ts so keyboard/IPC callers can import without
  * pulling in the full view-mount module.
  */
 
 import { state } from "./state";
 import { selectSession } from "./active-session";
-import { startNewSession, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { startNewSession, startNewSessionWithFavorite, resumeDraft, resumeParkedDraft } from "./pending-flow";
 import { saveParkedDrafts } from "./pending-draft-storage";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { invoke } from "../../shared/ipc";
-import { showToast } from "../../shared/toast";
 import { showView } from "../../shared/navigation";
-import * as shortcuts from "../../shared/shortcuts";
-import { projectName } from "./sessions-helpers";
 import type { SessionConfig } from "./model-effort-modal";
 
 // ── Shared pane + pending state ───────────────────────────────────────────────
@@ -21,6 +18,7 @@ import type { SessionConfig } from "./model-effort-modal";
 
 let _pane: HTMLElement | null = null;
 let _pendingOpenPicker = false;
+let _pendingFavoriteSlot: number | null = null;
 let _pendingHistoryResume: string | null = null;
 let _pendingNewChat: { project: { path: string; name: string }; config: SessionConfig } | null = null;
 
@@ -29,6 +27,12 @@ export function setPaneRef(pane: HTMLElement | null): void { _pane = pane; }
 export function consumePendingOpenPicker(): boolean {
   const v = _pendingOpenPicker;
   _pendingOpenPicker = false;
+  return v;
+}
+
+export function consumePendingFavoriteSlot(): number | null {
+  const v = _pendingFavoriteSlot;
+  _pendingFavoriteSlot = null;
   return v;
 }
 
@@ -79,6 +83,17 @@ export function triggerNewSessionGlobal(): void {
   }
 }
 
+/** Ctrl+Shift+1..9 global shortcut: same pane-not-mounted fallback as
+ *  triggerNewSessionGlobal, queued separately since it carries a slot. */
+export function triggerNewSessionFavoriteGlobal(slot: number): void {
+  if (_pane) {
+    void startNewSessionWithFavorite(_pane, slot);
+  } else {
+    _pendingFavoriteSlot = slot;
+    showView("sessions");
+  }
+}
+
 // ── Keyboard shortcut handlers ────────────────────────────────────────────────
 
 /**
@@ -121,30 +136,6 @@ export function selectSessionByIndex(index: number): void {
   }
 
   void selectSession(id, pane);
-}
-
-export function selectSessionBySlot(slot: number): void {
-  if (!_pane) return;
-  const sessionId = shortcuts.getSlotAssignment(slot);
-  if (!sessionId) {
-    showToast(`No chat assigned to slot ${slot} — press Ctrl+Shift+${slot} in a chat to assign it`);
-    return;
-  }
-  const exists = state.sessions.find(s => s.session_id === sessionId);
-  if (!exists) {
-    showToast(`Chat assigned to slot ${slot} is no longer active`);
-    return;
-  }
-  void selectSession(sessionId, _pane);
-}
-
-export function assignCurrentToSlot(slot: number): void {
-  const id = state.selectedId;
-  if (!id) { showToast("No active chat to assign"); return; }
-  shortcuts.setSlotAssignment(slot, id);
-  const sess = state.sessions.find(s => s.session_id === id);
-  const label = sess ? projectName(sess) : id.slice(0, 8);
-  showToast(`Slot ${slot} → ${label}`);
 }
 
 export function closeFocusedChat(): void {

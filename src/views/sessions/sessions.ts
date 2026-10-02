@@ -23,7 +23,7 @@ import "./worktree-picker.css";
 import "./model-effort-modal.css";
 import "./model-effort-slider.css";
 import "./preview-panel.css";
-import { startNewSession, loadAndRestorePendingSession, loadAndRestoreParkedDrafts } from "./pending-flow";
+import { startNewSession, startNewSessionWithFavorite, loadAndRestorePendingSession, loadAndRestoreParkedDrafts } from "./pending-flow";
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";
 import { state, resetState } from "./state";
 import { initThinkingBar, updateThinkingBar } from "./session-thinking-bar";
@@ -42,6 +42,7 @@ import { showToast } from "../../shared/toast";
 import {
   setPaneRef,
   consumePendingOpenPicker,
+  consumePendingFavoriteSlot,
 } from "./session-controls";
 import {
   wireRateLimitBanner,
@@ -64,9 +65,8 @@ export {
   queueSessionSelect,
   queueNewChat,
   triggerNewSessionGlobal,
+  triggerNewSessionFavoriteGlobal,
   selectSessionByIndex,
-  selectSessionBySlot,
-  assignCurrentToSlot,
   closeFocusedChat,
 } from "./session-controls";
 
@@ -163,6 +163,10 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
 
   if (consumePendingOpenPicker()) {
     void startNewSession(pane);
+  }
+  const pendingFavoriteSlot = consumePendingFavoriteSlot();
+  if (pendingFavoriteSlot !== null) {
+    void startNewSessionWithFavorite(pane, pendingFavoriteSlot);
   }
 
   const teardownOverflowMenu = await wireOverflowMenu(root, previewController);

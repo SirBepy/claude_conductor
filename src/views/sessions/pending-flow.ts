@@ -3,9 +3,12 @@ import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
 import { lockBackgroundInput, unlockBackgroundInputIfClosed } from "../../shared/modal";
 import { state, setActiveSession, type ParkedDraft } from "./state";
-import { pickProject } from "./project-picker";
+import { pickProject, type PickedProject } from "./project-picker";
 import { renderSidebar } from "./sidebar";
 import { openModelEffortModal, type SessionConfig } from "./model-effort-modal";
+import { pathForKey, readFavorites } from "./project-favorites";
+import { resolveRememberedLocation } from "./location-picker";
+import { projectGroupsData, resolveCached } from "./new-session-cache";
 import {
   savePendingSession,
   loadPendingSession,
@@ -172,6 +175,20 @@ export async function resumeDraft(pane: HTMLElement): Promise<void> {
 // each open their own project-picker into the same shared modal slot.
 let inFlight = false;
 
+/** Shared tail of both new-chat entry points: model/effort modal, then
+ *  launch. `project` is already resolved by the caller - via the picker
+ *  (startNewSession) or a favourite slot (startNewSessionWithFavorite). */
+async function resolveConfigAndLaunch(pane: HTMLElement, project: PickedProject): Promise<void> {
+  const myMount = state.mountId;
+  const config = await openModelEffortModal(project.path, project.name);
+  if (!config) return;
+  if (state.mountId !== myMount) return;
+  // The picker's own machine chip (H4), not anything openModelEffortModal
+  // resolves - it never sees the machine dimension.
+  config.machineId = project.machineId ?? null;
+  await launchNewSession(pane, project, config);
+}
+
 export async function startNewSession(pane: HTMLElement): Promise<void> {
   if (inFlight) return;
   inFlight = true;
@@ -183,13 +200,32 @@ export async function startNewSession(pane: HTMLElement): Promise<void> {
     const project = await pickProject();
     if (!project) return;
     if (state.mountId !== myMount) return;
-    const config = await openModelEffortModal(project.path, project.name);
-    if (!config) return;
+    await resolveConfigAndLaunch(pane, project);
+  } finally {
+    inFlight = false;
+    unlockBackgroundInputIfClosed();
+  }
+}
+
+/** Ctrl+Shift+1..9 global shortcut: skips the project picker entirely and
+ *  resolves straight from the favourite slot, same as the picker's own
+ *  ctrl+1..9 fast path (project-picker.ts's openFavorite) - still goes
+ *  through the model/effort modal, since that's a separate step there too.
+ *  An empty or stale slot (project removed/moved) is inert, not an error,
+ *  matching openFavorite's "slot already renders as unresolved" call. */
+export async function startNewSessionWithFavorite(pane: HTMLElement, slot: number): Promise<void> {
+  if (inFlight) return;
+  const path = pathForKey(readFavorites(), String(slot));
+  if (!path) return;
+  inFlight = true;
+  lockBackgroundInput();
+  try {
+    const myMount = state.mountId;
+    const groups = await resolveCached(projectGroupsData(), []);
     if (state.mountId !== myMount) return;
-    // The picker's own machine chip (H4), not anything openModelEffortModal
-    // resolves - it never sees the machine dimension.
-    config.machineId = project.machineId ?? null;
-    await launchNewSession(pane, project, config);
+    const p = groups.find((g) => g.path.toLowerCase() === path.toLowerCase());
+    if (!p || p.path_exists === false) return;
+    await resolveConfigAndLaunch(pane, { ...resolveRememberedLocation(p), machineId: null });
   } finally {
     inFlight = false;
     unlockBackgroundInputIfClosed();

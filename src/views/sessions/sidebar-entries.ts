@@ -21,7 +21,6 @@ import {
 } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
-import { getChatSlotMode, getSlotAssignment } from "../../shared/shortcuts";
 import { pendingPromptSessionIds } from "./permission-modal";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
@@ -134,26 +133,14 @@ export function buildSidebarEntries(
   refreshScheduledCounts();
   const sorted = sortSessions(filtered, sort, closing, drainMap);
 
-  const isManualSlots = getChatSlotMode() === "manual";
-  const slotBySession: Record<string, number> = {};
-  if (isManualSlots) {
-    for (let slot = 1; slot <= 9; slot++) {
-      const sid = getSlotAssignment(slot);
-      if (sid) slotBySession[sid] = slot;
-    }
-  }
-
   const entries: Array<{ key: string; html: string }> = [];
 
   // Ctrl+Num order: draft rows (below) come first since they render above the
-  // segmented list, then real sessions in renderSeg. Manual slot mode never
-  // reads this array (selectSessionBySlot goes through getSlotAssignment
-  // instead), so it's fine that a draft/parked row has no stable id to pin to
-  // a manual slot - kbdOrderIds is only ever consumed by the auto-index path.
+  // segmented list, then real sessions in renderSeg.
   let sessionIndex = 0;
   const kbdOrderIds: string[] = [];
   const pushKbdRow = (id: string): string => {
-    const hint = !isManualSlots && sessionIndex < 9 ? ` data-kbd-hint="${sessionIndex + 1}"` : "";
+    const hint = sessionIndex < 9 ? ` data-kbd-hint="${sessionIndex + 1}"` : "";
     kbdOrderIds[sessionIndex] = id;
     sessionIndex++;
     return hint;
@@ -216,13 +203,7 @@ export function buildSidebarEntries(
         const i = sessionIndex++;
         kbdOrderIds[i] = s.session_id;
         const isActive = s.session_id === state.selectedId;
-        let kbdHint = "";
-        if (isManualSlots) {
-          const slot = slotBySession[s.session_id];
-          if (slot) kbdHint = ` data-kbd-hint="${slot}"`;
-        } else {
-          if (i < 9) kbdHint = ` data-kbd-hint="${i + 1}"`;
-        }
+        const kbdHint = i < 9 ? ` data-kbd-hint="${i + 1}"` : "";
         entries.push({
           key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {

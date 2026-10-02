@@ -86,16 +86,4 @@ describe("Ctrl+Num numbering includes draft/parked rows", () => {
     expect(parkedLi?.getAttribute("data-kbd-hint")).toBe("2");
     expect(state.sortedSessionIds.slice(0, 2)).toEqual(["pending-1", "parked-1"]);
   });
-
-  it("gives draft rows no kbd hint in manual slot mode", () => {
-    const el = makeList();
-    localStorage.setItem("cc_chat_slot_mode", "manual");
-    state.pendingNewSession = draftState("pending-1");
-
-    renderSidebar(el);
-    vi.runAllTimers();
-
-    const draftLi = el.querySelector('li[data-placeholder-id="pending-1"]');
-    expect(draftLi?.hasAttribute("data-kbd-hint")).toBe(false);
-  });
 });

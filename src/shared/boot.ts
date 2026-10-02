@@ -31,7 +31,7 @@ import { refreshDashboardView } from "../views/dashboard/dashboard";
 import { renderProjectsList } from "../views/projects/projects";
 import { renderProjectDetailContent } from "../views/project-detail/project-detail";
 import * as shortcuts from "./shortcuts";
-import { triggerNewSessionGlobal } from "../views/sessions/sessions";
+import { triggerNewSessionGlobal, triggerNewSessionFavoriteGlobal } from "../views/sessions/sessions";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
@@ -352,6 +352,9 @@ export function initBoot(): void {
   if (_isMainWindow) void maybeShowSettingsLoadNotice();
 
   shortcuts.register("new-chat", triggerNewSessionGlobal);
+  for (let slot = 1; slot <= 9; slot++) {
+    shortcuts.register(`new-chat-favorite-${slot}`, () => triggerNewSessionFavoriteGlobal(slot));
+  }
   shortcuts.register("go-home", () => showView("dashboard"));
   shortcuts.register("go-chats", () => showView("sessions"));
 }

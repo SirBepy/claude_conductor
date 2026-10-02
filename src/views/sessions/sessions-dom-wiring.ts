@@ -24,8 +24,6 @@ import {
 } from "./view-more-menu";
 import {
   selectSessionByIndex,
-  selectSessionBySlot,
-  assignCurrentToSlot,
   closeFocusedChat,
 } from "./session-controls";
 
@@ -113,20 +111,15 @@ export async function wireOverflowMenu(
   };
 }
 
-/** Registers the chats-view keyboard shortcuts (numbered slot jump/assign,
+/** Registers the chats-view keyboard shortcuts (numbered chat jump,
  * close-chat) and the ctrl-held sidebar hint class. Returns a dispose
- * function that unregisters everything. */
+ * function that unregisters everything. Ctrl+Shift+1-9 (new chat from a
+ * favourite project slot) is registered globally in boot.ts instead, since
+ * it must work even when this view isn't mounted. */
 export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
   for (let i = 0; i < 9; i++) {
     const slot = i + 1;
-    shortcuts.register(`open-chat-${slot}`, () => {
-      if (shortcuts.getChatSlotMode() === "manual") {
-        selectSessionBySlot(slot);
-      } else {
-        selectSessionByIndex(i);
-      }
-    });
-    shortcuts.register(`assign-slot-${slot}`, () => assignCurrentToSlot(slot));
+    shortcuts.register(`open-chat-${slot}`, () => selectSessionByIndex(i));
   }
   shortcuts.register("close-chat", closeFocusedChat);
 
@@ -137,7 +130,6 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
   return () => {
     for (let i = 1; i <= 9; i++) {
       shortcuts.unregister(`open-chat-${i}`);
-      shortcuts.unregister(`assign-slot-${i}`);
     }
     shortcuts.unregister("close-chat");
     unlistenCtrlHeld();
