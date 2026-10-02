@@ -27,7 +27,8 @@
     "test:e2e:schedule": "wdio run e2e/wdio.conf.js --spec e2e/specs/schedule-view.e2e.js",
     "test:e2e:held": "wdio run e2e/wdio.conf.js --spec e2e/specs/held-messages.e2e.js",
     "kill-orphans": "node scripts/kill-dev-orphans.mjs",
-    "check:css-vars": "node scripts/check-css-vars.mjs"
+    "check:css-vars": "node scripts/check-css-vars.mjs",
+    "check:view-spec-coverage": "node scripts/check-view-spec-coverage.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
