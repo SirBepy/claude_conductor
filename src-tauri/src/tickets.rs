@@ -114,19 +114,16 @@ pub fn prompt_line(t: &TicketTracker) -> Option<String> {
 
 // ── tokens ──────────────────────────────────────────────────────────────
 
-/// Reads one `KEY=value` from `~/.claude/.env`. Tolerates a UTF-8 BOM (a
-/// PowerShell-written copy of this file has carried one before), CRLF, and
-/// optional quotes.
+/// Reads one `KEY=value` from `~/.claude/.env`. The line parse (BOM, CRLF,
+/// optional quotes) is shared with `api_keys::is_key_set` via
+/// `crate::env_file::read_value` (todo 1049).
 fn env_token(key: &str) -> Option<String> {
     let path = dirs::home_dir()?.join(".claude").join(".env");
     parse_env_value(&std::fs::read_to_string(path).ok()?, key)
 }
 
 fn parse_env_value(text: &str, key: &str) -> Option<String> {
-    text.trim_start_matches('\u{feff}').lines().find_map(|line| {
-        let (k, v) = line.trim().split_once('=')?;
-        (k.trim() == key).then(|| v.trim().trim_matches('"').trim_matches('\'').to_string())
-    }).filter(|v| !v.is_empty())
+    crate::env_file::read_value(text, key)
 }
 
 fn token_for(kind: TrackerKind) -> Result<String, String> {

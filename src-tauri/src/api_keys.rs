@@ -1,8 +1,8 @@
 //! Registry of API keys the app can read, plus a line-preserving `.env`
 //! rewriter. Keys live in `~/.claude/.env`, the one place every tool already
-//! reads them from (see `tickets.rs`'s own token reader for the sibling
-//! convention this mirrors - kept separate rather than reusing its private
-//! parser, since that module owns tracker lookups, not key storage).
+//! reads them from. The line READ itself is shared with `tickets.rs`'s
+//! tracker token lookup via `crate::env_file` (todo 1049); this module still
+//! owns key storage (the registry + the writer), not tracker lookups.
 //!
 //! A value never round-trips through this module's public API: callers get
 //! an `is_set` bool, never the string itself.
@@ -47,17 +47,12 @@ pub fn env_path() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".claude").join(".env"))
 }
 
-/// Whether `name` has a non-empty value in `text`. Same tolerance as
-/// `tickets.rs::parse_env_value` (BOM, surrounding quotes, first match wins)
-/// but kept local since that parser is private to the tracker module.
+/// Whether `name` has a non-empty value in `text`. The line parse itself
+/// (BOM, surrounding quotes, first match wins) is shared with
+/// `tickets.rs::parse_env_value` via `crate::env_file::read_value` (todo
+/// 1049) - this module still owns key storage, `env_file` just owns the read.
 pub fn is_key_set(text: &str, name: &str) -> bool {
-    text.trim_start_matches('\u{feff}')
-        .lines()
-        .find_map(|line| {
-            let (k, v) = line.trim().split_once('=')?;
-            (k.trim() == name).then(|| v.trim().trim_matches('"').trim_matches('\'').to_string())
-        })
-        .is_some_and(|v| !v.is_empty())
+    crate::env_file::read_value(text, name).is_some()
 }
 
 /// Rewrites `text` so `name=value` is set, touching only that one line (or

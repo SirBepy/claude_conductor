@@ -8,6 +8,7 @@ pub mod context_status;
 pub mod daemon;
 pub mod daemon_client;
 mod daemon_link;
+pub mod env_file;
 pub mod files;
 pub mod chat;
 pub mod auth;
