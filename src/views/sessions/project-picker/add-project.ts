@@ -119,12 +119,13 @@ export function renderNoMatches(filter: string, state: AddProjectState, deps: Ad
     return html`<li class="project-picker-empty">No matches</li>`;
   }
   const validName = isValidProjectName(typed);
+  const noProjects = (deps.getLocalProjects() ?? []).length === 0;
   // The phone has no native folder-picker (pick_folder is Tauri-only), so
   // Browse never renders remotely, and Create needs a server-resolvable
   // root before it can do anything - with neither, an invalid/empty typed
   // term leaves nothing actionable to offer (todo 1058).
   if (isRemote() && !validName) {
-    return html`<li class="project-picker-empty">No matches</li>`;
+    return html`<li class="project-picker-empty">${noProjects ? "No projects yet. Type a name to create one." : "No matches"}</li>`;
   }
   const root = projectsRoot(state, deps);
   const remoteNoRoot = isRemote() && !root;
@@ -168,7 +169,7 @@ export function renderNoMatches(filter: string, state: AddProjectState, deps: Ad
           <span class="pp-body"><b>Browse for a folder&hellip;</b><br><em>pick one that already exists on disk</em></span>
         </button>
       `}
-      ${validName ? "" : html`<span class="pp-inline-hint">No matches. Type a folder name to create one.</span>`}
+      ${validName ? "" : html`<span class="pp-inline-hint">${noProjects ? "No projects yet" : "No matches"}. Type a folder name to create one.</span>`}
     </li>
   `;
 }

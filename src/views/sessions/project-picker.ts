@@ -564,14 +564,10 @@ export function openProjectPickerModal(
     // revalidating the list (and stats) in the background per the
     // stale-while-revalidate policy - a project added/removed elsewhere shows
     // up on next render.
+    // An empty list still renders the modal: its no-matches state carries
+    // Create and Browse, the only way out of a zero-project install.
     void projectsReady.then((groups) => {
-      if (!groups.length) {
-        if (!localProjects) {
-          alert("No projects detected yet. Run claude in a folder first or add a project.");
-          finish(null);
-        }
-        return;
-      }
+      if (!groups.length && localProjects) return;
       applyGroups(groups);
     }).catch((err) => {
       console.error("[sessions] list_project_groups failed", err);

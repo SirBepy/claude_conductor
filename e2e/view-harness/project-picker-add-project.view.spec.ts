@@ -130,6 +130,38 @@ test.describe("view-harness / add a project inline", () => {
     await expect(page.locator(".project-picker-row")).toHaveCount(2);
   });
 
+  test("with zero projects on a cold cache the picker stays open and offers Create and Browse", async ({ page }) => {
+    await mountView(page, { invoke: baseInvoke({ list_project_groups: [], create_folder: null, pick_folder: null }) });
+    // Boot warms the project cache, which would make this the warm path; the
+    // delay (installed ahead of a reload, same trick as
+    // new-session-cold-cache.view.spec.ts) keeps it cold when the picker opens.
+    await page.addInitScript(() => {
+      const w = window as unknown as {
+        __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+      };
+      const tauri = w.__TAURI__;
+      if (!tauri) return;
+      const orig = tauri.core.invoke;
+      tauri.core.invoke = (cmd: string, args?: Record<string, unknown>) =>
+        cmd === "list_project_groups"
+          ? new Promise((resolve) => setTimeout(() => resolve(orig(cmd, args)), 1000))
+          : orig(cmd, args);
+    });
+    await page.reload();
+    await page.waitForFunction(() => typeof (window as unknown as { __startNewSession?: unknown }).__startNewSession === "function");
+    await page.evaluate(() => {
+      void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
+    });
+    await expect(page.locator(".modal-card-loading")).toBeVisible();
+
+    await expect(page.locator(".project-picker-modal")).toHaveCount(1);
+    await expect(page.locator(".pp-inline-hint")).toContainText("No projects yet");
+    await expect(page.locator(".pp-act", { hasText: "Browse" })).toHaveCount(1);
+
+    await page.locator("#project-picker-search").fill("first-one");
+    await expect(page.locator(".pp-act", { hasText: 'Create "first-one"' })).toHaveCount(1);
+  });
+
   // NOT covered here: the remote/peer-machine branch, where Create is hidden
   // because a peer's filesystem is not ours to create folders on. Exercising
   // it needs a list_machines fixture with a live peer plus a chip click, which
