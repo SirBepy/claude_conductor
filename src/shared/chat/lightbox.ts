@@ -37,7 +37,7 @@ export interface LightboxComposerBridge {
 
 // Registered by Composer itself (ctor/destroy), so the lightbox's own textbox
 // can seed from / hand back to the real draft without importing the views
-// layer - same seam as setFileEditsProvider in file-viewer.ts. Composer owns
+// layer. Composer owns
 // it rather than a pane, because a pane that mounts a Composer and forgets to
 // register leaves this pointing at the PREVIOUS session's composer: destroy()
 // doesn't null that object's textarea, so setDraftText still runs saveDraft

@@ -1,19 +1,3 @@
-/* Stacked per-file diff (shared edit-window renderer). Lives here, not
-   sessions.css, so the file viewer's Diff tab is styled when opened from the
-   history window too (which imports only chat.css). The changes-panel sheet
-   in the sessions view still gets these via its chat.css import. */
-.stacked-diff-file { margin-bottom: 16px; }
-.stacked-diff-header {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 6px 8px;
-  background: var(--color-background);
-  border-radius: 4px 4px 0 0;
-  font-size: 12px;
-  font-family: "Fira Code", ui-monospace, monospace;
-}
-
 /* ── Edit window (inline tool-call preview) ──────────────────────────── */
 .edit-window {
   margin: 6px 0;

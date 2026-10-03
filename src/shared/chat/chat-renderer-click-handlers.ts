@@ -1,7 +1,7 @@
 import { invoke } from "../ipc";
 import { renderBlocks } from "./chat-transforms";
 import type { ChatEvent } from "../../types/ipc.generated";
-import { openFileViewer } from "./file-viewer";
+import { openInCodeMode } from "./code-mode-bridge";
 import { getScreenshotRowShots } from "./screenshot-row";
 import { collectChatImages } from "./chat-image-gallery-data";
 import { openChatImageGallery } from "./chat-image-gallery";
@@ -64,15 +64,14 @@ export function createHandleScreenshotThumbClick(renderer: ChatRenderer): (e: Mo
   };
 }
 
-// Custom chip-panel file rows (Read / File Changes) open their target in the
-// in-app file viewer (ai_todo 95). The external-editor jump is preserved via
-// the "Open in VS Code" button in the viewer header.
+// Custom chip-panel file rows (Read / File Changes) open their target in Code
+// mode. Open in VS Code lives in Code mode's ⋯ menu and right-click menu.
 export function createHandleToolFileClick(_renderer: ChatRenderer): (e: MouseEvent) => void {
   return (e: MouseEvent): void => {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".tool-file-row[data-path]");
     if (!row) return;
     const path = row.dataset.path;
-    if (path) openFileViewer(path);
+    if (path) openInCodeMode({ kind: "file", path });
   };
 }
 

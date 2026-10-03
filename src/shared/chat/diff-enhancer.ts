@@ -6,8 +6,7 @@
 //
 // Inline chat edit windows are default-collapsed <details>, so enhancement
 // is lazy: armLazyDiffEnhance attaches one capture-phase toggle listener per
-// chat container and enhances a window's hunks on first open. The changes
-// panel sheet is visible immediately, so it calls enhanceEditDiffs eagerly.
+// chat container and enhances a window's hunks on first open.
 
 import { loadShiki } from "./shiki-loader";
 import { buildDiffRows, normalizeEol, type DiffRow } from "./diff-rows";

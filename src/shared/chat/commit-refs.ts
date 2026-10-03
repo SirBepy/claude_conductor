@@ -2,13 +2,11 @@
 // only once the session's repo confirms the sha names a real commit. The
 // markdown pass (markCommitCandidates in markdown-highlight.ts) wraps every
 // sha-shaped word in an inert span; resolveCommitRefs then asks git about them
-// in one batch per message and upgrades the confirmed ones. Clicking opens the
-// PR review modal scoped to that single commit.
+// in one batch per message and upgrades the confirmed ones. Clicking opens
+// that commit in Code mode.
 
 import { invoke } from "../ipc";
-import { escapeHtml } from "../escape-html";
-import { renderMarkdown, utf8ToBase64 } from "./chat-transforms";
-import { openPrPreviewModal } from "./pr-review-modal";
+import { openInCodeMode } from "./code-mode-bridge";
 import type { CommitRef } from "../../types/ipc.generated";
 
 // Per-repo answers, including misses (null), so a streaming bubble that is
@@ -53,27 +51,12 @@ export async function resolveCommitRefs(root: HTMLElement, cwd: string | undefin
   }
 }
 
-export function openCommitModal(ref: CommitRef, cwd: string): void {
-  const card = document.createElement("div");
-  card.dataset.prTitle = ref.subject;
-  card.dataset.prCommits = utf8ToBase64(JSON.stringify([{ sha: ref.sha, msg: ref.subject }]));
-  // No h1 here: the modal header (pr-review-modal.ts, built from dataset.prTitle
-  // above) already shows this same subject - a second copy right below it was
-  // pure duplication for the single-commit case.
-  const shaShort = escapeHtml(ref.sha.slice(0, 7));
-  const shaFull = escapeHtml(ref.sha);
-  const meta = `${escapeHtml(ref.author)} · ${escapeHtml(new Date(ref.date).toLocaleString())} · <code title="${shaFull}">${shaShort}</code>`;
-  const body = ref.body ? renderMarkdown(ref.body) : `<p class="commit-ref-nobody">No description</p>`;
-  card.innerHTML = `<template class="pr-modal-tpl"><div class="pr-modal-body-content"><p class="commit-ref-meta">${meta}</p>${body}</div></template>`;
-  openPrPreviewModal(card, { cwd, commit: true });
-}
-
 function activate(e: Event): void {
   const el = (e.target as Element).closest<HTMLElement>(".commit-ref.resolved");
   const hit = el ? byEl.get(el) : undefined;
   if (!hit) return;
   e.preventDefault();
-  openCommitModal(hit.ref, hit.cwd);
+  openInCodeMode({ kind: "commit", sha: hit.ref.sha, title: hit.ref.subject });
 }
 
 export function handleCommitRefClick(e: MouseEvent): void {

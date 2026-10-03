@@ -1,0 +1,95 @@
+/* Branch list rows for branch-switcher.ts, carried over unchanged from the
+   git card it used to live in. */
+
+.sb-git-pop-list {
+  padding: 4px 0;
+}
+
+.sb-git-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  min-width: 0;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.75rem;
+}
+
+.sb-git-pop-row.current { background: rgba(74, 222, 128, 0.06); }
+
+.sb-git-pop-row.pick { cursor: pointer; }
+.sb-git-pop-row.pick:hover { background: rgba(255, 255, 255, 0.06); }
+.sb-git-pop-row.pick:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.sb-git-pop-row.pick.busy { cursor: default; opacity: 0.75; }
+.gc-row-spin { flex-shrink: 0; font-size: 0.75rem; color: var(--sb-muted); }
+
+.sb-git-pop-check { color: #4ade80; font-size: 0.8rem; flex-shrink: 0; }
+.sb-git-pop-check-pad { display: inline-block; width: 0.8rem; flex-shrink: 0; }
+
+.sb-git-pop-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+}
+
+.sb-git-pop-row.current .sb-git-pop-name { color: #4ade80; font-weight: 600; }
+
+.sb-git-pop-sha {
+  flex-shrink: 0;
+  color: var(--sb-muted);
+  font-size: 0.7rem;
+}
+
+.sb-git-pop-upstream {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  color: #818cf8;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.sb-git-pop-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 12px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+  justify-content: center;
+}
+
+.sb-git-pop-spin { display: inline-block; animation: sb-git-pop-spin 0.7s linear infinite; }
+@keyframes sb-git-pop-spin { to { transform: rotate(360deg); } }
+
+.sb-git-pop-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 12px 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #f87171;
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gc-dirty-warn, .gc-peer-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-warning);
+  font-size: 0.68rem;
+}
+.gc-dirty-warn i, .gc-peer-warn i { font-size: 0.82rem; flex-shrink: 0; }

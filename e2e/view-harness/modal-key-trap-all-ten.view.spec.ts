@@ -10,7 +10,9 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 // Todo 1043 added api-key-modal.ts as a sixth own-backdrop modal; a later
 // pass rebuilt it onto the shared modal-host (matching characters.ts's
 // openNewCharacterModal shell), moving it into the shared-host group below
-// and bringing that group's count to five.
+// and bringing that group's count to five. Todo 1069 retired pr-review-modal
+// (Code mode replaced it; code-mode.view.spec.ts covers its typing guard),
+// leaving four own-backdrop modals.
 
 const MARKER = "MARKER";
 
@@ -106,7 +108,7 @@ async function openApiKeyModal(page: Page): Promise<void> {
   await page.locator(".aikm-modal-card").waitFor();
 }
 
-// ── the five own-backdrop call sites (lockInputToHost directly) ───────────
+// ── the four own-backdrop call sites (lockInputToHost directly) ───────────
 
 /** Isolated, not chained through the picker flow - askConfirm's own guard is
  * the thing under test, and its `cancelBtn.focus()` is what surfaces the
@@ -135,21 +137,6 @@ async function openChangeCharacterModal(page: Page): Promise<void> {
   await page.locator(".cc-modal-card").waitFor();
 }
 
-async function openPrReviewModal(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const mod = await import("/shared/chat/pr-review-modal.ts");
-    const card = document.createElement("div");
-    card.dataset.prTitle = "Test PR";
-    card.dataset.prCommits = btoa(JSON.stringify([]));
-    const tmpl = document.createElement("template");
-    tmpl.classList.add("pr-modal-tpl");
-    tmpl.innerHTML = "<p>Description</p>";
-    card.appendChild(tmpl);
-    mod.openPrPreviewModal(card);
-  });
-  await page.locator(".pr-modal-overlay").waitFor();
-}
-
 async function openEditAccountModal(page: Page): Promise<void> {
   await page.evaluate(async (account) => {
     const mod = await import("/views/settings/subviews/accounts/edit-account-modal.ts");
@@ -158,7 +145,7 @@ async function openEditAccountModal(page: Page): Promise<void> {
   await page.locator(".aem-modal").waitFor();
 }
 
-test.describe("view-harness / modal-open must swallow every keystroke (all ten call sites)", () => {
+test.describe("view-harness / modal-open must swallow every keystroke (every call site)", () => {
   test("shared-host: project-picker", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openProjectPicker(page);
@@ -207,12 +194,6 @@ test.describe("view-harness / modal-open must swallow every keystroke (all ten c
   test("own-backdrop: change-character-modal", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openChangeCharacterModal(page);
-    await assertKeySwallowed(page, composer);
-  });
-
-  test("own-backdrop: pr-review-modal", async ({ page }) => {
-    const composer = await mountWithComposer(page);
-    await openPrReviewModal(page);
     await assertKeySwallowed(page, composer);
   });
 

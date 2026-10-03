@@ -1,6 +1,6 @@
 // Pure data layer: turn an Edit/Write/MultiEdit/NotebookEdit tool_use input
 // into a normalised FileEditView. Consumed by edit-window.ts (inline render)
-// and changes-panel.ts (right-rail aggregator). Returns null for any other
+// and Code mode (its "This chat" scope). Returns null for any other
 // tool, so the caller can fall back to the generic <pre>{json}</pre>.
 
 import { basename } from "../path-utils";

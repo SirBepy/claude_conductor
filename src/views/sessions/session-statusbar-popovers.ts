@@ -5,15 +5,13 @@
 // every call, so all of this is re-wired fresh each time - wireChipPopovers
 // takes a ctx snapshot assembled once per render() (same pattern as
 // statusbar-chips.ts's ChipRenderCtx) rather than reading `this` directly.
-import type { GitInfo } from "../../types/ipc.generated";
-import { driftLabel } from "./statusbar-chips";
+import { openInCodeMode } from "../../shared/chat/code-mode-bridge";
 import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
 import { EffortPopover } from "./effort-popover";
 import { ModelPopover } from "./model-popover";
-import { GitCard } from "./git-card";
 import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 
 /** The popovers a single closeChipPopovers() sweep dismisses. `tally` is
@@ -26,7 +24,6 @@ export interface StatusbarPopovers {
   imagesPopover: ImagesPopover;
   effortPopover: EffortPopover;
   modelPopover: ModelPopover;
-  gitCard: GitCard;
   overflowPopover: OverflowPopover;
   tally: { closePopover: () => void };
 }
@@ -39,7 +36,6 @@ export function closeChipPopovers(p: StatusbarPopovers): void {
   p.imagesPopover.close();
   p.effortPopover.close();
   p.modelPopover.close();
-  p.gitCard.close();
   p.overflowPopover.close();
   p.tally.closePopover();
 }
@@ -85,15 +81,10 @@ export function reanchorConfigPopover(
 
 export interface ChipPopoverWireCtx extends StatusbarPopovers {
   cwd: string | null;
-  liveCwd: string | null;
-  sessionId: string | null;
-  gitInfo: GitInfo;
-  gitCwd: string | null;
   effortAnchor: HTMLElement | null;
   modelAnchor: HTMLElement | null;
   toggleModelPopover: (anchor: HTMLElement) => void;
   toggleEffortPopover: (anchor: HTMLElement) => void;
-  refreshGitInfo: () => void;
   overflowData: () => OverflowPanelData;
 }
 
@@ -147,24 +138,13 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
     if (!wasOpen) ctx.imagesPopover.open(anchor);
   });
 
-  // The card is pinned to the SPAWN cwd, not the live one: it is always about
-  // the chat's own repo, and the drift footer names wherever the AI went.
+  // The git chip is a way into Code mode, on what a push would send.
   for (const sel of [".sb-git-btn", ".sb-branch-btn", ".sb-commits-btn"]) {
     container.querySelector<HTMLElement>(sel)?.addEventListener("click", (e) => {
       e.stopPropagation();
-      const anchor = e.currentTarget as HTMLElement;
-      const wasOpen = ctx.gitCard.isOpen;
       closeAll();
-      if (wasOpen || !ctx.cwd) return;
-      ctx.gitCard.open(anchor, {
-        cwd: ctx.cwd,
-        // Only attribute gitInfo.repo to the live location when the fetch
-        // actually ran there - the off-repo fallback (gitCwd back on the
-        // spawn cwd) would otherwise misname a non-repo folder (todo 921).
-        awayLabel: driftLabel(ctx.cwd, ctx.liveCwd, ctx.gitCwd === ctx.liveCwd ? ctx.gitInfo.repo : null) || null,
-        sessionId: ctx.sessionId,
-        onPushed: () => ctx.refreshGitInfo(),
-      });
+      if (!ctx.cwd) return;
+      openInCodeMode({ kind: "scope", scope: "unpushed", commitsOpen: true });
     });
   }
 
@@ -184,7 +164,6 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
   reanchorIfOpen(container, ctx.aiTodosPopover, ".sb-ai-todos-btn", (a) => ctx.aiTodosPopover.open(a));
   reanchorIfOpen(container, ctx.serversPopover, ".sb-servers-btn", (a) => ctx.serversPopover.open(a));
   reanchorIfOpen(container, ctx.imagesPopover, ".sb-images-btn", (a) => ctx.imagesPopover.open(a));
-  reanchorIfOpen(container, ctx.gitCard, ".sb-git-btn, .sb-branch-btn, .sb-commits-btn", (a) => ctx.gitCard.reanchor(a));
   reanchorIfOpen(container, ctx.overflowPopover, ".sb-overflow-btn", (a) => ctx.overflowPopover.open(a, ctx.overflowData()));
   reanchorConfigPopover(container, ctx.effortPopover, ctx.effortAnchor, ".sb-effort-btn", (a) => ctx.effortPopover.reanchor(a));
   reanchorConfigPopover(container, ctx.modelPopover, ctx.modelAnchor, ".sb-model-btn", (a) => ctx.modelPopover.reanchor(a));

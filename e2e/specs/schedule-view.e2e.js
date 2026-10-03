@@ -7,7 +7,7 @@
 // item before that can happen.
 //
 // window.__TAURI__.core.invoke is the same direct-IPC mechanism already used
-// by e2e/specs/multi-account.e2e.js and e2e/specs/changes-panel.e2e.js, so
+// by e2e/specs/multi-account.e2e.js, so
 // this spec follows that precedent rather than driving the composer/picker UI
 // to create the item (the picker is composer-anchored and out of scope here).
 

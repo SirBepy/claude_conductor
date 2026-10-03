@@ -34,7 +34,7 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String, from: Option<String>, to: String }
+                struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 if !is_known_cwd(&state, &p.cwd) {
@@ -72,7 +72,7 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String, rev: String, path: String }
+                struct P { cwd: String, #[serde(default)] rev: Option<String>, path: String }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 reject_unknown(&state, &p.cwd)?;
@@ -88,7 +88,7 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
-            struct P { cwd: String, from: Option<String>, to: String, path: String, #[serde(default)] context: Option<u32> }
+            struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, path: String, #[serde(default)] context: Option<u32> }
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             if !is_known_cwd(&state, &p.cwd) {

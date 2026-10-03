@@ -1,195 +1,148 @@
-/* Shared file surface (bar + body: File/Diff view, search, nav stepper, ⋮
- * menu). One component, mounted by file-viewer.ts today and, in future, an
- * embedded PR-review file tab. Mirrors .for_bepy/pr-review-mockup.html's
- * .fs-* styles, adapted to this app's real theme custom properties. */
+/* Code mode's editor body (file-surface.ts): a breadcrumb line over a File /
+ * Diff view, plus the icon-only controls Code mode hosts in its tab row. */
 
 .fsurface {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--color-surface);
 }
 
 .fs-hidden {
   display: none !important;
 }
 
-/* ── bar ──────────────────────────────────────────────────────────────── */
+/* ── breadcrumb line ──────────────────────────────────────────────────── */
 
-.fs-bar {
+.fs-crumbs {
+  flex: none;
   display: flex;
-  gap: 6px;
-  padding: 5px 12px;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px 0 14px;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  align-items: center;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.fs-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
   font-size: 12px;
-  font-weight: 600;
   color: var(--color-text-muted);
 }
 
-.fs-mode > .ph {
-  font-size: 14px;
+.fs-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fs-path .ph {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.fs-path .fs-leaf {
+  color: var(--color-text);
+}
+
+.fs-grow {
+  flex: 1;
 }
 
 .fs-counts {
-  font-family: "Fira Code", ui-monospace, monospace;
-  font-size: 10.5px;
   display: flex;
-  gap: 5px;
-}
-
-.fs-right,
-.fs-edit-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
   gap: 6px;
-}
-
-.fs-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: none;
-  background: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  transition: background 0.1s, color 0.1s;
-  flex-shrink: 0;
-}
-
-.fs-btn:hover {
-  background: var(--color-surface-alt);
-  color: var(--color-text);
-}
-
-.fs-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.fs-btn.fs-sq {
-  width: 28px;
-  padding: 0;
-  font-size: 15px;
-}
-
-/* Groups the file-step carets + position behind a divider, so they don't
-   read as a continuation of the search prev/next pair right before them -
-   same shapes, different meaning. */
-.fs-nav-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-left: 8px;
-  border-left: 1px solid var(--color-border);
-}
-
-.fs-navpos {
-  font-size: 10.5px;
-  color: var(--color-text-muted);
-  font-family: "Fira Code", ui-monospace, monospace;
-}
-
-/* Diff layout toggle + Full file, visible in the bar like VS Code's diff editor
-   rather than buried in the ⋮ menu. */
-.fs-diff-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.fs-seg {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  background: var(--color-surface-alt);
-}
-
-.fs-seg-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
-  border: none;
-  border-radius: 5px;
-  background: none;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-}
-
-.fs-seg-btn:hover {
-  color: var(--color-text);
-}
-
-.fs-seg-btn.fs-on {
-  background: var(--color-surface);
-  color: var(--color-text);
-}
-
-.fs-full-btn.fs-on {
-  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-  color: var(--color-text);
+  font: 12px "Fira Code", ui-monospace, monospace;
 }
 
 .fs-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: var(--color-surface-alt);
+  gap: 4px;
+  height: 24px;
+  padding: 0 2px 0 8px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
-  padding: 3px 8px;
+  background: var(--color-background);
 }
 
 .fs-search > .ph {
-  color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
+/* Untyped on purpose: widgets.css styles input[type="text"] at a specificity
+   this single-class rule would lose to. */
 .fs-search-input {
+  width: 140px;
   border: none;
   background: none;
   color: var(--color-text);
   font: inherit;
-  font-size: 11.5px;
-  width: 110px;
+  font-size: 12px;
   outline: none;
 }
 
 .fs-search-count {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  font-family: "Fira Code", ui-monospace, monospace;
   min-width: 26px;
+  font: 10.5px "Fira Code", ui-monospace, monospace;
 }
 
-/* ── ⋮ menu ───────────────────────────────────────────────────────────── */
+/* ── icon-only controls ───────────────────────────────────────────────── */
+
+.fs-tools,
+.fs-diff-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.fs-tb {
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.fs-search .fs-tb {
+  width: 22px;
+  height: 20px;
+  font-size: 12px;
+}
+
+.fs-tb:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+.fs-tb.fs-on {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.fs-tsep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--color-border);
+}
+
+/* ── ⋯ menu ───────────────────────────────────────────────────────────── */
 
 .fs-menu {
   position: absolute;
   top: calc(100% + 4px);
-  right: 8px;
+  right: 0;
   z-index: 20;
   min-width: 200px;
   background: var(--color-surface);
@@ -205,7 +158,7 @@
   gap: 9px;
   padding: 7px 10px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
   color: var(--color-text);
 }
@@ -221,6 +174,11 @@
 
 .fs-mi span {
   flex: 1;
+}
+
+.fs-mi kbd {
+  font: 10.5px "Fira Code", ui-monospace, monospace;
+  color: var(--color-text-muted);
 }
 
 .fs-chk {
@@ -274,10 +232,6 @@
   background: rgba(255, 196, 0, 0.12);
   color: #e0b341;
   font-size: 0.8rem;
-}
-
-.fs-session-diff {
-  padding: 10px 12px;
 }
 
 /* ── unified (inline) diff ────────────────────────────────────────────── */
@@ -461,29 +415,4 @@ mark.fs-hit {
 mark.fs-hit-cur {
   background: var(--color-primary);
   color: var(--color-background);
-}
-
-/* ── inline editor ────────────────────────────────────────────────────── */
-
-.fs-editor {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-height: 60vh;
-  box-sizing: border-box;
-  resize: none;
-  background: var(--color-background);
-  color: var(--color-text);
-  border: none;
-  padding: 14px 16px;
-  font-family: "Fira Code", ui-monospace, monospace;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  white-space: pre;
-  tab-size: 2;
-  outline: none;
-}
-
-.fs-error-inline {
-  margin: 0 16px 12px;
 }

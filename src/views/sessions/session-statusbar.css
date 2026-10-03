@@ -495,9 +495,7 @@
 }
 
 /* ── Branch + commits git chips ────────────────────────────────────────────── */
-/* The git-card POPOVER these open (.sb-git-popover, .gc-*, .sb-history-*, ...)
-   lives in git-card.css, imported by each consuming view right after this
-   sheet - see the note by the merged git chip below. */
+/* These open Code mode on the unpushed changes (code-mode/). */
 
 .sb-chip.sb-branch-btn,
 .sb-chip.sb-commits-btn { cursor: pointer; }
@@ -563,10 +561,6 @@
 }
 
 .sb-chip.sb-overflow i { opacity: 0.9; }
-
-/* Git-card popover rules (.sb-git-card, .gc-*) live in git-card.css, imported
-   by each consuming view right after this sheet - same reasoning as the
-   images-chip note above: a mid-file @import is silently dropped by Vite. */
 
 /* Overflow-panel popover rules (.sb-overflow-popover, .ov-*) live in
    overflow-panel.css, imported by each consuming view right after this sheet. */

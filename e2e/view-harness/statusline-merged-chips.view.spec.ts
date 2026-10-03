@@ -9,15 +9,6 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 const SPAWN = "C:/Projects/zng-app";
 const SESSIONS = [sessionInstance({ cwd: SPAWN, name: "Reply to Lenar on claim state" })];
 
-const HISTORY = {
-  entries: [
-    { short_sha: "a41c9d20", message: "git chip prints only what is unknown", pushed: false, timestamp: 1788000000 },
-    { short_sha: "08828e1c", message: "disarm the thinking-bar silence timer", pushed: true, timestamp: 1787992800 },
-  ],
-  has_more: false,
-  has_upstream: true,
-};
-
 async function mount(page: Page, over: Record<string, unknown> = {}): Promise<void> {
   await mountView(page, {
     view: "sessions",
@@ -30,7 +21,6 @@ async function mount(page: Page, over: Record<string, unknown> = {}): Promise<vo
       get_git_info: { branch: "master", repo: "zng-app", ahead: 2, behind: 4, sha: "abc1234", insertions: null, deletions: null },
       list_ai_todos: [{ name: "889-git-card.md", path: `${SPAWN}/.claude/todos/889.md` }],
       get_commit_sync: { ahead: [{ short_sha: "a41c9d20", message: "one" }], behind: [], has_upstream: true },
-      get_commit_history: HISTORY,
       get_recent_branches: [
         { name: "master", current: true, short_sha: "08828e1c", upstream: "origin/master" },
         { name: "feat/claim-state", current: false, short_sha: "3f77b021", upstream: null },
@@ -91,24 +81,28 @@ test.describe("view-harness / merged statusline chips", () => {
     await expect(chip).toBeVisible();
   });
 
-  test("one card carries the branch line and the commit history the two popovers used to split", async ({ page }) => {
+  test("the git chip opens Code mode on what a push would send, with its branch list", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 700 });
-    await mount(page);
+    await mount(page, {
+      get_range_files: [{ path: "src/a.ts", status: "M", added: 2, removed: 1, old_path: null }],
+      get_git_dirty: [],
+      list_instances: SESSIONS,
+    });
 
     await page.locator("#session-pane .sb-git-btn").click();
-    const card = page.locator(".sb-git-card");
-    await expect(card.locator(".gc-branchline .bname")).toHaveText("master");
-    await expect(card.locator(".gc-branchline .up")).toHaveText("origin/master");
-    await expect(card.locator(".sb-history-row")).toHaveCount(2);
-    await expect(card.locator(".sb-history-row").first()).toHaveClass(/unpushed/);
-    // No drift, so the footer stays away.
-    await expect(card.locator(".gc-away-foot")).toHaveCount(0);
+    const code = page.locator(".code-mode");
+    await expect(code.locator(".cm-qtitle")).toContainText("Unpushed");
+    await expect(code.locator(".cm-fold .cm-qn")).toHaveText("1 unpushed");
+    await expect(code.locator('[data-act="push"]')).toContainText("Push 1 commit");
 
-    await card.locator(".gc-branchline").click();
-    await expect(card.locator(".gc-search input")).toBeVisible();
-    // The filter box must beat widgets.css's bare `input` rules on the cascade.
-    const bg = await card.locator(".gc-search input").evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(bg).not.toBe("rgba(0, 0, 0, 0)");
+    await code.locator(".cm-branchbtn").click();
+    const input = code.locator(".cm-bmenu .bs-search input");
+    await expect(input).toBeVisible();
+    await expect(code.locator(".cm-bmenu .sb-git-pop-row")).toHaveCount(2);
+    // The filter box sits in its own bordered wrapper; the input itself must
+    // not pick up widgets.css's input chrome on top of it.
+    const bg = await input.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(bg).toBe("rgba(0, 0, 0, 0)");
   });
 
   test("the overflow panel opens with the tiles, both meters and the tool key", async ({ page }) => {

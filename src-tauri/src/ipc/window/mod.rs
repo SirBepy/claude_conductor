@@ -1,6 +1,6 @@
 //! Window and chat-window-opening commands, extracted from `misc.rs`
 //! (ai_todo 101) and split into one file per window type (ai_todo 623):
-//! `chats`, `schedule`, `jarvis`, `preview`, plus this file's shared helpers.
+//! `chats`, `code`, `schedule`, `jarvis`, `preview`, plus this file's shared helpers.
 //!
 //! # Every command that can reach a `build_*_window` MUST be `#[tauri::command(async)]`
 //!
@@ -25,6 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub mod activation;
 pub mod chats;
+pub mod code;
 pub mod jarvis;
 pub mod preview;
 pub mod schedule;

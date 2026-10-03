@@ -15,6 +15,14 @@ vi.mock("../src/shared/ipc.ts", () => ({
 }));
 
 const { SessionStatusbar } = await import("../src/views/sessions/session-statusbar.ts");
+const { setCodeModeOpener } = await import("../src/shared/chat/code-mode-bridge.ts");
+
+/** Captures what a file row asks Code mode to open. */
+function codeModeTargets() {
+  const targets = [];
+  setCodeModeOpener((t) => targets.push(t));
+  return targets;
+}
 
 const TOOL_ROW = [["tool:Read", "tool:Grep", "tool:Edit", "tool:Bash"]];
 
@@ -120,21 +128,21 @@ describe("per-tool chips", () => {
     expect(texts).toEqual(["foo.*bar"]);
   });
 
-  it("opens the in-app file viewer (read_text_file) on a file row click", () => {
-    const calls = [];
-    ipcMock.impl = async (cmd, args) => { calls.push([cmd, args]); return { content: "", truncated: false }; };
+  it("opens a file row's file in Code mode", () => {
+    const targets = codeModeTargets();
     const { el, sb } = mount();
     sb.updateToolTally(sampleTally());
     openChip(el, "Read");
     document.body.querySelector(".sb-tally-file").dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(calls).toContainEqual(["read_text_file", { path: "/proj/src/a.ts" }]);
+    expect(targets).toEqual([{ kind: "file", path: "/proj/src/a.ts" }]);
+    // The popover gets out of the way of the mode it opened.
+    expect(document.body.querySelector(".sb-tally-popover")).toBeNull();
   });
 });
 
 describe("custom-view provider (reuses the in-chat views)", () => {
-  it("renders the provider HTML for custom tools and opens files in the in-app viewer", () => {
-    const calls = [];
-    ipcMock.impl = async (cmd, args) => { calls.push([cmd, args]); return { content: "", truncated: false }; };
+  it("renders the provider HTML for custom tools and opens files in Code mode", () => {
+    const targets = codeModeTargets();
     const { el, sb } = mount([["tool:Read", "tool:Skill", "tool:AskUserQuestion"]]);
     sb.setToolViewProvider((tool) => {
       if (tool === "Read") return '<button class="tool-file-row" data-path="/p/x.ts"><span class="tool-file-name">x.ts</span></button>';
@@ -160,7 +168,7 @@ describe("custom-view provider (reuses the in-chat views)", () => {
     const fileRow = document.body.querySelector(".sb-tally-popover .tool-file-row");
     expect(fileRow).not.toBeNull();
     fileRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(calls).toContainEqual(["read_text_file", { path: "/p/x.ts" }]);
+    expect(targets).toEqual([{ kind: "file", path: "/p/x.ts" }]);
   });
 
   it("falls back to the target list when no provider is set", () => {

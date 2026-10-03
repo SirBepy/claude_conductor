@@ -2,7 +2,7 @@ import { base64ToUtf8 } from "./chat-transforms";
 import { openLightbox } from "./lightbox";
 import { chipToLightboxContent } from "./attachment-hydrator";
 import { showView } from "../navigation";
-import { openPrPreviewModal } from "./pr-review-modal";
+import { openInCodeMode, type PrCommit } from "./code-mode-bridge";
 
 let tableOverlay: HTMLDivElement | null = null;
 
@@ -87,7 +87,23 @@ export function handlePrPreviewClick(e: MouseEvent): void {
   if (!btn) return;
   const card = btn.closest<HTMLElement>(".pr-preview-card");
   if (!card) return;
-  openPrPreviewModal(card);
+  openInCodeMode({
+    kind: "pr",
+    title: card.dataset.prTitle ?? "PR",
+    commits: parsePrCommits(card),
+    desc: card.querySelector<HTMLTemplateElement>("template.pr-modal-tpl"),
+  });
+}
+
+/** The PR card's commits, newest first (`data-pr-commits`, base64 JSON). */
+function parsePrCommits(card: HTMLElement): PrCommit[] {
+  try {
+    const parsed = JSON.parse(base64ToUtf8(card.dataset.prCommits ?? "")) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((c): c is PrCommit => !!c && typeof c.sha === "string" && typeof c.msg === "string");
+  } catch {
+    return [];
+  }
 }
 
 export function handleAttachmentClick(e: MouseEvent): void {

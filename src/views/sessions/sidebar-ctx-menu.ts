@@ -90,7 +90,7 @@ export function openCtxMenu(
   const isHidden = hiddenSet.has(sessionId);
 
   // "View changes" is only available when this is the currently active session
-  // and the ChangesPanel is registered.
+  // and its Code mode provider is registered.
   const isActive = state.selectedId === sessionId;
   const viewChanges = isActive ? state.activeChatActions?.viewChanges : undefined;
   const cwd = sess.cwd ? String(sess.cwd) : null;

@@ -172,15 +172,99 @@ fn parse_range_files(name_status: &str, numstat: &str) -> Vec<PrFileChange> {
     entries
 }
 
+/// The base a working-tree diff compares against: `from` itself (default
+/// `HEAD`), not its parent - `git diff <from> --` - so `from: "@{u}"` means
+/// everything not on the upstream yet, committed or not.
+fn worktree_base(from: &Option<String>) -> String {
+    from.clone().unwrap_or_else(|| "HEAD".to_string())
+}
+
+/// Untracked, not-ignored files, repo-root relative like `git diff`'s own
+/// output. `git diff <rev>` never lists them, but a brand new file is exactly
+/// what a working-tree scope exists to show.
+fn untracked_files(cwd: &str, path: Option<&str>) -> Result<Vec<String>, String> {
+    let mut args = vec!["ls-files", "--others", "--exclude-standard", "--full-name", "-z"];
+    if let Some(p) = path {
+        args.extend(["--", p]);
+    }
+    let out = run_git(cwd, &args)?;
+    Ok(out.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
+}
+
+/// Reads a repo-root-relative path from disk, refusing anything that resolves
+/// outside the repo (`..`, an absolute path, a symlink out): these commands are
+/// phone-reachable, and only the repo's own files are in scope.
+fn read_worktree_bytes(cwd: &str, path: &str, cap: usize) -> Result<(Vec<u8>, bool), String> {
+    let top = run_git(cwd, &["rev-parse", "--show-toplevel"])?;
+    let root = std::fs::canonicalize(top).map_err(|e| format!("repo root: {e}"))?;
+    let full = std::fs::canonicalize(root.join(path)).map_err(|e| format!("{path}: {e}"))?;
+    if !full.starts_with(&root) {
+        return Err(format!("{path}: outside the repository"));
+    }
+    let mut bytes = std::fs::read(&full).map_err(|e| format!("{path}: {e}"))?;
+    let truncated = bytes.len() > cap;
+    bytes.truncate(cap);
+    Ok((bytes, truncated))
+}
+
+/// A NUL in the first 8KB is git's own binary heuristic.
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8000).any(|&b| b == 0)
+}
+
+/// The unified diff `git diff --no-index /dev/null <path>` would print for an
+/// untracked file, built in-process: `/dev/null` is not a path on Windows.
+fn new_file_diff(path: &str, bytes: &[u8]) -> String {
+    let header = format!("diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n");
+    if looks_binary(bytes) {
+        return format!("{header}Binary files /dev/null and b/{path} differ\n");
+    }
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = format!("{header}@@ -0,0 +1,{} @@\n", lines.len());
+    for l in &lines {
+        out.push('+');
+        out.push_str(l);
+        out.push('\n');
+    }
+    out
+}
+
+fn count_lines(bytes: &[u8]) -> u32 {
+    if looks_binary(bytes) {
+        return 0;
+    }
+    String::from_utf8_lossy(bytes).lines().count() as u32
+}
+
 /// Returns the files changed in the range `(lower, to]`, where `lower` is the
 /// parent of `from` if given, else the parent of `to`. Passing `from: None`
 /// yields the files touched by the single commit `to`; passing `from: Some(oldest)`
 /// yields the cumulative files touched across the whole range up to `to`.
+///
+/// `to: None` diffs against the working tree instead (see `worktree_base`),
+/// listing untracked files as added.
 #[tauri::command]
-pub async fn get_range_files(cwd: String, from: Option<String>, to: String) -> Result<Vec<PrFileChange>, String> {
+pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<String>) -> Result<Vec<PrFileChange>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        reject_option_like("to", &to)?;
+        if let Some(t) = to.as_deref() { reject_option_like("to", t)?; }
         if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
+
+        let Some(to) = to else {
+            let base = worktree_base(&from);
+            let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &base, "--"])?;
+            let numstat = run_git(&cwd, &["diff", "--numstat", "-M", &base, "--"])?;
+            let mut files = parse_range_files(&name_status, &numstat);
+            for path in untracked_files(&cwd, None)? {
+                if files.iter().any(|f| f.path == path) {
+                    continue;
+                }
+                let added = read_worktree_bytes(&cwd, &path, 1_000_000).map(|(b, _)| count_lines(&b)).unwrap_or(0);
+                files.push(PrFileChange { path, status: "A".to_string(), added, removed: 0, old_path: None });
+            }
+            return Ok(files);
+        };
+
         let lower = resolve_lower_bound(&cwd, &from, &to);
 
         let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &lower, &to, "--"])?;
@@ -196,26 +280,39 @@ pub async fn get_range_files(cwd: String, from: Option<String>, to: String) -> R
 /// with the same lower-bound resolution as `get_range_files`. `context` is
 /// git's `-U<n>` (lines kept around each change); a caller wanting the whole
 /// file passes a large one. Truncates at a line boundary before 1MB with a
-/// trailing marker.
+/// trailing marker. `to: None` diffs against the working tree, an untracked
+/// file coming back as an all-added diff.
 #[tauri::command]
 pub async fn get_file_diff(
     cwd: String,
     from: Option<String>,
-    to: String,
+    to: Option<String>,
     path: String,
     context: Option<u32>,
 ) -> Result<String, String> {
     const MAX_BYTES: usize = 1_000_000;
 
     tauri::async_runtime::spawn_blocking(move || {
-        reject_option_like("to", &to)?;
+        if let Some(t) = to.as_deref() { reject_option_like("to", t)?; }
         reject_option_like("path", &path)?;
         if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
-        let lower = resolve_lower_bound(&cwd, &from, &to);
         let unified = format!("-U{}", context.unwrap_or(3));
 
         let mut cmd = std::process::Command::new("git");
-        cmd.arg("-C").arg(&cwd).args(["diff", &unified, &lower, &to, "--", &path]);
+        cmd.arg("-C").arg(&cwd);
+        match to.as_deref() {
+            Some(to) => {
+                let lower = resolve_lower_bound(&cwd, &from, to);
+                cmd.args(["diff", &unified, &lower, to, "--", &path]);
+            }
+            None => {
+                if !untracked_files(&cwd, Some(&path))?.is_empty() {
+                    let (bytes, _) = read_worktree_bytes(&cwd, &path, MAX_BYTES)?;
+                    return Ok(new_file_diff(&path, &bytes));
+                }
+                cmd.args(["diff", &unified, &worktree_base(&from), "--", &path]);
+            }
+        }
         crate::util::process::hide_console(&mut cmd);
         let output = cmd.output().map_err(|e| format!("failed to run git: {e}"))?;
         if !output.status.success() {
@@ -310,14 +407,19 @@ mod range_files_tests {
 
 /// A file's content as of revision `rev` (`git show <rev>:<path>`), for the
 /// file view of a past commit, where the working tree would show the wrong
-/// version. Capped like `read_text_file`, lossy UTF-8.
+/// version. `rev: None` reads the working-tree copy from disk, confined to
+/// the repo. Capped like `read_text_file`, lossy UTF-8.
 #[tauri::command]
-pub async fn get_file_at_rev(cwd: String, rev: String, path: String) -> Result<crate::ipc::files::TextFileData, String> {
+pub async fn get_file_at_rev(cwd: String, rev: Option<String>, path: String) -> Result<crate::ipc::files::TextFileData, String> {
     const MAX_BYTES: usize = 2 * 1024 * 1024;
 
     tauri::async_runtime::spawn_blocking(move || {
-        reject_option_like("rev", &rev)?;
         reject_option_like("path", &path)?;
+        let Some(rev) = rev else {
+            let (bytes, truncated) = read_worktree_bytes(&cwd, &path, MAX_BYTES)?;
+            return Ok(crate::ipc::files::TextFileData { content: String::from_utf8_lossy(&bytes).into_owned(), truncated });
+        };
+        reject_option_like("rev", &rev)?;
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C").arg(&cwd).args(["show", &format!("{rev}:{path}")]);
         crate::util::process::hide_console(&mut cmd);
@@ -346,15 +448,16 @@ mod rev_tests {
 
     #[tokio::test]
     async fn file_at_rev_reads_the_committed_blob() {
-        let data = get_file_at_rev(cwd(), "HEAD".into(), "package.json".into()).await.unwrap();
+        let data = get_file_at_rev(cwd(), Some("HEAD".into()), "package.json".into()).await.unwrap();
         assert!(data.content.contains("\"name\""));
         assert!(!data.truncated);
     }
 
     #[tokio::test]
     async fn file_at_rev_refuses_option_like_input() {
-        assert!(get_file_at_rev(cwd(), "--output=x".into(), "a".into()).await.is_err());
-        assert!(get_file_at_rev(cwd(), "HEAD".into(), "-x".into()).await.is_err());
+        assert!(get_file_at_rev(cwd(), Some("--output=x".into()), "a".into()).await.is_err());
+        assert!(get_file_at_rev(cwd(), Some("HEAD".into()), "-x".into()).await.is_err());
+        assert!(get_file_at_rev(cwd(), None, "-x".into()).await.is_err());
     }
 
     #[tokio::test]
@@ -378,8 +481,56 @@ mod rev_tests {
 
         // One changed line: full context carries the whole file, -U3 only ~7 lines.
         let path = "big.txt".to_string();
-        let full = get_file_diff(repo.clone(), None, "HEAD".into(), path.clone(), Some(1_000_000)).await.unwrap();
-        let short = get_file_diff(repo, None, "HEAD".into(), path, None).await.unwrap();
+        let full = get_file_diff(repo.clone(), None, Some("HEAD".into()), path.clone(), Some(1_000_000)).await.unwrap();
+        let short = get_file_diff(repo, None, Some("HEAD".into()), path, None).await.unwrap();
         assert!(full.lines().count() > short.lines().count() + 50, "full {} vs short {}", full.lines().count(), short.lines().count());
+    }
+
+    // One commit, then one modified tracked file and one untracked file: the
+    // shapes a working-tree scope has to show.
+    fn worktree_repo() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_string_lossy().to_string();
+        let git = |args: &[&str]| run_git(&repo, args).unwrap();
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "test"]);
+        std::fs::write(dir.path().join("tracked.txt"), "one\ntwo\n").unwrap();
+        git(&["add", "tracked.txt"]);
+        git(&["commit", "-q", "-m", "base"]);
+        std::fs::write(dir.path().join("tracked.txt"), "one\nTWO\n").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/new.txt"), "a\nb\nc\n").unwrap();
+        (dir, repo)
+    }
+
+    #[tokio::test]
+    async fn worktree_range_lists_modified_and_untracked_files() {
+        let (_dir, repo) = worktree_repo();
+        let files = get_range_files(repo, None, None).await.unwrap();
+        let tracked = files.iter().find(|f| f.path == "tracked.txt").expect("modified file listed");
+        assert_eq!((tracked.status.as_str(), tracked.added, tracked.removed), ("M", 1, 1));
+        let new = files.iter().find(|f| f.path == "sub/new.txt").expect("untracked file listed");
+        assert_eq!((new.status.as_str(), new.added), ("A", 3));
+    }
+
+    #[tokio::test]
+    async fn worktree_diff_covers_tracked_and_untracked_files() {
+        let (_dir, repo) = worktree_repo();
+        let tracked = get_file_diff(repo.clone(), None, None, "tracked.txt".into(), None).await.unwrap();
+        assert!(tracked.contains("-two") && tracked.contains("+TWO"), "{tracked}");
+        let new = get_file_diff(repo, None, None, "sub/new.txt".into(), None).await.unwrap();
+        assert!(new.contains("@@ -0,0 +1,3 @@") && new.contains("+c"), "{new}");
+    }
+
+    #[tokio::test]
+    async fn worktree_file_reads_disk_but_never_outside_the_repo() {
+        let (dir, repo) = worktree_repo();
+        let data = get_file_at_rev(repo.clone(), None, "tracked.txt".into()).await.unwrap();
+        assert_eq!(data.content.replace("\r\n", "\n"), "one\nTWO\n");
+        let outside = tempfile::NamedTempFile::new_in(dir.path().parent().unwrap()).unwrap();
+        let rel = format!("../{}", outside.path().file_name().unwrap().to_string_lossy());
+        let Err(err) = get_file_at_rev(repo, None, rel).await else { panic!("read a file outside the repo") };
+        assert!(err.contains("outside the repository"), "{err}");
     }
 }

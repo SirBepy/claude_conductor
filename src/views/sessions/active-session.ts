@@ -22,6 +22,8 @@ import { isAutoAccept, replayPendingPrompt, rehydratePendingPrompts, pendingProm
 import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { SessionHeader } from "./session-header";
+import { closeCodeMode } from "./code-mode/code-mode";
+import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
 import { setThinkingActivity } from "./session-thinking-bar";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
@@ -97,9 +99,9 @@ export function dismountActivePane(opts?: { rerenderSidebar?: boolean }): void {
   state.composer = null;
   state.scheduledChip?.destroy();
   state.scheduledChip = null;
-  state.changesPanel?.unmount();
-  state.changesPanel = null;
   state.activeChatActions = null;
+  closeCodeMode();
+  setCodeModeChatProvider(null);
   setThinkingActivity(null);
   setActiveSession(null);
   const pane = document.querySelector<HTMLElement>(".session-pane #session-pane")

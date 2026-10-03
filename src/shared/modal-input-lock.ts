@@ -1,6 +1,6 @@
-// Deliberately free of lit-html and modal.css: chat-click-handlers reaches
-// this through pr-review-modal, and lit-html touches document at module eval,
-// which breaks node-environment tests that never render a modal.
+// Deliberately free of lit-html and modal.css: shared chat modules reach this
+// through the composer, and lit-html touches document at module eval, which
+// breaks node-environment tests that never render a modal.
 
 import { isTextEntryElement } from "./text-entry";
 

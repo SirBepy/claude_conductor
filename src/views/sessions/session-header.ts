@@ -13,9 +13,9 @@ export interface SessionHeaderBindOpts {
 }
 
 /**
- * The session pane header - avatar, title/meta, and discard button (drafts).
- * The per-session more-btn and changes-btn have moved to the top-right view-more
- * menu ("This chat" section and Chat submenu respectively).
+ * The session pane header - avatar, title/meta, the `</>` Code mode button, and
+ * the discard button (drafts). The per-session more-btn moved to the top-right
+ * view-more menu ("This chat" section).
  */
 export class SessionHeader {
   readonly el: HTMLElement;
@@ -29,7 +29,8 @@ export class SessionHeader {
 
   private readonly _onDiscard: (() => void) | undefined;
 
-  onChangesClick: (() => void) | null = null;
+  /** The `</>` button: enter Code mode for this chat. */
+  onCodeModeClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
   /** Opens the statusbar's model / effort slider popover on the header's own
    *  text. The statusbar owns both popovers and the commit path, so the header
@@ -60,6 +61,9 @@ export class SessionHeader {
       `    </span>`,
       `  </span>`,
       `</div>`,
+      `<button class="icon-btn code-mode-btn" title="Code mode (Ctrl+Shift+E)" aria-label="Code mode">`,
+      `  <i class="ph ph-code"></i>`,
+      `</button>`,
       `<button class="icon-btn discard-btn" title="Discard draft">`,
       `  <i class="ph ph-x-circle"></i>`,
       `</button>`,
@@ -73,6 +77,11 @@ export class SessionHeader {
     this._cfgModelEl = el.querySelector(".meta-cfg-model")!;
     this._cfgSepEl = el.querySelector(".meta-cfg-sep")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
+
+    el.querySelector<HTMLButtonElement>(".code-mode-btn")!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.onCodeModeClick?.();
+    });
 
     el.querySelector<HTMLButtonElement>(".discard-btn")?.addEventListener("click", () => {
       this._onDiscard?.();
@@ -139,13 +148,6 @@ export class SessionHeader {
     } else if (!isRemote && existing) {
       existing.remove();
     }
-  }
-
-  /** No-op kept for call-site compatibility. Changes badge moved to view-more menu. */
-  setChangesBadge(_n: number): void {
-    // The badge counter previously shown on the header changes-btn is gone.
-    // pending-pane.ts and active-session.ts still call this; it is a no-op so
-    // they don't need changes.
   }
 
   setAvatar(charId: string | null, url: string | null, status: string, cwd?: string | null): void {

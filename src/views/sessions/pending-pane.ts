@@ -3,7 +3,8 @@ import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
-import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
+import { setCodeModeChatProvider, enterCodeMode } from "./code-mode/entry";
+import { sessionCodeModeChat } from "./code-mode/session-chat";
 import { Composer } from "../../shared/chat/composer";
 import { HeldMessages } from "../../shared/chat/held-messages";
 import type { ChatEvent, ContentBlock, ScheduledItem, ScheduledKind } from "../../types/ipc.generated";
@@ -19,7 +20,6 @@ import type { SessionConfig } from "./model-effort-modal";
 import { isAutoAccept, setAutoAccept } from "./permission-modal";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero, fetchGitInfo } from "./session-statusbar";
 import { savePendingSession, clearPendingSession } from "./pending-draft-storage";
-import { ChangesPanel, dedupeByPath } from "./changes-panel";
 import { SessionHeader } from "./session-header";
 import { showToast } from "../../shared/toast";
 import { wireRenderer } from "./active-session-mount";
@@ -122,9 +122,12 @@ export async function renderPendingPane(
     state.renderer = renderer;
     // A fresh draft owns none of the previous chat's progress/activity.
     syncThinkingBar(renderer);
-    // Let the PR-preview modal's git IPC calls resolve this pending
-    // session's working directory.
-    setPrReviewCwdProvider(() => project.path || null);
+    // Code mode works on a draft too: its repo, no session or edits yet.
+    const headerEl = _pendingHeader?.el ?? null;
+    setCodeModeChatProvider(project.path && headerEl
+      ? () => sessionCodeModeChat({ pane, sessionId: renderer.sessionId, cwd: project.path, headerEl, renderer })
+      : null);
+    if (_pendingHeader) _pendingHeader.onCodeModeClick = () => void enterCodeMode();
     const sbForRenderer = state.statusbar;
     if (sbForRenderer) {
       renderer.onMetaUpdate = (meta) => {
@@ -438,18 +441,11 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
   const renderer = state.renderer;
   if (messagesEl && renderer && sess) {
-    state.changesPanel?.unmount();
     // Full shared wiring (tool-view provider, activity/progress/todo/CTA
-    // callbacks, activeChatActions) - not just the changes-panel subset this used
-    // to hand-roll, which is exactly why a promoted draft looked like a chat but
+    // callbacks, activeChatActions, Code mode) - not a hand-rolled subset,
+    // which is exactly why a promoted draft once looked like a chat but
     // wasn't wired like one (ai_todo: draft-promotion lookalike bug).
-    const panel = new ChangesPanel();
-    wireRenderer(pane, sess, h, renderer, panel);
-    // onFileEditsChanged above is a fresh listener; edits from before promotion
-    // (nothing was listening yet) need seeding, same as a retained-pane remount.
-    const seeded = renderer.getFileEdits();
-    panel.onUpdate(seeded);
-    h.setChangesBadge(dedupeByPath(seeded).length);
+    wireRenderer(pane, sess, h, renderer);
     // Register with the pane cache so the next navigate-away-and-back is a
     // cache hit (element swap) instead of the cold rebuild that used to be
     // the only thing that fully re-wired a promoted chat.

@@ -1,10 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
-// Two statusline changes driven in a real browser: repo + folder are location
-// chips now (silent until the AI leaves the folder the chat was opened in), and
-// the git card lists branch history as one scrolling list with the unpushed rows
-// marked apart from the pushed ones.
+// Statusline location chips driven in a real browser: repo + folder stay silent
+// until the AI leaves the folder the chat was opened in.
 
 const DESKTOP = { width: 1400, height: 900 };
 const SPAWN = "C:/Projects/alpha";
@@ -25,26 +23,6 @@ const SYNC = {
   has_upstream: true,
 };
 
-function history(): { entries: unknown[]; has_more: boolean; has_upstream: boolean } {
-  const base = 1_770_000_000;
-  const unpushed = SYNC.ahead.map((c, i) => ({
-    short_sha: c.short_sha, message: c.message, pushed: false, timestamp: base - i * 5400,
-  }));
-  const messages = [
-    "FIX: keep pre-meta-tick calls in the open turn's chip strip",
-    "FIX: render a tool chip's panel from the calls it counted",
-    "FIX: use fractional height for the question card's track clip",
-    "FEAT: page the commits popover",
-    "DOCS: note the worktree bootstrap step",
-    "TEST: cover the statusline location chips",
-  ];
-  // 18 rows, enough to overflow the list's 260px cap so the scroll is real.
-  const pushed = Array.from({ length: 18 }, (_, i) => messages[i % messages.length]).map((message, i) => ({
-    short_sha: `c0${i}de${i}f`, message, pushed: true, timestamp: base - (i + 3) * 86_400,
-  }));
-  return { entries: [...unpushed, ...pushed], has_more: false, has_upstream: true };
-}
-
 async function mountStatusbar(page: Page, liveCwd: string): Promise<void> {
   await page.setViewportSize(DESKTOP);
   await mountView(page, {
@@ -57,7 +35,6 @@ async function mountStatusbar(page: Page, liveCwd: string): Promise<void> {
       get_git_info: GIT_INFO,
       get_git_dirty: [],
       get_commit_sync: SYNC,
-      get_commit_history: history(),
       get_settings: { theme: "void", statuslineRows: [ROW], statuslineRowsMobile: [ROW] },
     },
   });
@@ -94,28 +71,5 @@ test.describe("statusline location chips", () => {
     await expect(bar.locator(".sb-repo")).toContainText("claude_conductor");
     await page.waitForTimeout(400);
     await shot(page.locator("#session-pane"), "location-chips-shown-after-worktree-move");
-  });
-});
-
-test.describe("git card history", () => {
-  test("lists pushed and unpushed commits in one scrolling list", async ({ page }) => {
-    await mountStatusbar(page, SPAWN);
-
-    await page.locator("#session-pane .sb-commits-btn").click();
-    const popover = page.locator(".sb-git-card");
-    await expect(popover).toBeVisible();
-    await expect(popover.locator(".sb-git-pop-push-btn")).toBeVisible();
-    await expect(popover.locator(".sb-git-pop-section.behind")).toContainText("Incoming");
-
-    const list = popover.locator(".sb-commit-history");
-    await expect(list.locator(".sb-history-row")).toHaveCount(20);
-    await expect(list.locator(".sb-history-row.unpushed")).toHaveCount(2);
-    await expect(list.locator(".sb-history-row.pushed")).toHaveCount(18);
-    // The list owns the scroll, so the header + Push button stay put above it.
-    await expect(list).toHaveCSS("overflow-y", "auto");
-    const scrollable = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
-    expect(scrollable, "history list should scroll rather than grow the popover").toBe(true);
-
-    await shot(popover, "git-card-pushed-history");
   });
 });

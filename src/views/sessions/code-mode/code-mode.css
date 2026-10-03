@@ -1,0 +1,805 @@
+/* Code mode (code-mode.ts): covers its host layout's other children while
+ * open. Mode bar (back pill + pop-out), then explorer | tabs + editor. */
+
+.code-mode-on > :not(.code-mode) {
+  display: none !important;
+}
+
+.code-mode {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+}
+
+.code-mode .grow {
+  flex: 1;
+}
+
+.cm-ib {
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.cm-ib:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-spin {
+  display: inline-block;
+  animation: cm-spin 0.7s linear infinite;
+}
+
+@keyframes cm-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── mode bar + back pill ─────────────────────────────────────────────── */
+
+.cm-modebar {
+  flex: none;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+/* One control back to the chat: which chat, whether Claude is writing, and
+   its latest line, so a reply landing mid-read is visible without leaving. */
+.cm-backchat {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 720px;
+  height: 32px;
+  min-height: 0;
+  padding: 0 14px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cm-backchat:hover {
+  border-color: var(--color-primary);
+}
+
+.cm-bc-ic {
+  flex: none;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cm-backchat:hover .cm-bc-ic {
+  transform: translateX(-2px);
+}
+
+.cm-bc-title {
+  flex: none;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.cm-bc-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--color-border);
+}
+
+.cm-bc-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.cm-bc-text:empty {
+  display: none;
+}
+
+.cm-live {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+
+.cm-live.on {
+  background: var(--color-primary);
+  animation: cm-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cm-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-live.on { animation: none; }
+  .cm-bc-ic { transition: none; }
+}
+
+/* ── body ─────────────────────────────────────────────────────────────── */
+
+.cm-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.cm-explorer {
+  position: relative;
+  width: 300px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.cm-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+}
+
+.cm-editor > [hidden] {
+  display: none !important;
+}
+
+/* ── explorer header ──────────────────────────────────────────────────── */
+
+.cm-files-h {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 6px 0 12px;
+}
+
+/* A quiet text menu, not a button row. */
+.cm-qtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 0;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cm-qtitle:hover {
+  background: var(--color-surface);
+}
+
+.cm-qtitle .n {
+  font: 500 11px "Fira Code", ui-monospace, monospace;
+  color: var(--color-text-muted);
+}
+
+.cm-qtitle .ph-caret-down {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.cm-menu {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 40px;
+  z-index: 6;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.cm-mi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.cm-mi:hover,
+.cm-mi:focus-visible {
+  background: var(--color-surface-alt);
+  outline: none;
+}
+
+.cm-mi .ph {
+  color: var(--color-text-muted);
+}
+
+.cm-mi .n {
+  margin-left: auto;
+  font: 11px "Fira Code", ui-monospace, monospace;
+  color: var(--color-text-muted);
+}
+
+.cm-mi .cm-chk {
+  visibility: hidden;
+  color: var(--color-primary);
+}
+
+.cm-mi[aria-checked="true"] .cm-chk {
+  visibility: visible;
+}
+
+.cm-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-border);
+}
+
+/* Opened commit / PR: back + title (2 lines max) + hash and file count. */
+.cm-chead {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 7px 6px 8px 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cm-ctext {
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.cm-ctitle {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.cm-csha {
+  margin-top: 3px;
+  font: 11.5px "Fira Code", ui-monospace, monospace;
+  color: var(--color-text-muted);
+}
+
+.cm-cn {
+  font-family: "DM Sans", system-ui, sans-serif;
+}
+
+.cm-copy {
+  border-radius: 4px;
+  cursor: copy;
+}
+
+.cm-copy:hover {
+  background: var(--color-surface);
+}
+
+.cm-copy.copied {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.cm-copy.copied::after {
+  content: "Copied";
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  vertical-align: 1px;
+  background: var(--color-primary);
+  color: var(--color-background);
+  font: 600 11px "DM Sans", system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+/* ── tree ─────────────────────────────────────────────────────────────── */
+
+.cm-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 10px;
+}
+
+.cm-note {
+  padding: 14px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.cm-note.cm-err {
+  color: var(--color-danger);
+}
+
+.cm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-right: 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-row:hover {
+  background: var(--color-surface);
+}
+
+.cm-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.cm-row.active {
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+.cm-row .ph {
+  flex: none;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.cm-row .ph-folder,
+.cm-row .ph-folder-open {
+  color: var(--color-primary);
+}
+
+.cm-caret-pad {
+  width: 13px;
+  flex: none;
+}
+
+.cm-row .fname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.cm-row.chg .fname {
+  color: var(--color-text);
+}
+
+.cm-row.wt .fname {
+  font-style: italic;
+}
+
+.cm-row .end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cm-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning);
+}
+
+.cm-wt {
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
+  font: 600 9px/1 "Fira Code", ui-monospace, monospace;
+}
+
+/* ── commits fold + push row ──────────────────────────────────────────── */
+
+.cm-fold {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-fold:hover {
+  color: var(--color-text);
+}
+
+.cm-fold:focus-visible,
+.cm-commit:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.cm-fold .ph {
+  font-size: 11px;
+}
+
+.cm-qn {
+  font-size: 12px;
+}
+
+.cm-commits {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+}
+
+.cm-commit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.cm-commit:hover,
+.cm-commit.on {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-commit code {
+  font: 11.5px "Fira Code", ui-monospace, monospace;
+  color: var(--color-text-muted);
+}
+
+.cm-commit:hover code,
+.cm-commit.on code {
+  color: var(--color-text);
+}
+
+.cm-commit span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-actrow {
+  cursor: default;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.cm-actrow:hover {
+  background: none;
+}
+
+/* Sticky: a long unpushed list scrolls under it instead of pushing Push out of view. */
+.cm-pushrow {
+  position: sticky;
+  bottom: 0;
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.cm-pushtext {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  min-height: 0;
+  margin-left: -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cm-pushtext:hover:not(:disabled) {
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+
+.cm-pushtext:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.cm-branchbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  min-height: 0;
+  margin-right: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: 12px "Fira Code", ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.cm-branchbtn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-branchbtn .ph-caret-up {
+  font-size: 10px;
+}
+
+.cm-branchbtn:hover,
+.cm-branchbtn.on {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-giterr {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-danger);
+  white-space: pre-wrap;
+}
+
+/* The git card's branch list, opened upward from the push row. */
+.cm-bmenu {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 42px;
+  z-index: 6;
+  max-height: 60%;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.bs-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 2px 2px 4px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-background);
+  color: var(--color-text-muted);
+}
+
+.bs-search input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+/* ── tabs ─────────────────────────────────────────────────────────────── */
+
+.cm-tabs {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background);
+}
+
+.cm-tabrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-height: 0;
+  flex: none;
+  padding: 0 4px 0 10px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cm-tab:hover {
+  color: var(--color-text);
+}
+
+.cm-tab.on {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-tab.cm-desc-tab {
+  padding-right: 10px;
+}
+
+.cm-tab .pr-file-status {
+  margin-right: 0;
+}
+
+/* 24px hit target around a small icon. */
+.cm-x {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.cm-x:hover {
+  background: var(--color-surface-alt);
+  opacity: 1;
+}
+
+.cm-tools {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.cm-files-back {
+  display: none;
+  align-self: center;
+}
+
+.cm-empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.cm-empty .ph {
+  font-size: 28px;
+  color: var(--color-primary);
+}
+
+.cm-desc {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ── right-click menu ─────────────────────────────────────────────────── */
+
+.cm-ctx {
+  position: fixed;
+  z-index: 2147483000;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.cm-ctx .cm-mi {
+  font-size: 12.5px;
+}
+
+/* ── phone: stacked screens ───────────────────────────────────────────── */
+
+.cm-phone .cm-modebar {
+  padding: 0 8px;
+}
+
+.cm-phone .cm-bc-title {
+  max-width: 40vw;
+}
+
+.cm-phone .cm-explorer {
+  width: 100%;
+  border-right: 0;
+}
+
+.cm-phone .cm-body[data-screen="explorer"] .cm-editor,
+.cm-phone .cm-body[data-screen="file"] .cm-explorer {
+  display: none;
+}
+
+.cm-phone .cm-files-back {
+  display: grid;
+}
+
+.cm-phone .cm-row {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  font-size: 14px;
+}
+
+.cm-phone .cm-commit {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+/* ── Code mode's own window (popout.ts) ───────────────────────────────── */
+
+.code-window-layout {
+  display: flex;
+  height: 100vh;
+}

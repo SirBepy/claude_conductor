@@ -1,6 +1,5 @@
-// HTML renderers for inline edit-window (chat) and stacked diff (panel sheet).
-// Pure functions, return escaped HTML strings. Consumed by chat-transforms.ts
-// (inline path) and changes-panel.ts (sheet path).
+// HTML renderers for inline edit-window (chat) and stacked diff.
+// Pure functions, return escaped HTML strings. Consumed by chat-transforms.ts.
 
 import type { FileEditView, FileEditHunk } from "./file-edits";
 import { escapeHtml } from "../escape-html";
@@ -38,12 +37,4 @@ export function renderEditWindow(view: FileEditView): string {
   const summary = `<summary class="edit-window-summary"><i class="ph ${icon}"></i><span class="edit-window-path">${escapeHtml(view.basename)}</span>${diffBadgeHtml(view.addedLines, view.removedLines)}</summary>`;
   const body = `<div class="edit-window-body">${view.hunks.map((h) => hunkHtml(h, view.kind)).join("")}</div>`;
   return `<details class="edit-window" data-kind="${view.kind}" data-path="${escapeHtml(view.path)}">${summary}${body}</details>`;
-}
-
-export function renderStackedDiff(views: FileEditView[]): string {
-  return views.map((v) => {
-    const header = `<div class="stacked-diff-header"><i class="ph ${KIND_ICON[v.kind]}"></i><span>${escapeHtml(v.basename)}</span>${diffBadgeHtml(v.addedLines, v.removedLines)}</div>`;
-    const body = v.hunks.map((h) => hunkHtml(h, v.kind)).join("");
-    return `<div class="stacked-diff-file" data-path="${escapeHtml(v.path)}">${header}${body}</div>`;
-  }).join("");
 }

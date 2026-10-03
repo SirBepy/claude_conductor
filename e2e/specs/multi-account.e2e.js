@@ -15,8 +15,7 @@
 // FREE in the billing sense (no `claude` process spawned), but NOT fixture-
 // free: the wizard's `/login` step cannot be scripted (00-overview.md, locked
 // decision) and there is no IPC seam to fabricate a fake registered account the
-// way `changes-panel.e2e.js` seeds a fake session via
-// `register_historical_session`. So the account count is whatever the `wdio`
+// way `register_historical_session` can seed a fake session. So the account count is whatever the `wdio`
 // daemon instance happens to hold, and the assertions below read it rather than
 // assuming it.
 //

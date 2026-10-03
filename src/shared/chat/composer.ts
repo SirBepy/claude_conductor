@@ -9,6 +9,7 @@ import { openComposerMenu, type ComposerMenuItem } from "./composer-menu";
 import { SlashProvider } from "./caret-popup/providers/slash";
 import { FileProvider } from "./caret-popup/providers/file";
 import type { SuggestProvider } from "./caret-popup/types";
+import { insertAtCaret } from "./caret-popup/insert-at-caret";
 import type { ChatRenderer } from "./chat-renderer";
 import { parseBuiltin, HANDLERS, type BuiltinContext } from "./builtins";
 import { ComposerCore } from "./composer-core/core";
@@ -723,6 +724,19 @@ export class Composer {
     this.updateHighlight();
     this.persistDraft();
     this.opts.onDraftActivity?.();
+  }
+
+  /** Insert `text` at the caret (the end, if the box never had a caret),
+   * spaced off the word before it. Goes through insertAtCaret so undo, the
+   * highlight and draft persistence all see it as typed input. */
+  insertText(text: string): void {
+    const ta = this.textarea;
+    if (!ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? start;
+    const pad = start > 0 && !/\s$/.test(ta.value.slice(0, start)) ? " " : "";
+    insertAtCaret(ta, pad + text, start, end);
+    ta.focus();
   }
 
   /** Plain text of the current draft, attachments aside (lightbox draft mirror). */

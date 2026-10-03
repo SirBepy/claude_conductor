@@ -127,6 +127,17 @@ function previewSessionFromHash(): string | null {
   return params.get("session");
 }
 
+// Code mode's own window, same detect-before-router shape: backend opens
+// `index.html?codewindow=1#code?session=<id>`.
+function codeSessionFromHash(): string | null {
+  if (new URLSearchParams(window.location.search).get("codewindow") !== "1") return null;
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#code")) return null;
+  const qIdx = hash.indexOf("?");
+  if (qIdx < 0) return null;
+  return new URLSearchParams(hash.slice(qIdx + 1)).get("session");
+}
+
 // Signal to the Rust boot watchdog that the webview loaded successfully.
 // If this never fires within ~6s, the watchdog reloads the window. Recovers
 // from WebView2 "can't reach this page" caused by an unreachable start URL
@@ -195,6 +206,13 @@ if (previewSessionId) {
   document.getElementById("sidemenuBackdrop")?.remove();
 }
 
+const codeSessionId = codeSessionFromHash();
+if (codeSessionId) {
+  document.body.classList.add("code-window-mode");
+  document.getElementById("sidemenu")?.remove();
+  document.getElementById("sidemenuBackdrop")?.remove();
+}
+
 // Opt out of the back-forward cache: bfcache-freezing this tab while
 // Android's native file picker is open on top of it drops the picker's
 // result on return with no error - the mobile "picker opens, nothing
@@ -251,6 +269,11 @@ if (detachedSessionId) {
   // calendar and cross-navigates to the Chats window on item click).
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
   void import("./views/schedule/schedule").then((m) => m.renderScheduleView(app));
+} else if (codeSessionId) {
+  // Solo Code mode render; no router, no sidemenu, no boot.
+  document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
+  void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
+  void import("./views/sessions/code-mode/popout").then((m) => m.mountCodeWindow(app, codeSessionId));
 } else if (previewSessionId) {
   // Solo preview render; no router, no sidemenu, no boot.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));

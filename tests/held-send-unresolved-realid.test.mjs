@@ -31,7 +31,7 @@ vi.mock("../src/shared/chat/event-store.ts", () => ({
     hasMore: vi.fn(() => false),
   },
 }));
-vi.mock("../src/shared/chat/pr-review-modal.ts", () => ({ setPrReviewCwdProvider: vi.fn() }));
+vi.mock("../src/views/sessions/code-mode/entry.ts", () => ({ setCodeModeChatProvider: vi.fn(), enterCodeMode: vi.fn() }));
 vi.mock("../src/shared/chat/composer.ts", () => ({
   Composer: vi.fn().mockImplementation(() => ({
     destroy: vi.fn(),
@@ -80,10 +80,6 @@ vi.mock("../src/views/sessions/permission-modal/index.ts", () => ({
   isAutoAccept: vi.fn(() => false),
   setAutoAccept: vi.fn(),
   setSelectedSessionId: vi.fn(),
-}));
-vi.mock("../src/views/sessions/changes-panel.ts", () => ({
-  ChangesPanel: vi.fn(),
-  dedupeByPath: vi.fn(() => []),
 }));
 vi.mock("../src/views/sessions/active-session-mount.ts", () => ({ wireRenderer: vi.fn() }));
 vi.mock("../src/views/sessions/chat-pane-cache.ts", () => ({ retainChat: vi.fn() }));

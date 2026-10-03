@@ -44,7 +44,6 @@ import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
 import { ModelEffortState } from "./session-statusbar-model-effort";
-import { GitCard } from "./git-card";
 import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
 import { onMobileViewportChange } from "../../shared/mobile-viewport";
@@ -118,7 +117,6 @@ export class SessionStatusbar {
   // Polls the server_supervisor for this project's running dev servers.
   private serversTimer: (() => void) | null = null;
   private imagesPopover = new ImagesPopover();
-  private gitCard = new GitCard();
   private overflowPopover = new OverflowPopover();
   private mobileUnsub: (() => void) | null = null;
 
@@ -243,6 +241,12 @@ export class SessionStatusbar {
    *  prints NOTHING without one - so one `cd` into an install or temp dir takes
    *  the whole chip down, ahead count included. The chat's own repo beats an
    *  empty statusbar, so retry there once (bounded: cwd === this.cwd). */
+  /** Re-fetch the git chip after a push / pull / checkout made elsewhere
+   *  (Code mode). */
+  refreshGit(): void {
+    void this.refreshGitInfo();
+  }
+
   private async refreshGitInfo(): Promise<void> {
     const cwd = this.gitCwd;
     if (!cwd) return;
@@ -528,7 +532,6 @@ export class SessionStatusbar {
       imagesPopover: this.imagesPopover,
       effortPopover: this.modelEffort.effortPopover,
       modelPopover: this.modelEffort.modelPopover,
-      gitCard: this.gitCard,
       overflowPopover: this.overflowPopover,
       tally: this.tally,
     };
@@ -540,15 +543,10 @@ export class SessionStatusbar {
     return {
       ...this.popoverBundle(),
       cwd: this.cwd,
-      liveCwd: this.liveCwd,
-      sessionId: this.sessionId,
-      gitInfo: this.gitInfo,
-      gitCwd: this.gitCwd,
       effortAnchor: this.modelEffort.effortAnchor,
       modelAnchor: this.modelEffort.modelAnchor,
       toggleModelPopover: (anchor) => this.toggleModelPopover(anchor),
       toggleEffortPopover: (anchor) => this.toggleEffortPopover(anchor),
-      refreshGitInfo: () => void this.refreshGitInfo(),
       overflowData: () => this.overflowData(),
     };
   }

@@ -7,15 +7,15 @@ import { invoke } from "../../shared/ipc";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { mountChatLoadingOverlay, type ChatLoadingOverlay } from "../../shared/chat/chat-loading";
-import { setFileEditsProvider } from "../../shared/chat/file-viewer";
 import { setChatImageDataProvider } from "../../shared/chat/chat-renderer-bridge";
-import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero } from "./session-statusbar";
 import { readLastChoice } from "../../shared/effort-presets";
 import { renderSidebar } from "./sidebar";
-import { ChangesPanel, dedupeByPath } from "./changes-panel";
+import { setCodeModeChatProvider, enterCodeMode } from "./code-mode/entry";
+import { closeCodeMode, currentCodeModeKey } from "./code-mode/code-mode";
+import { sessionCodeModeChat } from "./code-mode/session-chat";
 import type { SessionHeader } from "./session-header";
 import { noteThinkingEvent, setThinkingActivity, setThinkingProgress, setThinkingTodoActivity, syncThinkingBar } from "./session-thinking-bar";
 import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
@@ -77,7 +77,7 @@ export async function mountStatusbar(
   return sb;
 }
 
-/** Point the visible chrome (statusbar, changes panel, thinking bar, CTAs) at
+/** Point the visible chrome (statusbar, Code mode, thinking bar, CTAs) at
  *  `renderer`. Shared by the cold mount, the retained-pane remount and draft
  *  promotion. Retained renderers stay subscribed off-screen, so every shared-chrome
  *  callback checks it is still the visible one - else a background turn drives it. */
@@ -86,10 +86,8 @@ export function wireRenderer(
   sess: Instance,
   header: SessionHeader,
   renderer: ChatRenderer,
-  panel: ChangesPanel,
 ): void {
   state.renderer = renderer;
-  state.changesPanel = panel;
   const sb = state.statusbar;
   if (sb) {
     renderer.onMetaUpdate = (meta) => {
@@ -108,13 +106,14 @@ export function wireRenderer(
     const known = renderer.getMeta();
     if (known.hasUsage || known.model) sb.updateMeta(known);
   }
-  panel.mount(pane, renderer.container);
-  renderer.onFileEditsChanged = (edits) => {
-    panel.onUpdate(edits);
-    header.setChangesBadge(dedupeByPath(edits).length);
-  };
-  // Let the file viewer's Diff tab resolve this session's edits for any file.
-  setFileEditsProvider(() => renderer.getFileEdits());
+  // Code mode reads this chat's edits, title and busy state through here;
+  // one left open for another chat would show the wrong repo.
+  const cwd = sess.cwd ? String(sess.cwd) : null;
+  setCodeModeChatProvider(cwd
+    ? () => sessionCodeModeChat({ pane, sessionId: renderer.sessionId ?? sess.session_id, cwd, headerEl: header.el, renderer })
+    : null);
+  const key = renderer.sessionId ?? sess.session_id;
+  if (currentCodeModeKey() !== null && currentCodeModeKey() !== key) closeCodeMode();
   // Let a sent-attachment thumb's click listener (attachment-hydrator.ts,
   // no `this`-bound renderer access of its own) build a fresh gallery
   // collection from this session's messages.
@@ -124,9 +123,6 @@ export function wireRenderer(
     sessionId: renderer.sessionId,
     cwd: renderer.paginator.cwdHint,
   }));
-  // Let the PR-preview modal's git IPC calls (get_range_files/get_file_diff)
-  // resolve this session's working directory.
-  setPrReviewCwdProvider(() => (sess.cwd ? String(sess.cwd) : null));
   renderer.onLiveEvent = () => {
     if (state.renderer === renderer) noteThinkingEvent();
   };
@@ -150,10 +146,10 @@ export function wireRenderer(
   // markers mid-turn. The registry's `awaiting` (set by the daemon from the
   // result line, gen-guarded) is the single source of truth now - see
   // deriveQuestionSet in sessions-helpers.ts.
-  header.onChangesClick = () => panel.toggle();
-  // Expose the panel toggle through the state seam so view-more-menu and
-  // sidebar-ctx-menu can offer "View changes" for the active session.
-  state.activeChatActions = { viewChanges: () => panel.toggle() };
+  header.onCodeModeClick = () => void enterCodeMode();
+  // view-more-menu and sidebar-ctx-menu offer "View changes" for the active
+  // session: Code mode on this chat's own edits.
+  state.activeChatActions = { viewChanges: () => void enterCodeMode({ kind: "scope", scope: "chat" }) };
   // Resolved lazily through state.composer (not bound to a closure captured
   // here) so this is safe to wire before mountComposer has run for this
   // session - by the time a CTA is actually clicked, state.composer is current.
@@ -181,16 +177,12 @@ function remountRetained(
   // store subscription did (e.g. a rekey that ran before this fix, or any
   // future path that severs it). No-op when already correctly subscribed.
   renderer.ensureSubscribed(sessionId);
-  const panel = new ChangesPanel();
-  wireRenderer(pane, sess, header, renderer, panel);
+  wireRenderer(pane, sess, header, renderer);
   renderer.resumeLiveRender();
   // Force any trailing coalesced flush from the drained events above so the
   // scroll below measures the FULL restored transcript, not a partial one
   // still waiting on scheduleFlush's 80ms window.
   flushRenderNow(renderer);
-  const edits = renderer.getFileEdits();
-  panel.onUpdate(edits);
-  header.setChangesBadge(dedupeByPath(edits).length);
   syncThinkingBar(renderer);
   // Reselecting a chat always lands on the newest message, same as a cold
   // load - it doesn't restore wherever the user had scrolled to before
@@ -200,7 +192,7 @@ function remountRetained(
   void sessionEvents.reconcileLatest(sessionId, sess.cwd ? String(sess.cwd) : undefined);
 }
 
-/** Attach the ChatRenderer + all-changes panel, wire status/CTA callbacks,
+/** Attach the ChatRenderer, wire status/CTA callbacks,
  * load history, and reconcile against the live transcript. Owns the stall
  * guard (ai_todo 226: ring the loading overlay after 150ms, show a
  * "didn't respond" retry state after 8s if nothing settled - a wedged
@@ -221,8 +213,6 @@ export async function mountRenderer(
   // of the cache. Anything else (pending-pane renderer, evicted chat) is dead
   // the moment the pane's DOM is replaced.
   if (state.renderer && !isRetainedRenderer(state.renderer)) state.renderer.detach();
-  state.changesPanel?.unmount();
-  state.changesPanel = null;
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
   if (!messagesEl) return true;
 
@@ -271,8 +261,8 @@ export async function mountRenderer(
   // Initial raw-activity view state (device-local pref, see message-filter-pref.ts).
   // Retained across pane-cache remounts since messagesEl itself is reused.
   messagesEl.classList.toggle("show-raw-chat", isRawViewEnabled(sessionId));
-  // Panel listens for file mutations; activity feed routes to the thinking bar.
-  wireRenderer(pane, sess, header, renderer, new ChangesPanel());
+  // Activity feed routes to the thinking bar.
+  wireRenderer(pane, sess, header, renderer);
   await renderer.attach(sessionId);
   // Bail if a newer mount or selectSession superseded us during await.
   if (state.mountId !== myMount || state.selectedId !== sessionId) {

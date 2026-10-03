@@ -31,6 +31,11 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "close-chat",  defaultKeys: "ctrl+w", label: "Cancel active turn",  description: "Cancel the current running turn in the focused chat", context: "sessions", suppressInInput: true },
   { id: "blur-composer", defaultKeys: "escape", label: "Unfocus message box", description: "Move keyboard focus off the message input", context: "sessions", suppressInInput: false },
 
+  // Code mode (src/views/sessions/code-mode/) - no view context: it also opens
+  // from History and detached chat windows, and docks back from its own window.
+  { id: "code-mode",        defaultKeys: "ctrl+shift+e", label: "Code mode",              description: "Enter or leave Code mode for the open chat",          suppressInInput: false },
+  { id: "code-mode-popout", defaultKeys: "ctrl+shift+o", label: "Pop out Code mode",      description: "Move Code mode into its own window, or dock it back", suppressInInput: false },
+
   // Chats view - new chat from a favourite project slot (see project-favorites.ts)
   { id: "new-chat-favorite-1", defaultKeys: "ctrl+shift+1", label: "New chat: favorite 1", description: "Start a new chat with the project pinned to favorite slot 1", context: "sessions", suppressInInput: false },
   { id: "new-chat-favorite-2", defaultKeys: "ctrl+shift+2", label: "New chat: favorite 2", description: "Start a new chat with the project pinned to favorite slot 2", context: "sessions", suppressInInput: false },

@@ -320,25 +320,14 @@
   position: relative;
 }
 
-.session-header .changes-btn {
-  position: relative;
+/* Quiet: muted like the model/effort text it sits beside, until hovered. */
+.session-header .code-mode-btn {
+  color: var(--color-text-muted);
 }
 
-.session-header .changes-btn .changes-count {
-  position: absolute;
-  right: -2px;
-  top: -2px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
-  background: var(--color-primary);
-  color: var(--color-background);
-  font-size: 0.58rem;
-  font-weight: 700;
-  line-height: 14px;
-  text-align: center;
-  pointer-events: none;
+.session-header .code-mode-btn:hover,
+.session-header .code-mode-btn:focus-visible {
+  color: var(--color-text);
 }
 
 /* View-header "more options" button indicator: when-done armed. */

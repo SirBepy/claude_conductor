@@ -30,6 +30,8 @@ export class ComposerStrayInput {
     // non-editable, so modal-input-lock lets the event bubble here - this
     // must not hijack it just because activeElement isn't a field.
     if (isAnyModalOpen()) return null;
+    // Code mode covers the chat: typing there must not land in a hidden box.
+    if (textarea.closest(".code-mode-on")) return null;
     if (isFormControlElement(document.activeElement)) return null;
     const cardInput = document.querySelector<HTMLTextAreaElement>(
       `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`,

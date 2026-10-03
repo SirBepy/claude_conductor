@@ -16,14 +16,14 @@
  *  - chat-draft-card.css:    write_draft card (outbound message draft, centered row)
  *  - chat-screenshot-block.css: screenshot block + thumbnail row
  *  - chat-turn-footer.css:   per-turn footer meta chips, progress bar, todo checklist
- *  - pr-preview.css:         PR preview card + modal (the /create-pr skill preview)
+ *  - pr-preview.css:         PR preview card (the /create-pr skill preview), the
+ *                            file status badges, and the PR description body
+ *                            Code mode's Description tab renders
  *  - chat-overlays.css:      shared lightbox overlay chrome
  *  - chat-image-gallery.css: chat-wide image gallery lightbox (chat-image-gallery.ts)
- *  - file-viewer.css:        in-app file viewer overlay + panel (file-viewer.ts)
  *  - edit-window.css:        stacked diff + inline tool-call preview (edit-window.ts)
  *  - diff-enhancer.css:      unified diff hunk upgrade (diff-enhancer.ts)
- *  - file-surface.css:       shared file surface (bar + File/Diff body) mounted by
- *                            the standalone file viewer (and, later, PR file tabs)
+ *  - file-surface.css:       Code mode's editor body (breadcrumbs + File/Diff view)
  */
 @import "./chat-messages.css";
 @import "./chat-messages-user.css";
@@ -45,7 +45,6 @@
 @import "./pr-preview.css";
 @import "./chat-overlays.css";
 @import "./chat-image-gallery.css";
-@import "./file-viewer.css";
 @import "./edit-window.css";
 @import "./diff-enhancer.css";
 @import "./file-surface.css";

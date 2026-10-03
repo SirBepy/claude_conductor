@@ -5,7 +5,7 @@ import { showView } from "../../shared/navigation";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { mountChatLoadingOverlay } from "../../shared/chat/chat-loading";
-import { setPrReviewCwdProvider } from "../../shared/chat/pr-review-modal";
+import { setCodeModeChatProvider } from "../sessions/code-mode/entry";
 import { queueHistoryResume } from "../sessions/sessions";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
 import { showToast } from "../../shared/toast";
@@ -17,7 +17,6 @@ import "../sessions/session-list.css";
 import "../sessions/session-row-portrait.css";
 import "../sessions/session-statusbar.css";
 import "../sessions/session-statusbar-images.css";
-import "../sessions/git-card.css";
 import "../sessions/overflow-panel.css";
 import "./history.css";
 import type { HistoryEntry } from "../../types/ipc.generated";
@@ -173,9 +172,22 @@ async function selectHistorySession(sessionId: string, pane: HTMLElement): Promi
       if (state.statusbar === sbForRenderer) sbForRenderer.updateMeta(meta);
     };
   }
-  // Let the PR-preview modal's git IPC calls resolve this historical
-  // session's working directory.
-  setPrReviewCwdProvider(() => (entry?.cwd ? String(entry.cwd) : null));
+  // Code mode from a past chat: its repo and its edits, nothing live.
+  const layout = pane.closest<HTMLElement>(".history-layout");
+  const histCwd = entry?.cwd ? String(entry.cwd) : null;
+  setCodeModeChatProvider(histCwd && layout
+    ? () => ({
+        key: `history:${sessionId}`,
+        sessionId: null,
+        cwd: histCwd,
+        layout,
+        title: () => entry?.title ?? "",
+        busy: () => false,
+        latestLine: () => "",
+        edits: () => renderer.getFileEdits(),
+        mention: null,
+      })
+    : null);
 
   await renderer.attach(sessionId);
   if (state.mountId !== myMount || state.selectedId !== sessionId) {

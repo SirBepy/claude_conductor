@@ -1,7 +1,7 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { openLightbox } from "../../shared/chat/lightbox";
-import { openFileViewer } from "../../shared/chat/file-viewer";
+import { openInCodeMode } from "../../shared/chat/code-mode-bridge";
 import { toolSummary, toolLabel, type ToolTally } from "../../shared/chat/tool-meta";
 import { CUSTOM_VIEW_TOOLS } from "../../shared/chat/tool-views";
 import { PopoverShell } from "./statusbar-popover-shell";
@@ -122,21 +122,14 @@ export class ToolTallyRow {
   }
 
   private wireItems(pop: HTMLElement): void {
-    // File rows open the in-app read-only file viewer (ai_todo 95 slice 1).
-    // The external-editor jump is preserved via the "Open in VS Code" button in
-    // the viewer header.
-    pop.querySelectorAll<HTMLElement>(".sb-tally-file").forEach((row) => {
+    // File rows, and the shared custom-view file rows (Read / File Changes),
+    // open that file in Code mode.
+    pop.querySelectorAll<HTMLElement>(".sb-tally-file, .tool-file-row[data-path]").forEach((row) => {
       row.addEventListener("click", () => {
         const path = row.dataset.path;
-        if (path) openFileViewer(path);
-      });
-    });
-
-    // Shared custom-view file rows (Read / File Changes) open in the viewer too.
-    pop.querySelectorAll<HTMLElement>(".tool-file-row[data-path]").forEach((row) => {
-      row.addEventListener("click", () => {
-        const path = row.dataset.path;
-        if (path) openFileViewer(path);
+        if (!path) return;
+        this.shell.close();
+        openInCodeMode({ kind: "file", path });
       });
     });
 

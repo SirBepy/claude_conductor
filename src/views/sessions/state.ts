@@ -7,7 +7,6 @@ import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import { setSelectedSessionId } from "./permission-modal";
 import type { SessionStatusbar } from "./session-statusbar";
 import type { SessionConfig } from "./model-effort-modal";
-import type { ChangesPanel } from "./changes-panel";
 import type { PreviewController } from "./preview-panel";
 import type { FabDialHandle } from "./fab-dial";
 
@@ -77,7 +76,6 @@ export interface SessionsState {
   pendingNewSession: PendingNewSession | null;
   parkedDrafts: ParkedDraft[];
   statusbar: SessionStatusbar | null;
-  changesPanel: ChangesPanel | null;
   prevBusyMap: Map<string, boolean>;
   sortedSessionIds: string[];
   /** Latest global sleep/shutdown-when-done protocol state, hydrated on mount
@@ -94,9 +92,9 @@ export interface SessionsState {
   daemonSetupStalled: boolean;
   /** Set by sessions.ts on mount. Called by active-session when the pickup CTA launches a new chat. */
   launchNewChatCallback: ((project: { path: string; name: string }, config: SessionConfig) => void) | null;
-  /** Seam for the active session's ChangesPanel.toggle(). Set by active-session.ts when a
-   * pane mounts; cleared on unmount. Allows the view-more-menu and sidebar ctx-menu to
-   * invoke "View changes" for the currently-selected session without importing active-session. */
+  /** Seam for the active session's "View changes" (Code mode on this chat's edits). Set
+   * when a pane mounts; cleared on unmount. Lets the view-more-menu and sidebar ctx-menu
+   * offer it for the currently-selected session without importing active-session. */
   activeChatActions: { viewChanges: () => void } | null;
   /** Set by sessions.ts on mount, cleared on unmount. Lets setActiveSession
    *  (below) scope the docked preview panel to whichever chat is active,
@@ -126,7 +124,6 @@ export function createInitialState(mountId: number): SessionsState {
     pendingNewSession: null,
     parkedDrafts: [],
     statusbar: null,
-    changesPanel: null,
     prevBusyMap: new Map(),
     sortedSessionIds: [],
     whenDone: null,

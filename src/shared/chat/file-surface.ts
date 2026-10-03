@@ -1,20 +1,17 @@
-// Shared "file surface" - the bar (view label + counts, search, nav stepper,
-// ⋮ menu) plus body (File / Diff view) used by both the standalone file
-// viewer (file-viewer.ts) and, in future, an embedded PR-review file tab. One
-// factory mounted per host element; same DOM, same CSS (file-surface.css),
-// same behavior everywhere it's mounted. See .for_bepy/pr-review-mockup.html
-// for the approved UX this mirrors.
+// Code mode's editor body: a breadcrumb line (path, +/- counts, search) over a
+// File or Diff view, with its controls rendered icon-only into a host the
+// caller places (Code mode puts them at the right end of its tab row, VS
+// Code's editor-title spot). Read-only. Styles in file-surface.css.
 
 import { invoke } from "../ipc";
 import { basename } from "../path-utils";
 import { escapeHtml } from "../escape-html";
+import { isRemote } from "../transport";
 // REUSE the existing full Shiki build (same highlighter the chat diffs use),
 // loaded lazily via shiki-loader (see its header comment) so it's not in the
 // main bundle at boot. The /web bundle lacks rust/toml/etc grammars, so the
 // lazy import MUST stay /bundle/full.
 import { loadShiki } from "./shiki-loader";
-import { renderStackedDiff } from "./edit-window";
-import { enhanceEditDiffs } from "./diff-enhancer";
 import {
   parseUnifiedDiff,
   renderUnifiedDiffHtml,
@@ -29,31 +26,31 @@ import type { FileEditView } from "./file-edits";
 import type { TextFileData } from "../../types/ipc.generated";
 
 export interface SurfaceFile {
+  /** Repo-relative path, forward slashes. */
   path: string;
-  /** Absolute path for Open in VS Code / edit / the working-tree file view,
-   *  when `path` is repo-relative (git sources). Defaults to `path`. */
+  /** Absolute path for Open in VS Code. Defaults to `path`. */
   absPath?: string;
   added?: number;
   removed?: number;
   // Diff sources - at most one is set:
-  sessionEdits?: FileEditView[]; // this session's edits -> renderStackedDiff (inline only)
+  sessionEdits?: FileEditView[];
   /** Raw unified git diff text; `full` asks for the whole file as context. */
   gitDiff?: (opts: { full: boolean }) => Promise<string>;
-  /** The file as of the diffed revision. Set for a past commit, where the
-   *  working tree would show the wrong content; such a file is not editable. */
-  fileAtRev?: () => Promise<TextFileData>;
+  /** The file's content for the File view (a past revision, or the working tree). */
+  fileAtRev: () => Promise<TextFileData>;
 }
 
 export interface FileSurfaceOptions {
   defaultView: "diff" | "file";
-  nav?: { list: () => SurfaceFile[]; onStep: (index: number) => void } | null;
-  onFileShown?: (f: SurfaceFile) => void;
+  /** Where the icon-only controls render. Without one they sit at the end of
+   *  the breadcrumb line. */
+  toolsHost?: HTMLElement;
 }
 
 export interface FileSurfaceHandle {
   show(file: SurfaceFile, view?: "diff" | "file"): void;
-  step(dir: 1 | -1): void;
-  handleKey(e: KeyboardEvent): boolean; // j/k + Ctrl+F handling; returns true if consumed
+  /** Ctrl+F, F7 / Shift+F7; returns true if consumed. */
+  handleKey(e: KeyboardEvent): boolean;
   destroy(): void;
 }
 
@@ -78,52 +75,58 @@ export function langFromPath(path: string): string {
   return map[ext] ?? "text";
 }
 
+/** Row indexes where a run of added/removed lines starts: the stops F7 and
+ *  Shift+F7 move between. */
+export function changeStarts(rows: HTMLElement[]): number[] {
+  const out: number[] = [];
+  let prevChanged = false;
+  rows.forEach((r, i) => {
+    const changed = r.classList.contains("fs-add") || r.classList.contains("fs-del")
+      || !!r.querySelector(".fs-code.fs-add, .fs-code.fs-del");
+    if (changed && !prevChanged) out.push(i);
+    prevChanged = changed;
+  });
+  return out;
+}
+
 interface SearchState {
   query: string;
   marks: HTMLElement[];
   cur: number;
 }
 
-const BAR_HTML =
-  `<div class="fs-bar">` +
-  `<div class="fs-mode"><i class="ph"></i><span class="fs-mode-label"></span><span class="fs-counts"></span></div>` +
-  `<div class="fs-right">` +
-  `<div class="fs-diff-controls">` +
-  `<div class="fs-seg" role="group" aria-label="Diff layout">` +
-  `<button type="button" class="fs-seg-btn" data-mode="inline" title="Inline diff"><i class="ph ph-rows"></i><span>Inline</span></button>` +
-  `<button type="button" class="fs-seg-btn" data-mode="split" title="Side by side"><i class="ph ph-columns"></i><span>Side by side</span></button>` +
-  `</div>` +
-  `<button type="button" class="fs-btn fs-full-btn" title="Show the whole file, not just the changed hunks" aria-pressed="false"><i class="ph ph-arrows-out-line-vertical"></i><span>Full file</span></button>` +
-  `</div>` +
-  `<div class="fs-search">` +
+const SURFACE_HTML =
+  `<div class="fs-crumbs">` +
+  `<span class="fs-path"></span>` +
+  `<span class="fs-grow"></span>` +
+  `<div class="fs-search fs-hidden">` +
   `<i class="ph ph-magnifying-glass"></i>` +
-  `<input type="text" class="fs-search-input" placeholder="Search" />` +
+  `<input class="fs-search-input" placeholder="Search" aria-label="Search this file" />` +
   `<span class="fs-search-count"></span>` +
-  `<button type="button" class="fs-btn fs-sq fs-search-prev" title="Previous match"><i class="ph ph-caret-up"></i></button>` +
-  `<button type="button" class="fs-btn fs-sq fs-search-next" title="Next match"><i class="ph ph-caret-down"></i></button>` +
+  `<button type="button" class="fs-tb fs-search-prev" title="Previous match (Shift+Enter)"><i class="ph ph-caret-up"></i></button>` +
+  `<button type="button" class="fs-tb fs-search-next" title="Next match (Enter)"><i class="ph ph-caret-down"></i></button>` +
+  `<button type="button" class="fs-tb fs-search-close" title="Close search (Esc)"><i class="ph ph-x"></i></button>` +
   `</div>` +
-  // Own group + divider: unlabeled, so without one these carets read as a
-  // continuation of the search prev/next pair right before them.
-  `<div class="fs-nav-group">` +
-  `<span class="fs-navpos"></span>` +
-  `<button type="button" class="fs-btn fs-sq fs-prev" title="Previous file (k)"><i class="ph ph-caret-up"></i></button>` +
-  `<button type="button" class="fs-btn fs-sq fs-next" title="Next file (j)"><i class="ph ph-caret-down"></i></button>` +
-  `</div>` +
-  `<button type="button" class="fs-btn fs-sq fs-menu-btn" title="View options" aria-haspopup="true"><i class="ph ph-dots-three-vertical"></i></button>` +
-  `</div>` +
-  `<div class="fs-edit-actions fs-hidden">` +
-  `<button type="button" class="fs-btn fs-save"><i class="ph ph-floppy-disk"></i><span>Save</span></button>` +
-  `<button type="button" class="fs-btn fs-cancel"><i class="ph ph-x-circle"></i><span>Cancel</span></button>` +
-  `</div>` +
-  `<div class="fs-menu fs-hidden">` +
-  `<div class="fs-mi" data-act="view-diff"><i class="ph ph-git-diff"></i><span>View as diff</span><i class="ph ph-check fs-chk"></i></div>` +
-  `<div class="fs-mi" data-act="view-file"><i class="ph ph-file-text"></i><span>View as file</span><i class="ph ph-check fs-chk"></i></div>` +
-  `<div class="fs-sep"></div>` +
-  `<div class="fs-mi" data-act="edit"><i class="ph ph-pencil-simple"></i><span>Edit file</span></div>` +
-  `<div class="fs-mi" data-act="vscode"><i class="ph ph-arrow-square-out"></i><span>Open in VS Code</span></div>` +
-  `</div>` +
+  `<span class="fs-counts"></span>` +
   `</div>` +
   `<div class="fs-body"></div>`;
+
+const TOOLS_HTML =
+  `<div class="fs-diff-tools">` +
+  `<button type="button" class="fs-tb fs-split-btn"><i class="ph ph-square-split-horizontal"></i></button>` +
+  `<button type="button" class="fs-tb fs-full-btn" title="Full file"><i class="ph ph-arrows-out-line-vertical"></i></button>` +
+  `<span class="fs-tsep"></span>` +
+  `<button type="button" class="fs-tb fs-prev-chg" title="Previous change (Shift+F7)"><i class="ph ph-caret-up"></i></button>` +
+  `<button type="button" class="fs-tb fs-next-chg" title="Next change (F7)"><i class="ph ph-caret-down"></i></button>` +
+  `</div>` +
+  `<button type="button" class="fs-tb fs-menu-btn" title="More: search, Open in VS Code" aria-haspopup="true"><i class="ph ph-dots-three"></i></button>` +
+  `<div class="fs-menu fs-hidden" role="menu">` +
+  `<div class="fs-mi" data-act="search" role="menuitem"><i class="ph ph-magnifying-glass"></i><span>Search</span><kbd>Ctrl+F</kbd></div>` +
+  `<div class="fs-mi" data-act="view-diff" role="menuitem"><i class="ph ph-git-diff"></i><span>View as diff</span><i class="ph ph-check fs-chk"></i></div>` +
+  `<div class="fs-mi" data-act="view-file" role="menuitem"><i class="ph ph-file-text"></i><span>View as file</span><i class="ph ph-check fs-chk"></i></div>` +
+  `<div class="fs-sep fs-desktop-only"></div>` +
+  `<div class="fs-mi fs-desktop-only" data-act="vscode" role="menuitem"><i class="ph ph-arrow-square-out"></i><span>Open in VS Code</span></div>` +
+  `</div>`;
 
 // Layout choices carry across files and openings in this window, like VS Code's
 // diff editor; nothing earns persisting them across restarts yet.
@@ -131,31 +134,27 @@ let preferredDiffMode: "inline" | "split" = "inline";
 let preferredFull = false;
 
 export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): FileSurfaceHandle {
-  host.innerHTML = BAR_HTML;
+  host.innerHTML = SURFACE_HTML;
   host.classList.add("fsurface");
+  const tools = document.createElement("div");
+  tools.className = "fs-tools";
+  tools.innerHTML = TOOLS_HTML;
+  (opts.toolsHost ?? host.querySelector<HTMLElement>(".fs-crumbs")!).appendChild(tools);
+  // Open in VS Code / reveal act on the desktop's own disk; the phone has none.
+  if (isRemote()) tools.querySelectorAll(".fs-desktop-only").forEach((n) => n.remove());
 
   const el = {
-    modeIcon: host.querySelector<HTMLElement>(".fs-mode > .ph")!,
-    modeLabel: host.querySelector<HTMLElement>(".fs-mode-label")!,
+    path: host.querySelector<HTMLElement>(".fs-path")!,
     counts: host.querySelector<HTMLElement>(".fs-counts")!,
-    right: host.querySelector<HTMLElement>(".fs-right")!,
-    editActions: host.querySelector<HTMLElement>(".fs-edit-actions")!,
-    saveBtn: host.querySelector<HTMLButtonElement>(".fs-save")!,
-    cancelBtn: host.querySelector<HTMLButtonElement>(".fs-cancel")!,
+    search: host.querySelector<HTMLElement>(".fs-search")!,
     searchInput: host.querySelector<HTMLInputElement>(".fs-search-input")!,
     searchCount: host.querySelector<HTMLElement>(".fs-search-count")!,
-    searchPrev: host.querySelector<HTMLButtonElement>(".fs-search-prev")!,
-    searchNext: host.querySelector<HTMLButtonElement>(".fs-search-next")!,
-    navGroup: host.querySelector<HTMLElement>(".fs-nav-group")!,
-    navpos: host.querySelector<HTMLElement>(".fs-navpos")!,
-    prevBtn: host.querySelector<HTMLButtonElement>(".fs-prev")!,
-    nextBtn: host.querySelector<HTMLButtonElement>(".fs-next")!,
-    menuBtn: host.querySelector<HTMLButtonElement>(".fs-menu-btn")!,
-    menu: host.querySelector<HTMLElement>(".fs-menu")!,
-    diffControls: host.querySelector<HTMLElement>(".fs-diff-controls")!,
-    segBtns: Array.from(host.querySelectorAll<HTMLButtonElement>(".fs-seg-btn")),
-    fullBtn: host.querySelector<HTMLButtonElement>(".fs-full-btn")!,
     body: host.querySelector<HTMLElement>(".fs-body")!,
+    diffTools: tools.querySelector<HTMLElement>(".fs-diff-tools")!,
+    splitBtn: tools.querySelector<HTMLButtonElement>(".fs-split-btn")!,
+    fullBtn: tools.querySelector<HTMLButtonElement>(".fs-full-btn")!,
+    menuBtn: tools.querySelector<HTMLButtonElement>(".fs-menu-btn")!,
+    menu: tools.querySelector<HTMLElement>(".fs-menu")!,
   };
 
   const state = {
@@ -163,19 +162,14 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     view: "file" as "diff" | "file",
     diffMode: preferredDiffMode,
     full: preferredFull,
-    editing: false,
-    wantEdit: false,
-    saving: false,
     menuOpen: false,
     loaded: null as TextFileData | null,
     loadedForPath: null as string | null,
-    gitDiffRows: null as DiffRow[] | null,
-    gitDiffKey: null as string | null,
-    gitDiffError: null as string | null,
-    sessionDiffRows: null as DiffRow[] | null,
-    sessionDiffRowsForPath: null as string | null,
+    diffRows: null as DiffRow[] | null,
+    diffKey: null as string | null,
+    diffError: null as string | null,
     diffHighlight: null as DiffHighlightMaps | null,
-    diffHighlightForPath: null as string | null,
+    diffHighlightKey: null as string | null,
     token: 0,
   };
 
@@ -194,22 +188,28 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   // ── search ────────────────────────────────────────────────────────────
 
   function clearSearchMarks(): void {
-    const marks = Array.from(el.body.querySelectorAll<HTMLElement>("mark.fs-hit"));
-    for (const m of marks) {
+    for (const m of Array.from(el.body.querySelectorAll<HTMLElement>("mark.fs-hit"))) {
       m.replaceWith(document.createTextNode(m.textContent ?? ""));
     }
     el.body.normalize();
   }
 
   function updateSearchCount(): void {
-    el.searchCount.textContent = search.marks.length ? `${search.cur + 1}/${search.marks.length}` : "";
+    el.searchCount.textContent = search.marks.length ? `${search.cur + 1}/${search.marks.length}` : search.query ? "0" : "";
   }
 
-  function clearSearch(): void {
+  function closeSearch(): void {
     clearSearchMarks();
     search = { query: "", marks: [], cur: -1 };
     el.searchInput.value = "";
     updateSearchCount();
+    el.search.classList.add("fs-hidden");
+  }
+
+  function openSearch(): void {
+    el.search.classList.remove("fs-hidden");
+    el.searchInput.focus();
+    el.searchInput.select();
   }
 
   function highlightCurrentMatch(): void {
@@ -228,8 +228,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     const walker = document.createTreeWalker(el.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        if (parent.closest("[data-no-search]")) return NodeFilter.FILTER_REJECT;
+        if (!parent || parent.closest("[data-no-search]")) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -275,10 +274,33 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     if (e.key === "Enter") {
       e.preventDefault();
       jumpSearch(e.shiftKey ? -1 : 1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearch();
     }
   });
-  el.searchPrev.addEventListener("click", () => jumpSearch(-1));
-  el.searchNext.addEventListener("click", () => jumpSearch(1));
+  host.querySelector(".fs-search-prev")!.addEventListener("click", () => jumpSearch(-1));
+  host.querySelector(".fs-search-next")!.addEventListener("click", () => jumpSearch(1));
+  host.querySelector(".fs-search-close")!.addEventListener("click", closeSearch);
+
+  // ── change navigation ─────────────────────────────────────────────────
+
+  function jumpChange(dir: 1 | -1): void {
+    const rows = Array.from(el.body.querySelectorAll<HTMLElement>("tr"));
+    const starts = changeStarts(rows);
+    if (!starts.length) return;
+    // A row counts as "here" once its top is within a few px of the viewport
+    // top, so a repeated F7 moves on instead of re-landing on the same block.
+    const top = el.body.getBoundingClientRect().top + 4;
+    const offsets = starts.map((i) => rows[i]!.getBoundingClientRect().top - top);
+    const target = dir === 1
+      ? starts[offsets.findIndex((o) => o > 1)] ?? starts[0]!
+      : starts[findLastIndex(offsets, (o) => o < -1)] ?? starts[starts.length - 1]!;
+    rows[target]!.scrollIntoView({ block: "start" });
+  }
+  tools.querySelector(".fs-prev-chg")!.addEventListener("click", () => jumpChange(-1));
+  tools.querySelector(".fs-next-chg")!.addEventListener("click", () => jumpChange(1));
 
   // ── menu ──────────────────────────────────────────────────────────────
 
@@ -289,47 +311,43 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     item.classList.toggle("fs-disabled", disabled);
   }
 
-  function toggleMenu(): void {
-    state.menuOpen = !state.menuOpen;
-    el.menu.classList.toggle("fs-hidden", !state.menuOpen);
-  }
-
-  function closeMenu(): void {
-    if (!state.menuOpen) return;
-    state.menuOpen = false;
-    el.menu.classList.add("fs-hidden");
+  function setMenuOpen(open: boolean): void {
+    state.menuOpen = open;
+    el.menu.classList.toggle("fs-hidden", !open);
+    el.menuBtn.classList.toggle("fs-on", open);
   }
 
   el.menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    toggleMenu();
+    setMenuOpen(!state.menuOpen);
   });
 
   function onDocClick(e: MouseEvent): void {
     if (!state.menuOpen) return;
     const target = e.target as Node;
     if (el.menu.contains(target) || el.menuBtn.contains(target)) return;
-    closeMenu();
+    setMenuOpen(false);
   }
   function onDocKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape" && state.menuOpen) {
-      closeMenu();
+      setMenuOpen(false);
       e.stopPropagation();
     }
   }
   document.addEventListener("click", onDocClick);
-  document.addEventListener("keydown", onDocKeydown);
+  document.addEventListener("keydown", onDocKeydown, true);
 
   el.menu.addEventListener("click", (e) => {
     const item = (e.target as HTMLElement).closest<HTMLElement>(".fs-mi");
     if (!item || item.classList.contains("fs-disabled")) return;
-    const act = item.dataset.act;
-    closeMenu();
-    handleMenuAction(act);
+    setMenuOpen(false);
+    handleMenuAction(item.dataset.act);
   });
 
-  function onViewChanged(): void {
-    clearSearch();
+  function setView(view: "diff" | "file"): void {
+    if (state.view === view) return;
+    state.view = view;
+    closeSearch();
     updateBar();
     void renderBody();
   }
@@ -337,30 +355,14 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   function handleMenuAction(act: string | undefined): void {
     if (!state.file) return;
     switch (act) {
+      case "search":
+        openSearch();
+        break;
       case "view-diff":
-        if (state.view !== "diff" && hasDiffSource(state.file)) {
-          state.view = "diff";
-          state.editing = false;
-          onViewChanged();
-        }
+        if (hasDiffSource(state.file)) setView("diff");
         break;
       case "view-file":
-        if (state.view !== "file") {
-          state.view = "file";
-          state.editing = false;
-          onViewChanged();
-        }
-        break;
-      case "edit":
-        // Disallow entering edit mode for an already-loaded truncated file.
-        if (state.loadedForPath === state.file.path && state.loaded?.truncated) break;
-        state.wantEdit = true;
-        if (state.view !== "file") {
-          state.view = "file";
-          onViewChanged();
-        } else {
-          void renderBody();
-        }
+        setView("file");
         break;
       case "vscode":
         void invoke<void>("open_in_editor", { path: state.file.absPath ?? state.file.path }).catch((err) =>
@@ -372,28 +374,16 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     }
   }
 
-  for (const btn of el.segBtns) {
-    btn.addEventListener("click", () => {
-      const mode = btn.dataset.mode === "split" ? "split" : "inline";
-      if (state.diffMode === mode) return;
-      state.diffMode = preferredDiffMode = mode;
-      updateBar();
-      void renderBody();
-    });
-  }
+  el.splitBtn.addEventListener("click", () => {
+    state.diffMode = preferredDiffMode = state.diffMode === "split" ? "inline" : "split";
+    updateBar();
+    void renderBody();
+  });
   el.fullBtn.addEventListener("click", () => {
     state.full = preferredFull = !state.full;
     updateBar();
     void renderBody();
   });
-
-  el.cancelBtn.addEventListener("click", () => {
-    state.editing = false;
-    state.wantEdit = false;
-    updateBar();
-    void renderBody();
-  });
-  el.saveBtn.addEventListener("click", () => void saveEdits());
 
   // ── bar ───────────────────────────────────────────────────────────────
 
@@ -401,47 +391,28 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     const file = state.file;
     if (!file) return;
     const isDiff = state.view === "diff";
-    el.modeIcon.className = `ph ${isDiff ? "ph-git-diff" : "ph-file-text"}`;
-    el.modeLabel.textContent = isDiff ? "Diff" : "File";
-    if (isDiff) {
-      const added = file.added ?? 0;
-      const removed = file.removed ?? 0;
-      const parts: string[] = [];
-      if (added > 0) parts.push(`<span class="diff-add">+${added}</span>`);
-      if (removed > 0) parts.push(`<span class="diff-del">-${removed}</span>`);
-      el.counts.innerHTML = parts.join(" ");
-    } else {
-      el.counts.innerHTML = "";
-    }
+    const segs = file.path.split("/");
+    el.path.innerHTML = segs
+      .map((s, i) => `<span class="${i === segs.length - 1 ? "fs-leaf" : ""}">${escapeHtml(s)}</span>`)
+      .join(`<i class="ph ph-caret-right"></i>`);
+    el.path.title = file.path;
+    const parts: string[] = [];
+    if (isDiff && (file.added ?? 0) > 0) parts.push(`<span class="diff-add">+${file.added}</span>`);
+    if (isDiff && (file.removed ?? 0) > 0) parts.push(`<span class="diff-del">-${file.removed}</span>`);
+    el.counts.innerHTML = parts.join("");
 
-    const hasDiff = hasDiffSource(file);
-    setMenuItem("view-diff", isDiff, !hasDiff);
+    setMenuItem("view-diff", isDiff, !hasDiffSource(file));
     setMenuItem("view-file", !isDiff, false);
-    setMenuItem("edit", false, !!file.fileAtRev);
-    el.diffControls.classList.toggle("fs-hidden", !isDiff);
-    for (const btn of el.segBtns) {
-      const on = btn.dataset.mode === state.diffMode;
-      btn.classList.toggle("fs-on", on);
-      btn.setAttribute("aria-pressed", String(on));
-    }
+    el.diffTools.classList.toggle("fs-hidden", !isDiff);
+    const split = state.diffMode === "split";
+    el.splitBtn.classList.toggle("fs-on", split);
+    el.splitBtn.setAttribute("aria-pressed", String(split));
+    el.splitBtn.title = split ? "Side by side (click for inline)" : "Inline (click for side by side)";
     // Whole-file context only exists for git sources; session edits carry
     // just the edited strings.
     el.fullBtn.classList.toggle("fs-hidden", !file.gitDiff);
     el.fullBtn.classList.toggle("fs-on", state.full);
     el.fullBtn.setAttribute("aria-pressed", String(state.full));
-
-    if (opts.nav) {
-      const list = opts.nav.list();
-      const pos = list.findIndex((f) => f.path === file.path);
-      el.navpos.textContent = pos >= 0 ? `${pos + 1} / ${list.length}` : `- / ${list.length}`;
-      el.navGroup.classList.remove("fs-hidden");
-    } else {
-      el.navGroup.classList.add("fs-hidden");
-    }
-
-    el.right.classList.toggle("fs-hidden", state.editing);
-    el.editActions.classList.toggle("fs-hidden", !state.editing);
-    el.saveBtn.disabled = state.saving;
   }
 
   // ── body: file view ──────────────────────────────────────────────────
@@ -450,172 +421,100 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     if (!truncated) return;
     const notice = document.createElement("div");
     notice.className = "fs-truncated";
-    notice.innerHTML =
-      `<i class="ph ph-warning"></i> File is large and was truncated. ` +
-      `Open in VS Code to see (and edit) the full contents.`;
+    notice.innerHTML = `<i class="ph ph-warning"></i> File is large and was truncated. Open in VS Code to see the full contents.`;
     el.body.appendChild(notice);
   }
 
-  async function renderFileView(data: TextFileData): Promise<void> {
-    const lang = langFromPath(state.file!.path);
+  async function renderFileBody(token: number): Promise<void> {
+    const file = state.file!;
+    if (!(state.loaded && state.loadedForPath === file.path)) {
+      el.body.innerHTML = `<div class="fs-loading">Loading...</div>`;
+      try {
+        const data = await file.fileAtRev();
+        if (token !== state.token) return;
+        state.loaded = data;
+        state.loadedForPath = file.path;
+      } catch (err) {
+        if (token !== state.token) return;
+        el.body.innerHTML = `<div class="fs-error">${escapeHtml(String(err))}</div>`;
+        return;
+      }
+    }
+    const data = state.loaded!;
     try {
       const { codeToHtml } = await loadShiki();
-      const highlighted = await codeToHtml(data.content, { lang, theme: "github-dark" });
+      const highlighted = await codeToHtml(data.content, { lang: langFromPath(file.path), theme: "github-dark" });
+      if (token !== state.token) return;
       el.body.innerHTML = `<div class="fs-code-view">${highlighted}</div>`;
     } catch {
+      if (token !== state.token) return;
       const lines = data.content.split("\n").map((l) => `<span class="line">${escapeHtml(l) || "&#8203;"}</span>`);
       el.body.innerHTML = `<div class="fs-code-view"><pre class="fs-plain"><code>${lines.join("\n")}</code></pre></div>`;
     }
     appendTruncationNotice(data.truncated);
   }
 
-  function renderEditor(content: string): void {
-    el.body.innerHTML = `<textarea class="fs-editor" spellcheck="false"></textarea>`;
-    const ta = el.body.querySelector<HTMLTextAreaElement>(".fs-editor");
-    if (ta) {
-      ta.value = content;
-      ta.focus();
-    }
-  }
-
-  function showEditError(msg: string): void {
-    el.body.querySelector(".fs-error-inline")?.remove();
-    const div = document.createElement("div");
-    div.className = "fs-error fs-error-inline";
-    div.textContent = `Save failed: ${msg}`;
-    el.body.prepend(div);
-  }
-
-  async function saveEdits(): Promise<void> {
-    if (!state.file || !state.loaded) return;
-    const ta = el.body.querySelector<HTMLTextAreaElement>(".fs-editor");
-    if (!ta) return;
-    const content = ta.value;
-    state.saving = true;
-    updateBar();
-    try {
-      await invoke<void>("write_text_file", { path: state.file.absPath ?? state.file.path, content });
-    } catch (err) {
-      state.saving = false;
-      updateBar();
-      showEditError(String(err));
-      return;
-    }
-    state.loaded = { content, truncated: state.loaded.truncated };
-    state.editing = false;
-    state.saving = false;
-    updateBar();
-    await renderBody();
-  }
-
-  async function ensureLoaded(token: number): Promise<boolean> {
-    const file = state.file!;
-    if (state.loaded && state.loadedForPath === file.path) return true;
-    el.body.innerHTML = `<div class="fs-loading">Loading...</div>`;
-    try {
-      state.loaded = file.fileAtRev
-        ? await file.fileAtRev()
-        : await invoke<TextFileData>("read_text_file", { path: file.absPath ?? file.path });
-      state.loadedForPath = file.path;
-    } catch (err) {
-      if (token !== state.token) return false;
-      el.body.innerHTML = `<div class="fs-error">${escapeHtml(String(err))}</div>`;
-      return false;
-    }
-    return token === state.token;
-  }
-
-  async function renderFileBody(token: number): Promise<void> {
-    if (!(await ensureLoaded(token))) return;
-    if (token !== state.token || !state.loaded) return;
-
-    if (state.editing) {
-      renderEditor(state.loaded.content);
-      return;
-    }
-
-    await renderFileView(state.loaded);
-    if (token !== state.token) return;
-
-    if (state.wantEdit) {
-      state.wantEdit = false;
-      if (!state.loaded.truncated) {
-        state.editing = true;
-        renderEditor(state.loaded.content);
-        updateBar();
-      }
-    }
-  }
-
   // ── body: diff view ──────────────────────────────────────────────────
 
-  // Shared highlight cache for both diff sources: rows are keyed by object
-  // identity, so this only fires the (lazy, one-call-per-side) shiki pass
-  // once per path and reapplies the cached maps on later mode toggles.
+  // Rows are keyed by object identity, so this only fires the (lazy,
+  // one-call-per-side) shiki pass once per row set and reapplies the cached
+  // maps on later mode toggles.
   async function enhanceDiffHighlight(token: number, file: SurfaceFile, rows: DiffRow[]): Promise<void> {
-    if (state.diffHighlightForPath !== file.path) {
-      state.diffHighlightForPath = file.path; // mark before the await - no duplicate tokenize races
+    const key = state.diffKey;
+    if (state.diffHighlightKey !== key) {
+      state.diffHighlightKey = key; // mark before the await - no duplicate tokenize races
       state.diffHighlight = await highlightDiffRows(rows, langFromPath(file.path));
     }
-    if (token !== state.token || state.diffHighlightForPath !== file.path || !state.diffHighlight) return;
+    if (token !== state.token || state.diffHighlightKey !== key || !state.diffHighlight) return;
     applyDiffHighlight(el.body, rows, state.diffHighlight);
     if (search.query) runSearch(search.query); // re-mark: innerHTML was just replaced
   }
 
+  async function loadDiffRows(token: number, file: SurfaceFile): Promise<boolean> {
+    if (file.sessionEdits?.length) {
+      const key = `${file.path}|session`;
+      if (state.diffKey !== key) {
+        state.diffRows = sessionEditsToDiffRows(file.sessionEdits);
+        state.diffKey = key;
+        state.diffError = null;
+      }
+      return true;
+    }
+    if (!file.gitDiff) {
+      state.diffRows = null;
+      state.diffError = "No diff available for this file.";
+      return true;
+    }
+    const key = `${file.path}|${state.full}`;
+    if (state.diffKey === key) return true;
+    el.body.innerHTML = `<div class="fs-loading">Loading diff...</div>`;
+    try {
+      const text = await file.gitDiff({ full: state.full });
+      if (token !== state.token) return false;
+      state.diffRows = parseUnifiedDiff(text);
+      state.diffError = null;
+    } catch (err) {
+      if (token !== state.token) return false;
+      state.diffRows = null;
+      state.diffError = String(err);
+    }
+    state.diffKey = key;
+    return true;
+  }
+
   async function renderDiffBody(token: number): Promise<void> {
     const file = state.file!;
-    if (file.sessionEdits && file.sessionEdits.length) {
-      if (state.diffMode === "split") {
-        if (state.sessionDiffRowsForPath !== file.path) {
-          state.sessionDiffRows = sessionEditsToDiffRows(file.sessionEdits);
-          state.sessionDiffRowsForPath = file.path;
-        }
-        const rows = state.sessionDiffRows!;
-        el.body.innerHTML = renderSplitDiffHtml(rows);
-        void enhanceDiffHighlight(token, file, rows);
-        return;
-      }
-      el.body.innerHTML = `<div class="fs-session-diff">${renderStackedDiff(file.sessionEdits)}</div>`;
-      const diffEl = el.body.querySelector<HTMLElement>(".fs-session-diff");
-      if (diffEl) await enhanceEditDiffs(diffEl);
+    if (!(await loadDiffRows(token, file)) || token !== state.token) return;
+    if (state.diffError || !state.diffRows) {
+      el.body.innerHTML = `<div class="fs-error">${escapeHtml(state.diffError ?? "No diff available for this file.")}</div>`;
       return;
     }
-
-    if (file.gitDiff) {
-      const key = `${file.path}|${state.full}`;
-      if (state.gitDiffKey !== key) {
-        el.body.innerHTML = `<div class="fs-loading">Loading diff...</div>`;
-        try {
-          const text = await file.gitDiff({ full: state.full });
-          if (token !== state.token) return;
-          state.gitDiffRows = parseUnifiedDiff(text);
-          state.gitDiffKey = key;
-          state.gitDiffError = null;
-        } catch (err) {
-          if (token !== state.token) return;
-          state.gitDiffRows = null;
-          state.gitDiffKey = key;
-          state.gitDiffError = String(err);
-        }
-        // New rows, new identities: the highlight maps key on row objects.
-        state.diffHighlightForPath = null;
-      }
-      if (token !== state.token) return;
-      if (state.gitDiffError) {
-        el.body.innerHTML = `<div class="fs-error">${escapeHtml(state.gitDiffError)}</div>`;
-        return;
-      }
-      if (state.gitDiffRows) {
-        el.body.innerHTML =
-          state.diffMode === "split"
-            ? renderSplitDiffHtml(state.gitDiffRows)
-            : renderUnifiedDiffHtml(state.gitDiffRows);
-        void enhanceDiffHighlight(token, file, state.gitDiffRows);
-      }
+    if (!state.diffRows.length) {
+      el.body.innerHTML = `<div class="fs-loading">No changes in this file.</div>`;
       return;
     }
-
-    el.body.innerHTML = `<div class="fs-error">No diff available for this file.</div>`;
+    el.body.innerHTML = state.diffMode === "split" ? renderSplitDiffHtml(state.diffRows) : renderUnifiedDiffHtml(state.diffRows);
+    void enhanceDiffHighlight(token, file, state.diffRows);
   }
 
   async function renderBody(): Promise<void> {
@@ -624,46 +523,24 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
       el.body.innerHTML = "";
       return;
     }
-    if (state.view === "diff") {
-      await renderDiffBody(token);
-    } else {
-      await renderFileBody(token);
-    }
+    if (state.view === "diff") await renderDiffBody(token);
+    else await renderFileBody(token);
     if (token !== state.token) return;
     if (search.query) runSearch(search.query);
   }
 
-  // ── nav / keys ────────────────────────────────────────────────────────
-
-  function step(dir: 1 | -1): void {
-    if (!opts.nav || !state.file) return;
-    const list = opts.nav.list();
-    if (!list.length) return;
-    const pos = list.findIndex((f) => f.path === state.file!.path);
-    const base = pos >= 0 ? pos : 0;
-    const next = Math.min(Math.max(base + dir, 0), list.length - 1);
-    if (next === pos) return;
-    opts.nav.onStep(next);
-  }
-  el.prevBtn.addEventListener("click", () => step(-1));
-  el.nextBtn.addEventListener("click", () => step(1));
+  // ── keys ──────────────────────────────────────────────────────────────
 
   function handleKey(e: KeyboardEvent): boolean {
+    if (!state.file) return false;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
-      el.searchInput.focus();
-      el.searchInput.select();
+      openSearch();
       return true;
     }
-    const target = e.target;
-    const inField = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
-    if (inField || state.editing) return false;
-    if (e.key === "j") {
-      step(1);
-      return true;
-    }
-    if (e.key === "k") {
-      step(-1);
+    if (e.key === "F7" && state.view === "diff") {
+      e.preventDefault();
+      jumpChange(e.shiftKey ? -1 : 1);
       return true;
     }
     return false;
@@ -673,43 +550,40 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   function show(file: SurfaceFile, view?: "diff" | "file"): void {
     state.token++;
+    // A tab reopened from another scope keeps its path but swaps its source,
+    // so cached content is keyed on the file object, not the path.
+    const sameFile = state.file === file;
     state.file = file;
     state.view = resolveView(file, view);
     state.diffMode = preferredDiffMode;
     state.full = preferredFull;
-    state.editing = false;
-    state.wantEdit = false;
-    state.saving = false;
-    if (state.loadedForPath !== file.path) {
+    if (!sameFile) {
       state.loaded = null;
       state.loadedForPath = null;
-    }
-    if (!state.gitDiffKey?.startsWith(`${file.path}|`)) {
-      state.gitDiffRows = null;
-      state.gitDiffKey = null;
-      state.gitDiffError = null;
-    }
-    if (state.sessionDiffRowsForPath !== file.path) {
-      state.sessionDiffRows = null;
-      state.sessionDiffRowsForPath = null;
-    }
-    if (state.diffHighlightForPath !== file.path) {
+      state.diffRows = null;
+      state.diffKey = null;
+      state.diffError = null;
       state.diffHighlight = null;
-      state.diffHighlightForPath = null;
+      state.diffHighlightKey = null;
     }
-    closeMenu();
-    clearSearch();
-    opts.onFileShown?.(file);
+    setMenuOpen(false);
+    closeSearch();
     updateBar();
     void renderBody();
   }
 
   function destroy(): void {
     document.removeEventListener("click", onDocClick);
-    document.removeEventListener("keydown", onDocKeydown);
+    document.removeEventListener("keydown", onDocKeydown, true);
+    tools.remove();
     host.innerHTML = "";
     host.classList.remove("fsurface");
   }
 
-  return { show, step, handleKey, destroy };
+  return { show, handleKey, destroy };
+}
+
+function findLastIndex<T>(arr: T[], pred: (v: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i]!)) return i;
+  return -1;
 }

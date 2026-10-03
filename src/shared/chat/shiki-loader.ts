@@ -1,7 +1,7 @@
 // Shared lazy loader for the shiki "full" bundle (bundle/full, not /web - the
 // web bundle lacks rust/toml/etc grammars this app's sessions edit constantly).
 // That bundle pulls in the whole highlighting engine + every grammar/theme, so
-// none of code-highlighter.ts / diff-enhancer.ts / file-viewer.ts may import it
+// none of code-highlighter.ts / diff-enhancer.ts / file-surface.ts may import it
 // statically - that would put shiki in the main bundle, loaded at boot for
 // every window (including the tiny overlay HUD, which never renders code).
 // All three route their first highlight call through this cached dynamic

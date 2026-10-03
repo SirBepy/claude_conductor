@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderEditWindow, renderStackedDiff } from "../src/shared/chat/edit-window.ts";
+import { renderEditWindow } from "../src/shared/chat/edit-window.ts";
 
 const editView = {
   path: "src/foo.ts",
@@ -58,15 +58,5 @@ describe("renderEditWindow", () => {
     expect(html).not.toContain(">.<script>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("&lt;b&gt;");
-  });
-});
-
-describe("renderStackedDiff", () => {
-  it("concatenates per-file edits with hunk labels", () => {
-    const v1 = { ...editView, hunks: [{ oldText: "a", newText: "A", label: "edit 1 of 2" }] };
-    const v2 = { ...editView, hunks: [{ oldText: "b", newText: "B", label: "edit 2 of 2" }] };
-    const html = renderStackedDiff([v1, v2]);
-    expect(html).toContain("edit 1 of 2");
-    expect(html).toContain("edit 2 of 2");
   });
 });
