@@ -145,12 +145,6 @@ export function closeCodeMode(): void {
   current?.close();
 }
 
-/** Re-point an open Code mode at whatever changed underneath (a push from
- *  elsewhere, a new edit): reloads the scope and git state. */
-export function refreshCodeMode(): void {
-  current?.reload();
-}
-
 class CodeModeInstance {
   readonly root: HTMLElement;
   private readonly view: ViewState;
