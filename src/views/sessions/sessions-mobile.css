@@ -88,6 +88,17 @@
   .view-sessions[data-mobile-pane="chat"] .session-header-lead .icon-btn.sessions-back {
     display: inline-flex;
   }
+  /* Up to four 44px buttons share this row with the avatar, so the desktop
+     12px gaps and 16px sides left the title ~80px and cut the project name
+     to one letter. Each button's own 44px box already spaces the icons. */
+  .session-header {
+    gap: 4px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .session-header-avatar-wrap {
+    margin: 0 6px 0 2px;
+  }
 
   /* ── Fullscreen question sheet: replace the chrome, don't sit under it ──
      A pending AUQ question (permission-modal-shell.css's fullscreen block)
@@ -113,6 +124,11 @@
   }
   .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-pane {
     padding-bottom: var(--keyboard-inset, 0px);
+  }
+  /* With both header bands gone the transcript is the top-most thing, so it
+     takes over the status-bar clearance .session-header was carrying. */
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard]:has(.session-header-lead > #sessionsBackBtn) .session-pane {
+    padding-top: env(safe-area-inset-top);
   }
 
   /* Phone bubbles: the desktop 32px side margins waste a third of a narrow
@@ -146,11 +162,15 @@
     border-right: none;
     border-radius: 0;
   }
+  /* Flush to the bottom edge in every state: the desktop 12px margin would
+     otherwise come back as a stray strip above the open keyboard. */
+  .composer-shell {
+    margin-bottom: 0;
+  }
   /* The composer is the bottom-most chrome now that the tab bar is gone, so
      it inherits the home-indicator clearance the bar used to reserve. The
      keyboard-open state drops it: the keyboard already covers that strip. */
   .view-sessions[data-mobile-pane="chat"]:not([data-mobile-keyboard]) .composer-shell {
-    margin-bottom: 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
   /* Corners follow the removed side borders; the fused thinking-bar/input

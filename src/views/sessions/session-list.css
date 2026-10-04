@@ -19,8 +19,10 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--color-surface-alt);
-  /* Mobile list pane: clear the notch above its search/header row (0 on desktop). */
-  padding-top: env(safe-area-inset-top);
+  /* No top inset: .view-header always sits above the list and already clears
+     the status bar. The bottom one keeps the pinned Hidden group off the
+     Android nav buttons (0 on desktop). */
+  padding-bottom: env(safe-area-inset-bottom);
   /* Anchor for the floating "new chat" CTA. */
   position: relative;
 }
@@ -169,6 +171,23 @@
 
 .sessions-list li.session-group-hidden-toggle:hover {
   color: var(--color-text, #ccc);
+}
+
+/* Phone: the 10px labels read as noise at arm's length, and the Hidden
+   toggle is a real button that was only ~25px tall. */
+@media (max-width: 768px) {
+  .sessions-list li.session-group-header {
+    font-size: var(--fs-micro, 0.72rem);
+    padding: 14px 14px 6px;
+  }
+  .sessions-list li.session-group-hidden-toggle,
+  .sessions-list li.session-group-seg-toggle {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
 }
 
 .sessions-list li.session-group-seg-toggle {

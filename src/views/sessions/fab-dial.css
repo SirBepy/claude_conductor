@@ -141,10 +141,19 @@
 @media (max-width: 768px) {
   .fab-dial-fab {
     bottom: calc(var(--fab-lift, 0px) + 12px);
+    width: 48px;
+    height: 48px;
+    font-size: 1.25rem;
   }
 
   .fab-dial {
-    bottom: calc(var(--fab-lift, 0px) + 60px);
+    bottom: calc(var(--fab-lift, 0px) + 68px);
+  }
+
+  .fab-dial-ic {
+    width: 44px;
+    height: 44px;
+    font-size: 1.15rem;
   }
 
   /* A phone question card is fullscreen and outranked by this host's z-index

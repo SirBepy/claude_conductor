@@ -117,6 +117,27 @@
   opacity: 0.7;
 }
 
+/* Phone: the chips are tap targets (branch, context, todos, stats), and at
+   ~22px tall they were the hardest thing in the chat to hit. */
+@media (max-width: 768px) {
+  .session-statusbar {
+    padding: 5px 10px;
+  }
+  .sb-row,
+  .sb-chips {
+    gap: 6px;
+  }
+  .sb-chip {
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.8rem;
+    border-radius: 6px;
+  }
+  .sb-chip i {
+    font-size: 0.95rem;
+  }
+}
+
 /* Smooth pop-in when a chip first appears (real data arrives or skeleton is
    swapped for the real value). Suppressed on subsequent re-renders by the
    animatedKeys set in SessionStatusbar - duration ticks don't re-fade. */

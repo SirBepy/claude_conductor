@@ -199,7 +199,14 @@
   /* The chevron sub-button stays narrower than Send (it's a secondary
      action), but 16px was well under any usable touch target. */
   .composer-send-split .composer-send-chevron {
+    width: 36px;
+  }
+  /* 20px was the smallest target in the chat, perched on a corner. */
+  .composer-attachments .rm {
     width: 28px;
+    height: 28px;
+    top: -8px;
+    right: -8px;
   }
 }
 
