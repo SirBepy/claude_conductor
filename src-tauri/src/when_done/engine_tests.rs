@@ -4,12 +4,10 @@ use super::*;
 //
 // Drives the whole phase machine through recording stubs instead of the real
 // AppHandle / daemon / system_control. tokio's paused clock makes the 1s
-// ticks + 30s countdown resolve instantly (the per-session Closing timeout
-// still uses wall-clock Instant::now() directly and so stays un-tripped, same
-// as before). The Watching no-progress runaway guard now reads `deps.now`
-// instead of `std::time::Instant::now()` directly (todo 894), so a test can
-// drive a synthetic World::clock past NO_PROGRESS_LIMIT without a real
-// wall-clock wait; tests that don't care about it just leave the clock
+// ticks + 30s countdown resolve instantly. The Watching no-progress runaway
+// guard reads `deps.now` instead of `std::time::Instant::now()` directly
+// (todo 894), so a test can drive a synthetic World::clock past
+// NO_PROGRESS_LIMIT without a real wall-clock wait; tests that don't care about it just leave the clock
 // untouched and it never trips. The stubs RECORD calls; the terminal stub
 // never actually sleeps/shuts down.
 
@@ -20,15 +18,13 @@ use std::time::Instant;
 /// `(session_id, busy)` snapshot the seams read, plus the recorded effects.
 struct World {
     /// Current live sessions. The test mutates this to simulate sessions
-    /// going idle and /close turns running.
+    /// going idle.
     busy_map: Vec<(String, bool)>,
     /// Phases observed via mutate_and_emit, in order. Drives the
     /// progression assertion.
     phases: Vec<ProtocolPhase>,
     /// How many times the terminal action fired, and with what action.
     terminal_calls: Vec<TerminalAction>,
-    /// How many /close injections happened, by session id.
-    closed: Vec<String>,
     /// Set true to make is_cancelled report cancellation from the next check.
     cancelled: bool,
     /// When true, mutate_and_emit arms `cancelled` once the countdown has
@@ -57,7 +53,6 @@ impl Default for World {
             busy_map: Vec::new(),
             phases: Vec::new(),
             terminal_calls: Vec::new(),
-            closed: Vec::new(),
             cancelled: false,
             cancel_on_countdown: false,
             state: ProtocolState::disarmed(),
@@ -81,16 +76,13 @@ impl World {
 fn deps_for(
     world: Arc<Mutex<World>>,
     // Called every time the engine reads busy_map; returns the next snapshot
-    // to install. Lets the test stage "now everything is idle", then "the
-    // close turn went busy", then "idle again".
+    // to install. Lets the test stage "still busy", then "now idle".
     tick: Arc<Mutex<dyn FnMut(&mut World) + Send>>,
 ) -> EngineDeps {
     let w_busy = world.clone();
     let tick_busy = tick.clone();
     let w_idle = world.clone();
-    let w_ids = world.clone();
     let w_resolve = world.clone();
-    let w_close = world.clone();
     let w_emit = world.clone();
     let w_cancel = world.clone();
     let w_term = world.clone();
@@ -104,26 +96,10 @@ fn deps_for(
             g.busy_map.clone()
         }),
         all_idle: Box::new(move || w_idle.lock().unwrap().live_idle()),
-        live_ids: Box::new(move || {
-            w_ids
-                .lock()
-                .unwrap()
-                .busy_map
-                .iter()
-                .map(|(id, _)| id.clone())
-                .collect()
-        }),
         auto_resolve: Box::new(move || {
             // Records the call only; the real seam talks to the daemon.
             w_resolve.lock().unwrap().resolved += 1;
             Box::pin(async move {})
-        }),
-        inject_close: Box::new(move |session_id| {
-            let w = w_close.clone();
-            Box::pin(async move {
-                w.lock().unwrap().closed.push(session_id);
-                true
-            })
         }),
         mutate_and_emit: Box::new(move |f| {
             let mut g = w_emit.lock().unwrap();
@@ -166,9 +142,7 @@ fn deps_for(
 async fn full_run_progresses_through_phases_and_fires_terminal_once() {
     // Start with one busy session. The tick hook walks the world through:
     //   1. busy   -> Watching keeps waiting,
-    //   2. idle   -> Watching breaks, Closing injects /close,
-    //   3. busy   -> close turn started (saw_busy latches),
-    //   4. idle   -> close turn complete, then CountingDown -> Firing.
+    //   2. idle   -> Watching breaks, then CountingDown -> Firing.
     let world = Arc::new(Mutex::new(World {
         busy_map: vec![("s1".to_string(), true)],
         ..Default::default()
@@ -176,7 +150,7 @@ async fn full_run_progresses_through_phases_and_fires_terminal_once() {
 
     // Sequence of busy-flags to install on successive busy_map reads. Once
     // exhausted, the session stays idle.
-    let steps = Arc::new(Mutex::new(vec![true, false, true, false]));
+    let steps = Arc::new(Mutex::new(vec![true, false]));
     let steps_for_tick = steps.clone();
     let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> =
         Arc::new(Mutex::new(move |w: &mut World| {
@@ -196,19 +170,13 @@ async fn full_run_progresses_through_phases_and_fires_terminal_once() {
     run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Manual).await;
 
     let g = world.lock().unwrap();
-    // Phase progression: Watching -> Closing -> CountingDown -> Firing.
+    // Phase progression: Watching -> CountingDown -> Firing, nothing between.
     assert_eq!(
         g.phases,
-        vec![
-            ProtocolPhase::Watching,
-            ProtocolPhase::Closing,
-            ProtocolPhase::CountingDown,
-            ProtocolPhase::Firing,
-        ],
+        vec![ProtocolPhase::Watching, ProtocolPhase::CountingDown, ProtocolPhase::Firing],
         "phase progression"
     );
-    // /close was injected exactly once, into the live session.
-    assert_eq!(g.closed, vec!["s1".to_string()], "close injection");
+    assert!(g.resolved > 0, "manual arm auto-resolves prompts");
     // Terminal action fired EXACTLY ONCE, with the armed action.
     assert_eq!(
         g.terminal_calls,
@@ -221,12 +189,12 @@ async fn full_run_progresses_through_phases_and_fires_terminal_once() {
 
 #[tokio::test(start_paused = true)]
 async fn cancel_mid_countdown_short_circuits_and_terminal_never_fires() {
-    // No busy sessions: Watching breaks on the first idle check, Closing has
-    // nothing to inject, so we reach CountingDown immediately. `cancel_on_
+    // No busy sessions: Watching breaks on the first idle check, so we reach
+    // CountingDown immediately. `cancel_on_
     // countdown` flips `cancelled` true once the countdown has ticked at
     // least once, so the engine returns mid-countdown, before Firing.
     let world = Arc::new(Mutex::new(World {
-        busy_map: vec![], // empty -> all idle -> straight to closing/countdown
+        busy_map: vec![], // empty -> all idle -> straight to countdown
         cancel_on_countdown: true,
         ..Default::default()
     }));
@@ -260,11 +228,10 @@ async fn cancel_mid_countdown_short_circuits_and_terminal_never_fires() {
     );
 }
 
-/// A nightly run leaves every chat as-is: no /close, no auto-answered prompts,
-/// and it holds in Watching while the user is still at the PC even though every
+/// A nightly run never auto-answers prompts, and it holds in Watching while the user is still at the PC even though every
 /// chat is already idle.
 #[tokio::test(start_paused = true)]
-async fn nightly_run_skips_close_and_waits_for_the_user_to_be_away() {
+async fn nightly_run_skips_auto_resolve_and_waits_for_the_user_to_be_away() {
     let world = Arc::new(Mutex::new(World {
         busy_map: vec![("s1".to_string(), false)],
         ..Default::default()
@@ -288,9 +255,8 @@ async fn nightly_run_skips_close_and_waits_for_the_user_to_be_away() {
     assert_eq!(
         g.phases,
         vec![ProtocolPhase::Watching, ProtocolPhase::CountingDown, ProtocolPhase::Firing],
-        "no Closing phase on a nightly run"
+        "phase progression"
     );
-    assert!(g.closed.is_empty(), "nightly must not /close chats, got {:?}", g.closed);
     assert_eq!(g.resolved, 0, "nightly must not auto-resolve prompts");
     assert_eq!(*reads.lock().unwrap(), 3, "held in Watching until the user was away");
     assert_eq!(g.terminal_calls, vec![TerminalAction::Shutdown]);
@@ -355,7 +321,7 @@ async fn no_progress_guard_gives_up_with_a_distinct_phase_and_blocking_ids() {
     assert_eq!(
         g.phases,
         vec![ProtocolPhase::Watching, ProtocolPhase::GaveUp],
-        "gives up from Watching, never reaches Closing/CountingDown/Firing"
+        "gives up from Watching, never reaches CountingDown/Firing"
     );
     assert!(g.terminal_calls.is_empty(), "must never fire the terminal action");
     assert_eq!(g.state.phase, ProtocolPhase::GaveUp);

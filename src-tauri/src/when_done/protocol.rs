@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::JoinHandle;
 
-/// The terminal action to perform once every session has been closed.
+/// The terminal action to perform once every session is idle.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export_to = "../../../src/types/ipc.generated.ts")]
@@ -11,9 +11,8 @@ pub enum TerminalAction {
 }
 
 /// How the protocol was armed. `Nightly` is the unattended scheduled arm: it
-/// leaves every chat exactly as it is (no `/close`, no auto-answered prompts) so
-/// they are all still there after boot, never gives up on a long turn, and also
-/// waits for the user to have stepped away from the PC.
+/// never auto-answers prompts, never gives up on a long turn, and also waits
+/// for the user to have stepped away from the PC.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArmMode {
     Manual,
@@ -27,7 +26,6 @@ pub enum ArmMode {
 pub enum ProtocolPhase {
     Disarmed,
     Watching,
-    Closing,
     CountingDown,
     Firing,
     /// Aborted without firing: the Watching no-progress guard gave up (todo
@@ -43,7 +41,7 @@ pub struct ProtocolState {
     pub action: Option<TerminalAction>,
     pub phase: ProtocolPhase,
     pub countdown_remaining_secs: Option<u32>,
-    /// Session ids not yet idle/closed. In the `GaveUp` phase, this is instead
+    /// Session ids not yet idle. In the `GaveUp` phase, this is instead
     /// the set of session ids that were still blocking progress when the
     /// Watching loop gave up.
     pub waiting_on: Vec<String>,

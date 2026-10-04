@@ -1,5 +1,5 @@
 //! Actuation: the only part of the protocol that talks to the daemon client and
-//! mutates other sessions (auto-resolving their prompts, injecting `/close`).
+//! mutates other sessions (auto-resolving their prompts).
 
 use super::idle::log_comment;
 use crate::state::AppState;
@@ -90,21 +90,6 @@ pub(super) fn default_question_answers(questions: Option<&serde_json::Value>) ->
         }
     }
     serde_json::Value::Object(map)
-}
-
-/// Inject `/close` into a single session via the daemon.
-pub(super) async fn inject_close(app: &AppHandle, session_id: &str) -> bool {
-    let state = app.state::<AppState>();
-    let Some(client) = state.client().await else {
-        return false;
-    };
-    match client.send_message(session_id, "/close").await {
-        Ok(()) => true,
-        Err(e) => {
-            log::warn!("when_done: send /close to {session_id} failed: {e}");
-            false
-        }
-    }
 }
 
 #[cfg(test)]

@@ -94,40 +94,6 @@ pub(super) fn next_countdown(remaining: u32) -> Option<u32> {
     }
 }
 
-/// Per-tick close-turn completion check. Given whether the target session is
-/// still present in the live list (`Some(busy)`), or has vanished (`None`),
-/// updates the `saw_busy` latch and returns true when the close turn is
-/// complete: the session vanished, OR it went busy then back to idle. Pure
-/// mirror of the inline match in the Closing wait loop (timeout handled by the
-/// caller, which stays timing-bound).
-pub(super) fn close_turn_complete(present: Option<bool>, saw_busy: &mut bool) -> bool {
-    match present {
-        None => true, // session closed/vanished -> done.
-        Some(busy) => {
-            if busy {
-                *saw_busy = true;
-                false
-            } else if *saw_busy {
-                // ran a turn and is now idle again -> done.
-                true
-            } else {
-                false
-            }
-        }
-    }
-}
-
-/// Currently-live (not ended) session ids from the cached instance list.
-pub(super) fn live_session_ids(app: &AppHandle) -> Vec<String> {
-    let state = app.state::<AppState>();
-    let guard = state.cached_instances.lock().unwrap();
-    guard
-        .iter()
-        .filter(|i| i.ended_at.is_none())
-        .map(|i| i.session_id.clone())
-        .collect()
-}
-
 /// Snapshot of (session_id, in-flight) for live sessions. "In-flight" is
 /// `busy` OR `awaiting == "working"` (self-reported background subagents/tasks
 /// that will re-invoke the session) - the same non-idle definition as

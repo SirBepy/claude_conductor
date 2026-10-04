@@ -91,7 +91,7 @@ export function whenDoneAction(): TerminalAction | null {
   return state.whenDone?.action ?? null;
 }
 
-/** True when any protocol is armed (watching / closing / countingDown / firing). */
+/** True when any protocol is armed (watching / countingDown / firing). */
 export function whenDoneArmed(): boolean {
   return isArmed(state.whenDone);
 }

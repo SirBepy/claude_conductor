@@ -195,38 +195,3 @@ fn next_countdown_full_sequence_emits_29_down_to_0() {
     assert_eq!(emitted, expected);
     assert_eq!(emitted.len(), COUNTDOWN_SECS as usize);
 }
-
-// --- close_turn_complete ------------------------------------------------
-
-#[test]
-fn close_turn_complete_busy_then_idle_yields_complete() {
-    // Sequence: present+idle (no busy yet) -> not done; present+busy ->
-    // latch saw_busy, not done; present+idle again -> done.
-    let mut saw_busy = false;
-    assert!(!close_turn_complete(Some(false), &mut saw_busy)); // idle, never busy
-    assert!(!saw_busy);
-    assert!(!close_turn_complete(Some(true), &mut saw_busy)); // went busy
-    assert!(saw_busy);
-    assert!(close_turn_complete(Some(false), &mut saw_busy)); // busy -> idle = done
-}
-
-#[test]
-fn close_turn_complete_vanished_session_yields_complete() {
-    // Session gone from the live list -> done immediately, regardless of
-    // whether it was ever seen busy.
-    let mut saw_busy = false;
-    assert!(close_turn_complete(None, &mut saw_busy));
-
-    let mut saw_busy2 = true;
-    assert!(close_turn_complete(None, &mut saw_busy2));
-}
-
-#[test]
-fn close_turn_complete_idle_without_prior_busy_keeps_waiting() {
-    // A session that is present and idle but never went busy is NOT done:
-    // its /close turn has not started yet, so keep waiting.
-    let mut saw_busy = false;
-    assert!(!close_turn_complete(Some(false), &mut saw_busy));
-    assert!(!close_turn_complete(Some(false), &mut saw_busy));
-    assert!(!saw_busy);
-}

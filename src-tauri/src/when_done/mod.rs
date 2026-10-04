@@ -4,15 +4,14 @@
 //! time. When armed, a background tokio task:
 //!   1. Watches every live session and auto-resolves any blocking prompt
 //!      (permission -> allow as-is, question -> first/default option).
-//!   2. Once all sessions are idle, injects `/close` into each and waits for
-//!      each close turn to finish.
-//!   3. Counts down 30s, then fires the terminal action (sleep / shutdown).
+//!   2. Once all sessions are idle, counts down 30s, then fires the terminal
+//!      action (sleep / shutdown). Chats are never closed.
 //!
 //! A nightly arm (`nightly.rs`, `ArmMode::Nightly`) skips the prompt
-//! auto-resolve and the `/close` step, and also waits for the user to be away.
+//! auto-resolve, and also waits for the user to be away.
 //!
-//! Cancellation, per-session timeouts, and a no-progress runaway guard keep the
-//! task from spinning forever. Every tick emits the current `ProtocolState` to
+//! Cancellation and a no-progress runaway guard keep the task from spinning
+//! forever. Every tick emits the current `ProtocolState` to
 //! all windows on the `when-done-state` event.
 
 mod protocol;
