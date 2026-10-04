@@ -21,6 +21,7 @@ import { isAutoAccept, setAutoAccept } from "./permission-modal";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero, fetchGitInfo } from "./session-statusbar";
 import { savePendingSession, clearPendingSession } from "./pending-draft-storage";
 import { SessionHeader } from "./session-header";
+import { applyHeaderMerge } from "./mobile-header-merge";
 import { showToast } from "../../shared/toast";
 import { wireRenderer } from "./active-session-mount";
 import { retainChat } from "./chat-pane-cache";
@@ -61,6 +62,9 @@ export async function renderPendingPane(
     `</div>`,
   ].join("\n");
   pane.insertBefore(_pendingHeader.el, pane.firstChild);
+  // Same re-home as active-session.ts: without it a draft keeps the phone's
+  // back / ⋮ in a second header band above this one.
+  applyHeaderMerge();
   // The wipe above ran after setSessionScope, so the FAB host is detached.
   state.fabDial?.reattach();
 

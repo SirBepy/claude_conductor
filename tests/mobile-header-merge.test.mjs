@@ -19,7 +19,7 @@ function setViewport(isMobile) {
 /** One sessions-view render: a fresh .view-header holding both buttons. */
 function renderView(tag) {
   document.body.innerHTML = `
-    <div class="view view-sessions">
+    <div class="view view-sessions" data-mobile-pane="chat">
       <div class="view-header">
         <button class="icon-btn burger"></button>
         <button class="icon-btn sessions-back" id="sessionsBackBtn"></button>
@@ -95,6 +95,20 @@ describe("mobile", () => {
     const more = document.querySelector(".session-header-trail > #viewMoreBtn");
     expect(more).not.toBeNull();
     expect(more.dataset.render).toBe("first");
+  });
+
+  it("hands the buttons back to the view-header once the list is showing", () => {
+    setViewport(true);
+    const pane = renderView("first");
+    rebuildPane(pane);
+    applyHeaderMerge();
+
+    // The pane (and its header) survives the trip back, only hidden.
+    document.querySelector(".view-sessions").setAttribute("data-mobile-pane", "list");
+    applyHeaderMerge();
+
+    expect(document.querySelector(".view-header > #viewMoreBtn")?.dataset.render).toBe("first");
+    expect(document.querySelector(".session-header-trail > #viewMoreBtn")).toBeNull();
   });
 
   it("hands the buttons back to the view-header when the viewport widens", () => {

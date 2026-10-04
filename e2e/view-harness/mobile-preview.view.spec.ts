@@ -157,6 +157,24 @@ test("the buttons go home when the viewport grows back to desktop", async ({ pag
   await expect(page.locator(".view-sessions .view-header")).toBeVisible();
 });
 
+test("going back to the list puts the kebab back in the list's own header", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPhone(page);
+  await page.evaluate(async () => {
+    const merge = await import("/views/sessions/mobile-header-merge.ts");
+    merge.initHeaderMerge(document.querySelector(".view-sessions")!);
+  });
+  await withPaneHeader(page);
+  await expect(page.locator(".session-header-trail > #viewMoreBtn")).toBeAttached();
+
+  // The pane header is only hidden in list mode, so without the re-home the
+  // kebab stayed parked in it and the list header had no menu.
+  await page.evaluate(() => document.querySelector(".view-sessions")!.setAttribute("data-mobile-pane", "list"));
+
+  await expect(page.locator(".view-header > #viewMoreBtn")).toBeVisible();
+  await expect(page.locator(".session-header-trail > #viewMoreBtn")).toHaveCount(0);
+});
+
 test("a failed merge degrades to the old layout rather than losing the back button", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page);

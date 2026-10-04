@@ -52,6 +52,11 @@ function findButton(root: ParentNode, id: string): HTMLElement | null {
   return root.querySelector<HTMLElement>(`#${id}`) ?? homes.get(id)?.el ?? null;
 }
 
+function viewOf(root: ParentNode): Element | null {
+  if (root instanceof Element && root.matches(".view-sessions")) return root;
+  return root.querySelector(".view-sessions");
+}
+
 /** Idempotent: safe to call on every pane render and every breakpoint change. */
 export function applyHeaderMerge(root: ParentNode = document): void {
   const back = findButton(root, BACK_ID);
@@ -62,10 +67,14 @@ export function applyHeaderMerge(root: ParentNode = document): void {
   const header = root.querySelector<HTMLElement>(".session-header");
   const lead = header?.querySelector<HTMLElement>(".session-header-lead");
   const trail = header?.querySelector<HTMLElement>(".session-header-trail");
+  // The pane header outlives a trip back to the list (it's only hidden), so
+  // the ⋮ would stay parked in it and vanish from the list's own header.
+  const view = viewOf(root);
+  const listShowing = !!view && view.getAttribute("data-mobile-pane") !== "chat";
 
-  // No pane header yet (empty state, or the sessions list): leave the buttons
-  // where they are rather than orphaning them.
-  if (!isMobileViewport() || !lead || !trail) {
+  // No pane header yet (empty state), or the list is what's on screen: leave
+  // the buttons in .view-header rather than orphaning them.
+  if (!isMobileViewport() || listShowing || !lead || !trail) {
     if (back) goHome(back);
     if (more) goHome(more);
     return;
@@ -82,7 +91,16 @@ let unsubscribe: (() => void) | null = null;
 export function initHeaderMerge(root: ParentNode = document): () => void {
   unsubscribe?.();
   applyHeaderMerge(root);
-  const dispose = onMobileViewportChange(() => applyHeaderMerge(root));
+  const offViewport = onMobileViewportChange(() => applyHeaderMerge(root));
+  // Several paths flip list/chat (back button, Android back, opening a chat),
+  // so follow the attribute itself rather than each caller.
+  const view = viewOf(root);
+  const paneObserver = new MutationObserver(() => applyHeaderMerge(root));
+  if (view) paneObserver.observe(view, { attributes: true, attributeFilter: ["data-mobile-pane"] });
+  const dispose = () => {
+    offViewport();
+    paneObserver.disconnect();
+  };
   unsubscribe = dispose;
   return () => {
     dispose();
