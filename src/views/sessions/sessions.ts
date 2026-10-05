@@ -170,7 +170,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   }
 
   const teardownOverflowMenu = await wireOverflowMenu(root, previewController);
-  const teardownKeyboardShortcuts = wireKeyboardShortcuts(listEl);
+  const teardownKeyboardShortcuts = wireKeyboardShortcuts(listEl, pane);
   // Wired before initialLoadAndRestore paints the rows. The listener
   // registrations after it are several IPC round trips, and a row painted
   // before its click handler silently drops a click on a slow boot (todo 926).

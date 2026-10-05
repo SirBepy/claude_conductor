@@ -1,6 +1,7 @@
 // src/shared/shortcuts.ts
 
 import { isFormControlElement } from "./text-entry";
+import { createModifierHintTracker, type ModifierHint } from "./modifier-hint";
 
 export interface ShortcutDef {
   id: string;
@@ -73,7 +74,7 @@ function saveBindings(overrides: Record<string, string>): void {
 // ── Runtime state ──────────────────────────────────────────────────────────
 
 const handlers = new Map<string, () => void | Promise<void>>();
-const ctrlHeldCallbacks = new Set<(held: boolean) => void>();
+const modifierHintCallbacks = new Set<(hint: ModifierHint) => void>();
 
 // ── Pure helpers (exported for tests) ─────────────────────────────────────
 
@@ -124,9 +125,11 @@ export function unregister(id: string): void {
   handlers.delete(id);
 }
 
-export function onCtrlHeld(cb: (held: boolean) => void): () => void {
-  ctrlHeldCallbacks.add(cb);
-  return () => ctrlHeldCallbacks.delete(cb);
+/** Fires when the held modifiers change what should be revealed: Ctrl alone
+ *  shows chat numbers, a still Ctrl+Shift hold shows the favourite slots. */
+export function onModifierHint(cb: (hint: ModifierHint) => void): () => void {
+  modifierHintCallbacks.add(cb);
+  return () => modifierHintCallbacks.delete(cb);
 }
 
 export function getAll(): ShortcutDef[] {
@@ -159,11 +162,11 @@ export function hasOverride(id: string): boolean {
 
 // ── Dispatcher (DOM — guarded for test environments) ──────────────────────
 
-function fireCtrlHeld(held: boolean): void {
-  for (const cb of ctrlHeldCallbacks) cb(held);
-}
-
 function _init(): void {
+  const modifierHint = createModifierHintTracker((hint) => {
+    for (const cb of modifierHintCallbacks) cb(hint);
+  });
+
   // Lazy import avoids loading DOM-dependent navigation module in test environments.
   let getActiveView: (() => string) | null = null;
   void import("./navigation").then(m => { getActiveView = m.getActiveView; });
@@ -171,10 +174,8 @@ function _init(): void {
   void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Control" || e.key === "Meta") {
-      fireCtrlHeld(true);
-      return;
-    }
+    modifierHint.keydown(e);
+    if (e.key === "Control" || e.key === "Meta") return;
 
     if (isAnyModalOpen?.()) return;
 
@@ -199,11 +200,9 @@ function _init(): void {
     void handler();
   });
 
-  document.addEventListener("keyup", (e) => {
-    if (e.key === "Control" || e.key === "Meta") fireCtrlHeld(false);
-  });
+  document.addEventListener("keyup", (e) => modifierHint.keyup(e));
 
-  window.addEventListener("blur", () => fireCtrlHeld(false));
+  window.addEventListener("blur", () => modifierHint.reset());
 }
 
 if (typeof document !== "undefined") {

@@ -8,6 +8,7 @@ import { mountPreviewTab, type PreviewController } from "./preview-panel";
 import { mountFabDial } from "./fab-dial";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { showFavoritesStrip, hideFavoritesStrip } from "./favorites-strip";
 import { discardComposerDraft } from "../../shared/chat/composer";
 import { saveParkedDrafts } from "./pending-draft-storage";
 import { selectSession } from "./active-session";
@@ -25,6 +26,7 @@ import {
 import {
   selectSessionByIndex,
   closeFocusedChat,
+  triggerNewSessionFavoriteGlobal,
 } from "./session-controls";
 
 function discardStuckPending(pane: HTMLElement): void {
@@ -112,19 +114,25 @@ export async function wireOverflowMenu(
 }
 
 /** Registers the chats-view keyboard shortcuts (numbered chat jump,
- * close-chat) and the ctrl-held sidebar hint class. Returns a dispose
- * function that unregisters everything. Ctrl+Shift+1-9 (new chat from a
- * favourite project slot) is registered globally in boot.ts instead, since
- * it must work even when this view isn't mounted. */
-export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
+ * close-chat), the ctrl-held sidebar hint class and the ctrl+shift-held
+ * favourites strip. Returns a dispose function that unregisters everything.
+ * Ctrl+Shift+1-9 (new chat from a favourite project slot) is registered
+ * globally in boot.ts instead, since it must work even when this view isn't
+ * mounted. */
+export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): () => void {
   for (let i = 0; i < 9; i++) {
     const slot = i + 1;
     shortcuts.register(`open-chat-${slot}`, () => selectSessionByIndex(i));
   }
   shortcuts.register("close-chat", closeFocusedChat);
 
-  const unlistenCtrlHeld = shortcuts.onCtrlHeld((held) => {
-    listEl.classList.toggle("kbd-hint-active", held);
+  const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
+    listEl.classList.toggle("kbd-hint-active", hint.numbers);
+    if (hint.favorites) {
+      showFavoritesStrip(pane, triggerNewSessionFavoriteGlobal);
+    } else {
+      hideFavoritesStrip(pane);
+    }
   });
 
   return () => {
@@ -132,7 +140,8 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
       shortcuts.unregister(`open-chat-${i}`);
     }
     shortcuts.unregister("close-chat");
-    unlistenCtrlHeld();
+    unlistenModifierHint();
+    hideFavoritesStrip(pane);
   };
 }
 
