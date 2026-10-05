@@ -70,6 +70,70 @@ test("the FAB dial opens preview and its window's X is the way back", async ({ p
   await expect(page.locator(".fab-dial-fab")).toBeVisible();
 });
 
+async function openPreview(page: Page): Promise<void> {
+  await page.locator(".fab-dial-fab").click();
+  await page.locator('[data-dial="preview"]').click();
+  await expect(page.locator('[data-tab-body="preview"]')).toBeVisible();
+}
+
+// Joe, 2026-10-05: the bar moves to the bottom, in thumb reach, and a
+// sideways swipe on it goes back to the chat.
+test("the preview cover's bar sits at the bottom of the screen", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPhone(page, { fab: true });
+  await openPreview(page);
+
+  const bar = (await page.locator(`${PREVIEW} .pw-bar`).boundingBox())!;
+  const body = (await page.locator(`${PREVIEW} .fab-card-body`).boundingBox())!;
+  expect(bar.y).toBeGreaterThanOrEqual(body.y + body.height - 1);
+  expect(Math.round(bar.y + bar.height)).toBe(PHONE.height);
+});
+
+test("a sideways swipe on the bar closes preview back to the chat", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPhone(page, { fab: true });
+  await openPreview(page);
+
+  const bar = (await page.locator(`${PREVIEW} .pw-bar`).boundingBox())!;
+  const y = bar.y + bar.height / 2;
+  await page.mouse.move(60, y);
+  await page.mouse.down();
+  await page.mouse.move(260, y, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator(PREVIEW)).toBeHidden();
+  await expect(page.locator(".fab-dial-fab")).toBeVisible();
+});
+
+test("a short swipe on the bar snaps back and leaves preview open", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPhone(page, { fab: true });
+  await openPreview(page);
+
+  const bar = (await page.locator(`${PREVIEW} .pw-bar`).boundingBox())!;
+  const y = bar.y + bar.height / 2;
+  await page.mouse.move(60, y);
+  await page.mouse.down();
+  await page.mouse.move(100, y, { steps: 4 });
+  await page.mouse.up();
+
+  await expect(page.locator(PREVIEW)).toBeVisible();
+  const box = (await railBox(page))!;
+  expect(Math.round(box.x)).toBe(0);
+});
+
+test("hardware back closes the preview cover", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPhone(page, { fab: true });
+  await openPreview(page);
+
+  await page.evaluate(async () => {
+    const back = await import("/shared/back-button.ts");
+    back.handleBack();
+  });
+  await expect(page.locator(PREVIEW)).toBeHidden();
+});
+
 test("the transcript keeps its scroll position across a trip to preview", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page, { fab: true });

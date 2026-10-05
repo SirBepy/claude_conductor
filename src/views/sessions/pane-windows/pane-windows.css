@@ -536,12 +536,21 @@
     min-height: 300px;
   }
 
+  /* Bar at the bottom, in thumb reach, where a sideways swipe on it goes back
+     to the chat (gestures.ts swipeBackGesture). */
   .fab-card[data-active="preview"] {
     inset: 0;
     height: auto;
+    flex-direction: column-reverse;
     border: none;
     border-radius: 0;
     box-shadow: none;
+  }
+
+  .fab-card[data-active="preview"] .pw-bar {
+    height: 48px;
+    border-bottom: none;
+    border-top: 1px solid var(--color-border);
   }
 
   .fab-card[data-active="preview"] .pw-bar,

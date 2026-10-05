@@ -10,12 +10,14 @@ import {
   type Bounds, type DropZone, type ResizeDir,
 } from "./geometry";
 import {
-  mergeWindows, moveTab, PANEL_META, place, setActive, setDockShare, setWeights, stackInto, tearOff, weightOf,
-  windowOf, type DockSide, type PaneLayout, type PaneWindow, type PanelKey, type Placement, type Rect,
+  closeWindow, mergeWindows, moveTab, PANEL_META, place, setActive, setDockShare, setWeights, stackInto, tearOff,
+  weightOf, windowOf, type DockSide, type PaneLayout, type PaneWindow, type PanelKey, type Placement, type Rect,
 } from "./layout";
 
 /** Pointer travel before a press on a tab becomes a tear-off, not a click. */
 const DRAG_SLOP = 6;
+/** Sideways travel on a phone window's bar that closes it on release. */
+const SWIPE_BACK_PX = 80;
 /** Matches .is-snapping's transition in pane-windows.css. */
 const GLIDE_MS = 240;
 
@@ -203,6 +205,32 @@ export class GestureController {
         rz?.classList.remove("is-active");
         f.el.classList.remove("is-resizing");
         host.commit(host.layout);
+      },
+    );
+  }
+
+  /** Phone only: the window follows a sideways drag on its bar and closes
+   *  back to the chat past SWIPE_BACK_PX (Joe, 2026-10-05). The bar is the
+   *  one strip Preview's iframe cannot swallow. Released in place on a tab,
+   *  it still switches to that tab. */
+  swipeBackGesture(id: string, ev: PointerEvent, panel?: PanelKey): void {
+    const host = this.host;
+    const f = host.frames.get(id);
+    if (!f) return;
+    let dx = 0;
+    let travelled = false;
+    this.track(
+      f.el,
+      ev,
+      (e) => {
+        dx = e.clientX - ev.clientX;
+        if (Math.hypot(dx, e.clientY - ev.clientY) >= DRAG_SLOP) travelled = true;
+        if (travelled) f.el.style.transform = `translateX(${dx}px)`;
+      },
+      () => {
+        f.el.style.removeProperty("transform");
+        if (Math.abs(dx) >= SWIPE_BACK_PX) host.commit(closeWindow(host.layout, id));
+        else if (!travelled && panel) host.commit(setActive(host.layout, id, panel));
       },
     );
   }

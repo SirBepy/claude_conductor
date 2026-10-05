@@ -6,6 +6,7 @@
 
 import { invoke } from "../../../shared/ipc";
 import { listen } from "../../../shared/events";
+import { registerOverlayBack } from "../../../shared/back-button";
 import type { RailTabDeps } from "../rail-panel";
 import { loadPopped, savePopped, saveOpen as savePreviewOpen, loadOpen as loadPreviewOpen } from "../rail-panel";
 import type { PreviewController } from "../preview-panel";
@@ -59,6 +60,8 @@ export class PaneWindows implements GestureHost {
   /** Drives moveGesture/resizeGesture/tabGesture through this manager as a
    *  GestureHost (pane-windows/gestures.ts). */
   private readonly gestures: GestureController;
+  /** Held while a phone sheet/cover is up, so hardware back closes it. */
+  private disposeBack: (() => void) | null = null;
 
   constructor(
     private pane: HTMLElement,
@@ -152,6 +155,8 @@ export class PaneWindows implements GestureHost {
     this.obs = null;
     if (this.storageHandler) window.removeEventListener("storage", this.storageHandler);
     this.unlistenDocked?.();
+    this.disposeBack?.();
+    this.disposeBack = null;
     for (const h of this.handles.values()) h.destroy();
     this.handles.clear();
     for (const f of this.frames.values()) f.destroy();
@@ -269,6 +274,21 @@ export class PaneWindows implements GestureHost {
     return typeof window.matchMedia === "function" && window.matchMedia(COMPACT_QUERY).matches;
   }
 
+  private syncBack(covering: boolean): void {
+    if (covering && !this.disposeBack) {
+      this.disposeBack = registerOverlayBack(() => {
+        const front = [...this.layout.windows].reverse().find((w) => this.visible(w));
+        // offsetParent is null once the phone has gone back to the chat list.
+        if (!front || !this.compact() || this.pane.offsetParent === null) return false;
+        this.commit(closeWindow(this.layout, front.id));
+        return true;
+      });
+    } else if (!covering && this.disposeBack) {
+      this.disposeBack();
+      this.disposeBack = null;
+    }
+  }
+
   /** Open, and not a Preview-only window whose content lives in the pop-out. */
   private visible(w: PaneWindow): boolean {
     return w.open && !(this.popped && w.tabs.length === 1 && w.tabs[0] === "preview");
@@ -332,6 +352,7 @@ export class PaneWindows implements GestureHost {
       }
       this.syncPoppedNote(f, w);
     });
+    this.syncBack(compact && !!front);
     this.paint();
     const shown = !this.popped && isShowing(this.layout, "preview");
     // A chat switch is the body's own setSessionScope's to fetch for.
@@ -449,9 +470,11 @@ export class PaneWindows implements GestureHost {
       if (this.layout.windows[this.layout.windows.length - 1]?.id === id) return;
       this.commit(focusWindow(this.layout, id));
     },
-    barDown: (id, ev) => this.gestures.moveGesture(id, ev),
+    barDown: (id, ev) =>
+      this.compact() ? this.gestures.swipeBackGesture(id, ev) : this.gestures.moveGesture(id, ev),
     resizeDown: (id, dir, ev) => this.gestures.resizeGesture(id, dir, ev),
-    tabDown: (id, panel, ev) => this.gestures.tabGesture(id, panel, ev),
+    tabDown: (id, panel, ev) =>
+      this.compact() ? this.gestures.swipeBackGesture(id, ev, panel) : this.gestures.tabGesture(id, panel, ev),
     action: (id, act) => {
       const w = this.layout.windows.find((x) => x.id === id);
       if (!w) return;
