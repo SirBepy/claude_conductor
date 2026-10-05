@@ -293,6 +293,27 @@
   gap: 5px;
 }
 
+/* Desktop: model+effort span both text lines so they centre on the header's
+   icon buttons instead of sitting on the meta line's baseline. The phone keeps
+   them on the meta line: its header row is already full of 44px buttons, and a
+   third column would cut the title further. `display: contents` keeps .meta's
+   font and colour inherited by both halves. */
+@media (min-width: 769px) {
+  .session-header .session-header-text {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+  }
+  .session-header .meta { display: contents; }
+  .session-header .title,
+  .session-header .meta-proj { grid-column: 1; }
+  .session-header .meta-cfg {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+}
+
 /* Both are editable mid-run, so each is its own hit target. The affordance stays
    at hover-only: a permanent underline on two always-present labels would read
    as noise on every chat header. */
