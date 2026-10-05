@@ -2,20 +2,21 @@
 
 use crate::tray::icon_render::{self as icon, IconCtx};
 use crate::state::AppState;
-use crate::types::AuthState;
+use crate::types::{now_epoch_ms, AuthState, MuteChoice, Settings, TimedMute};
 use anyhow::Result;
 use std::sync::atomic::Ordering;
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder};
+use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::{AppHandle, Listener, Manager};
 
 pub const TRAY_ID: &str = "main-tray";
+const HOUR_SECS: u64 = 3600;
 
 pub fn setup(app: &AppHandle) -> Result<()> {
-    let initial_mute = app.state::<AppState>().settings.lock().unwrap().mute_all();
+    let initial_settings = app.state::<AppState>().settings.lock().unwrap().clone();
     let initial_update = app.state::<AppState>().update_state.lock().unwrap().clone();
-    let menu = build_menu(app, initial_mute, &initial_update)?;
+    let menu = build_menu(app, &initial_settings, &initial_update)?;
 
     let idle_bytes = icon::render(&IconCtx { updating: false, in_meeting: false, dev: cfg!(debug_assertions) });
     let idle_icon = Image::from_bytes(&idle_bytes)?;
@@ -70,12 +71,10 @@ pub fn setup(app: &AppHandle) -> Result<()> {
                     // drain here.
                     app.exit(0);
                 }
-                "mute-all" => {
-                    let h = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        toggle_mute_all(h);
-                    });
-                }
+                "mute-forever" => select_mute(app.clone(), MuteChoice::Forever),
+                "mute-1h" => select_mute(app.clone(), MuteChoice::Timed(HOUR_SECS)),
+                "mute-3h" => select_mute(app.clone(), MuteChoice::Timed(3 * HOUR_SECS)),
+                "mute-1d" => select_mute(app.clone(), MuteChoice::Timed(24 * HOUR_SECS)),
                 "update-install" => {
                     crate::ipc::install_update(app.clone());
                 }
@@ -172,9 +171,9 @@ fn on_left_click(app: AppHandle) {
 pub fn rebuild_menu_and_render(app: &AppHandle) {
     let h = app.clone();
     let _ = app.run_on_main_thread(move || {
-        let mute = h.state::<AppState>().settings.lock().unwrap().mute_all();
+        let settings = h.state::<AppState>().settings.lock().unwrap().clone();
         let update = h.state::<AppState>().update_state.lock().unwrap().clone();
-        if let Ok(new_menu) = build_menu(&h, mute, &update) {
+        if let Ok(new_menu) = build_menu(&h, &settings, &update) {
             if let Some(tray) = h.tray_by_id(TRAY_ID) {
                 let _ = tray.set_menu(Some(new_menu));
             }
@@ -201,10 +200,32 @@ pub fn render_tray_now(app: &AppHandle) {
     }
 }
 
-fn build_menu(app: &AppHandle, mute_all: bool, update: &serde_json::Value) -> Result<Menu<tauri::Wry>> {
-    let mute = CheckMenuItemBuilder::with_id("mute-all", "Mute Notifications")
-        .checked(mute_all)
-        .build(app)?;
+fn build_menu(app: &AppHandle, settings: &Settings, update: &serde_json::Value) -> Result<Menu<tauri::Wry>> {
+    let choice = settings.mute_choice();
+    let timed_check = |secs: u64| choice == Some(MuteChoice::Timed(secs));
+    let mute = SubmenuBuilder::new(app, "Mute Notifications")
+        .item(
+            &CheckMenuItemBuilder::with_id("mute-forever", "Until I turn it back on")
+                .checked(choice == Some(MuteChoice::Forever))
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &CheckMenuItemBuilder::with_id("mute-1h", "1 hour")
+                .checked(timed_check(HOUR_SECS))
+                .build(app)?,
+        )
+        .item(
+            &CheckMenuItemBuilder::with_id("mute-3h", "3 hours")
+                .checked(timed_check(3 * HOUR_SECS))
+                .build(app)?,
+        )
+        .item(
+            &CheckMenuItemBuilder::with_id("mute-1d", "1 day")
+                .checked(timed_check(24 * HOUR_SECS))
+                .build(app)?,
+        )
+        .build()?;
     let mut builder = MenuBuilder::new(app)
         .item(&MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?)
         .item(&MenuItemBuilder::with_id("open-chats", "Open Chats").build(app)?)
@@ -259,20 +280,62 @@ fn build_menu(app: &AppHandle, mute_all: bool, update: &serde_json::Value) -> Re
     Ok(menu)
 }
 
-fn toggle_mute_all(app: AppHandle) {
+/// Picking the active choice again unmutes. A timed pick clears the persisted
+/// `muteAll` flag, so the timer expiring returns to unmuted rather than to
+/// "until I turn it back on".
+fn select_mute(app: AppHandle, choice: MuteChoice) {
+    use crate::settings::paths;
+    use tauri::Emitter;
+    let state = app.state::<AppState>();
+    let (updated, deadline) = {
+        let mut s = state.settings.lock().unwrap();
+        let next = if s.mute_choice() == Some(choice) { None } else { Some(choice) };
+        let forever = next == Some(MuteChoice::Forever);
+        s.extra.insert("muteAll".into(), serde_json::Value::Bool(forever));
+        s.timed_mute = match next {
+            Some(MuteChoice::Timed(secs)) => Some(TimedMute {
+                until_ms: now_epoch_ms() + (secs as i64) * 1000,
+                secs,
+            }),
+            _ => None,
+        };
+        s.bump_generation();
+        (s.clone(), s.timed_mute.map(|t| t.until_ms))
+    };
+    if let Ok(path) = paths::settings_file() {
+        if let Err(e) = crate::settings::save(&path, &updated) {
+            log::warn!("persist mute toggle failed: {e}");
+        }
+    }
+    let _ = app.emit("settings-changed", &updated);
+    if let Some(until_ms) = deadline {
+        let h = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let wait = (until_ms - now_epoch_ms()).max(0) as u64;
+            tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            expire_timed_mute(&h, until_ms);
+        });
+    }
+}
+
+/// `until_ms` identifies the timer, so a timer superseded by a later pick
+/// (or cleared by a manual unmute) finds a different deadline and does nothing.
+fn expire_timed_mute(app: &AppHandle, until_ms: i64) {
     use crate::settings::paths;
     use tauri::Emitter;
     let state = app.state::<AppState>();
     let updated = {
         let mut s = state.settings.lock().unwrap();
-        let current = s.mute_all();
-        s.extra.insert("muteAll".into(), serde_json::Value::Bool(!current));
+        if s.timed_mute.map(|t| t.until_ms) != Some(until_ms) {
+            return;
+        }
+        s.timed_mute = None;
         s.bump_generation();
         s.clone()
     };
     if let Ok(path) = paths::settings_file() {
         if let Err(e) = crate::settings::save(&path, &updated) {
-            log::warn!("persist mute toggle failed: {e}");
+            log::warn!("persist timed mute expiry failed: {e}");
         }
     }
     let _ = app.emit("settings-changed", &updated);

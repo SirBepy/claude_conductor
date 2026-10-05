@@ -128,6 +128,13 @@ pub struct Settings {
     /// named field so serde's flatten never sees it.
     #[serde(default)]
     pub settings_generation: u64,
+    /// Tray-selected timed mute (1h / 3h / 1d). In-memory only: `serde(skip)`
+    /// keeps it out of settings.json, so a restart clears it. The frontend
+    /// never sees it either, which is why `save_settings` copies it across
+    /// its full-replace.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub timed_mute: Option<TimedMute>,
     /// Everything the dashboard persists that Rust doesn't need to read —
     /// project aliases, blacklist, colour thresholds, themes, etc. Stored
     /// verbatim so renames / hides / theme changes actually stick.
@@ -187,13 +194,53 @@ impl Default for Settings {
             accounts_setup_prompt_dismissed: false,
             schedule_grace_secs: None,
             settings_generation: 0,
+            timed_mute: None,
             extra: serde_json::Map::new(),
         }
     }
 }
 
+/// A timed mute: the deadline (epoch ms) and the length it was picked with, so
+/// the tray can tick the matching duration's check mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimedMute {
+    pub until_ms: i64,
+    pub secs: u64,
+}
+
+/// What the tray's Mute Notifications submenu has selected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MuteChoice {
+    /// Persisted `muteAll` flag: stays muted until switched off.
+    Forever,
+    Timed(u64),
+}
+
+pub(crate) fn now_epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 impl Settings {
-    pub fn mute_all(&self) -> bool { self.bool_extra("muteAll") }
+    pub fn mute_all(&self) -> bool {
+        self.bool_extra("muteAll") || self.timed_mute_active()
+    }
+
+    fn timed_mute_active(&self) -> bool {
+        self.timed_mute.is_some_and(|t| t.until_ms > now_epoch_ms())
+    }
+
+    /// The submenu's current selection. Timed wins over the forever flag,
+    /// since a timed pick clears `muteAll` (see `tray::menu`).
+    pub fn mute_choice(&self) -> Option<MuteChoice> {
+        if let Some(t) = self.timed_mute.filter(|t| t.until_ms > now_epoch_ms()) {
+            return Some(MuteChoice::Timed(t.secs));
+        }
+        if self.bool_extra("muteAll") { Some(MuteChoice::Forever) } else { None }
+    }
+
     pub fn mute_sounds(&self) -> bool { self.bool_extra("muteSounds") }
     pub fn mute_system_notifications(&self) -> bool { self.bool_extra("muteSystemNotifications") }
 
@@ -406,6 +453,37 @@ mod tests {
         let s: Settings = serde_json::from_str(raw).unwrap();
         assert!(!s.mute_all());
         assert!(!s.mute_sounds());
+    }
+
+    #[test]
+    fn timed_mute_silences_until_deadline_then_lapses() {
+        let mut s = Settings::default();
+        s.timed_mute = Some(TimedMute { until_ms: now_epoch_ms() + 60_000, secs: 3600 });
+        assert!(s.mute_all());
+        assert_eq!(s.mute_choice(), Some(MuteChoice::Timed(3600)));
+
+        s.timed_mute = Some(TimedMute { until_ms: now_epoch_ms() - 1, secs: 3600 });
+        assert!(!s.mute_all());
+        assert_eq!(s.mute_choice(), None);
+    }
+
+    #[test]
+    fn timed_mute_takes_precedence_over_forever_flag_in_choice() {
+        let mut s = Settings::default();
+        s.extra.insert("muteAll".into(), serde_json::Value::Bool(true));
+        assert_eq!(s.mute_choice(), Some(MuteChoice::Forever));
+        s.timed_mute = Some(TimedMute { until_ms: now_epoch_ms() + 60_000, secs: 86_400 });
+        assert_eq!(s.mute_choice(), Some(MuteChoice::Timed(86_400)));
+    }
+
+    #[test]
+    fn timed_mute_never_serializes_to_settings_json() {
+        let mut s = Settings::default();
+        s.timed_mute = Some(TimedMute { until_ms: now_epoch_ms() + 60_000, secs: 3600 });
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("timed_mute") && !json.contains("timedMute"));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.timed_mute, None);
     }
 
     #[test]
