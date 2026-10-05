@@ -31,6 +31,7 @@ import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { getTransport } from "../../shared/transport";
 import { closeViewMoreMenu } from "./view-more-menu";
 import { initMobileKeyboard } from "../../shared/mobile-keyboard";
+import { initMobileHeaderSwipe } from "./mobile-header-swipe";
 import {
   getSelectedSessionId,
   reopenPendingPrompt,
@@ -106,6 +107,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   let previewController = wirePreviewPanel(root, pane);
   initThinkingBar(pane);
   const teardownMobileKeyboard = initMobileKeyboard(view);
+  const teardownHeaderSwipe = initMobileHeaderSwipe(view, pane);
 
   // Click a question card in the transcript to reopen it. A still-pending one
   // (gated on `.tool-qa-a--pending`) puts the real, answerable card back up;
@@ -216,6 +218,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     teardownOverflowMenu();
     teardownDaemonStatusListeners();
     teardownMobileKeyboard();
+    teardownHeaderSwipe();
     window.removeEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
     window.removeEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
     previewController?.destroy();

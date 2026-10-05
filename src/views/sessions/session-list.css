@@ -19,10 +19,6 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--color-surface-alt);
-  /* No top inset: .view-header always sits above the list and already clears
-     the status bar. The bottom one keeps the pinned Hidden group off the
-     Android nav buttons (0 on desktop). */
-  padding-bottom: env(safe-area-inset-bottom);
   /* Anchor for the floating "new chat" CTA. */
   position: relative;
 }
@@ -35,7 +31,6 @@
   position: absolute;
   right: 16px;
   bottom: 16px;
-  bottom: max(16px, calc(env(safe-area-inset-bottom) + 12px));
   width: 52px;
   height: 52px;
   border-radius: 50%;

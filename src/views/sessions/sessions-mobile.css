@@ -112,23 +112,21 @@
     display: none;
   }
 
-  /* ── Soft keyboard open: same chrome-unmount, driven by mobile-keyboard.ts ──
-     Reclaims the header and statusbar's real estate the moment the
-     keyboard shows, rather than shrinking everything to fit alongside it
-     (Joe, 2026-08-20). --keyboard-inset (set alongside the attribute) is only
-     non-zero when the native layout viewport didn't already resize itself -
-     see mobile-keyboard.ts's doc comment. */
-  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-header,
-  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-statusbar {
-    display: none;
+  /* ── Soft keyboard open: header + chip row stay up, swipeable ──
+     mobile-header-swipe.ts tucks them away on a swipe up and brings them back
+     on a swipe down from the top (Joe, 2026-10-05, replacing the 2026-08-20
+     always-unmount). The chip row follows the header in flow, so one negative
+     margin slides both, and .session-pane's overflow:hidden clips them.
+     --keyboard-inset (set by mobile-keyboard.ts) is only non-zero when the
+     native layout viewport didn't already resize itself. */
+  .view-sessions[data-mobile-pane="chat"] .session-header {
+    transition: margin-top 0.2s ease;
+  }
+  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard][data-mobile-header-tucked] .session-header {
+    margin-top: calc(-1 * var(--mobile-chrome-h, 0px));
   }
   .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard] .session-pane {
     padding-bottom: var(--keyboard-inset, 0px);
-  }
-  /* With both header bands gone the transcript is the top-most thing, so it
-     takes over the status-bar clearance .session-header was carrying. */
-  .view-sessions[data-mobile-pane="chat"][data-mobile-keyboard]:has(.session-header-lead > #sessionsBackBtn) .session-pane {
-    padding-top: env(safe-area-inset-top);
   }
 
   /* Phone bubbles: the desktop 32px side margins waste a third of a narrow
@@ -162,16 +160,10 @@
     border-right: none;
     border-radius: 0;
   }
-  /* Flush to the bottom edge in every state: the desktop 12px margin would
-     otherwise come back as a stray strip above the open keyboard. */
+  /* Flush to the nav-bar band (or the open keyboard): the desktop 12px margin
+     would otherwise come back as a stray strip above either. */
   .composer-shell {
     margin-bottom: 0;
-  }
-  /* The composer is the bottom-most chrome now that the tab bar is gone, so
-     it inherits the home-indicator clearance the bar used to reserve. The
-     keyboard-open state drops it: the keyboard already covers that strip. */
-  .view-sessions[data-mobile-pane="chat"]:not([data-mobile-keyboard]) .composer-shell {
-    padding-bottom: env(safe-area-inset-bottom);
   }
   /* Corners follow the removed side borders; the fused thinking-bar/input
      boundary is the shared border, not the radius, so the merge survives. */

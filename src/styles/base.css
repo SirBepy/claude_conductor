@@ -60,6 +60,18 @@ body {
        tap flash. No-ops on desktop. */
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
+    /* The status and nav bars get their own plain bands, painted by body's
+       background, instead of each top/bottom-most widget stretching under
+       them (Joe, 2026-10-05). In-flow chrome therefore never adds the inset
+       itself; only position:fixed overlays, which escape this padding, do.
+       env() is 0 on desktop. */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+/* The open keyboard already covers the nav bar, so its band would only be a
+   stray strip between the composer and the keys. */
+body:has(.view-sessions[data-mobile-keyboard]) {
+    padding-bottom: 0;
 }
 
 
@@ -74,9 +86,6 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    /* Clear the notch on a viewport-fit=cover phone. env() is 0 elsewhere, so
-       desktop keeps the flat 14px. */
-    padding-top: max(14px, env(safe-area-inset-top));
     border-bottom: 1px solid var(--color-border);
     flex-shrink: 0;
 }

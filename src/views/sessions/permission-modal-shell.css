@@ -4,15 +4,14 @@
  *   - .prompt-card-host--pane: inside .session-pane (read-only, no composer).
  *   - .prompt-card-host--viewport: fixed at viewport bottom (no pane mounted).
  */
-/* Each mode's bottom offset grows by the safe-area inset (0 on desktop) so
- * the card never sits under a phone's gesture/nav bar - same pattern as
- * .session-composer's own padding-bottom in sessions.css. */
+/* Only the fixed viewport mode adds the nav-bar inset: the other two are
+ * absolute inside body, whose own padding already clears it (base.css). */
 #prompt-card-host.prompt-card-host--composer {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 100%;
-  padding: 0 12px max(8px, env(safe-area-inset-bottom));
+  padding: 0 12px 8px;
   z-index: 20;
   pointer-events: none;
 }
@@ -20,7 +19,7 @@
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: max(12px, calc(env(safe-area-inset-bottom) + 12px));
+  bottom: 12px;
   z-index: 20;
   pointer-events: none;
 }
@@ -129,11 +128,16 @@
    * aware `bottom` offset that fullscreen would need to duplicate. */
   #prompt-card-host:not(.prompt-card-host--viewport):has(.prompt-card__header .prompt-pager) {
     position: fixed;
-    inset: 0;
+    /* Fixed escapes body's system-bar padding, so it keeps the same two
+       bands itself (base.css). */
+    inset: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
     width: 100%;
-    height: 100%;
+    height: auto;
     transform: none;
     padding: 0;
+  }
+  .view-sessions[data-mobile-keyboard] #prompt-card-host:not(.prompt-card-host--viewport):has(.prompt-card__header .prompt-pager) {
+    bottom: 0;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) {
     width: 100%;
@@ -145,10 +149,8 @@
     border-left: none;
     border-right: none;
   }
-  /* No .composer-shell below it anymore to clear the home indicator - the
-   * footer (always last) grows its own bottom padding instead. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
-    padding-bottom: max(10px, env(safe-area-inset-bottom), var(--keyboard-inset, 0px));
+    padding-bottom: max(10px, var(--keyboard-inset, 0px));
   }
   /* Short questions no longer float above a blank void: body claims whatever
    * height the fullscreen card isn't spending on header/footer. */
