@@ -122,6 +122,26 @@ test("a short swipe on the bar snaps back and leaves preview open", async ({ pag
   expect(Math.round(box.x)).toBe(0);
 });
 
+// Joe, 2026-10-05: no floating sheet or split on a phone - every panel gets
+// the same full-screen cover as Preview.
+test("a non-preview panel also opens as a full cover with its bar at the bottom", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await mountPhone(page, { fab: true });
+  await page.locator(".fab-dial-fab").click();
+  await page.locator('[data-dial="ask"]').click();
+
+  const win = page.locator('.pw-window[data-active="ask"]');
+  await expect(win).toBeVisible();
+  const box = (await win.boundingBox())!;
+  const pane = (await page.locator(".session-pane").boundingBox())!;
+  expect(Math.round(box.x)).toBe(0);
+  expect(Math.round(box.width)).toBe(PHONE.width);
+  expect(Math.round(box.y)).toBe(Math.round(pane.y));
+  expect(Math.round(box.height)).toBe(Math.round(pane.height));
+  const bar = (await win.locator(".pw-bar").boundingBox())!;
+  expect(Math.round(bar.y + bar.height)).toBe(Math.round(box.y + box.height));
+});
+
 test("hardware back closes the preview cover", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountPhone(page, { fab: true });

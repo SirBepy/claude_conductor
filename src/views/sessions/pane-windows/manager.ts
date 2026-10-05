@@ -22,8 +22,8 @@ import {
 } from "./layout";
 import { recallLayout, rememberLayout } from "./memory";
 
-/** Same breakpoint as sessions-mobile.css: on a phone each window is a sheet
- *  (Preview a full cover), one at a time, with no drag, dock or tear-off. */
+/** Same breakpoint as sessions-mobile.css: on a phone each window is a full
+ *  cover, one at a time, with no drag, dock or tear-off. */
 const COMPACT_QUERY = "(max-width: 768px)";
 
 export interface PaneWindowsDeps {
@@ -60,7 +60,7 @@ export class PaneWindows implements GestureHost {
   /** Drives moveGesture/resizeGesture/tabGesture through this manager as a
    *  GestureHost (pane-windows/gestures.ts). */
   private readonly gestures: GestureController;
-  /** Held while a phone sheet/cover is up, so hardware back closes it. */
+  /** Held while a phone cover is up, so hardware back closes it. */
   private disposeBack: (() => void) | null = null;
 
   constructor(
@@ -327,7 +327,7 @@ export class PaneWindows implements GestureHost {
       f.destroy();
       this.frames.delete(id);
     }
-    // On a phone only the front-most open window shows; it is a sheet.
+    // On a phone only the front-most open window shows, as a full cover.
     const front = [...this.layout.windows].reverse().find((w) => this.visible(w));
     this.layout.windows.forEach((w, i) => {
       let f = this.frames.get(w.id);
@@ -342,7 +342,7 @@ export class PaneWindows implements GestureHost {
       const wasHidden = f.el.hidden;
       f.el.hidden = !this.visible(w) || (compact && w !== front);
       // Only a real open rises in, not a chat switch landing on a window that
-      // was already up there. A phone's sheet or cover just appears.
+      // was already up there. A phone's cover just appears.
       if (wasHidden && !f.el.hidden && !scoping && !compact) riseIn(f.el);
       for (const t of w.tabs) {
         const el = this.panelEl(t);

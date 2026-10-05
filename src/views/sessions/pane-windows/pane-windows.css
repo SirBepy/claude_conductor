@@ -512,8 +512,9 @@
 }
 
 /* ── Phone ────────────────────────────────────────────────────────────────── */
-/* One window at a time, as a sheet; Preview as a full cover, so a trip to it
-   keeps the transcript's scroll position. No drag, dock or tear-off. */
+/* One window at a time, every panel a full-screen cover - no sheet, no split
+   (Joe, 2026-10-05) - so a trip to one keeps the transcript's scroll
+   position. No drag, dock or tear-off. */
 @media (max-width: 768px) {
   .fab-rz,
   .pw-grip,
@@ -522,39 +523,29 @@
     display: none;
   }
 
-  .pw-bar {
-    cursor: default;
-  }
-
-  .fab-card {
-    left: 10px;
-    right: 10px;
-    bottom: 14px;
-    width: auto;
-    max-width: none;
-    height: 62%;
-    min-height: 300px;
-  }
-
   /* Bar at the bottom, in thumb reach, where a sideways swipe on it goes back
      to the chat (gestures.ts swipeBackGesture). */
-  .fab-card[data-active="preview"] {
+  .fab-card {
     inset: 0;
+    width: auto;
     height: auto;
+    max-width: none;
+    min-height: 0;
     flex-direction: column-reverse;
     border: none;
     border-radius: 0;
     box-shadow: none;
   }
 
-  .fab-card[data-active="preview"] .pw-bar {
+  .fab-card .pw-bar {
     height: 48px;
+    cursor: default;
     border-bottom: none;
     border-top: 1px solid var(--color-border);
   }
 
-  .fab-card[data-active="preview"] .pw-bar,
-  .fab-card[data-active="preview"] .fab-card-body {
+  .fab-card .pw-bar,
+  .fab-card .fab-card-body {
     border-radius: 0;
   }
 }
