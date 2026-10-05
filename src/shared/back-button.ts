@@ -10,19 +10,34 @@
  *   1. closes the top open overlay (modal, sidemenu, prompt card, mobile chat
  *      pane, news article) if any is registered, else
  *   2. steps back one entry through the view-navigation stack, else
- *   3. stays put at the root (back never closes the app).
+ *   3. falls back to the chats list (HOME_VIEW) from any other root, else
+ *   4. stays put on the chats list (back never closes the app).
+ *
+ * The soft keyboard never reaches this: Android's IME consumes the press that
+ * hides it. A text field can still hold focus after that, so every press that
+ * does arrive drops it rather than spending the press on a silent blur.
+ *
+ * The Android shell does not rely on the history trap: Chromium skips history
+ * entries pushed without a user gesture, so WebView.goBack() walked straight
+ * past the sentinel and closed the app. MainActivity.kt intercepts back
+ * natively and calls window.__ccHandleBack instead.
  *
  * Overlays register a handler via registerOverlayBack(); it returns true if it
  * consumed the press. The router feeds the view stack via noteNavigation().
  *
  * Desktop (Tauri webview) has no hardware back button, so initBackButton() is
- * only called there in the remote/phone client. The module has no DOM imports
- * and no-ops cleanly when window/history are absent (node tests).
+ * only called there in the remote/phone client. The module no-ops cleanly when
+ * window/history/document are absent (node tests).
  */
+
+import { isTextEntryElement } from "./text-entry";
 
 /** Back handler for a transient overlay. Returns true if it consumed the press
  *  (the overlay was open and is now closed), false to fall through. */
 export type OverlayBack = () => boolean;
+
+/** The phone's home screen - router.ts opens it when the URL names no view. */
+const HOME_VIEW = "sessions";
 
 let viewStack: string[] = [];
 let suppressNote = false;
@@ -60,27 +75,44 @@ export function registerOverlayBack(fn: OverlayBack): () => void {
   };
 }
 
-function goBackView(): boolean {
-  // At the root there is nothing to go back to: return false so back stays put
-  // rather than exiting.
-  if (viewStack.length <= 1) return false;
-  viewStack.pop();
-  const prev = viewStack[viewStack.length - 1] ?? "dashboard";
+function navigateWithoutNoting(name: string): void {
   const nav = (window as unknown as {
     navigateTo?: (n: string) => void | Promise<void>;
   }).navigateTo;
   suppressNote = true;
   try {
-    void nav?.(prev);
+    void nav?.(name);
   } finally {
     suppressNote = false;
   }
-  return true;
+}
+
+function goBackView(): boolean {
+  if (viewStack.length > 1) {
+    viewStack.pop();
+    navigateWithoutNoting(viewStack[viewStack.length - 1] ?? HOME_VIEW);
+    return true;
+  }
+  // A root with no known previous screen (opened straight into settings, say)
+  // still has somewhere to go: the chats list.
+  if (viewStack.length === 1 && viewStack[0] !== HOME_VIEW) {
+    viewStack = [HOME_VIEW];
+    navigateWithoutNoting(HOME_VIEW);
+    return true;
+  }
+  return false;
+}
+
+function blurFocusedTextEntry(): void {
+  if (typeof document === "undefined") return;
+  const el = document.activeElement;
+  if (isTextEntryElement(el)) (el as HTMLElement).blur();
 }
 
 /** Resolve a single back press. Exported for unit tests; production triggers it
  *  from the popstate listener installed by initBackButton(). */
 export function handleBack(): void {
+  blurFocusedTextEntry();
   for (let i = overlays.length - 1; i >= 0; i--) {
     if (overlays[i]?.()) return;
   }
@@ -105,6 +137,13 @@ export function initBackButton(): void {
       "dashboard";
     viewStack.push(initial);
   }
+
+  // Native hook for the Android shell (MainActivity.kt). Always true: the SPA
+  // owns back once it's loaded, and "nothing left to close" means stay put.
+  (window as unknown as { __ccHandleBack?: () => boolean }).__ccHandleBack = () => {
+    handleBack();
+    return true;
+  };
 
   // Prime the trap: one extra entry that the first back press consumes instead
   // of exiting the SPA.

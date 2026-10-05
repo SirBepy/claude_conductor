@@ -2,9 +2,10 @@
 //
 // Regression: Android's hardware back used to SKIP the open AUQ card - it ran
 // the same cancel() the Skip button does, sending no answer at all, from a
-// button that is trivially easy to hit by accident. Back now only lowers the
-// soft keyboard, then falls through to main.ts's mobile-pane handler (back to
-// the session list) with the card left pending.
+// button that is trivially easy to hit by accident. Back now falls through to
+// main.ts's mobile-pane handler (back to the session list) with the card left
+// pending. It also used to spend a whole press silently blurring a field whose
+// keyboard the IME had already hidden, which read as "back does nothing".
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -49,7 +50,7 @@ beforeEach(() => {
 });
 
 describe("AUQ card vs the phone back button", () => {
-  it("with a focused text field, back only blurs it and consumes the press", () => {
+  it("with a focused text field, back blurs it AND leaves the chat in the same press", () => {
     const fallback = registerPaneFallback();
     const opts = baseOpts();
     renderQuestionUI(opts);
@@ -64,7 +65,7 @@ describe("AUQ card vs the phone back button", () => {
     expect(document.activeElement).not.toBe(field);
     expect(opts.onCancel).not.toHaveBeenCalled();
     expect(opts.onSubmit).not.toHaveBeenCalled();
-    expect(fallback).not.toHaveBeenCalled();
+    expect(fallback).toHaveBeenCalledTimes(1);
   });
 
   it("with nothing focused, back leaves the chat instead of skipping the question", () => {

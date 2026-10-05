@@ -48,11 +48,20 @@ describe("handleBack view stepping", () => {
     expect(viewStackForTests()).toEqual(["dashboard"]);
   });
 
-  it("never navigates (never exits) at the root view", () => {
-    noteNavigation("dashboard");
+  it("never navigates (never exits) on the chats list root", () => {
+    noteNavigation("sessions");
     handleBack();
     expect(navCalls).toEqual([]);
-    expect(viewStackForTests()).toEqual(["dashboard"]);
+    expect(viewStackForTests()).toEqual(["sessions"]);
+  });
+
+  it("falls back to the chats list from any other root view", () => {
+    noteNavigation("settings");
+    handleBack();
+    expect(navCalls).toEqual(["sessions"]);
+    expect(viewStackForTests()).toEqual(["sessions"]);
+    handleBack();
+    expect(navCalls).toEqual(["sessions"]);
   });
 });
 

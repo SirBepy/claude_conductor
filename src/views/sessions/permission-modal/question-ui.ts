@@ -115,9 +115,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const savedScrollTop = messagesEl?.scrollTop ?? 0;
   const savedPaddingBottom = messagesEl?.style.paddingBottom ?? "";
 
-  // Phone back button never answers or skips the question - it only drops the
-  // soft keyboard, then falls through to the mobile-pane handler. Registered
-  // below once `cancel` exists; disposed on teardown.
+  // Phone back button never answers or skips the question - it falls through
+  // to the mobile-pane handler. Registered below once `cancel` exists;
+  // disposed on teardown.
   let backDisposer: (() => void) | null = null;
 
   // Declared and wired BEFORE `teardown` (which closes over it) so there is no
@@ -288,9 +288,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
   // Escape must never skip the question: a skipped card sends NO answer at
   // all (onCancel), and Escape is reflexive enough to spend a whole prompt on
-  // by accident. Same shape as the phone back button below, deliberately -
-  // first press only drops focus out of a text field, and with nothing
-  // focused it does nothing. The footer's "Skip" button stays the one
+  // by accident. First press only drops focus out of a text field, and with
+  // nothing focused it does nothing. The footer's "Skip" button stays the one
   // explicit route to answering nothing.
   //
   // A lightbox on top of this card has no overlay registration of its own, so
@@ -308,17 +307,12 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (document.querySelector(`.${LIGHTBOX_OVERLAY_CLASS}`)) return true;
     // Back must never skip the question: a skipped card sends NO answer, and
     // Android's back is far too easy to hit by accident to spend a prompt on.
-    // First press only drops the soft keyboard; with nothing focused we fall
-    // through (false) to main.ts's mobile-pane handler, which returns to the
-    // session list. The card stays live in the hidden pane; switching to
-    // another chat tears it down display-only (active-session.ts), and
-    // selectSession's rehydratePendingPrompts refetches it from the daemon
-    // on the way back.
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement && isTextEntryElement(focused)) {
-      focused.blur();
-      return true;
-    }
+    // Fall through (false) to main.ts's mobile-pane handler, which returns to
+    // the session list. The keyboard needs no press of its own here: the IME
+    // eats the one that hides it, and handleBack blurs any lingering focus.
+    // The card stays live in the hidden pane; switching to another chat tears
+    // it down display-only (active-session.ts), and selectSession's
+    // rehydratePendingPrompts refetches it from the daemon on the way back.
     return false;
   });
 
