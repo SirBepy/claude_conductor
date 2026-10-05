@@ -10,10 +10,28 @@ import type { QuestionDraft } from "./types";
 
 const PUSH_DEBOUNCE_MS = 500;
 
+/** What the daemon holds for a prompt, as far as this client last knew: its
+ *  serialized payload plus the daemon's OWN `updated_at` for it. The live poll
+ *  only ever compares daemon timestamps against daemon timestamps - comparing
+ *  one against this device's clock let a PC clock running ahead of the phone's
+ *  win every newest-wins race, yanking the card back a step after each pick. */
+let daemonCopy: { promptId: string; json: string; updatedAt: string | null } | null = null;
+let pushQueued = false;
+let pushesInFlight = 0;
+
 const pushDebounced: Debounced<[sessionId: string, promptId: string, draft: QuestionDraft]> = debounce(
   (sessionId, promptId, draft) => {
-    void setAuqDraft(sessionId, promptId, serializeQuestionDraft(draft))
-      .catch((e) => console.warn("[auq-sync] set_auq_draft failed:", e));
+    pushQueued = false;
+    const payload = serializeQuestionDraft(draft);
+    const json = JSON.stringify(payload);
+    // A just-adopted remote draft re-renders the card, which re-notifies; pushing
+    // it back would stamp a stale copy newer than a third edit racing it.
+    if (daemonCopy?.promptId === promptId && daemonCopy.json === json) return;
+    pushesInFlight++;
+    void setAuqDraft(sessionId, promptId, payload)
+      .then((r) => { daemonCopy = { promptId, json, updatedAt: r?.updated_at ?? null }; })
+      .catch((e) => console.warn("[auq-sync] set_auq_draft failed:", e))
+      .finally(() => { pushesInFlight--; });
   },
   PUSH_DEBOUNCE_MS,
 );
@@ -22,6 +40,7 @@ const pushDebounced: Debounced<[sessionId: string, promptId: string, draft: Ques
  *  so a single module-level debounce is safe - no per-prompt keying needed. */
 export function scheduleAuqPush(sessionId: string | undefined, promptId: string, draft: QuestionDraft): void {
   if (!sessionId) return;
+  pushQueued = true;
   pushDebounced(sessionId, promptId, draft);
 }
 
@@ -30,12 +49,43 @@ export function flushAuqPush(): void {
 }
 
 export function cancelAuqPush(): void {
+  pushQueued = false;
   pushDebounced.cancel();
+}
+
+/** Local edits the daemon hasn't acknowledged yet - anything the daemon
+ *  returns meanwhile is older than what's on screen. */
+function localPushPending(): boolean {
+  return pushQueued || pushesInFlight > 0;
+}
+
+/** Live-poll step for an open card: the daemon's draft, but only when ANOTHER
+ *  client changed it since this one last looked. Null while this card has an
+ *  unacknowledged push, when the daemon's `updated_at` hasn't moved, or when
+ *  the change is this card's own echo. */
+export async function pollRemoteAuqChange(sessionId: string | undefined, promptId: string): Promise<QuestionDraft | null> {
+  if (localPushPending()) return null;
+  const remote = await fetchRemoteAuqDraftMeta(sessionId, promptId);
+  // A pick made during the round trip queued a push; this result predates it.
+  if (!remote || localPushPending()) return null;
+  const prev = daemonCopy?.promptId === promptId ? daemonCopy : null;
+  const json = JSON.stringify(serializeQuestionDraft(remote.draft));
+  daemonCopy = { promptId, json, updatedAt: remote.updatedAt };
+  if (prev && (prev.updatedAt === remote.updatedAt || prev.json === json)) return null;
+  return remote.draft;
+}
+
+/** Test-only: forget what the daemon was last known to hold. */
+export function resetAuqSyncForTests(): void {
+  cancelAuqPush();
+  daemonCopy = null;
+  pushesInFlight = 0;
 }
 
 /** Explicit discard (submit/cancel) - never called on blur or navigate-away. */
 export async function clearAuqPush(sessionId: string | undefined, promptId: string): Promise<void> {
-  pushDebounced.cancel();
+  cancelAuqPush();
+  if (daemonCopy?.promptId === promptId) daemonCopy = null;
   if (!sessionId) return;
   try {
     await clearAuqDraft(sessionId, promptId);

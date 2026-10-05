@@ -15,7 +15,7 @@ import {
   clearActiveCardIfCurrent,
   NO_ANSWER_TEXT,
 } from "./question-state";
-import { flushAuqPush, cancelAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
+import { flushAuqPush, cancelAuqPush, pollRemoteAuqChange } from "./auq-draft-sync";
 import { invoke } from "../../../shared/ipc";
 import { isTextEntryElement } from "../../../shared/text-entry";
 import { visibleInterval } from "../../../shared/visible-interval";
@@ -164,7 +164,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     additionalMessage: state.additionalMessage,
   });
 
-  /** Merge an already newest-wins-reconciled draft into the live card. A full
+  /** Merge another client's draft (pollRemoteAuqChange) into the live card. A full
    *  render() rebuilds the DOM (new textarea node, dropped cursor - see
    *  fb230ef3's scroll-yank incident), so typing and any tab advance are
    *  skipped while a field is focused; everything else adopts freely. */
@@ -195,8 +195,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       return;
     }
     if (document.visibilityState !== "visible" || !draftSyncTargets.sessionId || !draftSyncTargets.promptId) return;
-    void fetchFreshestAuqDraft(draftSyncTargets.sessionId, draftSyncTargets.promptId).then((fresh) => {
-      if (fresh) mergeFreshDraft(fresh);
+    void pollRemoteAuqChange(draftSyncTargets.sessionId, draftSyncTargets.promptId).then((fresh) => {
+      if (fresh && !tornDown) mergeFreshDraft(fresh);
     });
   };
   document.addEventListener("visibilitychange", visibilityHandler);
@@ -213,8 +213,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     const sid = draftSyncTargets.sessionId;
     const pid = draftSyncTargets.promptId;
     disposeLivePoll = visibleInterval(() => {
-      void fetchFreshestAuqDraft(sid, pid).then((fresh) => {
-        if (fresh) mergeFreshDraft(fresh);
+      void pollRemoteAuqChange(sid, pid).then((fresh) => {
+        if (fresh && !tornDown) mergeFreshDraft(fresh);
       });
     }, LIVE_DRAFT_POLL_MS);
   }

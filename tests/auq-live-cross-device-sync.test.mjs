@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 // While a question card is open, piggyback get_session_drafts (no new
-// transport) to reconcile with newest-wins - typing on one device shows up
+// transport) to adopt other clients' edits - typing on one device shows up
 // on the others, including activeTab. Hard rule: the field the user is
 // focused in is never overwritten, and no remote update steals focus.
 
@@ -14,16 +14,17 @@ vi.mock("tauri-plugin-clipboard-api", () => ({
   readFiles: vi.fn().mockResolvedValue([]),
 }));
 
-const { getSessionDrafts } = vi.hoisted(() => ({ getSessionDrafts: vi.fn() }));
+const { getSessionDrafts, setAuqDraft } = vi.hoisted(() => ({ getSessionDrafts: vi.fn(), setAuqDraft: vi.fn() }));
 vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   getSessionDrafts: (...a) => getSessionDrafts(...a),
-  setAuqDraft: vi.fn().mockResolvedValue({ updated_at: "t" }),
+  setAuqDraft: (...a) => setAuqDraft(...a),
   clearAuqDraft: vi.fn().mockResolvedValue({ cleared: true }),
 }));
 
 const { renderQuestionUI } = await import("../src/views/sessions/permission-modal/question-ui.ts");
 const { saveQuestionDraft } = await import("../src/views/sessions/permission-modal/draft-persistence.ts");
 const { snapshotActiveCardDraft, setActiveCard } = await import("../src/views/sessions/permission-modal/question-state.ts");
+const { scheduleAuqPush, resetAuqSyncForTests } = await import("../src/views/sessions/permission-modal/auq-draft-sync.ts");
 
 const QUESTIONS = [
   { question: "Tabs or spaces?", options: [{ label: "Tabs" }, { label: "Spaces" }] },
@@ -60,7 +61,9 @@ beforeEach(() => {
   localStorage.clear();
   invokeMock.mockClear();
   getSessionDrafts.mockReset().mockResolvedValue({ composer: null, auq: null, held: [], held_updated_at: null });
+  setAuqDraft.mockReset().mockResolvedValue({ updated_at: "t" });
   setActiveCard(null);
+  resetAuqSyncForTests();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-14T00:00:00.000Z"));
 });
@@ -117,23 +120,55 @@ describe("live poll: activeTab (Task 2) advances when nothing is focused", () =>
   });
 });
 
-describe("live poll reuses fetchFreshestAuqDraft's newest-wins comparison", () => {
-  it("a fresher LOCAL draft is not clobbered by a staler remote poll result", async () => {
-    saveQuestionDraft("p1", {
-      freeText: new Map(), selections: new Map([[0, "Spaces"]]), activeTab: 0, additionalMessage: "", attachments: [],
-    });
-    vi.setSystemTime(new Date("2026-08-14T00:00:10.000Z")); // after the saveQuestionDraft stamp above
-    renderQuestionUI(baseOpts({ initialDraft: { freeText: new Map(), selections: new Map([[0, "Spaces"]]), activeTab: 0, additionalMessage: "", attachments: [] } }));
-    document.body.focus();
-
-    getSessionDrafts.mockResolvedValue(remoteDrafts({
-      selections: [[0, "Tabs"]],
-      updatedAt: "2026-08-13T23:59:59.000Z", // older than the local save (T0) above
+describe("live poll never compares the daemon's clock against this device's", () => {
+  // Regression: the poll used to pick newest-wins between the daemon's
+  // updated_at (PC clock) and the local save stamp (phone clock). With the PC
+  // clock ahead, the stale daemon copy won the race between a pick and its
+  // debounced push landing, yanking the card back a step every time.
+  function daemonWithClockAhead() {
+    let stored = { freeText: [], selections: [], activeTab: 0, additionalMessage: "" };
+    let n = 0;
+    getSessionDrafts.mockImplementation(async () => ({
+      composer: null,
+      auq: { prompt_id: "p1", payload: stored, updated_at: `2099-01-01T00:00:0${n}.000Z` },
+      held: [], held_updated_at: null,
     }));
+    setAuqDraft.mockImplementation(async (_s, _p, payload) => {
+      stored = payload;
+      n++;
+      return { updated_at: `2099-01-01T00:00:0${n}.000Z` };
+    });
+  }
 
-    await vi.advanceTimersByTimeAsync(1000);
+  it("a pick whose push is still pending is not undone by the stale daemon copy", async () => {
+    daemonWithClockAhead();
+    renderQuestionUI(baseOpts({
+      onDraftChange: (d) => { saveQuestionDraft("p1", d); scheduleAuqPush("s1", "p1", d); },
+    }));
+    await vi.advanceTimersByTimeAsync(900); // open-time push has landed
+
+    const tabs = document.querySelector('.prompt-panel[data-panel="0"] input[data-label="Tabs"]');
+    tabs.checked = true;
+    tabs.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(document.querySelector('.prompt-panel[data-panel="1"]').classList.contains("is-active")).toBe(true);
+
+    // The 1s poll fires before the pick's 500ms push does.
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(document.querySelector('.prompt-panel[data-panel="1"]').classList.contains("is-active")).toBe(true);
+    expect(snapshotActiveCardDraft("s1").selections.get(0)).toBe("Tabs");
+  });
+
+  it("adopting another client's draft does not push it back as a fresh write", async () => {
+    renderQuestionUI(baseOpts({ onDraftChange: (d) => scheduleAuqPush("s1", "p1", d) }));
+    await vi.advanceTimersByTimeAsync(900);
+    const pushesBefore = setAuqDraft.mock.calls.length;
+
+    getSessionDrafts.mockResolvedValue(remoteDrafts({ selections: [[0, "Spaces"]], updatedAt: "remote-1" }));
+    await vi.advanceTimersByTimeAsync(2000);
 
     expect(snapshotActiveCardDraft("s1").selections.get(0)).toBe("Spaces");
+    expect(setAuqDraft.mock.calls.length).toBe(pushesBefore);
   });
 });
 

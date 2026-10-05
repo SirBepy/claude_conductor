@@ -13,7 +13,7 @@ vi.mock("../src/shared/chat/session-draft-sync.ts", () => ({
   getSessionDrafts: (...a) => getSessionDrafts(...a),
 }));
 
-const { scheduleAuqPush, flushAuqPush, cancelAuqPush, clearAuqPush, fetchRemoteAuqDraft } = await import(
+const { scheduleAuqPush, flushAuqPush, cancelAuqPush, clearAuqPush, fetchRemoteAuqDraft, resetAuqSyncForTests } = await import(
   "../src/views/sessions/permission-modal/auq-draft-sync.ts"
 );
 
@@ -33,7 +33,7 @@ beforeEach(() => {
   setAuqDraft.mockReset().mockResolvedValue({ updated_at: "t" });
   clearAuqDraft.mockReset().mockResolvedValue({ cleared: true });
   getSessionDrafts.mockReset();
-  cancelAuqPush(); // module-level debounce - reset between tests
+  resetAuqSyncForTests(); // module-level debounce + daemon copy - reset between tests
 });
 
 afterEach(() => {
