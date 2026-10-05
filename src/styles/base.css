@@ -60,17 +60,20 @@ body {
        tap flash. No-ops on desktop. */
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
-    /* The status and nav bars get their own plain bands, painted by body's
-       background, instead of each top/bottom-most widget stretching under
-       them (Joe, 2026-10-05). In-flow chrome therefore never adds the inset
-       itself; only position:fixed overlays, which escape this padding, do.
-       env() is 0 on desktop. */
+}
+/* The status and nav bars get their own plain bands, painted by body's
+   background, instead of each top/bottom-most widget stretching under them
+   (Joe, 2026-10-05). In-flow chrome therefore never adds the inset itself;
+   only position:fixed overlays, which escape this padding, do. env() is 0 on
+   desktop. `html body` outranks tauri_kit tokens.css's `html, body
+   { padding: 0 }` reset, which the bundle emits after this file. */
+html body {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
 }
 /* The open keyboard already covers the nav bar, so its band would only be a
    stray strip between the composer and the keys. */
-body:has(.view-sessions[data-mobile-keyboard]) {
+html body:has(.view-sessions[data-mobile-keyboard]) {
     padding-bottom: 0;
 }
 
