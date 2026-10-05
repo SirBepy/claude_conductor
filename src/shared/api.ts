@@ -8,6 +8,13 @@
 import { invoke } from "./ipc";
 import { isTauri } from "./transport";
 import { showToast } from "./toast";
+import {
+  loadUsageHistory,
+  resetUsageHistoryCache,
+  toUsageRecord,
+  type UsageRecord,
+  type UsageSnapshot,
+} from "./usage-history";
 import type { TokenRecord, AliasMap } from "./tokens";
 import type { SettingsShape } from "./state";
 import type {
@@ -27,23 +34,7 @@ import type {
 
 export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, OauthAccountInfo, AuthState, ApiKeyStatus };
 
-// ── Backend snapshot shape ────────────────────────────────────────────────
-
-interface UsageWindow {
-  utilization: number;
-  resets_at?: string | null;
-}
-interface ExtraUsage {
-  is_enabled?: boolean;
-  used_credits?: number;
-  monthly_limit?: number;
-}
-interface UsageSnapshot {
-  captured_at: string;
-  five_hour: UsageWindow;
-  seven_day: UsageWindow;
-  extra_usage?: ExtraUsage | null;
-}
+export type { UsageRecord };
 
 // Per-model availability, from the count_tokens probe (probe_models_availability).
 // `message` carries the API's reason when a model is disabled (else null).
@@ -57,33 +48,6 @@ export interface ModelAvailability {
   authExpired: boolean;
 }
 
-// Renderer-facing legacy shape (kept until views consume UsageSnapshot directly).
-export interface UsageRecord {
-  hour: string;
-  session_pct: number | null;
-  weekly_pct: number | null;
-  session_resets_at: string | null;
-  weekly_resets_at: string | null;
-  extra_usage: ExtraUsage | null;
-  [k: string]: unknown;
-}
-
-function pad(n: number): string { return String(n).padStart(2, "0"); }
-
-function toUsageRecord(snap: UsageSnapshot | null | undefined): UsageRecord | null {
-  if (!snap || !snap.five_hour || !snap.seven_day) return null;
-  const d = new Date(snap.captured_at);
-  const hour = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}`;
-  return {
-    hour,
-    session_pct: Math.round(snap.five_hour.utilization),
-    weekly_pct: Math.round(snap.seven_day.utilization),
-    session_resets_at: snap.five_hour.resets_at || null,
-    weekly_resets_at: snap.seven_day.resets_at || null,
-    extra_usage: snap.extra_usage || null,
-  };
-}
-
 function usageSnapshotMapToRecordMap(
   raw: Record<string, UsageSnapshot>,
 ): Record<string, UsageRecord> {
@@ -93,22 +57,6 @@ function usageSnapshotMapToRecordMap(
     if (rec) out[accountId] = rec;
   }
   return out;
-}
-
-async function fetchHistoryLegacy(): Promise<UsageRecord[]> {
-  const raw = await invoke<UsageSnapshot[]>("get_history", { limit: null, accountId: null });
-  return (raw || []).map(toUsageRecord).filter((r): r is UsageRecord => r !== null);
-}
-
-/** Per-account history fetch (multi-account milestone 05). `accountId: null`
- * (or omitted) mirrors the legacy aggregate query - every account's rows,
- * used before any account is registered. */
-async function fetchHistoryForAccount(opts: { limit?: number; accountId?: string | null }): Promise<UsageRecord[]> {
-  const raw = await invoke<UsageSnapshot[]>("get_history", {
-    limit: opts.limit ?? null,
-    accountId: opts.accountId ?? null,
-  });
-  return (raw || []).map(toUsageRecord).filter((r): r is UsageRecord => r !== null);
 }
 
 // ── Event subscription helper ─────────────────────────────────────────────
@@ -251,9 +199,11 @@ export interface ListMachinesResult {
 
 export const api = {
   // --- Usage + history ---
-  getUsageHistory: (): Promise<UsageRecord[]> => fetchHistoryLegacy(),
+  getUsageHistory: (): Promise<UsageRecord[]> => loadUsageHistory(),
+  /** `accountId: null` (or omitted) is every account's rows, used before any
+   * account is registered (multi-account milestone 05). */
   getHistory: (opts: { limit?: number; accountId?: string | null } = {}): Promise<UsageRecord[]> =>
-    fetchHistoryForAccount(opts),
+    loadUsageHistory(opts),
   pollNow: (): Promise<unknown> => invoke("poll_now"),
 
   // --- Per-account usage (multi-account milestone 03/05) ---
@@ -452,6 +402,7 @@ export const api = {
   clearDataset: async (dataset: DatasetId): Promise<void> => {
     try { await invoke("clear_dataset", { dataset }); }
     catch (e) { console.error("clear_dataset failed", e); throw e; }
+    if (dataset === "UsageSnapshots") resetUsageHistoryCache();
   },
 
   // --- API keys (Settings > API keys, the ticket hover card's missing-token
@@ -598,7 +549,7 @@ export const api = {
     listenEvent("update-state", cb),
   onHistoryUpdated: (cb: (h: UsageRecord[]) => void): Unlisten =>
     listenEvent("usage-updated", async () => {
-      try { cb(await fetchHistoryLegacy()); }
+      try { cb(await loadUsageHistory()); }
       catch (e) { console.error("onHistoryUpdated refetch failed", e); }
     }),
   onTokenHistoryUpdated: (cb: (th: TokenRecord[]) => void): Unlisten =>
@@ -654,13 +605,17 @@ export const api = {
     invoke("add_account_capture_cookie", { sessionId }),
   addAccountCancel: (sessionId: string): Promise<void> =>
     invoke("add_account_cancel", { sessionId }),
-  addAccountFinalize: (
+  addAccountFinalize: async (
     sessionId: string,
     label: string,
     colour: string,
     icon: string,
-  ): Promise<Account> =>
-    invoke("add_account_finalize", { sessionId, label, colour, icon }),
+  ): Promise<Account> => {
+    const account = await invoke<Account>("add_account_finalize", { sessionId, label, colour, icon });
+    // Finalize can re-key legacy usage rows to the new account in place.
+    resetUsageHistoryCache();
+    return account;
+  },
   listAccounts: async (): Promise<Account[]> => {
     try { return (await invoke<Account[]>("list_accounts")) || []; }
     catch (e) { console.error("list_accounts failed", e); return []; }

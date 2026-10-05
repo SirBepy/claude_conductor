@@ -513,7 +513,11 @@ export class HttpTransport implements Transport {
       // Usage + token history: served from the daemon's shared companion.db so
       // the phone homescreen + statistics populate (the daemon is the writer).
       case "get_history":
-        return this.rpc<T>("get_history", { limit: args.limit ?? null });
+        return this.rpc<T>("get_history", {
+          limit: args.limit ?? null,
+          since: args.since ?? null,
+          account_id: args.accountId ?? null,
+        });
       case "get_token_history":
         // `since` (unix seconds) bounds the window. Unbounded here used to be
         // a 100MB response on this dev's machine - see boot.ts's window.

@@ -55,11 +55,21 @@ pub fn get_snapshots(
     Ok(out)
 }
 
-/// Returns every snapshot in ascending timestamp order, tagged with `account_id`.
-pub fn get_all_snapshots(conn: &Connection) -> Result<Vec<UsageSnapshot>> {
-    let mut stmt =
-        conn.prepare("SELECT data FROM usage_snapshots ORDER BY timestamp ASC")?;
-    let rows = stmt.query_map([], |row| {
+/// Returns snapshots with `timestamp >= since` (unix seconds) in ascending
+/// order, optionally filtered to one account. Inclusive on purpose: an
+/// incremental reader re-reads its cursor's second and dedupes, because a
+/// strict `>` would skip a row inserted later within that same second.
+pub fn get_snapshots_since(
+    conn: &Connection,
+    since: i64,
+    account_id: Option<&str>,
+) -> Result<Vec<UsageSnapshot>> {
+    let mut stmt = conn.prepare(
+        "SELECT data FROM usage_snapshots \
+         WHERE timestamp >= ?1 AND (?2 IS NULL OR account_id = ?2) \
+         ORDER BY timestamp ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![since, account_id], |row| {
         let data: String = row.get(0)?;
         Ok(data)
     })?;
@@ -68,6 +78,11 @@ pub fn get_all_snapshots(conn: &Connection) -> Result<Vec<UsageSnapshot>> {
         out.push(serde_json::from_str::<UsageSnapshot>(&data?)?);
     }
     Ok(out)
+}
+
+/// Returns every snapshot in ascending timestamp order, tagged with `account_id`.
+pub fn get_all_snapshots(conn: &Connection) -> Result<Vec<UsageSnapshot>> {
+    get_snapshots_since(conn, 0, None)
 }
 
 #[cfg(test)]
@@ -138,5 +153,22 @@ mod tests {
         let only_a = get_snapshots(&conn, 0, -1, Some("a")).unwrap();
         assert_eq!(only_a.len(), 1);
         assert_eq!(only_a[0].account_id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn get_snapshots_since_is_inclusive_ascending_and_account_scoped() {
+        let conn = test_conn();
+        insert_snapshot(&conn, &snap("2026-07-01T00:00:00Z", Some("a"))).unwrap();
+        insert_snapshot(&conn, &snap("2026-07-01T00:01:00Z", Some("b"))).unwrap();
+        insert_snapshot(&conn, &snap("2026-07-01T00:02:00Z", Some("a"))).unwrap();
+        let cursor = rfc3339_to_unix("2026-07-01T00:01:00Z").unwrap();
+
+        let tail = get_snapshots_since(&conn, cursor, None).unwrap();
+        let stamps: Vec<_> = tail.iter().map(|s| s.captured_at.as_str()).collect();
+        assert_eq!(stamps, ["2026-07-01T00:01:00Z", "2026-07-01T00:02:00Z"]);
+
+        let tail_a = get_snapshots_since(&conn, cursor, Some("a")).unwrap();
+        assert_eq!(tail_a.len(), 1);
+        assert_eq!(tail_a[0].captured_at, "2026-07-01T00:02:00Z");
     }
 }

@@ -49,21 +49,31 @@ async fn latest_captured_at(
 }
 
 pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
-    // Mirrors `get_history` (params: { limit }) -> Vec<UsageSnapshot>. Snapshots
-    // come back ascending by timestamp; `limit` keeps the newest N (trim front).
+    // Mirrors `get_history` (params: { limit, since, account_id }) ->
+    // Vec<UsageSnapshot>. Snapshots come back ascending by timestamp; `limit`
+    // keeps the newest N (trim front), `since` is an inclusive unix-seconds
+    // floor.
     {
         let state = state.clone();
         router.register("get_history", move |params, _ctx| {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize, Default)]
-                struct P { limit: Option<u32> }
+                struct P {
+                    limit: Option<u32>,
+                    since: Option<i64>,
+                    account_id: Option<String>,
+                }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null)).unwrap_or_default();
                 let Some(db) = state.db.clone() else { return Ok(json!([])) };
                 let snaps = tokio::task::spawn_blocking(move || {
                     let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
-                    let mut all = crate::storage::usage_store::get_all_snapshots(mgr.conn())
-                        .unwrap_or_default();
+                    let mut all = crate::storage::usage_store::get_snapshots_since(
+                        mgr.conn(),
+                        p.since.unwrap_or(0),
+                        p.account_id.as_deref(),
+                    )
+                    .unwrap_or_default();
                     if let Some(n) = p.limit {
                         let start = all.len().saturating_sub(n as usize);
                         all = all.split_off(start);

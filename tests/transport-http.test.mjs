@@ -208,7 +208,10 @@ describe("HttpTransport.call mapping", () => {
   it("forwards get_history to the rpc with a null limit (usage history from the daemon db)", async () => {
     await new HttpTransport().call("get_history");
     expect(url()).toBe("/api/rpc");
-    expect(body()).toEqual({ method: "get_history", params: { limit: null } });
+    expect(body()).toEqual({
+      method: "get_history",
+      params: { limit: null, since: null, account_id: null },
+    });
   });
 
   it("forwards get_token_history to the rpc, defaulting since to all history", async () => {

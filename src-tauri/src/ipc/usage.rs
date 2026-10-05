@@ -28,18 +28,22 @@ pub async fn get_history(
     state: State<'_, AppState>,
     limit: Option<u32>,
     account_id: Option<String>,
+    since: Option<i64>,
 ) -> Result<Vec<UsageSnapshot>, String> {
     // Snapshots come back ascending by timestamp (same order the legacy JSONL
     // file produced), so a `limit` keeps the newest N by trimming the front.
-    // `account_id` (new, optional - existing callers omit it and see every
-    // row) filters to one account's snapshots.
+    // `account_id` (optional - omitted means every row) filters to one
+    // account's snapshots. `since` (unix seconds, inclusive) is the frontend
+    // cache's cursor, so a refresh ships only new rows, not the whole table.
     let mut all = {
         let mgr = state.db.lock().unwrap();
-        crate::storage::usage_store::get_all_snapshots(mgr.conn()).unwrap_or_default()
+        crate::storage::usage_store::get_snapshots_since(
+            mgr.conn(),
+            since.unwrap_or(0),
+            account_id.as_deref(),
+        )
+        .unwrap_or_default()
     };
-    if let Some(acct) = account_id {
-        all.retain(|s| s.account_id.as_deref() == Some(acct.as_str()));
-    }
     if let Some(n) = limit {
         let start = all.len().saturating_sub(n as usize);
         all = all.split_off(start);
