@@ -127,6 +127,7 @@ export class ComposerVoice {
     this.textarea.selectionStart = this.textarea.selectionEnd = this.commitPos + this.volatileLen;
     this.isUsed = true;
     this.cb.onAfterEdit();
+    this.revealCaret();
   }
 
   private onFinal(text: string): void {
@@ -140,6 +141,25 @@ export class ComposerVoice {
     this.textarea.selectionStart = this.textarea.selectionEnd = this.commitPos;
     this.isUsed = true;
     this.cb.onAfterEdit();
+    this.revealCaret();
+  }
+
+  /** A programmatic value write never scrolls a textarea to its caret (only
+   *  typing does), so dictation past the composer's max height ran on out of
+   *  sight. Measures the caret's bottom edge by briefly truncating the value
+   *  to the text before it - no layout is painted in between. */
+  private revealCaret(): void {
+    const ta = this.textarea;
+    if (!ta) return;
+    const caret = this.commitPos + this.volatileLen;
+    const full = ta.value;
+    const prevTop = ta.scrollTop;
+    ta.value = full.slice(0, caret);
+    const caretBottom = ta.scrollHeight;
+    ta.value = full;
+    ta.selectionStart = ta.selectionEnd = caret;
+    ta.scrollTop = prevTop;
+    if (caretBottom > ta.scrollTop + ta.clientHeight) ta.scrollTop = caretBottom - ta.clientHeight;
   }
 
   private onError(message: string): void {
