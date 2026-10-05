@@ -18,6 +18,7 @@ import { forwardToCodeWindow, isPoppedOut, markPoppedOut, isCodeWindow, dockFrom
 import type { SettingsShape } from "../../../shared/state";
 import { setCodeModeOpener } from "../../../shared/chat/code-mode-bridge";
 import * as shortcuts from "../../../shared/shortcuts";
+import { openQuickOpen } from "./quick-open";
 
 let provider: (() => CodeModeChat | null) | null = null;
 
@@ -94,6 +95,15 @@ export function togglePopOut(): void {
   if (chat && isCodeModeOpen() && canPopOut(chat)) popOut(chat);
 }
 
+/** Ctrl+P: pick a file from the open chat's project, then show it in Code
+ *  mode, entering Code mode first if it isn't open. */
+export function quickOpenFile(): void {
+  const chat = provider?.();
+  if (!chat?.cwd) return;
+  openQuickOpen(chat.cwd, (path) => void enterCodeMode({ kind: "file", path }));
+}
+
 setCodeModeOpener((target) => void enterCodeMode(target));
 shortcuts.register("code-mode", toggleCodeMode);
 shortcuts.register("code-mode-popout", togglePopOut);
+shortcuts.register("quick-open", quickOpenFile);

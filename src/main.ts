@@ -28,6 +28,7 @@ import { setupNewsBadgeAndNotifications, setupScheduleMissedPopup, setupSchedule
 import { initWindowTitlebar } from "./shared/window-titlebar";
 import { initCursorAutohide } from "./shared/cursor-autohide";
 import { installE2eSeams } from "./boot/e2e-seams";
+import { installPrintBlock } from "./shared/print-block";
 import "./missed-panel.css";
 
 // Test-build banner: in dev (`cargo tauri dev` / the vite dev server) paint a
@@ -59,6 +60,7 @@ if (import.meta.env.DEV) {
 // is unconditional here but installs nothing in a `vite build` production
 // bundle.
 installE2eSeams();
+installPrintBlock();
 
 // Route-level dynamic imports (todo 187): each view's chunk loads only when
 // its route mounts, so windows stop parsing code they never visit. Cast at

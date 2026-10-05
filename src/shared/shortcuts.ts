@@ -35,6 +35,7 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   // from History and detached chat windows, and docks back from its own window.
   { id: "code-mode",        defaultKeys: "ctrl+shift+e", label: "Code mode",              description: "Enter or leave Code mode for the open chat",          suppressInInput: false },
   { id: "code-mode-popout", defaultKeys: "ctrl+shift+o", label: "Pop out Code mode",      description: "Move Code mode into its own window, or dock it back", suppressInInput: false },
+  { id: "quick-open",       defaultKeys: "ctrl+p",       label: "Go to file",             description: "Search the open chat's project files and open one in Code mode", suppressInInput: false },
 
   // Chats view - new chat from a favourite project slot (see project-favorites.ts)
   { id: "new-chat-favorite-1", defaultKeys: "ctrl+shift+1", label: "New chat: favorite 1", description: "Start a new chat with the project pinned to favorite slot 1", context: "sessions", suppressInInput: false },

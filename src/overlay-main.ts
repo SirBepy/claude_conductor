@@ -30,6 +30,7 @@ import { invoke } from "./shared/ipc";
 import { api } from "./shared/api";
 import { setSettings } from "./shared/state";
 import { renderOverlay } from "./views/overlay/overlay";
+import { installPrintBlock } from "./shared/print-block";
 
 const app = document.getElementById("app");
 if (!app) {
@@ -39,6 +40,7 @@ if (!app) {
 // Signal to the Rust boot watchdog that this webview loaded successfully
 // (same ping main.ts sends for every other window - see lib.rs's setup fn).
 void invoke("frontend_ready").catch(() => {});
+installPrintBlock();
 
 void (async () => {
   try {
