@@ -39,6 +39,7 @@ mod remote_voice;
 mod remote_ws_pump;
 pub(crate) mod render_cache;
 pub mod repo_channel_wake;
+mod resume_interrupted;
 pub mod rpc;
 pub mod schedule;
 mod schedule_fire;
@@ -303,14 +304,20 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // -> External (or vice versa).
     {
         let path = crate::settings::paths::interactive_sessions_file().unwrap_or_default();
-        let restored = crate::sessions::persistence::populate_registry(
-            &state.registry,
-            crate::sessions::persistence::load_snapshot(&path),
+        let snapshot = crate::sessions::persistence::load_snapshot(&path);
+        let interrupted = resume_interrupted::interrupted_sessions(
+            &snapshot,
+            crate::sessions::chat_state::get,
+            chrono::Utc::now().timestamp_millis(),
         );
+        let restored = crate::sessions::persistence::populate_registry(&state.registry, snapshot);
         if restored > 0 {
             log::info!("restored {restored} interactive session(s) from snapshot");
             crate::daemon::machines::publish_instances_changed(&state);
         }
+        // populate_registry skips a chat whose project folder is gone.
+        let interrupted = interrupted.into_iter().filter(|id| state.registry.get(id).is_some()).collect();
+        resume_interrupted::spawn_resumes(state.clone(), interrupted);
     }
 
     // Adopt bridges that survived a previous daemon shutdown before spawning
