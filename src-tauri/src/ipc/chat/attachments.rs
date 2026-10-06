@@ -176,16 +176,14 @@ pub struct AttachmentData {
 /// Pure read helper, factored out of the `read_attachment` command so it can
 /// be unit-tested without a Tauri AppHandle (mirrors `write_attachment`).
 pub(crate) fn read_attachment_impl(root: &Path, path: &str) -> Result<AttachmentData, String> {
+    use crate::util::path::ConfineErr;
     let attachments_root = root.join("chat-attachments");
-    let attachments_root = attachments_root
-        .canonicalize()
-        .map_err(|e| format!("attachments dir missing: {e}"))?;
-    let target = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|e| format!("file not found: {e}"))?;
-    if !target.starts_with(&attachments_root) {
-        return Err("path outside chat-attachments".to_string());
-    }
+    let target = crate::util::path::confine_absolute(&attachments_root, &PathBuf::from(path))
+        .map_err(|e| match e {
+            ConfineErr::Root(e) => format!("attachments dir missing: {e}"),
+            ConfineErr::Target(e) => format!("file not found: {e}"),
+            ConfineErr::Outside => "path outside chat-attachments".to_string(),
+        })?;
     let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
     let mime = match target.extension().and_then(|e| e.to_str()) {
         Some("png") => "image/png",
