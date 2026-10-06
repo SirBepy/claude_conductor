@@ -276,6 +276,13 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "list_project_servers", params: { cwd: "/repo" } });
   });
 
+  it("forwards list_ai_todos and count_ai_todos to the rpc with cwd", async () => {
+    await new HttpTransport().call("list_ai_todos", { cwd: "/repo" });
+    await new HttpTransport().call("count_ai_todos", { cwd: "/repo" });
+    expect(body(0)).toEqual({ method: "list_ai_todos", params: { cwd: "/repo" } });
+    expect(body(1)).toEqual({ method: "count_ai_todos", params: { cwd: "/repo" } });
+  });
+
   it("reshapes list_claude_md_scopes worktreePath -> worktree_path", async () => {
     await new HttpTransport().call("list_claude_md_scopes", { worktreePath: "/repo/wt" });
     expect(body()).toEqual({ method: "list_claude_md_scopes", params: { worktree_path: "/repo/wt" } });

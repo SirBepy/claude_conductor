@@ -112,6 +112,37 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // Mirror `count_ai_todos` / `list_ai_todos` (params: cwd): the project
+    // picker's todo badge and the chat statusbar's todos chip. `cwd` is
+    // client-supplied and both read the dir listing, so reject_unknown first.
+    {
+        let state = state.clone();
+        router.register("count_ai_todos", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                Ok(json!(crate::ipc::ai_todos::count_ai_todos(p.cwd).await))
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("list_ai_todos", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                Ok(json!(crate::ipc::ai_todos::list_ai_todos(p.cwd).await))
+            }
+        });
+    }
     // Mirrors the `list_slash_commands` Tauri command (params: project_dir) ->
     // Vec<SlashEntry>. project_dir is client-supplied, so reject_unknown must
     // run before any fs access when it's Some; None only scans the daemon's

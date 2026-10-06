@@ -126,6 +126,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only tracker lookup for linking ticket ids in a phone-rendered chat,
     // reject_unknown(cwd)-gated in project_meta.rs. Never returns a token.
     ("get_ticket_tracker", P),
+    // Read-only `.claude/todos` file names for the picker badge and the chat
+    // statusbar's todos chip, reject_unknown(cwd)-gated in project_meta.rs.
+    ("count_ai_todos", P),
+    ("list_ai_todos", P),
     // Read-only, gated by reject_unknown(root) in registry.rs (todo 656).
     ("get_project_tech", P),
     // Read-only fs read + base64 return; gated by reject_unknown(root) in
@@ -372,6 +376,7 @@ mod tests {
             "paste_attachment", "list_characters", "list_project_groups",
             "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
             "project_last_activity_at", "get_project_tech", "get_project_icon",
+            "count_ai_todos", "list_ai_todos",
             "get_history", "get_token_history", "get_active_sessions",
             "get_usage_map", "get_auth_state_map", "context_status",
             "list_accounts", "list_slash_commands", "ensure_session_character",

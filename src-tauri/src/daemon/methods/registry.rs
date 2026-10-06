@@ -71,6 +71,31 @@ mod reject_unknown_tests {
         assert!(resp.error.is_some(), "unknown cwd must be rejected");
     }
 
+    #[tokio::test]
+    async fn ai_todos_methods_reject_unknown_cwd() {
+        for method in ["count_ai_todos", "list_ai_todos"] {
+            let resp = call(dummy_state(), method, json!({"cwd": "C:\\nope\\not\\registered"})).await;
+            assert!(resp.error.is_some(), "{method}: unknown cwd must be rejected");
+        }
+    }
+
+    #[tokio::test]
+    async fn ai_todos_methods_list_a_known_projects_backlog() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("01-a.md"), "a").unwrap();
+        std::fs::write(todos.join("PLAN.md"), "plan").unwrap();
+        let state = dummy_state();
+        state.registry.upsert_interactive(&uuid::Uuid::new_v4().to_string(), dir.path(), "proj", "2026-10-06T00:00:00Z");
+        let cwd = dir.path().to_string_lossy().into_owned();
+
+        let count = call(state.clone(), "count_ai_todos", json!({"cwd": cwd})).await;
+        assert_eq!(count.result, Some(json!(1)), "PLAN.md is not a todo");
+        let list = call(state, "list_ai_todos", json!({"cwd": cwd})).await;
+        assert_eq!(list.result.unwrap()[0]["name"], json!("01-a.md"));
+    }
+
     // Todo 656 follow-up: list_slash_commands must reject an unregistered
     // project_dir, but the None case (desktop's own ~/.claude scan) must
     // keep working - a test that only checks rejection would let someone

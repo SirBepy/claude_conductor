@@ -5,6 +5,7 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
+import { isRemote } from "../../shared/transport";
 import type { AiTodoEntry } from "../../types/ipc.generated";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -43,6 +44,8 @@ export class AiTodosPopover {
     this.shell.open(anchor, this.buildHtml(), {
       className: "sb-ai-todos-popover",
       wire: (el) => {
+        // No editor to open on the phone: the list is read-only there.
+        if (isRemote()) return;
         el.querySelectorAll<HTMLElement>(".sb-ai-todos-popover-file").forEach((f) => {
           f.addEventListener("click", () => {
             const p = f.dataset.path;

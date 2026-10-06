@@ -163,6 +163,12 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_branch_files", { cwd: args.cwd, branch: args.branch });
       case "get_ticket_tracker":
         return this.rpc<T>("get_ticket_tracker", { cwd: args.cwd });
+      // `.claude/todos` backlog: the chat statusbar's todos chip and the
+      // project picker's badge. Missing here left the chip a skeleton forever.
+      case "list_ai_todos":
+        return this.rpc<T>("list_ai_todos", { cwd: args.cwd });
+      case "count_ai_todos":
+        return this.rpc<T>("count_ai_todos", { cwd: args.cwd });
       case "resolve_commit_refs":
         return this.rpc<T>("resolve_commit_refs", { cwd: args.cwd, candidates: args.candidates });
       // Session-statusbar git/servers chips + location-picker scan (mirrors
