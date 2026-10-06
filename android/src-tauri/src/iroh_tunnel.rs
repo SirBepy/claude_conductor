@@ -28,8 +28,9 @@ pub const LOOPBACK_PORT: u16 = 27184;
 /// iroh still holds pre-sleep network state hangs the WebView request forever.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Opening a stream on a live connection is local bookkeeping, so anything
-/// this slow means the connection is wedged.
+/// Opening a stream is local bookkeeping and only waits when the peer's
+/// concurrent-stream limit is used up - a busy connection, not a dead one, so
+/// a timeout fails just this socket and never tears the connection down.
 const OPEN_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
 const WATCHDOG_TICK: Duration = Duration::from_secs(2);
@@ -146,16 +147,18 @@ impl Tunnel {
             let conn = self.connection().await?;
             match tokio::time::timeout(OPEN_STREAM_TIMEOUT, conn.open_bi()).await {
                 Ok(Ok(streams)) => return Ok(streams),
+                // A connection-level error: this connection is gone for every
+                // stream, so redial once.
                 Ok(Err(e)) => {
                     warn!("open_bi failed: {e}");
                     last_err = e.into();
+                    self.invalidate("could not open a stream").await;
                 }
                 Err(_) => {
-                    warn!("open_bi timed out");
-                    last_err = "open_bi timed out".into();
+                    warn!("open_bi timed out: stream limit reached");
+                    return Err("open_bi timed out".into());
                 }
             }
-            self.invalidate("could not open a stream").await;
         }
         Err(last_err)
     }
