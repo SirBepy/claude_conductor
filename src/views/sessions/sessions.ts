@@ -6,6 +6,7 @@ import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
 import { DRAFT_OPEN_EVENT } from "../../shared/chat/chat-draft-card";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
+import "./session-header.css";
 import "./sessions-mobile.css";
 import "./project-rail.css";
 import "./session-list.css";

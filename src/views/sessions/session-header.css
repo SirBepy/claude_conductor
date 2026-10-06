@@ -1,0 +1,114 @@
+/* session-header.ts's stylesheet. sessions.ts must import it before
+   sessions-mobile.css: that file's .session-header overrides have equal
+   specificity and only win on source order. */
+
+.session-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--color-surface-alt);
+  flex-shrink: 0;
+}
+
+.session-header .title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-header-remote-badge {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* M2: the project anchors left, model+effort sit at the far right edge. The
+   split is positional, so neither side is dimmed to separate them - dimming
+   only costs legibility once position has already done the work. */
+.session-header .meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sb-muted);
+  font-size: 0.72rem;
+  font-family: 'Fira Code', monospace;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.session-header .meta-proj {
+  color: var(--color-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-header .meta-cfg {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Desktop: model+effort span both text lines so they centre on the header's
+   icon buttons instead of sitting on the meta line's baseline. The phone keeps
+   them on the meta line: its header row is already full of 44px buttons, and a
+   third column would cut the title further. `display: contents` keeps .meta's
+   font and colour inherited by both halves. */
+@media (min-width: 769px) {
+  .session-header .session-header-text {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 8px;
+  }
+  .session-header .meta { display: contents; }
+  .session-header .title,
+  .session-header .meta-proj { grid-column: 1; }
+  .session-header .meta-cfg {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+}
+
+/* Both are editable mid-run, so each is its own hit target. The affordance stays
+   at hover-only: a permanent underline on two always-present labels would read
+   as noise on every chat header. */
+.session-header .meta-cfg-btn {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: -1px -3px;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.session-header .meta-cfg-btn:hover,
+.session-header .meta-cfg-btn:focus-visible {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.session-header .icon-btn {
+  flex-shrink: 0;
+}
+
+.session-header .more-btn {
+  position: relative;
+}
+
+/* Quiet: muted like the model/effort text it sits beside, until hovered. */
+.session-header .code-mode-btn {
+  color: var(--color-text-muted);
+}
+
+.session-header .code-mode-btn:hover,
+.session-header .code-mode-btn:focus-visible {
+  color: var(--color-text);
+}
