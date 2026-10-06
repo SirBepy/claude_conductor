@@ -209,8 +209,13 @@ export async function openModelEffortModal(
     /** Binds the picked account to the project so the next new session here
      * preselects it. Registers the project first if it isn't tracked yet
      * (mirrors the automation "Automate channel" CTA's ensureProject call).
-     * Best-effort: a failure here never blocks starting the chat. */
+     * Best-effort: a failure here never blocks starting the chat.
+     *
+     * ensureProject/updateProject are desktop-only RPCs: the phone transport
+     * refuses both, so this skips there rather than letting
+     * the chat start log a RemoteUnavailableError every time. */
     async function persistAccountBinding(): Promise<void> {
+      if (isRemote()) return;
       if (accountField.accountId === null || accountField.accountId === preferredAccountId) return;
       try {
         let id = projectId;
