@@ -46,6 +46,21 @@
   color: #fff;
   vertical-align: 1px;
 }
+/* Phone: best match sits at the bottom, next to the input and the thumb.
+   column-reverse keeps DOM order (and the keyboard index) untouched, and a
+   reversed scroller starts scrolled to its end, so the top pick shows first. */
+@media (max-width: 768px) {
+  .caret-popup {
+    display: flex;
+    flex-direction: column-reverse;
+  }
+  .caret-popup .row:last-child {
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 30%, transparent);
+  }
+  .caret-popup .row:first-child {
+    border-bottom: none;
+  }
+}
 /* Only project-local kinds render a badge (see SlashProvider.renderRow). */
 .caret-popup .badge.project-skill,
 .caret-popup .badge.project-command { background: #7cb6ff; }
