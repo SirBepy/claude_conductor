@@ -13,6 +13,7 @@ use claude_conductor_lib::ipc::accounts::{
 };
 use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot};
 use claude_conductor_lib::ipc::ai_todos::AiTodoEntry;
+use claude_conductor_lib::ipc::hidden_chats::HiddenChatsView;
 use claude_conductor_lib::ipc::servers::ServerInfo;
 use claude_conductor_lib::ipc::git::{BranchEntry, GitInfo};
 use claude_conductor_lib::ipc::worktrees::WorktreeDetail;
@@ -124,6 +125,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<TicketSummary>());
     out.push_str(&decl::<TextFileData>());
     out.push_str(&decl::<AiTodoEntry>());
+    out.push_str(&decl::<HiddenChatsView>());
     out.push_str(&decl::<ServerInfo>());
     out.push_str(&decl::<ContextStatus>());
 

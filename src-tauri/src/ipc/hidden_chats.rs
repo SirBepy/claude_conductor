@@ -6,7 +6,8 @@ use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct HiddenChatsView {
     pub sessions: Vec<String>,
 }

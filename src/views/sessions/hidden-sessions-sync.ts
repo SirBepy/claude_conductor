@@ -6,8 +6,7 @@
 import { invoke } from "../../shared/ipc";
 import { getTransport } from "../../shared/transport";
 import { loadHiddenSessions, writeHiddenSessionsLocal, setHiddenSessionsPusher } from "./sessions-helpers";
-
-type HiddenChats = { sessions: string[] };
+import type { HiddenChatsView as HiddenChats } from "../../types/ipc.generated";
 
 /** Set once this device's pre-sync, local-only hides were merged into the
  *  daemon's list. Without it, every boot would re-add a chat another device
