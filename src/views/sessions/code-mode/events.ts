@@ -7,6 +7,7 @@ import { allDirs } from "./tree";
 import { openTreeContextMenu } from "./context-menu";
 import type { BaseScope } from "./data";
 import { DESC_TAB, type CodeModeInstance } from "./code-mode";
+import { loadOlderCommits, openCheckoutFor, runGit } from "./git-fold";
 
 export function createHandleClick(inst: CodeModeInstance): (e: MouseEvent) => void {
   return (e: MouseEvent): void => {
@@ -54,10 +55,10 @@ function act(inst: CodeModeInstance, act: string, el: HTMLElement): void {
       inst.branchOpen = !inst.branchOpen;
       inst.renderExplorer();
       break;
-    case "push": void inst.runGit("push"); break;
-    case "pull": void inst.runGit("pull"); break;
-    case "checkout-branch": inst.openCheckoutFor(el.dataset.branch!); break;
-    case "older-commits": void inst.loadOlderCommits(); break;
+    case "push": void runGit(inst, "push"); break;
+    case "pull": void runGit(inst, "pull"); break;
+    case "checkout-branch": openCheckoutFor(inst, el.dataset.branch!); break;
+    case "older-commits": void loadOlderCommits(inst); break;
     case "screen-explorer":
       inst.view.screen = "explorer";
       inst.showActive();

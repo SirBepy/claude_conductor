@@ -5,13 +5,12 @@
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { basename } from "../../../shared/path-utils";
-import { invoke } from "../../../shared/ipc";
 import { isRemote } from "../../../shared/transport";
 import { registerOverlayBack } from "../../../shared/back-button";
 import { createFileSurface, type FileSurfaceHandle, type SurfaceFile } from "../../../shared/chat/file-surface";
 import type { FileEditView } from "../../../shared/chat/file-edits";
 import type { CodeModeTarget } from "../../../shared/chat/code-mode-bridge";
-import { BranchSwitcher } from "./branch-switcher";
+import type { BranchSwitcher } from "./branch-switcher";
 import { repoRelative, type FileStatus } from "./tree";
 import { explorerHtml, type ExplorerModel } from "./explorer-html";
 import { renderPrDescription } from "./pr-description";
@@ -19,8 +18,6 @@ import { closeTreeContextMenu } from "./context-menu";
 import {
   branchFileSurface,
   chatFiles,
-  loadCommitHistoryPage,
-  loadGitState,
   loadScope,
   plainSurface,
   type BaseScope,
@@ -30,6 +27,7 @@ import {
   type ScopeRef,
 } from "./data";
 import { createHandleClick, createHandleAuxClick, createHandleContextMenu, createHandleDocClick, createHandleKey, handleDblClick, stepBack } from "./events";
+import { loadGit, mountBranchSwitcher, resetOlderCommits } from "./git-fold";
 import "./code-mode.css";
 
 /** The chat a Code mode instance is about. Supplied by whichever view hosts
@@ -105,6 +103,12 @@ export function currentCodeModeKey(): string | null {
   return current?.chat.key ?? null;
 }
 
+/** Whether `inst` is still the live instance - an async git op can finish
+ *  after the user has switched chats and a new instance replaced it. */
+export function isCurrent(inst: CodeModeInstance): boolean {
+  return current === inst;
+}
+
 /** Snapshot of a chat's Code mode state, handed across windows on pop-out
  *  and dock so tabs and scope come along. */
 export interface ViewSnapshot {
@@ -166,26 +170,28 @@ export class CodeModeInstance {
   };
   surface: FileSurfaceHandle;
   data: ScopeData | null = null;
-  private git: GitState | null = null;
+  /** Public, like `view` above: git-fold.ts's functions read and write the
+   *  rest of this block directly. */
+  git: GitState | null = null;
   menuOpen = false;
   private menuCounts: ExplorerModel["menuCounts"] = {};
   branchOpen = false;
-  private branchSwitcher: BranchSwitcher | null = null;
+  branchSwitcher: BranchSwitcher | null = null;
   /** One-shot: the branch name the Check out button wants the next-mounted
    *  branch switcher pre-filtered to. Cleared once read. */
-  private checkoutSeed: string | null = null;
-  private gitBusy: "push" | "pull" | null = null;
-  private gitError: string | null = null;
+  checkoutSeed: string | null = null;
+  gitBusy: "push" | "pull" | null = null;
+  gitError: string | null = null;
   /** Pushed commits paged in via "Show older commits", newest
    *  loaded first; cleared whenever the log itself can change (reload()). */
-  private older: CommitHistoryEntry[] = [];
+  older: CommitHistoryEntry[] = [];
   /** Cursor into the full `git log HEAD`, not into `older` - the log
    *  interleaves unpushed commits that get filtered out before display, so
    *  the next page must continue from the raw count fetched, not the
    *  filtered one. */
-  private olderOffset = 0;
-  private olderLoading = false;
-  private olderDone = false;
+  olderOffset = 0;
+  olderLoading = false;
+  olderDone = false;
   private loadGen = 0;
   private editsSeen = -1;
   private pillTimer: number;
@@ -243,7 +249,7 @@ export class CodeModeInstance {
     // stacked screens it walks back through.
     if (this.phone) this.disposeBack = registerOverlayBack(() => stepBack(this));
     this.updatePill();
-    void this.loadGit();
+    void loadGit(this);
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────
@@ -296,16 +302,9 @@ export class CodeModeInstance {
   }
 
   reload(): void {
-    this.resetOlderCommits();
+    resetOlderCommits(this);
     void this.loadScope();
-    void this.loadGit();
-  }
-
-  private resetOlderCommits(): void {
-    this.older = [];
-    this.olderOffset = 0;
-    this.olderLoading = false;
-    this.olderDone = false;
+    void loadGit(this);
   }
 
   enterScope(scope: ScopeRef, openFirst: boolean): void {
@@ -339,13 +338,6 @@ export class CodeModeInstance {
     }
     this.renderExplorer();
     this.renderTabs();
-  }
-
-  private async loadGit(): Promise<void> {
-    const git = await loadGitState(this.chat.cwd);
-    if (current !== this) return;
-    this.git = git;
-    this.renderExplorer();
   }
 
   /** Once a scope loads, an open tab whose file is in it shows that scope's
@@ -485,43 +477,7 @@ export class CodeModeInstance {
     const newTree = ex.querySelector<HTMLElement>(".cm-tree");
     if (newTree) newTree.scrollTop = scroll;
     if (focusKey) ex.querySelector<HTMLElement>(focusKey)?.focus();
-    const bmenu = ex.querySelector<HTMLElement>(".cm-bmenu");
-    if (bmenu) {
-      const seed = this.checkoutSeed;
-      this.checkoutSeed = null;
-      this.branchSwitcher = new BranchSwitcher({
-        cwd: this.chat.cwd,
-        sessionId: this.chat.sessionId,
-        initialFilter: seed ?? undefined,
-        onCheckedOut: () => {
-          this.branchOpen = false;
-          this.chat.onGitChanged?.();
-          this.reload();
-        },
-        onClose: () => {
-          this.branchOpen = false;
-          this.renderExplorer();
-          ex.querySelector<HTMLElement>(".cm-branchbtn")?.focus();
-        },
-        onPreview: (name) => {
-          this.branchOpen = false;
-          this.enterScope({ kind: "branch", name }, true);
-        },
-      });
-      this.branchSwitcher.mount(bmenu);
-    } else {
-      this.branchSwitcher = null;
-    }
-  }
-
-  /** The explorer header's Check out button on a branch preview: reuses the
-   *  branch switcher's own checkout + warnings rather than invoking
-   *  checkout_branch a second, duplicate way. */
-  openCheckoutFor(name: string): void {
-    this.view.commitsOpen = true;
-    this.branchOpen = true;
-    this.checkoutSeed = name;
-    this.renderExplorer();
+    mountBranchSwitcher(this, ex);
   }
 
   async openMenu(): Promise<void> {
@@ -558,48 +514,6 @@ export class CodeModeInstance {
     const c = this.view.collapsed;
     if (c.has(dir)) c.delete(dir);
     else c.add(dir);
-    this.renderExplorer();
-  }
-
-  async runGit(kind: "push" | "pull"): Promise<void> {
-    if (this.gitBusy) return;
-    const cwd = this.chat.cwd;
-    this.gitBusy = kind;
-    this.gitError = null;
-    this.renderExplorer();
-    try {
-      if (kind === "push") await invoke<void>("push_commits", { cwd, publish: !this.git?.sync?.has_upstream });
-      else await invoke<void>("pull_commits", { cwd });
-      this.chat.onGitChanged?.();
-    } catch (e) {
-      this.gitError = e instanceof Error ? e.message : String(e);
-    }
-    this.gitBusy = null;
-    if (current !== this) return;
-    this.reload();
-  }
-
-  /** Fetches the next page of pushed history. Dedupes against
-   *  the unpushed rows above it (`sync.ahead`): the API already flags those
-   *  `pushed: false`, but a push mid-session could race a stale `this.git`,
-   *  so both checks apply. */
-  async loadOlderCommits(): Promise<void> {
-    if (this.olderLoading || this.olderDone) return;
-    const cwd = this.chat.cwd;
-    this.olderLoading = true;
-    this.renderExplorer();
-    try {
-      const page = await loadCommitHistoryPage(cwd, this.olderOffset);
-      if (current !== this || this.chat.cwd !== cwd) return;
-      this.olderOffset += page.entries.length;
-      const unpushedShas = new Set(this.git?.sync?.ahead.map((c) => c.short_sha) ?? []);
-      this.older = this.older.concat(page.entries.filter((e) => e.pushed && !unpushedShas.has(e.short_sha)));
-      this.olderDone = !page.has_more;
-    } catch (e) {
-      console.error("[code-mode] get_commit_history failed", e);
-    }
-    this.olderLoading = false;
-    if (current !== this) return;
     this.renderExplorer();
   }
 
