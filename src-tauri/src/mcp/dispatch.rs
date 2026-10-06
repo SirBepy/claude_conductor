@@ -14,7 +14,7 @@ use super::dispatch_jarvis::jarvis_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, waiting_target};
 use super::tool_schemas::{
-    TOOL_APPROVAL, TOOL_CLOSE, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
+    TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_SCHEDULE, TOOL_SEND_MESSAGE,
     TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN,
     TOOL_WRITE_USER_TODO,
@@ -143,6 +143,13 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 }
             }
             Some(ctx.relay("/schedule/write", Value::Object(body), Some("invalid schedule write"), None))
+        }
+        TOOL_CREATE_PROJECT => {
+            let body = json!({
+                "session_id": ctx.session_id,
+                "path": ctx.args["path"],
+            });
+            Some(ctx.relay("/projects/create", body, Some("invalid project path"), None))
         }
         _ => None,
     }

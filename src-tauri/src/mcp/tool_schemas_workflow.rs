@@ -35,6 +35,10 @@ pub const TOOL_WRITE_PLAN: &str = "write_plan";
 // injection (`methods::schedule_mcp::render_for_injection`), which costs
 // nothing when there are none and hands over real ids for free.
 pub const TOOL_SCHEDULE: &str = "schedule";
+// The project picker lists only projects the app has registered, never a disk
+// scan, so a folder Claude made from a shell stayed invisible until a chat
+// happened to run in it. Unconditional: any session can start a new project.
+pub const TOOL_CREATE_PROJECT: &str = "create_project";
 
 pub fn workflow_schemas() -> Vec<Value> {
     vec![
@@ -164,6 +168,17 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "id": {"type": "string", "description": "Which item, for cancel. The short id from the injected list."}
                 },
                 "required": ["action"]
+            }
+        }),
+        json!({
+            "name": TOOL_CREATE_PROJECT,
+            "description": "Add a project to the app so it shows in the user's project picker and `spawn_chat` can target it. Call it whenever you create a new project folder, or the user names a project folder the app does not list yet. Creates the folder if it is missing; an existing folder is just registered. Returns {ok, project_id, path}.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path of the project folder."}
+                },
+                "required": ["path"]
             }
         }),
     ]

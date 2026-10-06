@@ -13,6 +13,7 @@ mod activity;
 mod channel;
 mod commit_lock;
 mod context;
+mod create_project;
 mod decision;
 mod drafts;
 mod jarvis;
@@ -180,6 +181,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/jarvis/fleet-status", post(jarvis::on_fleet_status))
         .route("/jarvis/respond-worker-prompt", post(jarvis::on_respond_worker_prompt))
         .route("/chat/spawn", post(spawn_chat::on_spawn_chat))
+        .route("/projects/create", post(create_project::on_create_project))
         .route("/channel/list-peers", post(channel::on_list_peers))
         .route("/channel/read-messages", post(channel::on_read_messages))
         .route("/channel/post-message", post(channel::on_post_message))

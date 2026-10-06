@@ -195,7 +195,7 @@ mod tests {
     use super::*;
     use super::super::dispatch::dispatch_tool_with;
     use super::super::tool_schemas::{
-        TOOL_APPROVAL, TOOL_CLOSE, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
+        TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
@@ -306,14 +306,15 @@ mod tests {
         // plus report_turn_status (todo 435) plus send_message/update_message
         // plus the two sibling-spawn tools (spawn_chat runs beside this chat,
         // respawn replaces it) plus write_user_todo (the Your Todos panel,
-        // todo 692) plus schedule (write access to the Schedule panel).
+        // todo 692) plus schedule (write access to the Schedule panel) plus
+        // create_project (registers a project folder with the app).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 17);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -333,6 +334,7 @@ mod tests {
         assert!(names.contains(&"show_preview"));
         assert!(names.contains(&"write_plan"));
         assert!(names.contains(&"schedule"));
+        assert!(names.contains(&"create_project"));
     }
 
     /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
@@ -369,7 +371,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 20, "16 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 21, "17 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -433,6 +435,7 @@ mod tests {
             (TOOL_WRITE_USER_TODO, "/todos/write"),
             (TOOL_WRITE_PLAN, "/plan/write"),
             (TOOL_SCHEDULE, "/schedule/write"),
+            (TOOL_CREATE_PROJECT, "/projects/create"),
             (TOOL_SHOW_PREVIEW, "/hooks/preview"),
             (TOOL_SPAWN_WORKER, "/jarvis/spawn-worker"),
             (TOOL_SEND_TO_SESSION, "/jarvis/send-to-session"),
