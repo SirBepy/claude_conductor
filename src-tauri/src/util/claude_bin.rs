@@ -351,13 +351,12 @@ mod tests {
         let real = dir.path().join("claude");
         std::fs::write(&real, b"#!/bin/sh\n").unwrap();
 
-        // ~2000 lines of ~35 bytes each is well over the ~64KB default pipe
-        // buffer, the way a chatty rc file (set -x tracing, a banner) would
-        // print before the actual `command -v claude` output.
-        let noisy = format!(
-            "for i in $(seq 1 2000); do echo 'noise line filling the pipe buffer'; done; printf '%s\\n' '{}'",
-            real.display()
-        );
+        // 70000 bytes of padding is well over the ~64KB default pipe buffer,
+        // the way a chatty rc file (set -x tracing, a banner) would print
+        // before the actual `command -v claude` output. A single `printf`
+        // width-field pad is a builtin, not a 2000-iteration `seq`/`echo`
+        // fork loop, so it stays fast even on a loaded CI runner.
+        let noisy = format!("printf '%70000s\\n%s\\n' '' '{}'", real.display());
         let got = run_shell_command(shell, &["-c", &noisy]);
         assert_eq!(got, Some(real), "output past the OS pipe buffer must not deadlock the probe");
     }
