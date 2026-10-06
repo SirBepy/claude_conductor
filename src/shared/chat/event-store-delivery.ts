@@ -81,7 +81,13 @@ export class DeliveryPolicy {
     // An interrupted turn's final text never matches streamAcc (see
     // noiseAssistantLabel), so record streamAcc's text as an already-delivered
     // final now - the watcher's later JSONL replay then dedups against it.
-    if (ev.type === "turn_usage" || (ev.type === "assistant_message" && !ev.streaming)) {
+    // A held message nudge.rs injected mid-turn (sessions-wiring.ts's
+    // `heldDelivered` marker) gets the same cut: without it the NEXT delta
+    // would keep appending onto streamAcc's pre-injection text, so the
+    // renderer's post-injection bubble would re-render everything that
+    // already streamed before the nudge landed (todo 945).
+    const isHeldMidTurn = ev.type === "user_message" && !!(ev as { heldDelivered?: boolean }).heldDelivered;
+    if (ev.type === "turn_usage" || (ev.type === "assistant_message" && !ev.streaming) || isHeldMidTurn) {
       if (entry.streamAcc && entry.streamAcc.text) {
         entry.recent.push({
           sig: `a:${entry.streamAcc.text}`,

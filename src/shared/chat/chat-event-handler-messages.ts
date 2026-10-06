@@ -110,6 +110,24 @@ export function handleUserMessageEvent(
     return { touched: true, coalesce: false };
   }
 
+  // A held message nudge.rs delivered mid-turn (sessions-wiring.ts's
+  // `heldDelivered` marker on the synthetic pushSynthetic event) is prose the
+  // user typed while THIS turn kept running - not a new turn. Finalize
+  // whatever text streamed so far in place (so it freezes instead of
+  // silently growing underneath the bubble about to render below it) without
+  // the generic enqueueTurnClose: that would rotate activeTurnChipKey and
+  // visually split the tool-chip strip around a message that never actually
+  // ended the turn. The NEXT streaming delta then opens a fresh bubble
+  // (streamingIndex is null again) that only grows AFTER this one, so the
+  // held bubble stays above everything the turn streams from here on,
+  // including through the turn's eventual close (todo 945).
+  const isHeldMidTurn = !!(ev as { heldDelivered?: boolean }).heldDelivered;
+  if (!isCompact && !isSilent && isHeldMidTurn && r.activeTurnChipKey !== null) {
+    finalizeStreamingBubble(r);
+    r.messages.push({ kind: "user", content: cleaned, ts, authorSessionId: null });
+    return { touched: true, coalesce: false };
+  }
+
   const auqAnswerText = !isCompact && !isSilent && !isMeta ? extractAuqAnswerText(cleaned) : null;
   const resolvedQuestionCard = auqAnswerText !== null
     && resolvePendingQuestionCard(r, auqAnswerText, extractAuqAnswerCardId(cleaned));

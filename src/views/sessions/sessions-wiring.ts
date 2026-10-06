@@ -335,7 +335,10 @@ export async function wireInstancesChangedListener(
         type: "user_message",
         content: payload.blocks,
         timestamp: BigInt(Date.now()),
-      } as ChatEvent);
+        // Tells event-store-delivery.ts and chat-event-handler-messages.ts
+        // this bubble landed mid-turn, not as a new one - see todo 945.
+        heldDelivered: true,
+      } as unknown as ChatEvent);
       state.heldMessages?.markDelivered(sid, payload.ids ?? []);
     },
   );
