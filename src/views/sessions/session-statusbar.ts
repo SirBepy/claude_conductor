@@ -44,6 +44,7 @@ import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
+import { CommitsPopover } from "./commits-popover";
 import { ModelEffortState } from "./session-statusbar-model-effort";
 import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
@@ -118,6 +119,7 @@ export class SessionStatusbar {
   // Polls the server_supervisor for this project's running dev servers.
   private serversTimer: (() => void) | null = null;
   private imagesPopover = new ImagesPopover();
+  private commitsPopover = new CommitsPopover();
   private overflowPopover = new OverflowPopover();
   private mobileUnsub: (() => void) | null = null;
 
@@ -532,6 +534,7 @@ export class SessionStatusbar {
       aiTodosPopover: this.aiTodosPopover,
       serversPopover: this.serversPopover,
       imagesPopover: this.imagesPopover,
+      commitsPopover: this.commitsPopover,
       effortPopover: this.modelEffort.effortPopover,
       modelPopover: this.modelEffort.modelPopover,
       overflowPopover: this.overflowPopover,

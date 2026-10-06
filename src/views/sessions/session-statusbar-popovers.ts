@@ -5,11 +5,11 @@
 // every call, so all of this is re-wired fresh each time - wireChipPopovers
 // takes a ctx snapshot assembled once per render() (same pattern as
 // statusbar-chips.ts's ChipRenderCtx) rather than reading `this` directly.
-import { openInCodeMode } from "../../shared/chat/code-mode-bridge";
 import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
+import { CommitsPopover } from "./commits-popover";
 import { EffortPopover } from "./effort-popover";
 import { ModelPopover } from "./model-popover";
 import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
@@ -22,6 +22,7 @@ export interface StatusbarPopovers {
   aiTodosPopover: AiTodosPopover;
   serversPopover: ServersPopover;
   imagesPopover: ImagesPopover;
+  commitsPopover: CommitsPopover;
   effortPopover: EffortPopover;
   modelPopover: ModelPopover;
   overflowPopover: OverflowPopover;
@@ -34,6 +35,7 @@ export function closeChipPopovers(p: StatusbarPopovers): void {
   p.aiTodosPopover.close();
   p.serversPopover.close();
   p.imagesPopover.close();
+  p.commitsPopover.close();
   p.effortPopover.close();
   p.modelPopover.close();
   p.overflowPopover.close();
@@ -138,15 +140,13 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
     if (!wasOpen) ctx.imagesPopover.open(anchor);
   });
 
-  // The git chip is a way into Code mode, on what a push would send.
-  for (const sel of [".sb-git-btn", ".sb-branch-btn", ".sb-commits-btn"]) {
-    container.querySelector<HTMLElement>(sel)?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      closeAll();
-      if (!ctx.cwd) return;
-      openInCodeMode({ kind: "scope", scope: "unpushed", commitsOpen: true });
-    });
-  }
+  container.querySelector<HTMLElement>(".sb-git-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const anchor = e.currentTarget as HTMLElement;
+    const wasOpen = ctx.commitsPopover.isOpen;
+    closeAll();
+    if (!wasOpen && ctx.cwd) ctx.commitsPopover.open(anchor, ctx.cwd);
+  });
 
   container.querySelector<HTMLElement>(".sb-overflow-btn")?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -164,6 +164,7 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
   reanchorIfOpen(container, ctx.aiTodosPopover, ".sb-ai-todos-btn", (a) => ctx.aiTodosPopover.open(a));
   reanchorIfOpen(container, ctx.serversPopover, ".sb-servers-btn", (a) => ctx.serversPopover.open(a));
   reanchorIfOpen(container, ctx.imagesPopover, ".sb-images-btn", (a) => ctx.imagesPopover.open(a));
+  reanchorIfOpen(container, ctx.commitsPopover, ".sb-git-btn", (a) => ctx.commitsPopover.reanchor(a));
   reanchorIfOpen(container, ctx.overflowPopover, ".sb-overflow-btn", (a) => ctx.overflowPopover.open(a, ctx.overflowData()));
   reanchorConfigPopover(container, ctx.effortPopover, ctx.effortAnchor, ".sb-effort-btn", (a) => ctx.effortPopover.reanchor(a));
   reanchorConfigPopover(container, ctx.modelPopover, ctx.modelAnchor, ".sb-model-btn", (a) => ctx.modelPopover.reanchor(a));

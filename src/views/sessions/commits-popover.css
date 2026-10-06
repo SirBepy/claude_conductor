@@ -1,0 +1,113 @@
+/* The git chip's commit popover (commits-popover.ts). The chip itself stays in
+   session-statusbar.css; this file styles only the popover it opens. */
+.cp-popover {
+  min-width: 280px;
+  max-width: 420px;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.75rem;
+}
+
+.cp-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.cp-header i { font-size: 0.85rem; }
+
+.cp-list { padding: 4px 0; max-height: inherit; overflow-y: auto; }
+
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 10px;
+  min-width: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+.cp-row:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.cp-row:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+
+.cp-row.unpushed { border-left-color: #4ade80; background: rgba(74, 222, 128, 0.06); }
+.cp-row.unpushed:hover { background: rgba(74, 222, 128, 0.12); }
+.cp-row.unpushed .cp-mark { color: #4ade80; }
+.cp-row.unpushed .cp-msg { color: var(--color-text); }
+.cp-row.pushed .cp-mark { color: var(--color-text-muted); opacity: 0.55; }
+.cp-row.pushed .cp-msg { color: var(--color-text-muted); }
+
+.cp-mark { font-size: 0.8rem; flex-shrink: 0; }
+
+.cp-sha {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--sb-muted);
+}
+
+.cp-msg {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Hover (or keyboard focus on the row) swaps the age for the absolute time
+   and reveals the copy buttons. */
+.cp-age, .cp-abs { flex-shrink: 0; font-size: 0.68rem; color: var(--sb-muted); }
+.cp-abs { display: none; }
+.cp-row:hover .cp-age,
+.cp-row:focus-within .cp-age { display: none; }
+.cp-row:hover .cp-abs,
+.cp-row:focus-within .cp-abs { display: inline; }
+
+.cp-tools { display: none; flex-shrink: 0; gap: 2px; }
+.cp-row:hover .cp-tools,
+.cp-row:focus-within .cp-tools { display: inline-flex; }
+
+.cp-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.cp-copy:hover { background: color-mix(in srgb, var(--color-text) 12%, transparent); color: var(--color-text); }
+.cp-copy:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+
+.cp-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 12px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+  justify-content: center;
+}
+
+.cp-sentinel {
+  padding: 6px 12px;
+  min-height: 6px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  opacity: 0.6;
+}
+.cp-sentinel.end { font-style: italic; }
+
+.cp-spin { display: inline-block; animation: cp-spin 0.7s linear infinite; }
+@keyframes cp-spin { to { transform: rotate(360deg); } }

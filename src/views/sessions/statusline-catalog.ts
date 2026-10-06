@@ -31,7 +31,7 @@ export const STATIC_CHIPS = {
   context_tokens: { section: "model",   icon: "ph-stack",            sample: "90k / 200k", tooltip: "Context window used, raw tokens / window size." },
   thinking:       { section: "model",   icon: "ph-brain",            sample: "thinking",   tooltip: "Shows while extended thinking is active." },
 
-  git:            { section: "git",     icon: "ph-git-branch",       sample: "main",       tooltip: "Branch, plus anything unpushed or incoming. The repo name appears only once the AI has moved into a different repo. Click for commits and branches." },
+  git:            { section: "git",     icon: "ph-git-branch",       sample: "main",       tooltip: "Branch, plus anything unpushed or incoming. The repo name appears only once the AI has moved into a different repo. Click for the commit list." },
   branch:         { section: "git",     icon: "ph-git-branch",       sample: "main",       tooltip: "Current git branch." },
   repo:           { section: "git",     icon: "ph-folder-simple",    sample: "my-project", tooltip: "Repository name (from origin). Hidden while the chat is still in the folder it was opened in." },
   folder:         { section: "git",     icon: "ph-folder-open",      sample: "my-project", tooltip: "Working directory. Hidden while the chat is still in the folder it was opened in; appears once the AI moves elsewhere. Click to open in your file explorer." },
