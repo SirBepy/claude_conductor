@@ -29,13 +29,15 @@ async fn read_asset(asset_path: &str) -> Option<(Vec<u8>, String)> {
     let dist_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("dist");
-    let candidate = dist_root.join(asset_path);
-    let root = tokio::fs::canonicalize(&dist_root).await.ok()?;
-    let resolved = tokio::fs::canonicalize(&candidate).await.ok()?;
-    // Reject anything canonicalizing outside dist_root (symlinks, traversal).
-    if !resolved.starts_with(&root) {
-        return None;
-    }
+    let asset_path = asset_path.to_string();
+    // Confinement check is sync (std::fs), so it runs off the async runtime
+    // thread the same way the old tokio::fs::canonicalize calls did.
+    let resolved = tokio::task::spawn_blocking(move || {
+        crate::util::path::confine(&dist_root, &asset_path)
+    })
+    .await
+    .ok()?
+    .ok()?;
     let bytes = tokio::fs::read(&resolved).await.ok()?;
     let mime = mime_guess::from_path(&resolved)
         .first_or_octet_stream()

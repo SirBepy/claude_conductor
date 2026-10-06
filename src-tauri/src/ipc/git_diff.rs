@@ -196,11 +196,13 @@ fn untracked_files(cwd: &str, path: Option<&str>) -> Result<Vec<String>, String>
 /// phone-reachable, and only the repo's own files are in scope.
 fn read_worktree_bytes(cwd: &str, path: &str, cap: usize) -> Result<(Vec<u8>, bool), String> {
     let top = run_git(cwd, &["rev-parse", "--show-toplevel"])?;
-    let root = std::fs::canonicalize(top).map_err(|e| format!("repo root: {e}"))?;
-    let full = std::fs::canonicalize(root.join(path)).map_err(|e| format!("{path}: {e}"))?;
-    if !full.starts_with(&root) {
-        return Err(format!("{path}: outside the repository"));
-    }
+    let full = crate::util::path::confine(std::path::Path::new(&top), path).map_err(|e| {
+        if e.ends_with(crate::util::path::OUTSIDE_ROOT) {
+            format!("{path}: outside the repository")
+        } else {
+            e
+        }
+    })?;
     let mut bytes = std::fs::read(&full).map_err(|e| format!("{path}: {e}"))?;
     let truncated = bytes.len() > cap;
     bytes.truncate(cap);

@@ -1,4 +1,5 @@
 pub mod claude_bin;
+pub mod path;
 pub mod process;
 
 /// Shared lock for any test in this crate that mutates a process-global env

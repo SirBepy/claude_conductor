@@ -74,9 +74,7 @@ impl Character {
     /// and the joined target and rejects escape via `..`/symlinks - `relative`
     /// is client-supplied over the `character_asset_url` remote RPC.
     pub fn asset_path_checked(&self, relative: &str) -> Option<PathBuf> {
-        let root = self.dir.canonicalize().ok()?;
-        let target = self.dir.join(relative).canonicalize().ok()?;
-        target.starts_with(&root).then_some(target)
+        crate::util::path::confine(&self.dir, relative).ok()
     }
 }
 
