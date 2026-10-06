@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+// jsdom: projectName reads settings off `window` for the "No project" check.
+
 import { describe, it, expect } from "vitest";
 import {
   projectName,

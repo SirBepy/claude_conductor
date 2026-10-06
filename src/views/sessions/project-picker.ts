@@ -14,6 +14,7 @@ import {
   pathForKey,
 } from "./project-favorites";
 import { PROJECTS_ROOT_SETTINGS_KEY } from "./projects-root";
+import { isNoProjectPath } from "../../shared/no-project";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
 import { api } from "../../shared/api";
@@ -285,6 +286,11 @@ export function openProjectPickerModal(
       // When a filter is active, promote closer name matches to the top.
       if (f) {
         rows = rows.slice().sort((a, b) => matchRank(a, f) - matchRank(b, f));
+      } else {
+        // "No project" is where a chat starts by default, not a project to
+        // find by name, so it stays on top whatever the sort.
+        const np = rows.findIndex((p) => isNoProjectPath(p.path));
+        if (np > 0) rows = [rows[np]!, ...rows.slice(0, np), ...rows.slice(np + 1)];
       }
       return rows;
     };
@@ -302,6 +308,12 @@ export function openProjectPickerModal(
         // (list_machine_projects returns a bare ProjectConfig) - resolve
         // directly instead of opening the location sub-modal.
         finish({ path: p.path, name: p.name, machineId: machineField.machineId });
+        return;
+      }
+      // Worktrees and start folders are project concepts; a no-project chat
+      // just starts in the folder's root.
+      if (isNoProjectPath(p.path)) {
+        finish({ path: p.path, name: p.name, machineId: null });
         return;
       }
       const result = await openLocationModal(p);
@@ -478,7 +490,7 @@ export function openProjectPickerModal(
                               ? html`<span class="pp-row-fav-dot" role="img" aria-label="Favourite, ctrl+${fav + 1}"></span>`
                               : "";
                           })()}</span>
-                          <span class="project-picker-path">${p.path}</span>
+                          <span class="project-picker-path">${isNoProjectPath(p.path) ? "Not tied to any project" : p.path}</span>
                           ${missing ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
                         </div>
                         ${p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}

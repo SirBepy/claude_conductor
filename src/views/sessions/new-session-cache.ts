@@ -7,6 +7,7 @@ import { api } from "../../shared/api";
 import type { Account, Character, ProjectConfig } from "../../shared/api";
 import { invoke } from "../../shared/ipc";
 import type { ProjectGroup } from "../../types/ipc.generated";
+import { isNoProjectPath, NO_PROJECT_LABEL } from "../../shared/no-project";
 
 export interface ProjectStat {
   mtime: number;
@@ -65,7 +66,12 @@ const projectGroupsEntry = makeEntry<ProjectGroup[]>();
 const projectStatEntries = new Map<string, Entry<ProjectStat>>();
 
 export function projectGroupsData(): CacheRead<ProjectGroup[]> {
-  return swr(projectGroupsEntry, async () => (await invoke<ProjectGroup[]>("list_project_groups")) || []);
+  return swr(projectGroupsEntry, async () => {
+    const groups = (await invoke<ProjectGroup[]>("list_project_groups")) || [];
+    // The label lives on `name` from this point on, so the picker rows,
+    // favourites rail and Ctrl+Shift strip never each check the path.
+    return groups.map((g) => (isNoProjectPath(g.path) ? { ...g, name: NO_PROJECT_LABEL } : g));
+  });
 }
 
 export function projectStatData(path: string): CacheRead<ProjectStat> {

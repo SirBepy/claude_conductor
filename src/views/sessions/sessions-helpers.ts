@@ -1,5 +1,6 @@
 import type { Instance, ScheduledItem } from "../../types/ipc.generated";
 import { markerToStatusClass } from "../../shared/status-icons";
+import { isNoProjectPath, NO_PROJECT_LABEL } from "../../shared/no-project";
 
 export type SessionSort = "status" | "recent" | "name" | "drain";
 
@@ -10,12 +11,11 @@ export const LS_HIDDEN_COLLAPSED = "cc_hidden_collapsed";
 export const LS_HIDDEN_PROJECTS = "cc_hidden_projects";
 
 export function projectName(i: Instance): string {
-  const cwd = String(i.cwd ?? "");
-  const parts = cwd.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? cwd;
+  return cwdToProjectName(String(i.cwd ?? ""));
 }
 
 export function cwdToProjectName(cwd: string): string {
+  if (isNoProjectPath(cwd)) return NO_PROJECT_LABEL;
   const parts = String(cwd ?? "").split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? cwd;
 }

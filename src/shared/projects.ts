@@ -9,6 +9,7 @@ import { resolveMergeChain } from "./merges";
 import { api } from "./api";
 import { getCharacterIconUrl } from "./character-icon";
 import { escapeHtml } from "./escape-html";
+import { isNoProjectPath, NO_PROJECT_ICON_HTML } from "./no-project";
 
 export interface Avatar {
   kind?: "emoji" | "image" | "none" | "character";
@@ -61,6 +62,7 @@ const projectIconUrlCache = new Map<string, string | null>();
 const projectTechCache = new Map<string, string | null>();
 
 export function renderAvatar(avatar: Avatar | undefined | null, projectPath?: string): string {
+  if (isNoProjectPath(projectPath)) return NO_PROJECT_ICON_HTML;
   if (!avatar || avatar.kind === "none") {
     // No user-set avatar: render a hydratable project-face placeholder (a
     // generic folder until hydrateProjectTechIcons fills the real icon / tech
