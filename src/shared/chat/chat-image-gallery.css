@@ -49,6 +49,7 @@
 .screenshot-gallery-stage {
   width: 100%;
   height: 100%;
+  touch-action: none; /* see .lightbox-content--image in chat-overlays.css */
   overflow: hidden;
   display: flex;
   align-items: center;

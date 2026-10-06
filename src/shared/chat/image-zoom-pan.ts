@@ -90,28 +90,99 @@ export function setupImageZoomPan(img: HTMLImageElement, container: HTMLElement)
   };
   container.addEventListener("wheel", onWheel, { passive: false });
 
-  let dragging = false;
+  // Every live pointer, so two fingers pinch instead of the second one
+  // re-anchoring a one-finger pan mid-gesture.
+  const pointers = new Map<number, { x: number; y: number }>();
+  // A gesture that pinched or panned must not end as a tap: neither the
+  // zoom toggle on the img nor the hosts' click-outside-to-close on the
+  // container. Cleared when the next gesture starts.
+  let suppressClick = false;
+  let panning = false; // a one-finger/mouse drag that started on the img
   let dragged = false;
   let startX = 0;
   let startY = 0;
   let startTx = 0;
   let startTy = 0;
+  let pinchStartDist = 0;
+  let pinchStartScale = 1;
+  let pinchStartMidX = 0;
+  let pinchStartMidY = 0;
 
-  img.addEventListener("pointerdown", (e) => {
-    dragging = true;
-    dragged = false;
-    startX = e.clientX;
-    startY = e.clientY;
+  function beginPan(x: number, y: number): void {
+    startX = x;
+    startY = y;
     startTx = tx;
     startTy = ty;
-    img.setPointerCapture(e.pointerId);
-  });
-  img.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
+  }
+
+  function pinchPair(): [{ x: number; y: number }, { x: number; y: number }] {
+    const [a, b] = [...pointers.values()];
+    return [a!, b!];
+  }
+
+  function beginPinch(): void {
+    const [a, b] = pinchPair();
+    pinchStartDist = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+    pinchStartScale = scale;
+    pinchStartMidX = (a.x + b.x) / 2;
+    pinchStartMidY = (a.y + b.y) / 2;
+    startTx = tx;
+    startTy = ty;
+  }
+
+  /** Scale by the finger spread, keeping the image point that sat under the
+   *  starting midpoint under the current midpoint, so pinch also pans. */
+  function movePinch(): void {
+    const [a, b] = pinchPair();
+    const midX = (a.x + b.x) / 2;
+    const midY = (a.y + b.y) / 2;
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinchStartScale * (dist / pinchStartDist)));
+    const rect = container.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const r = next / pinchStartScale;
+    tx = midX - cx - (pinchStartMidX - cx - startTx) * r;
+    ty = midY - cy - (pinchStartMidY - cy - startTy) * r;
+    scale = next;
+    clampPan();
+    apply();
+  }
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (pointers.size === 0) suppressClick = false;
+    const onImg = e.target === img;
+    // A lone pointer off the image is a tap on the backdrop, which the hosts
+    // treat as close; only a second finger makes it part of a gesture.
+    if (pointers.size === 0 && !onImg) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    if (pointers.size === 1) {
+      panning = true;
+      dragged = false;
+      beginPan(e.clientX, e.clientY);
+    } else if (pointers.size === 2) {
+      suppressClick = true;
+      panning = false;
+      beginPinch();
+    }
+  };
+
+  const onPointerMove = (e: PointerEvent) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (pointers.size >= 2) {
+      movePinch();
+      return;
+    }
+    if (!panning) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     if (!dragged && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
       dragged = true;
+      suppressClick = true;
       img.style.cursor = "grabbing";
     }
     if (dragged) {
@@ -120,20 +191,55 @@ export function setupImageZoomPan(img: HTMLImageElement, container: HTMLElement)
       clampPan();
       apply();
     }
-  });
-  function endDrag(e: PointerEvent): void {
-    if (!dragging) return;
-    dragging = false;
-    if (!dragged) {
+  };
+
+  const onPointerEnd = (e: PointerEvent) => {
+    if (!pointers.delete(e.pointerId)) return;
+    if (pointers.size === 1) {
+      // Pinch down to one finger: carry on as a pan from where it is now,
+      // rather than jumping back to the pan's original anchor.
+      const [rest] = [...pointers.values()];
+      panning = true;
+      dragged = true;
+      beginPan(rest!.x, rest!.y);
+      return;
+    }
+    if (pointers.size > 0) return;
+    const wasTap = panning && !dragged && !suppressClick && e.type === "pointerup";
+    panning = false;
+    if (wasTap) {
       // A click, not a drag: toggle between fit and a fixed zoomed-in level,
       // animated - zoomAt() already calls apply(true) internally.
       zoomAt(e.clientX, e.clientY, scale <= MIN_SCALE ? CLICK_ZOOM_SCALE : MIN_SCALE, true);
+      return;
+    }
+    if (scale <= MIN_SCALE) {
+      tx = 0;
+      ty = 0;
+      apply(true); // a pinch released at fit glides back to centre
     } else {
       apply(); // just restore the cursor after a drag-pan ends
     }
-  }
-  img.addEventListener("pointerup", endDrag);
-  img.addEventListener("pointercancel", () => { dragging = false; });
+  };
 
-  return () => container.removeEventListener("wheel", onWheel);
+  const onClickCapture = (e: MouseEvent) => {
+    if (!suppressClick) return;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  container.addEventListener("pointerdown", onPointerDown);
+  container.addEventListener("pointermove", onPointerMove);
+  container.addEventListener("pointerup", onPointerEnd);
+  container.addEventListener("pointercancel", onPointerEnd);
+  container.addEventListener("click", onClickCapture, true);
+
+  return () => {
+    container.removeEventListener("wheel", onWheel);
+    container.removeEventListener("pointerdown", onPointerDown);
+    container.removeEventListener("pointermove", onPointerMove);
+    container.removeEventListener("pointerup", onPointerEnd);
+    container.removeEventListener("pointercancel", onPointerEnd);
+    container.removeEventListener("click", onClickCapture, true);
+  };
 }
