@@ -28,7 +28,10 @@ import {
 } from "./data";
 import { createHandleClick, createHandleAuxClick, createHandleContextMenu, createHandleDocClick, createHandleKey, handleDblClick, stepBack } from "./events";
 import { loadGit, mountBranchSwitcher, resetOlderCommits } from "./git-fold";
-import "./code-mode.css";
+import "./code-mode-shell.css";
+import "./code-mode-explorer.css";
+import "./code-mode-commits.css";
+import "./code-mode-tabs.css";
 
 /** The chat a Code mode instance is about. Supplied by whichever view hosts
  *  the chat (the sessions view, history, the pop-out window's proxy). */

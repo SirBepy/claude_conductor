@@ -1,0 +1,149 @@
+/* Code mode (code-mode.ts): covers its host layout's other children while
+ * open. Mode bar (back pill + pop-out), then explorer | tabs + editor. */
+
+.code-mode-on > :not(.code-mode) {
+  display: none !important;
+}
+
+.code-mode {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+}
+
+.code-mode .grow {
+  flex: 1;
+}
+
+.cm-ib {
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.cm-ib:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-spin {
+  display: inline-block;
+  animation: cm-spin 0.7s linear infinite;
+}
+
+@keyframes cm-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── mode bar + back pill ─────────────────────────────────────────────── */
+
+.cm-modebar {
+  flex: none;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+/* One control back to the chat: which chat, whether Claude is writing, and
+   its latest line, so a reply landing mid-read is visible without leaving. */
+.cm-backchat {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 720px;
+  height: 32px;
+  min-height: 0;
+  padding: 0 14px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cm-backchat:hover {
+  border-color: var(--color-primary);
+}
+
+.cm-bc-ic {
+  flex: none;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cm-backchat:hover .cm-bc-ic {
+  transform: translateX(-2px);
+}
+
+.cm-bc-title {
+  flex: none;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.cm-bc-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--color-border);
+}
+
+.cm-bc-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.cm-bc-text:empty {
+  display: none;
+}
+
+.cm-live {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+
+.cm-live.on {
+  background: var(--color-primary);
+  animation: cm-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cm-pulse {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-live.on { animation: none; }
+  .cm-bc-ic { transition: none; }
+}
+

@@ -1,0 +1,213 @@
+/* ── commits fold + push row ──────────────────────────────────────────── */
+
+.cm-fold {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-fold:hover {
+  color: var(--color-text);
+}
+
+.cm-fold:focus-visible,
+.cm-commit:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.cm-fold .ph {
+  font-size: 11px;
+}
+
+.cm-qn {
+  font-size: 12px;
+}
+
+.cm-commits {
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+}
+
+.cm-commit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.cm-commit:hover,
+.cm-commit.on {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-commit code {
+  font: 11.5px "Fira Code", ui-monospace, monospace;
+  color: var(--color-text-muted);
+}
+
+.cm-commit:hover code,
+.cm-commit.on code {
+  color: var(--color-text);
+}
+
+.cm-commit span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-actrow {
+  cursor: default;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.cm-actrow:hover {
+  background: none;
+}
+
+/* Sticky: a long unpushed list scrolls under it instead of pushing Push out of view. */
+.cm-pushrow {
+  position: sticky;
+  bottom: 0;
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.cm-pushtext {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  min-height: 0;
+  margin-left: -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cm-pushtext:hover:not(:disabled) {
+  background: var(--color-surface);
+  color: var(--color-primary);
+}
+
+.cm-pushtext:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.cm-branchbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  min-height: 0;
+  margin-right: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: 12px "Fira Code", ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.cm-branchbtn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-branchbtn .ph-caret-up {
+  font-size: 10px;
+}
+
+.cm-branchbtn:hover,
+.cm-branchbtn.on {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-older-ic {
+  font-size: 11px;
+}
+
+/* A quiet trailing affordance, not a button - same row chrome as a commit. */
+.cm-older-trigger .ph-clock-counter-clockwise {
+  font-size: 12px;
+}
+
+.cm-giterr {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-danger);
+  white-space: pre-wrap;
+}
+
+/* The git card's branch list, opened upward from the push row. */
+.cm-bmenu {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 42px;
+  z-index: 6;
+  max-height: 60%;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.bs-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 2px 2px 4px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-background);
+  color: var(--color-text-muted);
+}
+
+.bs-search input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+

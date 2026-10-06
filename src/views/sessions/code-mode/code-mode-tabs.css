@@ -1,0 +1,164 @@
+/* ── tabs ─────────────────────────────────────────────────────────────── */
+
+.cm-tabs {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background);
+}
+
+.cm-tabrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-height: 0;
+  flex: none;
+  padding: 0 4px 0 10px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cm-tab:hover {
+  color: var(--color-text);
+}
+
+.cm-tab.on {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.cm-tab.cm-desc-tab {
+  padding-right: 10px;
+}
+
+.cm-tab .pr-file-status {
+  margin-right: 0;
+}
+
+/* 24px hit target around a small icon. */
+.cm-x {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.cm-x:hover {
+  background: var(--color-surface-alt);
+  opacity: 1;
+}
+
+.cm-tools {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.cm-files-back {
+  display: none;
+  align-self: center;
+}
+
+.cm-empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.cm-empty .ph {
+  font-size: 28px;
+  color: var(--color-primary);
+}
+
+.cm-desc {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ── right-click menu ─────────────────────────────────────────────────── */
+
+.cm-ctx {
+  position: fixed;
+  z-index: 2147483000;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.cm-ctx .cm-mi {
+  font-size: 12.5px;
+}
+
+/* ── phone: stacked screens ───────────────────────────────────────────── */
+
+.cm-phone .cm-modebar {
+  padding: 0 8px;
+}
+
+.cm-phone .cm-bc-title {
+  max-width: 40vw;
+}
+
+.cm-phone .cm-explorer {
+  width: 100%;
+  border-right: 0;
+}
+
+.cm-phone .cm-body[data-screen="explorer"] .cm-editor,
+.cm-phone .cm-body[data-screen="file"] .cm-explorer {
+  display: none;
+}
+
+.cm-phone .cm-files-back {
+  display: grid;
+}
+
+.cm-phone .cm-row {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  font-size: 14px;
+}
+
+.cm-phone .cm-commit {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+/* ── Code mode's own window (popout.ts) ───────────────────────────────── */
+
+.code-window-layout {
+  display: flex;
+  height: 100vh;
+}
