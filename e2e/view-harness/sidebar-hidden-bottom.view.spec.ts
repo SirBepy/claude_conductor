@@ -34,6 +34,17 @@ async function measure(page: Page) {
   });
 }
 
+/** Space left under the list's last row once scrolled to the end - the phone's
+ *  clearance for the floating new-chat button. */
+async function gapUnderLastRow(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const list = document.querySelector<HTMLElement>("#sessions-list")!;
+    list.scrollTop = list.scrollHeight;
+    const last = list.lastElementChild as HTMLElement;
+    return list.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+  });
+}
+
 test.describe("view-harness / sidebar Hidden group pinned to the bottom", () => {
   test("tall window: Hidden sits on the bottom edge, below Closing", async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 900 });
@@ -51,13 +62,7 @@ test.describe("view-harness / sidebar Hidden group pinned to the bottom", () => 
     await page.setViewportSize({ width: 390, height: 500 });
     await mountSessionsList(page, sessions(10).slice(0, 10));
     await expect(page.locator("#sessions-list li[data-session-id='s10']")).toBeAttached();
-    const gap = await page.evaluate(() => {
-      const list = document.querySelector<HTMLElement>("#sessions-list")!;
-      list.scrollTop = list.scrollHeight;
-      const last = list.querySelector<HTMLElement>("li[data-session-id='s10']")!;
-      return list.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
-    });
-    expect(gap).toBeGreaterThanOrEqual(83);
+    expect(await gapUnderLastRow(page)).toBeGreaterThanOrEqual(83);
   });
 
   test("phone width: a collapsed Hidden still sits on the bottom edge, like desktop", async ({ page }) => {
@@ -79,13 +84,7 @@ test.describe("view-harness / sidebar Hidden group pinned to the bottom", () => 
     await mountSessionsList(page, sessions(2));
     await expect(page.locator(`#sessions-list li[data-session-id='${HIDDEN_ID}']`)).toBeVisible();
 
-    const gap = await page.evaluate(() => {
-      const list = document.querySelector<HTMLElement>("#sessions-list")!;
-      list.scrollTop = list.scrollHeight;
-      const last = list.lastElementChild as HTMLElement;
-      return list.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
-    });
-    expect(gap).toBeGreaterThanOrEqual(83);
+    expect(await gapUnderLastRow(page)).toBeGreaterThanOrEqual(83);
   });
 
   test("desktop: no FAB, so no bottom clearance under Hidden", async ({ page }) => {
