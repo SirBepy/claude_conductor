@@ -30,6 +30,7 @@ use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 use crate::sessions::repo_channel;
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Resolves the calling session's own `project_id`, straight off the
@@ -77,8 +78,18 @@ pub(super) fn display_name(state: &Arc<DaemonState>, session_id: &str) -> String
 /// project (see `sessions::repo_channel::list_unread` for the cursor), not
 /// the full retained history - repeat calls don't redeliver the same note.
 pub(crate) fn read_messages(state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
+    read_messages_at(None, state, session_id)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `read_messages` above resolves through `repo_channel::list_unread` - the
+/// seam hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn read_messages_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    let messages = repo_channel::list_unread(&project_id, session_id);
+    let messages = match root {
+        Some(r) => repo_channel::list_unread_at(&repo_channel::channel_path(r, &project_id), session_id),
+        None => repo_channel::list_unread(&project_id, session_id),
+    };
     Ok(json!({"messages": messages}))
 }
 
@@ -90,8 +101,19 @@ pub(crate) fn read_messages(state: &Arc<DaemonState>, session_id: &str) -> Resul
 /// call from a passive UI surface without stealing a delivery from whichever
 /// session's own `read_messages` would otherwise have seen it exactly once.
 pub(crate) fn list_channel_messages(state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
+    list_channel_messages_at(None, state, session_id)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `list_channel_messages` above resolves through `repo_channel::list_all` -
+/// the seam hermetic tests use, same shape as
+/// `repo_channel::post_at`.
+pub(crate) fn list_channel_messages_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    let messages = repo_channel::list_all(&project_id);
+    let messages = match root {
+        Some(r) => repo_channel::list_at(&repo_channel::channel_path(r, &project_id)),
+        None => repo_channel::list_all(&project_id),
+    };
     Ok(json!({"messages": messages}))
 }
 
@@ -100,6 +122,20 @@ pub(crate) fn list_channel_messages(state: &Arc<DaemonState>, session_id: &str) 
 /// only those (see `repo_channel_wake::resolve_targets` for the security
 /// rule) - fire-and-forget, never blocks the caller's own turn on delivery.
 pub(crate) fn post_message(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    text: &str,
+    target: Option<&[String]>,
+) -> Result<Value, String> {
+    post_message_at(None, state, session_id, text, target)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `post_message` above resolves through `repo_channel::post` - the seam
+/// hermetic tests use, same shape as `repo_channel::post_at`
+/// itself.
+pub(crate) fn post_message_at(
+    root: Option<&Path>,
     state: &Arc<DaemonState>,
     session_id: &str,
     text: &str,
@@ -114,7 +150,10 @@ pub(crate) fn post_message(
     // Resolve BEFORE persisting: a rejected target used to still leave the text
     // in durable channel history, readable by every project member.
     let targets = repo_channel_wake::resolve_targets(state, session_id, target)?;
-    let msg = repo_channel::post(&project_id, session_id, &author, text, None);
+    let msg = match root {
+        Some(r) => repo_channel::post_at(Some(&repo_channel::channel_path(r, &project_id)), session_id, &author, text, None),
+        None => repo_channel::post(&project_id, session_id, &author, text, None),
+    };
 
     let mut notified = 0usize;
     for target_id in &targets {
@@ -154,8 +193,28 @@ pub(crate) async fn post_message_or_forward(
     target: Option<&[String]>,
     to: Option<&str>,
 ) -> Value {
+    post_message_or_forward_at(None, state, session_id, text, target, to).await
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root the
+/// local-delivery branch below resolves through `repo_channel::post` - the
+/// seam hermetic tests use. Not threaded into the cross-machine
+/// branch: that branch never writes locally, the receiving daemon's own
+/// `register_channel_rpc_at` resolves the write on its side.
+pub(crate) async fn post_message_or_forward_at(
+    root: Option<&Path>,
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    text: &str,
+    target: Option<&[String]>,
+    to: Option<&str>,
+) -> Value {
     let Some(to_id) = to.map(str::trim).filter(|s| !s.is_empty()) else {
-        return match post_message(state, session_id, text, target) {
+        let result = match root {
+            Some(r) => post_message_at(Some(r), state, session_id, text, target),
+            None => post_message(state, session_id, text, target),
+        };
+        return match result {
             Ok(v) => v,
             Err(e) => json!({"ok": false, "error": e}),
         };
@@ -179,7 +238,10 @@ pub(crate) async fn post_message_or_forward(
         if inst.ended_at.is_some() {
             return json!({"ok": false, "error": format!("target session has already ended: {to_id}")});
         }
-        let msg = repo_channel::post(&inst.project_id, session_id, &author, text, Some(to_id));
+        let msg = match root {
+            Some(r) => repo_channel::post_at(Some(&repo_channel::channel_path(r, &inst.project_id)), session_id, &author, text, Some(to_id)),
+            None => repo_channel::post(&inst.project_id, session_id, &author, text, Some(to_id)),
+        };
         repo_channel_wake::enqueue(state, to_id, session_id, msg.text.clone());
         repo_channel_wake::spawn_drain(state, to_id);
         return json!({"ok": true, "message": msg, "notified": 1, "delivered": true});
@@ -227,23 +289,40 @@ pub(crate) async fn post_message_or_forward(
 /// `params.from`'s `name` field's implied machine - a payload cannot forge
 /// which machine it claims to be from.
 pub fn register_channel_rpc(router: &mut Router, state: Arc<DaemonState>) {
+    register_channel_rpc_at(router, state, None)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root the
+/// two handlers below resolve through `repo_channel::list_all`/`post` - the
+/// seam a hermetic test needs to drive the actual REGISTERED closures through
+/// a real router dispatch, rather than a hand-rolled mirror that
+/// would stop exercising the security check (`ctx.transport`-derived label,
+/// never the payload's) these handlers exist to enforce.
+pub(crate) fn register_channel_rpc_at(router: &mut Router, state: Arc<DaemonState>, root: Option<PathBuf>) {
     // Desktop/phone UI read (todo 893), not peer-to-peer like
     // `peer_channel_post` below - `P` in `remote_transport_table` because the
     // peer-chip panel renders in the same shared SPA on both surfaces.
     router.register("list_channel_messages", {
         let state = state.clone();
+        let root = root.clone();
         move |params, _ctx| {
             let state = state.clone();
+            let root = root.clone();
             async move {
                 let p = params.unwrap_or(Value::Null);
                 let session_id = p.get("session_id").and_then(Value::as_str).unwrap_or_default();
-                list_channel_messages(&state, session_id).map_err(RpcError::invalid_params)
+                let result = match &root {
+                    Some(r) => list_channel_messages_at(Some(r), &state, session_id),
+                    None => list_channel_messages(&state, session_id),
+                };
+                result.map_err(RpcError::invalid_params)
             }
         }
     });
 
     router.register("peer_channel_post", move |params, ctx| {
         let state = state.clone();
+        let root = root.clone();
         async move {
             let p = params.unwrap_or(Value::Null);
             let to_id = p.get("to_session_id").and_then(Value::as_str).unwrap_or_default();
@@ -271,7 +350,10 @@ pub fn register_channel_rpc(router: &mut Router, state: Arc<DaemonState>) {
                 return Err(RpcError::invalid_params(format!("target session has already ended: {to_id}")));
             }
             let author = format!("{from_name} @ {label}");
-            let msg = repo_channel::post(&inst.project_id, from_session_id, &author, text, Some(to_id));
+            let msg = match &root {
+                Some(r) => repo_channel::post_at(Some(&repo_channel::channel_path(r, &inst.project_id)), from_session_id, &author, text, Some(to_id)),
+                None => repo_channel::post(&inst.project_id, from_session_id, &author, text, Some(to_id)),
+            };
             repo_channel_wake::enqueue(&state, to_id, from_session_id, msg.text.clone());
             repo_channel_wake::spawn_drain(&state, to_id);
             Ok(json!({"ok": true, "message": msg}))
@@ -290,49 +372,21 @@ mod tests {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
     }
 
-    /// Test-only mirror of `post_message`'s wiring with `repo_channel::post_at`
-    /// substituted for `repo_channel::post`, so notify/deliver bookkeeping is
-    /// exercised against a tempdir instead of real app data (todo 757), same
-    /// as the retitle test below.
-    fn post_message_at(
-        state: &Arc<DaemonState>,
-        session_id: &str,
-        text: &str,
-        target: Option<&[String]>,
-        path: &std::path::Path,
-    ) -> Result<Value, String> {
-        let author = display_name(state, session_id);
-        let targets = repo_channel_wake::resolve_targets(state, session_id, target)?;
-        let msg = repo_channel::post_at(Some(path), session_id, &author, text, None);
-
-        let mut notified = 0usize;
-        for target_id in &targets {
-            repo_channel_wake::enqueue(state, target_id, session_id, msg.text.clone());
-            repo_channel_wake::spawn_drain(state, target_id);
-            notified += 1;
-        }
-        Ok(json!({
-            "ok": true,
-            "message": msg,
-            "notified": notified,
-            "delivered": notified > 0,
-        }))
-    }
-
     #[test]
     fn list_channel_messages_returns_every_authors_post_without_advancing_any_cursor() {
-        // Real (non-tempdir) app data, randomized project id so repeated
-        // `cargo test` runs on this machine never collide - same tradeoff
-        // `register_channel_rpc`'s own cross-machine test documents.
+        // Tempdir root, injected via `list_channel_messages_at`/`post_at`:
+        // this test's own writes never touch real app data.
         let state = test_state();
-        let project_id = format!("proj-893-{}", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let project_id = "proj-893".to_string();
+        let path = repo_channel::channel_path(dir.path(), &project_id);
         state.registry.upsert_interactive("s1", std::path::Path::new("."), &project_id, "2026-10-01T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), &project_id, "2026-10-01T00:00:00Z");
 
-        repo_channel::post(&project_id, "s1", "Alice", "touching foo.rs", None);
-        repo_channel::post(&project_id, "s2", "Bob", "touching bar.rs", None);
+        repo_channel::post_at(Some(&path), "s1", "Alice", "touching foo.rs", None);
+        repo_channel::post_at(Some(&path), "s2", "Bob", "touching bar.rs", None);
 
-        let v = list_channel_messages(&state, "s1").unwrap();
+        let v = list_channel_messages_at(Some(dir.path()), &state, "s1").unwrap();
         let messages = v["messages"].as_array().expect("messages array");
         assert_eq!(messages.len(), 2, "sees every author's post, including the caller's own");
         assert_eq!(messages[0]["text"], "touching foo.rs");
@@ -340,7 +394,7 @@ mod tests {
 
         // Unlike read_messages/list_unread, this read must never advance a
         // cursor: s2's own unread list still has Alice's post waiting.
-        let unread = repo_channel::list_unread(&project_id, "s2");
+        let unread = repo_channel::list_unread_at(&path, "s2");
         assert_eq!(unread.len(), 1, "s2's read_messages cursor must be untouched by the UI read");
         assert_eq!(unread[0].text, "touching foo.rs");
     }
@@ -427,13 +481,12 @@ mod tests {
         // happens synchronously, before that task is ever dispatched.
         let state = test_state();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("proj-1.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.set_busy("s2", true);
 
         let long = "x".repeat(3000); // exceeds repo_channel::MAX_TEXT_LEN (2000)
-        let v = post_message_at(&state, "s1", &long, None, &path).unwrap();
+        let v = post_message_at(Some(dir.path()), &state, "s1", &long, None).unwrap();
         assert_eq!(v["notified"], 1);
 
         let queues = state.repo_channel_wakes.lock().unwrap();
@@ -449,12 +502,11 @@ mod tests {
         // `"[repo-channel] {author}: "` text a receiving hook could misparse.
         let state = test_state();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("proj-743.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-743", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-743", "2026-07-30T00:00:00Z");
         state.registry.set_busy("s2", true);
 
-        post_message_at(&state, "s1", "touching pump.rs, anyone on this?", None, &path).unwrap();
+        post_message_at(Some(dir.path()), &state, "s1", "touching pump.rs, anyone on this?", None).unwrap();
 
         let queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.get("s2").expect("wake queued for s2");
@@ -470,12 +522,11 @@ mod tests {
         // with "no reactor running").
         let state = test_state();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("proj-1.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-2", "2026-07-30T00:00:00Z");
 
-        let v = post_message_at(&state, "s1", "touching pending-pane.ts, anyone on this?", None, &path).unwrap();
+        let v = post_message_at(Some(dir.path()), &state, "s1", "touching pending-pane.ts, anyone on this?", None).unwrap();
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1, "only s2 shares proj-1 with the poster");
         assert_eq!(v["delivered"], true);
@@ -485,10 +536,9 @@ mod tests {
     async fn post_message_to_an_empty_project_reports_not_delivered() {
         let state = test_state();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("proj-lonely.json");
         state.registry.upsert_interactive("lonely", std::path::Path::new("."), "proj-lonely", "2026-07-30T00:00:00Z");
 
-        let v = post_message_at(&state, "lonely", "anyone here?", None, &path).unwrap();
+        let v = post_message_at(Some(dir.path()), &state, "lonely", "anyone here?", None).unwrap();
         assert_eq!(v["notified"], 0);
         assert_eq!(
             v["delivered"], false,
@@ -500,13 +550,12 @@ mod tests {
     async fn post_message_with_a_target_wakes_only_that_peer() {
         let state = test_state();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("proj-1.json");
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
 
         let target = vec!["s3".to_string()];
-        let v = post_message_at(&state, "s1", "for s3 only", Some(&target), &path).unwrap();
+        let v = post_message_at(Some(dir.path()), &state, "s1", "for s3 only", Some(&target)).unwrap();
         assert_eq!(v["notified"], 1);
 
         let queues = state.repo_channel_wakes.lock().unwrap();
@@ -539,7 +588,7 @@ mod tests {
 
         let before = repo_channel::list_at(&path).len();
         let target = vec!["typo".to_string()];
-        let r = post_message_at(&state, "g1", "secret coordination note", Some(&target), &path);
+        let r = post_message_at(Some(dir.path()), &state, "g1", "secret coordination note", Some(&target));
         assert!(r.is_err(), "an unknown target must fail the call");
 
         // Persisting before validating leaked the text into durable history that
@@ -596,19 +645,21 @@ mod tests {
     #[tokio::test]
     async fn post_message_or_forward_without_to_delegates_to_the_broadcast_path() {
         let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
-        let v = post_message_or_forward(&state, "s1", "hello", None, None).await;
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "s1", "hello", None, None).await;
         assert_eq!(v["ok"], true);
     }
 
     #[tokio::test]
     async fn post_message_or_forward_delivers_a_local_direct_message() {
         let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
 
-        let v = post_message_or_forward(&state, "s1", "just for s2", None, Some("s2")).await;
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "s1", "just for s2", None, Some("s2")).await;
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1);
 
@@ -619,23 +670,22 @@ mod tests {
 
     #[tokio::test]
     async fn post_message_or_forward_direct_message_is_invisible_to_other_readers() {
-        // A random, not merely a distinct fixed, project id: `post_message_or_forward`
-        // goes through `repo_channel::post`'s real (non-tempdir) disk path
-        // (todo 757), and this test reads the backlog back via
-        // `read_messages` - a fixed id would accumulate leftover messages
-        // both from other tests here AND across repeated `cargo test` runs
-        // on the same machine.
+        // Tempdir root, injected via `post_message_or_forward_at`/`read_messages_at`:
+        // this test's own writes never touch real app data, so
+        // the project id no longer needs a random suffix to dodge collisions
+        // with other tests or earlier runs.
         let state = test_state();
-        let project = format!("proj-direct-msg-{}", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let project = "proj-direct-msg".to_string();
         state.registry.upsert_interactive("s1", std::path::Path::new("."), &project, "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), &project, "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s3", std::path::Path::new("."), &project, "2026-07-30T00:00:00Z");
 
-        post_message_or_forward(&state, "s1", "just for s2", None, Some("s2")).await;
+        post_message_or_forward_at(Some(dir.path()), &state, "s1", "just for s2", None, Some("s2")).await;
 
-        let for_s2 = read_messages(&state, "s2").unwrap();
+        let for_s2 = read_messages_at(Some(dir.path()), &state, "s2").unwrap();
         assert_eq!(for_s2["messages"].as_array().unwrap().len(), 1, "addressee must see it");
-        let for_s3 = read_messages(&state, "s3").unwrap();
+        let for_s3 = read_messages_at(Some(dir.path()), &state, "s3").unwrap();
         assert_eq!(for_s3["messages"].as_array().unwrap().len(), 0, "an unaddressed peer must not see it");
     }
 
@@ -696,11 +746,15 @@ mod tests {
 
         let a_dir = tempfile::tempdir().unwrap();
         let b_dir = tempfile::tempdir().unwrap();
+        // Separate from `b_dir` (B's machines/device-registry app-data root
+        // above): the channel-root seam below is scoped to repo-channels
+        // files only, not app-data as a whole.
+        let b_channel_dir = tempfile::tempdir().unwrap();
         let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
 
         let mut b_router = Router::new();
-        register_channel_rpc(&mut b_router, b_state.clone());
+        register_channel_rpc_at(&mut b_router, b_state.clone(), Some(b_channel_dir.path().to_path_buf()));
         let (_a_stt, _a_port, a_serve) =
             crate::daemon::remote_server::spawn_on(a_state.clone(), a_dir.path().to_path_buf(), Router::new(), 0);
         let (_b_stt, b_port, b_serve) =
@@ -710,12 +764,10 @@ mod tests {
         b_state.machines.get().unwrap().set_label("B");
         let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
 
-        // Random suffix, not a fixed "proj-b": this test reads the backlog
-        // back via `read_messages` against real (non-tempdir) disk (todo
-        // 757), so a fixed id would accumulate messages across repeated
-        // `cargo test` runs on the same machine, not just other tests in
-        // this same process.
-        let project_b = format!("proj-b-{}", uuid::Uuid::new_v4());
+        // A fixed id is safe now: `register_channel_rpc_at`'s injected
+        // `b_channel_dir` tempdir isolates this run's writes, so there is
+        // nothing left to collide with.
+        let project_b = "proj-b".to_string();
         b_state.registry.upsert_interactive("b-session-1", std::path::Path::new("."), &project_b, "2026-09-05T00:00:00Z");
 
         let (token_for_a, _device_id) = DeviceRegistry::add_machine_device("A", &a_id, b_dir.path()).unwrap();
@@ -756,7 +808,7 @@ mod tests {
         let v = post_message_or_forward(&a_state, "a-session-1", "ping from A", None, Some("b-session-1")).await;
         assert_eq!(v["ok"], true, "forward must succeed: {v:?}");
 
-        let for_recipient = read_messages(&b_state, "b-session-1").unwrap();
+        let for_recipient = read_messages_at(Some(b_channel_dir.path()), &b_state, "b-session-1").unwrap();
         let messages = for_recipient["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["text"], "ping from A");
@@ -792,15 +844,14 @@ mod tests {
             reverse_device_id: None,
             added_at: 0,
         });
-        // A random project id (see `post_message_or_forward_direct_message_is_invisible_to_other_readers`'s
-        // comment): this test reads the backlog back via `read_messages`, so
-        // a fixed id would pick up leftover messages from other tests AND
-        // from this same test's own prior runs.
-        let project = format!("proj-peer-spoof-{}", uuid::Uuid::new_v4());
+        // A fixed id is safe: `register_channel_rpc_at`'s injected tempdir
+        // below isolates this run's writes.
+        let dir = tempfile::tempdir().unwrap();
+        let project = "proj-peer-spoof".to_string();
         state.registry.upsert_interactive("recipient", std::path::Path::new("."), &project, "2026-09-05T00:00:00Z");
 
         let mut router = Router::new();
-        register_channel_rpc(&mut router, state.clone());
+        register_channel_rpc_at(&mut router, state.clone(), Some(dir.path().to_path_buf()));
 
         let req = Request {
             jsonrpc: "2.0".into(),
@@ -820,7 +871,7 @@ mod tests {
             .await;
         assert!(resp.error.is_none(), "expected success, got {:?}", resp.error);
 
-        let stored = read_messages(&state, "recipient").unwrap();
+        let stored = read_messages_at(Some(dir.path()), &state, "recipient").unwrap();
         let author = stored["messages"][0]["author"].as_str().unwrap();
         assert!(author.ends_with("@ Real Peer"), "must use the REAL registry label: {author}");
         assert!(!author.contains("TOTALLY NOT REAL PEER"), "payload's claimed label must never win: {author}");

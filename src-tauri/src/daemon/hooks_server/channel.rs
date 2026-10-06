@@ -122,17 +122,21 @@ mod tests {
 
     #[tokio::test]
     async fn post_message_route_with_a_to_delivers_a_direct_message() {
+        // Drives `post_message_or_forward_at` directly, with a tempdir root,
+        // rather than through `on_post_message`: that handler
+        // calls the real-app-data `post_message_or_forward` with no path
+        // seam of its own, since it is the production axum route the actual
+        // app serves. The HTTP body's `(session_id, text, target, to)` shape
+        // is the only thing `on_post_message` adds over the method it calls,
+        // and `post_message_route_errors_for_empty_text` above already
+        // exercises that extraction.
         let c = ctx();
+        let dir = tempfile::tempdir().unwrap();
         c.state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         c.state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
-        let body = PostMessageBody {
-            session_id: "s1".to_string(),
-            text: "hi".to_string(),
-            target: None,
-            to: Some("s2".to_string()),
-        };
-        let resp = on_post_message(AxState(c), ValidatedJson(body)).await.into_response();
-        let v = body_json(resp).await;
+        let v =
+            channel_methods::post_message_or_forward_at(Some(dir.path()), &c.state, "s1", "hi", None, Some("s2"))
+                .await;
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1);
     }

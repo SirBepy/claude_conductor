@@ -67,6 +67,16 @@ fn store_path_for(project_id: &str) -> Option<PathBuf> {
     Some(store_dir()?.join(crate::util::project_store_file_name(project_id)))
 }
 
+/// Joins an explicit `root` with `project_id`'s on-disk file name, the same
+/// sanitization `store_path_for` applies against the real `data_dir()`.
+/// `daemon::methods::channel`'s own `*_at` seam uses this to substitute a
+/// `tempfile::tempdir()` root for the real app-data root, so its hermetic
+/// tests resolve to the identical path shape production code builds under
+/// `store_dir()`.
+pub(crate) fn channel_path(root: &Path, project_id: &str) -> PathBuf {
+    root.join(crate::util::project_store_file_name(project_id))
+}
+
 fn load(path: &Path) -> Vec<ChannelMessage> {
     std::fs::read_to_string(path)
         .ok()
