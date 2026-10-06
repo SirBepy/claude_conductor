@@ -183,6 +183,21 @@ describe("global stream on resume", () => {
     unlisten();
   });
 
+  it("dials once when resume and the network coming back land together", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    const unlisten = await new HttpTransport().listen("instances-changed", () => {});
+    sockets[0].onopen();
+    sockets[0].onclose();
+    // The phone slept: the wall clock moved on, no timer ran.
+    vi.setSystemTime(Date.now() + 60_000);
+    reconnectGlobalStreamIfStale();
+    reconnectGlobalStreamIfStale();
+    expect(sockets).toHaveLength(2);
+    expect(sockets[1].close).not.toHaveBeenCalled();
+    unlisten();
+  });
+
   it("leaves a fresh, live socket alone", async () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });

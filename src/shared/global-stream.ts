@@ -220,6 +220,9 @@ export function reconnectGlobalStreamIfStale(): void {
     try { dead.close(); } catch { /* ignore */ }
   }
   globalWs = null;
+  // Counts the fresh socket as live until the watchdog says otherwise, so a
+  // visibilitychange and an `online` landing in the same tick dial once.
+  globalLastFrameAt = Date.now();
   connectGlobalStream();
 }
 
