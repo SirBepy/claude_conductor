@@ -6,6 +6,7 @@ use crate::daemon::methods::channel::caller_project;
 use crate::daemon::methods::injection_util::{append_capped, short};
 use crate::daemon::state::DaemonState;
 use crate::sessions::message_drafts::{self as store, DraftState, MessageDraft};
+use std::path::Path;
 use std::sync::Arc;
 
 /// Hard ceiling on injected cards: this text is rebuilt every turn.
@@ -34,8 +35,18 @@ fn open_line(d: &MessageDraft) -> String {
 /// `mark_seen` runs in the same daemon call, so an edit is reported exactly
 /// once.
 pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+    render_for_injection_at(None, state, session_id)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `render_for_injection` above resolves through `store::list` - the seam
+/// hermetic tests use, same shape as `repo_channel::channel_path`.
+pub(crate) fn render_for_injection_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
     let project_id = caller_project(state, session_id).ok()?;
-    let drafts = store::list(&project_id);
+    let drafts = match root {
+        Some(r) => store::list_at(&store::draft_path(r, &project_id)),
+        None => store::list(&project_id),
+    };
 
     // Own chat only (Joe 2026-09-26). The store stays project-wide and the
     // panel still lists every card, but this block is rebuilt every single
@@ -109,7 +120,7 @@ pub(crate) fn mark_drafts_seen(state: &Arc<DaemonState>, session_id: &str) -> us
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::methods::drafts_store::write_draft;
+    use crate::daemon::methods::drafts_store::write_draft_at;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::sessions::message_drafts::{DraftAuthor, DraftVariant, DraftVersion};
@@ -174,48 +185,51 @@ mod tests {
 
     /// Two sessions in one project, one draft each: `render_for_injection`
     /// scopes the Open list to the caller's own chat (todo 984, pins
-    /// `b896fbaa`'s `d.origin_session_id == session_id` clause). Fresh uuids
-    /// for session and project ids per
-    /// `project_lib_tests_shared_static_session_ids_collide` - the store
-    /// writes real on-disk state under `<app-data>/message-drafts/<project_id>.json`.
-    fn two_sessions_one_project() -> (Arc<DaemonState>, String, String, String) {
+    /// `b896fbaa`'s `d.origin_session_id == session_id` clause). Tempdir
+    /// root, injected via `write_draft_at`/`render_for_injection_at`, keeps
+    /// the writes out of real app data; it rides along as the 5th element
+    /// because it must outlive the returned tuple.
+    fn two_sessions_one_project() -> (Arc<DaemonState>, String, String, String, tempfile::TempDir) {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        let project_id = format!("proj-inject-scope-{}", uuid::Uuid::new_v4());
-        let s1 = format!("s1-{}", uuid::Uuid::new_v4());
-        let s2 = format!("s2-{}", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let project_id = "proj-inject-scope".to_string();
+        let s1 = "s1".to_string();
+        let s2 = "s2".to_string();
         state.registry.upsert_interactive(&s1, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
         state.registry.upsert_interactive(&s2, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
-        write_draft(
+        write_draft_at(
+            Some(dir.path()),
             &state,
             &s1,
             "add",
             &json!({"topic": "s1 topic", "recipient": "Bruno", "body": "hi from s1"}),
         )
         .expect("s1 can write a draft");
-        write_draft(
+        write_draft_at(
+            Some(dir.path()),
             &state,
             &s2,
             "add",
             &json!({"topic": "s2 topic", "recipient": "Ana", "body": "hi from s2"}),
         )
         .expect("s2 can write a draft");
-        (state, project_id, s1, s2)
+        (state, project_id, s1, s2, dir)
     }
 
     #[test]
     fn render_for_injection_only_lists_the_callers_own_open_draft() {
-        let (state, _project_id, s1, _s2) = two_sessions_one_project();
+        let (state, _project_id, s1, _s2, dir) = two_sessions_one_project();
 
-        let block = render_for_injection(&state, &s1).expect("s1 wrote an open draft");
+        let block = render_for_injection_at(Some(dir.path()), &state, &s1).expect("s1 wrote an open draft");
         assert!(block.contains("s1 topic"), "got {block}");
         assert!(!block.contains("s2 topic"), "got {block}");
     }
 
     #[test]
     fn render_for_injection_is_symmetric_for_the_other_session() {
-        let (state, _project_id, _s1, s2) = two_sessions_one_project();
+        let (state, _project_id, _s1, s2, dir) = two_sessions_one_project();
 
-        let block = render_for_injection(&state, &s2).expect("s2 wrote an open draft");
+        let block = render_for_injection_at(Some(dir.path()), &state, &s2).expect("s2 wrote an open draft");
         assert!(block.contains("s2 topic"), "got {block}");
         assert!(!block.contains("s1 topic"), "got {block}");
     }
@@ -223,12 +237,14 @@ mod tests {
     #[test]
     fn a_session_with_no_drafts_of_its_own_gets_no_block_even_with_a_peer_open_one() {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        let project_id = format!("proj-inject-scope-{}", uuid::Uuid::new_v4());
-        let author = format!("author-{}", uuid::Uuid::new_v4());
-        let bystander = format!("bystander-{}", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let project_id = "proj-inject-scope-bystander".to_string();
+        let author = "author".to_string();
+        let bystander = "bystander".to_string();
         state.registry.upsert_interactive(&author, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
         state.registry.upsert_interactive(&bystander, std::path::Path::new("."), &project_id, "2026-08-26T00:00:00Z");
-        write_draft(
+        write_draft_at(
+            Some(dir.path()),
             &state,
             &author,
             "add",
@@ -237,7 +253,7 @@ mod tests {
         .expect("author can write a draft");
 
         assert!(
-            render_for_injection(&state, &bystander).is_none(),
+            render_for_injection_at(Some(dir.path()), &state, &bystander).is_none(),
             "a chat that never wrote a draft must get no block, not an empty one"
         );
     }

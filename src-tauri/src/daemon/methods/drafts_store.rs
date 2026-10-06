@@ -13,8 +13,9 @@ pub use routes::register_drafts_store;
 
 use super::channel::{caller_project, display_name};
 use crate::daemon::state::DaemonState;
-use crate::sessions::message_drafts::{self as store, DraftReceipt, DraftState};
+use crate::sessions::message_drafts::{self as store, DraftReceipt, DraftState, MessageDraft};
 use serde_json::{json, Value};
+use std::path::Path;
 use std::sync::Arc;
 
 pub(super) fn publish_changed(state: &Arc<DaemonState>, project_id: &str) {
@@ -30,14 +31,24 @@ fn parse_state(s: &str) -> Result<DraftState, String> {
     }
 }
 
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `resolve_id`/`recipient_from` below resolve through `store::list` - the
+/// seam hermetic tests use, same shape as `repo_channel::channel_path`.
+fn list_for(root: Option<&Path>, project_id: &str) -> Vec<MessageDraft> {
+    match root {
+        Some(r) => store::list_at(&store::draft_path(r, project_id)),
+        None => store::list(project_id),
+    }
+}
+
 /// Accepts a full uuid, an unambiguous uuid prefix, or a handle like
 /// "Bruno #2" - the id the injected block actually hands the model.
-fn resolve_id(project_id: &str, id: &str) -> Result<String, String> {
+fn resolve_id(root: Option<&Path>, project_id: &str, id: &str) -> Result<String, String> {
     let id = id.trim();
     if id.is_empty() {
         return Err("id is required".to_string());
     }
-    let drafts = store::list(project_id);
+    let drafts = list_for(root, project_id);
     if let Some(d) = drafts.iter().find(|d| d.id == id) {
         return Ok(d.id.clone());
     }
@@ -58,12 +69,12 @@ fn resolve_id(project_id: &str, id: &str) -> Result<String, String> {
 
 /// A handle also names WHICH variant, so "Bruno #2" resolves the recipient too
 /// and the caller never has to pass it twice.
-fn recipient_from(project_id: &str, id: &str, recipient: &str) -> String {
+fn recipient_from(root: Option<&Path>, project_id: &str, id: &str, recipient: &str) -> String {
     if !recipient.trim().is_empty() {
         return recipient.to_string();
     }
     let wanted = id.trim().to_lowercase();
-    for d in store::list(project_id) {
+    for d in list_for(root, project_id) {
         for v in &d.variants {
             if store::handle_of(v).to_lowercase() == wanted {
                 return v.recipient.clone();
@@ -89,12 +100,27 @@ fn receipts_from(value: Option<&Value>) -> Vec<DraftReceipt> {
 }
 
 pub(crate) fn list_message_drafts(state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
+    list_message_drafts_at(None, state, session_id)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `list_message_drafts` above resolves through `store::list` - the seam
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn list_message_drafts_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    Ok(json!({"drafts": store::list(&project_id)}))
+    Ok(json!({"drafts": list_for(root, &project_id)}))
 }
 
 /// The single `write_draft` MCP tool's four actions.
-pub(crate) fn write_draft(
+pub(crate) fn write_draft(state: &Arc<DaemonState>, session_id: &str, action: &str, args: &Value) -> Result<Value, String> {
+    write_draft_at(None, state, session_id, action, args)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root each
+/// action below resolves through `store::add`/`revise`/`add_variant`/`remove`
+/// - the seam hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn write_draft_at(
+    root: Option<&Path>,
     state: &Arc<DaemonState>,
     session_id: &str,
     action: &str,
@@ -119,38 +145,48 @@ pub(crate) fn write_draft(
                 return Err("body is required to add a draft".to_string());
             }
             let label = display_name(state, session_id);
-            store::add(
-                &project_id,
-                store::NewDraft {
-                    topic: &topic,
-                    recipient: &recipient,
-                    body: &body,
-                    brief: &s("brief"),
-                    receipts: receipts_from(args.get("receipts")),
-                    origin_session_id: session_id,
-                    origin_label: &label,
-                },
-            )
-            .ok_or_else(|| "no data dir to write drafts into".to_string())?
+            let new = store::NewDraft {
+                topic: &topic,
+                recipient: &recipient,
+                body: &body,
+                brief: &s("brief"),
+                receipts: receipts_from(args.get("receipts")),
+                origin_session_id: session_id,
+                origin_label: &label,
+            };
+            let added = match root {
+                Some(r) => store::add_at(&store::draft_path(r, &project_id), new),
+                None => store::add(&project_id, new),
+            };
+            added.ok_or_else(|| "no data dir to write drafts into".to_string())?
         }
         "revise" => {
             if body.trim().is_empty() {
                 return Err("body is required to revise a draft".to_string());
             }
-            let who = recipient_from(&project_id, &id, &recipient);
-            let full = resolve_id(&project_id, &id)?;
-            store::revise(&project_id, &full, &who, &body, &s("note"))?
+            let who = recipient_from(root, &project_id, &id, &recipient);
+            let full = resolve_id(root, &project_id, &id)?;
+            match root {
+                Some(r) => store::revise_at(&store::draft_path(r, &project_id), &full, &who, &body, &s("note"))?,
+                None => store::revise(&project_id, &full, &who, &body, &s("note"))?,
+            }
         }
         "variant" => {
             if body.trim().is_empty() {
                 return Err("body is required to add a variant".to_string());
             }
-            let full = resolve_id(&project_id, &id)?;
-            store::add_variant(&project_id, &full, &recipient, &body)?
+            let full = resolve_id(root, &project_id, &id)?;
+            match root {
+                Some(r) => store::add_variant_at(&store::draft_path(r, &project_id), &full, &recipient, &body)?,
+                None => store::add_variant(&project_id, &full, &recipient, &body)?,
+            }
         }
         "drop" => {
-            let full = resolve_id(&project_id, &id)?;
-            store::remove(&project_id, &full)?;
+            let full = resolve_id(root, &project_id, &id)?;
+            match root {
+                Some(r) => store::remove_at(&store::draft_path(r, &project_id), &full)?,
+                None => store::remove(&project_id, &full)?,
+            };
             publish_changed(state, &project_id);
             return Ok(json!({"ok": true, "dropped": full}));
         }
@@ -162,7 +198,15 @@ pub(crate) fn write_draft(
 
 /// The user's own edit from the panel. Appends a version rather than
 /// overwriting, and clears `seen_by_origin` so the next turn is told.
-pub(crate) fn set_draft_body(
+pub(crate) fn set_draft_body(state: &Arc<DaemonState>, session_id: &str, id: &str, recipient: &str, body: &str) -> Result<Value, String> {
+    set_draft_body_at(None, state, session_id, id, recipient, body)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `set_draft_body` above resolves through `store::set_body` - the seam
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn set_draft_body_at(
+    root: Option<&Path>,
     state: &Arc<DaemonState>,
     session_id: &str,
     id: &str,
@@ -170,13 +214,24 @@ pub(crate) fn set_draft_body(
     body: &str,
 ) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    let full = resolve_id(&project_id, id)?;
-    let draft = store::set_body(&project_id, &full, recipient, body)?;
+    let full = resolve_id(root, &project_id, id)?;
+    let draft = match root {
+        Some(r) => store::set_body_at(&store::draft_path(r, &project_id), &full, recipient, body)?,
+        None => store::set_body(&project_id, &full, recipient, body)?,
+    };
     publish_changed(state, &project_id);
     Ok(json!({"ok": true, "draft": draft}))
 }
 
-pub(crate) fn set_draft_version(
+pub(crate) fn set_draft_version(state: &Arc<DaemonState>, session_id: &str, id: &str, recipient: &str, n: u32) -> Result<Value, String> {
+    set_draft_version_at(None, state, session_id, id, recipient, n)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `set_draft_version` above resolves through `store::set_current_version` -
+/// the seam hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn set_draft_version_at(
+    root: Option<&Path>,
     state: &Arc<DaemonState>,
     session_id: &str,
     id: &str,
@@ -184,13 +239,24 @@ pub(crate) fn set_draft_version(
     n: u32,
 ) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    let full = resolve_id(&project_id, id)?;
-    let draft = store::set_current_version(&project_id, &full, recipient, n)?;
+    let full = resolve_id(root, &project_id, id)?;
+    let draft = match root {
+        Some(r) => store::set_current_version_at(&store::draft_path(r, &project_id), &full, recipient, n)?,
+        None => store::set_current_version(&project_id, &full, recipient, n)?,
+    };
     publish_changed(state, &project_id);
     Ok(json!({"ok": true, "draft": draft}))
 }
 
-pub(crate) fn set_draft_state(
+pub(crate) fn set_draft_state(state: &Arc<DaemonState>, session_id: &str, id: &str, next: &str) -> Result<Value, String> {
+    set_draft_state_at(None, state, session_id, id, next)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `set_draft_state` above resolves through `store::set_state` - the seam
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn set_draft_state_at(
+    root: Option<&Path>,
     state: &Arc<DaemonState>,
     session_id: &str,
     id: &str,
@@ -198,16 +264,29 @@ pub(crate) fn set_draft_state(
 ) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
     let next = parse_state(next)?;
-    let full = resolve_id(&project_id, id)?;
-    let draft = store::set_state(&project_id, &full, next)?;
+    let full = resolve_id(root, &project_id, id)?;
+    let draft = match root {
+        Some(r) => store::set_state_at(&store::draft_path(r, &project_id), &full, next)?,
+        None => store::set_state(&project_id, &full, next)?,
+    };
     publish_changed(state, &project_id);
     Ok(json!({"ok": true, "draft": draft}))
 }
 
 pub(crate) fn delete_draft(state: &Arc<DaemonState>, session_id: &str, id: &str) -> Result<Value, String> {
+    delete_draft_at(None, state, session_id, id)
+}
+
+/// `root: Some(path)` substitutes a tempdir for the real app-data root
+/// `delete_draft` above resolves through `store::remove` - the seam hermetic
+/// tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn delete_draft_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str, id: &str) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    let full = resolve_id(&project_id, id)?;
-    let removed = store::remove(&project_id, &full)?;
+    let full = resolve_id(root, &project_id, id)?;
+    let removed = match root {
+        Some(r) => store::remove_at(&store::draft_path(r, &project_id), &full)?,
+        None => store::remove(&project_id, &full)?,
+    };
     if removed {
         publish_changed(state, &project_id);
     }

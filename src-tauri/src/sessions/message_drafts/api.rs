@@ -43,9 +43,15 @@ fn push_version(variant: &mut DraftVariant, body: &str, author: DraftAuthor, not
 /// with no file yet.
 pub fn list(project_id: &str) -> Vec<MessageDraft> {
     match store_path_for(project_id) {
-        Some(path) => load(&path).drafts,
+        Some(path) => list_at(&path),
         None => Vec::new(),
     }
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::list_at`.
+pub(crate) fn list_at(path: &Path) -> Vec<MessageDraft> {
+    load(path).drafts
 }
 
 pub struct NewDraft<'a> {
@@ -63,7 +69,9 @@ pub fn add(project_id: &str, new: NewDraft<'_>) -> Option<MessageDraft> {
     add_at(&path, new)
 }
 
-fn add_at(path: &Path, new: NewDraft<'_>) -> Option<MessageDraft> {
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn add_at(path: &Path, new: NewDraft<'_>) -> Option<MessageDraft> {
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut store = load(path);
     let handle_n = allocate_handle(&mut store, new.recipient);
@@ -125,18 +133,16 @@ fn mutate_at(
     Ok(updated)
 }
 
-fn mutate(
-    project_id: &str,
-    id: &str,
-    f: impl FnOnce(&mut MessageDraft, &mut BTreeMap<String, u32>) -> Result<(), String>,
-) -> Result<MessageDraft, String> {
-    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
-    mutate_at(&path, id, f)
-}
-
 /// A new AI version on an existing variant.
 pub fn revise(project_id: &str, id: &str, recipient: &str, body: &str, note: &str) -> Result<MessageDraft, String> {
-    mutate(project_id, id, |d, _| {
+    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
+    revise_at(&path, id, recipient, body, note)
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn revise_at(path: &Path, id: &str, recipient: &str, body: &str, note: &str) -> Result<MessageDraft, String> {
+    mutate_at(path, id, |d, _| {
         let i = variant_index(d, recipient)?;
         push_version(&mut d.variants[i], body, DraftAuthor::Ai, note);
         d.state = DraftState::NeedsYou;
@@ -146,10 +152,17 @@ pub fn revise(project_id: &str, id: &str, recipient: &str, body: &str, note: &st
 
 /// A second recipient for the same topic: same card, its own version track.
 pub fn add_variant(project_id: &str, id: &str, recipient: &str, body: &str) -> Result<MessageDraft, String> {
+    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
+    add_variant_at(&path, id, recipient, body)
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn add_variant_at(path: &Path, id: &str, recipient: &str, body: &str) -> Result<MessageDraft, String> {
     if recipient.trim().is_empty() {
         return Err("recipient is required to add a variant".to_string());
     }
-    mutate(project_id, id, |d, handles| {
+    mutate_at(path, id, |d, handles| {
         if variant_index(d, recipient).is_ok() {
             return Err(format!("draft already has a variant for {recipient}"));
         }
@@ -173,7 +186,14 @@ pub fn add_variant(project_id: &str, id: &str, recipient: &str, body: &str) -> R
 /// appending one per autosave, so the version list stays one entry per
 /// divergence from an AI version instead of one per typing pause.
 pub fn set_body(project_id: &str, id: &str, recipient: &str, body: &str) -> Result<MessageDraft, String> {
-    mutate(project_id, id, |d, _| {
+    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
+    set_body_at(&path, id, recipient, body)
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn set_body_at(path: &Path, id: &str, recipient: &str, body: &str) -> Result<MessageDraft, String> {
+    mutate_at(path, id, |d, _| {
         let i = variant_index(d, recipient)?;
         set_body_on(&mut d.variants[i], body);
         d.state = DraftState::NeedsYou;
@@ -200,7 +220,14 @@ fn set_body_on(variant: &mut DraftVariant, body: &str) {
 
 /// Revert: makes an existing version current instead of deleting the ones after it.
 pub fn set_current_version(project_id: &str, id: &str, recipient: &str, n: u32) -> Result<MessageDraft, String> {
-    mutate(project_id, id, |d, _| {
+    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
+    set_current_version_at(&path, id, recipient, n)
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn set_current_version_at(path: &Path, id: &str, recipient: &str, n: u32) -> Result<MessageDraft, String> {
+    mutate_at(path, id, |d, _| {
         let i = variant_index(d, recipient)?;
         if !d.variants[i].versions.iter().any(|v| v.n == n) {
             return Err(format!("no such version: v{n}"));
@@ -211,7 +238,14 @@ pub fn set_current_version(project_id: &str, id: &str, recipient: &str, n: u32) 
 }
 
 pub fn set_state(project_id: &str, id: &str, state: DraftState) -> Result<MessageDraft, String> {
-    mutate(project_id, id, |d, _| {
+    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
+    set_state_at(&path, id, state)
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn set_state_at(path: &Path, id: &str, state: DraftState) -> Result<MessageDraft, String> {
+    mutate_at(path, id, |d, _| {
         d.state = state;
         Ok(())
     })
@@ -222,7 +256,9 @@ pub fn remove(project_id: &str, id: &str) -> Result<bool, String> {
     remove_at(&path, id)
 }
 
-fn remove_at(path: &Path, id: &str) -> Result<bool, String> {
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn remove_at(path: &Path, id: &str) -> Result<bool, String> {
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut store = load(path);
     let before = store.drafts.len();
@@ -241,7 +277,9 @@ pub fn mark_seen(project_id: &str, origin_session_id: &str) -> usize {
     mark_seen_at(&path, origin_session_id)
 }
 
-fn mark_seen_at(path: &Path, origin_session_id: &str) -> usize {
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn mark_seen_at(path: &Path, origin_session_id: &str) -> usize {
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut store = load(path);
     let mut flipped = 0usize;

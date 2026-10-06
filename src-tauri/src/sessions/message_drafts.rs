@@ -9,3 +9,4 @@ mod types;
 
 pub use api::*;
 pub use types::*;
+pub(crate) use persistence::draft_path;

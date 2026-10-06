@@ -18,6 +18,16 @@ pub(super) fn store_path_for(project_id: &str) -> Option<PathBuf> {
     Some(dir.join(crate::util::project_store_file_name(project_id)))
 }
 
+/// Joins an explicit `root` with `project_id`'s on-disk file name, the same
+/// sanitization `store_path_for` applies against the real `data_dir()`.
+/// `daemon::methods::drafts_store`'s own `*_at` seam uses this to substitute a
+/// `tempfile::tempdir()` root for the real app-data root, so its hermetic
+/// tests resolve to the identical path shape production code builds under
+/// `store_path_for` (mirrors `repo_channel::channel_path`).
+pub(crate) fn draft_path(root: &Path, project_id: &str) -> PathBuf {
+    root.join(crate::util::project_store_file_name(project_id))
+}
+
 pub(super) fn load(path: &Path) -> Store {
     std::fs::read_to_string(path)
         .ok()
