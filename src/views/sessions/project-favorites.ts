@@ -6,6 +6,8 @@
 // Desktop only, by Joe's call 2026-09-26: the keys are the whole point and a
 // phone has no keyboard to press 1-9 with.
 
+import type { ProjectGroup } from "../../types/ipc.generated";
+
 /** A slot holds a project PATH, or null when empty. Always exactly
  *  SLOT_COUNT entries so slot N is always index N-1, with no shifting: the
  *  numbers are the feature, so an empty slot 3 must stay slot 3 rather than
@@ -111,4 +113,23 @@ export function slotOf(slots: FavoriteSlots, path: string | null): number {
 export function pathForKey(slots: FavoriteSlots, key: string): string | null {
   if (key.length !== 1 || key < "1" || key > "9") return null;
   return slots[Number(key) - 1] ?? null;
+}
+
+/** What a slot currently holds, shared by the composer's Ctrl+Shift strip
+ *  and the picker's favourites rail (todo 1085) so an empty/resolved/gone
+ *  slot renders the same decision in both places. `findProject` is each
+ *  caller's own lookup (strip: the cached project list; rail: the picker's
+ *  live map) - this stays free of both so it works against either. */
+export type FavoriteSlotResolution =
+  | { kind: "empty" }
+  | { kind: "resolved"; project: ProjectGroup }
+  | { kind: "unresolved"; path: string };
+
+export function resolveFavoriteSlot(
+  path: string | null,
+  findProject: (path: string) => ProjectGroup | undefined,
+): FavoriteSlotResolution {
+  if (path === null) return { kind: "empty" };
+  const project = findProject(path);
+  return project ? { kind: "resolved", project } : { kind: "unresolved", path };
 }

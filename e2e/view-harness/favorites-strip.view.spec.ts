@@ -8,7 +8,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./har
 // what only a browser can: real key events reaching the strip through the
 // mounted view, and the strip landing in the composer of a live chat.
 //
-// asserts: src/shared/shortcuts.ts, src/shared/modifier-hint.ts, src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/favorites-strip.ts
+// asserts: src/shared/shortcuts.ts, src/shared/modifier-hint.ts, src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/favorites-strip.ts, src/views/sessions/project-favorites.ts
 
 const FAVORITES_KEY = "claude_companion_project_favorites";
 

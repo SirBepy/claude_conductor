@@ -26,6 +26,7 @@ import {
   assignSlot,
   moveSlot,
   clearSlot,
+  resolveFavoriteSlot,
 } from "../project-favorites";
 
 /** Drag/hover state for the rail, owned by project-picker.ts and passed in
@@ -133,17 +134,18 @@ export function renderFavoriteRail(state: FavoritesRailState, deps: FavoritesRai
     <div class="pp-fav-rail" role="group" aria-label="Favourite projects, keys ctrl+1 to ctrl+9">
       ${Array.from({ length: SLOT_COUNT }, (_, i) => {
         const path = favorites[i] ?? null;
-        const p = path ? deps.projectByPath(path) : undefined;
-        // A slot whose project left the registry keeps its number and goes
-        // quiet rather than vanishing: silently renumbering everything would
-        // repoint every key below it.
-        const unresolved = path !== null && p === undefined;
-        const label = p ? p.name : (path ? "(missing)" : `Empty slot ${i + 1}`);
+        // Same resolve as the composer's Ctrl+Shift strip (project-favorites.ts):
+        // a slot whose project left the registry keeps its number and goes
+        // quiet rather than vanishing, since silently renumbering everything
+        // would repoint every key below it.
+        const resolution = resolveFavoriteSlot(path, deps.projectByPath);
+        const label = resolution.kind === "resolved" ? resolution.project.name
+          : (resolution.kind === "unresolved" ? "(missing)" : `Empty slot ${i + 1}`);
         return html`
           <div
-            class="pp-fav-slot${path === null ? " is-empty" : ""}${unresolved ? " is-unresolved" : ""}${state.dragOverSlot === i ? " is-target" : ""}${state.hoverFavSlot === i && state.dragOverSlot === null ? " is-hinted" : ""}"
+            class="pp-fav-slot${resolution.kind === "empty" ? " is-empty" : ""}${resolution.kind === "unresolved" ? " is-unresolved" : ""}${state.dragOverSlot === i ? " is-target" : ""}${state.hoverFavSlot === i && state.dragOverSlot === null ? " is-hinted" : ""}"
             data-slot=${i}
-            title=${p ? `${p.name} - press ctrl+${i + 1}` : (path ?? `Empty - drag a project here for ctrl+${i + 1}`)}
+            title=${resolution.kind === "resolved" ? `${resolution.project.name} - press ctrl+${i + 1}` : (resolution.kind === "unresolved" ? resolution.path : `Empty - drag a project here for ctrl+${i + 1}`)}
             aria-label=${label}
             @click=${() => { if (path) deps.openFavorite(path); }}
             @pointerdown=${(e: PointerEvent) => {
@@ -151,9 +153,9 @@ export function renderFavoriteRail(state: FavoritesRailState, deps: FavoritesRai
             }}
           >
             <span class="pp-num">${i + 1}</span>
-            ${p
-              ? html`<span class="pp-fav-face">${unsafeHTML(renderAvatar(p.avatar, p.path))}</span>`
-              : (unresolved ? html`<i class="ph ph-question pp-fav-gone"></i>` : "")}
+            ${resolution.kind === "resolved"
+              ? html`<span class="pp-fav-face">${unsafeHTML(renderAvatar(resolution.project.avatar, resolution.project.path))}</span>`
+              : (resolution.kind === "unresolved" ? html`<i class="ph ph-question pp-fav-gone"></i>` : "")}
           </div>
         `;
       })}

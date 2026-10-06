@@ -18,6 +18,7 @@ import {
   clearSlot,
   slotOf,
   pathForKey,
+  resolveFavoriteSlot,
 } from "../src/views/sessions/project-favorites.ts";
 
 const A = "C:/Projects/zng-app";
@@ -158,6 +159,27 @@ describe("pathForKey - what a number key resolves to", () => {
     expect(pathForKey(s, "a")).toBeNull();
     expect(pathForKey(s, "Enter")).toBeNull();
     expect(pathForKey(s, "")).toBeNull();
+  });
+});
+
+describe("resolveFavoriteSlot - shared by the strip and the rail (todo 1085)", () => {
+  const PROJECT = { path: A, name: "zng-app", avatar: { kind: "emoji", value: "Z" } };
+  const findProject = (path) => [PROJECT].find((p) => p.path.toLowerCase() === path.toLowerCase());
+
+  it("is empty for a null slot", () => {
+    expect(resolveFavoriteSlot(null, findProject)).toEqual({ kind: "empty" });
+  });
+
+  it("resolves a path whose project is found", () => {
+    expect(resolveFavoriteSlot(A, findProject)).toEqual({ kind: "resolved", project: PROJECT });
+  });
+
+  it("is unresolved for a path with no matching project, keeping the path", () => {
+    expect(resolveFavoriteSlot(B, findProject)).toEqual({ kind: "unresolved", path: B });
+  });
+
+  it("resolves regardless of case, since findProject does its own case-insensitive match", () => {
+    expect(resolveFavoriteSlot(A.toUpperCase(), findProject)).toEqual({ kind: "resolved", project: PROJECT });
   });
 });
 

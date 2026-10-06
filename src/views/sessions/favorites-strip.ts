@@ -13,7 +13,7 @@ import { isAnyModalOpen } from "../../shared/modal-input-lock";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { isRemote } from "../../shared/transport";
 import { projectGroupsData } from "./new-session-cache";
-import { readFavorites } from "./project-favorites";
+import { readFavorites, resolveFavoriteSlot } from "./project-favorites";
 
 const STRIP_CLASS = "favorites-strip";
 
@@ -21,19 +21,22 @@ function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+const findProject = (path: string) =>
+  projectGroupsData().cached?.find((g) => g.path.toLowerCase() === path.toLowerCase());
+
 function slotHtml(path: string | null, i: number): string {
   const num = `<span class="pp-num">${i + 1}</span>`;
-  if (path === null) {
+  const resolution = resolveFavoriteSlot(path, findProject);
+  if (resolution.kind === "empty") {
     return `<div class="pp-fav-slot is-empty" data-slot="${i}">${num}<span class="favorites-strip-name">empty</span></div>`;
   }
-  const p = projectGroupsData().cached?.find((g) => g.path.toLowerCase() === path.toLowerCase());
   // Same "keeps its number, goes quiet" treatment as the picker rail for a
   // slot whose project left the registry.
-  const face = p
-    ? `<span class="pp-fav-face">${renderAvatar(p.avatar, p.path)}</span>`
+  const face = resolution.kind === "resolved"
+    ? `<span class="pp-fav-face">${renderAvatar(resolution.project.avatar, resolution.project.path)}</span>`
     : `<i class="ph ph-question pp-fav-gone"></i>`;
-  const name = escapeHtml(p?.name ?? baseName(path));
-  return `<div class="pp-fav-slot${p ? "" : " is-unresolved"}" data-slot="${i}" title="${name} - ctrl+shift+${i + 1}">${num}${face}<span class="favorites-strip-name">${name}</span></div>`;
+  const name = escapeHtml(resolution.kind === "resolved" ? resolution.project.name : baseName(resolution.path));
+  return `<div class="pp-fav-slot${resolution.kind === "resolved" ? "" : " is-unresolved"}" data-slot="${i}" title="${name} - ctrl+shift+${i + 1}">${num}${face}<span class="favorites-strip-name">${name}</span></div>`;
 }
 
 /** Shows the strip in `pane`'s composer. A no-op on the phone (favourites are
