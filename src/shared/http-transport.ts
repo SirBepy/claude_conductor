@@ -145,17 +145,22 @@ export class HttpTransport implements Transport {
       // PR-review Commits/Files browsing (ai_todo 244): mirrors desktop's
       // `ipc::git_diff` Tauri commands. Daemon rejects an unrecognized cwd.
       case "get_range_files":
-        return this.rpc<T>("get_range_files", { cwd: args.cwd, from: args.from ?? null, to: args.to ?? null });
+        return this.rpc<T>("get_range_files", { cwd: args.cwd, from: args.from ?? null, to: args.to ?? null, base: args.base ?? null });
       case "get_file_diff":
         return this.rpc<T>("get_file_diff", {
           cwd: args.cwd,
           from: args.from ?? null,
           to: args.to ?? null,
+          base: args.base ?? null,
           path: args.path,
           context: args.context ?? null,
         });
       case "get_file_at_rev":
         return this.rpc<T>("get_file_at_rev", { cwd: args.cwd, rev: args.rev ?? null, path: args.path });
+      // Code mode's branch-preview tree: daemon rejects an unrecognized cwd,
+      // same gate as get_range_files/get_file_at_rev above.
+      case "list_branch_files":
+        return this.rpc<T>("list_branch_files", { cwd: args.cwd, branch: args.branch });
       case "get_ticket_tracker":
         return this.rpc<T>("get_ticket_tracker", { cwd: args.cwd });
       case "resolve_commit_refs":

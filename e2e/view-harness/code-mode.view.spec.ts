@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts
+// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts, src/views/sessions/code-mode/branch-switcher.ts, src/views/sessions/code-mode/branch-switcher.css, src/views/sessions/code-mode/data.ts
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
@@ -215,6 +215,52 @@ test.describe("view-harness / Code mode", () => {
     await page.keyboard.press("2");
     await page.keyboard.press("Escape");
     await expect(composer).toHaveValue("MARKER");
+  });
+
+  test("Preview on a branch shows its tree read-only, badged, with a Check out button", async ({ page }) => {
+    await mount(page);
+    await page.locator("#session-pane .sb-git-btn").click();
+    const code = page.locator(".code-mode");
+
+    await page.evaluate(() => {
+      const w = window as unknown as { __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } };
+      const orig = w.__TAURI__.core.invoke;
+      w.__TAURI__.core.invoke = (cmd, args) => {
+        if (cmd === "get_recent_branches") {
+          return Promise.resolve([
+            { name: "master", current: true, short_sha: "8b3cb30", upstream: "origin/master" },
+            { name: "feature/preview-me", current: false, short_sha: "def5678", upstream: null },
+          ]);
+        }
+        if (cmd === "list_branch_files") {
+          return Promise.resolve(["src/shared/shortcuts.ts", "src/shared/branch-only-file.ts"]);
+        }
+        if (cmd === "get_range_files" && args?.base === "HEAD" && args?.to === "feature/preview-me") {
+          return Promise.resolve([{ path: "src/shared/shortcuts.ts", status: "M", added: 1, removed: 0, old_path: null }]);
+        }
+        return orig(cmd, args);
+      };
+    });
+
+    await code.locator(".cm-branchbtn").click();
+    await code.locator('.bs-preview[data-preview="feature/preview-me"]').click();
+
+    await expect(code.locator(".cm-ctitle")).toContainText("feature/preview-me");
+    await expect(code.locator('[data-file="src/shared/shortcuts.ts"] .pr-file-status')).toHaveText("M");
+    await expect(code.locator('[data-file="src/shared/branch-only-file.ts"] .pr-file-status')).toHaveCount(0);
+    await expect(code.locator('[data-act="checkout-branch"]')).toBeVisible();
+    await shot(page, "code-mode-branch-preview");
+
+    // Opening a file the diff never flagged still reads that branch's own
+    // content (get_file_at_rev with rev=branch), not the working tree.
+    await code.locator('[data-file="src/shared/branch-only-file.ts"]').click();
+    await expect(code.locator(".cm-tab.on")).toContainText("branch-only-file.ts");
+
+    // Check out reuses the branch switcher's own checkout flow, filtered to
+    // exactly the previewed branch - not a second call path.
+    await code.locator('[data-act="checkout-branch"]').click();
+    await expect(code.locator('.sb-git-pop-row.pick[data-branch="feature/preview-me"]')).toBeVisible();
+    await expect(code.locator(".sb-git-pop-row.pick")).toHaveCount(1);
   });
 
   test("Ctrl+Shift+E enters and leaves", async ({ page }) => {

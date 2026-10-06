@@ -123,6 +123,33 @@ describe("Unpushed scope", () => {
   });
 });
 
+describe("Branch preview scope", () => {
+  it("lists the branch's tree, badges changed files, and opens files at that branch's rev", async () => {
+    const calls = [];
+    ipcMock.impl = async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "list_branch_files") return ["a.ts", "b.ts", "unchanged.ts"];
+      if (cmd === "get_range_files") return [
+        { path: "a.ts", status: "M", added: 1, removed: 1, old_path: null },
+        { path: "b.ts", status: "A", added: 3, removed: 0, old_path: null },
+      ];
+      return null;
+    };
+    const d = await loadScope({ cwd: CWD, edits: [] }, { kind: "branch", name: "feature" });
+    expect(calls).toContainEqual(["list_branch_files", { cwd: CWD, branch: "feature" }]);
+    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: null, to: "feature", base: "HEAD" }]);
+    expect(d.paths.sort()).toEqual(["a.ts", "b.ts", "unchanged.ts"]);
+    expect(d.changed.get("a.ts").status).toBe("M");
+    expect(d.changed.get("b.ts").status).toBe("A");
+    expect(d.changed.has("unchanged.ts")).toBe(false);
+
+    // Every file in a branch preview reads the BRANCH's own content, never
+    // the working tree - including one the diff never flagged as changed.
+    await d.changed.get("a.ts").surface.fileAtRev();
+    expect(calls).toContainEqual(["get_file_at_rev", { cwd: CWD, rev: "feature", path: "a.ts" }]);
+  });
+});
+
 describe("explorer markup", () => {
   const data = (files, paths) => ({ changed: new Map(files.map((f) => [f.path, f])), paths: paths ?? files.map((f) => f.path), error: null });
 
@@ -360,6 +387,78 @@ describe("Code mode", () => {
     expect(root().querySelector(".cm-desc").textContent).toContain("Body text");
     expect(root().querySelector(".cm-ctitle").textContent).toBe("My PR");
   });
+  it("Preview on a branch row shows its tree with badges, opening the first file at that branch's rev", async () => {
+    const c = chat({ key: "s9" });
+    openCodeMode(c, { kind: "scope", scope: "unpushed", commitsOpen: true });
+    await settle();
+    ipcMock.impl = async (cmd, args) => {
+      if (cmd === "get_commit_sync") return SYNC;
+      if (cmd === "get_git_info") return { branch: "master" };
+      if (cmd === "get_recent_branches") return [
+        { name: "master", current: true, short_sha: "abc1234", upstream: "origin/master" },
+        { name: "feature", current: false, short_sha: "def5678", upstream: null },
+      ];
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [];
+      if (cmd === "list_branch_files") return ["src/a.ts", "src/unchanged.ts"];
+      if (cmd === "get_range_files") return args.base === "HEAD" && args.to === "feature"
+        ? [{ path: "src/a.ts", status: "M", added: 1, removed: 0, old_path: null }]
+        : [];
+      if (cmd === "get_file_at_rev") return { content: "preview", truncated: false };
+      return null;
+    };
+    root().querySelector('[data-act="branch"]').click();
+    await settle();
+    root().querySelector('.bs-preview[data-preview="feature"]').click();
+    await settle();
+
+    expect(root().querySelector(".cm-ctitle").textContent).toContain("feature");
+    expect(root().querySelector('[data-file="src/a.ts"] .pr-file-status').textContent).toBe("M");
+    expect(root().querySelector('[data-file="src/unchanged.ts"] .pr-file-status')).toBeNull();
+    expect(root().querySelector('[data-act="checkout-branch"]')).not.toBeNull();
+
+    // An unchanged file (no diff source, so the surface shows its File view
+    // directly) still reads the BRANCH's own content, never the working tree.
+    root().querySelector('[data-file="src/unchanged.ts"]').click();
+    await settle();
+    expect(calls).toContainEqual(["get_file_at_rev", { cwd: CWD, rev: "feature", path: "src/unchanged.ts" }]);
+  });
+
+  it("Check out in the branch-preview header reuses the switcher's own checkout path, filtered to that branch", async () => {
+    const c = chat({ key: "s10" });
+    openCodeMode(c, { kind: "scope", scope: "unpushed", commitsOpen: true });
+    await settle();
+    ipcMock.impl = async (cmd) => {
+      if (cmd === "get_commit_sync") return SYNC;
+      if (cmd === "get_git_info") return { branch: "master" };
+      if (cmd === "get_recent_branches") return [
+        { name: "master", current: true, short_sha: "abc1234", upstream: "origin/master" },
+        { name: "feature", current: false, short_sha: "def5678", upstream: null },
+      ];
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "list_instances") return [];
+      if (cmd === "list_branch_files") return [];
+      if (cmd === "get_range_files") return [];
+      return null;
+    };
+    root().querySelector('[data-act="branch"]').click();
+    await settle();
+    root().querySelector('.bs-preview[data-preview="feature"]').click();
+    await settle();
+
+    root().querySelector('[data-act="checkout-branch"]').click();
+    await settle();
+    // Filtered to exactly the previewed branch - the SAME picker, not a
+    // second, duplicate checkout call site.
+    const rows = root().querySelectorAll(".sb-git-pop-row.pick");
+    expect(rows.length).toBe(1);
+    expect(rows[0].dataset.branch).toBe("feature");
+
+    rows[0].click();
+    await settle();
+    expect(calls).toContainEqual(["checkout_branch", { cwd: CWD, name: "feature" }]);
+  });
+
   it("on the phone: explorer, then the file as its own screen; back walks out", async () => {
     remote.on = true;
     openCodeMode(chat({ key: "s8" }));

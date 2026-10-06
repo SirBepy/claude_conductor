@@ -56,6 +56,7 @@ function act(inst: CodeModeInstance, act: string, el: HTMLElement): void {
       break;
     case "push": void inst.runGit("push"); break;
     case "pull": void inst.runGit("pull"); break;
+    case "checkout-branch": inst.openCheckoutFor(el.dataset.branch!); break;
     case "older-commits": void inst.loadOlderCommits(); break;
     case "screen-explorer":
       inst.view.screen = "explorer";
@@ -90,7 +91,7 @@ export function createHandleDocClick(inst: CodeModeInstance): (e: MouseEvent) =>
       inst.menuOpen = false;
       inst.renderExplorer();
     }
-    if (inst.branchOpen && !t.closest(".cm-bmenu, .cm-branchbtn")) {
+    if (inst.branchOpen && !t.closest(".cm-bmenu, .cm-branchbtn, .cm-checkoutbtn")) {
       inst.branchOpen = false;
       inst.renderExplorer();
     }
@@ -151,7 +152,7 @@ export function createHandleKey(inst: CodeModeInstance): (e: KeyboardEvent) => v
       e.stopPropagation();
       return;
     }
-    if (e.key === "Backspace" && (inst.view.scope.kind === "commit" || inst.view.scope.kind === "pr")) {
+    if (e.key === "Backspace" && (inst.view.scope.kind === "commit" || inst.view.scope.kind === "pr" || inst.view.scope.kind === "branch")) {
       e.preventDefault();
       inst.scopeBack();
       return;
@@ -188,7 +189,7 @@ export function stepBack(inst: CodeModeInstance): boolean {
     inst.showActive();
     return true;
   }
-  if (inst.view.scope.kind === "commit" || inst.view.scope.kind === "pr") {
+  if (inst.view.scope.kind === "commit" || inst.view.scope.kind === "pr" || inst.view.scope.kind === "branch") {
     inst.scopeBack();
     return true;
   }

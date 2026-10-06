@@ -17,7 +17,10 @@ export type { PrCommit };
 export type ScopeRef =
   | { kind: BaseScope }
   | { kind: "commit"; sha: string; title: string }
-  | { kind: "pr"; title: string; commits: PrCommit[] };
+  | { kind: "pr"; title: string; commits: PrCommit[] }
+  /** Read-only preview of another branch's tree, entered from the branch
+   *  switcher's Preview action - no checkout happens. */
+  | { kind: "branch"; name: string };
 
 export interface ScopeFile {
   path: string;
@@ -87,6 +90,23 @@ export function plainSurface(cwd: string, path: string): SurfaceFile {
     path,
     absPath: absPath(cwd, path),
     fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: null, path }),
+  };
+}
+
+/** A file inside a branch preview: always reads the branch's own committed
+ *  content via `get_file_at_rev(rev: branch)`, never the working tree - this
+ *  scope never checks the branch out. `f` is present only for a file the
+ *  HEAD-vs-branch diff flagged as changed, which adds a diff view. */
+export function branchFileSurface(cwd: string, path: string, branch: string, f?: PrFileChange): SurfaceFile {
+  return {
+    path,
+    absPath: absPath(cwd, path),
+    added: f?.added,
+    removed: f?.removed,
+    gitDiff: f
+      ? ({ full }) => invoke<string>("get_file_diff", { cwd, from: null, to: branch, base: "HEAD", path, context: full ? FULL_FILE_CONTEXT : null })
+      : undefined,
+    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: branch, path }),
   };
 }
 
@@ -209,6 +229,30 @@ export async function loadScope(ctx: ScopeCtx, ref: ScopeRef): Promise<ScopeData
         const range = { from: ref.commits.length > 1 ? oldest.sha : null, to: newest.sha };
         const changed = await rangeFiles(cwd, range, null);
         return { changed, paths: [...changed.keys()], error: null };
+      }
+      case "branch": {
+        const { name } = ref;
+        const [branchPaths, prFiles] = await Promise.all([
+          invoke<string[]>("list_branch_files", { cwd, branch: name }),
+          // What the branch changes relative to the current HEAD: an exact
+          // HEAD..branch diff, not the working tree (this scope never checks
+          // the branch out, so the working tree has nothing to do with it).
+          invoke<PrFileChange[]>("get_range_files", { cwd, from: null, to: name, base: "HEAD" }),
+        ]);
+        const changed = new Map<string, ScopeFile>();
+        for (const f of prFiles) {
+          changed.set(f.path, {
+            path: f.path,
+            status: statusLetter(f.status),
+            added: f.added,
+            removed: f.removed,
+            wt: false,
+            surface: branchFileSurface(cwd, f.path, name, f),
+          });
+        }
+        const paths = new Set(branchPaths.map((p) => p.replace(/\\/g, "/")));
+        for (const p of changed.keys()) paths.add(p);
+        return { changed, paths: [...paths], error: null };
       }
     }
   } catch (err) {

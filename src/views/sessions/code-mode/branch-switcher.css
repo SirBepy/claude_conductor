@@ -83,6 +83,27 @@
   word-break: break-word;
 }
 
+.bs-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sb-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.bs-preview:hover,
+.bs-preview:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+}
+
 .gc-dirty-warn, .gc-peer-warn {
   display: flex;
   align-items: center;

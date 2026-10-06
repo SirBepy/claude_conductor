@@ -17,6 +17,7 @@ import { explorerHtml, type ExplorerModel } from "./explorer-html";
 import { renderPrDescription } from "./pr-description";
 import { closeTreeContextMenu } from "./context-menu";
 import {
+  branchFileSurface,
   chatFiles,
   loadCommitHistoryPage,
   loadGitState,
@@ -170,6 +171,9 @@ export class CodeModeInstance {
   private menuCounts: ExplorerModel["menuCounts"] = {};
   branchOpen = false;
   private branchSwitcher: BranchSwitcher | null = null;
+  /** One-shot: the branch name the Check out button wants the next-mounted
+   *  branch switcher pre-filtered to. Cleared once read. */
+  private checkoutSeed: string | null = null;
   private gitBusy: "push" | "pull" | null = null;
   private gitError: string | null = null;
   /** Pushed commits paged in via "Show older commits", newest
@@ -306,7 +310,7 @@ export class CodeModeInstance {
 
   enterScope(scope: ScopeRef, openFirst: boolean): void {
     const v = this.view;
-    if (v.scope.kind !== "commit" && v.scope.kind !== "pr") v.prevScope = v.scope.kind;
+    if (v.scope.kind !== "commit" && v.scope.kind !== "pr" && v.scope.kind !== "branch") v.prevScope = v.scope.kind;
     v.scope = scope;
     this.menuOpen = false;
     this.openFirstOnLoad = openFirst;
@@ -378,8 +382,12 @@ export class CodeModeInstance {
 
   openPath(path: string): void {
     const f = this.data?.changed.get(path);
-    const inCommit = this.view.scope.kind === "commit" || this.view.scope.kind === "pr";
-    this.upsertTab({ path, status: f?.status ?? null, inCommit, surface: f?.surface ?? plainSurface(this.chat.cwd, path) }, true);
+    const scope = this.view.scope;
+    const inCommit = scope.kind === "commit" || scope.kind === "pr";
+    // An unchanged file in a branch preview still has to read the branch's
+    // own content, never the working tree plainSurface would read.
+    const fallback = scope.kind === "branch" ? branchFileSurface(this.chat.cwd, path, scope.name) : plainSurface(this.chat.cwd, path);
+    this.upsertTab({ path, status: f?.status ?? null, inCommit, surface: f?.surface ?? fallback }, true);
     this.view.screen = "file";
     this.renderExplorer();
     this.renderTabs();
@@ -479,9 +487,12 @@ export class CodeModeInstance {
     if (focusKey) ex.querySelector<HTMLElement>(focusKey)?.focus();
     const bmenu = ex.querySelector<HTMLElement>(".cm-bmenu");
     if (bmenu) {
+      const seed = this.checkoutSeed;
+      this.checkoutSeed = null;
       this.branchSwitcher = new BranchSwitcher({
         cwd: this.chat.cwd,
         sessionId: this.chat.sessionId,
+        initialFilter: seed ?? undefined,
         onCheckedOut: () => {
           this.branchOpen = false;
           this.chat.onGitChanged?.();
@@ -492,11 +503,25 @@ export class CodeModeInstance {
           this.renderExplorer();
           ex.querySelector<HTMLElement>(".cm-branchbtn")?.focus();
         },
+        onPreview: (name) => {
+          this.branchOpen = false;
+          this.enterScope({ kind: "branch", name }, true);
+        },
       });
       this.branchSwitcher.mount(bmenu);
     } else {
       this.branchSwitcher = null;
     }
+  }
+
+  /** The explorer header's Check out button on a branch preview: reuses the
+   *  branch switcher's own checkout + warnings rather than invoking
+   *  checkout_branch a second, duplicate way. */
+  openCheckoutFor(name: string): void {
+    this.view.commitsOpen = true;
+    this.branchOpen = true;
+    this.checkoutSeed = name;
+    this.renderExplorer();
   }
 
   async openMenu(): Promise<void> {
@@ -524,7 +549,7 @@ export class CodeModeInstance {
 
   scopeBack(): void {
     const v = this.view;
-    if (v.scope.kind !== "commit" && v.scope.kind !== "pr") return;
+    if (v.scope.kind !== "commit" && v.scope.kind !== "pr" && v.scope.kind !== "branch") return;
     v.scope = { kind: v.prevScope };
     void this.loadScope();
   }

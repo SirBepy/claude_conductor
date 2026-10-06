@@ -9,7 +9,7 @@ use super::git::run_git;
 /// has no parent (root commit).
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
-#[derive(serde::Serialize, ts_rs::TS)]
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct PrFileChange {
     pub path: String,
@@ -244,18 +244,23 @@ fn count_lines(bytes: &[u8]) -> u32 {
 /// yields the files touched by the single commit `to`; passing `from: Some(oldest)`
 /// yields the cumulative files touched across the whole range up to `to`.
 ///
+/// `base`, when given, is used verbatim as the lower bound instead of the
+/// `from`/`to`-derived one above - the branch-preview scope needs `HEAD`
+/// itself as the exact lower bound (`HEAD..branch`), not `HEAD^`.
+///
 /// `to: None` diffs against the working tree instead (see `worktree_base`),
-/// listing untracked files as added.
+/// listing untracked files as added; `base` has no effect on that path.
 #[tauri::command]
-pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<String>) -> Result<Vec<PrFileChange>, String> {
+pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<String>, base: Option<String>) -> Result<Vec<PrFileChange>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(t) = to.as_deref() { reject_option_like("to", t)?; }
         if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
+        if let Some(b) = base.as_deref() { reject_option_like("base", b)?; }
 
         let Some(to) = to else {
-            let base = worktree_base(&from);
-            let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &base, "--"])?;
-            let numstat = run_git(&cwd, &["diff", "--numstat", "-M", &base, "--"])?;
+            let wt_base = worktree_base(&from);
+            let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &wt_base, "--"])?;
+            let numstat = run_git(&cwd, &["diff", "--numstat", "-M", &wt_base, "--"])?;
             let mut files = parse_range_files(&name_status, &numstat);
             for path in untracked_files(&cwd, None)? {
                 if files.iter().any(|f| f.path == path) {
@@ -267,7 +272,7 @@ pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<Strin
             return Ok(files);
         };
 
-        let lower = resolve_lower_bound(&cwd, &from, &to);
+        let lower = base.unwrap_or_else(|| resolve_lower_bound(&cwd, &from, &to));
 
         let name_status = run_git(&cwd, &["diff", "--name-status", "-M", &lower, &to, "--"])?;
         let numstat = run_git(&cwd, &["diff", "--numstat", "-M", &lower, &to, "--"])?;
@@ -279,16 +284,18 @@ pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<Strin
 }
 
 /// Returns the raw unified diff for a single file in the range `(lower, to]`,
-/// with the same lower-bound resolution as `get_range_files`. `context` is
-/// git's `-U<n>` (lines kept around each change); a caller wanting the whole
-/// file passes a large one. Truncates at a line boundary before 1MB with a
-/// trailing marker. `to: None` diffs against the working tree, an untracked
-/// file coming back as an all-added diff.
+/// with the same lower-bound resolution as `get_range_files`, including the
+/// `base` exact-override. `context` is git's `-U<n>` (lines kept around each
+/// change); a caller wanting the whole file passes a large one. Truncates at
+/// a line boundary before 1MB with a trailing marker. `to: None` diffs
+/// against the working tree, an untracked file coming back as an all-added
+/// diff; `base` has no effect on that path.
 #[tauri::command]
 pub async fn get_file_diff(
     cwd: String,
     from: Option<String>,
     to: Option<String>,
+    base: Option<String>,
     path: String,
     context: Option<u32>,
 ) -> Result<String, String> {
@@ -298,13 +305,14 @@ pub async fn get_file_diff(
         if let Some(t) = to.as_deref() { reject_option_like("to", t)?; }
         reject_option_like("path", &path)?;
         if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
+        if let Some(b) = base.as_deref() { reject_option_like("base", b)?; }
         let unified = format!("-U{}", context.unwrap_or(3));
 
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C").arg(&cwd);
         match to.as_deref() {
             Some(to) => {
-                let lower = resolve_lower_bound(&cwd, &from, to);
+                let lower = base.unwrap_or_else(|| resolve_lower_bound(&cwd, &from, to));
                 cmd.args(["diff", &unified, &lower, to, "--", &path]);
             }
             None => {
@@ -438,6 +446,110 @@ pub async fn get_file_at_rev(cwd: String, rev: Option<String>, path: String) -> 
     .map_err(|e| format!("get_file_at_rev join error: {e}"))?
 }
 
+/// Repo-relative file list for `<branch>` without checking it out, for the
+/// read-only branch-preview scope: `git ls-tree -r --name-only -z
+/// --end-of-options <branch>`. `--end-of-options` (git's own
+/// end-of-option-parsing marker) plus `reject_option_like` below both exist
+/// so a crafted branch name can never be read as a git flag - this is
+/// phone-reachable, same concern as `get_range_files`/`get_file_at_rev` above.
+#[tauri::command]
+pub async fn list_branch_files(cwd: String, branch: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        reject_option_like("branch", &branch)?;
+        let out = run_git(&cwd, &["ls-tree", "-r", "--name-only", "-z", "--end-of-options", &branch])?;
+        Ok(out.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
+    })
+    .await
+    .map_err(|e| format!("list_branch_files join error: {e}"))?
+}
+
+#[cfg(test)]
+mod branch_files_tests {
+    use super::*;
+
+    /// A repo with a base commit on the default branch plus a `feature`
+    /// branch adding one more file. Returns the default branch's own name
+    /// (varies with `init.defaultBranch`) so the test never hardcodes it.
+    fn two_branch_repo() -> (tempfile::TempDir, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().to_string_lossy().to_string();
+        let git = |args: &[&str]| run_git(&repo, args).unwrap();
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "test"]);
+        std::fs::write(dir.path().join("base.txt"), "base\n").unwrap();
+        git(&["add", "base.txt"]);
+        git(&["commit", "-q", "-m", "base"]);
+        let base_branch = run_git(&repo, &["branch", "--show-current"]).unwrap();
+        git(&["checkout", "-q", "-b", "feature"]);
+        std::fs::write(dir.path().join("feature.txt"), "feature\n").unwrap();
+        std::fs::write(dir.path().join("base.txt"), "base\nfeature-added-line\n").unwrap();
+        git(&["add", "feature.txt", "base.txt"]);
+        git(&["commit", "-q", "-m", "feature file"]);
+        git(&["checkout", "-q", &base_branch]);
+        (dir, repo, base_branch)
+    }
+
+    #[tokio::test]
+    async fn lists_the_other_branchs_files_without_checking_it_out() {
+        let (_dir, repo, base_branch) = two_branch_repo();
+        let head_before = run_git(&repo, &["rev-parse", "HEAD"]).unwrap();
+        let status_before = run_git(&repo, &["status", "--porcelain"]).unwrap();
+
+        let files = list_branch_files(repo.clone(), "feature".into()).await.unwrap();
+        assert!(files.contains(&"feature.txt".to_string()), "{files:?}");
+        assert!(files.contains(&"base.txt".to_string()), "{files:?}");
+
+        assert_eq!(run_git(&repo, &["rev-parse", "HEAD"]).unwrap(), head_before, "HEAD moved");
+        assert_eq!(run_git(&repo, &["status", "--porcelain"]).unwrap(), status_before, "working tree changed");
+        assert_eq!(run_git(&repo, &["branch", "--show-current"]).unwrap(), base_branch, "branch changed");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_dash_prefixed_branch_name() {
+        let (_dir, repo, _base) = two_branch_repo();
+        let err = list_branch_files(repo, "--output=x".into()).await.unwrap_err();
+        assert!(err.contains("branch"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn range_files_with_base_diffs_head_to_branch_not_the_worktree() {
+        let (dir, repo, _base) = two_branch_repo();
+        // Dirtying the checked-out branch's worktree must not leak into a
+        // base=HEAD..feature diff: both ends are already pinned commits.
+        std::fs::write(dir.path().join("base.txt"), "base\nuncommitted-edit\n").unwrap();
+
+        let files = get_range_files(repo, None, Some("feature".into()), Some("HEAD".into())).await.unwrap();
+        assert_eq!(files.len(), 2, "uncommitted edit must not appear: {files:?}");
+
+        let added = files.iter().find(|f| f.path == "feature.txt").expect("feature-only file listed");
+        assert_eq!(added.status, "A", "{files:?}");
+
+        let modified = files.iter().find(|f| f.path == "base.txt").expect("branch-changed file listed");
+        assert_eq!(modified.status, "M", "{files:?}");
+        assert_eq!((modified.added, modified.removed), (1, 0), "{files:?}");
+    }
+
+    #[tokio::test]
+    async fn file_diff_with_base_shows_the_branchs_added_line() {
+        let (dir, repo, _base) = two_branch_repo();
+        std::fs::write(dir.path().join("base.txt"), "base\nuncommitted-edit\n").unwrap();
+
+        let diff = get_file_diff(repo, None, Some("feature".into()), Some("HEAD".into()), "base.txt".into(), None)
+            .await
+            .unwrap();
+        assert!(diff.contains("+feature-added-line"), "{diff}");
+        assert!(!diff.contains("uncommitted-edit"), "{diff}");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_dash_prefixed_base() {
+        let (_dir, repo, _base) = two_branch_repo();
+        let err = get_range_files(repo, None, Some("feature".into()), Some("--output=x".into())).await.unwrap_err();
+        assert!(err.contains("base"), "{err}");
+    }
+}
+
 #[cfg(test)]
 mod rev_tests {
     use super::*;
@@ -483,8 +595,8 @@ mod rev_tests {
 
         // One changed line: full context carries the whole file, -U3 only ~7 lines.
         let path = "big.txt".to_string();
-        let full = get_file_diff(repo.clone(), None, Some("HEAD".into()), path.clone(), Some(1_000_000)).await.unwrap();
-        let short = get_file_diff(repo, None, Some("HEAD".into()), path, None).await.unwrap();
+        let full = get_file_diff(repo.clone(), None, Some("HEAD".into()), None, path.clone(), Some(1_000_000)).await.unwrap();
+        let short = get_file_diff(repo, None, Some("HEAD".into()), None, path, None).await.unwrap();
         assert!(full.lines().count() > short.lines().count() + 50, "full {} vs short {}", full.lines().count(), short.lines().count());
     }
 
@@ -509,7 +621,7 @@ mod rev_tests {
     #[tokio::test]
     async fn worktree_range_lists_modified_and_untracked_files() {
         let (_dir, repo) = worktree_repo();
-        let files = get_range_files(repo, None, None).await.unwrap();
+        let files = get_range_files(repo, None, None, None).await.unwrap();
         let tracked = files.iter().find(|f| f.path == "tracked.txt").expect("modified file listed");
         assert_eq!((tracked.status.as_str(), tracked.added, tracked.removed), ("M", 1, 1));
         let new = files.iter().find(|f| f.path == "sub/new.txt").expect("untracked file listed");
@@ -519,9 +631,9 @@ mod rev_tests {
     #[tokio::test]
     async fn worktree_diff_covers_tracked_and_untracked_files() {
         let (_dir, repo) = worktree_repo();
-        let tracked = get_file_diff(repo.clone(), None, None, "tracked.txt".into(), None).await.unwrap();
+        let tracked = get_file_diff(repo.clone(), None, None, None, "tracked.txt".into(), None).await.unwrap();
         assert!(tracked.contains("-two") && tracked.contains("+TWO"), "{tracked}");
-        let new = get_file_diff(repo, None, None, "sub/new.txt".into(), None).await.unwrap();
+        let new = get_file_diff(repo, None, None, None, "sub/new.txt".into(), None).await.unwrap();
         assert!(new.contains("@@ -0,0 +1,3 @@") && new.contains("+c"), "{new}");
     }
 

@@ -132,4 +132,27 @@ describe("code mode branch switcher", () => {
     host.querySelector(".bs-search input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("without onPreview there is no preview icon", async () => {
+    const { host } = await mount();
+    expect(host.querySelector(".bs-preview")).toBeNull();
+  });
+
+  it("the preview icon reports the branch without checking it out", async () => {
+    const calls = [];
+    ipcMock.impl = ipc(() => undefined, calls);
+    const onPreview = vi.fn();
+    const { host } = await mount({ onPreview });
+    host.querySelector('.bs-preview[data-preview="feat/claim-state"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    expect(onPreview).toHaveBeenCalledWith("feat/claim-state");
+    expect(calls.some(([cmd]) => cmd === "checkout_branch")).toBe(false);
+  });
+
+  it("initialFilter pre-fills the search box, narrowing the list on mount", async () => {
+    const { host } = await mount({ initialFilter: "claim-state" });
+    const names = Array.from(host.querySelectorAll(".sb-git-pop-name"), (n) => n.textContent);
+    expect(names).toEqual(["feat/claim-state"]);
+    expect(host.querySelector(".bs-search input").value).toBe("claim-state");
+  });
 });

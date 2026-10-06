@@ -14,6 +14,12 @@ export interface BranchSwitcherOpts {
   sessionId: string | null;
   onCheckedOut: () => void;
   onClose: () => void;
+  /** Preview icon on a row: read-only, no checkout. Omit to hide the icon,
+   *  e.g. when a caller only wants the plain picker. */
+  onPreview?: (name: string) => void;
+  /** Pre-fills the search box, e.g. the explorer's Check out button jumping
+   *  straight to the one branch it's offering to check out. */
+  initialFilter?: string;
 }
 
 interface BranchContext {
@@ -33,6 +39,7 @@ export class BranchSwitcher {
 
   mount(host: HTMLElement): void {
     this.host = host;
+    if (this.opts.initialFilter) this.filter = this.opts.initialFilter;
     this.render();
     host.querySelector<HTMLInputElement>(".bs-search input")?.focus();
     void this.load();
@@ -121,6 +128,13 @@ export class BranchSwitcher {
     // On the list container, not per row: paintRows() swaps only its innerHTML.
     const list = host.querySelector<HTMLElement>(".bs-list")!;
     const pick = (e: Event) => {
+      const previewBtn = (e.target as Element).closest<HTMLElement>(".bs-preview[data-preview]");
+      if (previewBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.opts.onPreview?.(previewBtn.dataset.preview!);
+        return;
+      }
       const row = (e.target as Element).closest<HTMLElement>(".sb-git-pop-row.pick[data-branch]");
       if (!row?.dataset.branch) return;
       e.preventDefault();
@@ -155,8 +169,11 @@ export class BranchSwitcher {
       }
       const busy = this.checkingOut === b.name;
       const spin = busy ? `<i class="ph ph-spinner-gap sb-git-pop-spin gc-row-spin"></i>` : "";
+      const preview = this.opts.onPreview && !busy
+        ? `<button class="bs-preview" data-preview="${escapeHtml(b.name)}" title="Preview without checking out" aria-label="Preview ${escapeHtml(b.name)}"><i class="ph ph-eye"></i></button>`
+        : "";
       return `<div class="sb-git-pop-row pick${busy ? " busy" : ""}" role="button" tabindex="0" data-branch="${escapeHtml(b.name)}"${busy ? ` aria-busy="true"` : ""}>`
-        + `${check}<span class="sb-git-pop-name">${escapeHtml(b.name)}</span>${sha}${up}${spin}</div>`;
+        + `${check}<span class="sb-git-pop-name">${escapeHtml(b.name)}</span>${sha}${up}${preview}${spin}</div>`;
     }).join("");
   }
 }

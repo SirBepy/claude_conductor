@@ -60,6 +60,13 @@ function scopeHeaderHtml(m: ExplorerModel): string {
       + `<div class="cm-ctext"><div class="cm-ctitle">${escapeHtml(s.title)}</div>`
       + `<div class="cm-csha"><i class="ph ph-git-pull-request"></i> <span class="cm-cn">${s.commits.length} commit${s.commits.length === 1 ? "" : "s"}${files}</span></div></div></div>`;
   }
+  if (s.kind === "branch") {
+    const changedCount = m.data ? `${m.data.changed.size} changed` : "…";
+    return `<div class="cm-chead"><button class="cm-ib" data-act="scope-back" title="Stop previewing (Backspace)" aria-label="Stop previewing"><i class="ph ph-arrow-left"></i></button>`
+      + `<div class="cm-ctext"><div class="cm-ctitle"><i class="ph ph-eye"></i> ${escapeHtml(s.name)}</div>`
+      + `<div class="cm-csha"><span class="cm-cn">Previewing · ${changedCount}</span></div></div>`
+      + `<button class="cm-checkoutbtn" data-act="checkout-branch" data-branch="${escapeHtml(s.name)}" title="Check out ${escapeHtml(s.name)}"><i class="ph ph-git-branch"></i>Check out</button></div>`;
+  }
   const item = (k: BaseScope) => {
     const n = m.menuCounts[k];
     return `<div class="cm-mi" role="menuitemradio" tabindex="-1" aria-checked="${s.kind === k}" data-scope="${k}"><i class="ph ${SCOPE_ICON[k]}"></i>${SCOPE_LABEL[k]}`
@@ -109,6 +116,7 @@ function treeHtml(m: ExplorerModel): string {
       chat: "This chat hasn't edited any files yet.",
       unpushed: "Nothing unpushed. Everything is on origin.",
       uncommitted: "No uncommitted changes.",
+      branch: "This branch has no files.",
     };
     return `<div class="cm-tree" role="tree"><div class="cm-note">${empty[m.scope.kind] ?? "No files."}</div></div>`;
   }

@@ -336,6 +336,31 @@
   white-space: nowrap;
 }
 
+/* Branch preview header's Check out button: sits at the end of the same
+   .cm-chead row a commit/PR header uses for back + title. */
+.cm-checkoutbtn {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  height: 26px;
+  min-height: 0;
+  margin-left: auto;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: 600 12px "DM Sans", system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.cm-checkoutbtn:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+}
+
 /* ── tree ─────────────────────────────────────────────────────────────── */
 
 .cm-tree {

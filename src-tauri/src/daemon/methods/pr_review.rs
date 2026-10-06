@@ -34,13 +34,13 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String> }
+                struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, #[serde(default)] base: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 if !is_known_cwd(&state, &p.cwd) {
                     return Err(RpcError::invalid_params("unknown cwd".to_string()));
                 }
-                let files = crate::ipc::git_diff::get_range_files(p.cwd, p.from, p.to)
+                let files = crate::ipc::git_diff::get_range_files(p.cwd, p.from, p.to, p.base)
                     .await
                     .map_err(RpcError::internal)?;
                 Ok(json!(files))
@@ -84,17 +84,35 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
 
+    {
+        let state = state.clone();
+        router.register("list_branch_files", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String, branch: String }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                reject_unknown(&state, &p.cwd)?;
+                let files = crate::ipc::git_diff::list_branch_files(p.cwd, p.branch)
+                    .await
+                    .map_err(RpcError::internal)?;
+                Ok(json!(files))
+            }
+        });
+    }
+
     router.register("get_file_diff", move |params, _ctx| {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
-            struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, path: String, #[serde(default)] context: Option<u32> }
+            struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, #[serde(default)] base: Option<String>, path: String, #[serde(default)] context: Option<u32> }
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             if !is_known_cwd(&state, &p.cwd) {
                 return Err(RpcError::invalid_params("unknown cwd".to_string()));
             }
-            let diff = crate::ipc::git_diff::get_file_diff(p.cwd, p.from, p.to, p.path, p.context)
+            let diff = crate::ipc::git_diff::get_file_diff(p.cwd, p.from, p.to, p.base, p.path, p.context)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(json!(diff))
@@ -134,6 +152,37 @@ mod tests {
             params: Some(json!({"cwd": "C:\\nope\\not\\registered", "from": null, "to": "HEAD"})),
         }, dummy_ctx()).await;
         assert!(resp.error.is_some(), "unknown cwd must be rejected");
+    }
+
+    #[tokio::test]
+    async fn list_branch_files_rejects_unknown_cwd() {
+        let mut r = Router::new();
+        register_pr_review(&mut r, dummy_state());
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "list_branch_files".into(),
+            params: Some(json!({"cwd": "C:\\nope\\not\\registered", "branch": "main"})),
+        }, dummy_ctx()).await;
+        assert!(resp.error.is_some(), "unknown cwd must be rejected");
+    }
+
+    #[tokio::test]
+    async fn list_branch_files_dispatches_for_known_cwd() {
+        // Without this route the phone's branch-preview explorer would get
+        // -32601 and silently show no files.
+        let state = dummy_state();
+        let cwd = std::env::current_dir().unwrap();
+        state.settings.upsert_project_for_cwd(&cwd, "2026-01-01T00:00:00Z");
+        let mut r = Router::new();
+        register_pr_review(&mut r, state);
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "list_branch_files".into(),
+            params: Some(json!({"cwd": cwd.to_string_lossy(), "branch": "HEAD"})),
+        }, dummy_ctx()).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
     }
 
     #[tokio::test]

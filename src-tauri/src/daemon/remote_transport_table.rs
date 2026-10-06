@@ -219,6 +219,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only: a file's committed content for the PR/commit modal's File
     // view. reject_unknown(cwd)-gated in pr_review.rs; rev/path refuse `-`.
     ("get_file_at_rev", P),
+    // Read-only branch-preview tree listing: `git ls-tree` of another branch
+    // without checking it out, for Code mode's branch switcher Preview
+    // action. Same reject_unknown(cwd) gate as
+    // get_range_files/get_file_at_rev above; branch name is
+    // `--end-of-options`-guarded and leading-dash-rejected in git_diff.rs so
+    // it can never be read as a git flag.
+    ("list_branch_files", P),
     // Read-only statusbar chips + location-picker scan (mirrors desktop's
     // `ipc::git` / `ipc::servers` / `ipc::claude_scopes` commands), path
     // params reject_unknown-gated in statusbar.rs. Missing here was the
@@ -373,6 +380,7 @@ mod tests {
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
             "get_range_files", "get_file_diff", "resolve_commit_refs", "get_ticket_tracker", "get_file_at_rev",
+            "list_branch_files",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "push_commits", "list_project_files", "chat_drains", "create_project_folder", "list_project_servers",
             "list_claude_md_scopes",
