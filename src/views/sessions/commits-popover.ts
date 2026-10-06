@@ -6,14 +6,13 @@
  */
 
 import { escapeHtml } from "../../shared/escape-html";
-import { invoke } from "../../shared/ipc";
 import { timeAgo } from "../../shared/time";
 import { openInCodeMode } from "../../shared/chat/code-mode-bridge";
 import { PopoverShell } from "./statusbar-popover-shell";
-import type { CommitHistory, CommitHistoryEntry } from "../../types/ipc.generated";
+import { loadCommitHistoryPage } from "./code-mode/data";
+import type { CommitHistoryEntry } from "../../types/ipc.generated";
 import "./commits-popover.css";
 
-const PAGE_SIZE = 30;
 /** Distance from the list's bottom edge that triggers the next page. */
 const LOAD_MARGIN_PX = 48;
 
@@ -112,7 +111,9 @@ export class CommitsPopover {
     if (list.scrollHeight <= list.clientHeight + LOAD_MARGIN_PX) void this.loadPage();
   }
 
-  /** Appends the next page in place, so the scroll position that asked for it holds. */
+  /** Appends the next page in place, so the scroll position that asked for it holds.
+   *  Shares Code mode's page loader but not its loadOlderCommits state: that one
+   *  keeps only pushed commits below the unpushed rows, this list shows every commit. */
   private async loadPage(): Promise<void> {
     if (this.historyLoading || !this.cwd) return;
     if (this.historyLoaded && !this.historyMore) return;
@@ -122,7 +123,7 @@ export class CommitsPopover {
     this.historyLoading = true;
     this.paintSentinel();
     try {
-      const page = await invoke<CommitHistory>("get_commit_history", { cwd, offset, limit: PAGE_SIZE });
+      const page = await loadCommitHistoryPage(cwd, offset);
       if (this.cwd !== cwd || this.historyGen !== gen) return;
       this.historyLoading = false;
       this.historyMore = page.has_more;
