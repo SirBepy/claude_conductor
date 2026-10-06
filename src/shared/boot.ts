@@ -36,6 +36,7 @@ import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
+import { mountReconnectStrip } from "./reconnect-strip";
 import { applyBackgroundFx } from "./background-fx";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
@@ -274,6 +275,8 @@ export function initBoot(): void {
   // once all three fetches SETTLE, so a rejected fetch cannot strand it on
   // screen - the same guarantee that keeps the render gate itself from wedging.
   const bootProgress = mountBootProgress();
+  // Phone-only: lives for the whole app lifetime, so the disposer is dropped.
+  mountReconnectStrip();
 
   // Initial data fetches: render once all three settle (success OR failure, so
   // a failed fetch can't wedge the gate - see wireInitialFetches).

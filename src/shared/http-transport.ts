@@ -12,7 +12,8 @@ import {
   removeGlobalListener,
   teardownGlobalStream,
 } from "./global-stream";
-import { beginLoad, readTrackedJson } from "./load-progress";
+import { beginLoad, readTrackedJson, type LoadTracker } from "./load-progress";
+import { reportRequestFailure, reportRequestSuccess, trackRequest } from "./connection-state";
 
 /** localStorage key holding the per-device bearer token the user pasted/paired. */
 export const REMOTE_TOKEN_KEY = "rc_token";
@@ -52,6 +53,68 @@ export function remoteToken(): string {
   } catch {
     return "";
   }
+}
+
+/** Silence budget for a read: no response head, or no new body bytes, for this
+ *  long means the request is riding a dead connection. Measured from the last
+ *  progress, so a big transcript that keeps streaming is never cut off. */
+const READ_TIMEOUT_MS = 15_000;
+/** Writes get a far longer budget: some legitimately run long (git push,
+ *  worktree creation) and aborting one does not undo it. Still finite, so a
+ *  dead connection can never leave a button spinning forever. */
+const MUTATION_TIMEOUT_MS = 120_000;
+const SEND_TIMEOUT_MS = 30_000;
+const RETRY_DELAY_MS = 500;
+
+const READ_ONLY_METHOD = /^(list_|get_|load_|read_|resolve_|count_|tail_)|^(context_status|transcript_stats|chat_drains|character_asset_url|project_last_activity_at)$/;
+
+/** Safe to retry: the daemon methods that only read. */
+export function isReadOnlyMethod(method: string): boolean {
+  return READ_ONLY_METHOD.test(method);
+}
+
+/** The request never got an answer (network error or silence timeout), as
+ *  opposed to the PC answering with an error. Only this kind is retried. */
+export class LinkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LinkError";
+  }
+}
+
+/** Aborts its signal after `ms` of silence; `bump` restarts the countdown. */
+class StallTimer {
+  private controller = new AbortController();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  fired = false;
+
+  constructor(readonly ms: number) {
+    this.bump();
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  bump(): void {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.fired = true;
+      this.controller.abort();
+    }, this.ms);
+  }
+
+  clear(): void {
+    clearTimeout(this.timer);
+  }
+}
+
+function linkError(what: string, cause: unknown, stall: StallTimer): LinkError {
+  reportRequestFailure();
+  if (stall.fired) {
+    return new LinkError(`${what}: your PC did not answer for ${Math.round(stall.ms / 1000)}s`);
+  }
+  return new LinkError(`${what}: could not reach your PC (${cause instanceof Error ? cause.message : String(cause)})`);
 }
 
 /** Thrown when a frontend command has no remote (phone) equivalent. Callers that
@@ -732,11 +795,21 @@ export class HttpTransport implements Transport {
       .map((b) => b.text ?? "")
       .join("\n")
       .trim();
-    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/send`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify({ text }),
-    });
+    const stall = new StallTimer(SEND_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/send`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ text }),
+        signal: stall.signal,
+      });
+    } catch (e) {
+      throw linkError("send", e, stall);
+    } finally {
+      stall.clear();
+    }
+    reportRequestSuccess();
     if (res.status === 401) handleAuthFailure();
     if (!res.ok) {
       // The body carries the daemon's own reason - notably the SESSION_BUSY
@@ -748,23 +821,50 @@ export class HttpTransport implements Transport {
   }
 
   private async rpc<T>(method: string, params: unknown): Promise<T> {
+    if (!isReadOnlyMethod(method)) return this.rpcOnce<T>(method, params, MUTATION_TIMEOUT_MS);
+    try {
+      return await this.rpcOnce<T>(method, params, READ_TIMEOUT_MS);
+    } catch (e) {
+      // One retry, reads only: after a resume the first attempt often rides a
+      // connection that died while the phone slept, and the retry gets a
+      // fresh one. A write might already have landed, so it never retries.
+      if (!(e instanceof LinkError)) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      return this.rpcOnce<T>(method, params, READ_TIMEOUT_MS);
+    }
+  }
+
+  private async rpcOnce<T>(method: string, params: unknown, timeoutMs: number): Promise<T> {
     // Tracked so the phone's loading UI has a real denominator to show: the
     // body is drained through readTrackedJson, which reports bytes against the
     // response's Content-Length (see load-progress.ts). A failed request calls
     // `abandon` rather than `finish`, keeping its duration out of the median -
     // how long a 500 took says nothing about how long success takes.
     const tracker = beginLoad(method);
-    let res: Response;
+    const untrack = isReadOnlyMethod(method) ? trackRequest(method, tracker) : () => {};
+    const stall = new StallTimer(timeoutMs);
     try {
-      res = await fetch("/api/rpc", {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({ method, params }),
-      });
-    } catch (e) {
-      tracker.abandon();
-      throw e;
+      let res: Response;
+      try {
+        res = await fetch("/api/rpc", {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify({ method, params }),
+          signal: stall.signal,
+        });
+      } catch (e) {
+        tracker.abandon();
+        throw linkError(method, e, stall);
+      }
+      reportRequestSuccess();
+      return await this.readRpcResponse<T>(method, res, tracker, stall);
+    } finally {
+      stall.clear();
+      untrack();
     }
+  }
+
+  private async readRpcResponse<T>(method: string, res: Response, tracker: LoadTracker, stall: StallTimer): Promise<T> {
     if (res.status === 401) handleAuthFailure();
     if (!res.ok) {
       tracker.abandon();
@@ -785,10 +885,10 @@ export class HttpTransport implements Transport {
     }
     let parsed: T;
     try {
-      parsed = await readTrackedJson<T>(res, tracker);
+      parsed = await readTrackedJson<T>(res, tracker, () => stall.bump());
     } catch (e) {
       tracker.abandon();
-      throw e;
+      throw stall.fired ? linkError(method, e, stall) : e;
     }
     tracker.finish();
     return parsed;

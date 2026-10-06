@@ -1,0 +1,23 @@
+/* In flow as body's first child, so it sits under the status-bar band and
+ * pushes the app down while shown instead of covering header controls. */
+.reconnect-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 3px 12px;
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reconnect-strip[hidden] {
+  display: none;
+}
+
+.reconnect-strip i {
+  font-size: 13px;
+  color: var(--color-primary);
+}

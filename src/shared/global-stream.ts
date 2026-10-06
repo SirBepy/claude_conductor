@@ -14,6 +14,7 @@
 import type { Transport } from "./transport";
 import { remoteToken } from "./http-transport";
 import { visibleInterval } from "./visible-interval";
+import { markLiveDown, markLiveUp } from "./connection-state";
 
 type GlobalCallback = (payload: unknown) => void;
 
@@ -59,6 +60,8 @@ const globalListeners = new Map<string, Set<GlobalCallback>>();
 let globalWatchdogTimer: (() => void) | undefined;
 let globalDegradePollTimer: (() => void) | undefined;
 let globalDegradePollInFlight = false;
+let globalReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let globalResumeUnwire: (() => void) | undefined;
 /** The Transport instance that registered the currently-active global
  *  listeners. Only its `call()` can be used for the degrade-path poll (it
  *  updates `HttpTransport`'s `nonStreamable` bookkeeping) - one instance lives
@@ -144,6 +147,7 @@ function ensureGlobalWatchdog(): void {
       // Stale: assume the socket is a zombie (half-open, no clean close).
       // Start degrading immediately and force-close so the existing
       // reconnect/backoff in onclose kicks in.
+      markLiveDown();
       startGlobalDegradePoll();
       if (globalWs) {
         try { globalWs.close(); } catch { /* ignore */ }
@@ -161,6 +165,7 @@ function connectGlobalStream(): void {
   globalWs = ws;
   ws.onmessage = (e: MessageEvent) => {
     globalLastFrameAt = Date.now();
+    markLiveUp();
     stopGlobalDegradePoll();
     let frame: { method?: string; params?: unknown };
     try {
@@ -175,6 +180,7 @@ function connectGlobalStream(): void {
   ws.onopen = () => {
     globalRetryDelay = 1000;
     globalLastFrameAt = Date.now();
+    markLiveUp();
     stopGlobalDegradePoll();
   };
   ws.onclose = () => {
@@ -182,9 +188,51 @@ function connectGlobalStream(): void {
     if (globalWsStopped) return;
     // No live channel until the reconnect completes - degrade immediately
     // rather than waiting for the watchdog's next tick.
+    markLiveDown();
     startGlobalDegradePoll();
-    setTimeout(connectGlobalStream, globalRetryDelay);
+    globalReconnectTimer = setTimeout(() => {
+      globalReconnectTimer = undefined;
+      connectGlobalStream();
+    }, globalRetryDelay);
     globalRetryDelay = Math.min(globalRetryDelay * 2, 30_000);
+  };
+}
+
+/** On resume (or the network coming back), a socket that has been silent past
+ *  the stale window is dead even if `onclose` never fired, and a pending
+ *  backoff retry may be up to 30s away. Both wait for nothing: reconnect now. */
+export function reconnectGlobalStreamIfStale(): void {
+  if (globalWsStopped) return;
+  if (globalWs && Date.now() - globalLastFrameAt <= GLOBAL_STALE_MS) return;
+  markLiveDown();
+  startGlobalDegradePoll();
+  globalRetryDelay = 1000;
+  if (globalReconnectTimer) {
+    clearTimeout(globalReconnectTimer);
+    globalReconnectTimer = undefined;
+  }
+  const dead = globalWs;
+  if (dead) {
+    // Detach first: this socket's own onclose would schedule a second,
+    // backed-off reconnect next to the immediate one below.
+    dead.onclose = null;
+    dead.onmessage = null;
+    try { dead.close(); } catch { /* ignore */ }
+  }
+  globalWs = null;
+  connectGlobalStream();
+}
+
+function wireResumeReconnect(): () => void {
+  if (typeof document === "undefined" || typeof window === "undefined") return () => {};
+  const onVisibility = (): void => {
+    if (document.visibilityState === "visible") reconnectGlobalStreamIfStale();
+  };
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("online", reconnectGlobalStreamIfStale);
+  return () => {
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("online", reconnectGlobalStreamIfStale);
   };
 }
 
@@ -200,6 +248,7 @@ export function ensureGlobalStream(owner: Transport): void {
   globalLastFrameAt = Date.now();
   connectGlobalStream();
   ensureGlobalWatchdog();
+  globalResumeUnwire ??= wireResumeReconnect();
 }
 
 /** Tears the singleton down when the last global listener unsubscribes,
@@ -208,6 +257,8 @@ export function ensureGlobalStream(owner: Transport): void {
 export function teardownGlobalStream(): void {
   globalWsStopped = true;
   if (globalWatchdogTimer) { globalWatchdogTimer(); globalWatchdogTimer = undefined; }
+  if (globalResumeUnwire) { globalResumeUnwire(); globalResumeUnwire = undefined; }
+  if (globalReconnectTimer) { clearTimeout(globalReconnectTimer); globalReconnectTimer = undefined; }
   stopGlobalDegradePoll();
   if (globalWs) {
     try { globalWs.close(); } catch { /* ignore */ }

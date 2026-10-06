@@ -329,7 +329,11 @@ export function aggregateSnapshot(methods: string[], now = Date.now()): LoadSnap
  * environment without streams, such as an older WebView or a test double, loses
  * the dial but never the data.
  */
-export async function readTrackedJson<T>(res: Response, tracker: LoadTracker): Promise<T> {
+export async function readTrackedJson<T>(
+  res: Response,
+  tracker: LoadTracker,
+  onChunk?: () => void,
+): Promise<T> {
   const header = res.headers?.get?.("Content-Length");
   const total = header !== null && header !== undefined ? Number(header) : NaN;
   tracker.onHead(Number.isFinite(total) ? total : null);
@@ -348,6 +352,7 @@ export async function readTrackedJson<T>(res: Response, tracker: LoadTracker): P
     if (value) {
       chunks.push(value);
       tracker.onChunk(value.byteLength);
+      onChunk?.();
     }
   }
   const merged = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0));
