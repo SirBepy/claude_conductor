@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, delayInvokes } from "./harness";
 import { shotDir } from "./shot-dir";
 
 // Todo 809: forces new-session-cache.ts's cold-cache path (boot's own
@@ -45,22 +45,7 @@ async function mountColdSessions(page: Page): Promise<void> {
       list_claude_md_scopes: [{ rel_path: "", label: "Repo root", nested: false }],
     },
   });
-  // Wraps whatever installMockTauri sets up next load: registered AFTER
-  // mountView's own addInitScript, so on reload it runs second, once
-  // window.__TAURI__ already exists.
-  await page.addInitScript(({ cmds, delayMs }) => {
-    const w = window as unknown as {
-      __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
-    };
-    const tauri = w.__TAURI__;
-    if (!tauri) return;
-    const orig = tauri.core.invoke;
-    tauri.core.invoke = (cmd: string, args?: Record<string, unknown>) =>
-      cmds.includes(cmd)
-        ? new Promise((resolve) => setTimeout(() => resolve(orig(cmd, args)), delayMs))
-        : orig(cmd, args);
-  }, { cmds: DELAYED_COMMANDS, delayMs: DELAY_MS });
-  await page.reload();
+  await delayInvokes(page, DELAYED_COMMANDS, DELAY_MS);
   await page.locator("#sessionsFab").waitFor();
 }
 

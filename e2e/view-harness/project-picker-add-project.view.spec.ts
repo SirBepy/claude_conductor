@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, invokeCalls } from "./harness";
+import { mountView, invokeCalls, delayInvokes } from "./harness";
 
 // Adding a project, inline in the empty-results state (Joe's variant C,
 // 2026-09-26). Replaces the footer's "New project…" / "Open in new folder…"
@@ -132,22 +132,9 @@ test.describe("view-harness / add a project inline", () => {
 
   test("with zero projects on a cold cache the picker stays open and offers Create and Browse", async ({ page }) => {
     await mountView(page, { invoke: baseInvoke({ list_project_groups: [], create_folder: null, pick_folder: null }) });
-    // Boot warms the project cache, which would make this the warm path; the
-    // delay (installed ahead of a reload, same trick as
-    // new-session-cold-cache.view.spec.ts) keeps it cold when the picker opens.
-    await page.addInitScript(() => {
-      const w = window as unknown as {
-        __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
-      };
-      const tauri = w.__TAURI__;
-      if (!tauri) return;
-      const orig = tauri.core.invoke;
-      tauri.core.invoke = (cmd: string, args?: Record<string, unknown>) =>
-        cmd === "list_project_groups"
-          ? new Promise((resolve) => setTimeout(() => resolve(orig(cmd, args)), 1000))
-          : orig(cmd, args);
-    });
-    await page.reload();
+    // Boot warms the project cache, which would make this the warm path;
+    // the delay keeps it cold when the picker opens.
+    await delayInvokes(page, ["list_project_groups"], 1000);
     await page.waitForFunction(() => typeof (window as unknown as { __startNewSession?: unknown }).__startNewSession === "function");
     await page.evaluate(() => {
       void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();

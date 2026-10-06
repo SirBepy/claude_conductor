@@ -134,6 +134,28 @@ export async function mountView(page: Page, opts: MountOptions = {}): Promise<vo
   await page.goto(`${HARNESS_ORIGIN}/${entry}.html${hash}`);
 }
 
+/** Delays the named invoke commands by `delayMs`, then reloads, so a spec can
+ *  force a boot-warmed cache's cold-cache path to render (the
+ *  `.modal-card-loading` shell) instead of racing past it before the real
+ *  response ever resolves. Call AFTER {@link mountView} (whose own
+ *  `addInitScript` installs `window.__TAURI__`): this wraps `core.invoke` on
+ *  the reload that follows, once that mock already exists to wrap. */
+export async function delayInvokes(page: Page, cmds: string[], delayMs: number): Promise<void> {
+  await page.addInitScript(({ cmds, delayMs }) => {
+    const w = window as unknown as {
+      __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    };
+    const tauri = w.__TAURI__;
+    if (!tauri) return;
+    const orig = tauri.core.invoke;
+    tauri.core.invoke = (cmd: string, args?: Record<string, unknown>) =>
+      cmds.includes(cmd)
+        ? new Promise((resolve) => setTimeout(() => resolve(orig(cmd, args)), delayMs))
+        : orig(cmd, args);
+  }, { cmds, delayMs });
+  await page.reload();
+}
+
 /** Read the commands the page has invoked so far (for call-shape asserts). */
 export async function invokeCalls(page: Page): Promise<Array<{ cmd: string; args?: unknown }>> {
   return page.evaluate(
