@@ -5,7 +5,7 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { basename } from "../../../shared/path-utils";
 import { buildTree, dirHas, type TreeNode } from "./tree";
-import type { BaseScope, GitState, ScopeData, ScopeRef } from "./data";
+import type { BaseScope, CommitHistoryEntry, GitState, ScopeData, ScopeRef } from "./data";
 
 export const SCOPE_LABEL: Record<BaseScope, string> = {
   chat: "This chat",
@@ -34,6 +34,11 @@ export interface ExplorerModel {
   branchOpen: boolean;
   gitBusy: "push" | "pull" | null;
   gitError: string | null;
+  /** Pushed commits paged in below the unpushed ones via "Show older commits". */
+  older?: CommitHistoryEntry[];
+  olderLoading?: boolean;
+  /** True once a page comes back with no more history - hides the trigger. */
+  olderDone?: boolean;
 }
 
 function countText(m: ExplorerModel): string {
@@ -118,15 +123,37 @@ function foldSummary(git: GitState | null): string {
   return "up to date";
 }
 
+/** Shared by the unpushed rows and the "Show older commits" ones below them -
+ *  same markup, same click target (events.ts's delegated `data-commit`), so
+ *  opening a historical commit works exactly like opening an unpushed one. */
+function commitRowHtml(c: CommitHistoryEntry | { short_sha: string; message: string }, openSha: string | null, older: boolean): string {
+  const on = openSha && c.short_sha.startsWith(openSha.slice(0, 7)) ? " on" : "";
+  // A quiet icon, not a badge, says "already on origin" for a row otherwise
+  // identical to an unpushed one.
+  const icon = older ? `<i class="ph ph-check cm-older-ic"></i>` : "";
+  return `<div class="cm-commit${older ? " cm-older" : ""}${on}" role="button" tabindex="0" data-commit="${escapeHtml(c.short_sha)}" data-title="${escapeHtml(c.message)}" title="Open this commit">`
+    + `${icon}<code>${escapeHtml(c.short_sha)}</code><span>${escapeHtml(c.message)}</span></div>`;
+}
+
+/** The trigger row at the end of the fold. Hidden once a page comes back
+ *  exhausted; while loading it swaps its icon for a spinner in place. */
+function olderTriggerHtml(m: ExplorerModel): string {
+  if (m.olderDone) return "";
+  const icon = m.olderLoading ? `<i class="ph ph-spinner-gap cm-spin"></i>` : `<i class="ph ph-clock-counter-clockwise"></i>`;
+  return `<div class="cm-commit cm-older-trigger" role="button" tabindex="0" data-act="older-commits"${m.olderLoading ? ` aria-busy="true"` : ""}>`
+    + `${icon}<span>Show older commits</span></div>`;
+}
+
 function commitsHtml(m: ExplorerModel): string {
   const git = m.git;
   const sync = git?.sync;
   if (!m.commitsOpen || !sync) return "";
   const openSha = m.scope.kind === "commit" ? m.scope.sha : null;
-  const rows = sync.ahead.map((c) =>
-    `<div class="cm-commit${openSha && c.short_sha.startsWith(openSha.slice(0, 7)) ? " on" : ""}" role="button" tabindex="0" data-commit="${escapeHtml(c.short_sha)}" data-title="${escapeHtml(c.message)}" title="Open this commit">`
-    + `<code>${escapeHtml(c.short_sha)}</code><span>${escapeHtml(c.message)}</span></div>`,
-  ).join("");
+  const rows = sync.ahead.map((c) => commitRowHtml(c, openSha, false)).join("");
+  // Browsing already-pushed history needs an upstream to mean
+  // anything - with none, get_commit_history flags every commit unpushed.
+  const olderRows = sync.has_upstream ? (m.older ?? []).map((c) => commitRowHtml(c, openSha, true)).join("") : "";
+  const olderTrigger = sync.has_upstream ? olderTriggerHtml(m) : "";
   const branchName = git.branch ?? "HEAD";
   const target = git.upstream ?? `origin/${branchName}`;
   const spin = `<i class="ph ph-spinner-gap cm-spin"></i>`;
@@ -142,7 +169,7 @@ function commitsHtml(m: ExplorerModel): string {
     + `<span class="grow"></span><button class="cm-branchbtn${m.branchOpen ? " on" : ""}" data-act="branch" aria-haspopup="dialog" aria-expanded="${m.branchOpen}" title="Switch branch">`
     + `<i class="ph ph-git-branch"></i><span>${escapeHtml(sync.has_upstream ? target : branchName)}</span><i class="ph ph-caret-up"></i></button></div>`;
   const err = m.gitError ? `<div class="cm-giterr"><i class="ph ph-warning"></i>${escapeHtml(m.gitError)}</div>` : "";
-  return `<div class="cm-commits">${rows}${pull}${push}${err}</div>`;
+  return `<div class="cm-commits">${rows}${pull}${push}${err}${olderRows}${olderTrigger}</div>`;
 }
 
 export function explorerHtml(m: ExplorerModel): string {

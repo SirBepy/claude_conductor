@@ -4,7 +4,9 @@
 import { invoke } from "../../../shared/ipc";
 import type { SurfaceFile } from "../../../shared/chat/file-surface";
 import type { FileEditView } from "../../../shared/chat/file-edits";
-import type { BranchEntry, CommitSync, GitInfo, PrFileChange, TextFileData } from "../../../types/ipc.generated";
+import type { BranchEntry, CommitHistory, CommitHistoryEntry, CommitSync, GitInfo, PrFileChange, TextFileData } from "../../../types/ipc.generated";
+
+export type { CommitHistoryEntry };
 import { OUTSIDE_DIR, repoRelative, statusLetter, type FileStatus } from "./tree";
 
 import type { CodeModeScope, PrCommit } from "../../../shared/chat/code-mode-bridge";
@@ -212,6 +214,16 @@ export async function loadScope(ctx: ScopeCtx, ref: ScopeRef): Promise<ScopeData
   } catch (err) {
     return { changed: new Map(), paths: [], error: String(err) };
   }
+}
+
+/** Commits fetched per "Show older commits" click. */
+export const OLDER_COMMITS_PAGE = 30;
+
+/** One page of the branch's full `git log HEAD`, continuing from `offset`.
+ *  Includes unpushed commits too (the log interleaves them by date) - the
+ *  caller filters to `pushed` entries not already shown by the unpushed rows. */
+export async function loadCommitHistoryPage(cwd: string, offset: number): Promise<CommitHistory> {
+  return invoke<CommitHistory>("get_commit_history", { cwd, offset, limit: OLDER_COMMITS_PAGE });
 }
 
 /** Branch, upstream and ahead/behind for the commits fold and its push row. */

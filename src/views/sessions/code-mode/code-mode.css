@@ -587,6 +587,15 @@
   color: var(--color-text);
 }
 
+.cm-older-ic {
+  font-size: 11px;
+}
+
+/* A quiet trailing affordance, not a button - same row chrome as a commit. */
+.cm-older-trigger .ph-clock-counter-clockwise {
+  font-size: 12px;
+}
+
 .cm-giterr {
   display: flex;
   gap: 6px;

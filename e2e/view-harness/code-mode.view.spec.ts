@@ -89,7 +89,7 @@ test.describe("view-harness / Code mode", () => {
     await expect(page.locator("#session-pane")).toBeVisible();
   });
 
-  test("Unpushed: badges, WT, the commits fold and Push as the last row", async ({ page }) => {
+  test("Unpushed: badges, WT, the commits fold, Push, then Show older commits as the last row", async ({ page }) => {
     await mount(page);
     await page.locator("#session-pane .sb-git-btn").click();
     const code = page.locator(".code-mode");
@@ -102,11 +102,58 @@ test.describe("view-harness / Code mode", () => {
     await expect(code.locator('[data-file="tests/fab-dial-drafts-autoopen.test.mjs"] .pr-file-status')).toHaveText("D");
 
     await expect(code.locator(".cm-commit[data-commit]")).toHaveCount(2);
-    const last = code.locator(".cm-commits > .cm-commit").last();
-    await expect(last).toHaveClass(/cm-pushrow/);
-    await expect(last).toContainText("Push 2 commits");
-    await expect(last.locator(".cm-branchbtn")).toContainText("origin/master");
+    const rows = code.locator(".cm-commits > .cm-commit");
+    const push = rows.nth((await rows.count()) - 2);
+    await expect(push).toHaveClass(/cm-pushrow/);
+    await expect(push).toContainText("Push 2 commits");
+    await expect(push.locator(".cm-branchbtn")).toContainText("origin/master");
+    const last = rows.last();
+    await expect(last).toHaveClass(/cm-older-trigger/);
+    await expect(last).toContainText("Show older commits");
     await shot(page, "code-mode-unpushed");
+  });
+
+  test("Show older commits pages in pushed history below Push; clicking a row opens that commit", async ({ page }) => {
+    await mount(page);
+    await page.locator("#session-pane .sb-git-btn").click();
+    const code = page.locator(".code-mode");
+
+    // The raw log interleaves the still-unpushed commit with older pushed
+    // ones - the already-shown "80b6247" must not repeat below.
+    await page.evaluate(() => {
+      const w = window as unknown as { __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } };
+      const orig = w.__TAURI__.core.invoke;
+      w.__TAURI__.core.invoke = (cmd, args) => {
+        if (cmd === "get_commit_history") {
+          return Promise.resolve({
+            entries: [
+              { short_sha: "80b6247", message: "FEAT: Ctrl+Shift+1-9 starts a new chat from a favorite slot", pushed: false, timestamp: 2 },
+              { short_sha: "deadbee", message: "REFACTOR: split the usage poller out of boot", pushed: true, timestamp: 1 },
+            ],
+            has_more: false,
+            has_upstream: true,
+          });
+        }
+        if (cmd === "get_range_files" && args?.to === "deadbee") {
+          return Promise.resolve([{ path: "src/daemon/boot.rs", status: "M", added: 2, removed: 0, old_path: null }]);
+        }
+        return orig(cmd, args);
+      };
+    });
+
+    await code.locator('[data-act="older-commits"]').click();
+    const older = code.locator('[data-commit="deadbee"]');
+    await expect(older).toBeVisible();
+    await expect(older).toHaveClass(/cm-older/);
+    // Deduped: the unpushed commit the history page re-listed stays singular.
+    await expect(code.locator('[data-commit="80b6247"]')).toHaveCount(1);
+    // Exhausted (has_more: false) - the trigger is gone.
+    await expect(code.locator('[data-act="older-commits"]')).toHaveCount(0);
+    await shot(page, "code-mode-older-commits");
+
+    await older.click();
+    await expect(code.locator(".cm-ctitle")).toHaveText("REFACTOR: split the usage poller out of boot");
+    await expect(code.locator('[data-file="src/daemon/boot.rs"]')).toBeVisible();
   });
 
   test("a file opens as a tab with icon-only diff tools in the tab row", async ({ page }) => {

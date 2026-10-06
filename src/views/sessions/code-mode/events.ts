@@ -56,6 +56,7 @@ function act(inst: CodeModeInstance, act: string, el: HTMLElement): void {
       break;
     case "push": void inst.runGit("push"); break;
     case "pull": void inst.runGit("pull"); break;
+    case "older-commits": void inst.loadOlderCommits(); break;
     case "screen-explorer":
       inst.view.screen = "explorer";
       inst.showActive();

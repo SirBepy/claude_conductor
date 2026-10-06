@@ -179,7 +179,7 @@ describe("explorer markup", () => {
 
   const git = (sync, branch = "master", upstream = "origin/master") => ({ sync, branch, upstream });
 
-  it("the commits fold summarises what is unpushed, and Push is the last row", () => {
+  it("the commits fold summarises what is unpushed, Push follows them, and Show older commits is the last row", () => {
     const el = render(model({
       data: data([]),
       commitsOpen: true,
@@ -187,7 +187,8 @@ describe("explorer markup", () => {
     }));
     expect(el.querySelector(".cm-fold .cm-qn").textContent).toBe("2 unpushed");
     const rows = Array.from(el.querySelectorAll(".cm-commits > .cm-commit"));
-    expect(rows.at(-1).classList.contains("cm-pushrow")).toBe(true);
+    expect(rows.at(-2).classList.contains("cm-pushrow")).toBe(true);
+    expect(rows.at(-1).classList.contains("cm-older-trigger")).toBe(true);
     expect(el.querySelector('[data-act="push"]').textContent).toContain("Push 2 commits");
     expect(el.querySelector(".cm-branchbtn").textContent).toContain("origin/master");
     // Commit rows are keyboard-reachable buttons.

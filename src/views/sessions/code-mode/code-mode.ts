@@ -18,10 +18,12 @@ import { renderPrDescription } from "./pr-description";
 import { closeTreeContextMenu } from "./context-menu";
 import {
   chatFiles,
+  loadCommitHistoryPage,
   loadGitState,
   loadScope,
   plainSurface,
   type BaseScope,
+  type CommitHistoryEntry,
   type GitState,
   type ScopeData,
   type ScopeRef,
@@ -170,6 +172,16 @@ export class CodeModeInstance {
   private branchSwitcher: BranchSwitcher | null = null;
   private gitBusy: "push" | "pull" | null = null;
   private gitError: string | null = null;
+  /** Pushed commits paged in via "Show older commits", newest
+   *  loaded first; cleared whenever the log itself can change (reload()). */
+  private older: CommitHistoryEntry[] = [];
+  /** Cursor into the full `git log HEAD`, not into `older` - the log
+   *  interleaves unpushed commits that get filtered out before display, so
+   *  the next page must continue from the raw count fetched, not the
+   *  filtered one. */
+  private olderOffset = 0;
+  private olderLoading = false;
+  private olderDone = false;
   private loadGen = 0;
   private editsSeen = -1;
   private pillTimer: number;
@@ -280,8 +292,16 @@ export class CodeModeInstance {
   }
 
   reload(): void {
+    this.resetOlderCommits();
     void this.loadScope();
     void this.loadGit();
+  }
+
+  private resetOlderCommits(): void {
+    this.older = [];
+    this.olderOffset = 0;
+    this.olderLoading = false;
+    this.olderDone = false;
   }
 
   enterScope(scope: ScopeRef, openFirst: boolean): void {
@@ -437,6 +457,9 @@ export class CodeModeInstance {
       branchOpen: this.branchOpen,
       gitBusy: this.gitBusy,
       gitError: this.gitError,
+      older: this.older,
+      olderLoading: this.olderLoading,
+      olderDone: this.olderDone,
     };
   }
 
@@ -529,6 +552,30 @@ export class CodeModeInstance {
     this.gitBusy = null;
     if (current !== this) return;
     this.reload();
+  }
+
+  /** Fetches the next page of pushed history. Dedupes against
+   *  the unpushed rows above it (`sync.ahead`): the API already flags those
+   *  `pushed: false`, but a push mid-session could race a stale `this.git`,
+   *  so both checks apply. */
+  async loadOlderCommits(): Promise<void> {
+    if (this.olderLoading || this.olderDone) return;
+    const cwd = this.chat.cwd;
+    this.olderLoading = true;
+    this.renderExplorer();
+    try {
+      const page = await loadCommitHistoryPage(cwd, this.olderOffset);
+      if (current !== this || this.chat.cwd !== cwd) return;
+      this.olderOffset += page.entries.length;
+      const unpushedShas = new Set(this.git?.sync?.ahead.map((c) => c.short_sha) ?? []);
+      this.older = this.older.concat(page.entries.filter((e) => e.pushed && !unpushedShas.has(e.short_sha)));
+      this.olderDone = !page.has_more;
+    } catch (e) {
+      console.error("[code-mode] get_commit_history failed", e);
+    }
+    this.olderLoading = false;
+    if (current !== this) return;
+    this.renderExplorer();
   }
 
   // ── back pill ─────────────────────────────────────────────────────────
