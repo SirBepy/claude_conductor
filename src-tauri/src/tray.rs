@@ -1,5 +1,6 @@
 pub mod menu;
 pub mod icon_render;
+pub(crate) mod mute;
 pub mod threshold;
 
 pub use menu::*;
