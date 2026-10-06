@@ -179,19 +179,39 @@ export function tickTimer(container: HTMLElement, startedAt: string | null): voi
   if (clock) clock.textContent = clockText();
 }
 
+const fadeObservers = new WeakMap<HTMLElement, ResizeObserver>();
+
 /** Toggle scroll-edge fade classes per row (rows rebuild on every render(),
  *  so listeners are re-wired each time). sb-row-scroll gates the CSS fade on
- *  actual overflow; at-start/at-end suppress it at the ends of the scroll. */
+ *  actual overflow; at-start/at-end suppress it at the ends of the scroll.
+ *  A chip can change width with no render() and no scroll event (a web font
+ *  swapping in after first paint, the duration/clock tick rewriting text in
+ *  place), which moves the scroll end under a row parked there, so each row
+ *  and chip is also size-observed. */
 export function updateRowFades(container: HTMLElement): void {
+  stopRowFades(container);
+  const syncs = new Map<Element, () => void>();
+  const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver((entries) => {
+    new Set(entries.map((e) => e.target.closest(".sb-row"))).forEach((row) => { if (row) syncs.get(row)?.(); });
+  });
   container.querySelectorAll<HTMLElement>(".sb-row").forEach((row) => {
     const sync = () => {
       row.classList.toggle("sb-row-scroll", row.scrollWidth > row.clientWidth + 1);
       row.classList.toggle("sb-row-at-start", row.scrollLeft <= 1);
       row.classList.toggle("sb-row-at-end", row.scrollLeft >= row.scrollWidth - row.clientWidth - 1);
     };
+    syncs.set(row, sync);
     sync();
     row.addEventListener("scroll", sync, { passive: true });
+    observer?.observe(row);
+    for (const chip of Array.from(row.children)) observer?.observe(chip, { box: "border-box" });
   });
+  if (observer) fadeObservers.set(container, observer);
+}
+
+export function stopRowFades(container: HTMLElement): void {
+  fadeObservers.get(container)?.disconnect();
+  fadeObservers.delete(container);
 }
 
 // ── Chip-row gates ──────────────────────────────────────────────────────────

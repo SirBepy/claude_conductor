@@ -34,6 +34,11 @@ async function mountSessionRow(page: Page, row: string[]): Promise<void> {
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
   await page.locator(`#sessions-list li[data-session-id="s1"]`).click();
   await page.locator("#session-pane .sb-row").first().waitFor();
+  // The text chips widen a few px when DM Sans swaps in after first paint.
+  // Under parallel load that lands mid-test: it moves a row parked at its end,
+  // and a Playwright click on a still-resizing chip was measured scrolling the
+  // row back to 0 before any re-render ran, so every check here waits it out.
+  await page.evaluate(() => document.fonts.ready);
 }
 
 test.describe("view-harness / statusbar scroll fade", () => {
@@ -63,6 +68,20 @@ test.describe("view-harness / statusbar scroll fade", () => {
     }));
     expect(atEnd.before).not.toBe("none");
     expect(atEnd.after).toBe("none");
+  });
+
+  // The duration/clock tick rewrites chip text in place, with no render() and
+  // no scroll event, so a row parked at its end has to notice the end moving.
+  test("a chip widening without a re-render clears the at-end state", async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await mountSessionRow(page, LONG_ROW);
+
+    const row = page.locator("#session-pane .sb-row").first();
+    await row.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+    await expect(row).toHaveClass(/sb-row-at-end/);
+
+    await row.evaluate((el) => { el.lastElementChild!.append(" 00:00:00 00:00:00"); });
+    await expect(row).not.toHaveClass(/sb-row-at-end/);
   });
 
   test("a row that fits at a wide viewport shows no fade", async ({ page }) => {

@@ -10,6 +10,7 @@ import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import {
   tickTimer,
   updateRowFades,
+  stopRowFades,
   hasChip,
   wantsCounts,
   wantsContext,
@@ -407,6 +408,7 @@ export class SessionStatusbar {
     if (this.mobileUnsub) { this.mobileUnsub(); this.mobileUnsub = null; }
     this.tally.destroy();
     this.closeChipPopovers();
+    stopRowFades(this.container);
   }
 
   /** Desktop and phone hold independent layouts, so crossing the breakpoint
