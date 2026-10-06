@@ -38,7 +38,7 @@ pub async fn save_settings(mut updated: Settings, state: State<'_, AppState>, ap
         settings::reconcile_save(&mut updated, &s).map_err(|e| e.to_string())?;
         // The frontend never round-trips the tray's timed mute, so keep the live one
         // rather than letting this full-replace cancel it.
-        updated.timed_mute = s.timed_mute;
+        updated = crate::types::carry_over_timed_mute(updated, s.timed_mute);
         settings::save(&path, &updated).map_err(|e| e.to_string())?;
         let old = s.audio_output_device.clone();
         *s = updated.clone();
