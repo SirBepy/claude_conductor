@@ -15,6 +15,8 @@ pub mod audio_preview;
 pub mod misc;
 pub mod git;
 pub mod git_diff;
+pub mod git_branch_preview;
+pub mod git_range_parse;
 pub mod git_commit_refs;
 pub mod tickets;
 pub mod git_sync;
