@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const TICK_MS: u64 = 1000;
 pub(super) const COUNTDOWN_SECS: u32 = 30;
-const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(180);
+const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(12 * 60 * 60);
 /// A nightly arm only fires once there has been no keyboard/mouse input for this
 /// long, so it never shuts the PC down under someone still using it.
 pub(super) const NIGHTLY_AWAY_SECS: u64 = 15 * 60;
@@ -131,7 +131,7 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction) -> bool
         } else if mode == ArmMode::Manual
             && (deps.now)().duration_since(no_progress_since) > NO_PROGRESS_LIMIT
         {
-            const REASON: &str = "no progress in Watching for 3 min (sessions never went idle)";
+            const REASON: &str = "no progress in Watching for 12 h (sessions never went idle)";
             log_comment(&format!("[when-done] gave up: {REASON}; disarming"));
             (deps.mutate_and_emit)(&mut |s| {
                 *s = ProtocolState::gave_up(action, REASON, waiting.clone());

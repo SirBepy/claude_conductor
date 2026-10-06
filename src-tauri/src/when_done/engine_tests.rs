@@ -308,10 +308,10 @@ async fn no_progress_guard_gives_up_with_a_distinct_phase_and_blocking_ids() {
     }));
 
     // Every busy_map read (once per Watching tick) advances the synthetic
-    // clock past NO_PROGRESS_LIMIT (180s), so the guard trips on the second
+    // clock past NO_PROGRESS_LIMIT (12h), so the guard trips on the second
     // tick without a real wall-clock wait.
     let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> = Arc::new(Mutex::new(|w: &mut World| {
-        w.clock += std::time::Duration::from_secs(181);
+        w.clock += std::time::Duration::from_secs(12 * 60 * 60 + 1);
     }));
 
     let deps = deps_for(world.clone(), tick);
