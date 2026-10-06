@@ -226,7 +226,12 @@ export function buildSidebarEntries(
     // stays blank rather than duplicating it in a cramped row.
     entries.push({
       key: "__empty__",
-      html: `<li class="sessions-empty-row" data-row-key="__empty__"><i class="ph ph-chat-circle-dots"></i>No active sessions</li>`,
+      // .v-empty (motion.css) is the shared empty-state idiom, the same one
+      // pending-pane-mount.ts's mountPendingHint uses.
+      html: `<li class="sessions-empty-row" data-row-key="__empty__">`
+        + `<div class="v-empty"><i class="ph ph-chat-circle-dots v-empty-icon"></i>`
+        + `<div class="v-empty-title">No active sessions</div>`
+        + `<div class="v-empty-hint">Tap + to start one</div></div></li>`,
     });
   }
 

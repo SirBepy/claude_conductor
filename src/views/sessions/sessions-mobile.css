@@ -134,6 +134,18 @@
   .session-messages {
     padding: 12px 12px;
   }
+
+  /* `.sessions-list` is a column flex (session-list.css), so flex:1 lets the
+     lone empty row fill the list and centre its card vertically. */
+  .sessions-empty-row {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+  .sessions-empty-row .v-empty-hint {
+    display: block;
+  }
   .msg.user {
     max-width: 92%;
     margin-left: 12px;
