@@ -178,15 +178,11 @@ pub fn register_create_project(router: &mut Router, state: Arc<DaemonState>) {
             // list, git info, slash commands, account) rejects an unknown cwd,
             // and the phone has no ensure_project to do it itself.
             let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            let (project_id, created_new) =
-                state.settings.upsert_project_for_cwd(std::path::Path::new(&full_path), &now);
-            if created_new {
-                state.notifier.publish("project_created", json!({
-                    "project_id": project_id,
-                    "cwd": full_path,
-                    "now": now,
-                }));
-            }
+            crate::daemon::session_registration::register_project(
+                &state,
+                std::path::Path::new(&full_path),
+                &now,
+            );
 
             Ok(json!({ "path": full_path }))
         }

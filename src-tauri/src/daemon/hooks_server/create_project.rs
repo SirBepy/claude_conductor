@@ -59,17 +59,8 @@ async fn create_project(state: &DaemonState, raw_path: &str) -> Value {
     };
 
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let (project_id, registered_new) = state.settings.upsert_project_for_cwd(&path, &now);
-    if registered_new {
-        state.notifier.publish(
-            "project_created",
-            json!({
-                "project_id": project_id,
-                "cwd": path.to_string_lossy(),
-                "now": now,
-            }),
-        );
-    }
+    let (project_id, registered_new) =
+        crate::daemon::session_registration::register_project(state, &path, &now);
     json!({
         "ok": true,
         "project_id": project_id,

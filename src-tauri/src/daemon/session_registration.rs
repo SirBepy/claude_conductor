@@ -10,6 +10,25 @@ use crate::daemon::state::DaemonState;
 use serde_json::json;
 use std::path::Path;
 
+/// Registers `path` as a project (or finds it already registered) and
+/// publishes `project_created` with `{project_id, cwd, now}` only when newly
+/// registered. Shared by `register_new_session`, the `create_project` MCP
+/// hook and the phone's `create_project_folder` RPC, so the payload
+/// `daemon_link/handlers.rs::handle_project_created` persists from has one
+/// shape: a caller publishing a different one would silently stop its
+/// registrations reaching settings.json.
+pub(crate) fn register_project(state: &DaemonState, path: &Path, now: &str) -> (String, bool) {
+    let (project_id, created_new) = state.settings.upsert_project_for_cwd(path, now);
+    if created_new {
+        state.notifier.publish("project_created", json!({
+            "project_id": project_id,
+            "cwd": path.to_string_lossy(),
+            "now": now,
+        }));
+    }
+    (project_id, created_new)
+}
+
 /// Register a freshly-spawned session into the project/registry/chat-config
 /// layers: upserts the cwd's project (publishing `project_created` if it's
 /// new), records model/effort/account into both the registry and
@@ -35,14 +54,7 @@ pub(crate) fn register_new_session(
     character_id: Option<&str>,
     is_remote: bool,
 ) {
-    let (project_id, created_new) = state.settings.upsert_project_for_cwd(cwd, now);
-    if created_new {
-        state.notifier.publish("project_created", json!({
-            "project_id": project_id,
-            "cwd": cwd.to_string_lossy(),
-            "now": now,
-        }));
-    }
+    let (project_id, _) = register_project(state, cwd, now);
     state.registry.upsert_interactive(session_id, cwd, &project_id, now);
     if is_remote {
         state.registry.set_is_remote(session_id, true);
@@ -75,4 +87,53 @@ pub(crate) fn register_new_session(
 pub(crate) fn flag_as_jarvis(state: &DaemonState, session_id: &str) {
     state.registry.set_jarvis(session_id, true);
     crate::sessions::chat_config::set_auto_accept(session_id, true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::settings::identity::test_support::non_ephemeral_tempdir;
+    use crate::types::Settings;
+    use serde_json::json;
+
+    fn state() -> std::sync::Arc<DaemonState> {
+        DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    /// Pins the `{project_id, cwd, now}` payload shape
+    /// `daemon_link/handlers.rs::handle_project_created` depends on.
+    #[tokio::test]
+    async fn registering_a_new_project_publishes_the_pinned_payload_shape() {
+        let dir = non_ephemeral_tempdir();
+        let target = dir.path().join("fresh-app");
+        std::fs::create_dir_all(&target).unwrap();
+        let s = state();
+        let mut rx = s.notifier.subscribe();
+
+        let (project_id, created_new) = register_project(&s, &target, "2026-01-01T00:00:00Z");
+
+        assert!(created_new);
+        let frame = rx.recv().await.expect("recv");
+        assert_eq!(frame["method"], json!("project_created"));
+        assert_eq!(frame["params"]["project_id"], json!(project_id));
+        assert_eq!(frame["params"]["cwd"], json!(target.to_string_lossy()));
+        assert_eq!(frame["params"]["now"], json!("2026-01-01T00:00:00Z"));
+    }
+
+    #[tokio::test]
+    async fn registering_an_already_known_project_does_not_republish() {
+        let dir = non_ephemeral_tempdir();
+        let target = dir.path().join("twice");
+        std::fs::create_dir_all(&target).unwrap();
+        let s = state();
+        let _ = register_project(&s, &target, "2026-01-01T00:00:00Z");
+        let mut rx = s.notifier.subscribe();
+
+        let (_project_id, created_new) = register_project(&s, &target, "2026-01-02T00:00:00Z");
+
+        assert!(!created_new);
+        assert!(rx.try_recv().is_err(), "a second registration of the same project must not republish");
+    }
 }
