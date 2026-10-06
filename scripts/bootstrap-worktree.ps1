@@ -8,6 +8,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (git rev-parse --show-toplevel) -replace "/", "\"
 Set-Location $repoRoot
 
+. (Join-Path $PSScriptRoot "resolve-android-java-home.ps1")
+
 Write-Host "[1/5] git submodule update --init --recursive (vendor/tauri_kit)"
 git submodule update --init --recursive
 
@@ -59,11 +61,11 @@ if (-not (Test-Path $androidDir)) {
     } elseif (Test-Path $ndkParent) {
         (Get-ChildItem $ndkParent | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).FullName
     } else { $null }
-    $javaHome = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { "C:\Program Files\Android\Android Studio\jbr" }
+    $javaHome = Resolve-AndroidJavaHome
 
     if ((Test-Path $tauriSettingsGradle) -and (Test-Path $tauriActivityKt)) {
         Write-Host "[4/5] android/ codegen output already present, skipping"
-    } elseif (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not (Test-Path $javaHome)) {
+    } elseif (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not $javaHome -or -not (Test-Path $javaHome)) {
         Write-Host "[4/5] could not auto-detect ANDROID_HOME/NDK_HOME/JAVA_HOME - skipping."
         Write-Host "  run manually from android/: cargo tauri android init (with those three set)"
     } else {

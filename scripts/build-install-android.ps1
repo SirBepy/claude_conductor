@@ -1,7 +1,8 @@
 # Builds the Android APK (aarch64) and installs it on the one connected device.
-# Auto-detect logic duplicated from scripts/bootstrap-worktree.ps1 per
-# .claude/todos/594-android-build-install-script.md (kept inline, not extracted, to
-# avoid a shared-helper file neither todo asked for).
+# ANDROID_HOME/NDK_HOME auto-detect logic duplicated from scripts/bootstrap-worktree.ps1
+# per .claude/todos/594-android-build-install-script.md (kept inline, not extracted, to
+# avoid a shared-helper file neither todo asked for). JAVA_HOME selection DOES share a
+# helper with that script (todo 1079): both need the same Gradle-compatible-JDK check.
 [CmdletBinding()]
 param(
     [switch]$Fresh
@@ -12,6 +13,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (git rev-parse --show-toplevel) -replace "/", "\"
 $androidDir = Join-Path $repoRoot "android"
 
+. (Join-Path $PSScriptRoot "resolve-android-java-home.ps1")
+
 $sdkHome = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
 $ndkParent = Join-Path $sdkHome "ndk"
 $ndkHome = if ($env:NDK_HOME) {
@@ -19,10 +22,11 @@ $ndkHome = if ($env:NDK_HOME) {
 } elseif (Test-Path $ndkParent) {
     (Get-ChildItem $ndkParent | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).FullName
 } else { $null }
-$javaHome = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { "C:\Program Files\Android\Android Studio\jbr" }
+$javaHome = Resolve-AndroidJavaHome
 
-if (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not (Test-Path $javaHome)) {
-    throw "Could not auto-detect ANDROID_HOME/NDK_HOME/JAVA_HOME. Set them explicitly and re-run."
+if (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not $javaHome -or -not (Test-Path $javaHome)) {
+    throw "Could not auto-detect ANDROID_HOME/NDK_HOME/JAVA_HOME. Set them explicitly and re-run " +
+        "(if JAVA_HOME was rejected, see the Warning above for why)."
 }
 
 $tauriConfPath = Join-Path $androidDir "src-tauri\tauri.conf.json"
