@@ -90,3 +90,87 @@ describe("CommitsPopover", () => {
     pop.close();
   });
 });
+
+function page(prefix, n, hasMore) {
+  const entries = Array.from({ length: n }, (_, i) => ({
+    short_sha: `${prefix}${String(i).padStart(4, "0")}`, message: `${prefix} ${i}`, pushed: true, timestamp: TS,
+  }));
+  return { entries, has_more: hasMore, has_upstream: true };
+}
+
+/** jsdom has no layout, so the list's scroll geometry is stubbed. */
+function scrollList(scrollTop) {
+  const list = document.querySelector(".cp-list");
+  Object.defineProperty(list, "clientHeight", { value: 200, configurable: true });
+  Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+  list.scrollTop = scrollTop;
+  list.dispatchEvent(new Event("scroll"));
+}
+
+describe("CommitsPopover paging", () => {
+  let anchor;
+  let calls;
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    anchor = document.createElement("span");
+    anchor.className = "sb-git-btn";
+    document.body.appendChild(anchor);
+    calls = [];
+  });
+
+  it("scrolling near the bottom fetches the next page at the current offset and appends it", async () => {
+    ipcMock.impl = async (cmd, args) => {
+      calls.push(args);
+      return args.offset === 0 ? page("a", 30, true) : page("b", 5, false);
+    };
+    const pop = new CommitsPopover();
+    pop.open(anchor, CWD);
+    await settle();
+    expect(document.querySelectorAll(".cp-row")).toHaveLength(30);
+    expect(document.querySelector(".cp-sentinel.end")).toBeNull();
+
+    scrollList(800);
+    await settle();
+
+    expect(calls.map((a) => a.offset)).toEqual([0, 30]);
+    const rows = [...document.querySelectorAll(".cp-row")].map((r) => r.dataset.sha);
+    expect(rows).toHaveLength(35);
+    expect(rows[0]).toBe("a0000");
+    expect(rows[34]).toBe("b0004");
+    expect(document.querySelector(".cp-sentinel.end")).not.toBeNull();
+    pop.close();
+  });
+
+  it("a scroll far from the bottom does not fetch", async () => {
+    ipcMock.impl = async (cmd, args) => { calls.push(args); return page("a", 30, true); };
+    const pop = new CommitsPopover();
+    pop.open(anchor, CWD);
+    await settle();
+
+    scrollList(0);
+    await settle();
+
+    expect(calls).toHaveLength(1);
+    pop.close();
+  });
+
+  it("a page from a closed popover never lands in the reopened one", async () => {
+    let releaseStale;
+    ipcMock.impl = (cmd, args) => {
+      calls.push(args);
+      if (calls.length === 1) return new Promise((r) => { releaseStale = () => r(page("stale", 3, false)); });
+      return Promise.resolve(page("fresh", 2, false));
+    };
+    const pop = new CommitsPopover();
+    pop.open(anchor, CWD);
+    pop.close();
+    pop.open(anchor, CWD);
+    await settle();
+    releaseStale();
+    await settle();
+
+    const rows = [...document.querySelectorAll(".cp-row")].map((r) => r.dataset.sha);
+    expect(rows).toEqual(["fresh0000", "fresh0001"]);
+    pop.close();
+  });
+});
