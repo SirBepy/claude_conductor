@@ -5,6 +5,7 @@
 // every call, so all of this is re-wired fresh each time - wireChipPopovers
 // takes a ctx snapshot assembled once per render() (same pattern as
 // statusbar-chips.ts's ChipRenderCtx) rather than reading `this` directly.
+import { openInCodeMode } from "../../shared/chat/code-mode-bridge";
 import { DrainPopover } from "./drain-popover";
 import { AiTodosPopover } from "./ai-todos-popover";
 import { ServersPopover } from "./servers-popover";
@@ -147,6 +148,17 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
     closeAll();
     if (!wasOpen && ctx.cwd) ctx.commitsPopover.open(anchor, ctx.cwd);
   });
+
+  // The standalone branch and ahead/behind chips are a way into Code mode, on
+  // what a push would send.
+  for (const sel of [".sb-branch-btn", ".sb-commits-btn"]) {
+    container.querySelector<HTMLElement>(sel)?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeAll();
+      if (!ctx.cwd) return;
+      openInCodeMode({ kind: "scope", scope: "unpushed", commitsOpen: true });
+    });
+  }
 
   container.querySelector<HTMLElement>(".sb-overflow-btn")?.addEventListener("click", (e) => {
     e.stopPropagation();

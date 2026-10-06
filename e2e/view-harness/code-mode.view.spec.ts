@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/git-fold.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts, src/views/sessions/code-mode/branch-switcher.ts, src/views/sessions/code-mode/branch-switcher.css, src/views/sessions/code-mode/data.ts
+// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/git-fold.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts, src/views/sessions/code-mode/branch-switcher.ts, src/views/sessions/code-mode/branch-switcher.css, src/views/sessions/code-mode/data.ts, src/views/sessions/session-statusbar-popovers.ts
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
@@ -9,6 +9,9 @@ import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./har
 const SIZE = { width: 1359, height: 860 };
 const SPAWN = "C:/Projects/alpha";
 const SESSIONS = [sessionInstance({ cwd: SPAWN, name: "Code mode review", busy: true })];
+// The ahead/behind chip is the statusbar's way into Code mode on what a push
+// would send; the merged git chip opens the commit list instead.
+const ROW = ["model", "git", "commits"];
 
 const FILES = [
   { path: "src/views/sessions/git-card.ts", status: "M", added: 3, removed: 1, old_path: null },
@@ -40,6 +43,7 @@ async function mount(page: Page): Promise<void> {
       list_instances: SESSIONS,
       get_active_sessions: SESSIONS,
       session_live_cwd: SPAWN,
+      get_settings: { theme: "void", statuslineRowsV2Applied: true, statuslineRows: [ROW], statuslineRowsMobile: [ROW] },
       get_git_info: { branch: "master", repo: "alpha", ahead: 2, behind: 0, sha: "abc1234", insertions: null, deletions: null },
       get_commit_sync: {
         ahead: [
@@ -91,7 +95,7 @@ test.describe("view-harness / Code mode", () => {
 
   test("Unpushed: badges, WT, the commits fold, Push, then Show older commits as the last row", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .sb-git-btn").click();
+    await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
 
     await expect(code.locator(".cm-qtitle")).toContainText("Unpushed");
@@ -115,7 +119,7 @@ test.describe("view-harness / Code mode", () => {
 
   test("Show older commits pages in pushed history below Push; clicking a row opens that commit", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .sb-git-btn").click();
+    await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
 
     // The raw log interleaves the still-unpushed commit with older pushed
@@ -158,7 +162,7 @@ test.describe("view-harness / Code mode", () => {
 
   test("a file opens as a tab with icon-only diff tools in the tab row", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .sb-git-btn").click();
+    await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
     await code.locator('[data-file="src/shared/shortcuts.ts"]').click();
 
@@ -178,7 +182,7 @@ test.describe("view-harness / Code mode", () => {
 
   test("opening a commit swaps the header for its title and hash", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .sb-git-btn").click();
+    await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
     await code.locator('[data-commit="80b6247"]').click();
 
@@ -219,7 +223,7 @@ test.describe("view-harness / Code mode", () => {
 
   test("Preview on a branch shows its tree read-only, badged, with a Check out button", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .sb-git-btn").click();
+    await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
 
     await page.evaluate(() => {

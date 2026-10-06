@@ -9,7 +9,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 const SPAWN = "C:/Projects/zng-app";
 const SESSIONS = [sessionInstance({ cwd: SPAWN, name: "Reply to Lenar on claim state" })];
 
-async function mount(page: Page, over: Record<string, unknown> = {}): Promise<void> {
+async function mount(page: Page, over: Record<string, unknown> = {}, ready = "#session-pane .sb-git"): Promise<void> {
   await mountView(page, {
     view: "sessions",
     invoke: {
@@ -29,7 +29,7 @@ async function mount(page: Page, over: Record<string, unknown> = {}): Promise<vo
     },
   });
   await page.locator(`#sessions-list li[data-session-id="s1"]`).click();
-  await page.locator("#session-pane .sb-git").waitFor();
+  await page.locator(ready).waitFor();
 }
 
 test.describe("view-harness / merged statusline chips", () => {
@@ -81,15 +81,35 @@ test.describe("view-harness / merged statusline chips", () => {
     await expect(chip).toBeVisible();
   });
 
-  test("the git chip opens Code mode on what a push would send, with its branch list", async ({ page }) => {
+  test("the git chip opens the commit list, pushed and unpushed marked", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 700 });
     await mount(page, {
-      get_range_files: [{ path: "src/a.ts", status: "M", added: 2, removed: 1, old_path: null }],
-      get_git_dirty: [],
-      list_instances: SESSIONS,
+      get_commit_history: {
+        entries: [
+          { short_sha: "a41c9d20", message: "one", pushed: false, timestamp: 2 },
+          { short_sha: "08828e1c", message: "zero", pushed: true, timestamp: 1 },
+        ],
+        has_more: false,
+        has_upstream: true,
+      },
     });
 
     await page.locator("#session-pane .sb-git-btn").click();
+    await expect(page.locator(".cp-popover .cp-row")).toHaveCount(2);
+    await expect(page.locator(".code-mode")).toHaveCount(0);
+  });
+
+  test("the ahead/behind chip opens Code mode on what a push would send, with its branch list", async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 700 });
+    const row = ["model", "branch", "commits"];
+    await mount(page, {
+      get_settings: { theme: "glacier", statuslineRowsV2Applied: true, statuslineRows: [row], statuslineRowsMobile: [row] },
+      get_range_files: [{ path: "src/a.ts", status: "M", added: 2, removed: 1, old_path: null }],
+      get_git_dirty: [],
+      list_instances: SESSIONS,
+    }, "#session-pane .sb-commits-btn");
+
+    await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
     await expect(code.locator(".cm-qtitle")).toContainText("Unpushed");
     await expect(code.locator(".cm-fold .cm-qn")).toHaveText("1 unpushed");
