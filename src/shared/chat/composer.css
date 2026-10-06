@@ -208,6 +208,14 @@
     top: -8px;
     right: -8px;
   }
+  /* The row stretches to base.css's 44px phone .icon-btn, so a 6px top pad
+     left one line of text ~6px above the send button's centre. Padding sized
+     to that 44px centres it; both layers, or the caret drifts off the text. */
+  .composer-textarea,
+  .composer-highlight {
+    padding-top: calc((44px - 1.4em) / 2);
+    padding-bottom: calc((44px - 1.4em) / 2);
+  }
 }
 
 /* Post-send attachment chips (inside user messages) */
