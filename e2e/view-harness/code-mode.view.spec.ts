@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts
+// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
