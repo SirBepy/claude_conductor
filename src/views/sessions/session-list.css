@@ -113,10 +113,18 @@
   position: relative;
 }
 
-/* After the base rule, or its `padding: 0` wins. Clears the floating "new
-   chat" CTA so the last chat row can always scroll out from under it. */
+/* Clears the floating "new chat" CTA so the last chat row can always scroll
+   out from under it. A margin on the last row rather than list padding: padding
+   would also float a collapsed Hidden header 84px off the bottom edge, where
+   desktop pins it. That header's label is on the left, clear of the CTA. A
+   negative margin on the header can't cancel the padding instead - Chromium
+   counts its inverted margin box as 40px of phantom scroll. An exiting row is
+   position:absolute, so while it is last the row before it keeps the gap. */
 @media (max-width: 640px) {
-  .sessions-list { padding-bottom: 84px; }
+  .sessions-list > li:last-child:not(.session-group-hidden-toggle, .row-exiting),
+  .sessions-list > li:not(.session-group-hidden-toggle):has(+ li.row-exiting:last-child) {
+    margin-bottom: 84px;
+  }
 }
 
 .sessions-list li {

@@ -47,18 +47,53 @@ test.describe("view-harness / sidebar Hidden group pinned to the bottom", () => 
     expect(m.isLast).toBe(true);
   });
 
-  test("phone width: the list keeps its bottom clearance for the new-chat FAB", async ({ page }) => {
+  test("phone width: the last chat row scrolls clear of the new-chat FAB", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 500 });
+    await mountSessionsList(page, sessions(10).slice(0, 10));
+    await expect(page.locator("#sessions-list li[data-session-id='s10']")).toBeAttached();
+    const gap = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>("#sessions-list")!;
+      list.scrollTop = list.scrollHeight;
+      const last = list.querySelector<HTMLElement>("li[data-session-id='s10']")!;
+      return list.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+    });
+    expect(gap).toBeGreaterThanOrEqual(83);
+  });
+
+  test("phone width: a collapsed Hidden still sits on the bottom edge, like desktop", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 800 });
     await seedHidden(page);
     await mountSessionsList(page, sessions(2));
-    const pad = await page.evaluate(() => getComputedStyle(document.querySelector("#sessions-list")!).paddingBottom);
-    expect(pad).toBe("84px");
+    await expect(page.locator("#sessions-list li.session-group-hidden-toggle")).toContainText("Hidden (1)");
+
+    const m = await measure(page);
+    expect(m.overflow).toBe(0);
+    expect(m.isLast).toBe(true);
+    expect(Math.abs(m.listBottom - m.headerBottom)).toBeLessThanOrEqual(1);
+  });
+
+  test("phone width: expanded Hidden rows keep the FAB clearance under the last row", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await seedHidden(page);
+    await page.addInitScript(() => localStorage.setItem("cc_hidden_collapsed", "false"));
+    await mountSessionsList(page, sessions(2));
+    await expect(page.locator(`#sessions-list li[data-session-id='${HIDDEN_ID}']`)).toBeVisible();
+
+    const gap = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>("#sessions-list")!;
+      list.scrollTop = list.scrollHeight;
+      const last = list.lastElementChild as HTMLElement;
+      return list.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+    });
+    expect(gap).toBeGreaterThanOrEqual(83);
   });
 
   test("desktop: no FAB, so no bottom clearance under Hidden", async ({ page }) => {
     await page.setViewportSize({ width: 1100, height: 900 });
     await seedHidden(page);
     await mountSessionsList(page, sessions(2));
+    const m = await measure(page);
+    expect(Math.abs(m.listBottom - m.headerBottom)).toBeLessThanOrEqual(1);
     const pad = await page.evaluate(() => getComputedStyle(document.querySelector("#sessions-list")!).paddingBottom);
     expect(pad).toBe("0px");
   });
