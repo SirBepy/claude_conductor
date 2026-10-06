@@ -16,6 +16,7 @@ import { getTransport, isRemote } from "../../shared/transport";
 import { findSuccessorToFollow, markFollowed } from "./successor-follow";
 import { freezePane } from "./pane-freeze";
 import { visibleInterval } from "../../shared/visible-interval";
+import { startHiddenSessionsSync } from "./hidden-sessions-sync";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -313,6 +314,9 @@ export async function wireInstancesChangedListener(
   // fans "instances-changed" out from the daemon's global WS stream, while
   // TauriTransport wraps the same desktop Tauri event used before.
   state.unlistenInstances = await getTransport().listen("instances-changed", () => { void syncInstances(); });
+  startHiddenSessionsSync(() => {
+    if (state.mountId === myMount) renderSidebar(listEl);
+  });
   // Recount the sidebar's scheduled-message marker/badge the moment a
   // schedule/cancel action lands, instead of waiting for an unrelated
   // instances-changed event. Routed through the transport seam so this also

@@ -49,6 +49,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // at most re-sends "continue" - both strictly weaker than send_message.
     ("freeze_session", P),
     ("unfreeze_session", P),
+    // Sidebar Hide/Unhide, so the phone shows the same chats hidden as the
+    // desktop. Reads/writes only a list of opaque session ids in its own file
+    // (sessions/hidden_chats.rs); hides nothing from any other surface.
+    ("get_hidden_chats", P),
+    ("update_hidden_chats", P),
     ("respond_permission", PM),
     ("respond_question", PM),
     // Write: resolves one render-confirmation waiter by client-supplied id.
@@ -351,6 +356,7 @@ mod tests {
         for m in [
             "list_instances", "send_message", "cancel_turn", "respond_question",
             "freeze_session", "unfreeze_session",
+            "get_hidden_chats", "update_hidden_chats",
             "confirm_question_rendered",
             "get_skipped_question_marks",
             "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",

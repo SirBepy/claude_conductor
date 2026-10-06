@@ -12,7 +12,6 @@ import {
   loadUnreadSet,
   loadSort,
   loadHiddenSessions,
-  saveHiddenSessions,
   loadHiddenProjects,
   loadHiddenCollapsed,
   isSegCollapsed,
@@ -69,19 +68,11 @@ export function buildSidebarEntries(
   const sort = loadSort();
   const rateLimited = new Set(listSessions.filter(isBlocked).map((s) => s.session_id));
 
-  // Load hidden set and prune stale IDs. Only prune against a non-empty live
-  // list: renderSidebar fires once on mount before refreshSessions()
-  // resolves (state.sessions still []), and pruning against that transient
-  // empty set would wipe every hidden id before the real list ever loads.
+  // Never pruned against this list: the hidden set is shared by every device
+  // through the daemon, and one device's list can be partial (a peer machine's
+  // rows not mirrored yet), which would unhide those chats everywhere. The
+  // daemon caps the set instead (sessions/hidden_chats.rs).
   const hidden = loadHiddenSessions();
-  const liveIds = new Set(listSessions.map(s => s.session_id));
-  if (listSessions.length > 0) {
-    let hiddenPruned = false;
-    for (const id of [...hidden]) {
-      if (!liveIds.has(id)) { hidden.delete(id); hiddenPruned = true; }
-    }
-    if (hiddenPruned) saveHiddenSessions(hidden);
-  }
 
   // Project-rail filter: hides a project's chats everywhere, including out of
   // the "Hidden" section below - a hidden project means nothing from it shows.

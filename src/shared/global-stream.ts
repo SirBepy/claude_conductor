@@ -27,6 +27,7 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   characters_changed: "characters-changed",
   message_drafts_changed: "message-drafts-changed",
   user_todos_changed: "user-todos-changed",
+  hidden_chats_changed: "hidden-chats-changed",
   // Same snake/kebab spelling, so this one is easy to mistake for already
   // wired up. Found by todo 946's own check (`tests/
   // notifier-event-registration-contract.test.mjs`): `preview-panel.ts` already

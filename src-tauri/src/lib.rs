@@ -404,6 +404,8 @@ pub fn run() {
             ipc::mark_todos_seen,
             ipc::set_todo_columns,
             ipc::clear_archived_todos,
+            ipc::get_hidden_chats,
+            ipc::update_hidden_chats,
             ipc::list_message_drafts,
             ipc::set_draft_body,
             ipc::set_draft_version,

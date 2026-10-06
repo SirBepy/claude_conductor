@@ -227,6 +227,11 @@ export class HttpTransport implements Transport {
         });
       case "clear_archived_todos":
         return this.rpc<T>("clear_archived_todos", { session_id: args.sessionId ?? args.session_id });
+      // Sidebar Hide/Unhide: one daemon-owned list, so phone and desktop agree.
+      case "get_hidden_chats":
+        return this.rpc<T>("get_hidden_chats", {});
+      case "update_hidden_chats":
+        return this.rpc<T>("update_hidden_chats", { add: args.add ?? [], remove: args.remove ?? [] });
       // Ask panel (todo 1007): same fab-dial reachability as Todos above.
       case "ask_list_threads":
         return this.rpc<T>("ask_list_threads", { session_id: args.sessionId ?? args.session_id });

@@ -292,6 +292,9 @@ export function saveUnreadSet(set: Set<string>): void {
   catch { /* ignore */ }
 }
 
+/** The daemon owns the hidden list (hidden-sessions-sync.ts); localStorage is
+ *  its last-known copy, read synchronously by every render so a reload never
+ *  flashes hidden chats into the visible list before the daemon answers. */
 export function loadHiddenSessions(): Set<string> {
   try {
     const raw = localStorage.getItem(LS_HIDDEN);
@@ -300,9 +303,30 @@ export function loadHiddenSessions(): Set<string> {
   return new Set();
 }
 
-export function saveHiddenSessions(set: Set<string>): void {
+/** Overwrites the local copy only; the daemon's push lands here. */
+export function writeHiddenSessionsLocal(set: Set<string>): void {
   try { localStorage.setItem(LS_HIDDEN, JSON.stringify([...set])); }
   catch { /* ignore */ }
+}
+
+type HiddenPusher = (add: string[], remove: string[]) => void;
+let hiddenPusher: HiddenPusher | null = null;
+
+/** Set by hidden-sessions-sync.ts, which owns the transport, so this file
+ *  stays importable by tests and views that never talk to the daemon. */
+export function setHiddenSessionsPusher(fn: HiddenPusher | null): void {
+  hiddenPusher = fn;
+}
+
+/** A user hide/unhide: updates the local copy at once and sends only the
+ *  difference to the daemon, so a concurrent change made on another device
+ *  is never reverted by this one's stale full set. */
+export function saveHiddenSessions(set: Set<string>): void {
+  const prev = loadHiddenSessions();
+  writeHiddenSessionsLocal(set);
+  const add = [...set].filter((id) => !prev.has(id));
+  const remove = [...prev].filter((id) => !set.has(id));
+  if (add.length || remove.length) hiddenPusher?.(add, remove);
 }
 
 /** Projects (keyed by cwd, matching the alias/merge system's own key) hidden

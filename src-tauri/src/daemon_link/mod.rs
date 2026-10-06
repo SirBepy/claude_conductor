@@ -286,6 +286,11 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "user_todos_changed" => {
             let _ = app.emit("user-todos-changed", params);
         }
+        // Sidebar Hide/Unhide from another client (`methods::hidden_chats`).
+        // Payload is the full `{sessions}` list, so the sidebar just adopts it.
+        "hidden_chats_changed" => {
+            let _ = app.emit("hidden-chats-changed", params);
+        }
         // In-app HTML preview push (daemon::preview via POST /hooks/preview).
         // Pure forward: the docked preview panel re-reads via `list_previews`
         // on open/focus, so this is just the fast live-update nudge. Payload
