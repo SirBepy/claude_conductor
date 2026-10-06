@@ -3,12 +3,7 @@
 // 3c): the dashboard account selector (milestone 05), the new-chat account
 // picker (milestone 04), and the floating overlay (milestone 06).
 //
-// WRITTEN, NOT YET RUN. Per the milestone-08 brief this spec was authored and
-// parse/type-checked (`pnpm tsc --noEmit` covers .ts specs; this file is
-// plain .js so only `node --check` syntax-validates it) but deliberately not
-// executed against the harness in this session. Whoever picks this up next
-// should run it via the opt-in npm script below, fix whatever the first real
-// run surfaces, and only then consider it "verified".
+// Opt-in, outside the default `test:e2e` pair:
 //
 //   npm run test:e2e:accounts
 //
