@@ -3,7 +3,7 @@
 // same shell as characters.ts's openNewCharacterModal: .modal.modal-card +
 // .modal-header/.modal-body/.modal-actions) so its input picks up the app's
 // shared text-input look instead of a bespoke one - that look only needed
-// `input[type="password"]` added to styles/widgets.css's shared input rule.
+// `input[type="password"]` added to styles/inputs.css's shared input rule.
 // presentHostCard()/closeHostCard() own the backdrop, focus trap and phone
 // hardware-back; this module no longer manages those itself.
 //

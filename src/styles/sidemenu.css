@@ -1,6 +1,5 @@
 /* ── Sidemenu ──────────────────────────────────────────────────────────── */
-/* Split out of widgets.css (todo 960) - pure move, no rule changes.
- * Imported by src/shared/sidemenu.ts. */
+/* Imported by src/shared/sidemenu.ts. */
 .sidemenu-backdrop {
   position: fixed;
   inset: 0;

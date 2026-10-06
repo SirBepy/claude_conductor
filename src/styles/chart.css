@@ -1,0 +1,60 @@
+/* ── Chart pagination ── */
+.chart-pagination {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.chart-pagination-label {
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  font-family: "DM Sans", system-ui, sans-serif;
+  text-align: center;
+}
+
+.chart-pagination .nav-arrow {
+  padding: 3px 10px;
+  font-size: var(--fs-micro);
+}
+
+.chart-pagination button:disabled {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Reserve space on the right so the pin button doesn't overlap the pagination arrow */
+.chart-container .chart-pagination {
+  padding-right: 34px;
+  padding-left: 34px;
+}
+
+/* ── Chart ── */
+.chart-container {
+  position: relative;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px 12px 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+

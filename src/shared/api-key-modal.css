@@ -1,6 +1,6 @@
 /* ── API key add/replace modal (todo 1043) ──────────────────────────────── */
 /* Shell (.modal/.modal-card/.modal-header/.modal-body/.modal-actions) comes
- * from styles/widgets.css and the #modal-host chain in shared/modal.css -
+ * from styles/hook-modal.css and the #modal-host chain in shared/modal.css -
  * only this modal's own data rows and states are styled here. */
 
 .aikm-modal-card .field { margin: 0 0 10px; }
@@ -10,7 +10,7 @@
   color: var(--sb-muted);
   margin-bottom: 6px;
 }
-/* Fill/border/focus come from input[type="password"] in styles/widgets.css -
+/* Fill/border/focus come from input[type="password"] in styles/inputs.css -
  * only the width this card's layout needs lives here. */
 .aikm-modal-card input.aikm-field {
   width: 100%;

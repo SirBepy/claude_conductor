@@ -1,0 +1,54 @@
+/* ── Today summary ── */
+.today-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 11px 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+/* ── Stats table ── */
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+}
+.stats-table th {
+  text-align: left;
+  color: var(--sb-muted);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 6px 10px 0;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.stats-table th:hover {
+  color: var(--color-text);
+}
+.stats-table th.sort-active {
+  color: var(--color-primary);
+}
+.stats-table td {
+  padding: 7px 6px 7px 0;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+  color: var(--color-text);
+}
+.stats-table tr:last-child td {
+  border-bottom: none;
+}
+.stats-table tr.proj-row td {
+  cursor: pointer;
+}
+.stats-table tr.proj-row:hover td {
+  color: var(--color-primary);
+}
+.stats-table .mono {
+  font-family: "Fira Code", monospace;
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+}
+

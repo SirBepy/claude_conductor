@@ -82,14 +82,14 @@ export interface ToggleRowOpts {
   checked: boolean;
   onChange?: (e: Event) => void;
   disabled?: boolean;
-  /** Optional help text shown via the existing .info-wrap/.info-tooltip hover pattern (see src/styles/widgets.css). */
+  /** Optional help text shown via the existing .info-wrap/.info-tooltip hover pattern (see src/styles/tooltips.css). */
   tooltip?: string;
 }
 
 /**
  * A `kit-row` with a label and a `kit-toggle` checkbox. When `tooltip` is set,
  * the label gets an inline info icon reusing the `.info-wrap`/`.info-icon`/
- * `.info-tooltip` classes from src/styles/widgets.css. Those classes only
+ * `.info-tooltip` classes from src/styles/tooltips.css. Those classes only
  * supply the box/positioning styling - the hover-position JS (see
  * `attachTooltips` in src/shared/row-tooltip.ts) still has to be wired by
  * the caller against the rendered root.

@@ -1,4 +1,4 @@
-// Shared hover tooltip for `.info-tooltip` boxes (widgets.css), delegated so
+// Shared hover tooltip for `.info-tooltip` boxes (tooltips.css), delegated so
 // it survives re-renders. Two placements: "side" (sidebar rows, anchor via
 // [data-tip]) and "above" (settings info-icons, anchor + text via .info-wrap).
 // Outside-tap dismiss builds on outside-dismiss.ts, shared with

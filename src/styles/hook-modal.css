@@ -1,0 +1,100 @@
+/* ── Hook-registration modal ── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2500;
+}
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 10px;
+  width: calc(100% - 48px);
+  max-width: 460px;
+  z-index: 2600;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border, #2e2e40);
+}
+.modal-header h3 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+.modal-header i {
+  font-size: 1.2rem;
+  color: var(--color-primary, #4c9eff);
+}
+.modal-body {
+  padding: 14px 16px;
+  font-size: var(--fs-body);
+  line-height: 1.45;
+}
+.modal-body p {
+  margin: 0 0 8px;
+}
+.modal-body .muted {
+  color: var(--sb-muted);
+  font-size: var(--fs-micro);
+}
+.modal-preview {
+  margin-top: 10px;
+  background: var(--color-background, #15151e);
+  border: 1px solid var(--color-border, #2a2a3a);
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-family: "Fira Code", monospace;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: auto;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border, #2e2e40);
+}
+
+/* Hook-consent modal: primary action gets full width, opt-outs sit
+ * below in a secondary row so the recommended action wins the eye. */
+.hook-modal-actions {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.hook-modal-actions .hook-modal-accept {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: var(--fs-heading);
+  font-weight: 600;
+}
+.hook-modal-actions .hook-modal-secondary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.btn-link-muted {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted, #9a9ab0);
+  font-size: var(--fs-body);
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.btn-link-muted:hover {
+  color: var(--color-text, #d8d8e6);
+  text-decoration: underline;
+}

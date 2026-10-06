@@ -1,0 +1,76 @@
+/* ── Theme mode toggle ── */
+.mode-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mode-toggle-label {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+/* Theme picker cards now use the kit's .kit-palette-* classes (see themes.ts). */
+
+/* ── Dead path warning ── */
+.dead-path-warning {
+  color: var(--color-warning);
+  font-size: var(--fs-micro);
+  vertical-align: middle;
+}
+
+/* ── Hidden projects row ── */
+.hidden-proj-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.option.is-disabled,
+.kit-row.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.mute-all-on .option.mute-child,
+.mute-all-on .kit-row.mute-child {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* .proj-face lives here, not with the rest of the project-card family in
+ * project-card.css - it is also rendered by shared/projects.ts and
+ * sessions/sidebar-row-visuals.ts. */
+
+/* Project tech-icon face (ai_todo 99): the detected-logo placeholder rendered by
+ * renderAvatar's no-user-avatar path, hydrated by hydrateProjectTechIcons. Fills
+ * its avatar box; the Devicon <i> inherits the box's font-size. */
+.proj-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.proj-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 7px;
+}
+/* Rust ships no `colored` Devicon variant; tint it to its brand-ish orange. */
+.proj-face .devicon-rust-plain {
+  color: #e0a884;
+}
+.count-pill {
+  background: var(--color-surface-alt, #2a2a3a);
+  color: var(--color-text-muted, #9a9ab0);
+  font-size: 0.66rem;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+

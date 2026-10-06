@@ -17,7 +17,7 @@
   border: 1px solid var(--color-border);
   border-radius: 6px;
 }
-/* :focus-within moves the global input focus recipe (widgets.css's
+/* :focus-within moves the global input focus recipe (inputs.css's
    input[type="search"]:focus) onto the container, since the inner input's
    own chrome is stripped below - otherwise both boxes glow independently. */
 .skills-search-field:focus-within {

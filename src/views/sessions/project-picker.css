@@ -373,7 +373,7 @@ body.pp-dragging * {
   color: var(--color-text-muted, #8a8aa0);
   pointer-events: none;
 }
-/* widgets.css's `.proj-face` is declared unscoped as width/height 100%, on the
+/* misc-widgets.css's `.proj-face` is declared unscoped as width/height 100%, on the
    assumption it always sits in a sized avatar box. Without this it fills the
    tile and swallows the numeral. */
 .pp-fav-face {

@@ -1,0 +1,39 @@
+/* ── Nav rows (settings subpage links) ── */
+.nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 0;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  transition: color 0.15s;
+}
+
+.nav-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.nav-row:first-child {
+  padding-top: 0;
+}
+
+.nav-row-label {
+  font-size: var(--fs-title);
+  color: var(--color-text);
+}
+
+.nav-row-arrow {
+  color: var(--color-text-muted);
+  font-size: var(--fs-heading);
+  line-height: 1;
+}
+
+.nav-row:hover .nav-row-label {
+  color: var(--color-primary);
+}
+
+.nav-row:hover .nav-row-arrow {
+  color: var(--color-primary);
+}
+

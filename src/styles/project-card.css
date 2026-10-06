@@ -1,8 +1,7 @@
 /* ── Projects view: sort control + card grid ─────────────────────────────
- * Split out of widgets.css (todo 960) - pure move, no rule changes.
- * Imported by src/views/projects/projects.ts, the only consumer
- * (.proj-face stayed behind in widgets.css - shared/projects.ts's
- * renderAvatar() and sessions/sidebar-row-visuals.ts also render it). */
+ * Imported by src/views/projects/projects.ts, the only consumer. .proj-face
+ * lives in src/styles/misc-widgets.css instead - shared/projects.ts's
+ * renderAvatar() and sessions/sidebar-row-visuals.ts also render it. */
 .projects-sort {
   display: inline-flex;
   align-items: center;

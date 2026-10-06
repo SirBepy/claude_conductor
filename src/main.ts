@@ -1,11 +1,22 @@
 import "./styles/tokens.css";
 // Kit settings layer (neutral --color-* + .kit-* widget CSS) + the 4 palettes
-// (2D [data-theme][data-mode]). Imported BEFORE base.css/widgets.css so
-// claude_usage's own base element rules (e.g. body font) win over the kit reset.
+// (2D [data-theme][data-mode]). Imported BEFORE base.css and the styles/
+// widget files so claude_usage's own base element rules (e.g. body font) win
+// over the kit reset.
 import "../vendor/tauri_kit/frontend/settings/styles.css";
 import "../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default.css";
 import "./styles/base.css";
-import "./styles/widgets.css";
+import "./styles/chart.css";
+import "./styles/settings-sections.css";
+import "./styles/tooltips.css";
+import "./styles/nav-rows.css";
+import "./styles/inputs.css";
+import "./styles/color-picker.css";
+import "./styles/toggle-switch.css";
+import "./styles/tables.css";
+import "./styles/misc-widgets.css";
+import "./styles/hook-modal.css";
+import "./styles/session-table.css";
 import "./styles/motion.css";
 
 import { mountRouter, registerView } from "./router";

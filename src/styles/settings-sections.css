@@ -1,0 +1,71 @@
+/* ── Settings sections ── */
+.section {
+  background: var(--color-surface);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.section-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 0;
+  min-height: 44px;
+}
+
+.option:not(:last-child) {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.option:first-of-type {
+  padding-top: 0;
+}
+
+.option:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.notif-card .notif-sound-row,
+.notif-card .notif-voice-rows {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.option-label {
+  font-size: var(--fs-title);
+  color: var(--color-text);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+

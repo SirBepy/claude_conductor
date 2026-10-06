@@ -70,7 +70,7 @@
   font-size: 12px;
 }
 
-/* Untyped on purpose: widgets.css styles input[type="text"] at a specificity
+/* Untyped on purpose: inputs.css styles input[type="text"] at a specificity
    this single-class rule would lose to. */
 .fs-search-input {
   width: 140px;

@@ -1,0 +1,76 @@
+/* .subview-header is still used by the legacy session-detail view so
+ * keep it here until Task 11 migrates session-detail. */
+.subview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border, #2d2c44);
+}
+
+/* See-all link row inside Recent sessions */
+.see-all-link {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 0;
+  background: transparent;
+  color: var(--color-accent, #9d7dfc);
+  border: 0;
+  font-size: var(--fs-body);
+  text-align: center;
+  cursor: pointer;
+}
+.see-all-link:hover {
+  text-decoration: underline;
+}
+
+/* Recent/all sessions table */
+.session-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--fs-micro);
+}
+.session-table thead th {
+  text-align: left;
+  color: var(--sb-muted);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 8px 5px 0;
+  font-weight: 600;
+}
+.session-table tbody td {
+  padding: 5px 8px 5px 0;
+  border-top: 1px solid var(--color-border, #2e2e40);
+  vertical-align: middle;
+}
+/* Column widths drive off the header row under table-layout: fixed, so pin
+   them on the th cells. When + Tokens stay just wide enough for their widest
+   real value ("just now", "999.9M"); Title (last) gets all the slack. */
+.session-table th:nth-child(1) { width: 70px; }
+.session-table th:nth-child(2) { width: 60px; }
+.session-table th:nth-child(3) { width: auto; }
+.session-table .col-when {
+  color: var(--sb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "Fira Code", monospace;
+}
+.session-table .col-tokens {
+  font-family: "Fira Code", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-table .col-name {
+  font-family: "Fira Code", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-table tr.session-row:hover td {
+  background: var(--color-surface-alt, #2a2a3d);
+}

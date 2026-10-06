@@ -77,7 +77,7 @@
   font-weight: 700;
 }
 
-/* .btn-danger is width:100% in widgets.css (built for standalone use); the
+/* .btn-danger is width:100% in color-picker.css (built for standalone use); the
  * flex:1 above already spans it correctly split with the cancel button. */
 .app-confirm-actions .btn-danger {
   width: auto;

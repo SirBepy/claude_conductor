@@ -327,7 +327,7 @@
 .dr-rv-item i { color: var(--color-primary); font-size: 13px; }
 .dr-rv-item:hover { background: var(--color-surface-alt); }
 
-/* Two classes to outrank widgets.css's input[type="text"]. */
+/* Two classes to outrank inputs.css's input[type="text"]. */
 .dr-rv-menu .dr-rv-input {
   margin-top: 4px;
   font: inherit;

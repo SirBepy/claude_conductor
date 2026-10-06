@@ -145,7 +145,7 @@
   flex-shrink: 0;
 }
 
-/* Fill/border/focus come from `input[type="text"]` in styles/widgets.css, which
+/* Fill/border/focus come from `input[type="text"]` in styles/inputs.css, which
  * outranks a lone class selector - so the padding that clears the search icon
  * has to carry the extra weight or the placeholder lands under the glass. */
 .cc-modal-search-wrap input.cc-modal-search {
