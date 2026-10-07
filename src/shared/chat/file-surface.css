@@ -373,6 +373,9 @@ table.fs-sdiff {
   padding: 0;
   background: transparent !important;
   counter-reset: fs-line;
+  /* The "\n" text nodes between the block-level .line rows would each render
+     as an extra empty row under `pre`; each .line keeps `pre` itself. */
+  white-space: normal;
 }
 
 .fs-code-view .line {
@@ -391,7 +394,6 @@ table.fs-sdiff {
   padding-right: 10px;
   margin-right: 12px;
   color: var(--color-text-muted);
-  opacity: 0.5;
   user-select: none;
   font-size: 10px;
   border-right: 1px solid var(--color-border);

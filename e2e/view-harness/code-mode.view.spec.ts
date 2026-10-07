@@ -272,6 +272,26 @@ test.describe("view-harness / Code mode", () => {
     await expect(code.locator(".sb-git-pop-row.pick")).toHaveCount(1);
   });
 
+  test("the file view is single-spaced: one row per source line, no blank row between", async ({ page }) => {
+    await mount(page);
+    await page.evaluate(() => {
+      const w = window as unknown as { __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } };
+      const orig = w.__TAURI__.core.invoke;
+      w.__TAURI__.core.invoke = (cmd, args) =>
+        cmd === "get_file_at_rev"
+          ? Promise.resolve({ content: "line one\nline two\nline three\n", truncated: false })
+          : orig(cmd, args);
+    });
+    await page.locator("#session-pane .code-mode-btn").click();
+    const code = page.locator(".code-mode");
+    await code.locator('[data-file="README.md"]').click();
+    const lines = code.locator(".fs-code-view .line");
+    await expect(lines.first()).toBeVisible();
+    const a = (await lines.nth(0).boundingBox())!;
+    const b = (await lines.nth(1).boundingBox())!;
+    expect(b.y - a.y).toBeLessThanOrEqual(a.height + 1);
+  });
+
   test("a narrow window gives the file the room, not a fixed-width explorer", async ({ page }) => {
     await mount(page);
     await page.setViewportSize({ width: 560, height: 860 });
