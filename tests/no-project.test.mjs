@@ -21,10 +21,10 @@ describe("isNoProjectPath", () => {
     expect(isNoProjectPath(null)).toBe(false);
   });
 
-  it("follows the noProjectDir setting instead of the default when set", () => {
+  it("ignores a hand-edited noProjectDir setting, the vault is the only folder", () => {
     setSettings({ noProjectDir: "D:\\scratch\\home" });
-    expect(isNoProjectPath("d:/scratch/home")).toBe(true);
-    expect(isNoProjectPath("C:\\Users\\tecno\\Documents\\ObsidianVault")).toBe(false);
+    expect(isNoProjectPath("d:/scratch/home")).toBe(false);
+    expect(isNoProjectPath("C:\\Users\\tecno\\Documents\\ObsidianVault")).toBe(true);
   });
 });
 
