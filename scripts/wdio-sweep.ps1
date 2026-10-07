@@ -45,10 +45,8 @@
   default fake stub. Off by default.
 
 .PARAMETER FakeClaudeBin
-  Path to a stream-json stub CLI used for chat-flow/reload-dup unless -RealClaude is passed. The
-  fixture from todo 926 (C:\tmp\926\fake-claude\claude.cmd) is scratch, not checked into the repo,
-  and may not exist on a given machine - pass your own stub's path if so. See
-  [[project_wdio_billed_specs_free_via_fake_claude]] for what the stub needs to emit.
+  Path to a stream-json stub CLI used for chat-flow/reload-dup unless -RealClaude is passed.
+  Defaults to the committed e2e\fixtures\fake-claude\claude.cmd.
 
 .EXAMPLE
   scripts\wdio-sweep.ps1
@@ -63,12 +61,13 @@ param(
 
     [switch]$RealClaude,
 
-    [string]$FakeClaudeBin = 'C:\tmp\926\fake-claude\claude.cmd'
+    [string]$FakeClaudeBin
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
+if (-not $FakeClaudeBin) { $FakeClaudeBin = Join-Path $repoRoot 'e2e\fixtures\fake-claude\claude.cmd' }
 
 # cargo's target dir is not repo-local here (the global ~/.cargo/config.toml redirects it to
 # D:/cargo-target) - only `cargo metadata` honours that, same resolution as live-verify.ps1.
