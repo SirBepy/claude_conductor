@@ -34,6 +34,7 @@ Deploy: GitHub Releases; CI builds Windows (NSIS) and Apple Silicon macOS (DMG, 
 - `CC_WHEN_DONE_DRY_RUN` (any non-empty value): the when-done Firing phase runs the full state machine but skips the real sleep/shutdown, logging `when_done: dry-run, would <action>` instead - set it before a live "does when-done actually fire" check so it doesn't sleep/power off the machine.
 - One-off component screenshot via `pnpm run test:view`'s browser harness, no throwaway spec: `scripts/harness-shot.ps1 -Driver <ts-file> -Out <png-path>`.
 - Show Joe an existing PNG in the in-app preview panel: `scripts/show-shot.ps1 -Path <png-path> [-Title <text>] [-Slug <name>]`.
+- Full wdio release-gate sweep in one call (7 free specs with daemon-lifecycle last, then chat-flow/reload-dup on a fake claude, full logs kept on disk, one-line verdict per spec): `scripts/wdio-sweep.ps1` (`-Billed` adds `question-card-live`; `-RealClaude` bills chat-flow/reload-dup too; `-WhatIf` prints the plan without running anything).
 
 ## Rules
 
