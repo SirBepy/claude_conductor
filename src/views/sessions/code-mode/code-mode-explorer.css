@@ -6,9 +6,10 @@
   display: flex;
 }
 
+/* A narrow window keeps room for the file itself instead of a fixed 300px. */
 .cm-explorer {
   position: relative;
-  width: 300px;
+  width: clamp(200px, 30%, 300px);
   flex: none;
   display: flex;
   flex-direction: column;

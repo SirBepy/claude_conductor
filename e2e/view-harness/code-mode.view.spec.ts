@@ -272,6 +272,18 @@ test.describe("view-harness / Code mode", () => {
     await expect(code.locator(".sb-git-pop-row.pick")).toHaveCount(1);
   });
 
+  test("a narrow window gives the file the room, not a fixed-width explorer", async ({ page }) => {
+    await mount(page);
+    await page.setViewportSize({ width: 560, height: 860 });
+    await page.locator("#session-pane .sb-commits-btn").click();
+    const code = page.locator(".code-mode");
+    await code.locator('[data-file="src/shared/shortcuts.ts"]').click();
+    const explorer = (await code.locator(".cm-explorer").boundingBox())!;
+    const editor = (await code.locator(".cm-editor").boundingBox())!;
+    expect(explorer.width).toBeLessThanOrEqual(201);
+    expect(editor.width).toBeGreaterThanOrEqual(300);
+  });
+
   test("Ctrl+Shift+E enters and leaves", async ({ page }) => {
     await mount(page);
     await page.keyboard.press("Control+Shift+E");
