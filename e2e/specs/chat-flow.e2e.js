@@ -126,7 +126,16 @@ async function startHaikuChat() {
   await confirm.click();
 
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
-
+  // The previous chat's composer already exists, so that wait alone can pass
+  // before the new chat's pane replaces it, and the next send then lands in
+  // the OLD chat (todo 1055). A new chat has no messages yet.
+  await browser.waitUntil(
+    async () => {
+      const c = await msgCounts();
+      return c.user === 0 && c.assistant === 0;
+    },
+    { timeout: 20000, interval: 250, timeoutMsg: "new chat pane never replaced the previous chat's messages" }
+  );
 }
 
 // Read back the session's real cwd instead of trusting the picker click (todo
@@ -218,6 +227,7 @@ describe("Full chat flow exercise (multi-message, switch, close, reopen)", () =>
     if (!bId) note("bug", "chat B: no active session id after first reply");
     await assertSessionCwd(bId);
     if (bId && aId && bId === aId) note("bug", "chat B reused chat A's session id", { aId, bId });
+    expect(bId).not.toBe(aId);
 
     const c = await msgCounts();
     if (c.user !== 1) note("bug", `chat B: expected 1 user msg, got ${c.user} (leaked from A?)`, { counts: c });

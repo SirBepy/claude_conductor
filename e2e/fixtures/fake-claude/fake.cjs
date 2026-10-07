@@ -28,6 +28,23 @@ const tx = (o) => { try { fs.mkdirSync(tdir, { recursive: true }); fs.appendFile
 const result = (reply) => ({ type: "result", subtype: "success", is_error: false, result: reply, session_id: sid, duration_ms: 5, duration_api_ms: 5, num_turns: 1, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, uuid: crypto.randomUUID() });
 let parent = null;
 
+// FAKE_TOOL_ROW=1: a quiet-mode turn's shape, a send_message tool_use and its
+// tool_result ahead of the text reply, so the transcript holds rows the live
+// stream painted differently (what the chat-resync rebuild reacts to).
+function emitSendMessageRow(text) {
+  const toolId = "toolu_" + crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  const tmsg = { id: "msg_" + crypto.randomUUID().replace(/-/g, ""), type: "message", role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "tool_use", id: toolId, name: "mcp__cc_conductor__send_message", input: { text } }], stop_reason: "tool_use", usage: { input_tokens: 1, output_tokens: 1 } };
+  const tu = crypto.randomUUID();
+  out({ type: "assistant", message: tmsg, session_id: sid, uuid: tu, parent_tool_use_id: null });
+  tx({ type: "assistant", message: tmsg, uuid: tu, parentUuid: parent, sessionId: sid, cwd, timestamp: new Date().toISOString() });
+  parent = tu;
+  const rmsg = { role: "user", content: [{ type: "tool_result", tool_use_id: toolId, content: '{"message":1,"ok":true}' }] };
+  const ru = crypto.randomUUID();
+  out({ type: "user", message: rmsg, session_id: sid, uuid: ru, parent_tool_use_id: null });
+  tx({ type: "user", message: rmsg, uuid: ru, parentUuid: parent, sessionId: sid, cwd, timestamp: new Date().toISOString() });
+  parent = ru;
+}
+
 out({ type: "system", subtype: "init", cwd, session_id: sid, tools: [], mcp_servers: [], model: "claude-haiku-4-5-20251001", permissionMode: "default", uuid: crypto.randomUUID() });
 
 let buf = "";
@@ -51,6 +68,7 @@ process.stdin.on("data", (d) => {
     const amsg = { id: mid, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "text", text: reply }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } };
     const au = crypto.randomUUID();
     setTimeout(() => {
+      if (process.env.FAKE_TOOL_ROW) emitSendMessageRow(reply);
       out({ type: "assistant", message: amsg, session_id: sid, uuid: au, parent_tool_use_id: null });
       tx({ type: "assistant", message: amsg, uuid: au, parentUuid: parent, sessionId: sid, cwd, timestamp: new Date().toISOString() });
       parent = au;
