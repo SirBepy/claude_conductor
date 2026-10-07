@@ -122,6 +122,13 @@ class SessionEventStore {
     return !!this.cache.get(sessionId)?.hasMore;
   }
 
+  /** True when the first history fetch ran and failed, so `hasMore` is a
+   *  default rather than an answer. */
+  historyLoadFailed(sessionId: string): boolean {
+    const entry = this.cache.get(sessionId);
+    return !!entry?.initialLoaded && entry.pageSessionId === null;
+  }
+
   /**
    * Fetch the last `INITIAL_PAGE_SIZE` messages for `sessionId` and attach
    * the live listener. Idempotent: subsequent calls return the cached array

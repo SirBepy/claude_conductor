@@ -44,7 +44,11 @@ export class PaginationPolicy {
    */
   async loadInitial(sessionId: string, cwd?: string, opts?: { force?: boolean }): Promise<ChatEvent[]> {
     let entry = this.cache.get(sessionId);
-    if (entry?.initialLoaded && !opts?.force) {
+    // `pageSessionId` is set only by a page that actually arrived. A chat
+    // opened before its transcript exists (a /respawn successor is selected
+    // the moment it spawns) fails its first fetch; without the retry it would
+    // never learn it has older history or a predecessor (todo 1122).
+    if (entry?.initialLoaded && !opts?.force && entry.pageSessionId !== null) {
       touchAccess(entry);
       await this.ensureListener(sessionId);
       return entry.events;

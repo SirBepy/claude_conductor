@@ -4,6 +4,7 @@
 // fade-in rebuild that, rather than the JSONL read, was the switch latency.
 
 import type { ChatRenderer } from "../../shared/chat/chat-renderer";
+import { sessionEvents } from "../../shared/chat/event-store";
 
 /** Hot chats kept warm; each costs a live renderer + a detached DOM tree. */
 const CAPACITY = 5;
@@ -23,11 +24,13 @@ export interface RetainedChat {
 const retained = new Map<string, RetainedChat>();
 
 /** The retained pane for `sessionId`, marked most-recently-used. Null on miss,
- *  or when it parked so many events that a cold reload is cheaper. */
+ *  when it parked so many events that a cold reload is cheaper, or when its
+ *  history never loaded (a /respawn successor opened before its transcript
+ *  existed, todo 1122) - only a cold reload can learn its older history. */
 export function takeRetainedChat(sessionId: string): RetainedChat | null {
   const hit = retained.get(sessionId);
   if (!hit) return null;
-  if (hit.renderer.parkedEventCount > MAX_PARKED_EVENTS) {
+  if (hit.renderer.parkedEventCount > MAX_PARKED_EVENTS || sessionEvents.historyLoadFailed(sessionId)) {
     dropRetainedChat(sessionId);
     return null;
   }
