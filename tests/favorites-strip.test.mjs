@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The favourites strip shown in the composer while Ctrl+Shift is held (Joe,
+// The favourites strip shown above the composer while Ctrl+Shift is held (Joe,
 // 2026-10-05): all 9 slots with number, icon and name; nothing at all when no
 // favourite is set; a click starts a new chat in that slot's project.
 
@@ -41,7 +41,7 @@ beforeEach(() => {
 });
 
 describe("showFavoritesStrip", () => {
-  it("renders all 9 slots inside the composer box, above the input", () => {
+  it("renders all 9 slots in the composer shell, ahead of the input, staggered left to right", () => {
     const pane = mountPane();
     showFavoritesStrip(pane, () => {});
     const strip = pane.querySelector(".composer-shell > .favorites-strip");
@@ -53,6 +53,7 @@ describe("showFavoritesStrip", () => {
     expect(tiles[0].querySelector(".favorites-strip-name").textContent).toBe("zng-app");
     expect(tiles[0].querySelector(".pp-fav-face").textContent).toBe("Z");
     expect(tiles[1].classList.contains("is-empty")).toBe(true);
+    expect([...tiles].map((t) => t.style.getPropertyValue("--slot-i"))).toEqual(["0", "1", "2", "3", "4", "5", "6", "7", "8"]);
   });
 
   it("names a slot whose project left the registry by its folder", () => {

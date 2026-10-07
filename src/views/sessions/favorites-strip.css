@@ -1,10 +1,29 @@
-/* Favourite slots inside the composer box while Ctrl+Shift is held
-   (favorites-strip.ts). Tiles are the Pick project rail's .pp-fav-slot,
-   restyled taller so each one can carry its project name. */
+/* Favourite slots floating just above the composer box while Ctrl+Shift is
+   held (favorites-strip.ts). Tiles are the Pick project rail's .pp-fav-slot,
+   restyled taller so each one can carry its project name.
+
+   An overlay, never in flow: the strip shows on the very keydown, so
+   Ctrl+Shift+Arrow word selection opens and closes it in one blink, and an
+   in-flow strip would make the composer jump each time. */
+.composer-shell:has(> .favorites-strip) {
+  position: relative;
+}
 .favorites-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 3;
   display: flex;
   gap: 6px;
-  padding: 6px 6px 0;
+  padding: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+  /* Rises out of the composer's top edge: the clip opens upward from the
+     bottom while the panel settles the last few pixels. */
+  animation: fav-strip-rise 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 .favorites-strip .pp-fav-slot {
   height: 52px;
@@ -12,6 +31,10 @@
   justify-content: center;
   gap: 4px;
   padding: 0 6px;
+  /* Left to right, in the order the 1-9 keys read; 8 x 14ms caps the
+     stagger at 112ms so the last slot lands well inside 300ms. */
+  animation: fav-slot-in 170ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--slot-i, 0) * 14ms);
 }
 .favorites-strip .pp-num {
   top: 5px;
@@ -35,4 +58,33 @@
 }
 .favorites-strip .is-empty .favorites-strip-name {
   color: var(--color-text-muted);
+}
+
+@keyframes fav-strip-rise {
+  from {
+    clip-path: inset(100% 0 0 0 round 8px);
+    transform: translateY(6px);
+  }
+  to {
+    clip-path: inset(-24px -24px 0 -24px round 8px);
+    transform: translateY(0);
+  }
+}
+
+@keyframes fav-slot-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .favorites-strip,
+  .favorites-strip .pp-fav-slot {
+    animation: none;
+  }
 }

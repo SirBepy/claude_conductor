@@ -126,7 +126,7 @@ export function unregister(id: string): void {
 }
 
 /** Fires when the held modifiers change what should be revealed: Ctrl alone
- *  shows chat numbers, a still Ctrl+Shift hold shows the favourite slots. */
+ *  shows chat numbers, Ctrl+Shift shows the favourite slots. */
 export function onModifierHint(cb: (hint: ModifierHint) => void): () => void {
   modifierHintCallbacks.add(cb);
   return () => modifierHintCallbacks.delete(cb);

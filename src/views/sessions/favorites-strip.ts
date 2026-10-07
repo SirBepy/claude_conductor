@@ -1,5 +1,5 @@
-// The favourite project slots, shown inside the composer box while Ctrl+Shift
-// is held (shortcuts.ts's onModifierHint), so Ctrl+Shift+1-9 can be pressed
+// The favourite project slots, floating just above the composer box while
+// Ctrl+Shift is held (shortcuts.ts's onModifierHint), so Ctrl+Shift+1-9 can be pressed
 // without remembering which number holds which project. Reuses the Pick
 // project rail's tile classes (project-picker.css) so a slot looks the same
 // in both places.
@@ -28,7 +28,7 @@ function slotHtml(path: string | null, i: number): string {
   const num = `<span class="pp-num">${i + 1}</span>`;
   const resolution = resolveFavoriteSlot(path, findProject);
   if (resolution.kind === "empty") {
-    return `<div class="pp-fav-slot is-empty" data-slot="${i}">${num}<span class="favorites-strip-name">empty</span></div>`;
+    return `<div class="pp-fav-slot is-empty" data-slot="${i}" style="--slot-i:${i}">${num}<span class="favorites-strip-name">empty</span></div>`;
   }
   // Same "keeps its number, goes quiet" treatment as the picker rail for a
   // slot whose project left the registry.
@@ -36,7 +36,7 @@ function slotHtml(path: string | null, i: number): string {
     ? `<span class="pp-fav-face">${renderAvatar(resolution.project.avatar, resolution.project.path)}</span>`
     : `<i class="ph ph-question pp-fav-gone"></i>`;
   const name = escapeHtml(resolution.kind === "resolved" ? resolution.project.name : baseName(resolution.path));
-  return `<div class="pp-fav-slot${resolution.kind === "resolved" ? "" : " is-unresolved"}" data-slot="${i}" title="${name} - ctrl+shift+${i + 1}">${num}${face}<span class="favorites-strip-name">${name}</span></div>`;
+  return `<div class="pp-fav-slot${resolution.kind === "resolved" ? "" : " is-unresolved"}" data-slot="${i}" style="--slot-i:${i}" title="${name} - ctrl+shift+${i + 1}">${num}${face}<span class="favorites-strip-name">${name}</span></div>`;
 }
 
 /** Shows the strip in `pane`'s composer. A no-op on the phone (favourites are

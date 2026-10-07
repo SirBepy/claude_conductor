@@ -2,7 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./harness";
 
 // Holding Ctrl+Shift in a chat swaps the sidebar's chat numbers for the
-// favourite project slots, shown inside the composer box (Joe, 2026-10-05).
+// favourite project slots (Joe, 2026-10-05), floating just above the composer
+// box with no hold delay (Joe, 2026-10-07).
 // The hold timing and strip markup are unit-tested in
 // tests/modifier-hint.test.mjs and tests/favorites-strip.test.mjs; this covers
 // what only a browser can: real key events reaching the strip through the
@@ -47,13 +48,17 @@ test("a still Ctrl+Shift hold hides the chat numbers and shows the favourites in
   await page.setViewportSize({ width: 1359, height: 900 });
   await mountChat(page, SEEDED);
   const list = page.locator("#sessions-list");
+  const shellHeight = (await page.locator("#session-pane .composer-shell").boundingBox())!.height;
 
   await page.keyboard.down("Control");
   await expect(list).toHaveClass(/kbd-hint-active/);
+  // The chat numbers animate in rather than popping (Joe, 2026-10-07).
+  const badgeAnim = await list.locator("li[data-kbd-hint]").first()
+    .evaluate((li) => getComputedStyle(li, "::before").animationName);
+  expect(badgeAnim).toBe("kbd-hint-in");
 
   await page.keyboard.down("Shift");
   await expect(list).not.toHaveClass(/kbd-hint-active/);
-  await expect(page.locator(STRIP)).toHaveCount(0);
 
   const strip = page.locator(STRIP);
   await expect(strip).toBeVisible();
@@ -62,12 +67,16 @@ test("a still Ctrl+Shift hold hides the chat numbers and shows the favourites in
   await expect(tiles.nth(0).locator(".favorites-strip-name")).toHaveText("zng-app");
   await expect(tiles.nth(1)).toHaveClass(/is-empty/);
 
-  // Sits above the input, inside the same box.
+  // Floats above the composer box at its width, and never pushes it: the
+  // shell keeps the height it had before the strip opened.
+  const shell = page.locator("#session-pane .composer-shell");
   const stripBox = (await strip.boundingBox())!;
-  const inputBox = (await page.locator("#session-pane .session-composer").boundingBox())!;
-  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(inputBox.y + 1);
-  expect(Math.abs(stripBox.width - inputBox.width)).toBeLessThan(2);
-  await capture(page.locator("#session-pane .composer-shell"), "favorites-strip-held");
+  const shellBox = (await shell.boundingBox())!;
+  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(shellBox.y + 1);
+  expect(Math.abs(stripBox.width - shellBox.width)).toBeLessThan(3);
+  expect(shellBox.height).toBeCloseTo(shellHeight, 0);
+  await page.waitForTimeout(400);
+  await capture(page.locator("#session-pane"), "favorites-strip-held");
 
   await page.keyboard.up("Shift");
   await expect(page.locator(STRIP)).toHaveCount(0);

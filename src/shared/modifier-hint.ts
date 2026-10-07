@@ -1,27 +1,18 @@
 // What the held modifiers should reveal. Ctrl alone shows the sidebar's chat
-// numbers; Ctrl+Shift hides them and, after a short hold, shows the favourite
-// project slots. Kept free of DOM listeners so the timing rules are
-// unit-testable; shortcuts.ts feeds it real key events.
+// numbers; Ctrl+Shift hides them and shows the favourite project slots at
+// once. Kept free of DOM listeners so the rules are unit-testable;
+// shortcuts.ts feeds it real key events.
 
 export interface ModifierHint {
   numbers: boolean;
   favorites: boolean;
 }
 
-/** Ctrl+Shift+Arrow is also word selection in the composer. Showing the
- *  favourites only after a still hold keeps that from flashing the strip. */
-export const FAVORITES_HINT_DELAY_MS = 300;
-
 export interface KeyLike {
   key: string;
   ctrlKey: boolean;
   shiftKey: boolean;
   metaKey: boolean;
-}
-
-export interface Timers {
-  set: (fn: () => void, ms: number) => unknown;
-  clear: (handle: unknown) => void;
 }
 
 export interface ModifierHintTracker {
@@ -33,19 +24,11 @@ export interface ModifierHintTracker {
 const isCtrlKey = (key: string) => key === "Control" || key === "Meta";
 const isModifierKey = (key: string) => isCtrlKey(key) || key === "Shift" || key === "Alt";
 
-export function createModifierHintTracker(
-  onChange: (hint: ModifierHint) => void,
-  delayMs = FAVORITES_HINT_DELAY_MS,
-  timers: Timers = {
-    set: (fn, ms) => setTimeout(fn, ms),
-    clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-  },
-): ModifierHintTracker {
+export function createModifierHintTracker(onChange: (hint: ModifierHint) => void): ModifierHintTracker {
   let hint: ModifierHint = { numbers: false, favorites: false };
-  let timer: unknown = null;
   // Set once any other key is pressed during a Ctrl+Shift hold: that hold is
-  // a shortcut or a text selection, not a request to see the favourites.
-  // Cleared only when the combo is released.
+  // a shortcut or a Ctrl+Shift+Arrow word selection, not a request to see the
+  // favourites, so the strip goes away. Cleared only when the combo is released.
   let consumed = false;
 
   const emit = (next: ModifierHint) => {
@@ -54,26 +37,10 @@ export function createModifierHintTracker(
     onChange(hint);
   };
 
-  const stopTimer = () => {
-    if (timer !== null) timers.clear(timer);
-    timer = null;
-  };
-
   const update = (ctrl: boolean, shift: boolean) => {
     const combo = ctrl && shift;
     if (!combo) consumed = false;
-    if (!combo || consumed) {
-      stopTimer();
-      emit({ numbers: ctrl && !shift, favorites: false });
-      return;
-    }
-    emit({ numbers: false, favorites: hint.favorites });
-    if (!hint.favorites && timer === null) {
-      timer = timers.set(() => {
-        timer = null;
-        emit({ numbers: false, favorites: true });
-      }, delayMs);
-    }
+    emit({ numbers: ctrl && !shift, favorites: combo && !consumed });
   };
 
   return {
