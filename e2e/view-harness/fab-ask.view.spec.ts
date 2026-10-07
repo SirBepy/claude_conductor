@@ -91,13 +91,13 @@ test("FAB rests closed, fans out to four, and opens Ask in a floating card", asy
   await expect(page.locator(".fab-dial-item")).toHaveCount(4);
   // Dial exists in the DOM but is hidden until the FAB is tapped.
   await expect(page.locator(".fab-dial-item").first()).toBeHidden();
-  await expect(page.locator(".fab-card:visible")).toHaveCount(0);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(0);
 
   await fab.click();
   await expect(page.locator(".fab-dial-item").first()).toBeVisible();
 
   await page.locator('[data-dial="ask"]').click();
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeVisible();
   // Centred, the window is clear of the FAB's spot, so the FAB stays usable;
   // it only yields to a window actually lying on top of it.
@@ -112,7 +112,7 @@ test("Preview is a toggle in the dial and opens as a tab of the one shared windo
   await expect(preview).toHaveClass(/is-toggle/);
   await preview.click();
   await expect(page.locator('.pw-window[data-win="main"][data-active="preview"]')).toBeVisible();
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
 
   await page.locator(".fab-dial-fab").click();
   await expect(page.locator('[data-dial="preview"]')).toHaveClass(/is-on/);
@@ -127,11 +127,11 @@ test("the tabs switch panels without closing the card", async ({ page }) => {
   await expect(page.locator(".ask-panel")).toBeVisible();
 
   await page.locator('[data-spine="todos"]').click();
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeHidden();
 
   await page.locator('[data-spine="ask"]').click();
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeVisible();
 });
 
@@ -182,10 +182,10 @@ test("Escape closes the card, but not while typing in it", async ({ page }) => {
 
   await page.locator("[data-ask-input]").click();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
 
   await page.locator(".ask-body").click();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".fab-card:visible")).toHaveCount(0);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(0);
   await expect(page.locator(".fab-dial-fab")).toBeVisible();
 });

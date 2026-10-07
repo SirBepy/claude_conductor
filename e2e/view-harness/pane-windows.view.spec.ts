@@ -146,11 +146,11 @@ test("dropping on the right edge docks it as a split: the chat shrinks, and the 
 test("Preview opens as a tab of the one window; torn out to the right edge it docks there on its own", async ({ page }) => {
   await mountPane(page);
   await openFromDial(page, "preview");
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
   await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(4);
 
   await dragTab(page, "preview", { x: 1278, y: 400 });
-  await expect(page.locator(".fab-card:visible")).toHaveCount(2);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(2);
   const preview = await box(page, "preview");
   expect(Math.round(preview.x + preview.width)).toBe(1280);
   await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(0);
@@ -216,7 +216,7 @@ test("a tab dropped on a docked window's upper half tears out and stacks above i
   await box(page, "ask");
   await dragTab(page, "drafts", { x: 1100, y: 200 });
 
-  await expect(page.locator(".fab-card:visible")).toHaveCount(2);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(2);
   const top = await box(page, "drafts");
   const bottom = await box(page, "ask");
   expect(Math.round(top.y)).toBe(0);
@@ -253,7 +253,7 @@ test("a corner drop parks a small window there, and pulling it off a dock floats
 test("a tab dragged out of the bar becomes its own window, and dropped on another window's bar joins it", async ({ page }) => {
   await mountPane(page);
   await openFromDial(page, "ask");
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
 
   const tab = (await win(page, "ask").locator('[data-spine="todos"]').boundingBox())!;
   await page.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2);
@@ -262,15 +262,15 @@ test("a tab dragged out of the bar becomes its own window, and dropped on anothe
   await expect(page.locator(".pw-tab-ghost")).toBeVisible();
   await page.mouse.up();
 
-  await expect(page.locator(".fab-card:visible")).toHaveCount(2);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(2);
   await expect(win(page, "todos")).toBeVisible();
   await expect(win(page, "ask").locator('[data-spine="todos"]')).toHaveCount(0);
 
   // Back in: drag the Todos window by its bar onto Ask's bar, past its tabs.
   const askTabs = (await win(page, "ask").locator(".pw-tabs").boundingBox())!;
   await dragBar(page, "todos", { x: askTabs.x + askTabs.width + 30, y: askTabs.y + askTabs.height / 2 });
-  await expect(page.locator(".fab-card:visible")).toHaveCount(1);
-  await expect(page.locator('.fab-card:visible [data-spine="todos"]')).toHaveCount(1);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await expect(page.locator('.pw-window:visible [data-spine="todos"]')).toHaveCount(1);
 });
 
 test("each chat keeps its own layout, and closing a window forgets it there", async ({ page }) => {
@@ -280,7 +280,7 @@ test("each chat keeps its own layout, and closing a window forgets it there", as
   const docked = await box(page, "drafts");
 
   await page.evaluate(() => (window as any).__fab.setSessionScope("sess-B", "/proj"));
-  await expect(page.locator(".fab-card:visible")).toHaveCount(0);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(0);
   expect(await page.locator(".session-pane").evaluate((el) => getComputedStyle(el).paddingRight)).toBe("0px");
 
   await page.evaluate(() => (window as any).__fab.setSessionScope("sess-A", "/proj"));
@@ -291,7 +291,7 @@ test("each chat keeps its own layout, and closing a window forgets it there", as
   await win(page, "drafts").locator('[data-pw-act="close"]').click();
   await page.evaluate(() => (window as any).__fab.setSessionScope("sess-B", "/proj"));
   await page.evaluate(() => (window as any).__fab.setSessionScope("sess-A", "/proj"));
-  await expect(page.locator(".fab-card:visible")).toHaveCount(0);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(0);
 });
 
 test("Revise opens its preset menu over the draft editor", async ({ page }) => {

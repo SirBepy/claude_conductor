@@ -8,7 +8,8 @@
 //   1. `--name:` in a src/**/*.css or vendor/tauri_kit/**/*.css declaration
 //      block (not inside a class name like `.host--composer` and not a
 //      var() fallback reference, which is followed by `,`/`)`, never `:`).
-//   2. Set at runtime from TS, detected generically:
+//   2. Set at runtime from src/ or vendor/tauri_kit/frontend/ TS, detected
+//      generically:
 //        - `.setProperty("--name", ...)` (any object's setProperty)
 //        - `--name:` inside a template-string `style="..."` attribute
 //          (same colon shape as #1, so the same regex catches it)
@@ -90,9 +91,10 @@ function collectReferences(files) {
 const srcCssFiles = walk(join(ROOT, "src"), [".css"], SKIP_DIRS);
 const vendorCssFiles = walk(join(ROOT, "vendor", "tauri_kit"), [".css"], new Set());
 const srcTsFiles = walk(join(ROOT, "src"), [".ts"], SKIP_DIRS);
+const vendorTsFiles = walk(join(ROOT, "vendor", "tauri_kit", "frontend"), [".ts"], new Set(["node_modules"]));
 const srcHtmlFiles = walk(join(ROOT, "src"), [".html"], SKIP_DIRS);
 
-const declared = collectDeclared([...srcCssFiles, ...vendorCssFiles, ...srcTsFiles]);
+const declared = collectDeclared([...srcCssFiles, ...vendorCssFiles, ...srcTsFiles, ...vendorTsFiles]);
 const references = collectReferences([...srcCssFiles, ...srcTsFiles, ...srcHtmlFiles]);
 
 const undeclared = references.filter((r) => !declared.has(r.name));

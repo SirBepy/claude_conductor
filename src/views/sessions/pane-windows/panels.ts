@@ -1,12 +1,25 @@
-// What each pane-window tab mounts. Panels are mounted once per pane and kept
-// alive while their window is closed or the tab is hidden, so Ask keeps its
-// thread, Drafts its open card, and Preview keeps listening for pushes.
+// The chat pane's panel registry for the kit's pane windows
+// (vendor/tauri_kit/frontend/pane-windows/): Ask / Todos / Drafts / Preview,
+// and what each tab mounts. Panels are mounted once per pane and kept alive
+// while their window is closed or the tab is hidden, so Ask keeps its thread,
+// Drafts its open card, and Preview keeps listening for pushes.
 
 import { mountAskPanel } from "../ask-panel";
 import { mountTodosPanel } from "../todos-panel";
 import { mountDraftsPanel, type DraftsPanelHandle } from "../drafts-panel";
 import type { RailTabDeps, RailTabHandle } from "../rail-panel";
-import type { PanelKey } from "./layout";
+import type { PanelMeta } from "../../../../vendor/tauri_kit/frontend/pane-windows/layout";
+
+export type PanelKey = "ask" | "todos" | "drafts" | "preview";
+
+export const PANEL_KEYS: readonly PanelKey[] = ["ask", "todos", "drafts", "preview"];
+
+export const PANEL_META: Record<PanelKey, PanelMeta> = {
+  ask: { label: "Ask", icon: "ph-chat-teardrop-dots" },
+  todos: { label: "Todos", icon: "ph-list-checks" },
+  drafts: { label: "Drafts", icon: "ph-note-pencil" },
+  preview: { label: "Preview", icon: "ph-monitor-play" },
+};
 
 export interface PanelHandle {
   setSessionScope(sessionId: string | null, cwd: string | null): void;

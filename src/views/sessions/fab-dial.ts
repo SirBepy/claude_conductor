@@ -4,10 +4,10 @@
 // corner, dock beside the chat as a split, and trade tabs: pane-windows/.
 
 import { PaneWindows } from "./pane-windows/manager";
-import { PANEL_META, type PanelKey } from "./pane-windows/layout";
-import type { PanelDeps } from "./pane-windows/panels";
+import { PANEL_META, type PanelDeps, type PanelKey } from "./pane-windows/panels";
 import type { PreviewController } from "./preview-panel";
 import "./fab-dial.css";
+import "../../../vendor/tauri_kit/frontend/pane-windows/pane-windows.css";
 import "./pane-windows/pane-windows.css";
 
 export interface FabDialDeps {

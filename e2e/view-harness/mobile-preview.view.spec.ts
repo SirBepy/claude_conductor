@@ -84,7 +84,7 @@ test("the preview cover's bar sits at the bottom of the screen", async ({ page }
   await openPreview(page);
 
   const bar = (await page.locator(`${PREVIEW} .pw-bar`).boundingBox())!;
-  const body = (await page.locator(`${PREVIEW} .fab-card-body`).boundingBox())!;
+  const body = (await page.locator(`${PREVIEW} .pw-body`).boundingBox())!;
   expect(bar.y).toBeGreaterThanOrEqual(body.y + body.height - 1);
   expect(Math.round(bar.y + bar.height)).toBe(PHONE.height);
 });
