@@ -84,6 +84,11 @@ test.describe("view-harness / Code mode", () => {
     const pill = code.locator(".cm-backchat");
     await expect(pill.locator(".cm-bc-title")).toHaveText("Code mode review");
     await expect(pill.locator(".cm-live")).toHaveClass(/on/);
+    // Opens on the whole repo (Joe, 2026-10-07), unchanged files included.
+    await expect(code.locator(".cm-qtitle")).toContainText("All files");
+    await expect(code.locator('[data-file="README.md"]')).toBeVisible();
+    await code.locator(".cm-qtitle").click();
+    await code.locator('.cm-mi[data-scope="chat"]').click();
     await expect(code.locator(".cm-qtitle")).toContainText("This chat");
     await expect(code.locator(".cm-note")).toContainText("hasn't edited any files");
     await shot(page, "code-mode-this-chat-empty");

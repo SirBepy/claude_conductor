@@ -275,6 +275,7 @@ describe("Code mode", () => {
       if (cmd === "get_git_dirty") return [];
       if (cmd === "get_file_diff") return "@@ -1 +1 @@\n-a\n+b";
       if (cmd === "get_file_at_rev") return { content: "x", truncated: false };
+      if (cmd === "list_project_files") return ["src/a.ts", "src/b.ts", "README.md"];
       return null;
     };
   });
@@ -293,8 +294,10 @@ describe("Code mode", () => {
     expect(root().querySelector(".cm-bc-title").textContent).toBe("My chat");
     expect(root().querySelector(".cm-bc-text").textContent).toBe("Working on it");
     expect(root().querySelector(".cm-live").classList.contains("on")).toBe(true);
-    // This chat's two edits, as the default scope.
-    expect(root().querySelectorAll(".cm-row.cm-file").length).toBe(2);
+    // The whole repo is the default scope (Joe, 2026-10-07), unchanged files included.
+    expect(root().querySelector(".cm-qtitle").textContent).toContain("All files");
+    expect(root().querySelectorAll(".cm-row.cm-file").length).toBe(3);
+    expect(root().querySelector('[data-file="README.md"]')).not.toBeNull();
   });
 
   it("Esc leaves, and the back pill leaves", async () => {

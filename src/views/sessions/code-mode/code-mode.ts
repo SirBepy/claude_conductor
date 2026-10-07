@@ -82,7 +82,7 @@ const views = new Map<string, ViewState>();
 function viewFor(key: string): ViewState {
   let v = views.get(key);
   if (!v) {
-    v = { scope: { kind: "chat" }, prevScope: "chat", tabs: [], active: null, collapsed: new Set(), commitsOpen: false, desc: null, screen: "explorer" };
+    v = { scope: { kind: "all" }, prevScope: "all", tabs: [], active: null, collapsed: new Set(), commitsOpen: false, desc: null, screen: "explorer" };
     views.set(key, v);
   }
   return v;
