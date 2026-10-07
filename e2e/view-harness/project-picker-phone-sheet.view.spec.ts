@@ -1,3 +1,4 @@
+// asserts: src/views/sessions/project-picker.css
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, capture } from "./harness";
 
