@@ -263,6 +263,37 @@
   gap: 8px;
 }
 
+/* ── Phone: dock to the bottom edge (todo 1077) ────────────────────────────
+   768 mirrors MOBILE_BREAKPOINT in permission-modal/host.ts and the AUQ
+   sheet's own breakpoint (permission-modal-shell.css) - keep all three in
+   sync. Same bottom-sheet shape as the AUQ prompt card: flush to the side
+   edges, rounded top corners only, clamped by dvh so index.html's
+   interactive-widget=resizes-content shrinks the sheet with the keyboard
+   instead of letting the keyboard cover the list below the search field. */
+@media (max-width: 768px) {
+  #modal-host .modal-card.project-picker-modal {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+    max-height: 75dvh;
+    border-radius: 12px 12px 0 0;
+  }
+  /* Overrides modal.css's centred shrink target (translate(-50%,-50%)
+     scaleY(0.05)): #modal-host .modal-card.project-picker-modal.modal-card-
+     morph-hidden is ID + 3 classes, which outranks modal.css's ID + 2-class
+     base rule, so the sheet collapses straight down instead of snapping to
+     a point mid-screen. */
+  #modal-host .modal-card.project-picker-modal.modal-card-morph-hidden {
+    transform: translateY(100%);
+  }
+  .project-picker-modal .modal-footer {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+}
+
 /* ── Favourite slots 1-9 (placement P4: inline in the footer) ─────────────
    Sharing the footer strip instead of taking a row of its own keeps the card
    70px shorter; the cost is that Cancel leaves ~440px for nine tiles, so a
