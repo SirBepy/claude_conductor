@@ -14,8 +14,9 @@ describe("basename", () => {
     expect(basename("file.ts")).toBe("file.ts");
   });
 
-  it("returns last segment for trailing slash", () => {
-    expect(basename("/some/path/")).toBe("");
+  it("skips a trailing separator to return the folder name (todo 1105)", () => {
+    expect(basename("/some/path/")).toBe("path");
+    expect(basename("C:/Projects/foo/")).toBe("foo");
   });
 
   it("returns p for empty string (no segments)", () => {

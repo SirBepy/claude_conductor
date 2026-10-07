@@ -10,16 +10,13 @@
 import "./favorites-strip.css";
 import { escapeHtml } from "../../shared/escape-html";
 import { isAnyModalOpen } from "../../shared/modal-input-lock";
+import { basename } from "../../shared/path-utils";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { isRemote } from "../../shared/transport";
 import { projectGroupsData } from "./new-session-cache";
 import { readFavorites, resolveFavoriteSlot } from "./project-favorites";
 
 const STRIP_CLASS = "favorites-strip";
-
-function baseName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
 
 const findProject = (path: string) =>
   projectGroupsData().cached?.find((g) => g.path.toLowerCase() === path.toLowerCase());
@@ -35,7 +32,7 @@ function slotHtml(path: string | null, i: number): string {
   const face = resolution.kind === "resolved"
     ? `<span class="pp-fav-face">${renderAvatar(resolution.project.avatar, resolution.project.path)}</span>`
     : `<i class="ph ph-question pp-fav-gone"></i>`;
-  const name = escapeHtml(resolution.kind === "resolved" ? resolution.project.name : baseName(resolution.path));
+  const name = escapeHtml(resolution.kind === "resolved" ? resolution.project.name : basename(resolution.path));
   return `<div class="pp-fav-slot${resolution.kind === "resolved" ? "" : " is-unresolved"}" data-slot="${i}" style="--slot-i:${i}" title="${name} - ctrl+shift+${i + 1}">${num}${face}<span class="favorites-strip-name">${name}</span></div>`;
 }
 
