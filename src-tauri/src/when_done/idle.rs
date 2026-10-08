@@ -67,8 +67,15 @@ pub(super) fn instance_is_idle(i: &crate::types::Instance) -> bool {
 pub(super) fn all_sessions_idle(instances: &[crate::types::Instance]) -> bool {
     instances
         .iter()
-        .filter(|i| i.ended_at.is_none())
+        .filter(|i| holds_this_machine_awake(i))
         .all(instance_is_idle)
+}
+
+/// A live session hosted on THIS machine. A row mirrored from a paired peer
+/// (`machine` set) keeps running when this machine sleeps, so it never holds
+/// the countdown back.
+pub(super) fn holds_this_machine_awake(i: &crate::types::Instance) -> bool {
+    i.ended_at.is_none() && i.machine.is_none()
 }
 
 /// Session ids still busy, from a `(session_id, busy)` snapshot. Returns exactly
@@ -104,7 +111,7 @@ pub(super) fn live_busy_map(app: &AppHandle) -> Vec<(String, bool)> {
     let guard = state.cached_instances.lock().unwrap();
     guard
         .iter()
-        .filter(|i| i.ended_at.is_none())
+        .filter(|i| holds_this_machine_awake(i))
         .map(|i| (i.session_id.clone(), !instance_is_idle(i)))
         .collect()
 }

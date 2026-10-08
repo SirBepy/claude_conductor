@@ -19,6 +19,7 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
     // Clone once outside the loop (todo 1006) - reused for every prompt so
     // the outer mutex isn't reacquired per iteration.
     let Some(client) = state.client().await else { return };
+    let instances = state.cached_instances.lock().unwrap().clone();
 
     for p in arr {
         let event = p.get("event").and_then(|v| v.as_str()).unwrap_or("");
@@ -26,6 +27,12 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
             Some(v) => v,
             None => continue,
         };
+        // `list_pending_prompts` also returns prompts mirrored from a paired
+        // peer. This machine going to sleep never blocks on those, and
+        // auto-approving another machine's permission prompt is not ours to do.
+        if is_mirrored_prompt(&instances, payload) {
+            continue;
+        }
         let request_id = match payload.get("id").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => continue,
@@ -67,6 +74,15 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
             _ => {}
         }
     }
+}
+
+/// Whether a pending prompt's payload belongs to a session mirrored from a
+/// paired peer, per the cached instance list.
+pub(super) fn is_mirrored_prompt(instances: &[crate::types::Instance], payload: &serde_json::Value) -> bool {
+    payload
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .is_some_and(|sid| crate::ipc::chat::history::is_mirrored(instances, sid))
 }
 
 /// Build the `{ question_text: first_option_label }` answers map for a question

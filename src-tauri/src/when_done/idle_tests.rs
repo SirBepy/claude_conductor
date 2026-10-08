@@ -195,3 +195,24 @@ fn next_countdown_full_sequence_emits_29_down_to_0() {
     assert_eq!(emitted, expected);
     assert_eq!(emitted.len(), COUNTDOWN_SECS as usize);
 }
+
+fn mirrored(session_id: &str, busy: bool) -> Instance {
+    let mut i = instance(session_id, busy, false);
+    i.machine = Some(crate::types::MachineRef { id: "mac".into(), label: "Mac Mini".into(), online: true });
+    i
+}
+
+#[test]
+fn a_busy_chat_on_the_other_machine_does_not_hold_this_one_awake() {
+    assert!(all_sessions_idle(&[instance("local", false, false), mirrored("peer", true)]));
+    assert!(!all_sessions_idle(&[instance("local", true, false), mirrored("peer", false)]));
+}
+
+#[test]
+fn a_mirrored_prompt_is_never_auto_resolved_by_this_machine() {
+    use super::super::actions::is_mirrored_prompt;
+    let instances = [instance("local", false, false), mirrored("peer", false)];
+    assert!(is_mirrored_prompt(&instances, &serde_json::json!({"id": "r1", "session_id": "peer"})));
+    assert!(!is_mirrored_prompt(&instances, &serde_json::json!({"id": "r2", "session_id": "local"})));
+    assert!(!is_mirrored_prompt(&instances, &serde_json::json!({"id": "r3"})));
+}
