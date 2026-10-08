@@ -127,11 +127,19 @@ pub async fn paste_attachment(
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Resolve a dropped file's extension to its MIME type. Split out of
-/// `paste_attachment_from_path` so the mirrored branch (which never touches
-/// `chat-attachments` locally) can still name a MIME for the daemon RPC.
-fn mime_for_ext(ext: &str) -> &'static str {
-    match ext {
+/// Resolve a file extension to its MIME type. Shared by `paste_attachment_from_path`
+/// below (split out so the mirrored branch, which never touches
+/// `chat-attachments` locally, can still name a MIME for the daemon RPC) and
+/// by `files::read_image_file` (was a second inlined copy of the same
+/// image-extension arms).
+///
+/// Returns `None` for an unrecognized extension rather than a baked-in
+/// default: the two callers' fallbacks happen to agree today
+/// (`application/octet-stream`) but are conceptually distinct (one is "any
+/// dropped file", the other "an image the model surfaced"), so each picks its
+/// own via `.unwrap_or(...)` instead of this fn silently deciding for both.
+pub(crate) fn mime_for_ext(ext: &str) -> Option<&'static str> {
+    Some(match ext {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -143,8 +151,8 @@ fn mime_for_ext(ext: &str) -> &'static str {
         "md" => "text/markdown",
         "csv" => "text/csv",
         "json" => "application/json",
-        _ => "application/octet-stream",
-    }
+        _ => return None,
+    })
 }
 
 /// Copy a file dropped from the OS into the chat-attachments dir, returning
@@ -173,7 +181,7 @@ pub async fn paste_attachment_from_path(
         .and_then(|e| e.to_str())
         .unwrap_or("bin")
         .to_lowercase();
-    let mime = mime_for_ext(&ext).to_string();
+    let mime = mime_for_ext(&ext).unwrap_or("application/octet-stream").to_string();
     let bytes = std::fs::read(&src).map_err(|e| format!("cannot read file: {e}"))?;
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
@@ -381,11 +389,36 @@ mod tests {
 
     #[test]
     fn mime_for_ext_covers_known_extensions() {
-        assert_eq!(mime_for_ext("png"), "image/png");
-        assert_eq!(mime_for_ext("jpg"), "image/jpeg");
-        assert_eq!(mime_for_ext("jpeg"), "image/jpeg");
-        assert_eq!(mime_for_ext("pdf"), "application/pdf");
-        assert_eq!(mime_for_ext("unknownext"), "application/octet-stream");
+        // paste_attachment_from_path's extension set.
+        assert_eq!(mime_for_ext("png"), Some("image/png"));
+        assert_eq!(mime_for_ext("jpg"), Some("image/jpeg"));
+        assert_eq!(mime_for_ext("jpeg"), Some("image/jpeg"));
+        assert_eq!(mime_for_ext("gif"), Some("image/gif"));
+        assert_eq!(mime_for_ext("webp"), Some("image/webp"));
+        assert_eq!(mime_for_ext("bmp"), Some("image/bmp"));
+        assert_eq!(mime_for_ext("svg"), Some("image/svg+xml"));
+        assert_eq!(mime_for_ext("pdf"), Some("application/pdf"));
+        assert_eq!(mime_for_ext("txt"), Some("text/plain"));
+        assert_eq!(mime_for_ext("md"), Some("text/markdown"));
+        assert_eq!(mime_for_ext("csv"), Some("text/csv"));
+        assert_eq!(mime_for_ext("json"), Some("application/json"));
+    }
+
+    #[test]
+    fn mime_for_ext_unknown_is_none_so_each_caller_keeps_its_own_fallback() {
+        assert_eq!(mime_for_ext("unknownext"), None);
+        // read_image_file's fallback (files.rs) - same string today, applied
+        // by that caller itself, not baked into the shared map.
+        assert_eq!(
+            mime_for_ext("unknownext").unwrap_or("application/octet-stream"),
+            "application/octet-stream"
+        );
+        // paste_attachment_from_path's fallback (this file) - also applied
+        // by the caller via the same `.unwrap_or(...)` pattern.
+        assert_eq!(
+            mime_for_ext("").unwrap_or("application/octet-stream"),
+            "application/octet-stream"
+        );
     }
 
     #[test]

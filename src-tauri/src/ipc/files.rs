@@ -143,16 +143,12 @@ pub async fn read_image_file(
         .canonicalize()
         .map_err(|e| format!("file not found: {e}"))?;
     let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
-    let mime = match target.extension().and_then(|e| e.to_str()) {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("bmp") => "image/bmp",
-        Some("svg") => "image/svg+xml",
-        _ => "application/octet-stream",
-    }
-    .to_string();
+    let ext = target.extension().and_then(|e| e.to_str()).unwrap_or("");
+    // Shared map; unknown extension keeps this caller's own fallback rather
+    // than one baked into `mime_for_ext` itself.
+    let mime = crate::ipc::chat::attachments::mime_for_ext(ext)
+        .unwrap_or("application/octet-stream")
+        .to_string();
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(crate::ipc::chat::attachments::AttachmentData { mime, base64 })
 }
