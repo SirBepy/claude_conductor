@@ -196,7 +196,7 @@ mod tests {
     use super::super::dispatch::dispatch_tool_with;
     use super::super::tool_schemas::{
         TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_FLEET_STATUS, TOOL_LIST_PEERS, TOOL_POST_MESSAGE,
-        TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN,
+        TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
         TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
@@ -301,7 +301,9 @@ mod tests {
     #[test]
     fn tools_list_returns_every_base_tool() {
         // Non-jarvis (the default for every normal session): base set is the
-        // original 3 permission/question/close tools plus the 3 unconditional
+        // original 3 permission/question/close tools, PLUS request_secret
+        // (own blocking prompt, same shape as permission/question), plus
+        // the 3 unconditional
         // coordination-channel tools (list_peers/post_message/read_messages)
         // plus report_turn_status (todo 435) plus send_message/update_message
         // plus the two sibling-spawn tools (spawn_chat runs beside this chat,
@@ -314,12 +316,13 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 17);
+        assert_eq!(tools.len(), 18);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
         assert!(names.contains(&"approval_prompt"));
         assert!(names.contains(&"ask_user_question"));
+        assert!(names.contains(&"request_secret"));
         assert!(names.contains(&"close_session"));
         assert!(names.contains(&"list_peers"));
         assert!(names.contains(&"post_message"));
@@ -371,7 +374,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 21, "17 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 22, "18 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -419,10 +422,12 @@ mod tests {
             "status": "done", "title": "t", "message": "m",
             "action": "add", "task": "task", "session_id": "s2",
             "request_id": "r1", "allow": true,
+            "label": "l", "file": "f", "key": "k",
         });
         let cases: &[(&str, &str)] = &[
             (TOOL_APPROVAL, "/permissions/request"),
             (TOOL_QUESTION, "/questions/request"),
+            (TOOL_REQUEST_SECRET, "/secrets/request"),
             (TOOL_CLOSE, "/sessions/close-confirm"),
             (TOOL_SPAWN_CHAT, "/chat/spawn"),
             (TOOL_RESPAWN, "/chat/spawn"),

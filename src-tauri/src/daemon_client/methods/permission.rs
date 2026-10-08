@@ -34,6 +34,18 @@ fn respond_question_params(request_id: &str, answers: Value, skipped: bool, sess
     })
 }
 
+/// Builds `respond_secret`'s RPC params. No `session_id` here (see
+/// `PersistentClient::respond_secret`'s doc comment for why) - just
+/// `request_id`/`value`/`cancelled`, matching `methods::secret::register_secret`'s
+/// `Body` on the daemon side exactly.
+fn respond_secret_params(request_id: &str, value: Option<String>, cancelled: bool) -> Value {
+    json!({
+        "request_id": request_id,
+        "value": value,
+        "cancelled": cancelled,
+    })
+}
+
 impl PersistentClient {
     pub async fn respond_permission(
         &self,
@@ -90,11 +102,37 @@ impl PersistentClient {
         let result = self.call("get_skipped_question_marks", params).await?;
         Ok(result.as_array().map(|a| a.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default())
     }
+
+    /// Resolves a pending `request_secret` prompt. Unlike
+    /// `respond_permission`/`respond_question`, the daemon's `respond_secret`
+    /// RPC takes no `session_id` param: the prompt's owning session already
+    /// rode along in the prompt payload the daemon itself stored at request
+    /// time, and `respond_secret` is desktop/phone-only (never forwarded to a
+    /// peer machine - see `remote_transport_table.rs`), so there is no
+    /// `machines/forward.rs` routing need for it either.
+    ///
+    /// `value` is intentionally NOT `Debug`-loggable at the call site: it is a
+    /// bare `Option<String>` local, never boxed into a struct that derives
+    /// `Debug`, so an accidental `{:?}` on this call's arguments can't leak it.
+    pub async fn respond_secret(
+        &self,
+        request_id: &str,
+        value: Option<String>,
+        cancelled: bool,
+    ) -> Result<bool, ClientError> {
+        let params = respond_secret_params(request_id, value, cancelled);
+        let result = self.call("respond_secret", params).await?;
+        if result["ok"].as_bool() == Some(true) {
+            return Ok(true);
+        }
+        let message = result["error"].as_str().unwrap_or("respond_secret failed").to_string();
+        Err(ClientError::Rpc { code: -32000, message })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{respond_permission_params, respond_question_params};
+    use super::{respond_permission_params, respond_question_params, respond_secret_params};
     use serde_json::json;
 
     #[test]
@@ -121,5 +159,21 @@ mod tests {
     fn respond_question_params_session_id_absent_serializes_null() {
         let v = respond_question_params("req2", json!({}), true, None);
         assert!(v.get("session_id").unwrap().is_null());
+    }
+
+    #[test]
+    fn respond_secret_params_carries_the_value_and_no_session_id() {
+        let v = respond_secret_params("p1", Some("sk-abc".to_string()), false);
+        assert_eq!(v.get("request_id").and_then(|x| x.as_str()), Some("p1"));
+        assert_eq!(v.get("value").and_then(|x| x.as_str()), Some("sk-abc"));
+        assert_eq!(v.get("cancelled").and_then(|x| x.as_bool()), Some(false));
+        assert!(v.get("session_id").is_none(), "respond_secret takes no session_id param");
+    }
+
+    #[test]
+    fn respond_secret_params_cancel_omits_the_value() {
+        let v = respond_secret_params("p1", None, true);
+        assert!(v.get("value").unwrap().is_null());
+        assert_eq!(v.get("cancelled").and_then(|x| x.as_bool()), Some(true));
     }
 }

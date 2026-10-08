@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 pub const TOOL_APPROVAL: &str = "approval_prompt";
 pub const TOOL_QUESTION: &str = "ask_user_question";
+pub const TOOL_REQUEST_SECRET: &str = "request_secret";
 
 /// Shared by the schema below and `server::question_args`'s validator so the
 /// two cannot drift (todo 818). Frontend twin: `DOMAIN_META`/`BADGE_META` in
@@ -70,6 +71,19 @@ pub fn core_schemas() -> Vec<Value> {
                     }
                 },
                 "required": ["questions"]
+            }
+        }),
+        json!({
+            "name": TOOL_REQUEST_SECRET,
+            "description": "Ask Joe to type a secret (an API key, password, or token) directly into a masked card instead of pasting it into this chat. The value NEVER comes back to you - the tool result only ever reports 'saved N characters' (or an error/cancellation), so you learn the length, never the contents. 'label' names what the secret is for (e.g. 'Kinetic Panel API key'), 'file' is the path of a key=value file to write it into (relative paths resolve against this chat's folder; the target must be gitignored), and 'key' is that line's key. Use this whenever a task needs a credential from Joe instead of asking him to paste it in chat text, where it would sit in the transcript in plaintext.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "file": {"type": "string"},
+                    "key": {"type": "string"}
+                },
+                "required": ["label", "file", "key"]
             }
         }),
         json!({

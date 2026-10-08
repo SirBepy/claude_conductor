@@ -12,12 +12,12 @@ use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
 
 use super::dispatch_jarvis::jarvis_tools;
 use super::relay::{http_post, Ctx, HttpPost};
-use super::server::{mcp_error, question_args, tool_error_result, waiting_target};
+use super::server::{mcp_error, question_args, tool_error_result, tool_result, waiting_target};
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
-    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_RESPAWN, TOOL_SCHEDULE, TOOL_SEND_MESSAGE,
-    TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT, TOOL_WRITE_PLAN,
-    TOOL_WRITE_USER_TODO,
+    TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
+    TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
+    TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
 };
 
 /// Route one `tools/call` to its hooks-server endpoint.
@@ -92,7 +92,48 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             });
             Some(ctx.relay("/questions/request", body, None, None))
         }
+        TOOL_REQUEST_SECRET => {
+            let label = ctx.args["label"].as_str().unwrap_or("").trim().to_string();
+            let file = ctx.args["file"].as_str().unwrap_or("").trim().to_string();
+            let key = ctx.args["key"].as_str().unwrap_or("").trim().to_string();
+            if label.is_empty() || file.is_empty() || key.is_empty() {
+                return Some(tool_error_result(ctx.id, "label, file, and key are all required"));
+            }
+            let body = json!({
+                "id": request_id,
+                "session_id": ctx.session_id,
+                "label": label,
+                "file": file,
+                "key": key,
+            });
+            // Not `ctx.relay`: that helper's `success` param is a single static
+            // string, but the daemon's ok=true reply carries a per-call
+            // `text` field ("saved N characters...") that must pass through
+            // verbatim - so the transport is called directly here. Same
+            // `ctx.post` fn pointer `relay()` itself uses, so this inherits
+            // the same RELAY_TIMEOUT_SECS (3660s) the blocking write needs.
+            let url = format!("http://127.0.0.1:{}/secrets/request", ctx.port);
+            Some(request_secret_result(ctx.id, (ctx.post)(ctx.rt, &url, body)))
+        }
         _ => None,
+    }
+}
+
+/// Maps the daemon's `/secrets/request` reply to a tool result: `ok:true`
+/// carries a safe `text` summary ("saved N characters..." / "cancelled"),
+/// never the secret value itself (which never reaches this process at all -
+/// it travels only through the app's own `respond_secret` call straight into
+/// the daemon's write). `ok:false` carries `error`.
+fn request_secret_result(id: &Value, posted: Result<Value, String>) -> Value {
+    match posted {
+        Ok(resp) if resp["ok"].as_bool() == Some(true) => {
+            tool_result(id, resp["text"].as_str().unwrap_or(""))
+        }
+        Ok(resp) => {
+            let err = resp["error"].as_str().unwrap_or("request_secret failed");
+            tool_error_result(id, err)
+        }
+        Err(e) => tool_error_result(id, &format!("relay error: {e}")),
     }
 }
 
@@ -306,6 +347,47 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An `ok:false` daemon reply (refused target, write failure, or the
+    /// "user did not respond in time" timeout) must become an error tool
+    /// result carrying the daemon's own `error` text, never a false success.
+    #[test]
+    fn request_secret_ok_false_becomes_an_error_tool_result() {
+        let id = json!(1);
+        let resp = request_secret_result(&id, Ok(json!({"ok": false, "error": "target escapes cwd"})));
+        assert_eq!(resp["result"]["isError"], json!(true));
+        assert_eq!(resp["result"]["content"][0]["text"], json!("target escapes cwd"));
+    }
+
+    /// An `ok:true` reply's `text` field ("saved N characters...") passes
+    /// through as the tool result text - this is the ONLY thing the model
+    /// ever learns about the written value.
+    #[test]
+    fn request_secret_ok_true_passes_through_the_text_field() {
+        let id = json!(1);
+        let resp = request_secret_result(
+            &id,
+            Ok(json!({"ok": true, "text": "saved 6 characters to secrets.env (API_KEY)"})),
+        );
+        assert_eq!(resp["result"]["isError"], json!(false));
+        assert_eq!(
+            resp["result"]["content"][0]["text"],
+            json!("saved 6 characters to secrets.env (API_KEY)")
+        );
+    }
+
+    /// A transport-level failure (daemon unreachable) must not panic on a
+    /// missing `ok` field - it degrades to an error result.
+    #[test]
+    fn request_secret_transport_error_becomes_an_error_tool_result() {
+        let id = json!(1);
+        let resp = request_secret_result(&id, Err("connection refused".to_string()));
+        assert_eq!(resp["result"]["isError"], json!(true));
+        assert!(resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("connection refused"));
+    }
 
     #[test]
     fn report_status_without_the_new_params_still_validates() {

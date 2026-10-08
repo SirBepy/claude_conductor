@@ -69,7 +69,14 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 /// started with `auto_accept: false` hangs on the first `schedule`/`write_plan`
 /// call until a human answers the permission card (confirmed live,
 /// `daemon_schedule_e2e.rs::schedule_mcp_tool_add_inject_cancel_live`).
+///
+/// `request_secret` joins them (todo 1125): it is its own blocking prompt
+/// (`hooks_server::secret::on_secret_request`), same shape as
+/// `approval_prompt`/`ask_user_question` - pretrusting it means the FIRST
+/// call lands straight on that dedicated card instead of stacking a generic
+/// "allow tool request_secret?" permission prompt in front of it.
 pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question \
+     mcp__cc_conductor__request_secret \
      mcp__cc_conductor__show_preview \
      mcp__cc_conductor__write_plan \
      mcp__cc_conductor__send_message \
@@ -185,6 +192,7 @@ mod tests {
         let tools: Vec<&str> = PRETRUSTED_TOOLS.split(' ').collect();
         for name in [
             "mcp__cc_conductor__ask_user_question",
+            "mcp__cc_conductor__request_secret",
             "mcp__cc_conductor__show_preview",
             "mcp__cc_conductor__write_plan",
             "mcp__cc_conductor__send_message",
@@ -196,7 +204,7 @@ mod tests {
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 9, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 10, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// Todo 1122: a turn ending on thinking alone gets the CLI's "no visible

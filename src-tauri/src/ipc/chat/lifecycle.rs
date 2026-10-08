@@ -283,6 +283,26 @@ pub async fn respond_question(
         .map_err(|e| e.to_string())
 }
 
+/// Resolves a pending `request_secret` prompt from the masked secret card:
+/// `value` on save, or `cancelled: true` on Cancel (mutually exclusive, same
+/// shape the daemon's `respond_secret` RPC expects). Never derives `Debug` on
+/// anything holding `value`, never logs it, never puts it in the `Err` path -
+/// the daemon's own error text (a refused target or a write failure) is the
+/// only thing that can surface here, and it never echoes the typed value.
+#[tauri::command]
+pub async fn respond_secret(
+    request_id: String,
+    value: Option<String>,
+    cancelled: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .respond_secret(&request_id, value, cancelled)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Fire-and-forget from both AUQ delivery branches (a mounted card and a parked
 /// prompt), so `on_question_request` can stop acking a question no client ever
 /// saw (todo 735). Without this command registered the frontend's invoke
