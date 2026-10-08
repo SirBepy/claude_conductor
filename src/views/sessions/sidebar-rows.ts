@@ -1,5 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
 import type { Instance, MachineRef } from "../../types/ipc.generated";
+import { isRemote } from "../../shared/transport";
 import { markerToStatusClass } from "../../shared/status-icons";
 import { characterForSession } from "./session-characters";
 import { projectName, sessionSubtitle, statusDotClass, stateTooltip } from "./sessions-helpers";
@@ -106,8 +107,14 @@ function buildRowOptions(args: {
 }): RowOptions {
   const tipAttr = "data-tip";
   const machineOffline = args.machine?.online === false;
+  // Phone shows the machine as visible text (no room for a hover tooltip on
+  // a touch device); desktop keeps the glyph + tooltip only - decided UX, G9
+  // in docs/multi-machine.md.
+  const machineLabel = args.machine && isRemote()
+    ? `<span class="session-machine-label${machineOffline ? " session-machine-label--offline" : ""}">${escapeHtml(args.machine.label)}</span>`
+    : "";
   const machineBadge = args.machine
-    ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>`
+    ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>${machineLabel}`
     : "";
   const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Started from phone"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${machineBadge}`;
   return {

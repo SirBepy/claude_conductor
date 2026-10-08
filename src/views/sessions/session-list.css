@@ -283,6 +283,23 @@
   opacity: 0.7;
 }
 
+/* Phone-only visible machine label (desktop keeps the glyph's tooltip) - own
+   bounded box so a long hostname ellipsizes instead of wrapping the row. */
+.session-machine-label {
+  display: inline-block;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  margin-left: 3px;
+  font-size: var(--fs-micro, 0.72rem);
+  color: var(--sb-muted);
+}
+.session-machine-label--offline {
+  opacity: 0.7;
+}
+
 /* Grey out, never hide (project convention) - readable again on hover/active
    so the row stays clickable-looking under the cursor or when selected. */
 .sessions-list li.is-machine-offline {

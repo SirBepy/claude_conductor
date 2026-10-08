@@ -134,6 +134,51 @@ export async function mountView(page: Page, opts: MountOptions = {}): Promise<vo
   await page.goto(`${HARNESS_ORIGIN}/${entry}.html${hash}`);
 }
 
+/**
+ * Mounts a view with NO `window.__TAURI__` global, so `isTauri()` is false and
+ * `isRemote()` is true - the phone (HttpTransport) code path, for specs that
+ * assert phone-only rendering (e.g. the sidebar's visible machine label).
+ *
+ * Unlike {@link mountView}'s page-injected `__TAURI__.core.invoke` mock,
+ * HttpTransport talks to real `fetch()`/`WebSocket` - this routes those at the
+ * network level (Playwright `page.route`/`routeWebSocket`) so the real
+ * `Response`/body-reader code in http-transport.ts runs unmodified. The daemon
+ * RPC method name is the same string as the Tauri command name for every
+ * command this harness needs (verified against http-transport.ts's `case`
+ * table), so the same `InvokeMap` shape as {@link mountView} works unchanged.
+ */
+export async function mountViewPhone(page: Page, opts: MountOptions = {}): Promise<void> {
+  const entry: Entry = opts.entry ?? "index";
+  const invokeMap: InvokeMap = { ...BOOT_SEED[entry], ...(opts.invoke ?? {}) };
+
+  await page.route("**/api/rpc", async (route) => {
+    const body = route.request().postDataJSON() as { method: string };
+    if (Object.prototype.hasOwnProperty.call(invokeMap, body.method)) {
+      await route.fulfill({ json: invokeMap[body.method] ?? null });
+    } else {
+      await route.fulfill({
+        status: 404,
+        json: { message: `[view-harness] unmocked rpc: ${body.method}` },
+      });
+    }
+  });
+  // The global live-state WS (list_instances arrives via the /api/rpc route
+  // above instead): close it immediately so the app's backoff reconnect runs
+  // harmlessly in the background rather than hanging on a real connection
+  // this static harness server never answers.
+  await page.routeWebSocket(/\/api\/global\/stream/, (ws) => { ws.close(); });
+
+  // ensureRemoteToken() (main.ts) halts boot behind a pairing-token form
+  // unless a token is already stored - this is the phone-mode equivalent of
+  // installMockTauri's belt-and-suspenders rc_token write.
+  await page.addInitScript(() => {
+    try { localStorage.setItem("rc_token", "view-harness-phone-token"); } catch { /* ignore */ }
+  });
+
+  const hash = opts.view ? `#${opts.view}` : "";
+  await page.goto(`${HARNESS_ORIGIN}/${entry}.html${hash}`);
+}
+
 /** Delays the named invoke commands by `delayMs`, then reloads, so a spec can
  *  force a boot-warmed cache's cold-cache path to render (the
  *  `.modal-card-loading` shell) instead of racing past it before the real

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { SESSIONS_BASE_INVOKE, sessionInstance, mountView, capture } from "./harness";
+import { SESSIONS_BASE_INVOKE, sessionInstance, mountView, mountViewPhone, capture } from "./harness";
 
 // Multi-machine federation (H2): the sidebar mark for a session mirrored in
 // from a paired peer machine - a small glyph beside the project name (online),
@@ -28,6 +28,21 @@ async function mountSessions(page: import("@playwright/test").Page): Promise<voi
   await mountView(page, {
     view: "sessions",
     invoke: { ...SESSIONS_BASE_INVOKE, list_instances: SESSIONS, get_active_sessions: SESSIONS },
+  });
+  await page.locator("#sessions-list li[data-session-id]").first().waitFor();
+}
+
+const LONG_LABEL = "Joes-MacBook-Pro-16-Max-2026";
+const MIRRORED_LONG_LABEL = instance({
+  session_id: "s-long",
+  cwd: "C:/Projects/long-label-app",
+  machine: { id: "m3", label: LONG_LABEL, online: true },
+});
+
+async function mountSessionsPhone(page: import("@playwright/test").Page, sessions = SESSIONS): Promise<void> {
+  await mountViewPhone(page, {
+    view: "sessions",
+    invoke: { ...SESSIONS_BASE_INVOKE, list_instances: sessions, get_active_sessions: sessions },
   });
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
 }
@@ -89,5 +104,60 @@ test.describe("view-harness / sidebar machine mark", () => {
     expect(Math.round(offlineBox!.height)).toBe(Math.round(localBox!.height));
 
     await capture(page, "sidebar-machine-mark-390");
+  });
+
+  // Phone (isRemote() true): the machine label renders as visible muted text,
+  // additional to the glyph+tooltip desktop already shows (G9, docs/multi-machine.md).
+  test("desktop: no row ever gets the visible machine-label span", async ({ page }) => {
+    await mountSessions(page);
+    await expect(page.locator("#sessions-list .session-machine-label")).toHaveCount(0);
+  });
+
+  test("phone: a mirrored row shows the machine label as text; a local row doesn't", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await mountSessionsPhone(page);
+
+    const localLabel = page.locator('#sessions-list li[data-session-id="s-local"] .session-machine-label');
+    await expect(localLabel).toHaveCount(0);
+
+    const onlineLabel = page.locator('#sessions-list li[data-session-id="s-online"] .session-machine-label');
+    await expect(onlineLabel).toHaveCount(1);
+    await expect(onlineLabel).toHaveText("Mac Mini");
+    await expect(onlineLabel).not.toHaveClass(/session-machine-label--offline/);
+
+    const offlineLabel = page.locator('#sessions-list li[data-session-id="s-offline"] .session-machine-label');
+    await expect(offlineLabel).toHaveClass(/session-machine-label--offline/);
+
+    await capture(page, "sidebar-machine-mark-phone");
+  });
+
+  test("phone at 390px: a long machine label stays single-line and bounded", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 780 });
+    await mountSessionsPhone(page, [LOCAL, MIRRORED_LONG_LABEL]);
+
+    const row = page.locator('#sessions-list li[data-session-id="s-long"]');
+    const label = row.locator(".session-machine-label");
+    await expect(label).toHaveText(LONG_LABEL);
+
+    // The entrance animation translateX()-slides a freshly-mounted row; a box
+    // read mid-slide reports whatever offset the row sits at that frame, not
+    // its settled position (same wait the offline-dim test above needs).
+    const localRow = page.locator('#sessions-list li[data-session-id="s-local"]');
+    await expect(localRow).not.toHaveClass(/row-entering/);
+    await expect(row).not.toHaveClass(/row-entering/);
+
+    const localLine = page.locator('#sessions-list li[data-session-id="s-local"] .session-row-project');
+    const longLine = row.locator(".session-row-project");
+    const [localBox, longBox, labelBox] = await Promise.all([
+      localLine.boundingBox(),
+      longLine.boundingBox(),
+      label.boundingBox(),
+    ]);
+    expect(labelBox).not.toBeNull();
+    // Single-line (no wrap): same row height as the plain local row.
+    expect(Math.round(longBox!.height)).toBe(Math.round(localBox!.height));
+    expect(labelBox!.width).toBeLessThanOrEqual(72);
+
+    await capture(page, "sidebar-machine-mark-phone-long-label");
   });
 });
