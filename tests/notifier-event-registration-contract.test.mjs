@@ -34,6 +34,8 @@ const DELIBERATELY_UNHANDLED_SNAKE = {
     "daemon_link/mod.rs's own comment above the token_history_updated arm).",
   question_request:
     "same reason as permission_request: poll-delivered, not broadcast-delivered.",
+  secret_request:
+    "same reason as permission_request: poll-delivered, not broadcast-delivered.",
   usage_snapshot:
     "fanned out over /api/global/stream for a non-Tauri local consumer (a " +
     "future taskbar widget dialing the daemon's own WS directly), never meant " +
