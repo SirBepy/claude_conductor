@@ -38,7 +38,16 @@ async fn forward_start_session(
         obj.remove("machine_id");
     }
     let client = crate::daemon::machines::client_for(state, &peer).await.map_err(map_peer_err)?;
-    client.call("start_session", params_value).await.map_err(map_peer_err)
+    let result = client.call("start_session", params_value).await.map_err(map_peer_err)?;
+    // G2: the peer's own `instances_changed` broadcast can take up to one
+    // mirror-link cycle to report the chat it just spawned for us, so a
+    // caller's immediate follow-up `attach_session`/`send_message` would
+    // find no mirrored row yet. Record the id as pending-owned right away so
+    // `MirrorState::owner_of` resolves it before that first frame arrives.
+    if let Some(sid) = result.get("session_id").and_then(Value::as_str) {
+        state.mirror.record_pending(sid, machine_id);
+    }
+    Ok(result)
 }
 
 #[derive(Debug, Deserialize)]
@@ -392,6 +401,10 @@ mod machine_target_tests {
         assert!(resp.error.is_none(), "expected the peer's result, got {:?}", resp.error);
         assert_eq!(resp.result.unwrap()["session_id"], json!("peer-spawned-1"));
         assert_eq!(state.sessions.len(), 0, "must not have spawned anything locally");
+        // G2: the pending-owner map must resolve the forwarded id as "on
+        // mach-b" immediately, before any instances_changed frame from the
+        // peer could possibly have reported it.
+        assert_eq!(state.mirror.owner_of("peer-spawned-1").as_deref(), Some("mach-b"));
 
         b_serve.kill();
     }

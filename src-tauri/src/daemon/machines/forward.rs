@@ -26,11 +26,18 @@ pub const ERR_MACHINE_OFFLINE: i32 = -32012;
 pub const ERR_REPAIR_REQUIRED: i32 = -32013;
 
 /// Methods whose session-identifying param is literally named `id` rather
-/// than `session_id`. Empty today: every current `PM`/`M` method in
-/// `remote_transport_table::TRANSPORT_TABLE` keys on `session_id` (verified by
-/// reading each handler under `daemon/methods/`) - `confirm_question_rendered`'s
-/// `id` is a prompt id, not a session id, and that method is phone-only
-/// anyway. Kept as a named seam for the first future method that does.
+/// than `session_id`. Still empty - NOT because `respond_permission`,
+/// `respond_question`, and `confirm_question_rendered` identify a session
+/// another way: all three key on a prompt id (`request_id`/`id`), which
+/// names a prompt, not a session. The mirrored-prompt seam (G4) solves that
+/// the other direction instead: every client now sends `session_id`
+/// ALONGSIDE the prompt id when answering or acking a mirrored chat's
+/// prompt, purely so this forwarder can route it - `extract_session_id`
+/// above already reads `params.session_id` generically, so all three forward
+/// correctly with no further change here once `remote_transport_table::TRANSPORT_TABLE`
+/// masks them `PM`/`M` (a later builder's remask). Kept as a named seam for
+/// a future method whose only identifying param really is `id`, with no
+/// parallel `session_id` a client could send instead.
 const ID_PARAM_METHODS: &[&str] = &[];
 
 /// Extracts the session id a request targets, if any: `params.session_id`,

@@ -88,6 +88,11 @@ async fn pair_machine_peer(ctx: &Arc<RemoteCtx>, peer: PairPeer) -> Response {
         reverse_device_id: Some(device_id),
         added_at: now_secs(),
     });
+    // G7: the initiator side (`methods/machines/pairing.rs::pair_machine`)
+    // starts its own link the instant it upserts its peer entry - the
+    // receiving side upserted one here too but, before this call, never
+    // started the matching link until the next daemon restart.
+    crate::daemon::machines::MachineHub::sync_links(&ctx.state);
     consume_pairing_code(&ctx.app_data);
     Json(serde_json::json!({
         "device_token": device_token,
@@ -265,6 +270,31 @@ mod tests {
         // registry keeps exactly one entry for "mach-1".
         assert!(!DeviceRegistry::validate_token(&first_token, dir.path()));
         assert_eq!(ctx.state.machines.get().unwrap().peers().len(), 1);
+    }
+
+    /// G7: before this fix, the receiving side of a pairing registered the
+    /// peer in `MachineRegistry` but never called `MachineHub::sync_links`,
+    /// so no link task existed until the next daemon restart - the mirror
+    /// stayed empty even though the peer was fully paired.
+    #[tokio::test]
+    async fn machine_pair_starts_the_links_hub_entry_for_the_new_peer() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::ensure_desktop_device(dir.path());
+        let code = "startslink1";
+        write_pairing_code(dir.path(), code);
+        let ctx = ctx_with_machines(dir.path().to_path_buf());
+
+        let resp = pair_device(
+            State(ctx.clone()),
+            Json(PairBody { pairing_code: code.to_string(), device_name: None, peer: Some(a_peer("mach-1")) }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        assert!(
+            crate::daemon::machines::MachineHub::has_link(&ctx.state, "mach-1"),
+            "pair_machine_peer must start a link for the newly-upserted peer"
+        );
     }
 
     /// Mirrors `pair_device_leaves_pairing_code_intact_when_add_device_fails`

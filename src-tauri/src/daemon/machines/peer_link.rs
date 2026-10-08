@@ -30,6 +30,10 @@ const REVOKED_BACKOFF: Duration = Duration::from_secs(60);
 /// Heartbeat cadence is 15s (`GLOBAL_HEARTBEAT_INTERVAL`); silence past 3x
 /// that means the socket is dead even though TCP hasn't noticed yet.
 const FRAME_DEAD_AFTER: Duration = Duration::from_secs(45);
+/// G4: while the peer's prompt cache is non-empty, re-fetch on this cadence
+/// so a prompt answered directly on the peer (or from a third device) drops
+/// out of OUR cache even with no intervening `instances_changed` frame.
+const PROMPT_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Runs forever (until the returned handle is aborted by `MachineHub`),
 /// keeping `state.mirror`'s entry for `peer.machine_id` in sync with that
@@ -54,7 +58,7 @@ async fn run_link(state: Arc<DaemonState>, peer: PeerMachine) {
         match tokio_tungstenite::connect_async(&ws_url).await {
             Ok((stream, _resp)) => {
                 backoff = RECONNECT_MIN; // a clean connect resets the ladder
-                read_until_dead(&state, &machine_id, &peer.label, stream).await;
+                read_until_dead(&state, &peer, stream).await;
                 mark_offline(&state, &machine_id);
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(RECONNECT_MAX);
@@ -105,14 +109,66 @@ type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsSt
 
 /// Reads frames until the socket closes, errors, or goes silent past
 /// `FRAME_DEAD_AFTER` (the heartbeat is every 15s, so 45s of nothing means
-/// dead even though TCP hasn't noticed).
-async fn read_until_dead(state: &Arc<DaemonState>, machine_id: &str, label: &str, mut stream: WsStream) {
+/// dead even though TCP hasn't noticed). Also runs the G4 prompt-cache
+/// refresh: a periodic tick independent of `FRAME_DEAD_AFTER` - the dead-link
+/// deadline is only ever pushed out by an actual frame arriving (via
+/// `sleep_until`, recomputed on receipt), never by the tick, so a silent
+/// socket is still caught at 45s even while the tick keeps firing every 2s.
+async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut stream: WsStream) {
+    let mut deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
+    let mut prompt_tick = tokio::time::interval(PROMPT_REFRESH_INTERVAL);
     loop {
-        match tokio::time::timeout(FRAME_DEAD_AFTER, stream.next()).await {
-            Ok(Some(Ok(Message::Text(txt)))) => handle_frame(state, machine_id, label, &txt),
-            Ok(Some(Ok(_))) => {} // ping/pong/binary/close-frame-as-data: ignore
-            Ok(Some(Err(_))) | Ok(None) | Err(_) => return, // errored, closed, or silent too long
+        tokio::select! {
+            frame = stream.next() => {
+                match frame {
+                    Some(Ok(Message::Text(txt))) => {
+                        deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
+                        handle_frame(state, &peer.machine_id, &peer.label, &txt);
+                        maybe_refresh_prompts_after_frame(state, peer).await;
+                    }
+                    Some(Ok(_)) => deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER, // ping/pong/binary: still alive
+                    Some(Err(_)) | None => return, // errored or closed
+                }
+            }
+            () = tokio::time::sleep_until(deadline) => return, // silent too long
+            _ = prompt_tick.tick() => {
+                if state.mirror.has_cached_prompts(&peer.machine_id) {
+                    refresh_prompts(state, peer).await;
+                }
+            }
         }
+    }
+}
+
+/// After an `instances_changed` frame is applied: refetch the peer's prompts
+/// when something might have changed worth showing - a row now awaiting
+/// input (a NEW prompt may exist), or the cache already non-empty (an open
+/// prompt may have just been answered and must drop out promptly rather than
+/// waiting for the next tick).
+async fn maybe_refresh_prompts_after_frame(state: &Arc<DaemonState>, peer: &PeerMachine) {
+    if state.mirror.peer_has_awaiting(&peer.machine_id) || state.mirror.has_cached_prompts(&peer.machine_id) {
+        refresh_prompts(state, peer).await;
+    }
+}
+
+/// One `list_pending_prompts` round trip against `peer`, replacing its cached
+/// snapshot wholesale on success. Never fatal to the link: a fetch failure
+/// (network blip, peer mid-restart) just keeps the last-known cache and
+/// leaves retrying to the next frame or tick.
+async fn refresh_prompts(state: &Arc<DaemonState>, peer: &PeerMachine) {
+    let client = match peer_client::client_for(state, peer).await {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!("peer_link: prompt refresh for {} unreachable: {e}", peer.machine_id);
+            return;
+        }
+    };
+    match client.call("list_pending_prompts", serde_json::Value::Null).await {
+        Ok(serde_json::Value::Array(prompts)) => state.mirror.set_prompts(&peer.machine_id, prompts),
+        Ok(other) => {
+            log::warn!("peer_link: list_pending_prompts for {} returned non-array: {other:?}", peer.machine_id)
+        }
+        Err(e) => log::debug!("peer_link: list_pending_prompts for {} failed: {e}", peer.machine_id),
     }
 }
 

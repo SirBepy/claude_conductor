@@ -17,6 +17,16 @@ impl MachineHub {
         Self { links: Mutex::new(HashMap::new()) }
     }
 
+    /// Whether a link task for `machine_id` is currently tracked. Test-only:
+    /// a cheap probe for "did `sync_links` actually spawn one" that doesn't
+    /// depend on the link reaching the peer (unlike `mirror.is_online`,
+    /// which only flips once a real connection succeeds) - used by G7's
+    /// regression for the receiving side of a pairing starting its link.
+    #[cfg(test)]
+    pub(crate) fn has_link(state: &Arc<DaemonState>, machine_id: &str) -> bool {
+        state.hub.links.lock().unwrap_or_else(|e| e.into_inner()).contains_key(machine_id)
+    }
+
     /// Spawns a link for every peer that doesn't already have a live one,
     /// and aborts + drops the mirror for any link whose peer is no longer
     /// registered (unpaired since the last sync).

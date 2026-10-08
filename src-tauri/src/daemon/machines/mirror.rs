@@ -5,22 +5,42 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::types::{Instance, MachineRef};
+
+/// A pending-owner entry older than this is treated as stale and dropped on
+/// next lookup rather than trusted forever - a peer that silently failed to
+/// ever report the session back (crashed before its next broadcast, or the
+/// id was never real) must not pin a phantom owner indefinitely.
+const PENDING_TTL: Duration = Duration::from_secs(120);
 
 struct MirroredPeer {
     label: String,
     online: bool,
     instances: Vec<Instance>,
+    /// The peer's own `list_pending_prompts` snapshot, last fetched by
+    /// `peer_link`. Cleared on `set_online(.., false)` and on `remove` (via
+    /// the whole entry going away) - a mirrored prompt must never outlive the
+    /// link that vouched for it.
+    prompts: Vec<serde_json::Value>,
 }
 
 pub struct MirrorState {
     inner: Mutex<HashMap<String, MirroredPeer>>,
+    /// `start_session`'s forwarded-id bridge (G2): the owning peer's
+    /// `instances_changed` broadcast can take up to one mirror-link cycle to
+    /// report a chat it just spawned for us, so `forward_start_session`
+    /// records the id here the instant the peer's RPC response names it.
+    /// `owner_of` consults this only after the real mirrored rows come up
+    /// empty, and `set_instances` retires an entry the moment a real row for
+    /// that id arrives.
+    pending: Mutex<HashMap<String, (String, Instant)>>,
 }
 
 impl MirrorState {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(HashMap::new()) }
+        Self { inner: Mutex::new(HashMap::new()), pending: Mutex::new(HashMap::new()) }
     }
 
     /// Every mirrored row across every peer, each stamped with the owning
@@ -48,13 +68,36 @@ impl MirrorState {
     }
 
     /// Which machine hosts `session_id`, if it is a mirrored row (not a
-    /// locally-registered one - callers check `registry` first).
+    /// locally-registered one - callers check `registry` first). Falls back
+    /// to the pending-owner map (G2) for an id too new to have appeared in a
+    /// real mirrored row yet, pruning it first if it has outlived
+    /// `PENDING_TTL` - a real row always wins once it shows up.
     pub fn owner_of(&self, session_id: &str) -> Option<String> {
-        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        guard
-            .iter()
-            .find(|(_, peer)| peer.instances.iter().any(|i| i.session_id == session_id))
-            .map(|(machine_id, _)| machine_id.clone())
+        {
+            let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((machine_id, _)) =
+                guard.iter().find(|(_, peer)| peer.instances.iter().any(|i| i.session_id == session_id))
+            {
+                return Some(machine_id.clone());
+            }
+        }
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        match pending.get(session_id) {
+            Some((machine_id, inserted_at)) if inserted_at.elapsed() <= PENDING_TTL => Some(machine_id.clone()),
+            Some(_) => {
+                pending.remove(session_id);
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// Records `session_id` as owned by `machine_id` the instant a forwarded
+    /// `start_session` returns it (`lifecycle/core.rs::forward_start_session`),
+    /// before the peer's own next `instances_changed` frame can report it.
+    pub fn record_pending(&self, session_id: &str, machine_id: &str) {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        pending.insert(session_id.to_string(), (machine_id.to_string(), Instant::now()));
     }
 
     /// Replace `machine_id`'s cached instance list wholesale (the frame we
@@ -65,17 +108,33 @@ impl MirrorState {
     /// transitively chains past one hop.
     pub fn set_instances(&self, machine_id: &str, label: &str, rows: Vec<Instance>) {
         let rows: Vec<Instance> = rows.into_iter().filter(|i| i.machine.is_none()).collect();
+        // A real row for an id just superseded any pending-owner guess for
+        // it - whether that guess named this machine or (in theory) a stale
+        // one, the freshly-reported row is ground truth now.
+        {
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            for row in &rows {
+                pending.remove(&row.session_id);
+            }
+        }
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        guard.insert(machine_id.to_string(), MirroredPeer { label: label.to_string(), online: true, instances: rows });
+        let prompts = guard.get(machine_id).map(|p| p.prompts.clone()).unwrap_or_default();
+        guard.insert(machine_id.to_string(), MirroredPeer { label: label.to_string(), online: true, instances: rows, prompts });
     }
 
     /// Flips the online flag without touching the cached rows - a dropped
     /// link keeps showing its last-known state, just grayed as offline,
     /// same contract session status elsewhere in this codebase already uses.
+    /// Going offline DOES clear the prompt cache (G4): an unreachable peer
+    /// can't be asked to re-confirm or re-answer, so a stale card is worse
+    /// than no card.
     pub fn set_online(&self, machine_id: &str, online: bool) {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(peer) = guard.get_mut(machine_id) {
             peer.online = online;
+            if !online {
+                peer.prompts.clear();
+            }
         }
     }
 
@@ -85,10 +144,51 @@ impl MirrorState {
     }
 
     /// Drops a peer entirely - called on unpair, so a removed peer's rows
-    /// vanish immediately instead of lingering "offline" forever.
+    /// (and its prompt cache) vanish immediately instead of lingering
+    /// "offline" forever. Also drops any pending-owner entry still naming
+    /// this machine (G2): once it's gone, nothing can ever confirm a
+    /// forwarded `start_session` of its, so guessing its ownership further
+    /// would just strand a caller on a machine that no longer exists.
     pub fn remove(&self, machine_id: &str) {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(machine_id);
+        drop(guard);
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        pending.retain(|_, (owner, _)| owner != machine_id);
+    }
+
+    /// Replaces `machine_id`'s cached prompt list wholesale - `peer_link`'s
+    /// fetch is always a full `list_pending_prompts` snapshot, same contract
+    /// as `set_instances`. A no-op if the peer isn't a known mirror entry
+    /// (e.g. it went offline between the fetch starting and finishing).
+    pub fn set_prompts(&self, machine_id: &str, prompts: Vec<serde_json::Value>) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(peer) = guard.get_mut(machine_id) {
+            peer.prompts = prompts;
+        }
+    }
+
+    /// Every cached mirrored prompt across every peer, merged into
+    /// `list_pending_prompts`' local list by `methods::permission`.
+    pub fn prompts(&self) -> Vec<serde_json::Value> {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.values().flat_map(|p| p.prompts.clone()).collect()
+    }
+
+    /// Whether `machine_id`'s prompt cache currently holds anything - the
+    /// "still non-empty, keep polling even without a fresh frame" half of
+    /// `peer_link`'s refresh trigger.
+    pub fn has_cached_prompts(&self, machine_id: &str) -> bool {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.get(machine_id).map(|p| !p.prompts.is_empty()).unwrap_or(false)
+    }
+
+    /// Whether any of `machine_id`'s currently-mirrored rows is awaiting
+    /// input - the "something NEW might need a prompt fetch" half of
+    /// `peer_link`'s refresh trigger.
+    pub fn peer_has_awaiting(&self, machine_id: &str) -> bool {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.get(machine_id).map(|p| p.instances.iter().any(|i| i.awaiting.is_some())).unwrap_or(false)
     }
 }
 
@@ -188,5 +288,79 @@ mod tests {
         m.remove("mach-b");
         assert!(m.instances().is_empty());
         assert_eq!(m.owner_of("s1"), None);
+    }
+
+    // ── pending-owner map (G2) ──────────────────────────────────────────────
+
+    #[test]
+    fn owner_of_resolves_a_pending_id_with_no_real_row_yet() {
+        let m = MirrorState::new();
+        m.record_pending("new-sid", "mach-b");
+        assert_eq!(m.owner_of("new-sid").as_deref(), Some("mach-b"));
+    }
+
+    #[test]
+    fn a_real_row_supersedes_a_pending_guess() {
+        let m = MirrorState::new();
+        // A stale/wrong guess (the pending entry was never promised to be
+        // correct forever) must lose to the peer's own ground-truth row once
+        // it broadcasts one, even naming a DIFFERENT machine.
+        m.record_pending("sid-1", "mach-wrong");
+        m.set_instances("mach-b", "Mac Mini", vec![fixture("sid-1", None)]);
+        assert_eq!(m.owner_of("sid-1").as_deref(), Some("mach-b"));
+    }
+
+    #[test]
+    fn a_pending_entry_older_than_the_ttl_is_pruned() {
+        let m = MirrorState::new();
+        m.record_pending("stale-sid", "mach-b");
+        // Rewrite the insertion instant directly - same module, private field
+        // reachable from this nested test module - rather than sleeping 2
+        // real minutes in a unit test.
+        {
+            let mut pending = m.pending.lock().unwrap();
+            pending.insert("stale-sid".to_string(), ("mach-b".to_string(), Instant::now() - PENDING_TTL - Duration::from_secs(1)));
+        }
+        assert_eq!(m.owner_of("stale-sid"), None);
+    }
+
+    #[test]
+    fn remove_drops_pending_entries_naming_that_machine() {
+        let m = MirrorState::new();
+        m.record_pending("sid-1", "mach-b");
+        m.remove("mach-b");
+        assert_eq!(m.owner_of("sid-1"), None);
+    }
+
+    // ── mirrored prompt cache (G4) ───────────────────────────────────────────
+
+    #[test]
+    fn set_prompts_is_merged_by_prompts_and_tracked_by_has_cached_prompts() {
+        let m = MirrorState::new();
+        m.set_instances("mach-b", "Mac Mini", vec![]);
+        assert!(!m.has_cached_prompts("mach-b"));
+        m.set_prompts("mach-b", vec![serde_json::json!({"id": "p1"})]);
+        assert!(m.has_cached_prompts("mach-b"));
+        assert_eq!(m.prompts(), vec![serde_json::json!({"id": "p1"})]);
+    }
+
+    #[test]
+    fn going_offline_clears_the_prompt_cache() {
+        let m = MirrorState::new();
+        m.set_instances("mach-b", "Mac Mini", vec![]);
+        m.set_prompts("mach-b", vec![serde_json::json!({"id": "p1"})]);
+        m.set_online("mach-b", false);
+        assert!(!m.has_cached_prompts("mach-b"));
+        assert!(m.prompts().is_empty());
+    }
+
+    #[test]
+    fn peer_has_awaiting_reflects_the_cached_rows() {
+        let m = MirrorState::new();
+        let mut awaiting_row = fixture("s1", None);
+        awaiting_row.awaiting = Some("question".into());
+        m.set_instances("mach-b", "Mac Mini", vec![awaiting_row]);
+        assert!(m.peer_has_awaiting("mach-b"));
+        assert!(!m.peer_has_awaiting("mach-nonexistent"));
     }
 }

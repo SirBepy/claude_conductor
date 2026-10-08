@@ -155,12 +155,25 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
     }
     {
         let state = state.clone();
-        router.register("list_pending_prompts", move |_params, _ctx| {
+        router.register("list_pending_prompts", move |_params, ctx| {
             let state = state.clone();
             // Reliable poll path: the app fetches open prompts over RPC instead
             // of relying on the lossy notifier broadcast (which silently dropped
             // question_request frames and hung AskUserQuestion turns).
-            async move { Ok(serde_json::Value::Array(state.list_prompts().await)) }
+            async move {
+                let mut prompts = state.list_prompts().await;
+                // G4: merge in every paired peer's mirrored prompts - EXCEPT
+                // when the caller is itself a peer machine (`Transport::PeerMachine`).
+                // One-hop rule, same guard `MirrorState::instances`/`set_instances`
+                // already enforce for session rows: a peer must only ever see
+                // OUR own local prompts, never a prompt we ourselves mirrored
+                // from a third machine, or two paired peers could echo the
+                // same prompt back and forth past one hop.
+                if !matches!(ctx.transport, crate::daemon::rpc::Transport::PeerMachine(_)) {
+                    prompts.extend(state.mirror.prompts());
+                }
+                Ok(serde_json::Value::Array(prompts))
+            }
         });
     }
     {
@@ -203,9 +216,18 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     id: String,
+                    // G4: a mirrored-chat client has no other way to name
+                    // which session this prompt id belongs to; unused for
+                    // local routing (`confirm_question_rendered` keys on
+                    // `id` alone), but present so `forward.rs::extract_session_id`
+                    // can read it generically off the raw params and route
+                    // the call to the owning peer for a mirrored chat.
+                    #[serde(default)]
+                    session_id: Option<String>,
                 }
                 let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                log::trace!("confirm_question_rendered: id={} session_id={:?}", b.id, b.session_id);
                 state.confirm_question_rendered(&b.id).await;
                 Ok(serde_json::json!({"ok": true}))
             }
@@ -227,4 +249,63 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             Ok(serde_json::json!({"ok": true, "delivered": delivered}))
         }
     });
+}
+
+#[cfg(test)]
+mod list_pending_prompts_tests {
+    use super::*;
+    use crate::daemon::rpc::{ConnectionContext, Request, Router, Transport, TRANSPORT};
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+    use serde_json::json;
+
+    async fn dispatch_with(state: Arc<DaemonState>, transport: Transport) -> serde_json::Value {
+        let mut r = Router::new();
+        register_responders(&mut r, state);
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let ctx = TRANSPORT.scope(transport, async { ConnectionContext::new(tx) }).await;
+        let resp = r
+            .dispatch(
+                Request { jsonrpc: "2.0".into(), id: json!(1), method: "list_pending_prompts".into(), params: None },
+                ctx,
+            )
+            .await;
+        resp.result.expect("list_pending_prompts must not error")
+    }
+
+    /// G4: a session mirrored from a paired peer has its question/permission
+    /// cards cached in `MirrorState` (by `peer_link`) rather than in this
+    /// daemon's own `pending_prompts` - `list_pending_prompts` must merge
+    /// both so a client never needs to know which machine actually hosts a
+    /// prompt it's polling for.
+    #[tokio::test]
+    async fn merges_local_and_mirrored_prompts() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.add_prompt("local-1", "question-requested", json!({"session_id": "s-local"}), true).await;
+        state.mirror.set_instances("mach-b", "Mac Mini", vec![]);
+        state.mirror.set_prompts("mach-b", vec![json!({"id": "mirrored-1", "event": "question-requested", "payload": {"session_id": "s-remote"}, "durable": true})]);
+
+        let result = dispatch_with(state, Transport::Local).await;
+        let ids: Vec<&str> = result.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids.len(), 2, "expected both the local and the mirrored prompt: {ids:?}");
+        assert!(ids.contains(&"local-1"));
+        assert!(ids.contains(&"mirrored-1"));
+    }
+
+    /// One-hop rule (G4c): a peer machine calling `list_pending_prompts` on
+    /// us (e.g. because IT mirrors a session WE host) must see only our own
+    /// local prompts - re-exporting a prompt we ourselves mirrored from a
+    /// THIRD machine would let two paired peers echo it back and forth.
+    #[tokio::test]
+    async fn excludes_mirrored_prompts_for_a_peer_machine_caller() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.add_prompt("local-1", "question-requested", json!({"session_id": "s-local"}), true).await;
+        state.mirror.set_instances("mach-b", "Mac Mini", vec![]);
+        state.mirror.set_prompts("mach-b", vec![json!({"id": "mirrored-1", "event": "question-requested", "payload": {"session_id": "s-remote"}, "durable": true})]);
+
+        let result = dispatch_with(state, Transport::PeerMachine("mach-c".into())).await;
+        let ids: Vec<&str> = result.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["local-1"], "a peer caller must never see a prompt we mirrored from someone else");
+    }
 }
