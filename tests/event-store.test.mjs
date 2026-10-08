@@ -139,6 +139,35 @@ describe("SessionEventStore pagination", () => {
     expect(sessionEvents.hasMore(sid)).toBe(false);
   });
 
+  // Todo 1122/863, seen on a real successor: its file opens with lines that
+  // render nothing (spawn prompt, attachments), so the page before the first
+  // shown event is EMPTY yet still names the predecessor. That empty page must
+  // hop, not end the walk.
+  it("loadOlder hops into the predecessor when the last page of this transcript is empty", async () => {
+    const sid = "sess-chain-empty-tail";
+    const prevId = "sess-chain-empty-prev";
+    routeHistoryChain({
+      [sid]: [
+        { events: [userEvent("q", 5), assistantEvent("a", 6)], oldest_seq: 367, newest_seq: 900, has_more: true },
+        { events: [], oldest_seq: 0, newest_seq: 0, has_more: false, continues_from: prevId },
+      ],
+      [prevId]: [{
+        events: [userEvent("older", 1), assistantEvent("older-reply", 2)],
+        oldest_seq: 0,
+        newest_seq: 4,
+        has_more: false,
+        continues_from: null,
+      }],
+    });
+
+    await sessionEvents.loadInitial(sid);
+    const older = await sessionEvents.loadOlder(sid);
+
+    expect(older?.map((e) => e.type)).toEqual(["user_message", "assistant_message", "notification"]);
+    expect(sessionEvents.events(sid)[2].kind).toBe("chain_divider");
+    expect(sessionEvents.hasMore(sid)).toBe(false);
+  });
+
   it("loadOlder is single-flight under concurrent calls", async () => {
     let resolveInitial = () => {};
     invokeMock.mockReturnValueOnce(

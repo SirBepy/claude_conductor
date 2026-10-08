@@ -203,9 +203,16 @@ export class PaginationPolicy {
       if (cwd) args.cwd = cwd;
       const page = await invoke<HistoryPage>("load_history_page", args);
       if (!page.events.length) {
-        entry.hasMore = false;
-        entry.chainNextId = null;
-        return null;
+        // A successor's file opens with lines that render nothing (spawn
+        // prompt, attachments), so its last page can be empty and still name
+        // the predecessor: hop instead of ending the walk.
+        const next = !hop && !page.has_more ? page.continues_from ?? null : null;
+        entry.pageHasMore = false;
+        entry.chainNextId = next;
+        entry.hasMore = next !== null;
+        if (next === null) return null;
+        entry.loadingOlder = false;
+        return await this.loadOlder(sessionId, cwd);
       }
       // Tag events from a predecessor's file so "Load full output" fetches
       // from that transcript, not the open chat's (todo 861). Not gated on
