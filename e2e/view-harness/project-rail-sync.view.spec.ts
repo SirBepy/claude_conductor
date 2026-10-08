@@ -88,4 +88,17 @@ test.describe("view-harness / project-rail filter synced through the daemon", ()
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem("cc_hidden_projects") ?? "[]")))
       .toEqual(["C:/Projects/only-on-the-phone"]);
   });
+
+  test("All showing everything clears only this device's projects, not one filtered elsewhere", async ({ page }) => {
+    await fakeDaemon(page, ["C:/Projects/only-on-the-phone", BETA]);
+    await mountSessionsList(page, SESSIONS);
+    await expect(row(page, "s2")).toHaveCount(0);
+
+    await page.locator("#project-rail .project-rail-all").click();
+
+    await expect(row(page, "s2")).toBeVisible();
+    await expect
+      .poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "update_hidden_chats").map((c) => c.args))
+      .toEqual([{ add: [], remove: [], addProjects: [], removeProjects: [BETA] }]);
+  });
 });

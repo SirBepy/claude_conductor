@@ -52,7 +52,11 @@ export function renderProjectRail(hostEl: HTMLElement, sessions: Instance[], onC
     // -> show everything. A one-way "always show all" button gave no way to
     // blank the whole list from this control.
     const current = loadHiddenProjects();
-    saveHiddenProjects(cwds.some((c) => current.has(c)) ? new Set() : new Set([...current, ...cwds]));
+    saveHiddenProjects(
+      cwds.some((c) => current.has(c))
+        ? new Set([...current].filter((c) => !cwds.includes(c)))
+        : new Set([...current, ...cwds]),
+    );
     onChange();
   });
   hostEl.querySelectorAll<HTMLButtonElement>(".project-rail-avatar").forEach((btn) => {
