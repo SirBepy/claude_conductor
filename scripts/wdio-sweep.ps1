@@ -259,7 +259,7 @@ function Invoke-WdioSpec {
 # --- main ---
 # Guarded so the functions above (Get-WdioVerdict, Get-WdioStatus, ...) can be dot-sourced and
 # unit-tested without firing off the actual sweep - dot-sourcing sets InvocationName to '.',
-# a normal `-File` run does not. See scripts/wdio-sweep.verdict-test.ps1.
+# a normal `-File` run does not. See scripts/wdio-sweep-verdict.test.ps1.
 if ($MyInvocation.InvocationName -ne '.') {
 
     Test-DebugExeFreshness

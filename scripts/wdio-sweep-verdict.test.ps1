@@ -11,7 +11,7 @@
   a real passing run still reads OK and a real failing run still reads FAIL.
 
 .EXAMPLE
-  powershell -NoProfile -File scripts\wdio-sweep.verdict-test.ps1
+  powershell -NoProfile -File scripts\wdio-sweep-verdict.test.ps1
 #>
 $ErrorActionPreference = 'Stop'
 
