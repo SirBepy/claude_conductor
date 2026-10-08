@@ -219,6 +219,7 @@ const viewMenu = createMoreMenu<[]>({
           isJarvis: sess?.jarvis === true,
           isFrozen: sess?.frozen === true,
           hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
+          mirrored: sess?.machine != null,
           viewChanges: state.activeChatActions?.viewChanges,
           onAfterAction: () => close(),
         };

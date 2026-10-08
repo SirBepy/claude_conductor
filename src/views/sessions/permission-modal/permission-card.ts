@@ -46,13 +46,14 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
         let message = formatAnswersAsMessage(questions, answers);
         if (extras.additionalMessage) message += `\n\n${extras.additionalMessage}`;
         try {
-          await invoke("respond_permission", { id: payload.id, behavior: "deny", updatedInput: null, message });
+          await invoke("respond_permission", { id: payload.id, sessionId: payload.session_id, behavior: "deny", updatedInput: null, message });
         } catch (e) { console.warn("respond_permission failed:", e); }
       },
       onCancel: async () => {
         try {
           await invoke("respond_permission", {
             id: payload.id,
+            sessionId: payload.session_id,
             behavior: "deny",
             updatedInput: null,
             message: FALLBACK_DISMISS_MESSAGE,
@@ -78,6 +79,7 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
     try {
       await invoke("respond_permission", {
         id: payload.id,
+        sessionId: payload.session_id,
         behavior,
         updatedInput: behavior === "allow" ? (payload.input ?? {}) : null,
         message: behavior === "deny" ? "Denied by user." : null,

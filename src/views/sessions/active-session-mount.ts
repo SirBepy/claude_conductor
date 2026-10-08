@@ -68,6 +68,7 @@ export async function mountStatusbar(
     accountId: sess.account_id ?? null,
     onAccountClick,
     onConfig,
+    mirrored: sess.machine != null,
   });
   state.statusbar = sb;
   // Git info is owned by the statusbar itself: it resolves the session's live

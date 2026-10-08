@@ -138,6 +138,16 @@ export class SessionHeader {
     }
   }
 
+  /** Hides the `</>` Code mode button for a chat mirrored in from a paired
+   *  peer machine: Code mode reads THIS machine's disk at the chat's cwd,
+   *  which is the wrong disk for a mirrored chat (G10, docs/multi-machine.md).
+   *  Hidden, not disabled - matches the existing `.discard-btn` removal
+   *  pattern below rather than adding a third visual "can't click" state. */
+  setMirrored(mirrored: boolean): void {
+    const btn = this.el.querySelector<HTMLButtonElement>(".code-mode-btn");
+    if (btn) btn.hidden = mirrored;
+  }
+
   setRemote(isRemote: boolean): void {
     const existing = this.el.querySelector(".session-header-remote-badge");
     if (isRemote && !existing) {

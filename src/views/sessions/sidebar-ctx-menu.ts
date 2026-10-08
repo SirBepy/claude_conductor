@@ -106,6 +106,7 @@ export function openCtxMenu(
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,
     hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
+    mirrored: sess.machine != null,
     viewChanges,
     onAfterAction: () => {
       closeCtxMenu();

@@ -300,4 +300,8 @@ export interface StatusbarOptions {
    *  `effortEditable` is false for a read-only (external) session, so the header
    *  can print effort without offering to change it. */
   onConfig?: (model: string | null, effort: string, effortEditable: boolean) => void;
+  /** True when this chat is hosted on a paired peer machine (multi-machine
+   *  federation): git/dirty/folder-explorer all read THIS machine's disk at
+   *  `cwd`, the wrong disk for a mirrored chat (G10, docs/multi-machine.md). */
+  mirrored?: boolean;
 }

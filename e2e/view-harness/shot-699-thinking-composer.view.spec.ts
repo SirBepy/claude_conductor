@@ -1,3 +1,4 @@
+// Reviewed 2026-10-08: index.ts's confirmQuestionRendered calls now also thread the prompt's sessionId (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 

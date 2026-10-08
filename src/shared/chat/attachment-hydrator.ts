@@ -23,14 +23,18 @@ export function mimeToIcon(mime: string): string {
   return "ph-file";
 }
 
-export async function hydrateAttachments(el: HTMLElement): Promise<void> {
+/** `sessionId` lets the daemon route the read to the machine that stored the
+ *  file (multi-machine federation: a mirrored chat's attachments live on the
+ *  peer, not this disk) - omit it only where the caller has no session scope
+ *  (e.g. a detached preview host). */
+export async function hydrateAttachments(el: HTMLElement, sessionId?: string | null): Promise<void> {
   const chips = Array.from(el.querySelectorAll<HTMLElement>(".attachment-chip[data-attachment-path]"));
   for (const chip of chips) {
     const path = chip.dataset.attachmentPath;
     if (!path) continue;
     const name = chip.dataset.filename ?? basename(path) ?? "file";
     try {
-      const data = await invoke<{ mime: string; base64: string }>("read_attachment", { path });
+      const data = await invoke<{ mime: string; base64: string }>("read_attachment", { path, sessionId: sessionId ?? undefined });
       if (!document.contains(chip)) continue;
       if (data.mime.startsWith("image/")) {
         const thumb = document.createElement("div");

@@ -97,7 +97,7 @@ export async function showQuestionCard(
       // otherwise read as delivered and drop the answer block (todo 773).
       let delivered = false;
       try {
-        delivered = (await invoke<boolean>("respond_question", { id: payload.id, answers, skipped: false })) === true;
+        delivered = (await invoke<boolean>("respond_question", { id: payload.id, sessionId: payload.session_id, answers, skipped: false })) === true;
       } catch (e) {
         // respond_question_inner has no error path of its own - this only
         // fires on a transport failure, so falling through to attempt
@@ -178,7 +178,7 @@ export async function showQuestionCard(
       clearQuestionDraft(payload.id);
       void clearAuqPush(payload.session_id, payload.id);
       try {
-        await invoke("respond_question", { id: payload.id, answers: {}, skipped: true });
+        await invoke("respond_question", { id: payload.id, sessionId: payload.session_id, answers: {}, skipped: true });
       } catch (e) {
         console.warn("respond_question (skip settle) failed:", e);
         clearPendingPromptById(payload.id);

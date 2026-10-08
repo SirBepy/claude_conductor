@@ -1,3 +1,4 @@
+// Reviewed 2026-10-08: session-header.ts gained setMirrored() (hides the `</>` Code mode button for a mirrored chat); never called by this spec, so its existing header behavior is unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { mountSessionsLayout, mountView } from "./harness";
 

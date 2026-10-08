@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/git-fold.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode-shell.css, src/views/sessions/code-mode/code-mode-explorer.css, src/views/sessions/code-mode/code-mode-commits.css, src/views/sessions/code-mode/code-mode-tabs.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts, src/views/sessions/code-mode/branch-switcher.ts, src/views/sessions/code-mode/branch-switcher.css, src/views/sessions/code-mode/data.ts, src/views/sessions/session-statusbar-popovers.ts
+// Reviewed 2026-10-08: code-mode/entry.ts now also refuses to open for a mirrored chat (`Instance.machine != null`), and session-header.ts gained setMirrored() to hide the `</>` button for one; every fixture here is a locally-hosted session (machine: null via sessionInstance's default), so this spec's contract is unaffected.
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 

@@ -1,3 +1,4 @@
+// Reviewed 2026-10-08: permission-card.ts's respond_permission calls now also thread the prompt's sessionId (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
 import { test, expect } from "@playwright/test";
 import { mountView, invokeCalls } from "./harness";
 

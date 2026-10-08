@@ -28,9 +28,9 @@ const LIVE_DRAFT_POLL_MS = 1000;
  *  its ack can mean "reached a client" (todo 735) - DISTINCT from
  *  `respond_question`, which resolves only on a real answer. Fire-and-forget;
  *  exported so index.ts's "parked" branch can fire it too. */
-export function confirmQuestionRendered(id: string | undefined): void {
+export function confirmQuestionRendered(id: string | undefined, sessionId?: string): void {
   if (!id) return;
-  void invoke("confirm_question_rendered", { id }).catch((e) => {
+  void invoke("confirm_question_rendered", { id, sessionId }).catch((e) => {
     console.warn("[perm-relay] confirm_question_rendered failed:", e);
   });
 }
@@ -359,5 +359,5 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   renderer.render();
-  confirmQuestionRendered(opts.id);
+  confirmQuestionRendered(opts.id, opts.sessionId);
 }

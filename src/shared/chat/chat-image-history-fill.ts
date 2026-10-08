@@ -55,7 +55,7 @@ export function startBackgroundImageFill(
         }
         if (hasChips) {
           document.body.appendChild(pageHost);
-          await hydrateAttachments(pageHost);
+          await hydrateAttachments(pageHost, sessionId);
           pageHost.remove();
         }
         if (cancelled) break;

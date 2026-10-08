@@ -210,7 +210,7 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
       queueSiblingQuestion(sid, payload);
       // Not shown/parked yet, but genuinely delivered here (queued) - the
       // daemon's on_question_request wait must not time out over this.
-      confirmQuestionRendered(payload.id);
+      confirmQuestionRendered(payload.id, payload.session_id);
       rerenderSidebar();
       console.warn("[perm-gate] QUEUED sibling question-requested behind an open slot", { eventSessionId: sid, ...gateDiag() });
       return;
@@ -222,7 +222,7 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
       // A parked prompt is a genuine delivery, just like the shown-card branch
       // in question-ui.ts - the backgrounded chat WILL see it via its sidebar
       // marker, so on_question_request must not time out and report false.
-      confirmQuestionRendered(payload.id);
+      confirmQuestionRendered(payload.id, payload.session_id);
       rerenderSidebar();
       console.warn("[perm-gate] PARKED question-requested for backgrounded chat", { eventSessionId: sid, ...gateDiag() });
     } else {

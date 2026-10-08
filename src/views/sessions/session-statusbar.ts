@@ -99,6 +99,10 @@ export class SessionStatusbar {
   // of gitCwd, so an off-repo cwd stays visible even while gitCwd (and the
   // git chip's branch/sha data) fall back to the chat's own repo.
   private liveCwd: string | null;
+  // Mirrored chat (multi-machine federation): git/dirty/folder-explorer all
+  // read THIS machine's disk, the wrong one for a chat hosted on a peer -
+  // see the constructor's git-fetch skip and the folder/git click guards below.
+  private mirrored: boolean;
   private sessionId: string | null;
   private modelEffort: ModelEffortState;
   private accountId: string | null;
@@ -130,6 +134,7 @@ export class SessionStatusbar {
     this.cwd = opts.cwd ?? null;
     this.gitCwd = this.cwd;
     this.liveCwd = this.cwd;
+    this.mirrored = opts.mirrored ?? false;
     this.sessionId = opts.sessionId ?? null;
     this.modelEffort = new ModelEffortState({
       effort: opts.effort ?? "",
@@ -155,6 +160,11 @@ export class SessionStatusbar {
     } else {
       this.gitInfoLoaded = true;
     }
+    // Mirrored: git/dirty are never fetched (see the resolveGitCwd skip
+    // below), so mark both loaded now with their EMPTY defaults - otherwise
+    // the git/branch/commits/dirty chips render a skeleton forever instead
+    // of just staying absent.
+    if (this.mirrored) { this.gitInfoLoaded = true; this.dirtyLoaded = true; }
     if (this.sessionId) {
       const cachedMeta = metaCache.get(this.sessionId);
       if (cachedMeta) { this.meta = cachedMeta; this.metaLoaded = true; }
@@ -167,7 +177,10 @@ export class SessionStatusbar {
     if (wantsContext(this.rows)) void this.refreshContextStatus();
     // Resolve the live git cwd (may follow the AI into a worktree), then fetch
     // git info + dirty against it. Owns all git fetching for live sessions.
-    if (wantsGit(this.rows)) void this.resolveGitCwd();
+    // Skipped for a mirrored chat: `cwd` is a path on the PEER's disk, not
+    // this machine's (G10, docs/multi-machine.md) - fetching here would read
+    // whatever (possibly unrelated) repo happens to sit at that path locally.
+    if (wantsGit(this.rows) && !this.mirrored) void this.resolveGitCwd();
     if (hasChip(this.rows, "ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
     if (wantsDrain(this.rows)) void this.refreshDrain();
     if (hasChip(this.rows, "servers") && this.cwd) this.startServersPoll();
@@ -510,7 +523,7 @@ export class SessionStatusbar {
     });
 
     this.container.querySelector<HTMLElement>(".sb-folder-btn")?.addEventListener("click", () => {
-      if (this.liveCwd) void invoke<void>("open_in_explorer", { path: this.liveCwd });
+      if (this.liveCwd && !this.mirrored) void invoke<void>("open_in_explorer", { path: this.liveCwd });
     });
 
     this.container.querySelector<HTMLElement>(".sb-account-btn")?.addEventListener("click", (e) => {
@@ -547,7 +560,11 @@ export class SessionStatusbar {
   private popoverWireCtx(): ChipPopoverWireCtx {
     return {
       ...this.popoverBundle(),
-      cwd: this.cwd,
+      // null, not this.cwd, when mirrored: the git-btn/branch-btn/commits-btn
+      // handlers below all gate on `ctx.cwd` already present, so this alone
+      // keeps the commits popover and Code mode's push-flow openers from
+      // reading the peer's path as if it were local (G10).
+      cwd: this.mirrored ? null : this.cwd,
       effortAnchor: this.modelEffort.effortAnchor,
       modelAnchor: this.modelEffort.modelAnchor,
       toggleModelPopover: (anchor) => this.toggleModelPopover(anchor),

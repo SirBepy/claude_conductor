@@ -49,6 +49,10 @@ describe("permission-gate question fallback: submit never turns a real answer in
     expect(args.behavior).toBe("deny");
     expect(args.message).not.toBe("User skipped the question.");
     expect(args.message).toContain("Spaces");
+    // Multi-machine federation: the daemon routes an answer to the machine
+    // that owns the turn, so every settle call must carry the prompt's
+    // session id, not just its (globally-scoped) responder id.
+    expect(args.sessionId).toBe("s1");
   });
 
   it("onCancel's message is distinguishable from onSubmit's real-answer message", async () => {

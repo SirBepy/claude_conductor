@@ -43,10 +43,17 @@ export interface ChatMenuCtx {
    *  tooltip, same pattern as every other gated item in this submenu. Always
    *  undefined on the phone, which has no route to the file check. */
   hasDeployWorkflow?: boolean;
+  /** True when this chat is hosted on a paired peer machine (multi-machine
+   *  federation), never this one - every item below that reads/opens THIS
+   *  machine's disk at `cwd` is wrong for it (G10, docs/multi-machine.md).
+   *  Always false/undefined for a draft (no Instance yet). */
+  mirrored?: boolean;
   viewChanges?: () => void;
   onAfterAction?: () => void;
   onDiscard?: () => void;
 }
+
+const NOT_ON_THIS_MACHINE = "Chat is on another machine";
 
 export interface ItemDesc {
   icon: string;
@@ -62,37 +69,40 @@ export interface ItemDesc {
 
 export function buildOpenProjectItems(ctx: ChatMenuCtx): ItemDesc[] {
   const cwd = ctx.cwd;
+  const mirrored = ctx.mirrored === true;
   return [
     {
       icon: "code",
       label: "VS Code",
-      run: cwd ? async () => {
+      run: cwd && !mirrored ? async () => {
         try { await invoke<void>("open_in_vscode", { path: cwd }); }
         catch { /* code may not be installed */ }
       } : undefined,
-      disabledReason: cwd ? undefined : "No project directory",
+      disabledReason: !cwd ? "No project directory" : (mirrored ? NOT_ON_THIS_MACHINE : undefined),
     },
     {
       icon: "terminal-window",
       label: "Terminal",
-      run: cwd ? async () => {
+      run: cwd && !mirrored ? async () => {
         try { await invoke<void>("open_terminal_in_directory", { path: cwd }); }
         catch (err) { alert(`Failed to open terminal: ${err}`); }
       } : undefined,
-      disabledReason: cwd ? undefined : "No project directory",
+      disabledReason: !cwd ? "No project directory" : (mirrored ? NOT_ON_THIS_MACHINE : undefined),
     },
     {
       icon: "folder-notch-open",
       label: "File Explorer",
       // Desktop-only (opens the host machine's file manager) - meaningless
       // from a phone, so disable rather than let it throw RemoteUnavailableError.
-      run: cwd && !isRemote() ? async () => {
+      run: cwd && !isRemote() && !mirrored ? async () => {
         try { await invoke<void>("open_in_explorer", { path: cwd }); }
         catch (err) {
           alert(err instanceof RemoteUnavailableError ? "Not available on this device." : `Failed to open file explorer: ${err}`);
         }
       } : undefined,
-      disabledReason: !cwd ? "No project directory" : (isRemote() ? "Not available on the phone" : undefined),
+      disabledReason: !cwd
+        ? "No project directory"
+        : (isRemote() ? "Not available on the phone" : (mirrored ? NOT_ON_THIS_MACHINE : undefined)),
     },
     {
       icon: "squares-four",
@@ -164,12 +174,15 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
     {
       icon: "git-diff",
       label: "View changes",
-      run: ctx.viewChanges
+      // Code mode reads this machine's disk at cwd - wrong disk for a
+      // mirrored chat (G10, docs/multi-machine.md); remote git browsing isn't
+      // built yet.
+      run: ctx.viewChanges && ctx.mirrored !== true
         ? () => { ctx.viewChanges!(); }
         : undefined,
-      disabledReason: !ctx.viewChanges
-        ? (isDraft ? "No active agent" : "Open the chat to view changes")
-        : undefined,
+      disabledReason: ctx.mirrored === true
+        ? NOT_ON_THIS_MACHINE
+        : (!ctx.viewChanges ? (isDraft ? "No active agent" : "Open the chat to view changes") : undefined),
     },
   ];
 }

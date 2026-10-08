@@ -1,3 +1,4 @@
+// Reviewed 2026-10-08: question-ui.ts's confirmQuestionRendered now also threads the prompt's sessionId to confirm_question_rendered (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";

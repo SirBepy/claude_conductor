@@ -45,6 +45,17 @@ const HEADER_STATUS_CLASSES = [
   "st-close-failed",
 ];
 
+/** True when opening this chat should ask the daemon's relay to attach to a
+ *  peer-hosted session (`ensure_session_attached`) instead of tailing a local
+ *  JSONL file (`watch_session_transcript`) - a mirrored chat has no such file
+ *  on THIS machine's disk (G6, docs/multi-machine.md). `remote` is the
+ *  caller's own `isRemote()` read: the phone already reaches a mirrored
+ *  session's live stream a different way (its own WS attach), so this is
+ *  desktop-only. Exported (pure, no IPC) for a cheap unit test of the branch. */
+export function needsRelayAttach(sess: Instance, remote: boolean): boolean {
+  return sess.machine != null && !remote;
+}
+
 /** Status class (st-working / st-question / …) for an open session, using the
  * same classifier the sidebar rows use so the header avatar's border colour
  * matches the sidebar strip. Exported for the live recolour on the
@@ -192,6 +203,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   const header = new SessionHeader({ title: sessionSubtitle(sess), meta: projectName(sess) });
   header.onCharClick = () => { void changeCharacterForSession(sess.session_id, headerStatusClass); };
   header.setRemote(sess.is_remote);
+  header.setMirrored(sess.machine != null);
   header.bindSession({
     sessionId: sess.session_id,
     readOnly,
@@ -266,9 +278,19 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // continued in a terminal appear in the UI. Watcher emits chat-watch:<id>
   // events; the store's ensureWatchListener deduplicates against runner events.
   _watchedId = sessionId;
-  void invoke<void>("watch_session_transcript", { sessionId, cwd: sess.cwd ?? null })
-    .then(() => sessionEvents.ensureWatchListener(sessionId))
-    .catch((err) => console.warn("[sessions] watch_session_transcript failed:", err));
+  if (needsRelayAttach(sess, isRemote())) {
+    // Mirrored chat, desktop: there is no local JSONL file to tail (G6,
+    // docs/multi-machine.md) - ask the daemon to attach its relay to the
+    // peer-hosted session instead, so chat:<id> events start flowing. The
+    // phone already reaches a mirrored session's live stream a different
+    // way (its own WS attach), so this branch never applies there.
+    void invoke<void>("ensure_session_attached", { sessionId })
+      .catch((err) => console.warn("[sessions] ensure_session_attached failed:", err));
+  } else {
+    void invoke<void>("watch_session_transcript", { sessionId, cwd: sess.cwd ?? null })
+      .then(() => sessionEvents.ensureWatchListener(sessionId))
+      .catch((err) => console.warn("[sessions] watch_session_transcript failed:", err));
+  }
 
   if (readOnly) {
     pane.querySelector<HTMLButtonElement>(".refresh-btn")?.addEventListener("click", async () => {

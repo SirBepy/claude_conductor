@@ -70,3 +70,25 @@ describe("session header config text", () => {
     expect(modelEl().classList.contains("meta-cfg-btn")).toBe(false);
   });
 });
+
+// Multi-machine federation (G10, docs/multi-machine.md): the `</>` Code mode
+// button reads THIS machine's disk at the chat's cwd, the wrong disk for a
+// chat mirrored in from a peer - so it's hidden, not just disabled.
+describe("session header Code mode button (multi-machine)", () => {
+  const codeModeBtn = () => header.el.querySelector(".code-mode-btn");
+
+  it("is visible by default (a locally-hosted chat)", () => {
+    expect(codeModeBtn().hidden).toBe(false);
+  });
+
+  it("hides for a mirrored chat", () => {
+    header.setMirrored(true);
+    expect(codeModeBtn().hidden).toBe(true);
+  });
+
+  it("re-shows once no longer mirrored (chat switch back to a local one)", () => {
+    header.setMirrored(true);
+    header.setMirrored(false);
+    expect(codeModeBtn().hidden).toBe(false);
+  });
+});

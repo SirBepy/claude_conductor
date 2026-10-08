@@ -85,6 +85,13 @@ describe("respond_question's envelope never counts as an in-band delivery", () =
     expect(answer.text).toContain("A");
   });
 
+  it("respond_question carries the prompt's session id (multi-machine routing)", async () => {
+    await answerOneCard();
+    const call = invokeMock.mock.calls.find((c) => c[0] === "respond_question");
+    expect(call).toBeDefined();
+    expect(call[1].sessionId).toBe(SESSION);
+  });
+
   it("sends the typed composer draft AND the answer when both are pending", async () => {
     draftText = "I wa";
     await answerOneCard();
