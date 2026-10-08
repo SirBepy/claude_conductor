@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/sidebar-entries.ts
+// asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/pending-pane-mount.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, mountSessionsList, SESSIONS_BASE_INVOKE, capture } from "./harness";
 
