@@ -268,6 +268,7 @@ pub fn run() {
             ipc::resolve_whitelist_characters,
             ipc::start_session,
             ipc::send_message,
+            ipc::ensure_session_attached,
             ipc::set_session_effort,
             ipc::set_session_model,
             ipc::set_auto_accept,

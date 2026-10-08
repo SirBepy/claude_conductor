@@ -118,8 +118,10 @@ pub fn replay(path: &Path) -> Result<Vec<ChatEvent>, String> {
     Ok(events)
 }
 
-/// Summary of a transcript for the session-detail cards.
-#[derive(serde::Serialize, TS)]
+/// Summary of a transcript for the session-detail cards. Deserialize is
+/// needed so the desktop IPC layer can decode a mirrored session's
+/// `transcript_stats` RPC result back into this same type (`ipc/chat/history.rs`).
+#[derive(serde::Serialize, serde::Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct TranscriptStats {
     pub messages: u32,

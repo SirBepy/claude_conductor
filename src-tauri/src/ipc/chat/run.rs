@@ -25,10 +25,11 @@ pub async fn start_session(
     placeholder_id: Option<String>,
     account_id: Option<String>,
     auto_accept: Option<bool>,
+    machine_id: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    start_session_daemon(cwd, prompt, model, effort, placeholder_id, account_id, auto_accept.unwrap_or(false), &state, &app).await
+    start_session_daemon(cwd, prompt, model, effort, placeholder_id, account_id, auto_accept.unwrap_or(false), machine_id, &state, &app).await
 }
 
 /// Daemon-backed new session: spawn via RPC, bridge events, hand the real id
@@ -41,6 +42,7 @@ async fn start_session_daemon(
     placeholder_id: Option<String>,
     account_id: Option<String>,
     auto_accept: bool,
+    machine_id: Option<String>,
     state: &State<'_, AppState>,
     app: &AppHandle,
 ) -> Result<String, String> {
@@ -53,7 +55,7 @@ async fn start_session_daemon(
         };
         let generation = client.generation;
         client
-            .start_session(&cwd, &model, &effort, None, account_id.as_deref(), auto_accept, placeholder_id.as_deref())
+            .start_session(&cwd, &model, &effort, None, account_id.as_deref(), auto_accept, placeholder_id.as_deref(), machine_id.as_deref())
             .await
             .map_err(|e| (generation, e))
     };
@@ -169,7 +171,9 @@ async fn send_message_daemon(
                     // auto_accept: false - this session_id already exists, so
                     // register_new_session's "only write when true" semantics
                     // leave its already-persisted chat_config flag untouched.
-                    .start_session(cwd, model, effort, Some(session_id), account_id, false, None)
+                    // machine_id: None - a resume always respawns locally, the
+                    // existing session's owner never changes mid-lifecycle.
+                    .start_session(cwd, model, effort, Some(session_id), account_id, false, None, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }

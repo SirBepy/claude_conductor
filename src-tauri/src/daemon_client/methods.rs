@@ -8,6 +8,7 @@
 mod ask;
 mod channels;
 mod hidden_chats;
+mod history;
 mod message_drafts;
 mod misc;
 mod permission;

@@ -7,6 +7,17 @@ use crate::state::AppState;
 use crate::types::chat::ChatEvent;
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Tauri entry point for attaching a mirrored chat's live stream on open
+/// (`active-session.ts` calls this for a session whose cached `Instance`
+/// carries a `machine`, since a chat started locally never needs it - the
+/// `start_session`/`send_message` paths already call `ensure_attached`
+/// themselves before their first send). `ensure_attached` is idempotent per
+/// `channel_epoch`, so a call on an already-attached session is a no-op.
+#[tauri::command]
+pub async fn ensure_session_attached(session_id: String, app: AppHandle) -> Result<(), String> {
+    ensure_attached(&app, &session_id).await
+}
+
 /// Force a fresh daemon attach for `session_id`, even if we believe we are
 /// already attached at the current epoch: unconditionally drops the
 /// `attached_sessions` entry so `ensure_attached` below treats it as a miss.

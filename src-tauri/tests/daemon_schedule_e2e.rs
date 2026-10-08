@@ -192,7 +192,7 @@ async fn scheduled_message_fires_via_tick_loop() {
     let cwd = std::env::temp_dir();
     let cwd_str = cwd.to_string_lossy().to_string();
     let session_id = client
-        .start_session(&cwd_str, "haiku", "low", None, Some(&account_id), false, None)
+        .start_session(&cwd_str, "haiku", "low", None, Some(&account_id), false, None, None)
         .await
         .expect("start_session");
     eprintln!("started session {session_id}");
@@ -462,7 +462,7 @@ async fn schedule_mcp_tool_add_inject_cancel_live() {
     // that list, a false here would block the tool call on a human answer this
     // test never provides, stalling to the 120s drain deadline.
     let session_id = client
-        .start_session(&cwd_str, "haiku", "low", None, Some(&account_id), true, None)
+        .start_session(&cwd_str, "haiku", "low", None, Some(&account_id), true, None, None)
         .await
         .expect("start_session");
     eprintln!("started session {session_id}");

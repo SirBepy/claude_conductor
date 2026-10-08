@@ -8,6 +8,8 @@
 //!                  shared `validate_session_id` + `write_attachment` helpers.
 //! - `history`    — read-only transcript replays: `load_history`,
 //!                  `load_history_page`, `transcript_stats`, `load_event_detail`.
+//! - `daemon_bridge` - daemon `chat_event` -> `chat:<id>` event pump;
+//!                  `ensure_session_attached` is its Tauri entry point.
 //! - `history_list` — History-view listing pipeline: `list_history`.
 //! - `lifecycle`  — AppHandle / process-tree side: `gc_attachments`,
 //!                  `takeover_manual`, `detach_window`, `reattach_window`,
@@ -36,6 +38,7 @@ pub mod watcher;
 // re-exports `bar` only; the macro-generated sibling stays hidden.
 pub use attachments::*;
 pub use builtins::*;
+pub use daemon_bridge::*;
 pub use history::*;
 pub use history_list::*;
 pub use lifecycle::*;

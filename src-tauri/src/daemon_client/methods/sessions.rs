@@ -1,6 +1,32 @@
 use super::super::{ClientError, PersistentClient};
 use serde_json::{json, Value};
 
+/// Builds the `start_session` RPC params. Split out from the method body so
+/// the `machine_id` wiring (the only piece of `start_session` with no live
+/// daemon to assert against in a unit test) can be checked by inspecting the
+/// JSON directly instead of standing up a connection.
+fn start_session_params(
+    cwd: &str,
+    model: &str,
+    effort: &str,
+    resume_id: Option<&str>,
+    account_id: Option<&str>,
+    auto_accept: bool,
+    placeholder_id: Option<&str>,
+    machine_id: Option<&str>,
+) -> Value {
+    json!({
+        "cwd": cwd,
+        "model": model,
+        "effort": effort,
+        "resume_id": resume_id,
+        "account_id": account_id,
+        "auto_accept": auto_accept,
+        "placeholder_id": placeholder_id,
+        "machine_id": machine_id,
+    })
+}
+
 impl PersistentClient {
     /// Snapshot of the daemon's instance registry (array of Instance JSON).
     /// Seeded into the app cache on connect so live sessions render immediately.
@@ -27,6 +53,11 @@ impl PersistentClient {
     /// `placeholder_id` is the caller's idempotency key: pass the same value on
     /// a retry and the daemon returns the session the first attempt already
     /// spawned instead of spawning a second one (`daemon::start_tokens`).
+    ///
+    /// `machine_id`: naming a paired peer other than this daemon makes
+    /// `lifecycle/core.rs::register_core`'s `start_session` handler forward the
+    /// whole call to that peer instead of spawning locally (`forward_start_session`).
+    /// `None`, or this daemon's own id, spawns locally as before.
     pub async fn start_session(
         &self,
         cwd: &str,
@@ -36,17 +67,10 @@ impl PersistentClient {
         account_id: Option<&str>,
         auto_accept: bool,
         placeholder_id: Option<&str>,
+        machine_id: Option<&str>,
     ) -> Result<String, ClientError> {
         let res = self
-            .call("start_session", json!({
-                "cwd": cwd,
-                "model": model,
-                "effort": effort,
-                "resume_id": resume_id,
-                "account_id": account_id,
-                "auto_accept": auto_accept,
-                "placeholder_id": placeholder_id,
-            }))
+            .call("start_session", start_session_params(cwd, model, effort, resume_id, account_id, auto_accept, placeholder_id, machine_id))
             .await?;
         res.get("session_id")
             .and_then(Value::as_str)
@@ -199,5 +223,22 @@ impl PersistentClient {
             .and_then(serde_json::Value::as_str)
             .map(|s| s.to_string())
             .ok_or_else(|| ClientError::Rpc { code: -32000, message: "takeover_manual: no session_id".into() })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::start_session_params;
+
+    #[test]
+    fn start_session_params_carries_machine_id() {
+        let v = start_session_params("/cwd", "opus", "high", None, None, false, None, Some("mach-b"));
+        assert_eq!(v.get("machine_id").and_then(|x| x.as_str()), Some("mach-b"));
+    }
+
+    #[test]
+    fn start_session_params_machine_id_absent_serializes_null() {
+        let v = start_session_params("/cwd", "opus", "high", None, None, false, None, None);
+        assert!(v.get("machine_id").unwrap().is_null());
     }
 }
