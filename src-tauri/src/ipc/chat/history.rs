@@ -32,6 +32,39 @@ pub(crate) fn is_mirrored(instances: &[crate::types::Instance], session_id: &str
         .is_some_and(|i| i.machine.is_some())
 }
 
+/// Matches the exact message `chat::history::locate_transcript` returns on a
+/// missing transcript - the only local failure a daemon retry could possibly
+/// fix (any other local error, e.g. a permission or parse failure, would
+/// just recur identically on retry).
+fn is_not_found(err: &str) -> bool {
+    err.starts_with("no transcript found for session")
+}
+
+/// Decide whether a local-disk "not found" lookup should retry once through
+/// the daemon RPC path.
+///
+/// A session just started on a paired machine has no local transcript, and
+/// `cached_instances` only gains the row's `machine` tag once the peer's next
+/// `instances_changed` frame republishes - until then the row is either
+/// absent from the cache or present untagged, so the `is_mirrored` check the
+/// callers below run first never routes it to the daemon. The daemon's own
+/// `MirrorState` pending-owner map (b9bac1eb) already knows a freshly
+/// forwarded id in that window, so retrying there is cheap: a genuinely local
+/// not-found comes back byte-for-byte identical from the daemon (same
+/// `locate_transcript` message), so retrying for "absent from cache" or
+/// "present but untagged" is harmless, not just acceptable.
+///
+/// Never retry on anything but a not-found (a success or a different local
+/// error must return as-is, with zero extra RPCs on the common path), and
+/// never retry an id already tagged mirrored - unreachable in practice since
+/// the caller's own `is_mirrored` check already sends that case to the
+/// daemon before local disk is ever touched, but kept as an explicit input
+/// so all three cache states (absent / untagged / tagged) are each testable
+/// here.
+pub(crate) fn should_retry_via_daemon(was_not_found: bool, _in_cache: bool, tagged_mirrored: bool) -> bool {
+    was_not_found && !tagged_mirrored
+}
+
 /// Replay the JSONL transcript for `session_id` from disk into ChatEvents.
 /// Used by the Sessions view to seed the renderer when opening a session,
 /// and by the History view for read-only past-session browsing.
@@ -59,7 +92,26 @@ pub async fn load_history(
     // (megabytes, thousands of events). Run on the blocking pool so the
     // Tauri async runtime stays responsive to other IPC calls while the
     // session loads.
-    crate::chat::history::with_transcript(session_id, cwd, crate::chat::history::replay).await
+    let local = crate::chat::history::with_transcript(session_id.clone(), cwd.clone(), crate::chat::history::replay).await;
+    match local {
+        Ok(events) => Ok(events),
+        Err(local_err) => {
+            // The session may have just been spawned on a paired machine,
+            // before this cache saw its `machine` tag.
+            let (in_cache, tagged_mirrored) = {
+                let instances = state.cached_instances.lock().unwrap();
+                (
+                    instances.iter().any(|i| i.session_id == session_id),
+                    is_mirrored(&instances, &session_id),
+                )
+            };
+            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
+                return Err(local_err);
+            }
+            let Some(client) = state.client().await else { return Err(local_err) };
+            client.load_history(&session_id, cwd.as_deref()).await.map_err(|e| e.to_string())
+        }
+    }
 }
 
 /// User-message count and model for a past session's detail cards, without
@@ -79,7 +131,24 @@ pub async fn transcript_stats(
         return client.transcript_stats(&session_id, cwd.as_deref()).await.map_err(|e| e.to_string());
     }
 
-    crate::chat::history::with_transcript(session_id, cwd, crate::chat::history::stats).await
+    let local = crate::chat::history::with_transcript(session_id.clone(), cwd.clone(), crate::chat::history::stats).await;
+    match local {
+        Ok(stats) => Ok(stats),
+        Err(local_err) => {
+            let (in_cache, tagged_mirrored) = {
+                let instances = state.cached_instances.lock().unwrap();
+                (
+                    instances.iter().any(|i| i.session_id == session_id),
+                    is_mirrored(&instances, &session_id),
+                )
+            };
+            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
+                return Err(local_err);
+            }
+            let Some(client) = state.client().await else { return Err(local_err) };
+            client.transcript_stats(&session_id, cwd.as_deref()).await.map_err(|e| e.to_string())
+        }
+    }
 }
 
 /// Paginated transcript reader. Returns the last `message_limit` message
@@ -108,11 +177,34 @@ pub async fn load_history_page(
             .map_err(|e| e.to_string());
     }
 
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::chat::history::read_page_for_session(&session_id, cwd.as_deref(), before_seq, limit)
+    let sid = session_id.clone();
+    let c = cwd.clone();
+    let local = tauri::async_runtime::spawn_blocking(move || {
+        crate::chat::history::read_page_for_session(&sid, c.as_deref(), before_seq, limit)
     })
     .await
-    .map_err(|e| format!("join: {}", e))?
+    .map_err(|e| format!("join: {}", e))?;
+
+    match local {
+        Ok(page) => Ok(page),
+        Err(local_err) => {
+            let (in_cache, tagged_mirrored) = {
+                let instances = state.cached_instances.lock().unwrap();
+                (
+                    instances.iter().any(|i| i.session_id == session_id),
+                    is_mirrored(&instances, &session_id),
+                )
+            };
+            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
+                return Err(local_err);
+            }
+            let Some(client) = state.client().await else { return Err(local_err) };
+            client
+                .load_history_page(&session_id, cwd.as_deref(), before_seq, limit)
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
 }
 
 /// Fetch a single `ToolResult`'s untruncated output, addressed by the
@@ -137,15 +229,37 @@ pub async fn load_event_detail(
             .map_err(|e| e.to_string());
     }
 
-    crate::chat::history::with_transcript(session_id, cwd, move |path| {
+    let tool_use_id_retry = tool_use_id.clone();
+    let local = crate::chat::history::with_transcript(session_id.clone(), cwd.clone(), move |path| {
         crate::chat::history::read_single_event(path, seq, &tool_use_id)
     })
-    .await
+    .await;
+
+    match local {
+        Ok(event) => Ok(event),
+        Err(local_err) => {
+            let (in_cache, tagged_mirrored) = {
+                let instances = state.cached_instances.lock().unwrap();
+                (
+                    instances.iter().any(|i| i.session_id == session_id),
+                    is_mirrored(&instances, &session_id),
+                )
+            };
+            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
+                return Err(local_err);
+            }
+            let Some(client) = state.client().await else { return Err(local_err) };
+            client
+                .load_event_detail(&session_id, cwd.as_deref(), seq, &tool_use_id_retry)
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_mirrored;
+    use super::{is_mirrored, is_not_found, should_retry_via_daemon};
     use crate::sessions::kinds::InstanceKind;
     use crate::types::{Instance, MachineRef};
 
@@ -204,5 +318,54 @@ mod tests {
     fn session_absent_from_cache_is_not_mirrored() {
         let instances = vec![fixture("s1", None)];
         assert!(!is_mirrored(&instances, "unknown"));
+    }
+
+    // Decision fn for whether a local "not found" retries via the daemon.
+
+    #[test]
+    fn retries_when_not_found_and_absent_from_cache() {
+        // Brand new session just started on the peer: no row yet at all.
+        assert!(should_retry_via_daemon(true, false, false));
+    }
+
+    #[test]
+    fn retries_when_not_found_and_in_cache_but_untagged() {
+        // Row exists (this machine saw SOME instances_changed) but hasn't
+        // picked up the peer's `machine` tag yet - the exact window between
+        // a chat starting on a peer and this cache's next resync. Retrying
+        // is cheap/harmless, so this is a deliberate "acceptable to retry"
+        // choice, not an oversight.
+        assert!(should_retry_via_daemon(true, true, false));
+    }
+
+    #[test]
+    fn never_retries_an_id_already_tagged_mirrored() {
+        // Unreachable in practice (the caller's own `is_mirrored` check
+        // already routes this to the daemon before reaching local disk) but
+        // kept explicit so the decision fn's full input space is covered.
+        assert!(!should_retry_via_daemon(true, true, true));
+    }
+
+    #[test]
+    fn never_retries_a_successful_local_read() {
+        // The common path: a real local session's normal success must never
+        // trigger an extra RPC, regardless of cache state.
+        assert!(!should_retry_via_daemon(false, false, false));
+        assert!(!should_retry_via_daemon(false, true, false));
+        assert!(!should_retry_via_daemon(false, true, true));
+    }
+
+    #[test]
+    fn never_retries_a_non_not_found_local_error() {
+        // Some other local I/O error (permission denied, corrupt file) -
+        // a daemon retry wouldn't help and would just mask the real error.
+        assert!(!should_retry_via_daemon(false, false, false));
+    }
+
+    #[test]
+    fn is_not_found_matches_locate_transcript_message_only() {
+        assert!(is_not_found("no transcript found for session abc-123"));
+        assert!(!is_not_found("open /x/y.jsonl: permission denied"));
+        assert!(!is_not_found(""));
     }
 }
