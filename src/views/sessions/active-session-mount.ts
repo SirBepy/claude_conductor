@@ -10,6 +10,7 @@ import { mountChatLoadingOverlay, type ChatLoadingOverlay } from "../../shared/c
 import { setChatImageDataProvider } from "../../shared/chat/chat-renderer-bridge";
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
+import { isMirrored } from "./sessions-helpers";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero } from "./session-statusbar";
 import { readLastChoice } from "../../shared/effort-presets";
 import { renderSidebar } from "./sidebar";
@@ -68,7 +69,7 @@ export async function mountStatusbar(
     accountId: sess.account_id ?? null,
     onAccountClick,
     onConfig,
-    mirrored: sess.machine != null,
+    mirrored: isMirrored(sess),
   });
   state.statusbar = sb;
   // Git info is owned by the statusbar itself: it resolves the session's live

@@ -6,6 +6,7 @@ import { isRemote } from "../../../shared/transport";
 import { invoke } from "../../../shared/ipc";
 import { updateSettings } from "../../../shared/settings-update";
 import { state } from "../state";
+import { isMirrored } from "../sessions-helpers";
 import {
   closeCodeMode,
   currentCodeModeKey,
@@ -72,7 +73,7 @@ function canPopOut(chat: CodeModeChat): boolean {
  *  by this check - multi-machine federation only mirrors live sessions. */
 function isMirroredChat(chat: CodeModeChat): boolean {
   if (!chat.sessionId) return false;
-  return state.sessions.find((s) => s.session_id === chat.sessionId)?.machine != null;
+  return isMirrored(state.sessions.find((s) => s.session_id === chat.sessionId));
 }
 
 export function popOut(chat: CodeModeChat, target: CodeModeTarget = { kind: "default" }): void {

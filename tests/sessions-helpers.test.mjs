@@ -12,6 +12,7 @@ import {
   statusDotClass,
   deriveQuestionSet,
   isJarvisOrWorker,
+  isMirrored,
 } from "../src/views/sessions/sessions-helpers.ts";
 
 function makeInstance(overrides = {}) {
@@ -137,6 +138,21 @@ describe("isJarvisOrWorker", () => {
   });
   it("is false when worker_of is explicitly null", () => {
     expect(isJarvisOrWorker(makeInstance({ jarvis: false, worker_of: null }))).toBe(false);
+  });
+});
+
+// The one predicate for "hosted on a paired peer machine" - every call site
+// used to inline `sess.machine != null`/`== null` itself.
+describe("isMirrored", () => {
+  it("is false for a locally-hosted session (machine: null)", () => {
+    expect(isMirrored(makeInstance({ machine: null }))).toBe(false);
+  });
+  it("is true when machine is set", () => {
+    expect(isMirrored(makeInstance({ machine: { id: "peer-1", label: "Laptop", online: true } }))).toBe(true);
+  });
+  it("is false for a missing/undefined instance (a lookup that found nothing)", () => {
+    expect(isMirrored(undefined)).toBe(false);
+    expect(isMirrored(null)).toBe(false);
   });
 });
 

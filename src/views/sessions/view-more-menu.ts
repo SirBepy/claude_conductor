@@ -30,7 +30,7 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
-import { loadHiddenSessions } from "./sessions-helpers";
+import { loadHiddenSessions, isMirrored } from "./sessions-helpers";
 import { isAutoAccept } from "./permission-modal";
 import { invoke } from "../../shared/ipc";
 import { isRemote } from "../../shared/transport";
@@ -219,7 +219,7 @@ const viewMenu = createMoreMenu<[]>({
           isJarvis: sess?.jarvis === true,
           isFrozen: sess?.frozen === true,
           hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
-          mirrored: sess?.machine != null,
+          mirrored: isMirrored(sess),
           viewChanges: state.activeChatActions?.viewChanges,
           onAfterAction: () => close(),
         };

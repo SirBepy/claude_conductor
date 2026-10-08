@@ -12,6 +12,7 @@ import {
   paneEmptyStateHtml,
   statusDotClass,
   deriveQuestionSet,
+  isMirrored,
 } from "./sessions-helpers";
 import { renderSidebar } from "./sidebar";
 import { characterForSession, characterIconUrl } from "./session-characters";
@@ -53,7 +54,7 @@ const HEADER_STATUS_CLASSES = [
  *  session's live stream a different way (its own WS attach), so this is
  *  desktop-only. Exported (pure, no IPC) for a cheap unit test of the branch. */
 export function needsRelayAttach(sess: Instance, remote: boolean): boolean {
-  return sess.machine != null && !remote;
+  return isMirrored(sess) && !remote;
 }
 
 /** True when a read-only session's banner offers "Take Over". Takeover kills
@@ -61,7 +62,7 @@ export function needsRelayAttach(sess: Instance, remote: boolean): boolean {
  *  pid belongs to the other machine) must never offer it: at best it errors,
  *  at worst it kills an unrelated local process sharing that pid number. */
 export function offersTakeover(sess: Instance, remote: boolean): boolean {
-  return sess.machine == null && !remote;
+  return !isMirrored(sess) && !remote;
 }
 
 /** Status class (st-working / st-question / …) for an open session, using the
@@ -211,7 +212,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   const header = new SessionHeader({ title: sessionSubtitle(sess), meta: projectName(sess) });
   header.onCharClick = () => { void changeCharacterForSession(sess.session_id, headerStatusClass); };
   header.setRemote(sess.is_remote);
-  header.setMirrored(sess.machine != null);
+  header.setMirrored(isMirrored(sess));
   header.bindSession({
     sessionId: sess.session_id,
     readOnly,

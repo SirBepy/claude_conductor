@@ -10,6 +10,7 @@ import {
   loadHiddenCollapsed,
   saveHiddenCollapsed,
   toggleSegCollapse,
+  isMirrored,
 } from "./sessions-helpers";
 import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
 import { isAutoAccept } from "./permission-modal";
@@ -106,7 +107,7 @@ export function openCtxMenu(
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,
     hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
-    mirrored: sess.machine != null,
+    mirrored: isMirrored(sess),
     viewChanges,
     onAfterAction: () => {
       closeCtxMenu();

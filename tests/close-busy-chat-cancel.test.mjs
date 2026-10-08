@@ -30,6 +30,7 @@ vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   loadHiddenCollapsed: () => false,
   saveHiddenCollapsed: () => {},
   toggleSegCollapse: () => {},
+  isMirrored: (i) => i?.machine != null,
 }));
 vi.mock("../src/shared/chat/message-filter-pref.ts", () => ({
   isRawViewEnabled: () => false,

@@ -79,6 +79,17 @@ export function isJarvisOrWorker(i: Instance): boolean {
 }
 
 /**
+ * True when the chat is hosted on a paired peer machine (multi-machine
+ * federation), the `Instance.machine` tag stamped only by
+ * `daemon::machines::all_instances` / `MirrorState::instances`. Accepts a
+ * nullable/undefined Instance because several call sites look up a session
+ * by id from an array that may not have it (a draft, a session that closed).
+ */
+export function isMirrored(i: Instance | null | undefined): boolean {
+  return i?.machine != null;
+}
+
+/**
  * Groups pending scheduled MESSAGE items by session_id, mirroring the exact
  * filter `scheduled-chip.ts` uses per-chat: `kind.type === "message"` and
  * status pending/firing (sent/failed excluded). `schedule_list` returns every
