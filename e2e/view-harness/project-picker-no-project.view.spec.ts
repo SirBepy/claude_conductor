@@ -2,6 +2,10 @@ import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/new-session-cache.ts, src/shared/no-project.ts
+//
+// G8 touched project-picker.ts's listMachines() gate (now unconditional, not
+// desktop-only) - a no-op here: this spec mounts via mountView (isTauri true,
+// isRemote false), the branch that already ran listMachines() before G8.
 
 // "No project" is a real folder (the Obsidian vault) that must read as no
 // project at all: renamed, pinned first whatever the sort, its path hidden,

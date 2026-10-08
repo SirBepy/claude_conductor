@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-const { renderMachineFieldHtml, attachMachineFieldHandlers } = await import(
+const { renderMachineFieldHtml, attachMachineFieldHandlers, selfChipLabel } = await import(
   "../src/views/sessions/machine-field.ts"
 );
 
@@ -72,6 +72,25 @@ describe("renderMachineFieldHtml", () => {
     const chips = el.querySelectorAll(".machine-chip");
     expect(chips[0].classList.contains("sel")).toBe(false);
     expect(chips[1].classList.contains("sel")).toBe(true);
+  });
+});
+
+// G8: phone now fetches list_machines() too (project-picker.ts's gate
+// lifted), so this is the only logic that decides what the self chip says -
+// no isRemote() branch needed, since the real self.label now resolves on
+// both platforms the same way.
+describe("selfChipLabel", () => {
+  it("falls back to the literal text when self hasn't resolved yet", () => {
+    expect(selfChipLabel(null)).toBe("This machine");
+  });
+
+  it("uses the daemon's own registry label once self resolves (desktop and phone alike)", () => {
+    expect(selfChipLabel(SELF)).toBe("This machine");
+    expect(selfChipLabel({ machine_id: "self", label: "Joe-PC", os: "windows" })).toBe("Joe-PC");
+  });
+
+  it("falls back on an empty label string, same as a missing one", () => {
+    expect(selfChipLabel({ machine_id: "self", label: "", os: "windows" })).toBe("This machine");
   });
 });
 

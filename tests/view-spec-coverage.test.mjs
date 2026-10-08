@@ -19,6 +19,7 @@ const PROJECTS_ROOT = "src/views/sessions/projects-root.ts";
 const ADD_PROJECT_SPEC = "e2e/view-harness/project-picker-add-project.view.spec.ts";
 const FAVORITES_SPEC = "e2e/view-harness/project-picker-favorites.view.spec.ts";
 const NO_PROJECT_SPEC = "e2e/view-harness/project-picker-no-project.view.spec.ts";
+const MACHINE_CHIPS_SPEC = "e2e/view-harness/project-picker-phone-machine-chips.view.spec.ts";
 
 describe("view-spec-coverage: import-derived link (auto, no header)", () => {
   it("maps question-ui.ts to the spec that dynamically imports it", () => {
@@ -64,7 +65,10 @@ describe("view-spec-coverage: header-derived link (// asserts:, for UI-driven sp
   });
 
   it("clears once every header-linked spec is in the same diff", () => {
-    const findings = findStaleSpecs([PROJECT_PICKER, ADD_PROJECT_SPEC, FAVORITES_SPEC, NO_PROJECT_SPEC], depMap);
+    const findings = findStaleSpecs(
+      [PROJECT_PICKER, ADD_PROJECT_SPEC, FAVORITES_SPEC, NO_PROJECT_SPEC, MACHINE_CHIPS_SPEC],
+      depMap,
+    );
     expect(findings[PROJECT_PICKER]).toBeUndefined();
   });
 });

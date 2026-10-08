@@ -2,7 +2,6 @@ import { html, render } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { invoke } from "../../shared/ipc";
 import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
-import { isRemote } from "../../shared/transport";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openLocationModal, resolveRememberedLocation } from "./location-picker";
 import { restoreFocus } from "./restore-focus";
@@ -152,16 +151,15 @@ export function openProjectPickerModal(
       );
     };
 
-    // Desktop only (H4); a phone caller degrades with RemoteUnavailableError,
-    // caught here so the picker just never grows the chip row.
-    if (!isRemote()) {
-      void api.listMachines().then((res) => {
-        if (resolved) return;
-        selfMachine = res.self;
-        peerMachines = res.peers;
-        if (peerMachines.length > 0) renderModal();
-      }).catch(() => { /* machine federation unavailable - no chip row, same as zero peers */ });
-    }
+    // Both desktop and phone (G8) - an older daemon without the federation
+    // backend, or a transport that hasn't mapped the command yet, degrades
+    // the same way: caught here so the picker just never grows the chip row.
+    void api.listMachines().then((res) => {
+      if (resolved) return;
+      selfMachine = res.self;
+      peerMachines = res.peers;
+      if (peerMachines.length > 0) renderModal();
+    }).catch(() => { /* machine federation unavailable - no chip row, same as zero peers */ });
 
     // The projects root, if the user has ever set one explicitly. Absent,
     // projectsRoot() infers it; this read only ever upgrades the answer, so

@@ -11,6 +11,10 @@ import { mountView, invokeCalls, delayInvokes } from "./harness";
 // is the control, so there is no label to word ambiguously.
 //
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/project-picker/add-project.ts, src/views/sessions/projects-root.ts
+//
+// G8 touched project-picker.ts's listMachines() gate (now unconditional, not
+// desktop-only) - a no-op here: this spec mounts via mountView (isTauri true,
+// isRemote false), the branch that already ran listMachines() before G8.
 
 const ROOT = "C:\\Users\\tecno\\Desktop\\Projects";
 

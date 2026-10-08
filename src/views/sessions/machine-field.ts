@@ -32,11 +32,21 @@ function machineChipHtml(
   return `<span class="${cls}" data-machine-id="${escapeHtml(machineId)}"${stateAttrs}${tip}>${escapeHtml(label)}</span>`;
 }
 
+/** From a phone, "this machine" is ambiguous (which one?), so the self chip
+ * shows the serving daemon's own registry label there, same as desktop
+ * already does once `list_machines()` resolves (G8 lifted the phone-only
+ * gate on that call, so `self` is populated on both platforms now). Falls
+ * back to the literal text only while that fetch hasn't landed yet, same as
+ * desktop's existing cold-start render. */
+export function selfChipLabel(self: SelfMachine | null): string {
+  return self?.label || "This machine";
+}
+
 /** "" when there are no peers - the whole chip row is skipped for a
  * single-machine setup (H4: only render once list_machines() returns >=1 peer). */
 export function renderMachineFieldHtml(state: MachineFieldState, ctx: MachineFieldContext): string {
   if (ctx.peers.length === 0) return "";
-  const selfLabel = ctx.self?.label || "This machine";
+  const selfLabel = selfChipLabel(ctx.self);
   const chips = [
     machineChipHtml(selfLabel, "", state.machineId === null, false),
     ...ctx.peers.map((p) =>
