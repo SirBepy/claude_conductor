@@ -56,6 +56,14 @@ export function needsRelayAttach(sess: Instance, remote: boolean): boolean {
   return sess.machine != null && !remote;
 }
 
+/** True when a read-only session's banner offers "Take Over". Takeover kills
+ *  the session's pid in THIS machine's own registry, so a mirrored row (whose
+ *  pid belongs to the other machine) must never offer it: at best it errors,
+ *  at worst it kills an unrelated local process sharing that pid number. */
+export function offersTakeover(sess: Instance, remote: boolean): boolean {
+  return sess.machine == null && !remote;
+}
+
 /** Status class (st-working / st-question / …) for an open session, using the
  * same classifier the sidebar rows use so the header avatar's border colour
  * matches the sidebar strip. Exported for the live recolour on the
@@ -223,7 +231,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
 
   pane.innerHTML = [
     `<div class="session-statusbar-host"></div>`,
-    readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${isRemote() ? "" : `<button type="button" class="takeover-btn">Take Over</button>`}</div>` : "",
+    readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${offersTakeover(sess, isRemote()) ? `<button type="button" class="takeover-btn">Take Over</button>` : ""}</div>` : "",
     `<div class="session-messages"></div>`,
     `<div class="scheduled-chip-slot"></div>`,
     `<div class="composer-shell">`,

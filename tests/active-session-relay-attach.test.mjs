@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
 
-const { needsRelayAttach } = await import("../src/views/sessions/active-session.ts");
+const { needsRelayAttach, offersTakeover } = await import("../src/views/sessions/active-session.ts");
 
 function instance(machine) {
   return { session_id: "s1", cwd: "/repo", machine: machine ?? null };
@@ -31,5 +31,19 @@ describe("needsRelayAttach", () => {
 
   it("false for a local session on the phone", () => {
     expect(needsRelayAttach(instance(null), true)).toBe(false);
+  });
+});
+
+describe("offersTakeover", () => {
+  it("offered for a local read-only session on desktop", () => {
+    expect(offersTakeover(instance(null), false)).toBe(true);
+  });
+
+  it("never offered for a mirrored session: its pid is the other machine's", () => {
+    expect(offersTakeover(instance({ id: "m1", label: "Mac Mini", online: true }), false)).toBe(false);
+  });
+
+  it("never offered on the phone", () => {
+    expect(offersTakeover(instance(null), true)).toBe(false);
   });
 });
