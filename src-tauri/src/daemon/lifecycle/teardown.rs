@@ -118,11 +118,10 @@ async fn send_message_inner(
 }
 
 /// Send a message to `session_id`, respawning it first if the daemon no
-/// longer holds it live in the `SessionMap`. The per-turn `claude -p`
-/// process exits at the end of every turn (see the `is_interactive` branch
-/// at the end of `spawn_session`'s pump task above), so a session that has
-/// gone idle since its last turn is routinely absent from the map even
-/// though the Registry still lists it as an open Interactive chat.
+/// longer holds it live in the `SessionMap`. The child normally lives across
+/// turns, but one that died (crash, kill, freeze, daemon restart) leaves the
+/// session absent from the map while the Registry still lists it as an open
+/// Interactive chat (see `pump::exit`'s `is_interactive` branch).
 ///
 /// The desktop app compensates for this client-side: `ipc/chat/run.rs`'s
 /// `send_message_daemon` catches the `-32004` NotFound RPC error, calls

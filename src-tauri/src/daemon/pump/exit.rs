@@ -20,10 +20,11 @@ pub(crate) async fn run_pump_exit(
     closing_flagged: bool,
 ) {
     map_for_pump.remove(&pump_session.session_id);
-    // Interactive sessions: `claude -p --input-format=stream-json` exits after
-    // completing each turn. Keep the registry entry live so the sidebar keeps
-    // showing the session. The next send_message will find the session missing
-    // from the SessionMap, get -32004 NotFound, and auto-respawn with --resume.
+    // Interactive sessions: the child lives across turns, so reaching here
+    // means it died (crash, kill, freeze, daemon shutdown). Keep the registry
+    // entry live so the sidebar keeps showing the session. The next
+    // send_message will find the session missing from the SessionMap, get
+    // -32004 NotFound, and auto-respawn with --resume.
     // For non-Interactive kinds (External / Automated) a process exit really
     // does mean the session is gone, so mark it ended as before.
     let is_interactive = state_for_pump.registry
