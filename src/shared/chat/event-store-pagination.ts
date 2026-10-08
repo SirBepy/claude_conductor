@@ -18,6 +18,7 @@ import type { DeliveryPolicy } from "./event-store-delivery";
 // user/tool/turn events typically renders well under 100 ms.
 const INITIAL_PAGE_SIZE = 10;
 const OLDER_PAGE_SIZE = 10;
+const MAX_EMPTY_PAGES_SKIPPED = 8;
 
 /** Boundary row marking where a `/respawn` predecessor's transcript ends. */
 function chainDividerEvent(predecessorId: string): ChatEvent {
@@ -184,7 +185,7 @@ export class PaginationPolicy {
    * Once this chat's transcript runs out the walk hops to the chat it took over
    * from, injecting a divider and restarting the cursor at that file's EOF.
    */
-  async loadOlder(sessionId: string, cwd?: string): Promise<ChatEvent[] | null> {
+  async loadOlder(sessionId: string, cwd?: string, emptyPagesSkipped = 0): Promise<ChatEvent[] | null> {
     const entry = this.cache.get(sessionId);
     if (!entry || !entry.initialLoaded) return null;
     touchAccess(entry);
@@ -205,14 +206,18 @@ export class PaginationPolicy {
       if (!page.events.length) {
         // A successor's file opens with lines that render nothing (spawn
         // prompt, attachments), so its last page can be empty and still name
-        // the predecessor: hop instead of ending the walk.
-        const next = !hop && !page.has_more ? page.continues_from ?? null : null;
+        // the predecessor: hop instead of ending the walk. A predecessor that
+        // was itself a fresh successor can be empty too, so keep hopping; the
+        // cap only guards against a chain that loops back on itself.
+        const next = !page.has_more && emptyPagesSkipped < MAX_EMPTY_PAGES_SKIPPED
+          ? page.continues_from ?? null
+          : null;
         entry.pageHasMore = false;
         entry.chainNextId = next;
         entry.hasMore = next !== null;
         if (next === null) return null;
         entry.loadingOlder = false;
-        return await this.loadOlder(sessionId, cwd);
+        return await this.loadOlder(sessionId, cwd, emptyPagesSkipped + 1);
       }
       // Tag events from a predecessor's file so "Load full output" fetches
       // from that transcript, not the open chat's (todo 861). Not gated on

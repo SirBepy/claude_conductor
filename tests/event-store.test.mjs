@@ -168,6 +168,27 @@ describe("SessionEventStore pagination", () => {
     expect(sessionEvents.hasMore(sid)).toBe(false);
   });
 
+  it("loadOlder keeps hopping past a predecessor that is itself empty", async () => {
+    const sid = "sess-chain2-head";
+    const midId = "sess-chain2-mid";
+    const rootId = "sess-chain2-root";
+    routeHistoryChain({
+      [sid]: [
+        { events: [userEvent("q", 5)], oldest_seq: 10, newest_seq: 90, has_more: true },
+        { events: [], oldest_seq: 0, newest_seq: 0, has_more: false, continues_from: midId },
+      ],
+      [midId]: [{ events: [], oldest_seq: 0, newest_seq: 0, has_more: false, continues_from: rootId }],
+      [rootId]: [{ events: [userEvent("root", 1)], oldest_seq: 0, newest_seq: 2, has_more: false, continues_from: null }],
+    });
+
+    await sessionEvents.loadInitial(sid);
+    const older = await sessionEvents.loadOlder(sid);
+
+    expect(older?.map((e) => e.type)).toEqual(["user_message", "notification"]);
+    expect(older?.[1].body).toBe(rootId);
+    expect(sessionEvents.hasMore(sid)).toBe(false);
+  });
+
   it("loadOlder is single-flight under concurrent calls", async () => {
     let resolveInitial = () => {};
     invokeMock.mockReturnValueOnce(
