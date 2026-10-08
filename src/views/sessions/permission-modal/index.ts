@@ -22,6 +22,7 @@ import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
 import { getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
+import { showSecretCard, dismissSecretCard } from "./secret-card";
 import { clearQuestionDraft } from "./draft-persistence";
 import { cancelAuqPush } from "./auq-draft-sync";
 import {
@@ -37,7 +38,7 @@ import {
   peekPendingPrompt,
   pendingPromptSessionIds,
 } from "./gating";
-import type { PermissionRequestedPayload, QuestionRequestedPayload } from "./types";
+import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 import { showQuestionCard } from "./question-submit";
 export type { ShowQuestionCardOpts } from "./question-submit";
 
@@ -130,6 +131,55 @@ function findSessionForPendingId(id: string): string | null {
     if (peekPendingPrompt(sid)?.payload.id === id) return sid;
   }
   return null;
+}
+
+// ── Secret-request queue ─────────────────────────────────────────────────
+//
+// Unlike questions, a secret request has no multi-sibling "awaiting" set on
+// the daemon side - but the same single-slot-per-session park (gating.ts's
+// `_pendingPrompts`) would still silently drop an EARLIER secret card if a
+// second one for the same, currently-focused session arrived while the first
+// was still open (storePendingPrompt overwrites the slot). Queued here
+// instead, same shape as the sibling-question queue above, and drained once
+// the session's slot frees up (handlePromptResolved below).
+
+const _queuedSecrets = new Map<string, SecretRequestedPayload[]>();
+
+function promoteQueuedSecret(sessionId: string): void {
+  const q = _queuedSecrets.get(sessionId);
+  if (!q?.length) return;
+  const next = q.shift();
+  if (q.length === 0) _queuedSecrets.delete(sessionId);
+  if (next) handleSecretRequested(next);
+}
+
+/** A `request_secret` tool fired. Queue behind an already-open secret card for
+ *  the SAME session, park a backgrounded session's, or surface the card (the
+ *  focused chat). Never auto-answered - only Joe can supply the value. */
+export function handleSecretRequested(payload: SecretRequestedPayload): void {
+  const sid = payload.session_id;
+  if (sid) {
+    const existing = peekPendingPrompt(sid);
+    if (existing?.kind === "secret" && existing.payload.id !== payload.id) {
+      const q = _queuedSecrets.get(sid) ?? [];
+      if (!q.some((p) => p.id === payload.id)) q.push(payload);
+      _queuedSecrets.set(sid, q);
+      rerenderSidebar();
+      console.warn("[perm-gate] QUEUED secret-requested behind an open slot", { eventSessionId: sid, ...gateDiag() });
+      return;
+    }
+  }
+  if (!isForSelectedSession(sid)) {
+    if (sid) {
+      storePendingPrompt(sid, { kind: "secret", payload });
+      rerenderSidebar();
+      console.warn("[perm-gate] PARKED secret-requested for backgrounded chat", { eventSessionId: sid, ...gateDiag() });
+    } else {
+      console.warn("[perm-gate] DROPPED secret-requested (no session_id)", { ...gateDiag() });
+    }
+    return;
+  }
+  showSecretCard(payload);
 }
 
 /** A permission tool fired. Allow (auto-accept / remembered rule), park (a
@@ -243,9 +293,14 @@ export function handlePromptResolved(id: string, durable = false): void {
   // Only cancel the (module-global) push for the card actually on screen.
   if (isActive && durable) cancelAuqPush();
   if (durable) dismissQuestionCard(id);
+  // Secret cards have their own tiny id-scoped registry (secret-card.ts) -
+  // this only tears down the card if it's the one still showing for `id`.
+  if (durable) dismissSecretCard(id);
   // A genuine resolve (or a background id that was never on screen) frees the
   // session's slot for its next queued sibling, if any (todo 897).
   if (sid && (durable || !isActive)) promoteQueuedSibling(sid);
+  // Same freed-slot reasoning, for a queued secret request instead of a sibling question.
+  if (sid) promoteQueuedSecret(sid);
   rerenderSidebar();
 }
 
@@ -296,6 +351,7 @@ function startRemotePromptPoll(): void {
   const cb = {
     onQuestion: handleQuestionRequested,
     onPermission: handlePermissionRequested,
+    onSecret: handleSecretRequested,
     onResolved: handlePromptResolved,
   };
   const tick = async (): Promise<void> => {
@@ -345,6 +401,7 @@ export function installPermissionModalListener(): void {
 
   ev.listen<PermissionRequestedPayload>("permission-requested", (event) => handlePermissionRequested(event.payload));
   ev.listen<QuestionRequestedPayload>("question-requested", (event) => handleQuestionRequested(event.payload));
+  ev.listen<SecretRequestedPayload>("secret-requested", (event) => handleSecretRequested(event.payload));
   // The reliable pending-prompt poll (daemon_link.rs) emits this, so it survives
   // the lossy broadcast.
   ev.listen<{ id: string; durable?: boolean }>("prompt-resolved", (event) => {

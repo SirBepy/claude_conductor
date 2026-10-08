@@ -5,6 +5,18 @@ export interface PermissionRequestedPayload {
   session_id?: string;
 }
 
+/** The `request_secret` MCP tool's blocking prompt: asks Joe to
+ *  paste a value that gets written straight to a key=value file, never
+ *  surfaced to the model. `file` is the daemon-resolved absolute path;
+ *  `key` is the line within it the value gets saved under. */
+export interface SecretRequestedPayload {
+  id: string;
+  session_id?: string;
+  label: string;
+  file: string;
+  key: string;
+}
+
 // Single source (todo 586): the domain/badge value lists live only here, as
 // record keys - the unions, and the runtime whitelists below, both derive
 // from these instead of hand-duplicating the same strings.

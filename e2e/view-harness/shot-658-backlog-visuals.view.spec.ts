@@ -1,4 +1,5 @@
 // Reviewed 2026-10-08: question-ui.ts's confirmQuestionRendered now also threads the prompt's sessionId to confirm_question_rendered (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
+// Reviewed 2026-10-08: types.ts gained a SecretRequestedPayload interface and http-transport.ts gained a respond_secret case for the request_secret MCP tool's masked-value card - additive, no change to this spec's contract.
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountSessionsList, mountView, sessionInstance } from "./harness";

@@ -50,6 +50,7 @@ const DESKTOP_ONLY_KEBAB = {
   "news-notification": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "permission-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "question-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
+  "secret-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "prompt-resolved": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "slash-commands-changed": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "when-done-state": "Tauri-only ev.listen; phone has no window.__TAURI__.",

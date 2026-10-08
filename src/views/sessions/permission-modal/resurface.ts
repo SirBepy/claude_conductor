@@ -23,6 +23,7 @@ import type { PendingPrompt } from "./gating";
 import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
 import { showPermissionCard, showQuestionReplay } from "./permission-card";
+import { showSecretCard } from "./secret-card";
 import { findQuestionIndexById } from "../../../shared/chat/chat-question-card";
 import { rerenderSidebar, dismissQuestionCard, queueSiblingQuestion, takeQueuedSiblingQuestionById } from "./index";
 import { showQuestionCard } from "./question-submit";
@@ -42,7 +43,8 @@ export function autoAcceptParked(sessionId: string): void {
     rerenderSidebar();
     return;
   }
-  // Can't auto-answer (question / AskUserQuestion-shaped): leave it parked.
+  // Can't auto-answer (question / AskUserQuestion-shaped, or a secret - only
+  // Joe can supply that value): leave it parked.
   storePendingPrompt(sessionId, pending);
 }
 
@@ -69,6 +71,12 @@ export function replayPendingPrompt(sessionId: string): boolean {
 function surfacePending(pending: PendingPrompt, reopened = false): void {
   if (pending.kind === "question") {
     void showQuestionCard(pending.payload, pending.draft, { reopened });
+    return;
+  }
+  // Never auto-answerable (only Joe can supply the value) - no auto-accept /
+  // remembered-rule shortcut applies, unlike the permission branch below.
+  if (pending.kind === "secret") {
+    showSecretCard(pending.payload);
     return;
   }
   const payload = pending.payload;
@@ -127,6 +135,11 @@ async function applyRehydration(
     // Still logged instead of silently vanishing, so a live hit surfaces in
     // the console this time rather than looking like the daemon just forgot.
     else console.warn("[perm-gate] a second live permission prompt for this session was dropped on rehydrate (todo 975, no permission-sibling queue exists yet)", { sessionId, id: sib.payload.id });
+  }
+  if (rec.kind === "secret") {
+    storePendingPrompt(sessionId, { kind: "secret", payload: rec.payload });
+    rerenderSidebar();
+    return true;
   }
   if (rec.kind !== "question") {
     storePendingPrompt(sessionId, { kind: "permission", payload: rec.payload });

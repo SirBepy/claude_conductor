@@ -2,7 +2,7 @@ import { invoke } from "../../../shared/ipc";
 import { state } from "../state";
 import { isDestructive, loadRulesForCwd, matchesRule } from "../permission-rules";
 import { extractQuestions } from "./question-ui";
-import type { PermissionRequestedPayload, QuestionDraft, QuestionRequestedPayload } from "./types";
+import type { PermissionRequestedPayload, QuestionDraft, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 
 // ── Auto-accept (per-session) ──────────────────────────────────────────────
 //
@@ -123,7 +123,11 @@ export function isForSelectedSession(eventSessionId: string | undefined): boolea
 
 export type PendingPrompt =
   | { kind: "permission"; payload: PermissionRequestedPayload; draft?: QuestionDraft }
-  | { kind: "question"; payload: QuestionRequestedPayload; draft?: QuestionDraft; answered?: boolean };
+  | { kind: "question"; payload: QuestionRequestedPayload; draft?: QuestionDraft; answered?: boolean }
+  // `draft` is structural-only here (never set) - keeps this variant
+  // assignable through savePendingPromptDraft's `{ ...p, draft }` spread,
+  // which runs generically across every PendingPrompt kind.
+  | { kind: "secret"; payload: SecretRequestedPayload; draft?: QuestionDraft };
 
 const _pendingPrompts = new Map<string, PendingPrompt>();
 

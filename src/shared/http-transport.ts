@@ -457,6 +457,20 @@ export class HttpTransport implements Transport {
         const delivered = typeof res === "object" && res !== null ? res.delivered === true : res === true;
         return delivered as T;
       }
+      // The daemon answers `{ok, error?}`; normalized to match the Tauri
+      // command's `Result<bool, String>` so secret-card.ts's try/catch works
+      // identically on both transports - resolves true on success, rejects
+      // with the daemon's error text otherwise (never a silent `ok: false`
+      // the caller has to remember to check).
+      case "respond_secret": {
+        const res = await this.rpc<{ ok?: boolean; error?: string } | null>("respond_secret", {
+          request_id: args.requestId ?? args.request_id,
+          value: args.value ?? null,
+          cancelled: args.cancelled ?? false,
+        });
+        if (!res || res.ok !== true) throw new Error(res?.error || "Failed to save secret.");
+        return true as unknown as T;
+      }
       case "get_skipped_question_marks":
         return this.rpc<T>("get_skipped_question_marks", {
           session_id: args.sessionId ?? args.session_id,

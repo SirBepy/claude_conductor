@@ -11,11 +11,12 @@
  * Pure (no DOM / transport imports) so both exports are unit-testable.
  */
 
-import type { PermissionRequestedPayload, QuestionRequestedPayload } from "./types";
+import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 
 export interface PromptPollCallbacks {
   onQuestion: (p: QuestionRequestedPayload) => void;
   onPermission: (p: PermissionRequestedPayload) => void;
+  onSecret: (p: SecretRequestedPayload) => void;
   onResolved: (id: string, durable: boolean) => void;
 }
 
@@ -57,6 +58,9 @@ export function reconcilePendingPrompts(
     } else if (event === "permission-requested") {
       cb.onPermission(p.payload as PermissionRequestedPayload);
       emitted.set(id, durable);
+    } else if (event === "secret-requested") {
+      cb.onSecret(p.payload as SecretRequestedPayload);
+      emitted.set(id, durable);
     }
   }
   for (const [id, durable] of Array.from(emitted)) {
@@ -70,7 +74,8 @@ export function reconcilePendingPrompts(
 /** One demuxed record from a `list_pending_prompts` snapshot. */
 export type PendingPromptRecord =
   | { kind: "question"; id: string; payload: QuestionRequestedPayload }
-  | { kind: "permission"; id: string; payload: PermissionRequestedPayload };
+  | { kind: "permission"; id: string; payload: PermissionRequestedPayload }
+  | { kind: "secret"; id: string; payload: SecretRequestedPayload };
 
 /** Every still-open prompt for `sessionId`, in snapshot order. Stateless unlike
  *  {@link reconcilePendingPrompts} - no "already emitted" memory - so a lost
@@ -92,6 +97,8 @@ export function findPendingPromptsForSession(
       out.push({ kind: "question", id, payload: p.payload as QuestionRequestedPayload });
     } else if (event === "permission-requested") {
       out.push({ kind: "permission", id, payload: p.payload as PermissionRequestedPayload });
+    } else if (event === "secret-requested") {
+      out.push({ kind: "secret", id, payload: p.payload as SecretRequestedPayload });
     }
   }
   return out;
