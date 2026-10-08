@@ -1,9 +1,10 @@
-//! Machine-identity RPCs: `list_machines` (desktop + read-only), and the
-//! pairing/unpairing/labeling mutators, desktop-pipe-only (absent from
-//! `remote_transport_table::TRANSPORT_TABLE`) except `peer_unpaired` - the one
+//! Machine-identity RPCs: `list_machines` and `list_machine_projects` back the
+//! desktop AND phone new-chat machine pickers, so both are `P` in
+//! `remote_transport_table::TRANSPORT_TABLE` - never `M`, since a peer
+//! machine already knows its own federation state and must not learn about
+//! this daemon's OTHER peers. The pairing/unpairing/labeling mutators stay
+//! desktop-pipe-only (absent from the table) except `peer_unpaired` - the one
 //! peer-callable exception (mask `M` there), the OTHER side of an unpair.
-//! `list_machine_projects` is also desktop-pipe-only: it's the new-chat
-//! picker's own cross-machine fetch, not a method a peer daemon would call.
 //!
 //! Split by concern into `machines/` submodules (todo 914): this file wires
 //! `register_machines` and owns `list_machine_projects` (an RPC-registration

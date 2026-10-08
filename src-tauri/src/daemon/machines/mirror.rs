@@ -28,7 +28,7 @@ struct MirroredPeer {
 
 pub struct MirrorState {
     inner: Mutex<HashMap<String, MirroredPeer>>,
-    /// `start_session`'s forwarded-id bridge (G2): the owning peer's
+    /// `start_session`'s forwarded-id bridge: the owning peer's
     /// `instances_changed` broadcast can take up to one mirror-link cycle to
     /// report a chat it just spawned for us, so `forward_start_session`
     /// records the id here the instant the peer's RPC response names it.
@@ -69,7 +69,7 @@ impl MirrorState {
 
     /// Which machine hosts `session_id`, if it is a mirrored row (not a
     /// locally-registered one - callers check `registry` first). Falls back
-    /// to the pending-owner map (G2) for an id too new to have appeared in a
+    /// to the pending-owner map for an id too new to have appeared in a
     /// real mirrored row yet, pruning it first if it has outlived
     /// `PENDING_TTL` - a real row always wins once it shows up.
     pub fn owner_of(&self, session_id: &str) -> Option<String> {
@@ -125,7 +125,7 @@ impl MirrorState {
     /// Flips the online flag without touching the cached rows - a dropped
     /// link keeps showing its last-known state, just grayed as offline,
     /// same contract session status elsewhere in this codebase already uses.
-    /// Going offline DOES clear the prompt cache (G4): an unreachable peer
+    /// Going offline DOES clear the prompt cache: an unreachable peer
     /// can't be asked to re-confirm or re-answer, so a stale card is worse
     /// than no card.
     pub fn set_online(&self, machine_id: &str, online: bool) {
@@ -146,7 +146,7 @@ impl MirrorState {
     /// Drops a peer entirely - called on unpair, so a removed peer's rows
     /// (and its prompt cache) vanish immediately instead of lingering
     /// "offline" forever. Also drops any pending-owner entry still naming
-    /// this machine (G2): once it's gone, nothing can ever confirm a
+    /// this machine: once it's gone, nothing can ever confirm a
     /// forwarded `start_session` of its, so guessing its ownership further
     /// would just strand a caller on a machine that no longer exists.
     pub fn remove(&self, machine_id: &str) {
@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(m.owner_of("s1"), None);
     }
 
-    // ── pending-owner map (G2) ──────────────────────────────────────────────
+    // ── pending-owner map ────────────────────────────────────────────────────
 
     #[test]
     fn owner_of_resolves_a_pending_id_with_no_real_row_yet() {
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(m.owner_of("sid-1"), None);
     }
 
-    // ── mirrored prompt cache (G4) ───────────────────────────────────────────
+    // ── mirrored prompt cache ────────────────────────────────────────────────
 
     #[test]
     fn set_prompts_is_merged_by_prompts_and_tracked_by_has_cached_prompts() {

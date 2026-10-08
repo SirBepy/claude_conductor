@@ -36,7 +36,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Session-mirroring surface: a peer machine needs these to list, spawn,
     // drive and read a chat it mirrors, same as the phone always could.
     ("list_instances", PM),
-    ("list_pending_prompts", P),
+    // A peer machine mirroring a session needs its own open question/
+    // permission cards merged in (the handler already restricts a
+    // PeerMachine caller to its OWN local prompts, never a prompt WE
+    // mirrored from a third machine - see methods/permission.rs's one-hop
+    // guard). No new trust class: a peer is already trusted with
+    // send_message/respond_permission/cancel_turn, and this is read-only.
+    ("list_pending_prompts", PM),
     // Write: spawns a claude process rooted at any client-supplied cwd. The
     // baseline capability every "strictly weaker" rationale below is measured against.
     ("start_session", PM),
@@ -46,9 +52,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Write: Chat menu's Freeze/Unfreeze and the composer's "Send now
     // (unfreezes chat)" choice. Freeze is `cancel_turn` plus a registry flag
     // on a session_id the caller already knows; unfreeze clears that flag and
-    // at most re-sends "continue" - both strictly weaker than send_message.
-    ("freeze_session", P),
-    ("unfreeze_session", P),
+    // at most re-sends "continue" - both strictly weaker than send_message, and
+    // a peer machine forwarding either for a chat it mirrors adds no new trust
+    // class over the send_message/cancel_turn it already has.
+    ("freeze_session", PM),
+    ("unfreeze_session", PM),
     // Sidebar Hide/Unhide and the project-rail filter, so the phone shows the
     // same chats hidden as the desktop. Reads/writes only lists of opaque
     // session ids and project cwds in its own file (sessions/hidden_chats.rs);
@@ -61,20 +69,30 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Strictly weaker than `respond_question` above, which takes the same kind
     // of id and also delivers an answer. A phone is a legitimate renderer, so
     // excluding it would ack false for every phone-delivered question (todo 735).
-    ("confirm_question_rendered", P),
+    // PM: a peer machine mirroring the chat is an equally legitimate renderer,
+    // and it already carries respond_question - no new trust class.
+    ("confirm_question_rendered", PM),
     // Read-only: durable Skip marks for one session_id, so a phone reopening
     // a chat sees "Skipped" instead of "awaiting answer" forever (todo 661).
-    ("get_skipped_question_marks", P),
+    // PM: a peer machine mirroring the chat needs the same Skip history; it
+    // already sees the chat's full transcript via load_history_page.
+    ("get_skipped_question_marks", PM),
     // Write: the phone sidemenu's Jarvis entry, the desktop Jarvis window's
     // get-or-spawn. Takes no params; spawns at most the one Jarvis singleton
     // in its fixed jarvis-home cwd through the same billing-gated
     // spawn_session, so strictly weaker than start_session. Phone only: a
     // peer machine never sees this daemon's Jarvis row either.
     ("ensure_jarvis_session", P),
-    ("set_session_effort", P),
-    ("set_session_model", P),
-    ("set_auto_accept", P),
-    ("list_auto_accept", P),
+    // Write: model/effort/auto-accept for a session_id the caller already
+    // knows. Each is strictly weaker than start_session (picks the model the
+    // NEXT spawn uses) or send_message (auto-accept only skips a permission
+    // prompt the caller could `respond_permission` through anyway) - a peer
+    // machine mirroring the chat adds no new trust class over what it
+    // already has.
+    ("set_session_effort", PM),
+    ("set_session_model", PM),
+    ("set_auto_accept", PM),
+    ("list_auto_accept", PM),
     // Read-only transcript paging - the chat pane's own render path, so a
     // peer machine mirroring a session needs it too.
     ("load_history_page", PM),
@@ -87,22 +105,31 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // these HttpTransport had no case for either name, so the view silently
     // rendered empty.
     ("list_history", P),
-    ("load_history", P),
+    // PM: read-only, same transcript access as load_history_page above - a
+    // peer machine mirroring the chat needs it for the same render path.
+    ("load_history", PM),
     // Read-only: the same transcript as load_history, folded to a message count
     // and a model name so the session-detail cards never ship the file itself.
-    ("transcript_stats", P),
+    // PM for the same reason load_history is: a peer mirroring the chat reads
+    // its own statusbar off this.
+    ("transcript_stats", PM),
     // Write: re-registers an ended session as Interactive (History's "Continue
     // this chat"). Narrow mutation, strictly weaker than start_session
     // (already remote-callable). Without this the button silently no-op'd on
     // remote (403, swallowed by the caller).
     ("register_historical", P),
     // Read-only: path is canonicalized and prefix-checked against
-    // <app-data>/chat-attachments/ in read_attachment_impl.
-    ("read_attachment", P),
+    // <app-data>/chat-attachments/ in read_attachment_impl. PM: a peer
+    // machine mirroring the chat renders the same pasted images the chat
+    // pane does locally, over its OWN <app-data>/chat-attachments/ (the
+    // optional session_id param lets forward.rs route the call there).
+    ("read_attachment", PM),
     // Write: phone composer paperclip upload. Bytes land in the path-validated
     // chat-attachments dir (write_attachment rejects path-traversal session ids),
-    // so this is not an arbitrary-write primitive.
-    ("paste_attachment", P),
+    // so this is not an arbitrary-write primitive. PM: a peer forwarding an
+    // upload into a chat it mirrors writes into ITS OWN validated dir, same
+    // guard - no new trust class over the send_message it already has.
+    ("paste_attachment", PM),
     ("list_characters", P),
     ("list_project_groups", P),
     // Read-only: `file` is canonicalized and prefix-checked against the
@@ -125,6 +152,18 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // `list_machine_projects`'s RPC forwards this SAME method name to
     // whichever machine the desktop's new-chat picker asked about, verbatim.
     ("list_projects", PM),
+    // Read-only self+peers view for the phone's new-chat machine picker
+    // (parity with desktop's own picker). P, never M: a peer machine already
+    // knows its own federation state from its own registry, and this
+    // daemon's OTHER peers are none of its business. `PeerMachineView`
+    // (registry.rs) already strips the bearer `token` field before this
+    // response is built, so nothing secret crosses the wire either way.
+    ("list_machines", P),
+    // Read-only cross-machine project list for the same picker: `machine_id
+    // == self` returns this daemon's own settings snapshot, any other known
+    // machine forwards `list_projects` to it (see methods/machines.rs). P,
+    // never M, same reasoning as list_machines above.
+    ("list_machine_projects", P),
     // Read-only, gated by reject_unknown(cwd) in registry.rs (todo 656).
     ("project_last_activity_at", P),
     // Read-only account-pin resolution, gated by reject_unknown(cwd) in the
@@ -406,6 +445,7 @@ mod tests {
             "list_message_drafts", "set_draft_body", "set_draft_version",
             "set_draft_state", "delete_draft",
             "ensure_jarvis_session",
+            "list_machines", "list_machine_projects",
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }
@@ -476,5 +516,34 @@ mod tests {
     fn local_transport_is_never_gated() {
         assert!(allowed("shutdown_daemon", &Transport::Local));
         assert!(allowed("not_a_real_method", &Transport::Local));
+    }
+
+    /// Session-scoped methods a paired peer must accept so this daemon can
+    /// forward a mirrored chat's call: each was phone-only (`P`) and is now
+    /// `PM`, no new trust class since a peer already carries
+    /// send_message/respond_permission/cancel_turn.
+    #[test]
+    fn mirrored_chat_control_methods_are_machine_callable() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in [
+            "list_pending_prompts", "confirm_question_rendered", "get_skipped_question_marks",
+            "set_session_effort", "set_session_model", "set_auto_accept", "list_auto_accept",
+            "freeze_session", "unfreeze_session", "paste_attachment", "read_attachment",
+            "transcript_stats", "load_history",
+        ] {
+            assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
+        }
+    }
+
+    /// The phone's machine picker RPCs are P, never M: a peer machine already
+    /// knows its own federation state and must not learn about this daemon's
+    /// OTHER peers through a forwarded call.
+    #[test]
+    fn machine_picker_methods_are_phone_only() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in ["list_machines", "list_machine_projects"] {
+            assert!(allowed(m, &Transport::Phone), "{m} must be callable by the phone");
+            assert!(!allowed(m, &peer), "{m} must not be callable by a peer machine");
+        }
     }
 }

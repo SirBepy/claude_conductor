@@ -162,7 +162,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             // question_request frames and hung AskUserQuestion turns).
             async move {
                 let mut prompts = state.list_prompts().await;
-                // G4: merge in every paired peer's mirrored prompts - EXCEPT
+                // Merge in every paired peer's mirrored prompts - EXCEPT
                 // when the caller is itself a peer machine (`Transport::PeerMachine`).
                 // One-hop rule, same guard `MirrorState::instances`/`set_instances`
                 // already enforce for session rows: a peer must only ever see
@@ -216,7 +216,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     id: String,
-                    // G4: a mirrored-chat client has no other way to name
+                    // A mirrored-chat client has no other way to name
                     // which session this prompt id belongs to; unused for
                     // local routing (`confirm_question_rendered` keys on
                     // `id` alone), but present so `forward.rs::extract_session_id`
@@ -274,7 +274,7 @@ mod list_pending_prompts_tests {
         resp.result.expect("list_pending_prompts must not error")
     }
 
-    /// G4: a session mirrored from a paired peer has its question/permission
+    /// A session mirrored from a paired peer has its question/permission
     /// cards cached in `MirrorState` (by `peer_link`) rather than in this
     /// daemon's own `pending_prompts` - `list_pending_prompts` must merge
     /// both so a client never needs to know which machine actually hosts a
@@ -293,7 +293,7 @@ mod list_pending_prompts_tests {
         assert!(ids.contains(&"mirrored-1"));
     }
 
-    /// One-hop rule (G4c): a peer machine calling `list_pending_prompts` on
+    /// One-hop rule: a peer machine calling `list_pending_prompts` on
     /// us (e.g. because IT mirrors a session WE host) must see only our own
     /// local prompts - re-exporting a prompt we ourselves mirrored from a
     /// THIRD machine would let two paired peers echo it back and forth.

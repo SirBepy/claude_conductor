@@ -432,6 +432,10 @@ export class HttpTransport implements Transport {
       case "respond_permission":
         return this.rpc<T>("respond_permission", {
           request_id: args.id,
+          // Lets forward.rs::extract_session_id route a mirrored chat's
+          // answer to the owning peer - unused for local routing, which
+          // still keys on request_id alone.
+          session_id: args.sessionId ?? args.session_id ?? null,
           allow: args.behavior === "allow",
           updated_input: args.updatedInput,
           message: args.message,
@@ -443,6 +447,10 @@ export class HttpTransport implements Transport {
       case "respond_question": {
         const res = await this.rpc<{ delivered?: boolean } | boolean | null>("respond_question", {
           request_id: args.id,
+          // Lets forward.rs::extract_session_id route a mirrored chat's
+          // answer to the owning peer - unused for local routing, which
+          // still keys on request_id alone.
+          session_id: args.sessionId ?? args.session_id ?? null,
           answers: args.answers,
           skipped: args.skipped ?? false,
         });
@@ -456,7 +464,13 @@ export class HttpTransport implements Transport {
       // Without this case the phone silently degrades: the card renders but no
       // confirmation reaches on_question_request, so every ask acks false.
       case "confirm_question_rendered":
-        return this.rpc<T>("confirm_question_rendered", { id: args.id });
+        return this.rpc<T>("confirm_question_rendered", {
+          id: args.id,
+          // Lets forward.rs::extract_session_id route a mirrored chat's ack
+          // to the owning peer - unused for local routing, which still keys
+          // on id alone.
+          session_id: args.sessionId ?? args.session_id ?? null,
+        });
       case "send_message":
         return this.sendMessage<T>(args);
       // Cross-surface draft sync (composer/AUQ/held messages): one round trip
@@ -554,7 +568,12 @@ export class HttpTransport implements Transport {
       case "read_attachment":
         // Pasted chat-image attachments. The daemon path-validates against the
         // chat-attachments dir, so a malicious path can't read arbitrary files.
-        return this.rpc<T>("read_attachment", { path: args.path });
+        // session_id lets forward.rs::extract_session_id route a mirrored
+        // chat's attachment read to the owning peer's own validated dir.
+        return this.rpc<T>("read_attachment", {
+          path: args.path,
+          session_id: args.sessionId ?? args.session_id ?? null,
+        });
       case "paste_attachment":
         // Composer paperclip upload from the phone: the daemon writes the bytes
         // into <app-data>/chat-attachments/<session>/ and returns the PC-side
@@ -583,6 +602,16 @@ export class HttpTransport implements Transport {
         });
       case "list_projects":
         return this.rpc<T>("list_projects", {});
+      // Phone new-chat machine picker (multi-machine federation): mirrors
+      // desktop's `ipc::machines::list_machines`/`list_machine_projects`
+      // Tauri commands, same arg names (`machineId`) so both platforms'
+      // picker code calls this transport identically.
+      case "list_machines":
+        return this.rpc<T>("list_machines", null);
+      case "list_machine_projects":
+        return this.rpc<T>("list_machine_projects", {
+          machine_id: args.machineId ?? args.machine_id,
+        });
       case "project_last_activity_at":
         return this.rpc<T>("project_last_activity_at", {
           cwd: args.cwd,

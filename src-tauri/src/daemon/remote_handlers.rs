@@ -98,6 +98,33 @@ pub(super) async fn send_message(
     AxPath(id): AxPath<String>,
     Json(body): Json<SendBody>,
 ) -> Response {
+    // A session not in this daemon's own registry may still be a mirrored
+    // row owned by a paired peer - forward to that peer's own send_message
+    // RPC instead of falling through to the local 404 below. Never forwards
+    // a request that itself arrived FROM a peer (`Transport::PeerMachine`):
+    // that would always be about OUR own sessions, and re-forwarding it would
+    // loop, same guard `machines/forward.rs::forward_one` applies.
+    if ctx.state.sessions.get(&id).is_none() {
+        if let Some(machine_id) = ctx.state.mirror.owner_of(&id) {
+            if matches!(current_transport(), Transport::PeerMachine(_)) {
+                return (StatusCode::FORBIDDEN, "a peer machine's own request is never re-forwarded").into_response();
+            }
+            return match crate::daemon::machines::forward::forward_send_message(&ctx.state, &machine_id, &id, &body.text)
+                .await
+            {
+                Ok(()) => StatusCode::OK.into_response(),
+                Err(e) => {
+                    use crate::daemon::machines::forward::{ERR_MACHINE_OFFLINE, ERR_NOT_FORWARDABLE, ERR_REPAIR_REQUIRED};
+                    let status = match e.code {
+                        ERR_MACHINE_OFFLINE | ERR_REPAIR_REQUIRED => StatusCode::SERVICE_UNAVAILABLE,
+                        ERR_NOT_FORWARDABLE => StatusCode::BAD_REQUEST,
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    (status, e.message).into_response()
+                }
+            };
+        }
+    }
     // Respawns the session first if its per-turn `claude -p` process already
     // exited since the last turn (the daemon-side equivalent of the desktop's
     // -32004 -> start_session(resume) -> retry dance - see
@@ -280,5 +307,157 @@ mod tests {
         let mut arr = rows();
         strip_hidden_instances_json(&mut arr, keeps_jarvis(&Transport::PeerMachine("m".into())));
         assert_eq!(ids(&arr), ["a"]);
+    }
+
+    /// Two real daemons over real loopback HTTP: the REST `POST
+    /// /api/sessions/:id/send` route on A for an id mirrored from B forwards
+    /// to B's own `send_message` RPC instead of 404ing - before this, the
+    /// route only ever consulted `ctx.state.sessions` (local-only).
+    #[tokio::test]
+    async fn send_message_forwards_to_the_mirrored_sessions_owner() {
+        use crate::daemon::machines::registry::PeerMachine;
+        use crate::daemon::rpc::Router;
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+        use crate::types::Settings;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        // B: a stub send_message that records what text it was asked to send.
+        let seen = std::sync::Arc::new(tokio::sync::Mutex::new(None::<String>));
+        let seen_for_stub = seen.clone();
+        let mut b_router = Router::new();
+        b_router.register("send_message", move |params, _ctx| {
+            let seen = seen_for_stub.clone();
+            async move {
+                let text = params.and_then(|p| p.get("text").and_then(|t| t.as_str().map(str::to_string)));
+                *seen.lock().await = text;
+                Ok(serde_json::json!({"ok": true}))
+            }
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        // A: paired to B, with session "s1" mirrored from it.
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        a_state.init_machines(dir.path().to_path_buf());
+        a_state.machines.get().unwrap().ensure_self();
+        let (token, _device_id) = DeviceRegistry::add_machine_device("A", "mach-a", peer_dir.path()).unwrap();
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mach-b".into(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token,
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        let settings = std::sync::Mutex::new(Settings::default());
+        a_state.registry.register(
+            RegisterInput {
+                session_id: "scratch".into(),
+                cwd: std::path::PathBuf::from("C:/x"),
+                pid: 0,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-09-05T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-09-05T00:00:00Z",
+        );
+        let mut inst = a_state.registry.get("scratch").unwrap();
+        inst.session_id = "s1".into();
+        a_state.mirror.set_instances("mach-b", "B", vec![inst]);
+        a_state.mirror.set_online("mach-b", true);
+
+        let a_stt = crate::daemon::stt::SttSupervisor::new(dir.path().to_path_buf());
+        let ctx = Arc::new(RemoteCtx {
+            state: a_state,
+            app_data: dir.path().to_path_buf(),
+            router: Router::new(),
+            stt: a_stt,
+        });
+        let resp =
+            send_message(State(ctx), AxPath("s1".to_string()), Json(SendBody { text: "hello".into() })).await;
+        assert_eq!(resp.status(), StatusCode::OK, "forwarded send must report success");
+        assert_eq!(seen.lock().await.as_deref(), Some("hello"), "B's stub must have received our text");
+
+        b_serve.kill();
+    }
+
+    /// A request whose `Transport` is itself `PeerMachine` must never be
+    /// re-forwarded (same loop guard `machines/forward.rs::forward_one`
+    /// applies) - proven here by scoping `TRANSPORT` the way `auth_mw` would
+    /// for an incoming peer call, then asserting the REST route refuses
+    /// rather than forwarding B's own request back out.
+    #[tokio::test]
+    async fn send_message_never_reforwards_a_peers_own_request() {
+        use crate::daemon::machines::registry::PeerMachine;
+        use crate::daemon::rpc::{Router, TRANSPORT};
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+        use crate::types::Settings;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        a_state.init_machines(dir.path().to_path_buf());
+        a_state.machines.get().unwrap().ensure_self();
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mach-b".into(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some("http://127.0.0.1:1".into()), // never dialed in this test
+            token: "tok".into(),
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        let settings = std::sync::Mutex::new(Settings::default());
+        a_state.registry.register(
+            RegisterInput {
+                session_id: "scratch".into(),
+                cwd: std::path::PathBuf::from("C:/x"),
+                pid: 0,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-09-05T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-09-05T00:00:00Z",
+        );
+        let mut inst = a_state.registry.get("scratch").unwrap();
+        inst.session_id = "s1".into();
+        a_state.mirror.set_instances("mach-b", "B", vec![inst]);
+        a_state.mirror.set_online("mach-b", true);
+
+        let a_stt = crate::daemon::stt::SttSupervisor::new(dir.path().to_path_buf());
+        let ctx = Arc::new(RemoteCtx {
+            state: a_state,
+            app_data: dir.path().to_path_buf(),
+            router: Router::new(),
+            stt: a_stt,
+        });
+        let resp = TRANSPORT
+            .scope(Transport::PeerMachine("someone-else".into()), send_message(
+                State(ctx),
+                AxPath("s1".to_string()),
+                Json(SendBody { text: "hi".into() }),
+            ))
+            .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 }

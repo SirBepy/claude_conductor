@@ -30,7 +30,7 @@ const REVOKED_BACKOFF: Duration = Duration::from_secs(60);
 /// Heartbeat cadence is 15s (`GLOBAL_HEARTBEAT_INTERVAL`); silence past 3x
 /// that means the socket is dead even though TCP hasn't noticed yet.
 const FRAME_DEAD_AFTER: Duration = Duration::from_secs(45);
-/// G4: while the peer's prompt cache is non-empty, re-fetch on this cadence
+/// While the peer's prompt cache is non-empty, re-fetch on this cadence
 /// so a prompt answered directly on the peer (or from a third device) drops
 /// out of OUR cache even with no intervening `instances_changed` frame.
 const PROMPT_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -109,7 +109,7 @@ type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsSt
 
 /// Reads frames until the socket closes, errors, or goes silent past
 /// `FRAME_DEAD_AFTER` (the heartbeat is every 15s, so 45s of nothing means
-/// dead even though TCP hasn't noticed). Also runs the G4 prompt-cache
+/// dead even though TCP hasn't noticed). Also runs the prompt-cache
 /// refresh: a periodic tick independent of `FRAME_DEAD_AFTER` - the dead-link
 /// deadline is only ever pushed out by an actual frame arriving (via
 /// `sleep_until`, recomputed on receipt), never by the tick, so a silent

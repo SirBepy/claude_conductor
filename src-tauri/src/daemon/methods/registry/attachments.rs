@@ -11,10 +11,20 @@ pub fn register_attachments(router: &mut Router, _state: Arc<DaemonState>) {
     // the path and rejects anything outside <app-data>/chat-attachments/, so this
     // is NOT an arbitrary-file-read primitive despite taking a path. (Distinct
     // from `read_image_file`, deliberately NOT exposed: it reads arbitrary paths.)
+    // `session_id` is optional and unused for local routing - this handler
+    // always validates `path` against ITS OWN <app-data>/chat-attachments/
+    // regardless - it exists purely so `machines/forward.rs::extract_session_id`
+    // can read it generically off the raw params and route the call to the
+    // owning peer for a mirrored chat (same pattern as confirm_question_rendered).
     router.register("read_attachment", move |params, _ctx| {
         async move {
             #[derive(serde::Deserialize)]
-            struct P { path: String }
+            struct P {
+                path: String,
+                #[serde(default)]
+                #[allow(dead_code)]
+                session_id: Option<String>,
+            }
             let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             let data = crate::ipc::chat::attachments::read_attachment(p.path)

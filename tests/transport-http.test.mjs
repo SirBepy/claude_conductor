@@ -98,7 +98,7 @@ describe("HttpTransport.call mapping", () => {
     });
     expect(body()).toEqual({
       method: "respond_permission",
-      params: { request_id: "req-1", allow: false, message: "nope" },
+      params: { request_id: "req-1", session_id: null, allow: false, message: "nope" },
     });
   });
 
@@ -110,9 +110,23 @@ describe("HttpTransport.call mapping", () => {
     });
     expect(body().params).toEqual({
       request_id: "req-2",
+      session_id: null,
       allow: true,
       updated_input: { command: "ls" },
     });
+  });
+
+  // Multi-machine federation: session_id lets forward.rs route a mirrored
+  // chat's answer to the owning peer - request_id alone names a prompt, not
+  // a session.
+  it("threads respond_permission's sessionId through as session_id", async () => {
+    await new HttpTransport().call("respond_permission", {
+      id: "req-3",
+      sessionId: "sess-3",
+      behavior: "deny",
+      message: "nope",
+    });
+    expect(body().params.session_id).toBe("sess-3");
   });
 
   it("reshapes respond_question to request_id/answers", async () => {
@@ -122,8 +136,17 @@ describe("HttpTransport.call mapping", () => {
     });
     expect(body()).toEqual({
       method: "respond_question",
-      params: { request_id: "q-1", answers: { color: "blue" }, skipped: false },
+      params: { request_id: "q-1", session_id: null, answers: { color: "blue" }, skipped: false },
     });
+  });
+
+  it("threads respond_question's sessionId through as session_id", async () => {
+    await new HttpTransport().call("respond_question", {
+      id: "q-2",
+      sessionId: "sess-2",
+      answers: {},
+    });
+    expect(body().params.session_id).toBe("sess-2");
   });
 
   // todo 773: the caller reads this as "answer already delivered in-band" and
@@ -149,7 +172,7 @@ describe("HttpTransport.call mapping", () => {
     });
     expect(body()).toEqual({
       method: "respond_question",
-      params: { request_id: "q-1", answers: {}, skipped: true },
+      params: { request_id: "q-1", session_id: null, answers: {}, skipped: true },
     });
   });
 
@@ -196,6 +219,50 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({
       method: "load_history_page",
       params: { session_id: "sess-h", cwd: "/work", before_seq: null, message_limit: 20 },
+    });
+  });
+
+  // Multi-machine federation: session_id lets forward.rs route a mirrored
+  // chat's render ack / attachment read to the owning peer.
+  it("forwards confirm_question_rendered with id and session_id", async () => {
+    await new HttpTransport().call("confirm_question_rendered", { id: "q-9", sessionId: "sess-9" });
+    expect(body()).toEqual({
+      method: "confirm_question_rendered",
+      params: { id: "q-9", session_id: "sess-9" },
+    });
+  });
+
+  it("defaults confirm_question_rendered's session_id to null when omitted", async () => {
+    await new HttpTransport().call("confirm_question_rendered", { id: "q-9" });
+    expect(body().params.session_id).toBeNull();
+  });
+
+  it("forwards read_attachment with path and session_id", async () => {
+    await new HttpTransport().call("read_attachment", { path: "/tmp/img.png", sessionId: "sess-7" });
+    expect(body()).toEqual({
+      method: "read_attachment",
+      params: { path: "/tmp/img.png", session_id: "sess-7" },
+    });
+  });
+
+  it("defaults read_attachment's session_id to null when omitted", async () => {
+    await new HttpTransport().call("read_attachment", { path: "/tmp/img.png" });
+    expect(body().params.session_id).toBeNull();
+  });
+
+  // Multi-machine federation: the phone's new-chat machine picker, mirroring
+  // desktop's list_machines/list_machine_projects Tauri commands.
+  it("forwards list_machines to the rpc with a null param", async () => {
+    await new HttpTransport().call("list_machines");
+    expect(url()).toBe("/api/rpc");
+    expect(body()).toEqual({ method: "list_machines", params: null });
+  });
+
+  it("forwards list_machine_projects, mapping machineId -> machine_id", async () => {
+    await new HttpTransport().call("list_machine_projects", { machineId: "mach-b" });
+    expect(body()).toEqual({
+      method: "list_machine_projects",
+      params: { machine_id: "mach-b" },
     });
   });
 
@@ -463,9 +530,12 @@ describe("HttpTransport.call mapping", () => {
     expect(body().params.machine_id).toBeNull();
   });
 
-  // The five machine-federation commands are desktop-pipe only (Tauri app-
-  // process wrappers) - the phone/HttpTransport has no route to them.
-  it.each(["list_machines", "pair_machine", "unpair_machine", "set_machine_label", "list_machine_projects"])(
+  // The pairing/identity mutators stay desktop-pipe only (Tauri app-process
+  // wrappers, absent from remote_transport_table.rs) - the phone/HttpTransport
+  // has no route to them. list_machines/list_machine_projects are now P in
+  // the daemon's allowlist (the machine picker's own read path) and are
+  // covered by their own mapping tests above instead.
+  it.each(["pair_machine", "unpair_machine", "set_machine_label"])(
     "throws RemoteUnavailableError for %s (desktop-pipe only)",
     async (cmd) => {
       await expect(new HttpTransport().call(cmd, {})).rejects.toBeInstanceOf(RemoteUnavailableError);

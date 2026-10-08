@@ -29,15 +29,15 @@ pub const ERR_REPAIR_REQUIRED: i32 = -32013;
 /// than `session_id`. Still empty - NOT because `respond_permission`,
 /// `respond_question`, and `confirm_question_rendered` identify a session
 /// another way: all three key on a prompt id (`request_id`/`id`), which
-/// names a prompt, not a session. The mirrored-prompt seam (G4) solves that
-/// the other direction instead: every client now sends `session_id`
-/// ALONGSIDE the prompt id when answering or acking a mirrored chat's
-/// prompt, purely so this forwarder can route it - `extract_session_id`
-/// above already reads `params.session_id` generically, so all three forward
-/// correctly with no further change here once `remote_transport_table::TRANSPORT_TABLE`
-/// masks them `PM`/`M` (a later builder's remask). Kept as a named seam for
-/// a future method whose only identifying param really is `id`, with no
-/// parallel `session_id` a client could send instead.
+/// names a prompt, not a session. The mirrored-prompt cache solves that the
+/// other direction instead: every client sends `session_id` ALONGSIDE the
+/// prompt id when answering or acking a mirrored chat's prompt, purely so
+/// this forwarder can route it - `extract_session_id` above already reads
+/// `params.session_id` generically, so all three forward correctly with no
+/// further change here as long as `remote_transport_table::TRANSPORT_TABLE`
+/// masks them `PM`/`M`. Kept as a named seam for a future method whose only
+/// identifying param really is `id`, with no parallel `session_id` a client
+/// could send instead.
 const ID_PARAM_METHODS: &[&str] = &[];
 
 /// Extracts the session id a request targets, if any: `params.session_id`,
@@ -111,24 +111,56 @@ async fn forward_one(
             data: None,
         }));
     }
+    let client = match resolve_peer_client(state, &machine_id).await {
+        Ok(c) => c,
+        Err(e) => return Some(Err(e)),
+    };
+    Some(client.call(method, params_value).await.map_err(map_peer_err))
+}
+
+/// Registry lookup, online check, and `client_for`, the three steps every
+/// forwarding path needs before actually calling a peer - shared by
+/// `forward_one` above and `forward_send_message` below (the REST send route
+/// isn't routed through the shared RPC router's forwarder seam, so it can't
+/// reuse `forward_one` itself, only this common tail).
+async fn resolve_peer_client(
+    state: &Arc<DaemonState>,
+    machine_id: &str,
+) -> Result<super::peer_client::PeerClient, RpcError> {
     let Some(registry) = state.machines.get() else {
-        return Some(Err(RpcError {
+        return Err(RpcError {
             code: ERR_MACHINE_OFFLINE,
             message: "machine registry not initialised".into(),
             data: None,
-        }));
+        });
     };
-    let Some(peer) = registry.peer(&machine_id) else {
-        return Some(Err(RpcError { code: ERR_MACHINE_OFFLINE, message: "paired machine no longer known".into(), data: None }));
+    let Some(peer) = registry.peer(machine_id) else {
+        return Err(RpcError { code: ERR_MACHINE_OFFLINE, message: "paired machine no longer known".into(), data: None });
     };
-    if !state.mirror.is_online(&machine_id) {
-        return Some(Err(RpcError { code: ERR_MACHINE_OFFLINE, message: format!("{} is offline", peer.label), data: None }));
+    if !state.mirror.is_online(machine_id) {
+        return Err(RpcError { code: ERR_MACHINE_OFFLINE, message: format!("{} is offline", peer.label), data: None });
     }
-    let client = match client_for(state, &peer).await {
-        Ok(c) => c,
-        Err(e) => return Some(Err(map_peer_err(e))),
-    };
-    Some(client.call(method, params_value).await.map_err(map_peer_err))
+    client_for(state, &peer).await.map_err(map_peer_err)
+}
+
+/// Forwards the REST `POST /api/sessions/:id/send` route (remote_handlers.rs)
+/// to `machine_id`'s own `send_message` RPC: that endpoint is a dedicated
+/// REST route, not an `/api/rpc` call, so it never passes through the shared
+/// router's `forward_one` seam above and needs its own entry point - built on
+/// the same `resolve_peer_client` tail so the client/offline/error-mapping
+/// logic isn't duplicated between the two call sites.
+pub(crate) async fn forward_send_message(
+    state: &Arc<DaemonState>,
+    machine_id: &str,
+    session_id: &str,
+    text: &str,
+) -> Result<(), RpcError> {
+    let client = resolve_peer_client(state, machine_id).await?;
+    client
+        .call("send_message", serde_json::json!({"session_id": session_id, "text": text}))
+        .await
+        .map_err(map_peer_err)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -347,5 +379,208 @@ mod tests {
             )
             .await;
         assert_eq!(resp.result, Some(json!("hi")));
+    }
+
+    // ── Two-daemon end-to-end coverage for the G5 remask (remote_transport_table.rs) ──
+
+    /// A prompt pending on B (with its owning session marked `awaiting`)
+    /// reaches A's mirrored prompt cache purely through A's real `peer_link`
+    /// over real loopback HTTP/WS - proving `list_pending_prompts`'s remask
+    /// from `P` to `PM` is what makes the fetch succeed (it would 403 under
+    /// the old mask, and the cache would stay empty forever).
+    #[tokio::test]
+    async fn prompt_pending_on_b_reaches_as_mirror_via_a_real_peer_link() {
+        use crate::daemon::methods::register_responders;
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let a_dir = tempdir().unwrap();
+        let b_dir = tempdir().unwrap();
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        b_state.registry.register(
+            RegisterInput {
+                session_id: "b-session-1".into(),
+                cwd: std::path::PathBuf::from("C:/b-repo"),
+                pid: 4242,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-09-05T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-09-05T00:00:00Z",
+        );
+        // awaiting != None is what makes A's link fetch prompts the instant
+        // its first resync frame reports this row (`maybe_refresh_prompts_after_frame`).
+        b_state.registry.set_awaiting("b-session-1", Some("question".into()));
+        b_state.add_prompt("mirrored-1", "question-requested", json!({"session_id": "b-session-1"}), true).await;
+
+        let mut b_router = Router::new();
+        register_responders(&mut b_router, b_state.clone());
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), b_dir.path().to_path_buf(), b_router, 0);
+        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        a_state.init_machines(a_dir.path().to_path_buf());
+        let a_id = a_state.machines.get().unwrap().ensure_self().machine_id;
+        let (token, _device_id) = DeviceRegistry::add_machine_device("A", &a_id, b_dir.path()).unwrap();
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: b_id.clone(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token,
+            reverse_device_id: None,
+            added_at: 0,
+        });
+
+        crate::daemon::machines::MachineHub::sync_links(&a_state);
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if a_state.mirror.has_cached_prompts(&b_id) {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                panic!("B's prompt never reached A's mirror within 5s: {:?}", a_state.mirror.prompts());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let ids: Vec<String> =
+            a_state.mirror.prompts().iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert!(ids.contains(&"mirrored-1".to_string()), "expected mirrored-1 among {ids:?}");
+
+        b_serve.kill();
+    }
+
+    /// `respond_question` dispatched on A for a session mirrored from B is
+    /// forwarded over real loopback HTTP and resolves B's OWN live waiter -
+    /// proving the remask (and the `session_id` every client now sends
+    /// alongside `request_id`) actually delivers an answer end to end, not
+    /// just that the RPC round-trips.
+    #[tokio::test]
+    async fn respond_question_dispatched_on_a_resolves_bs_real_waiter() {
+        use crate::daemon::methods::register_responders;
+        use tokio::sync::oneshot;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (tx, rx) = oneshot::channel();
+        b_state.pending.lock().await.insert("req-1".to_string(), tx);
+
+        let mut b_router = Router::new();
+        register_responders(&mut b_router, b_state.clone());
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "b-session-1");
+
+        let mut router = Router::new();
+        install(state.clone(), &mut router);
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "respond_question".into(),
+                    params: Some(json!({
+                        "request_id": "req-1",
+                        "session_id": "b-session-1",
+                        "answers": {"color": "blue"},
+                        "skipped": false
+                    })),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+            .await
+            .expect("B's waiter must resolve within 5s")
+            .expect("B's responder dropped the sender");
+        assert_eq!(answer, json!({"answers": {"color": "blue"}}));
+
+        b_serve.kill();
+    }
+
+    /// `set_session_model` on A for a session mirrored from B is forwarded
+    /// over real loopback HTTP, landing on B's stub with our params intact -
+    /// before the remask this method hit `ERR_NOT_FORWARDABLE`.
+    #[tokio::test]
+    async fn set_session_model_forwards_to_the_mirrored_sessions_owner() {
+        use crate::daemon::rpc::RpcError as RE;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        let mut b_router = Router::new();
+        b_router.register("set_session_model", |params, _ctx| async move {
+            let model = params.and_then(|p| p.get("model").and_then(|m| m.as_str().map(str::to_string)));
+            Err::<Value, RE>(RE { code: -32098, message: format!("stub saw: {model:?}"), data: None })
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "s1");
+
+        let result =
+            forward_one(&state, "set_session_model", Some(json!({"session_id": "s1", "model": "opus"})), &Transport::Local)
+                .await;
+        match result {
+            Some(Err(e)) => {
+                assert_eq!(e.code, -32098);
+                assert!(e.message.contains("opus"), "peer must have received our params: {}", e.message);
+            }
+            other => panic!("expected the peer's stub error to round-trip, got {other:?}"),
+        }
+        b_serve.kill();
+    }
+
+    /// A real peer-bearer-token HTTP call hitting A's `/api/rpc` resolves to
+    /// `Transport::PeerMachine` through the real auth middleware (not a
+    /// scoped-in-test transport) and A's `list_pending_prompts` still excludes
+    /// a prompt A itself mirrors from a THIRD machine - the one-hop rule
+    /// exercised over the real HTTP boundary, not just at dispatch level.
+    #[tokio::test]
+    async fn peer_machine_caller_over_real_http_sees_local_prompts_only() {
+        use crate::daemon::methods::register_responders;
+
+        let a_dir = tempdir().unwrap();
+
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        a_state.add_prompt("local-1", "question-requested", json!({"session_id": "s-local"}), true).await;
+        // A prompt A itself mirrors from a third machine - must never be
+        // echoed back to a peer calling list_pending_prompts ON us.
+        a_state.mirror.set_instances("mach-c", "C", vec![]);
+        a_state.mirror.set_prompts(
+            "mach-c",
+            vec![json!({"id": "mirrored-from-c", "event": "question-requested", "payload": {"session_id": "s-remote"}, "durable": true})],
+        );
+
+        let mut a_router = Router::new();
+        register_responders(&mut a_router, a_state.clone());
+        let (_a_stt, a_port, a_serve) =
+            crate::daemon::remote_server::spawn_on(a_state.clone(), a_dir.path().to_path_buf(), a_router, 0);
+
+        // A Machine-kind bearer token minted into A's OWN device registry,
+        // same as a real pairing would - so A's auth_mw resolves the caller
+        // as Transport::PeerMachine for real, not via a test-scoped transport.
+        let (token, _device_id) = DeviceRegistry::add_machine_device("B", "mach-b", a_dir.path()).unwrap();
+        let client = crate::daemon::machines::PeerClient::new(&format!("http://127.0.0.1:{a_port}"), &token);
+        let result = client.call("list_pending_prompts", Value::Null).await.unwrap();
+        let ids: Vec<&str> = result.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["local-1"], "a peer caller must never see a prompt A mirrored from a third machine");
+
+        a_serve.kill();
     }
 }

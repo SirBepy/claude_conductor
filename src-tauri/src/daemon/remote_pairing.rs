@@ -88,10 +88,9 @@ async fn pair_machine_peer(ctx: &Arc<RemoteCtx>, peer: PairPeer) -> Response {
         reverse_device_id: Some(device_id),
         added_at: now_secs(),
     });
-    // G7: the initiator side (`methods/machines/pairing.rs::pair_machine`)
-    // starts its own link the instant it upserts its peer entry - the
-    // receiving side upserted one here too but, before this call, never
-    // started the matching link until the next daemon restart.
+    // The initiator side (`methods/machines/pairing.rs::pair_machine`) starts
+    // its own link the instant it upserts its peer entry; the receiving side
+    // must do the same here so its mirror starts without a daemon restart.
     crate::daemon::machines::MachineHub::sync_links(&ctx.state);
     consume_pairing_code(&ctx.app_data);
     Json(serde_json::json!({
@@ -272,10 +271,11 @@ mod tests {
         assert_eq!(ctx.state.machines.get().unwrap().peers().len(), 1);
     }
 
-    /// G7: before this fix, the receiving side of a pairing registered the
-    /// peer in `MachineRegistry` but never called `MachineHub::sync_links`,
-    /// so no link task existed until the next daemon restart - the mirror
-    /// stayed empty even though the peer was fully paired.
+    /// The receiving side of a pairing must register the peer in
+    /// `MachineRegistry` AND call `MachineHub::sync_links` in the same
+    /// request: without the sync call, no link task exists until the next
+    /// daemon restart, so the mirror stays empty even though the peer is
+    /// fully paired.
     #[tokio::test]
     async fn machine_pair_starts_the_links_hub_entry_for_the_new_peer() {
         let dir = tempdir().unwrap();
