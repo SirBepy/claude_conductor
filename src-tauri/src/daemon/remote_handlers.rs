@@ -38,32 +38,54 @@ pub(crate) use super::remote_transport_table::allowed;
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-/// Jarvis (todo 272) and its worker sub-sessions never reach the remote/phone
-/// cockpit - Joe's binding design decision: Jarvis exists only in its own
-/// dedicated desktop window (`ipc::window::open_jarvis_window`), and a worker
-/// is meaningless outside its parent session's context. Shared by every
-/// remote session-list surface below: the `GET /api/sessions` REST route, the
+/// Jarvis worker sub-sessions (todo 272) never reach a remote client: a worker
+/// is meaningless outside its parent session's context. The Jarvis row itself
+/// reaches the phone, which opens it from its sidemenu the way desktop opens
+/// its Jarvis window, and the phone's chat list then hides it client-side
+/// (`isJarvisOrWorker`), same as desktop. A paired peer machine gets neither:
+/// a mirrored Jarvis would leak into that machine's listings
+/// (`methods/channel/peers.rs::visible_for_peers`). Shared by every remote
+/// session-list surface below: the `GET /api/sessions` REST route, the
 /// `POST /api/rpc {"method":"list_instances"}` allowlisted RPC (the one the
 /// phone SPA's `HttpTransport` actually calls - see `http-transport.ts`), the
 /// WebSocket global-stream's initial resync frame, and its live-forwarded
 /// `instances_changed` notifications.
-pub(super) fn strip_hidden_instances(instances: Vec<crate::types::Instance>) -> Vec<crate::types::Instance> {
-    instances.into_iter().filter(|i| !i.jarvis && i.worker_of.is_none()).collect()
+pub(super) fn strip_hidden_instances(
+    instances: Vec<crate::types::Instance>,
+    keep_jarvis: bool,
+) -> Vec<crate::types::Instance> {
+    instances
+        .into_iter()
+        .filter(|i| (keep_jarvis || !i.jarvis) && i.worker_of.is_none())
+        .collect()
 }
 
 /// JSON-level counterpart of `strip_hidden_instances`, for call sites that
 /// already hold a serialized instance array (the shared RPC router's dispatch
 /// result, and forwarded notifier frames) rather than typed `Instance`s.
-pub(super) fn strip_hidden_instances_json(arr: &mut Vec<serde_json::Value>) {
+pub(super) fn strip_hidden_instances_json(arr: &mut Vec<serde_json::Value>, keep_jarvis: bool) {
     arr.retain(|v| {
         let jarvis = v.get("jarvis").and_then(serde_json::Value::as_bool).unwrap_or(false);
         let is_worker = v.get("worker_of").map(|w| !w.is_null()).unwrap_or(false);
-        !jarvis && !is_worker
+        (keep_jarvis || !jarvis) && !is_worker
     });
 }
 
+/// The `keep_jarvis` argument for `strip_hidden_instances` on a request
+/// served under `transport`: only the phone gets the Jarvis row.
+pub(super) fn keeps_jarvis(transport: &Transport) -> bool {
+    matches!(transport, Transport::Phone)
+}
+
+fn current_transport() -> Transport {
+    crate::daemon::rpc::TRANSPORT
+        .try_with(|t| t.clone())
+        .unwrap_or(Transport::Local)
+}
+
 pub(super) async fn list_sessions(State(ctx): State<Arc<RemoteCtx>>) -> Response {
-    Json(strip_hidden_instances(crate::daemon::machines::all_instances(&ctx.state))).into_response()
+    let keep = keeps_jarvis(&current_transport());
+    Json(strip_hidden_instances(crate::daemon::machines::all_instances(&ctx.state), keep)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -163,7 +185,7 @@ pub(super) async fn rpc_dispatch(
             // filtered centrally. Strip it here instead, remote-transport-only.
             if method == "list_instances" {
                 if let Some(arr) = result.as_array_mut() {
-                    strip_hidden_instances_json(arr);
+                    strip_hidden_instances_json(arr, keeps_jarvis(&transport));
                 }
             }
             Json(result).into_response()
@@ -220,26 +242,43 @@ pub(super) async fn global_stream_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !DeviceRegistry::validate_token(&q.token, &ctx.app_data) {
+    // The upgraded socket runs outside auth_mw's TRANSPORT scope, so the
+    // device kind is resolved here from the query token instead.
+    let Some((kind, _machine_id)) = DeviceRegistry::resolve_token(&q.token, &ctx.app_data) else {
         return StatusCode::UNAUTHORIZED.into_response();
-    }
+    };
+    let keep_jarvis = matches!(kind, DeviceKind::Phone);
     let state = ctx.state.clone();
-    ws.on_upgrade(move |socket| pump_global_events(socket, state))
+    ws.on_upgrade(move |socket| pump_global_events(socket, state, keep_jarvis))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn strip_hidden_instances_json_drops_jarvis_and_workers() {
-        let mut arr = vec![
+    fn rows() -> Vec<serde_json::Value> {
+        vec![
             serde_json::json!({"session_id": "a", "jarvis": false, "worker_of": null}),
             serde_json::json!({"session_id": "b", "jarvis": true, "worker_of": null}),
             serde_json::json!({"session_id": "c", "jarvis": false, "worker_of": "a"}),
-        ];
-        strip_hidden_instances_json(&mut arr);
-        assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["session_id"], "a");
+        ]
+    }
+
+    fn ids(arr: &[serde_json::Value]) -> Vec<&str> {
+        arr.iter().map(|v| v["session_id"].as_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn strip_hidden_instances_json_keeps_jarvis_for_the_phone_but_never_workers() {
+        let mut arr = rows();
+        strip_hidden_instances_json(&mut arr, keeps_jarvis(&Transport::Phone));
+        assert_eq!(ids(&arr), ["a", "b"]);
+    }
+
+    #[test]
+    fn strip_hidden_instances_json_drops_jarvis_and_workers_for_a_peer_machine() {
+        let mut arr = rows();
+        strip_hidden_instances_json(&mut arr, keeps_jarvis(&Transport::PeerMachine("m".into())));
+        assert_eq!(ids(&arr), ["a"]);
     }
 }

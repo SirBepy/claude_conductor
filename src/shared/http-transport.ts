@@ -174,6 +174,10 @@ export class HttpTransport implements Transport {
       }
       case "list_pending_prompts":
         return this.rpc<T>("list_pending_prompts", null);
+      // The phone sidemenu's Jarvis entry (open-jarvis.ts): get-or-spawn the
+      // singleton and return its session id.
+      case "ensure_jarvis_session":
+        return this.rpc<T>("ensure_jarvis_session", null);
       case "list_characters":
         return this.rpc<T>("list_characters", null);
       case "list_accounts":

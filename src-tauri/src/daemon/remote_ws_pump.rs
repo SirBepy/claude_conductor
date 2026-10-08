@@ -31,11 +31,11 @@ const TURN_SOUND_STALE_MS: i64 = 15_000;
 /// every registry mutation (see e.g. `daemon::methods::registry`), so a
 /// freshly (re)connected client gets an immediate full resync instead of
 /// waiting for the next mutation.
-fn instances_changed_frame(state: &DaemonState) -> String {
+fn instances_changed_frame(state: &DaemonState, keep_jarvis: bool) -> String {
     serde_json::json!({
         "jsonrpc": "2.0",
         "method": "instances_changed",
-        "params": {"instances": strip_hidden_instances(crate::daemon::machines::all_instances(state))},
+        "params": {"instances": strip_hidden_instances(crate::daemon::machines::all_instances(state), keep_jarvis)},
     })
     .to_string()
 }
@@ -63,12 +63,12 @@ fn parse_host_overlay(txt: &str) -> Option<bool> {
     v.pointer("/params/hosted").and_then(serde_json::Value::as_bool)
 }
 
-pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonState>) {
+pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonState>, keep_jarvis: bool) {
     // Heal a client that just (re)connected: send a full snapshot before any
     // future mutation, mirroring `fetch_and_reseed_instances` on the
     // desktop app-side link.
     if socket
-        .send(Message::Text(instances_changed_frame(&state)))
+        .send(Message::Text(instances_changed_frame(&state, keep_jarvis)))
         .await
         .is_err()
     {
@@ -87,14 +87,15 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
                 Ok(mut frame) => {
                     // The notifier fans out every daemon-wide event verbatim
                     // (see this fn's doc), but `instances_changed` specifically
-                    // must never carry Jarvis/worker sessions to a remote
-                    // client - the initial resync frame above already strips
+                    // must never carry worker sessions (nor Jarvis, for a
+                    // peer machine) to a remote client - the initial resync
+                    // frame above already strips
                     // them; do the same for every live one, or a later
                     // unrelated registry mutation anywhere in the daemon would
                     // re-leak the full unfiltered list within seconds.
                     if frame.get("method").and_then(serde_json::Value::as_str) == Some("instances_changed") {
                         if let Some(arr) = frame.pointer_mut("/params/instances").and_then(serde_json::Value::as_array_mut) {
-                            strip_hidden_instances_json(arr);
+                            strip_hidden_instances_json(arr, keep_jarvis);
                         }
                     }
                     // A suspended host doesn't cleanly close this socket, so `turn_sound`
@@ -315,7 +316,7 @@ mod tests {
     #[test]
     fn instances_changed_frame_matches_notifier_shape() {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
-        let frame = instances_changed_frame(&state);
+        let frame = instances_changed_frame(&state, true);
         let v: serde_json::Value = serde_json::from_str(&frame).expect("valid json frame");
         assert_eq!(v["jsonrpc"], "2.0");
         assert_eq!(v["method"], "instances_changed");

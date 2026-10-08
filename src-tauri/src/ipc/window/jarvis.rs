@@ -6,10 +6,10 @@ use tauri::{AppHandle, Manager};
 /// Get-or-focus the singleton Jarvis window (todo 272). Fixed label
 /// `session-jarvis` regardless of which real session id backs it - unlike
 /// `detach_window`'s per-session `session-<id>` label, there is only ever one
-/// Jarvis window. By design (Joe's binding decision) Jarvis lives ONLY in
-/// this dedicated window: it never appears in the Chats sidebar (see
-/// `sessions/sidebar.ts`'s jarvis/worker_of filter) or the phone cockpit
-/// (`daemon/remote_handlers.rs`).
+/// Jarvis window. On desktop Jarvis lives ONLY in this dedicated window: it
+/// never appears in the Chats sidebar (see `sessions/sidebar.ts`'s
+/// jarvis/worker_of filter). The phone opens the same session from its
+/// sidemenu instead (`src/views/sessions/open-jarvis.ts`).
 ///
 /// If the window doesn't exist yet, get-or-spawns the singleton session via
 /// the daemon's `ensure_jarvis_session` RPC (`daemon/methods/jarvis.rs`, todo

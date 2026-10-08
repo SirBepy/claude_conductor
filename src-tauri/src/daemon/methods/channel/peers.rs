@@ -132,7 +132,7 @@ fn mirrored_peer_json(i: &crate::types::Instance) -> Value {
 
 /// Jarvis and its worker sub-sessions never belong in a cross-machine peer
 /// listing, same call `remote_handlers::strip_hidden_instances` already makes
-/// for every remote listing surface - a peer machine's mirrored Jarvis rows
+/// for a peer machine's remote listings - a peer machine's mirrored Jarvis rows
 /// would otherwise leak into scope "all"/"machine:*", which no local listing
 /// surface allows either.
 fn visible_for_peers(i: &crate::types::Instance) -> bool {

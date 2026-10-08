@@ -65,6 +65,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only: durable Skip marks for one session_id, so a phone reopening
     // a chat sees "Skipped" instead of "awaiting answer" forever (todo 661).
     ("get_skipped_question_marks", P),
+    // Write: the phone sidemenu's Jarvis entry, the desktop Jarvis window's
+    // get-or-spawn. Takes no params; spawns at most the one Jarvis singleton
+    // in its fixed jarvis-home cwd through the same billing-gated
+    // spawn_session, so strictly weaker than start_session. Phone only: a
+    // peer machine never sees this daemon's Jarvis row either.
+    ("ensure_jarvis_session", P),
     ("set_session_effort", P),
     ("set_session_model", P),
     ("set_auto_accept", P),
@@ -399,9 +405,16 @@ mod tests {
             "ask_list_threads", "ask_send", "ask_delete_thread",
             "list_message_drafts", "set_draft_body", "set_draft_version",
             "set_draft_state", "delete_draft",
+            "ensure_jarvis_session",
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }
+    }
+
+    #[test]
+    fn ensure_jarvis_session_is_phone_only() {
+        assert!(allowed("ensure_jarvis_session", &Transport::Phone));
+        assert!(!allowed("ensure_jarvis_session", &Transport::PeerMachine("m".into())));
     }
 
     /// Every `machine:true` entry is `PM` (phone subset) or a named `M`-only

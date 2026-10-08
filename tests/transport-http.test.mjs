@@ -83,6 +83,13 @@ describe("HttpTransport.call mapping", () => {
     expect(out).toEqual([{ session_id: "s" }]);
   });
 
+  it("forwards ensure_jarvis_session to the rpc with null params", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ session_id: "jarvis-id" }) });
+    const out = await new HttpTransport().call("ensure_jarvis_session");
+    expect(body()).toEqual({ method: "ensure_jarvis_session", params: null });
+    expect(out).toEqual({ session_id: "jarvis-id" });
+  });
+
   it("reshapes respond_permission (deny) to request_id/allow", async () => {
     await new HttpTransport().call("respond_permission", {
       id: "req-1",
