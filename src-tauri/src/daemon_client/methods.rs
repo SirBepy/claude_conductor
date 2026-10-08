@@ -6,6 +6,7 @@
 //! change.
 
 mod ask;
+mod attachments;
 mod channels;
 mod hidden_chats;
 mod history;

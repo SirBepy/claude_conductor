@@ -243,6 +243,7 @@ pub async fn respond_permission(
     behavior: String,
     updated_input: Option<Value>,
     message: Option<String>,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let allow = match behavior.as_str() {
@@ -257,6 +258,7 @@ pub async fn respond_permission(
             allow,
             if allow { Some(updated_input.unwrap_or_else(|| serde_json::json!({}))) } else { None },
             if allow { None } else { Some(message.unwrap_or_else(|| "Denied by user.".to_string())) },
+            session_id.as_deref(),
         )
         .await
         .map_err(|e| e.to_string())
@@ -271,11 +273,12 @@ pub async fn respond_question(
     id: String,
     answers: Value,
     skipped: bool,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
-        .respond_question(&id, answers, skipped)
+        .respond_question(&id, answers, skipped, session_id.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -287,11 +290,12 @@ pub async fn respond_question(
 #[tauri::command]
 pub async fn confirm_question_rendered(
     id: String,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client
-        .confirm_question_rendered(&id)
+        .confirm_question_rendered(&id, session_id.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -321,4 +325,30 @@ pub async fn list_pending_prompts(state: State<'_, AppState>) -> Result<Value, S
         .list_pending_prompts()
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Read a previously-pasted attachment as `{mime, base64}` for inline
+/// rendering in the chat view. Session-aware counterpart of
+/// `attachments::read_attachment` (reused here for the local branch): that
+/// fn is frozen at a 1-arg signature because the daemon's own
+/// `read_attachment` RPC handler calls it directly, with no `session_id`/
+/// `State` to give it, so this wrapper - the one actually registered as the
+/// Tauri `read_attachment` command - carries the routing decision instead.
+///
+/// `session_id` is `None` for every call site that predates mirroring (the
+/// AUQ card's attachment hydrate, the composer's own re-read on restore) -
+/// those fall straight through to the local read, unchanged from before.
+#[tauri::command]
+pub async fn read_attachment(
+    path: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<super::attachments::AttachmentData, String> {
+    if let Some(sid) = session_id.as_deref() {
+        if super::history::is_mirrored(&state.cached_instances.lock().unwrap(), sid) {
+            let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+            return client.read_attachment(&path, Some(sid)).await.map_err(|e| e.to_string());
+        }
+    }
+    super::attachments::read_attachment(path).await
 }

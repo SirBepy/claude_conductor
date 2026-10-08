@@ -43,7 +43,7 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
                 if let Err(e) = client
-                    .respond_permission(&request_id, true, Some(input), None)
+                    .respond_permission(&request_id, true, Some(input), None, None)
                     .await
                 {
                     log::warn!("when_done: auto-allow permission failed: {e}");
@@ -56,7 +56,7 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
             "question-requested" => {
                 let questions = payload.get("questions");
                 let answers = default_question_answers(questions);
-                if let Err(e) = client.respond_question(&request_id, answers.clone(), false).await {
+                if let Err(e) = client.respond_question(&request_id, answers.clone(), false, None).await {
                     log::warn!("when_done: auto-answer question failed: {e}");
                 } else {
                     log_comment(&format!(

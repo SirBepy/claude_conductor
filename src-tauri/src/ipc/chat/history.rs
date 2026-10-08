@@ -25,7 +25,7 @@ pub(crate) use super::history_list::collect_history;
 /// `daemon_link::fetch_and_reseed_instances`). A miss (session absent from
 /// the cache, or present with `machine: None`) means "read local disk" -
 /// the existing behavior for every session hosted on this machine.
-fn is_mirrored(instances: &[crate::types::Instance], session_id: &str) -> bool {
+pub(crate) fn is_mirrored(instances: &[crate::types::Instance], session_id: &str) -> bool {
     instances
         .iter()
         .find(|i| i.session_id == session_id)

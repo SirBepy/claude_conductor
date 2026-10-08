@@ -6,8 +6,11 @@
 //! `paste_image` is the original caller; both are re-exported by the parent
 //! `chat` module so `history` can reuse `validate_session_id`.
 
+use super::history::is_mirrored;
+use crate::state::AppState;
 use base64::Engine;
 use std::path::{Path, PathBuf};
+use tauri::State;
 
 /// Hard cap on one attachment write. Comfortably clears the frontend's 8MB
 /// per-draft budget and a full-resolution screenshot, while still bounding a
@@ -85,12 +88,22 @@ pub(crate) fn write_attachment(
 /// Persist a clipboard-pasted image and return its absolute path. The
 /// composer surfaces this path to claude as a `<file:...>` mention so
 /// claude reads it via its Read tool.
+///
+/// A mirrored `session_id` has no local `claude` to read the file, so the
+/// bytes are written on the OWNING peer's disk instead via the daemon's
+/// `paste_attachment` RPC (same wire method `paste_attachment` uses below -
+/// there is no separate `paste_image` RPC). Local sessions are unaffected.
 #[tauri::command]
 pub async fn paste_image(
     session_id: String,
     base64_data: String,
     mime: String,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
+    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+        return client.paste_attachment(&session_id, &base64_data, &mime).await.map_err(|e| e.to_string());
+    }
     let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
     let path = write_attachment(&root, &session_id, &base64_data, &mime)?;
     Ok(path.to_string_lossy().to_string())
@@ -103,30 +116,22 @@ pub async fn paste_attachment(
     session_id: String,
     base64_data: String,
     mime: String,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
+    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+        return client.paste_attachment(&session_id, &base64_data, &mime).await.map_err(|e| e.to_string());
+    }
     let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
     let path = write_attachment(&root, &session_id, &base64_data, &mime)?;
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Copy a file dropped from the OS into the chat-attachments dir, returning
-/// the dest path + MIME + base64 so the composer can display it inline.
-/// Used by the Tauri drag-drop event path (tauri://drop gives file paths,
-/// not File blobs, so the standard paste_attachment flow doesn't apply).
-#[tauri::command]
-pub async fn paste_attachment_from_path(
-    session_id: String,
-    path: String,
-) -> Result<AttachmentFromPathResult, String> {
-    use base64::Engine;
-    validate_session_id(&session_id)?;
-    let src = std::path::PathBuf::from(&path);
-    let ext = src
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("bin")
-        .to_lowercase();
-    let mime = match ext.as_str() {
+/// Resolve a dropped file's extension to its MIME type. Split out of
+/// `paste_attachment_from_path` so the mirrored branch (which never touches
+/// `chat-attachments` locally) can still name a MIME for the daemon RPC.
+fn mime_for_ext(ext: &str) -> &'static str {
+    match ext {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -140,9 +145,47 @@ pub async fn paste_attachment_from_path(
         "json" => "application/json",
         _ => "application/octet-stream",
     }
-    .to_string();
+}
+
+/// Copy a file dropped from the OS into the chat-attachments dir, returning
+/// the dest path + MIME + base64 so the composer can display it inline.
+/// Used by the Tauri drag-drop event path (tauri://drop gives file paths,
+/// not File blobs, so the standard paste_attachment flow doesn't apply).
+///
+/// The dropped file always lives on THIS machine's disk regardless of where
+/// `session_id` is hosted, so the source read is unconditional. For a
+/// mirrored session the bytes are then uploaded to the owning peer via the
+/// `paste_attachment` RPC instead of being copied into this machine's own
+/// `chat-attachments` dir (which the remote `claude` cannot read); the
+/// returned `path` is the peer's path, but `mime`/`base64` describe the same
+/// local bytes either way.
+#[tauri::command]
+pub async fn paste_attachment_from_path(
+    session_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<AttachmentFromPathResult, String> {
+    use base64::Engine;
+    validate_session_id(&session_id)?;
+    let src = std::path::PathBuf::from(&path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
+        .to_lowercase();
+    let mime = mime_for_ext(&ext).to_string();
     let bytes = std::fs::read(&src).map_err(|e| format!("cannot read file: {e}"))?;
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+        let remote_path = client
+            .paste_attachment(&session_id, &base64, &mime)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(AttachmentFromPathResult { path: remote_path, mime, base64 });
+    }
+
     let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
     let dir = root.join("chat-attachments").join(&session_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -156,14 +199,17 @@ pub async fn paste_attachment_from_path(
     })
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct AttachmentFromPathResult {
     pub path: String,
     pub mime: String,
     pub base64: String,
 }
 
-#[derive(serde::Serialize)]
+/// Also `Deserialize` so `daemon_client::methods::attachments::read_attachment`
+/// can parse the owning peer's `{mime, base64}` reply straight into this type
+/// for a mirrored chat's attachment read.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct AttachmentData {
     pub mime: String,
     pub base64: String,
@@ -202,8 +248,15 @@ pub(crate) fn read_attachment_impl(root: &Path, path: &str) -> Result<Attachment
     Ok(AttachmentData { mime, base64 })
 }
 
-#[tauri::command]
-pub async fn read_attachment(path: String) -> Result<AttachmentData, String> {
+/// Local-disk-only read, kept at this exact name and 1-arg signature because
+/// `daemon/methods/registry/attachments.rs`'s `read_attachment` RPC handler
+/// calls it directly (not through Tauri IPC) so the OWNING peer can serve a
+/// mirrored chat's attachment off its own disk. The session-aware Tauri
+/// command the desktop frontend invokes lives in `lifecycle.rs` instead,
+/// since it needs an extra `session_id`/`State` the daemon has no way to
+/// supply when calling this fn directly - it reuses this fn for its own
+/// local-read branch rather than duplicating the logic.
+pub(crate) async fn read_attachment(path: String) -> Result<AttachmentData, String> {
     let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
     read_attachment_impl(&root, &path)
 }
@@ -324,6 +377,15 @@ mod tests {
         assert_eq!(json.extension().and_then(|e| e.to_str()), Some("json"));
         let csv = write_attachment(tmp.path(), "s1", b64, "text/csv").unwrap();
         assert_eq!(csv.extension().and_then(|e| e.to_str()), Some("csv"));
+    }
+
+    #[test]
+    fn mime_for_ext_covers_known_extensions() {
+        assert_eq!(mime_for_ext("png"), "image/png");
+        assert_eq!(mime_for_ext("jpg"), "image/jpeg");
+        assert_eq!(mime_for_ext("jpeg"), "image/jpeg");
+        assert_eq!(mime_for_ext("pdf"), "application/pdf");
+        assert_eq!(mime_for_ext("unknownext"), "application/octet-stream");
     }
 
     #[test]
