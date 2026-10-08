@@ -44,6 +44,10 @@ mod resume_interrupted;
 pub mod rpc;
 pub mod schedule;
 mod schedule_fire;
+// pub(crate): both `hooks_server::secret` (refuse before registering the
+// prompt) and `methods::secret` (re-check right before the write) share this
+// validation - see its own module doc for why it's a separate file from both.
+pub(crate) mod secret_target;
 pub mod session;
 pub(crate) mod session_registration;
 #[cfg(test)]

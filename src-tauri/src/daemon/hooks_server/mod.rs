@@ -30,6 +30,7 @@ pub(crate) mod preview_render;
 mod question;
 mod relay;
 mod schedule;
+mod secret;
 mod spawn_chat;
 mod stop;
 mod stop_verdict;
@@ -173,6 +174,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/preview-render/:id", get(preview_render::on_preview_render_get))
         .route("/permissions/request", post(permission::on_permission_request))
         .route("/questions/request", post(question::on_question_request))
+        .route("/secrets/request", post(secret::on_secret_request))
         .route("/hooks/ask-question", post(question::on_ask_question_hook))
         .route("/hooks/commit-lock-request", post(commit_lock::on_commit_lock_request))
         .route("/hooks/commit-lock-release", post(commit_lock::on_commit_lock_release))

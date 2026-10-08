@@ -170,7 +170,19 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 // from a third machine, or two paired peers could echo the
                 // same prompt back and forth past one hop.
                 if !matches!(ctx.transport, crate::daemon::rpc::Transport::PeerMachine(_)) {
-                    prompts.extend(state.mirror.prompts());
+                    // Exclude `secret-requested` prompts from the mirrored
+                    // merge: `respond_secret` is
+                    // phone-only in `remote_transport_table.rs`, so a secret
+                    // card mirrored onto a peer machine would render there
+                    // with no way to ever answer it. Joe answers it on the
+                    // machine (or phone) where the chat actually runs.
+                    prompts.extend(
+                        state
+                            .mirror
+                            .prompts()
+                            .into_iter()
+                            .filter(|p| p["event"].as_str() != Some("secret-requested")),
+                    );
                 }
                 Ok(serde_json::Value::Array(prompts))
             }
@@ -307,5 +319,24 @@ mod list_pending_prompts_tests {
         let result = dispatch_with(state, Transport::PeerMachine("mach-c".into())).await;
         let ids: Vec<&str> = result.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["local-1"], "a peer caller must never see a prompt we mirrored from someone else");
+    }
+
+    /// A mirrored `secret-requested` prompt must never reach a
+    /// local (desktop) caller either - `respond_secret` is phone-only in
+    /// `remote_transport_table.rs`, so a secret card mirrored in from a peer
+    /// would render on this machine with no transport able to answer it.
+    #[tokio::test]
+    async fn excludes_mirrored_secret_requested_prompts() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.add_prompt("local-1", "question-requested", json!({"session_id": "s-local"}), true).await;
+        state.mirror.set_instances("mach-b", "Mac Mini", vec![]);
+        state.mirror.set_prompts(
+            "mach-b",
+            vec![json!({"id": "secret-1", "event": "secret-requested", "payload": {"session_id": "s-remote"}, "durable": false})],
+        );
+
+        let result = dispatch_with(state, Transport::Local).await;
+        let ids: Vec<&str> = result.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["local-1"], "a mirrored secret-requested prompt must never surface, even locally");
     }
 }

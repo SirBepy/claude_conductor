@@ -65,6 +65,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("update_hidden_chats", P),
     ("respond_permission", PM),
     ("respond_question", PM),
+    // Write: resolves a blocking `request_secret` prompt. P only, never M - a
+    // phone is Joe's own device, the same trust level as respond_permission
+    // above, but a peer machine must never relay a secret value through a
+    // forwarded call: the value travels straight from
+    // the answering client into the write with no intermediate hop, and
+    // `machines/forward.rs` only forwards methods this table allows for
+    // `Transport::PeerMachine`, so leaving `machine: false` here is what
+    // keeps a mirrored chat's secret card unanswerable from the peer side -
+    // see the matching mirrored-prompt exclusion in `methods/permission.rs`.
+    ("respond_secret", P),
     // Write: resolves one render-confirmation waiter by client-supplied id.
     // Strictly weaker than `respond_question` above, which takes the same kind
     // of id and also delivers an answer. A phone is a legitimate renderer, so
@@ -416,7 +426,7 @@ mod tests {
             "get_hidden_chats", "update_hidden_chats",
             "confirm_question_rendered",
             "get_skipped_question_marks",
-            "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",
+            "respond_permission", "respond_secret", "load_history_page", "load_event_detail", "list_history", "load_history",
             "transcript_stats",
             "register_historical", "read_attachment",
             "paste_attachment", "list_characters", "list_project_groups",
@@ -496,6 +506,15 @@ mod tests {
             assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m} must be callable by a peer machine");
             assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
         }
+    }
+
+    /// `respond_secret` is phone-callable (Joe's own device) but never
+    /// peer-machine-callable - the one row this table gates specifically to
+    /// keep a secret value from ever crossing a machine-to-machine forward.
+    #[test]
+    fn respond_secret_is_phone_only_never_a_peer_machine() {
+        assert!(allowed("respond_secret", &Transport::Phone));
+        assert!(!allowed("respond_secret", &Transport::PeerMachine("x".into())));
     }
 
     /// `pair_machine`/`unpair_machine`/`set_machine_label` are desktop-pipe-only:

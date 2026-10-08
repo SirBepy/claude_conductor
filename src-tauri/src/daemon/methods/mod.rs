@@ -49,6 +49,10 @@ mod preview;
 // property, same as the model/effort swaps that helper was written for.
 pub(crate) mod registry;
 mod schedule;
+// Blocking `request_secret` MCP tool's responder RPC, split from
+// `permission.rs` the way `hooks_server::secret` is split from
+// `hooks_server::permission`: a distinct prompt kind with its own write step.
+mod secret;
 /// MCP-facing half of the scheduler, kept out of `schedule.rs` so that file
 /// stays the desktop RPC surface: different caller, different trust model
 /// (an untrusted `session_id` re-derived against the registry, exactly as
@@ -86,6 +90,7 @@ pub use pr_review::register_pr_review;
 pub use preview::register_preview;
 pub use registry::register_chat_registry;
 pub use schedule::register_schedule;
+pub use secret::register_secret;
 pub use statusbar::register_statusbar;
 pub use step_comments::register_step_comments;
 pub use usage::register_usage;

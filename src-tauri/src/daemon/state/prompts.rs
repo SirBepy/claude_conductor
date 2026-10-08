@@ -86,6 +86,18 @@ impl DaemonState {
             .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
     }
 
+    /// The full recorded payload for a still-open prompt, if any.
+    /// `methods::secret::respond_secret_inner` uses this to re-read
+    /// `file`/`key`/`session_id` from the SERVER's own copy right before
+    /// writing, rather than trust whatever the RPC caller's params say.
+    pub async fn prompt_payload(&self, id: &str) -> Option<Value> {
+        self.pending_prompts
+            .lock()
+            .await
+            .get(id)
+            .map(|v| v["payload"].clone())
+    }
+
     /// The recorded `event` kind for a still-open prompt (`"permission-requested"`
     /// or `"question-requested"`), if any. `jarvis::respond_worker_prompt` uses
     /// this to route an answer to the right `respond_*_inner` without the
