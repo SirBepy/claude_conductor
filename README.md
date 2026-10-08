@@ -141,7 +141,14 @@ Paired devices can be revoked any time from Settings > Remote access on the desk
 Run Conductor on two machines (say a Windows PC and a Mac), pair them once, and each app's chat
 list shows both machines' chats together. A chat hosted on the other machine gets a small machine
 glyph next to it (dimmed when that machine is offline) and opens, streams, and accepts messages
-exactly like a local one.
+like a local one: its history, question and permission cards, stop, model/effort switch,
+auto-accept and pasted attachments all go to the machine the chat runs on. Code mode, the git
+chips and open-in-editor are hidden for such a chat, since they read this machine's disk.
+
+**From the phone.** A phone paired with either machine sees both machines' chats. Chats on the
+machine the phone is connected to are unmarked; chats on the other machine show its name next to
+the glyph. Every chat can be opened and driven from the phone, and the phone's new-chat picker has
+the same machine chips as the desktop.
 
 **Pair them.** On machine A, open Settings > Remote access - it shows the same pairing URL/QR a
 phone uses. On machine B, go to Settings > Remote access > Paired machines, paste that URL into
@@ -174,4 +181,5 @@ run, then `post_message(to: <its session id>, text: "...")` and read its reply w
 lives in a `machines.json` file in the app data dir, separate from phone pairing. A peer's own
 mirrored copies of a THIRD machine are never re-mirrored, so chats never chain through more than
 one hop. The other machine's project list in the picker is name/path only - no avatar, worktree, or
-CLAUDE.md-scope data.
+CLAUDE.md-scope data. A chat started in a terminal on the other machine shows its history but does
+not stream new turns live until reopened. Developer notes: `docs/multi-machine.md`.
