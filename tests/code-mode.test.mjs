@@ -300,6 +300,35 @@ describe("Code mode", () => {
     expect(root().querySelector('[data-file="README.md"]')).not.toBeNull();
   });
 
+  it("All files reloads live as the chat writes files, not just This chat (todo 1126)", async () => {
+    const c = chat({ key: "s11" });
+    openCodeMode(c);
+    await settle();
+    expect(root().querySelector('[data-file="src/new.ts"]')).toBeNull();
+
+    // The chat writes a new file: the working-tree query the daemon answers
+    // now includes it, and the chat's own edit count moves.
+    ipcMock.impl = async (cmd, args) => {
+      if (cmd === "get_commit_sync") return SYNC;
+      if (cmd === "get_git_info") return { branch: "master" };
+      if (cmd === "get_recent_branches") return [{ name: "master", current: true, short_sha: "abc1234", upstream: "origin/master" }];
+      if (cmd === "get_range_files") return args.to === "abc1234"
+        ? [{ path: "src/z.ts", status: "M", added: 1, removed: 0, old_path: null }, { path: "src/a.ts", status: "A", added: 3, removed: 0, old_path: null }]
+        : [];
+      if (cmd === "get_git_dirty") return [];
+      if (cmd === "get_file_diff") return "@@ -1 +1 @@\n-a\n+b";
+      if (cmd === "get_file_at_rev") return { content: "x", truncated: false };
+      if (cmd === "list_project_files") return ["src/a.ts", "src/b.ts", "src/new.ts", "README.md"];
+      return null;
+    };
+    c.edits = () => [edit("C:\\repo\\src\\a.ts"), edit("C:\\repo\\src\\b.ts", "write"), edit("C:\\repo\\src\\new.ts", "write")];
+
+    // The real 1s tick, not a mocked one - this pins the actual interval path.
+    await new Promise((r) => setTimeout(r, 1100));
+    await settle();
+    expect(root().querySelector('[data-file="src/new.ts"]')).not.toBeNull();
+  });
+
   it("Esc leaves, and the back pill leaves", async () => {
     openCodeMode(chat());
     await settle();

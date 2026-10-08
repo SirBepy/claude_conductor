@@ -361,7 +361,12 @@ export class CodeModeInstance {
 
   private tick(): void {
     this.updatePill();
-    if (this.view.scope.kind === "chat" && this.chat.edits().length !== this.editsSeen) void this.loadScope();
+    // "chat" builds its file list straight from edits(); "all" (the default
+    // since 6506935a) instead re-reads the working tree via get_range_files,
+    // which already reflects a chat-written file on disk - so the same
+    // edit-count nudge reloads it too, no extra scope-specific path needed.
+    const kind = this.view.scope.kind;
+    if ((kind === "chat" || kind === "all") && this.chat.edits().length !== this.editsSeen) void this.loadScope();
   }
 
   // ── tabs ──────────────────────────────────────────────────────────────
