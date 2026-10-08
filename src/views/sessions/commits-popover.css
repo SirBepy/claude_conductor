@@ -3,7 +3,7 @@
 .cp-popover {
   min-width: 280px;
   max-width: 420px;
-  font-family: 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
@@ -12,7 +12,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px 6px;
-  font-size: 0.7rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -35,9 +35,9 @@
 .cp-row:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
 .cp-row:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
 
-.cp-row.unpushed { border-left-color: #4ade80; background: rgba(74, 222, 128, 0.06); }
-.cp-row.unpushed:hover { background: rgba(74, 222, 128, 0.12); }
-.cp-row.unpushed .cp-mark { color: #4ade80; }
+.cp-row.unpushed { border-left-color: var(--color-success); background: color-mix(in srgb, var(--color-success) 6%, transparent); }
+.cp-row.unpushed:hover { background: color-mix(in srgb, var(--color-success) 12%, transparent); }
+.cp-row.unpushed .cp-mark { color: var(--color-success); }
 .cp-row.unpushed .cp-msg { color: var(--color-text); }
 .cp-row.pushed .cp-mark { color: var(--color-text-muted); opacity: 0.55; }
 .cp-row.pushed .cp-msg { color: var(--color-text-muted); }
@@ -46,7 +46,7 @@
 
 .cp-sha {
   flex-shrink: 0;
-  font-size: 0.7rem;
+  font-size: var(--fs-micro);
   color: var(--sb-muted);
 }
 
@@ -60,7 +60,7 @@
 
 /* Hover (or keyboard focus on the row) swaps the age for the absolute time
    and reveals the copy buttons. */
-.cp-age, .cp-abs { flex-shrink: 0; font-size: 0.68rem; color: var(--sb-muted); }
+.cp-age, .cp-abs { flex-shrink: 0; font-size: var(--fs-micro); color: var(--sb-muted); }
 .cp-abs { display: none; }
 .cp-row:hover .cp-age,
 .cp-row:focus-within .cp-age { display: none; }
@@ -79,7 +79,7 @@
   height: 20px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-badge);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 0.75rem;
@@ -104,7 +104,7 @@
   min-height: 6px;
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 0.68rem;
+  font-size: var(--fs-micro);
   opacity: 0.6;
 }
 .cp-sentinel.end { font-style: italic; }
