@@ -49,9 +49,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // at most re-sends "continue" - both strictly weaker than send_message.
     ("freeze_session", P),
     ("unfreeze_session", P),
-    // Sidebar Hide/Unhide, so the phone shows the same chats hidden as the
-    // desktop. Reads/writes only a list of opaque session ids in its own file
-    // (sessions/hidden_chats.rs); hides nothing from any other surface.
+    // Sidebar Hide/Unhide and the project-rail filter, so the phone shows the
+    // same chats hidden as the desktop. Reads/writes only lists of opaque
+    // session ids and project cwds in its own file (sessions/hidden_chats.rs);
+    // hides nothing from any other surface.
     ("get_hidden_chats", P),
     ("update_hidden_chats", P),
     ("respond_permission", PM),

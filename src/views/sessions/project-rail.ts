@@ -25,18 +25,11 @@ export function renderProjectRail(hostEl: HTMLElement, sessions: Instance[], onC
   hostEl.hidden = false;
 
   const aliases: AliasMap = (getSettings().projectAliases as AliasMap) || {};
+  // Never pruned against `cwds`: the set is shared by every device through the
+  // daemon, and one device's live list can be partial, which would unfilter
+  // those projects everywhere. So "All" reads only the projects shown here.
   const hidden = loadHiddenProjects();
-
-  // Prune stale entries against the live cwd set so a project that's gone
-  // (or been renamed/merged) doesn't stay silently filtered forever.
-  const live = new Set(cwds);
-  let pruned = false;
-  for (const c of [...hidden]) {
-    if (!live.has(c)) { hidden.delete(c); pruned = true; }
-  }
-  if (pruned) saveHiddenProjects(hidden);
-
-  const allActive = hidden.size === 0;
+  const allActive = !cwds.some((c) => hidden.has(c));
   const avatarsHtml = cwds
     .map((cwd) => {
       const alias = aliases[cwd];
@@ -59,7 +52,7 @@ export function renderProjectRail(hostEl: HTMLElement, sessions: Instance[], onC
     // -> show everything. A one-way "always show all" button gave no way to
     // blank the whole list from this control.
     const current = loadHiddenProjects();
-    saveHiddenProjects(current.size === 0 ? new Set(cwds) : new Set());
+    saveHiddenProjects(cwds.some((c) => current.has(c)) ? new Set() : new Set([...current, ...cwds]));
     onChange();
   });
   hostEl.querySelectorAll<HTMLButtonElement>(".project-rail-avatar").forEach((btn) => {

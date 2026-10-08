@@ -309,7 +309,13 @@ export function writeHiddenSessionsLocal(set: Set<string>): void {
   catch { /* ignore */ }
 }
 
-type HiddenPusher = (add: string[], remove: string[]) => void;
+export interface HiddenDelta {
+  add?: string[];
+  remove?: string[];
+  addProjects?: string[];
+  removeProjects?: string[];
+}
+type HiddenPusher = (delta: HiddenDelta) => void;
 let hiddenPusher: HiddenPusher | null = null;
 
 /** Set by hidden-sessions-sync.ts, which owns the transport, so this file
@@ -318,21 +324,25 @@ export function setHiddenSessionsPusher(fn: HiddenPusher | null): void {
   hiddenPusher = fn;
 }
 
+function diff(prev: Set<string>, next: Set<string>): [string[], string[]] {
+  return [[...next].filter((id) => !prev.has(id)), [...prev].filter((id) => !next.has(id))];
+}
+
 /** A user hide/unhide: updates the local copy at once and sends only the
  *  difference to the daemon, so a concurrent change made on another device
  *  is never reverted by this one's stale full set. */
 export function saveHiddenSessions(set: Set<string>): void {
   const prev = loadHiddenSessions();
   writeHiddenSessionsLocal(set);
-  const add = [...set].filter((id) => !prev.has(id));
-  const remove = [...prev].filter((id) => !set.has(id));
-  if (add.length || remove.length) hiddenPusher?.(add, remove);
+  const [add, remove] = diff(prev, set);
+  if (add.length || remove.length) hiddenPusher?.({ add, remove });
 }
 
 /** Projects (keyed by cwd, matching the alias/merge system's own key) hidden
  *  from the sidebar entirely via the project-rail filter. Independent of the
  *  per-session hide list above: a hidden project's chats never show anywhere,
- *  including in the "Hidden" section. */
+ *  including in the "Hidden" section. Daemon-owned like that list, with
+ *  localStorage as the last-known copy. */
 export function loadHiddenProjects(): Set<string> {
   try {
     const raw = localStorage.getItem(LS_HIDDEN_PROJECTS);
@@ -341,9 +351,17 @@ export function loadHiddenProjects(): Set<string> {
   return new Set();
 }
 
-export function saveHiddenProjects(set: Set<string>): void {
+export function writeHiddenProjectsLocal(set: Set<string>): void {
   try { localStorage.setItem(LS_HIDDEN_PROJECTS, JSON.stringify([...set])); }
   catch { /* ignore */ }
+}
+
+/** Same delta-only push as saveHiddenSessions. */
+export function saveHiddenProjects(set: Set<string>): void {
+  const prev = loadHiddenProjects();
+  writeHiddenProjectsLocal(set);
+  const [addProjects, removeProjects] = diff(prev, set);
+  if (addProjects.length || removeProjects.length) hiddenPusher?.({ addProjects, removeProjects });
 }
 
 export function loadHiddenCollapsed(): boolean {
