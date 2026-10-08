@@ -169,8 +169,12 @@ function Get-WdioVerdict {
     $content = @(Get-Content -Path $LogPath -ErrorAction SilentlyContinue)
     $passing = 0
     $failing = 0
+    # Mocha always prints "N passing" on a real run, even when N is 0 - its absence is the
+    # distinct "ran nothing at all" case Passing/Failing alone can't see: an exit-0 run with no
+    # reporter output parses identically to a clean "0 passing, 0 failing" pass.
+    $sawSummary = $false
     foreach ($line in $content) {
-        if ($line -match '(\d+)\s+passing') { $passing = [int]$matches[1] }
+        if ($line -match '(\d+)\s+passing') { $passing = [int]$matches[1]; $sawSummary = $true }
         if ($line -match '(\d+)\s+failing') { $failing = [int]$matches[1] }
     }
     $firstError = $null
@@ -184,7 +188,17 @@ function Get-WdioVerdict {
             }
         }
     }
-    [PSCustomObject]@{ Passing = $passing; Failing = $failing; FirstError = $firstError }
+    [PSCustomObject]@{ Passing = $passing; Failing = $failing; FirstError = $firstError; SawSummary = $sawSummary }
+}
+
+# Pure status decision, pulled out of Invoke-WdioSpec so the empty-log case can be exercised
+# without running wdio. NO SUMMARY outranks the passing/failing counts: a run that
+# never printed mocha's summary proved nothing, no matter its exit code or count defaults.
+function Get-WdioStatus {
+    param([int]$ExitCode, [int]$Failing, [bool]$SawSummary)
+    if (-not $SawSummary) { return 'NO SUMMARY' }
+    if ($ExitCode -eq 0 -and $Failing -eq 0) { return 'OK' }
+    return 'FAIL'
 }
 
 # One spec per call, sequential by construction (the caller loops), which is itself how this
@@ -234,66 +248,74 @@ function Invoke-WdioSpec {
     }
 
     $verdict = Get-WdioVerdict -LogPath $logPath
-    $status = if ($exitCode -eq 0 -and $verdict.Failing -eq 0) { 'OK' } else { 'FAIL' }
+    $status = Get-WdioStatus -ExitCode $exitCode -Failing $verdict.Failing -SawSummary $verdict.SawSummary
     Write-Verdict -Spec $SpecName -Tag "$($verdict.Passing) passing, $($verdict.Failing) failing [$status] (exit $exitCode)"
     if ($verdict.FirstError) { Write-Host "  first error: $($verdict.FirstError)" }
+    if ($status -eq 'NO SUMMARY') { Write-Host "  no mocha summary line in the log - the spec ran but printed nothing, this is not a pass" }
 
-    [PSCustomObject]@{ Spec = $SpecName; Passing = $verdict.Passing; Failing = $verdict.Failing; FirstError = $verdict.FirstError; ExitCode = $exitCode; LogPath = $logPath; Skipped = $false }
+    [PSCustomObject]@{ Spec = $SpecName; Passing = $verdict.Passing; Failing = $verdict.Failing; FirstError = $verdict.FirstError; ExitCode = $exitCode; LogPath = $logPath; Skipped = $false; Status = $status }
 }
 
 # --- main ---
+# Guarded so the functions above (Get-WdioVerdict, Get-WdioStatus, ...) can be dot-sourced and
+# unit-tested without firing off the actual sweep - dot-sourcing sets InvocationName to '.',
+# a normal `-File` run does not. See scripts/wdio-sweep.verdict-test.ps1.
+if ($MyInvocation.InvocationName -ne '.') {
 
-Test-DebugExeFreshness
-Assert-PortsFree
-Backup-WdioSessionRegistry
+    Test-DebugExeFreshness
+    Assert-PortsFree
+    Backup-WdioSessionRegistry
 
-$useFakeForChat = -not $RealClaude
-if ($useFakeForChat -and -not (Test-Path $FakeClaudeBin)) {
-    throw "Fake claude binary not found at $FakeClaudeBin. Pass -FakeClaudeBin <path> to a stream-json stub (see [[project_wdio_billed_specs_free_via_fake_claude]] for what it needs to emit), or pass -RealClaude to bill real turns for chat-flow/reload-dup instead."
-}
-if ($RealClaude) {
-    Write-Warning "chat-flow and reload-dup will bill real claude turns (-RealClaude)."
-}
-if ($Billed) {
-    Write-Warning "question-card-live will bill real claude turns (~2 haiku turns per run) (-Billed)."
-}
+    $useFakeForChat = -not $RealClaude
+    if ($useFakeForChat -and -not (Test-Path $FakeClaudeBin)) {
+        throw "Fake claude binary not found at $FakeClaudeBin. Pass -FakeClaudeBin <path> to a stream-json stub (see [[project_wdio_billed_specs_free_via_fake_claude]] for what it needs to emit), or pass -RealClaude to bill real turns for chat-flow/reload-dup instead."
+    }
+    if ($RealClaude) {
+        Write-Warning "chat-flow and reload-dup will bill real claude turns (-RealClaude)."
+    }
+    if ($Billed) {
+        Write-Warning "question-card-live will bill real claude turns (~2 haiku turns per run) (-Billed)."
+    }
 
-$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$logDir = Join-Path $repoRoot ".for_bepy\wdio-logs\$timestamp"
-if ($PSCmdlet.ShouldProcess($logDir, 'create log directory')) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-} else {
-    Write-Host "[WhatIf] would create log directory $logDir"
-}
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $logDir = Join-Path $repoRoot ".for_bepy\wdio-logs\$timestamp"
+    if ($PSCmdlet.ShouldProcess($logDir, 'create log directory')) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    } else {
+        Write-Host "[WhatIf] would create log directory $logDir"
+    }
 
-$plan = @()
-foreach ($s in $freeSpecs) {
-    $plan += [PSCustomObject]@{ Spec = $s; Env = @{} }
-}
-foreach ($s in $chatSpecs) {
-    $env = if ($useFakeForChat) { @{ CC_CLAUDE_BIN = $FakeClaudeBin } } else { @{} }
-    $plan += [PSCustomObject]@{ Spec = $s; Env = $env }
-}
-if ($Billed) {
-    $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
-}
+    $plan = @()
+    foreach ($s in $freeSpecs) {
+        $plan += [PSCustomObject]@{ Spec = $s; Env = @{} }
+    }
+    foreach ($s in $chatSpecs) {
+        $env = if ($useFakeForChat) { @{ CC_CLAUDE_BIN = $FakeClaudeBin } } else { @{} }
+        $plan += [PSCustomObject]@{ Spec = $s; Env = $env }
+    }
+    if ($Billed) {
+        $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
+    }
 
-$results = @()
-foreach ($item in $plan) {
-    $results += Invoke-WdioSpec -SpecName $item.Spec -LogDir $logDir -ExtraEnv $item.Env
-}
+    $results = @()
+    foreach ($item in $plan) {
+        $results += Invoke-WdioSpec -SpecName $item.Spec -LogDir $logDir -ExtraEnv $item.Env
+    }
 
-Write-Host "`n=== Summary ==="
-foreach ($r in $results) {
-    $tag = if ($r.Skipped) { '[WhatIf - not run]' } else { "$($r.Passing)p/$($r.Failing)f exit=$($r.ExitCode)" }
-    Write-Host "  $($r.Spec): $tag  log: $($r.LogPath)"
-}
+    Write-Host "`n=== Summary ==="
+    foreach ($r in $results) {
+        $tag = if ($r.Skipped) { '[WhatIf - not run]' } else { "$($r.Passing)p/$($r.Failing)f exit=$($r.ExitCode) [$($r.Status)]" }
+        Write-Host "  $($r.Spec): $tag  log: $($r.LogPath)"
+    }
 
-$anyFailed = @($results | Where-Object { -not $_.Skipped -and ($_.Failing -gt 0 -or $_.ExitCode -ne 0) })
-if ($anyFailed.Count -gt 0) {
-    Write-Host "`nSWEEP FAILED ($($anyFailed.Count) spec(s))"
-    exit 1
-} else {
-    Write-Host "`nSWEEP PASSED (or dry run via -WhatIf)"
-    exit 0
+    # Status, not raw Failing/ExitCode: a NO SUMMARY run has Failing=0 and ExitCode=0 and would
+    # otherwise read as passed here too - the same false-OK the per-spec check used to make.
+    $anyFailed = @($results | Where-Object { -not $_.Skipped -and $_.Status -ne 'OK' })
+    if ($anyFailed.Count -gt 0) {
+        Write-Host "`nSWEEP FAILED ($($anyFailed.Count) spec(s))"
+        exit 1
+    } else {
+        Write-Host "`nSWEEP PASSED (or dry run via -WhatIf)"
+        exit 0
+    }
 }
