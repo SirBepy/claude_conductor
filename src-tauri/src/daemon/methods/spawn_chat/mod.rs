@@ -49,6 +49,18 @@ fn claim_turn_slot(state: &Arc<DaemonState>, caller_session_id: &str) -> bool {
     true
 }
 
+/// Frees the caller's slot when its model turn ends (the pump's result line).
+/// `turn_gen` alone cannot mark that boundary: it only bumps on a delivered
+/// user message, so turns woken by a background-task notification or a peer
+/// message all share one gen, and a single spawn would lock the session out of
+/// spawn_chat/respawn until Joe next typed (seen 2026-10-10: 40 minutes).
+pub(crate) fn release_turn_slot(caller_session_id: &str) {
+    let mut guard = SPAWNED_IN_GEN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = guard.as_mut() {
+        map.remove(caller_session_id);
+    }
+}
+
 /// Spawns a new Interactive session in the caller's own project - or another
 /// project the user already has registered - and sends `prompt` as its first
 /// turn. The prompt lands as a real, visible user message - the whole point
@@ -340,6 +352,22 @@ mod tests {
         );
         assert!(claim_turn_slot(&state, "sess-gen"), "first claim in a turn succeeds");
         assert!(!claim_turn_slot(&state, "sess-gen"), "second claim in the same turn is refused");
+    }
+
+    /// A notification-woken turn keeps the same `turn_gen` as the turn before
+    /// it, so only the turn-end release lets it spawn again.
+    #[test]
+    fn turn_slot_is_claimable_again_after_the_turn_ends_without_a_gen_bump() {
+        let state = test_state();
+        state.registry.upsert_interactive(
+            "sess-wake",
+            std::path::Path::new("."),
+            "proj-x",
+            "2026-10-10T00:00:00Z",
+        );
+        assert!(claim_turn_slot(&state, "sess-wake"));
+        release_turn_slot("sess-wake");
+        assert!(claim_turn_slot(&state, "sess-wake"), "next turn at the same gen may spawn again");
     }
 
     #[test]

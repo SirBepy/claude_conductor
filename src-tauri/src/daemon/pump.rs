@@ -398,6 +398,9 @@ pub(crate) async fn run_stdout_pump(
                                 {
                                     crate::sessions::chat_state::set_busy(&pump_session.session_id, false);
                                 }
+                                if live_turn {
+                                    crate::daemon::methods::spawn_chat::release_turn_slot(&pump_session.session_id);
+                                }
                                 // Drain-on-jarvis-idle (todo 272 chunk 3): this session IS
                                 // Jarvis and it just went idle - flush anything that queued
                                 // up while it was mid-turn. No-op (via the busy/ended guards
