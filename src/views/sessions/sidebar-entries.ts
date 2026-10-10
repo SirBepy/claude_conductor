@@ -93,11 +93,14 @@ export function buildSidebarEntries(
   let visible = listSessions.filter(s => !hidden.has(s.session_id) && !projectHidden(s));
   if (pendingRealId && !pendingRealVisible) {
     visible = visible.filter(s => s.session_id !== pendingRealId);
-  } else if (pending && !pendingRealId) {
+  } else if (pending && !pendingRealId && pending.firstMessageSent) {
     // Pre-resolution window: the SessionStart hook on our own `claude -p`
     // spawn registers an External entry before chat IPC captures the real
     // session_id. Hide that newcomer row so it doesn't double-render the
     // pending placeholder. Pre-existing sessions in the same cwd stay visible.
+    // Gated on firstMessageSent because start_session only fires on send: an
+    // unsent draft (persisted, so it outlives restarts) has no newcomer of its
+    // own, and filtering then hid every spawn_chat/respawn chat in its project.
     visible = visible.filter(s =>
       !(String(s.cwd) === pending.projectPath && !pending.preExistingSessionIds.has(s.session_id))
     );
