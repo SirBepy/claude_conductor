@@ -10,7 +10,7 @@
 //! (`methods::secret::respond_secret_inner`). This module only ever sees
 //! `label`/`file`/`key` - the metadata about the secret, never its contents.
 
-use super::permission::PROMPT_TIMEOUT;
+use super::permission::{await_answer, PROMPT_TIMEOUT};
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
@@ -26,17 +26,6 @@ pub(super) struct SecretRequestBody {
     key: String,
     #[serde(default)]
     session_id: Option<String>,
-}
-
-/// Await the answer oneshot with an upper bound. Same contract as
-/// `permission::await_answer`: kept as its own copy rather than shared, since
-/// the two prompt kinds resolve to differently-shaped payloads and a shared
-/// generic would buy nothing here.
-async fn await_answer(rx: tokio::sync::oneshot::Receiver<Value>, timeout: std::time::Duration) -> Option<Value> {
-    match tokio::time::timeout(timeout, rx).await {
-        Ok(Ok(val)) => Some(val),
-        _ => None,
-    }
 }
 
 pub(super) async fn on_secret_request(

@@ -40,6 +40,7 @@ import {
 } from "./gating";
 import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 import { showQuestionCard } from "./question-submit";
+import { createPromptQueue } from "./prompt-queue";
 export type { ShowQuestionCardOpts } from "./question-submit";
 
 export {
@@ -81,20 +82,20 @@ export function rerenderSidebar(): void {
 // drops the older prompt from all local tracking while the daemon still holds
 // it open, which is exactly "input needed" with nothing on screen to answer.
 // Queued here instead; drained into the slot once the front prompt resolves
-// (promoteQueuedSibling) or picked directly by id when its own transcript
+// (handlePromptResolved promotes it) or picked directly by id when its own transcript
 // card is clicked (resurface.ts's reopenPendingPrompt).
 
-const _queuedSiblingQuestions = new Map<string, QuestionRequestedPayload[]>();
+// Promotion re-runs the normal arrival gate - the slot is already empty by
+// the time handlePromptResolved promotes, so the sibling parks or shows
+// exactly as a fresh event would.
+const _queuedSiblingQuestions = createPromptQueue<QuestionRequestedPayload>((p) => handleQuestionRequested(p));
 
 /** Queue a still-open sibling behind whichever prompt already owns this
  *  session's slot, instead of clobbering it. No-op if already queued.
  *  Exported for resurface.ts's rehydration/reopen paths, which hit the same
  *  one-slot limit against the daemon's own `list_pending_prompts`. */
 export function queueSiblingQuestion(sessionId: string, payload: QuestionRequestedPayload): void {
-  const q = _queuedSiblingQuestions.get(sessionId) ?? [];
-  if (q.some((p) => p.id === payload.id)) return;
-  q.push(payload);
-  _queuedSiblingQuestions.set(sessionId, q);
+  _queuedSiblingQuestions.push(sessionId, payload);
 }
 
 /** Remove and return the queued sibling carrying `id`, if any - lets a
@@ -102,25 +103,7 @@ export function queueSiblingQuestion(sessionId: string, payload: QuestionRequest
  *  the "newest open question" fallback, which would wrongly mark a genuine
  *  sibling as superseded (todo 860). */
 export function takeQueuedSiblingQuestionById(sessionId: string, id: string): QuestionRequestedPayload | null {
-  const q = _queuedSiblingQuestions.get(sessionId);
-  if (!q) return null;
-  const i = q.findIndex((p) => p.id === id);
-  if (i === -1) return null;
-  const [payload] = q.splice(i, 1);
-  if (q.length === 0) _queuedSiblingQuestions.delete(sessionId);
-  return payload ?? null;
-}
-
-/** Promote the oldest queued sibling once the session's front prompt
- *  resolves, by re-running the normal arrival gate - the slot is already
- *  empty by the time handlePromptResolved calls this, so it parks or shows
- *  exactly as a fresh event would. */
-function promoteQueuedSibling(sessionId: string): void {
-  const q = _queuedSiblingQuestions.get(sessionId);
-  if (!q?.length) return;
-  const next = q.shift();
-  if (q.length === 0) _queuedSiblingQuestions.delete(sessionId);
-  if (next) handleQuestionRequested(next);
+  return _queuedSiblingQuestions.takeById(sessionId, id);
 }
 
 /** Which session (if any) currently owns the pending-prompt slot holding
@@ -143,15 +126,7 @@ function findSessionForPendingId(id: string): string | null {
 // instead, same shape as the sibling-question queue above, and drained once
 // the session's slot frees up (handlePromptResolved below).
 
-const _queuedSecrets = new Map<string, SecretRequestedPayload[]>();
-
-function promoteQueuedSecret(sessionId: string): void {
-  const q = _queuedSecrets.get(sessionId);
-  if (!q?.length) return;
-  const next = q.shift();
-  if (q.length === 0) _queuedSecrets.delete(sessionId);
-  if (next) handleSecretRequested(next);
-}
+const _queuedSecrets = createPromptQueue<SecretRequestedPayload>((p) => handleSecretRequested(p));
 
 /** A `request_secret` tool fired. Queue behind an already-open secret card for
  *  the SAME session, park a backgrounded session's, or surface the card (the
@@ -161,9 +136,7 @@ export function handleSecretRequested(payload: SecretRequestedPayload): void {
   if (sid) {
     const existing = peekPendingPrompt(sid);
     if (existing?.kind === "secret" && existing.payload.id !== payload.id) {
-      const q = _queuedSecrets.get(sid) ?? [];
-      if (!q.some((p) => p.id === payload.id)) q.push(payload);
-      _queuedSecrets.set(sid, q);
+      _queuedSecrets.push(sid, payload);
       rerenderSidebar();
       console.warn("[perm-gate] QUEUED secret-requested behind an open slot", { eventSessionId: sid, ...gateDiag() });
       return;
@@ -298,9 +271,9 @@ export function handlePromptResolved(id: string, durable = false): void {
   if (durable) dismissSecretCard(id);
   // A genuine resolve (or a background id that was never on screen) frees the
   // session's slot for its next queued sibling, if any (todo 897).
-  if (sid && (durable || !isActive)) promoteQueuedSibling(sid);
+  if (sid && (durable || !isActive)) _queuedSiblingQuestions.promote(sid);
   // Same freed-slot reasoning, for a queued secret request instead of a sibling question.
-  if (sid) promoteQueuedSecret(sid);
+  if (sid) _queuedSecrets.promote(sid);
   rerenderSidebar();
 }
 

@@ -122,7 +122,7 @@ async function applyRehydration(
     if (sib.kind === "question") queueSiblingQuestion(sessionId, sib.payload);
     // A `kind: "permission"` sibling past `rec` is dropped here on purpose,
     // not fixed (todo 975, checked 2026-09-26): the sibling QUEUE (index.ts's
-    // `_queuedSiblingQuestions`) and its promotion (`promoteQueuedSibling` ->
+    // `_queuedSiblingQuestions`) and its promotion (`_queuedSiblingQuestions.promote` ->
     // `handleQuestionRequested`) are both question-shaped only - there is no
     // permission-sibling queue to push this into, and building one is a
     // cross-file change outside this fix's scope. Confirmed NOT provably
@@ -268,7 +268,7 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     // at onSubmit/onCancel before the daemon's `prompt-resolved` poll clears
     // it) must not be requeued as if still open - `queueSiblingQuestion` only
     // takes a bare payload, so re-queuing it here would drop the flag on the
-    // way in, and a later promotion (index.ts's promoteQueuedSibling) would
+    // way in, and a later promotion (index.ts's `_queuedSiblingQuestions.promote`) would
     // re-render it as a fresh, unanswered card (todo 975). Nothing left to
     // track: the answer already went out via respond_question.
     if (!displaced.answered) queueSiblingQuestion(sessionId, displaced.payload);

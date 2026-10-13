@@ -24,8 +24,9 @@ pub(crate) const PROMPT_TIMEOUT: Duration = Duration::from_secs(3600);
 /// Await the answer oneshot with an upper bound. `Some(val)` iff the user
 /// responded; `None` if the wait elapsed OR the sender was dropped (daemon
 /// restart / dismissal). Both map to the same "no answer" wire behavior, so
-/// callers treat them identically.
-async fn await_answer(rx: tokio::sync::oneshot::Receiver<Value>, timeout: Duration) -> Option<Value> {
+/// callers treat them identically. Shared with `secret.rs`, whose prompt
+/// waits on the same kind of oneshot.
+pub(super) async fn await_answer(rx: tokio::sync::oneshot::Receiver<Value>, timeout: Duration) -> Option<Value> {
     match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(val)) => Some(val),
         _ => None,
