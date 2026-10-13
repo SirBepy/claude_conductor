@@ -15,7 +15,10 @@
 //! instead ("sync_threadpool"), so `build()` dispatches to a *free* event loop
 //! and returns normally. It keeps the plain-fn signature, so the direct Rust
 //! call sites (`lib.rs`'s setup, `tray::menu`) are unaffected - those already
-//! run outside a webview callback and were never at risk.
+//! run outside a webview callback and were never at risk. The one direct call
+//! that WAS at risk is `lib.rs`'s single-instance callback, which runs inside a
+//! WM_COPYDATA window proc and so defers `open_dashboard` to a blocking-pool
+//! thread instead.
 //!
 //! `ipc::chat::lifecycle::detach_window` is the same rule expressed as a true
 //! `async fn`; it has always worked for exactly this reason.
@@ -295,5 +298,29 @@ mod tests {
         check_file(include_str!("jarvis.rs"), &mut checked);
         check_file(include_str!("preview.rs"), &mut checked);
         assert!(checked >= 8, "expected to check every open_* command, only saw {checked}");
+    }
+
+    /// The single-instance callback is the one non-IPC caller that runs in a
+    /// context where `build()` cannot return: inside the plugin's WM_COPYDATA
+    /// window proc, mid cross-process SendMessageW (see the comment in
+    /// `lib.rs`). Calling `open_dashboard` inline there froze the app on the
+    /// first relaunch after every reboot, so the call must stay deferred.
+    #[test]
+    fn second_launch_handoff_builds_the_dashboard_off_the_window_proc() {
+        let src = include_str!("../../lib.rs");
+        let start = src
+            .find("tauri_plugin_single_instance::init(")
+            .expect("single-instance plugin registration not found in lib.rs");
+        let body = &src[start..start + src[start..].find("}));").expect("callback end")];
+        let call = body
+            .find("open_dashboard(")
+            .expect("second-launch handoff no longer surfaces the dashboard");
+        let deferred = body[..call].rfind("spawn_blocking(");
+        assert!(
+            deferred.is_some_and(|d| !body[d..call].contains(';')),
+            "the single-instance callback must call open_dashboard inside \
+             tauri::async_runtime::spawn_blocking, never inline - building a \
+             window from the WM_COPYDATA window proc freezes the app"
+        );
     }
 }

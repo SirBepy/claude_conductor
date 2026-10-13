@@ -109,8 +109,19 @@ pub fn run() {
             // has not opened it yet this session (main is lazy - ai_todo 143).
             // Relaunching is the fallback when the tray is unreachable; no line
             // here means the handoff never fired.
+            //
+            // Never build a window inline here: on Windows this callback runs
+            // inside the plugin's WM_COPYDATA window proc while the second
+            // process is still blocked in SendMessageW, and building `main`'s
+            // WebView2 from there never returns - the whole app freezes, only
+            // killable. That froze the first run after every reboot: autostart
+            // launches the app to the tray, then clicking its icon is a second
+            // launch. A blocking-pool thread makes `build()` dispatch to the
+            // event loop once this handler has returned, like the
+            // `#[tauri::command(async)]` openers in `ipc::window`.
             log::info!("single-instance: second launch handed off, surfacing dashboard");
-            crate::ipc::open_dashboard(app.clone());
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || crate::ipc::open_dashboard(app));
         }));
     }
 
