@@ -30,7 +30,10 @@ import type {
   OauthAccountInfo,
   AuthState,
   ApiKeyStatus,
+  GamingModeView,
 } from "../types/ipc.generated";
+
+export type { GamingModeView };
 
 export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, OauthAccountInfo, AuthState, ApiKeyStatus };
 
@@ -472,6 +475,12 @@ export const api = {
     invoke("import_legacy_obsidian_config"),
   confirmLegacyObsidianImport: (accept: boolean): Promise<unknown> =>
     invoke("confirm_legacy_obsidian_import", { accept }),
+
+  // --- Gaming mode (desktop-pipe only; never reaches the remote/phone transport) ---
+  getGamingMode: (): Promise<GamingModeView> => invoke("get_gaming_mode"),
+  setGamingMode: (on: boolean): Promise<GamingModeView> => invoke("set_gaming_mode", { on }),
+  onGamingModeChanged: (cb: (v: GamingModeView) => void): Unlisten =>
+    listenEvent<GamingModeView>("gaming-mode-changed", cb),
 
   // --- Instances ---
   listInstances: async (): Promise<InstanceInfo[]> => {

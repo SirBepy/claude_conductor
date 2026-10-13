@@ -28,6 +28,7 @@ interface ProjectCfg {
   preferred_account_id?: string | null;
   claude_ai_connectors?: boolean;
   tracker?: TicketTracker | null;
+  keep_running_in_gaming_mode?: boolean;
 }
 
 /** Which account new chats in this project spawn under (multi-account
@@ -128,6 +129,35 @@ async function renderConnectorsRow(): Promise<void> {
       } finally {
         toggle.disabled = false;
         await renderConnectorsRow();
+      }
+    })();
+  };
+}
+
+/** Gaming mode's per-project allowlist: a chat here is never parked, and a
+ *  supervised dev-server entry rooted here is never stopped, while gaming
+ *  mode is on. Exported so it can be unit-tested directly without standing
+ *  up the whole subview's other rows. */
+export async function renderGamingModeRow(): Promise<void> {
+  const cwd = getProjectDetailState().cwd;
+  const toggle = document.getElementById("gamingModeKeepRunning") as HTMLInputElement | null;
+  if (!cwd || !toggle) return;
+  const projects = (await api.listProjects()) as unknown as ProjectCfg[];
+  const proj = projects.find((p) => p.path === cwd);
+  toggle.checked = !!proj?.keep_running_in_gaming_mode;
+  toggle.onchange = () => {
+    void (async () => {
+      toggle.disabled = true;
+      try {
+        const id = proj?.id ?? (await api.ensureProject(cwd)).id;
+        await api.updateProject(id, { keep_running_in_gaming_mode: toggle.checked });
+        showToast(toggle.checked ? "Exempt from gaming mode." : "Parked by gaming mode like any other project.");
+      } catch (e) {
+        console.error("[automation] update gaming-mode allowlist failed", e);
+        showToast(`Could not update gaming mode setting: ${e}`);
+      } finally {
+        toggle.disabled = false;
+        await renderGamingModeRow();
       }
     })();
   };
@@ -280,6 +310,7 @@ export async function renderAutomationView(
   await renderAutomationForm();
   await renderAccountRow();
   await renderConnectorsRow();
+  await renderGamingModeRow();
   await renderTrackerRow();
 
   return () => { /* no teardown */ };
@@ -308,6 +339,15 @@ function template(avatar: Avatar, title: string, projectPath?: string) {
               <div class="option-label">Use your claude.ai connectors (Google Drive etc.) in this project's chats</div>
             </span>
             <label class="switch"><input type="checkbox" id="connectorsEnabled"><span class="slider"></span></label>
+          </div>
+        </section>
+        <section class="automation-section" id="gamingModeSection" style="margin-top:16px">
+          <div class="section-title">Gaming mode</div>
+          <div class="option">
+            <span class="oi">
+              <div class="option-label">Keep running in gaming mode</div>
+            </span>
+            <label class="switch"><input type="checkbox" id="gamingModeKeepRunning"><span class="slider"></span></label>
           </div>
         </section>
         <section class="automation-section" id="trackerSection" style="margin-top:16px">

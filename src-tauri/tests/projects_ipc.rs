@@ -22,6 +22,7 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         last_start_folder_rel: None,
         claude_ai_connectors: false,
         tracker: None,
+        keep_running_in_gaming_mode: false,
     }
 }
 

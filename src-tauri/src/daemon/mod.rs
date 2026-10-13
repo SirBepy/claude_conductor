@@ -12,6 +12,7 @@ pub mod detector_task;
 pub mod device_registry;
 pub mod draft_store;
 pub mod frame;
+pub mod gaming_mode;
 pub mod handshake;
 pub mod health;
 pub mod hooks_server;

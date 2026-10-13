@@ -76,6 +76,24 @@ pub fn setup(app: &AppHandle) -> Result<()> {
                 "mute-1h" => select_mute(app.clone(), MuteChoice::Timed(HOUR_SECS)),
                 "mute-3h" => select_mute(app.clone(), MuteChoice::Timed(3 * HOUR_SECS)),
                 "mute-1d" => select_mute(app.clone(), MuteChoice::Timed(24 * HOUR_SECS)),
+                "gaming-mode" => {
+                    // Quiet affordance only (no badge/toast): the check item's
+                    // own state and the tray tooltip are the indicator. The
+                    // daemon re-publishes `gaming_mode_changed` once the
+                    // toggle actually lands, which is what flips the check
+                    // mark - this click just fires the request.
+                    let h = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let next = !*h.state::<AppState>().gaming_mode.lock().unwrap();
+                        let client_slot = h.state::<AppState>().daemon_client.clone();
+                        let guard = client_slot.lock().await;
+                        if let Some(client) = guard.as_ref() {
+                            if let Err(e) = client.set_gaming_mode(next).await {
+                                log::warn!("tray: set_gaming_mode failed: {e}");
+                            }
+                        }
+                    });
+                }
                 "update-install" => {
                     crate::ipc::install_update(app.clone());
                 }
@@ -199,6 +217,11 @@ pub fn render_tray_now(app: &AppHandle) {
         #[cfg(target_os = "macos")]
         let _ = tray.set_icon_as_template(false);
     }
+    // Gaming mode's only indicator besides the tray menu's own check item
+    // (quiet affordance, no badge/toast) - see the tray menu's own doc.
+    let gaming_mode_on = *state.gaming_mode.lock().unwrap();
+    let tooltip = if gaming_mode_on { "Claude Conductor (Gaming mode on)" } else { "Claude Conductor" };
+    let _ = tray.set_tooltip(Some(tooltip));
 }
 
 fn build_menu(app: &AppHandle, settings: &Settings, update: &serde_json::Value) -> Result<Menu<tauri::Wry>> {
@@ -236,10 +259,16 @@ fn build_menu(app: &AppHandle, settings: &Settings, update: &serde_json::Value) 
     if !*app.state::<AppState>().widget_hosted.lock().unwrap() {
         builder = builder.item(&MenuItemBuilder::with_id("show-overlay", "Show overlay").build(app)?);
     }
+    let gaming_mode_on = *app.state::<AppState>().gaming_mode.lock().unwrap();
     builder = builder
         .separator()
         .item(&MenuItemBuilder::with_id("refresh", "Refresh Now").build(app)?)
-        .item(&mute);
+        .item(&mute)
+        .item(
+            &CheckMenuItemBuilder::with_id("gaming-mode", "Gaming mode")
+                .checked(gaming_mode_on)
+                .build(app)?,
+        );
 
     let state = update.get("state").and_then(|v| v.as_str()).unwrap_or("");
     let version = update.get("version").and_then(|v| v.as_str()).unwrap_or("");

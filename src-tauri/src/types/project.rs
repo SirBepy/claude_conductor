@@ -85,6 +85,12 @@ pub struct ProjectConfig {
     /// `None` infers from the git remote (`tickets::infer_from_remote`).
     #[serde(default)]
     pub tracker: Option<crate::tickets::TicketTracker>,
+    /// Gaming mode's per-project allowlist: a chat under this project is
+    /// never parked, and a supervised dev-server entry rooted under this
+    /// project's path is never stopped, while gaming mode is on. Default
+    /// false so an existing project opts in explicitly.
+    #[serde(default)]
+    pub keep_running_in_gaming_mode: bool,
 }
 
 /// Which paired peer machine an `Instance` row is mirrored from, and
@@ -312,6 +318,7 @@ mod tests {
             last_start_folder_rel: None,
             claude_ai_connectors: false,
             tracker: None,
+            keep_running_in_gaming_mode: false,
         };
         let raw = serde_json::to_string(&p).unwrap();
         let back: ProjectConfig = serde_json::from_str(&raw).unwrap();

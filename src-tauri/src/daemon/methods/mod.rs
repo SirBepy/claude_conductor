@@ -25,6 +25,7 @@ mod drain;
 // dialog to point `create_folder` (files.rs's desktop-only Tauri command) at.
 mod create_project;
 mod files;
+mod gaming_mode;
 /// Shared mechanism (short-id truncation, capped-list overflow line) behind
 /// `user_todos`, `drafts_store::inject`, and `schedule_mcp`'s injected blocks.
 mod injection_util;
@@ -79,6 +80,7 @@ pub use drafts_store::register_drafts_store;
 pub use drain::register_drain;
 pub use create_project::register_create_project;
 pub use files::register_files;
+pub use gaming_mode::register_gaming_mode;
 pub use hidden_chats::register_hidden_chats;
 pub use history::register_history;
 pub use jarvis::register_jarvis;
