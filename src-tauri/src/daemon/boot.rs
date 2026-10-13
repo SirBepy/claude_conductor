@@ -110,6 +110,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_step_comments(&mut router, state.clone());
     methods::register_user_todos(&mut router, state.clone());
     methods::register_hidden_chats(&mut router, state.clone());
+    methods::register_gaming_mode(&mut router, state.clone());
     methods::register_drafts_store(&mut router, state.clone());
     methods::register_ask(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());

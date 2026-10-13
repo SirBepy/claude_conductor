@@ -1,6 +1,8 @@
 import { html, render } from "lit-html";
 import { openSidemenu } from "../../shared/sidemenu";
-import { settingsHeader, navRow } from "./ui";
+import { settingsHeader, navRow, toggleRow } from "./ui";
+import { api } from "../../shared/api";
+import { showToast } from "../../shared/toast";
 import "./settings.css";
 
 interface LegacyGlobals {
@@ -14,15 +16,46 @@ function g(): LegacyGlobals {
 export async function renderSettingsView(
   root: HTMLElement,
 ): Promise<() => void> {
-  render(template(), root);
+  let gamingModeOn = false;
+  try { gamingModeOn = (await api.getGamingMode()).on; }
+  catch (e) { console.error("get_gaming_mode failed", e); }
 
-  const burger = root.querySelector<HTMLButtonElement>('[data-burger="true"]');
-  if (burger) burger.onclick = () => openSidemenu();
+  const draw = () => {
+    render(template(gamingModeOn, onToggleGamingMode), root);
+    const burger = root.querySelector<HTMLButtonElement>('[data-burger="true"]');
+    if (burger) burger.onclick = () => openSidemenu();
+  };
 
-  return () => {};
+  const onToggleGamingMode = () => {
+    void (async () => {
+      const next = !gamingModeOn;
+      try {
+        const v = await api.setGamingMode(next);
+        gamingModeOn = v.on;
+        showToast(
+          gamingModeOn
+            ? `Gaming mode on - ${v.paused_sessions} chat(s) parked, ${v.stopped_procs} dev server(s) and ${v.stopped_containers} container(s) stopped.`
+            : "Gaming mode off - resuming parked chats and dev servers.",
+        );
+      } catch (e) {
+        console.error("set_gaming_mode failed", e);
+        showToast(`Could not toggle gaming mode: ${e}`);
+      }
+      draw();
+    })();
+  };
+
+  draw();
+
+  const unlisten = api.onGamingModeChanged((v) => {
+    gamingModeOn = v.on;
+    draw();
+  });
+
+  return () => { unlisten(); };
 }
 
-function template() {
+function template(gamingModeOn: boolean, onToggleGamingMode: () => void) {
   const nav = (name: string) => void g().navigateTo(name);
   return html`
     <div class="view view-settings">
@@ -41,6 +74,13 @@ function template() {
           ${navRow("Chat defaults", "ph-chats-circle", () => nav("settings-chat-defaults"))}
           ${navRow("Permissions", "ph-shield-check", () => nav("settings-permissions"))}
           ${navRow("Statusline", "ph-list-dashes", () => nav("settings-statusline"))}
+          ${toggleRow({
+            label: "Gaming mode",
+            inputId: "gamingModeToggle",
+            checked: gamingModeOn,
+            onChange: onToggleGamingMode,
+            tooltip: "Parks every chat (except projects marked “Keep running”) and stops dev servers, Docker containers and Docker Desktop. Flip off to resume everything.",
+          })}
         </div>
 
         <div class="kit-section">

@@ -63,6 +63,17 @@ pub async fn run_app_subscription(app_handle: tauri::AppHandle) {
                         let _ = app_handle.emit("channels-changed", channels);
                     }
                 }
+                // Gaming mode is daemon-persisted and can already be on from
+                // before this app process started (or across a daemon
+                // restart) - seed the tray's cached flag from the daemon's
+                // own state rather than defaulting to false until the next
+                // toggle.
+                if let Ok(v) = client.get_gaming_mode().await {
+                    if let Some(on) = v.get("on").and_then(serde_json::Value::as_bool) {
+                        *state.gaming_mode.lock().unwrap() = on;
+                        crate::tray::rebuild_menu_and_render(&app_handle);
+                    }
+                }
             }
             {
                 // Writes the slot itself (todo 1006) - keeps the lock.
@@ -240,6 +251,18 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
             let state = app.state::<crate::state::AppState>();
             *state.widget_hosted.lock().unwrap() = hosted;
             crate::tray::rebuild_menu_and_render(app);
+        }
+        // Gaming mode toggled (desktop-pipe only - never the phone/remote
+        // transport). Payload is `GamingModeSummary` JSON - keep the tray's
+        // cached flag current and rebuild its check item, then forward for
+        // the Settings toggle to re-render from.
+        "gaming_mode_changed" => {
+            if let Some(on) = params.get("on").and_then(serde_json::Value::as_bool) {
+                let state = app.state::<crate::state::AppState>();
+                *state.gaming_mode.lock().unwrap() = on;
+            }
+            crate::tray::rebuild_menu_and_render(app);
+            let _ = app.emit("gaming-mode-changed", params);
         }
         "channels_changed" => {
             let state = app.state::<crate::state::AppState>();

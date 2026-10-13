@@ -185,6 +185,7 @@ mod tests {
             last_start_folder_rel: None,
             claude_ai_connectors: false,
             tracker: None,
+            keep_running_in_gaming_mode: false,
         });
         let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
         state.init_machines(dir.path().to_path_buf());
