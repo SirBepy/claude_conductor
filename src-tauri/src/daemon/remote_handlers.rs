@@ -24,7 +24,9 @@ use crate::daemon::device_registry::{DeviceKind, DeviceRegistry};
 use crate::daemon::rpc::Transport;
 
 use super::remote_server::RemoteCtx;
-use super::remote_ws_pump::{pump_events, pump_global_events, pump_relayed_session_events};
+use super::remote_ws_pump::{
+    pump_events, pump_external_session_events, pump_global_events, pump_relayed_session_events,
+};
 
 // The TRANSPORT_TABLE allowlist, TransportMask and allowed() live in
 // `remote_transport_table` (todo 934: the table's per-method rationale
@@ -237,6 +239,32 @@ pub(super) async fn stream_ws(
     if let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) {
         let state = ctx.state.clone();
         return ws.on_upgrade(move |socket| pump_events(socket, state, id, session));
+    }
+    // Not a daemon-hosted session - maybe an EXTERNAL (terminal) one this
+    // daemon's own registry knows about: no `claude` child/pump of ours, so
+    // there's no broadcast channel for `pump_events` to subscribe to. Its
+    // live stream instead tails the transcript file this daemon's own hook
+    // server already resolved at session-start time (`Instance.transcript_path`,
+    // falling back to a scan the same way `locate_transcript` does for a
+    // caller that only has `cwd`). Resolved only from THIS daemon's own
+    // registry, never from a mirrored row - `machines::all_instances` never
+    // tags a row THIS daemon registered itself with a `machine`, so a row
+    // reaching here with `kind == External` is always genuinely local. Fixes
+    // the gap `docs/multi-machine.md`'s "Known limits" used to name: an
+    // external session mirrored to a peer got history but no live updates
+    // until reopened, because this branch didn't exist and execution fell
+    // through to the mirror lookup below, which 404s for a row that was never
+    // mirrored INTO this daemon in the first place.
+    if let Some(inst) = ctx.state.registry.get(&id) {
+        if inst.kind == crate::sessions::kinds::InstanceKind::External {
+            let path = inst.transcript_path.clone().or_else(|| {
+                crate::chat::history::locate_transcript(&id, Some(&inst.cwd.to_string_lossy())).ok()
+            });
+            return match path {
+                Some(p) => ws.on_upgrade(move |socket| pump_external_session_events(socket, p)),
+                None => (StatusCode::NOT_FOUND, "no transcript for external session").into_response(),
+            };
+        }
     }
     // Not a local session - maybe one mirrored in from a paired peer.
     let Some(owner) = ctx.state.mirror.owner_of(&id) else {

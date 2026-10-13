@@ -4,7 +4,7 @@
 
 use crate::types::chat::ChatEvent;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 use ts_rs::TS;
 
@@ -102,6 +102,55 @@ where
     })
     .await
     .map_err(|e| format!("join: {}", e))?
+}
+
+/// Read whatever complete JSONL lines were appended to `path` since byte
+/// `offset`, returning the parsed events and the offset to resume from on
+/// the next call. A trailing partial line (write still in progress, no `\n`
+/// yet) is left unconsumed rather than guessed at.
+///
+/// Shared by two pollers that both tail a live transcript from a remembered
+/// offset rather than replaying the whole file: the desktop's
+/// `ipc::chat::watcher::watch_session_transcript` (a local External session
+/// opened in the Sessions view) and the daemon's
+/// `daemon::remote_ws_pump::pump_external_session_events` (serving a mirrored
+/// peer's request for the SAME kind of session's live stream over
+/// `/api/sessions/:id/stream` - see `docs/multi-machine.md`'s "Known limits").
+/// Both used to carry their own copy of this read-seek-parse loop; a missing
+/// partial-line guard in only one copy would silently emit a truncated,
+/// unparseable JSON fragment as a dropped line instead of waiting for the
+/// rest of it.
+pub fn tail_new_events(path: &Path, offset: u64) -> (Vec<ChatEvent>, u64) {
+    let mut f = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return (Vec::new(), offset),
+    };
+    if f.seek(SeekFrom::Start(offset)).is_err() {
+        return (Vec::new(), offset);
+    }
+    let mut reader = BufReader::new(f);
+    let mut events = Vec::new();
+    let mut new_offset = offset;
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(n) => {
+                if line.ends_with('\n') {
+                    new_offset += n as u64;
+                    let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+                    if !trimmed.trim().is_empty() {
+                        events.extend(crate::chat::parser::parse_line(trimmed));
+                    }
+                } else {
+                    // Partial line - wait for the next poll/notification.
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    (events, new_offset)
 }
 
 pub fn replay(path: &Path) -> Result<Vec<ChatEvent>, String> {
@@ -291,6 +340,64 @@ mod tests {
     fn replay_returns_err_on_missing_file() {
         let r = replay(Path::new("/this/file/does/not/exist.jsonl"));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn tail_new_events_returns_nothing_for_a_missing_file() {
+        let (events, offset) = tail_new_events(Path::new("/this/file/does/not/exist.jsonl"), 0);
+        assert!(events.is_empty());
+        assert_eq!(offset, 0);
+    }
+
+    #[test]
+    fn tail_new_events_reads_only_whats_new_since_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("tail.jsonl");
+        std::fs::write(
+            &p,
+            format!(
+                "{}\n",
+                r#"{"type":"user","message":{"role":"user","content":"first"}}"#
+            ),
+        )
+        .unwrap();
+
+        // Nothing appended yet since offset 0 was never consumed - simulate a
+        // caller that already read the first line and remembers its offset.
+        let (first_events, offset_after_first) = tail_new_events(&p, 0);
+        assert_eq!(first_events.len(), 1);
+
+        // Append a second line after that offset: only the NEW line comes back.
+        let mut f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
+        use std::io::Write;
+        writeln!(
+            f,
+            r#"{{"type":"user","message":{{"role":"user","content":"second"}}}}"#
+        )
+        .unwrap();
+
+        let (second_events, offset_after_second) = tail_new_events(&p, offset_after_first);
+        assert_eq!(second_events.len(), 1, "only the newly-appended line should be returned");
+        match &second_events[0] {
+            ChatEvent::UserMessage { content, .. } => match &content[0] {
+                ContentBlock::Text { text } => assert_eq!(text, "second"),
+                _ => panic!("expected text block"),
+            },
+            _ => panic!("expected UserMessage"),
+        }
+        assert!(offset_after_second > offset_after_first);
+    }
+
+    #[test]
+    fn tail_new_events_leaves_a_trailing_partial_line_unconsumed() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("partial.jsonl");
+        // No trailing newline: a write still in progress.
+        std::fs::write(&p, r#"{"type":"user","message":{"role":"user","content":"x"}"#).unwrap();
+
+        let (events, offset) = tail_new_events(&p, 0);
+        assert!(events.is_empty(), "a partial line must not be parsed yet");
+        assert_eq!(offset, 0, "offset must not advance past an incomplete line");
     }
 
     #[test]

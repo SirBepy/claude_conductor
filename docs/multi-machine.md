@@ -126,11 +126,34 @@ chat rather than proxy them. Todo 1129 proxies the READ half instead:
 own data dir and remote port. Pair it by its direct `http://127.0.0.1:<port>` URL (only the default
 instance advertises iroh).
 
+## Mirrored external (terminal) session live stream (2026-10-13)
+
+A `claude` session started in a terminal (`kind: External`) has no daemon child/pump on its own
+machine, so it was never reachable through `/api/sessions/:id/stream`: that handler
+(`remote_handlers::stream_ws`) only checked `ctx.state.sessions` (daemon-hosted chats) and then
+`ctx.state.mirror.owner_of` (a row mirrored IN from some OTHER peer) - a row the daemon registered
+about its OWN external session matched neither, so the handshake 404'd. A desktop/phone viewing
+that session from a peer got history (the forwarded `load_history_page` still worked) but no live
+updates until reopened - the gap this section used to name.
+
+Fix: `stream_ws` now also checks the local registry for a `kind == External` row before falling
+through to the mirror lookup, and resolves it to `pump_external_session_events`
+(`daemon/remote_ws_pump.rs`), which tails the session's own `transcript_path` from its current EOF
+and emits the same raw `ChatEvent` frames `pump_events` sends for a daemon-hosted chat - so neither
+consumer (`attach_session`'s relay wrap for desktop, or the phone's verbatim forward) needed to
+change. The read-seek-partial-line-safe tail loop itself was extracted out of the desktop's
+`ipc::chat::watcher::watch_session_transcript` into `chat::history::tail_new_events`, shared by
+both pollers instead of duplicated.
+
+Test: `methods/lifecycle/attach.rs::attach_session_relays_an_external_sessions_new_transcript_lines`
+- a real two-daemon loopback where B registers an External `Instance` backed by a temp JSONL file,
+  A attaches through the normal `attach_session` RPC + relay path, and a line appended to B's file
+  after attach arrives on A as a `chat_event` frame. Unit tests for `tail_new_events` itself live
+  in `chat/history.rs`.
+
 ## Known limits
 
 - One hop only: a phone paired to the PC reaches Mac chats through the PC, never a third machine.
-- A mirrored external (terminal) session has no live stream: `watch_session_transcript` tails a
-  local JSONL file and the peer's session stream only serves daemon-hosted chats.
 - Code mode / git views for a mirrored chat now proxy their READS only (todo 1129, see the G10
   follow-up above) - `push_commits`/`pull_commits`/`checkout_branch` and open-in-editor/explorer
   stay hidden/disabled, and `resolve_commit_refs` stays phone-only.

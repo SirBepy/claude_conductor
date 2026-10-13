@@ -280,6 +280,62 @@ pub(super) async fn pump_relayed_session_events(
     }
 }
 
+/// Poll interval for `pump_external_session_events`'s transcript tail.
+/// Shorter than `relay::RELAY_RETRY` (a network reconnect backoff) since
+/// this is a plain local file read: the goal is "feels live", not
+/// battery-friendly background polling.
+const EXTERNAL_TAIL_POLL: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Serves the live stream for an EXTERNAL (terminal) session THIS daemon's
+/// own registry knows about - one with no daemon child/pump, so
+/// `pump_events`'s subscribe-to-a-broadcast-channel path doesn't apply (see
+/// `stream_ws`'s call site). Tails `transcript_path` from its current EOF
+/// (history already covers everything written before this socket opened)
+/// using the same offset-based, partial-line-safe reader the desktop's
+/// `watch_session_transcript` command uses
+/// (`crate::chat::history::tail_new_events`), and emits each new parsed
+/// `ChatEvent` as the same raw-JSON frame shape `pump_events` sends for a
+/// daemon-hosted chat - so neither consumer (`attach_session`'s relay, which
+/// re-wraps every frame, or the phone's verbatim forward) needs to know
+/// which kind of session it's reading from.
+pub(super) async fn pump_external_session_events(mut socket: WebSocket, transcript_path: std::path::PathBuf) {
+    let mut offset = tokio::task::spawn_blocking({
+        let p = transcript_path.clone();
+        move || std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0)
+    })
+    .await
+    .unwrap_or(0);
+
+    let mut poll = tokio::time::interval(EXTERNAL_TAIL_POLL);
+    loop {
+        tokio::select! {
+            _ = poll.tick() => {
+                let (events, new_offset) = tokio::task::spawn_blocking({
+                    let p = transcript_path.clone();
+                    let cur = offset;
+                    move || crate::chat::history::tail_new_events(&p, cur)
+                })
+                .await
+                .unwrap_or((Vec::new(), offset));
+                offset = new_offset;
+                for ev in events {
+                    let txt = match serde_json::to_string(&ev) {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    if socket.send(Message::Text(txt)).await.is_err() {
+                        return; // client gone
+                    }
+                }
+            }
+            incoming = socket.recv() => match incoming {
+                Some(Ok(_)) => {}      // ignore client->server frames
+                _ => return,            // client closed or errored
+            },
+        }
+    }
+}
+
 /// Poll the SessionMap for `session_id` to come back live, up to
 /// `RESPAWN_MAX_WAIT`, while still watching `socket` so a client-initiated
 /// close is honored immediately instead of waiting out the poll.

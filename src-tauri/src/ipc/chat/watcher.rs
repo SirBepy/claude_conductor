@@ -12,8 +12,6 @@
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
@@ -148,42 +146,13 @@ pub async fn watch_session_transcript(
             }
 
             let path = resolved_path.as_ref().unwrap().clone();
+            // Shared with the daemon's `pump_external_session_events` - see
+            // that fn's doc for why the read-seek-parse loop lives in one
+            // place instead of two.
             let (new_events, new_offset) = tauri::async_runtime::spawn_blocking({
                 let p = path.clone();
                 let cur = offset;
-                move || -> (Vec<crate::types::chat::ChatEvent>, u64) {
-                    let mut f = match File::open(&p) {
-                        Ok(f) => f,
-                        Err(_) => return (vec![], cur),
-                    };
-                    if f.seek(SeekFrom::Start(cur)).is_err() {
-                        return (vec![], cur);
-                    }
-                    let mut reader = BufReader::new(f);
-                    let mut evs = Vec::new();
-                    let mut new_off = cur;
-                    loop {
-                        let mut line = String::new();
-                        match reader.read_line(&mut line) {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                if line.ends_with('\n') {
-                                    new_off += n as u64;
-                                    let trimmed =
-                                        line.trim_end_matches(|c| c == '\r' || c == '\n');
-                                    if !trimmed.trim().is_empty() {
-                                        evs.extend(crate::chat::parser::parse_line(trimmed));
-                                    }
-                                } else {
-                                    // Partial line — wait for the next notification.
-                                    break;
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    (evs, new_off)
-                }
+                move || crate::chat::history::tail_new_events(&p, cur)
             })
             .await
             .unwrap_or((vec![], offset));

@@ -409,4 +409,124 @@ mod relay_tests {
         b_serve.kill();
         let _ = b_child.kill().await;
     }
+
+    /// B's session is EXTERNAL (started in a terminal, not by B's daemon) -
+    /// no `sessions` map entry, no broadcast channel for `pump_events` to
+    /// subscribe to. Before the fix, B's `/api/sessions/:id/stream` (served
+    /// by `remote_handlers::stream_ws`) only ever checked `ctx.state.sessions`
+    /// and then `ctx.state.mirror.owner_of` (a row mirrored IN from some
+    /// OTHER peer) - neither matches a row B registered itself, so the
+    /// handshake 404'd and `relay_session_frames` could never establish a
+    /// connection to forward frames from, leaving A's attach "succeed" (the
+    /// RPC call itself has no failure mode for an unreachable relay target)
+    /// but silent forever after. This is the gap
+    /// `docs/multi-machine.md`'s "Known limits" named: history arrived via
+    /// the forwarded `load_history_page`, but no live update ever did.
+    ///
+    /// Reproduces it end-to-end: B registers an External `Instance` whose
+    /// `transcript_path` points at a real temp JSONL file, A attaches to it
+    /// through the normal `attach_session` RPC + relay path, then a new line
+    /// is appended to B's file (simulating a fresh terminal turn) and must
+    /// arrive on A's outbound channel as the same `chat_event`-wrapped frame
+    /// shape a daemon-hosted session's broadcast would have produced.
+    #[tokio::test]
+    async fn attach_session_relays_an_external_sessions_new_transcript_lines() {
+        let a_dir = tempdir().unwrap();
+        let b_dir = tempdir().unwrap();
+        let sid = "ext-session-1";
+
+        let transcript_dir = tempdir().unwrap();
+        let transcript_path = transcript_dir.path().join(format!("{sid}.jsonl"));
+        std::fs::write(&transcript_path, "").unwrap();
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let b_settings = std::sync::Mutex::new(Settings::default());
+        b_state.registry.register(
+            crate::sessions::registry::RegisterInput {
+                session_id: sid.into(),
+                cwd: transcript_dir.path().to_path_buf(),
+                pid: 0,
+                kind: InstanceKind::External,
+                is_remote: false,
+                transcript_path: Some(transcript_path.clone()),
+                started_at: "2026-10-13T00:00:00Z".into(),
+            },
+            &b_settings,
+            "2026-10-13T00:00:00Z",
+        );
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), b_dir.path().to_path_buf(), Router::new(), 0);
+        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        a_state.init_machines(a_dir.path().to_path_buf());
+        a_state.machines.get().unwrap().ensure_self();
+        let (token_for_a, _device_id) = DeviceRegistry::add_machine_device("A", "mach-a", b_dir.path()).unwrap();
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: b_id.clone(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token: token_for_a,
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        a_state.mirror.set_instances(&b_id, "B", vec![mirrored_instance(sid)]);
+        a_state.mirror.set_online(&b_id, true);
+
+        let mut router = Router::new();
+        register_attach(&mut router, a_state.clone());
+
+        let (ctx, mut rx) = dummy_ctx();
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "attach_session".into(),
+                    params: Some(json!({"session_id": sid})),
+                },
+                ctx,
+            )
+            .await;
+        assert!(
+            resp.error.is_none(),
+            "attach must succeed for a mirrored external session: {:?}",
+            resp.error
+        );
+
+        // Append a new turn's line to B's transcript AFTER attach, mimicking
+        // a fresh message typed into the terminal `claude` session. Keeps
+        // appending (not a single write) on every iteration - the relay's WS
+        // handshake to B, and `pump_external_session_events`'s own EOF-offset
+        // capture, still have to land first; a single early write would be
+        // swallowed into that initial offset and never tailed, same race
+        // `attach_session_relays_a_mirrored_sessions_chat_events_and_detach_stops_it`
+        // avoids above by resending its marker every iteration too.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut saw_it = false;
+        while tokio::time::Instant::now() < deadline {
+            {
+                let mut f = std::fs::OpenOptions::new().append(true).open(&transcript_path).unwrap();
+                use std::io::Write as _;
+                let _ = writeln!(
+                    f,
+                    r#"{{"type":"user","message":{{"role":"user","content":"hello from terminal"}}}}"#
+                );
+            }
+            if let Ok(Some(frame)) = tokio::time::timeout(std::time::Duration::from_millis(300), rx.recv()).await {
+                if frame["method"] == json!("chat_event")
+                    && frame["params"]["session_id"] == json!(sid)
+                    && frame["params"]["event"]["type"] == json!("user_message")
+                {
+                    saw_it = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_it, "expected a chat_event frame relayed from B's tailed transcript");
+
+        b_serve.kill();
+    }
 }
