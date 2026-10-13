@@ -155,6 +155,18 @@ pub(crate) async fn run_stdout_pump(
                         // writes - a trailing frame, a control line - then reads as a fresh turn
                         // and pins `busy` on with nothing running and no result line coming.
                         let stream_event_seen = ctx.take_stream_event_seen();
+                        // A line on an idle child, after its turn's result and before
+                        // the next turn streams. Logged at info so the live install
+                        // captures it without trace's per-token volume, which would
+                        // roll daemon.log within hours. A 300-char prefix: claude puts
+                        // `type`/`subtype` first, so it names the frame without logging
+                        // a whole system-init tool list.
+                        if turn.is_idle_after_a_turn() && !stream_event_seen {
+                            let raw = String::from_utf8_lossy(&line_buf);
+                            let raw = raw.trim_end();
+                            let cut = raw.char_indices().nth(300).map(|(i, _)| i).unwrap_or(raw.len());
+                            log::info!("daemon: idle stdout[{}]: {}", pump_session.session_id, &raw[..cut]);
+                        }
                         // `--resume` history replay never emits `stream_event` lines, so this
                         // is the earliest live-exclusive signal, firing even for tool-only turns.
                         if !turn.is_live() && stream_event_seen

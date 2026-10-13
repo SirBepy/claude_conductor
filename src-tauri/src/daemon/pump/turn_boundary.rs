@@ -21,6 +21,9 @@ pub(crate) enum TurnAction {
 pub(crate) struct TurnBoundary {
     live: bool,
     replaying: bool,
+    /// A real turn has ended in this process at least once, so a quiet stretch
+    /// now is the idle gap between turns, not spawn-time output or a replay.
+    ended_once: bool,
 }
 
 impl TurnBoundary {
@@ -28,7 +31,7 @@ impl TurnBoundary {
     /// result really is a turn ending - todo 525's immediate CLI-side
     /// rejection never streams anything either.
     pub(crate) fn new(resumed: bool) -> Self {
-        Self { live: false, replaying: resumed }
+        Self { live: false, replaying: resumed, ended_once: false }
     }
 
     /// Call on the turn's first `stream_event` line.
@@ -44,17 +47,29 @@ impl TurnBoundary {
     /// Call on every `result` line. Resets liveness so each turn is judged on
     /// its own, matching the per-turn `stream_event` signal.
     pub(crate) fn on_result_line(&mut self) -> TurnAction {
-        if std::mem::replace(&mut self.live, false) {
+        let action = if std::mem::replace(&mut self.live, false) {
             TurnAction::TurnEnded
         } else if self.replaying {
             TurnAction::ReplayedResult
         } else {
             TurnAction::TurnEnded
+        };
+        if action == TurnAction::TurnEnded {
+            self.ended_once = true;
         }
+        action
     }
 
     pub(crate) fn is_live(&self) -> bool {
         self.live
+    }
+
+    /// Between two turns: a turn has ended and the next has not streamed yet.
+    /// A stdout line arriving here is the rare idle-child output the pump logs
+    /// on its own (claude writes almost nothing between turns, so this stays
+    /// a few lines per turn rather than the per-token volume of trace logging).
+    pub(crate) fn is_idle_after_a_turn(&self) -> bool {
+        self.ended_once && !self.live
     }
 }
 
@@ -124,6 +139,20 @@ mod tests {
         }
         assert_eq!(turn.on_stream_event(), TurnAction::TurnStarted);
         assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
+    }
+
+    #[test]
+    fn idle_window_opens_only_after_a_real_turn_ends() {
+        let mut turn = TurnBoundary::new(true);
+        assert!(!turn.is_idle_after_a_turn(), "spawn output is not the idle window");
+        turn.on_result_line();
+        assert!(!turn.is_idle_after_a_turn(), "a replayed result is not a turn ending");
+        turn.on_stream_event();
+        assert!(!turn.is_idle_after_a_turn(), "a live turn is not idle");
+        turn.on_result_line();
+        assert!(turn.is_idle_after_a_turn());
+        turn.on_stream_event();
+        assert!(!turn.is_idle_after_a_turn(), "the next turn closes the window again");
     }
 
     fn registry_with_session() -> Registry {
