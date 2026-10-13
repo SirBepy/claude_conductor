@@ -54,6 +54,7 @@ mime_guess = "2"
 rodio = { version = "0.19", default-features = false, features = ["mp3", "symphonia-mp3", "symphonia-wav", "vorbis"] }
 cpal = "0.15"
 tauri_kit_audio = { path = "../vendor/tauri_kit/tauri/audio" }
+tauri_kit_webview_recovery = { path = "../vendor/tauri_kit/tauri/webview_recovery" }
 which = "7"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 base64 = "0.22"

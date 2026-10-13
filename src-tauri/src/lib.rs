@@ -141,6 +141,12 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        // A dead WebView2 renderer reloads in place; a dead browser process
+        // restarts this app (the 2026-10-08 hang: alive, window frozen). Safe
+        // for live chats: they belong to the detached daemon, and nothing in
+        // this process's exit path stops it. The JS heartbeat watchdog stays,
+        // since a renderer can hang without WebView2 ever reporting it.
+        .plugin(tauri_kit_webview_recovery::plugin())
         .plugin(
             // Restore position/size/maximized but never visibility: the default
             // flags include VISIBLE, which causes the window to appear before

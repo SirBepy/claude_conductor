@@ -1137,6 +1137,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tauri_kit_audio",
+ "tauri_kit_webview_recovery",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -8572,6 +8573,16 @@ dependencies = [
  "rodio",
  "serde",
  "ts-rs",
+]
+
+[[package]]
+name = "tauri_kit_webview_recovery"
+version = "0.0.1"
+dependencies = [
+ "log",
+ "tauri",
+ "webview2-com",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
