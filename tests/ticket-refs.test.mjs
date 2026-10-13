@@ -2,7 +2,7 @@
 
 // Ticket ids in a chat message link to the project's tracker, and only ids
 // that tracker actually uses: Linear keys come from the workspace's own teams,
-// and a bare Shortcut number links only as a whole inline-code span.
+// and a bare Shortcut number links in prose but not inside code.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -36,10 +36,20 @@ describe("applyTicketLinks", () => {
     expect(root.textContent).toBe("Fixed in sc-55411 and sc-12.");
   });
 
-  it("links a bare Shortcut number only as a whole inline-code span", () => {
-    const root = mount("<p>Processed 55411 rows, see <code>55412</code> and <code>55413 x</code></p>");
+  it("links a bare Shortcut number in prose, but in inline code only as the whole span", () => {
+    const root = mount("<p>Should 53957 move? Blocked by 51278. See <code>55412</code> and <code>port 55413</code></p>");
     applyTicketLinks(root, SC);
-    expect(links(root)).toEqual([["55412", "https://app.shortcut.com/zirtue/story/55412"]]);
+    expect(links(root)).toEqual([
+      ["53957", "https://app.shortcut.com/zirtue/story/53957"],
+      ["51278", "https://app.shortcut.com/zirtue/story/51278"],
+      ["55412", "https://app.shortcut.com/zirtue/story/55412"],
+    ]);
+  });
+
+  it("leaves numbers that are clearly not story ids alone", () => {
+    const root = mount("<p>1234 4567890 12,345 1.23456 127.0.0.1:27183 PORT=27183 $12345 /x/12345 abc12345</p>");
+    applyTicketLinks(root, SC);
+    expect(links(root)).toEqual([]);
   });
 
   it("leaves existing links, fenced code and look-alikes alone", () => {

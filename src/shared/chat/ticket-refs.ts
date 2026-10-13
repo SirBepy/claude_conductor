@@ -70,15 +70,13 @@ function anchorFor(t: TrackerInfo, id: string): HTMLAnchorElement {
   return a;
 }
 
-/** Wraps ticket ids in `root`'s text in links. Skips existing links and code
- *  blocks; a bare 5-6 digit Shortcut id links only as a whole inline-code span
- *  (`55411`), since in prose it is as likely a count as a story. */
-export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): void {
-  const re = idPattern(t);
-  if (!re) return;
+// A bare Shortcut number: 5-6 digits standing alone, so not part of a decimal,
+// a thousands-grouped count, a port (`:27183`), an assignment, a path or money.
+const BARE_SHORTCUT = /(?<![\w/.,:=$-])\d{5,6}(?![\w-]|[.,:]\d)/g;
+
+function linkMatches(root: HTMLElement, re: RegExp, skip: string, t: TrackerInfo, idOf: (m: string) => string): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) =>
-      n.parentElement?.closest("a, pre, .ticket-ref, .commit-ref") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    acceptNode: (n) => (n.parentElement?.closest(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
   const hits: Text[] = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -91,13 +89,25 @@ export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): void {
     let last = 0;
     re.lastIndex = 0;
     for (let m = re.exec(text); m; m = re.exec(text)) {
-      frag.append(text.slice(last, m.index), anchorFor(t, t.kind === "shortcut" ? m[0].toLowerCase() : m[0]));
+      frag.append(text.slice(last, m.index), anchorFor(t, idOf(m[0])));
       last = m.index + m[0].length;
     }
     frag.append(text.slice(last));
     node.replaceWith(frag);
   }
+}
+
+/** Wraps ticket ids in `root`'s text in links. Skips existing links and code
+ *  blocks. A bare 5-6 digit Shortcut id links in prose too (a stray count
+ *  just gets a "not found" hover card), but inside inline code only as the
+ *  whole span (`55411`), since code is full of ports and sizes. */
+export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): void {
+  const re = idPattern(t);
+  if (!re) return;
+  const skip = "a, pre, .ticket-ref, .commit-ref";
+  linkMatches(root, re, skip, t, (m) => (t.kind === "shortcut" ? m.toLowerCase() : m));
   if (t.kind === "shortcut") {
+    linkMatches(root, BARE_SHORTCUT, `${skip}, code`, t, (m) => m);
     root.querySelectorAll<HTMLElement>("code").forEach((code) => {
       if (code.closest("pre, a") || code.children.length > 0) return;
       const txt = code.textContent ?? "";

@@ -6,6 +6,7 @@
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { isElNearBottom } from "../../../shared/chat/chat-dom-renderer";
+import { handleTicketHover, handleTicketHoverOut, linkifyTickets } from "../../../shared/chat/ticket-refs";
 import { renderCardShell } from "./host";
 import {
   collapsedHtml, extraMessageZoneHtml, nextArrowDisabled, ownZoneHtml, pagerHtml,
@@ -58,6 +59,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   let minimized = false;
   let firstRender = true;
+  // Same ticket links + hover cards as a chat bubble. Delegated on the host,
+  // which outlives every innerHTML rebuild; same function refs dedupe when a
+  // later card reuses the host.
+  host.addEventListener("mouseover", handleTicketHover);
+  host.addEventListener("mouseout", handleTicketHoverOut);
   let hintTimer: number | undefined;
 
   // Brief feedback for a paste that couldn't attach (see attachments.ts's
@@ -324,6 +330,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         <button type="button" class="btn btn-primary" data-act="primary"></button>
       `;
       host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml);
+
+      void linkifyTickets(host, opts.cwd ?? undefined);
 
       const card = host.querySelector<HTMLElement>(".prompt-card");
       if (!firstRender) card?.classList.add("prompt-card--no-anim");

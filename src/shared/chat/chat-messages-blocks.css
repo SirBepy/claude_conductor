@@ -139,10 +139,11 @@
 }
 
 /* Hover card for a ticket link (ticket-refs.ts). Body-appended, so not
-   scoped under .msg; same surface as .info-tooltip. */
+   scoped under .msg; same surface as .info-tooltip. One above the floating
+   question card host (1000), whose options can carry ticket links too. */
 .ticket-card {
   position: fixed;
-  z-index: 1000;
+  z-index: 1001;
   width: 280px;
   padding: 8px 10px;
   background: var(--color-surface-alt);
