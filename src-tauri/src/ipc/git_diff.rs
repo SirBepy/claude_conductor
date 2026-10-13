@@ -9,10 +9,14 @@
 // `pr_review.rs` both reach `list_branch_files` through this path.
 pub use super::git_branch_preview::*;
 
+use tauri::State;
+
 use super::git::run_git;
 use super::git_range_parse::{parse_range_files, resolve_lower_bound};
+use crate::ipc::mirror::mirrored_client;
+use crate::state::AppState;
 
-#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct PrFileChange {
     pub path: String,
@@ -142,8 +146,12 @@ fn count_lines(bytes: &[u8]) -> u32 {
 ///
 /// `to: None` diffs against the working tree instead (see `worktree_base`),
 /// listing untracked files as added; `base` has no effect on that path.
-#[tauri::command]
-pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<String>, base: Option<String>) -> Result<Vec<PrFileChange>, String> {
+///
+/// `pub(crate)` pure local read, reused directly by the daemon's own
+/// `get_range_files` RPC handler (`daemon/methods/pr_review.rs`) - see
+/// `git::get_git_dirty_local`'s doc for why the Tauri-facing wrapper below is
+/// split out from this one.
+pub(crate) async fn get_range_files_local(cwd: String, from: Option<String>, to: Option<String>, base: Option<String>) -> Result<Vec<PrFileChange>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(t) = to.as_deref() { reject_option_like("to", t)?; }
         if let Some(f) = from.as_deref() { reject_option_like("from", f)?; }
@@ -175,6 +183,27 @@ pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<Strin
     .map_err(|e| format!("get_range_files join error: {e}"))?
 }
 
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+#[tauri::command]
+pub async fn get_range_files(
+    cwd: String,
+    from: Option<String>,
+    to: Option<String>,
+    base: Option<String>,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<PrFileChange>, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return client
+            .get_range_files(session_id.as_deref().unwrap(), &cwd, from.as_deref(), to.as_deref(), base.as_deref())
+            .await
+            .map_err(|e| e.to_string());
+    }
+    get_range_files_local(cwd, from, to, base).await
+}
+
 /// Returns the raw unified diff for a single file in the range `(lower, to]`,
 /// with the same lower-bound resolution as `get_range_files`, including the
 /// `base` exact-override. `context` is git's `-U<n>` (lines kept around each
@@ -182,8 +211,9 @@ pub async fn get_range_files(cwd: String, from: Option<String>, to: Option<Strin
 /// a line boundary before 1MB with a trailing marker. `to: None` diffs
 /// against the working tree, an untracked file coming back as an all-added
 /// diff; `base` has no effect on that path.
-#[tauri::command]
-pub async fn get_file_diff(
+///
+/// `pub(crate)` pure local read - see `get_range_files_local`'s doc.
+pub(crate) async fn get_file_diff_local(
     cwd: String,
     from: Option<String>,
     to: Option<String>,
@@ -240,12 +270,36 @@ pub async fn get_file_diff(
     .map_err(|e| format!("get_file_diff join error: {e}"))?
 }
 
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+#[tauri::command]
+pub async fn get_file_diff(
+    cwd: String,
+    from: Option<String>,
+    to: Option<String>,
+    base: Option<String>,
+    path: String,
+    context: Option<u32>,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return client
+            .get_file_diff(session_id.as_deref().unwrap(), &cwd, from.as_deref(), to.as_deref(), base.as_deref(), &path, context)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    get_file_diff_local(cwd, from, to, base, path, context).await
+}
+
 /// A file's content as of revision `rev` (`git show <rev>:<path>`), for the
 /// file view of a past commit, where the working tree would show the wrong
 /// version. `rev: None` reads the working-tree copy from disk, confined to
 /// the repo. Capped like `read_text_file`, lossy UTF-8.
-#[tauri::command]
-pub async fn get_file_at_rev(cwd: String, rev: Option<String>, path: String) -> Result<crate::ipc::files::TextFileData, String> {
+///
+/// `pub(crate)` pure local read - see `get_range_files_local`'s doc.
+pub(crate) async fn get_file_at_rev_local(cwd: String, rev: Option<String>, path: String) -> Result<crate::ipc::files::TextFileData, String> {
     const MAX_BYTES: usize = 2 * 1024 * 1024;
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -271,6 +325,26 @@ pub async fn get_file_at_rev(cwd: String, rev: Option<String>, path: String) -> 
     .map_err(|e| format!("get_file_at_rev join error: {e}"))?
 }
 
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+#[tauri::command]
+pub async fn get_file_at_rev(
+    cwd: String,
+    rev: Option<String>,
+    path: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::ipc::files::TextFileData, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return client
+            .get_file_at_rev(session_id.as_deref().unwrap(), &cwd, rev.as_deref(), &path)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    get_file_at_rev_local(cwd, rev, path).await
+}
+
 #[cfg(test)]
 mod rev_tests {
     use super::*;
@@ -283,16 +357,16 @@ mod rev_tests {
 
     #[tokio::test]
     async fn file_at_rev_reads_the_committed_blob() {
-        let data = get_file_at_rev(cwd(), Some("HEAD".into()), "package.json".into()).await.unwrap();
+        let data = get_file_at_rev_local(cwd(), Some("HEAD".into()), "package.json".into()).await.unwrap();
         assert!(data.content.contains("\"name\""));
         assert!(!data.truncated);
     }
 
     #[tokio::test]
     async fn file_at_rev_refuses_option_like_input() {
-        assert!(get_file_at_rev(cwd(), Some("--output=x".into()), "a".into()).await.is_err());
-        assert!(get_file_at_rev(cwd(), Some("HEAD".into()), "-x".into()).await.is_err());
-        assert!(get_file_at_rev(cwd(), None, "-x".into()).await.is_err());
+        assert!(get_file_at_rev_local(cwd(), Some("--output=x".into()), "a".into()).await.is_err());
+        assert!(get_file_at_rev_local(cwd(), Some("HEAD".into()), "-x".into()).await.is_err());
+        assert!(get_file_at_rev_local(cwd(), None, "-x".into()).await.is_err());
     }
 
     #[tokio::test]
@@ -316,8 +390,8 @@ mod rev_tests {
 
         // One changed line: full context carries the whole file, -U3 only ~7 lines.
         let path = "big.txt".to_string();
-        let full = get_file_diff(repo.clone(), None, Some("HEAD".into()), None, path.clone(), Some(1_000_000)).await.unwrap();
-        let short = get_file_diff(repo, None, Some("HEAD".into()), None, path, None).await.unwrap();
+        let full = get_file_diff_local(repo.clone(), None, Some("HEAD".into()), None, path.clone(), Some(1_000_000)).await.unwrap();
+        let short = get_file_diff_local(repo, None, Some("HEAD".into()), None, path, None).await.unwrap();
         assert!(full.lines().count() > short.lines().count() + 50, "full {} vs short {}", full.lines().count(), short.lines().count());
     }
 
@@ -342,7 +416,7 @@ mod rev_tests {
     #[tokio::test]
     async fn worktree_range_lists_modified_and_untracked_files() {
         let (_dir, repo) = worktree_repo();
-        let files = get_range_files(repo, None, None, None).await.unwrap();
+        let files = get_range_files_local(repo, None, None, None).await.unwrap();
         let tracked = files.iter().find(|f| f.path == "tracked.txt").expect("modified file listed");
         assert_eq!((tracked.status.as_str(), tracked.added, tracked.removed), ("M", 1, 1));
         let new = files.iter().find(|f| f.path == "sub/new.txt").expect("untracked file listed");
@@ -352,20 +426,20 @@ mod rev_tests {
     #[tokio::test]
     async fn worktree_diff_covers_tracked_and_untracked_files() {
         let (_dir, repo) = worktree_repo();
-        let tracked = get_file_diff(repo.clone(), None, None, None, "tracked.txt".into(), None).await.unwrap();
+        let tracked = get_file_diff_local(repo.clone(), None, None, None, "tracked.txt".into(), None).await.unwrap();
         assert!(tracked.contains("-two") && tracked.contains("+TWO"), "{tracked}");
-        let new = get_file_diff(repo, None, None, None, "sub/new.txt".into(), None).await.unwrap();
+        let new = get_file_diff_local(repo, None, None, None, "sub/new.txt".into(), None).await.unwrap();
         assert!(new.contains("@@ -0,0 +1,3 @@") && new.contains("+c"), "{new}");
     }
 
     #[tokio::test]
     async fn worktree_file_reads_disk_but_never_outside_the_repo() {
         let (dir, repo) = worktree_repo();
-        let data = get_file_at_rev(repo.clone(), None, "tracked.txt".into()).await.unwrap();
+        let data = get_file_at_rev_local(repo.clone(), None, "tracked.txt".into()).await.unwrap();
         assert_eq!(data.content.replace("\r\n", "\n"), "one\nTWO\n");
         let outside = tempfile::NamedTempFile::new_in(dir.path().parent().unwrap()).unwrap();
         let rel = format!("../{}", outside.path().file_name().unwrap().to_string_lossy());
-        let Err(err) = get_file_at_rev(repo, None, rel).await else { panic!("read a file outside the repo") };
+        let Err(err) = get_file_at_rev_local(repo, None, rel).await else { panic!("read a file outside the repo") };
         assert!(err.contains("outside the repository"), "{err}");
     }
 }

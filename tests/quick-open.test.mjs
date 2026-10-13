@@ -49,8 +49,8 @@ describe("Ctrl+P", () => {
 describe("Go to file picker", () => {
   it("lists the chat's project files and picks the best match on Enter", async () => {
     const picked = [];
-    openQuickOpen("/repo", (p) => picked.push(p));
-    expect(invokeMock).toHaveBeenCalledWith("list_project_files", { projectDir: "/repo" });
+    openQuickOpen("/repo", "sess-1", (p) => picked.push(p));
+    expect(invokeMock).toHaveBeenCalledWith("list_project_files", { projectDir: "/repo", sessionId: "sess-1" });
     expect(document.activeElement).toBe(input());
     await flush();
 
@@ -64,7 +64,7 @@ describe("Go to file picker", () => {
 
   it("moves the selection with the arrow keys", async () => {
     const picked = [];
-    openQuickOpen("/repo", (p) => picked.push(p));
+    openQuickOpen("/repo", "sess-1", (p) => picked.push(p));
     await flush();
 
     key("ArrowDown");
@@ -79,7 +79,7 @@ describe("Go to file picker", () => {
     const codeModeSaw = [];
     const codeModeKeys = (e) => codeModeSaw.push(e.key);
     document.addEventListener("keydown", codeModeKeys, true);
-    openQuickOpen("/repo", (p) => picked.push(p));
+    openQuickOpen("/repo", "sess-1", (p) => picked.push(p));
     await flush();
 
     key("Escape");
@@ -92,7 +92,7 @@ describe("Go to file picker", () => {
 
   it("closes on a backdrop click without picking", async () => {
     const picked = [];
-    openQuickOpen("/repo", (p) => picked.push(p));
+    openQuickOpen("/repo", "sess-1", (p) => picked.push(p));
     await flush();
 
     document.querySelector(".quick-open-overlay").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));

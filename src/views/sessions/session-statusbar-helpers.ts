@@ -267,10 +267,14 @@ export const ctxStatusCache = new Map<string, ContextStatus>();
  *  placeholder while the async refetch is in flight. */
 export const drainCache = new Map<string, ChatDrain>();
 
-export function fetchGitInfo(cwd: string): Promise<GitInfo> {
+/** `sessionId` is sent alongside `cwd` so a chat mirrored from a paired peer
+ *  machine resolves against the OWNING peer's disk (G10 in
+ *  docs/multi-machine.md) instead of this one's; absent/null for a chat
+ *  hosted on this machine, the exact same call as before this param existed. */
+export function fetchGitInfo(cwd: string, sessionId?: string | null): Promise<GitInfo> {
   let p = gitInflight.get(cwd);
   if (!p) {
-    p = invoke<GitInfo>("get_git_info", { cwd })
+    p = invoke<GitInfo>("get_git_info", { cwd, sessionId })
       .then((info) => { gitInfoCache.set(cwd, info); gitInflight.delete(cwd); return info; })
       .catch((e) => { gitInflight.delete(cwd); throw e; });
     gitInflight.set(cwd, p);

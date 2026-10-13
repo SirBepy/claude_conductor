@@ -124,7 +124,7 @@ function wireOwner(): void {
     rememberPopOut(false);
     const chat = chatFor(sessionId);
     if (!chat) return;
-    if (snap) restoreView(chat.key, chat.cwd, snap);
+    if (snap) restoreView(chat.key, chat.cwd, snap, chat.sessionId);
     openCodeMode(chat, { kind: "default" }, { popOut: () => popOut(chat) });
     void invoke("focus_app_window", { label: owner }).catch(() => {});
   });
@@ -203,7 +203,7 @@ function hooks() {
 
 function openInWindow(target: CodeModeTarget, snap: ViewSnapshot | null | undefined): void {
   const chat = proxyChat(windowLayout!);
-  if (snap) restoreView(chat.key, chat.cwd, snap);
+  if (snap) restoreView(chat.key, chat.cwd, snap, chat.sessionId);
   document.title = `Code · ${windowState?.title ?? ""}`;
   openCodeMode(chat, target, hooks());
 }

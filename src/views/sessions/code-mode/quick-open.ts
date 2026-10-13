@@ -13,7 +13,7 @@ export function isQuickOpenOpen(): boolean {
   return current !== null;
 }
 
-export function openQuickOpen(cwd: string, onPick: (relPath: string) => void): void {
+export function openQuickOpen(cwd: string, sessionId: string | null, onPick: (relPath: string) => void): void {
   if (current) return;
 
   const overlay = document.createElement("div");
@@ -126,7 +126,7 @@ export function openQuickOpen(cwd: string, onPick: (relPath: string) => void): v
   input.focus();
   render();
 
-  invoke<string[]>("list_project_files", { projectDir: cwd })
+  invoke<string[]>("list_project_files", { projectDir: cwd, sessionId })
     .then((all) => { files = all.map((p) => p.replace(/\\/g, "/")); })
     .catch((err) => { error = `Couldn't list files: ${String(err)}`; files = []; })
     .finally(() => { if (current === handle) refilter(); });

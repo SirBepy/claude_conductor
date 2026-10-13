@@ -3,7 +3,7 @@
 //! git/servers chips and the "Open .claude" modal aren't wired to nothing.
 //! Same pattern as `worktrees.rs`; every path is gated by `is_known_cwd`.
 
-use super::pr_review::reject_unknown;
+use super::pr_review::{reject_unknown, resolve_cwd};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde_json::json;
@@ -18,11 +18,13 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 #[derive(serde::Deserialize)]
                 struct P {
                     cwd: String,
+                    #[serde(default)]
+                    session_id: Option<String>,
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                Ok(json!(crate::ipc::git::get_git_info(p.cwd).await))
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                Ok(json!(crate::ipc::git::get_git_info_local(cwd).await))
             }
         });
     }
@@ -35,11 +37,13 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 #[derive(serde::Deserialize)]
                 struct P {
                     cwd: String,
+                    #[serde(default)]
+                    session_id: Option<String>,
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                Ok(json!(crate::ipc::git::get_git_dirty(p.cwd).await))
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                Ok(json!(crate::ipc::git::get_git_dirty_local(cwd).await))
             }
         });
     }
@@ -52,11 +56,13 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 #[derive(serde::Deserialize)]
                 struct P {
                     cwd: String,
+                    #[serde(default)]
+                    session_id: Option<String>,
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                Ok(json!(crate::ipc::git::get_commit_sync(p.cwd).await))
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                Ok(json!(crate::ipc::git::get_commit_sync_local(cwd).await))
             }
         });
     }
@@ -73,15 +79,17 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                     offset: u32,
                     #[serde(default = "default_history_limit")]
                     limit: u32,
+                    #[serde(default)]
+                    session_id: Option<String>,
                 }
                 fn default_history_limit() -> u32 {
                     30
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
                 Ok(json!(
-                    crate::ipc::git::get_commit_history(p.cwd, p.offset, p.limit).await
+                    crate::ipc::git::get_commit_history_local(cwd, p.offset, p.limit).await
                 ))
             }
         });
@@ -169,6 +177,35 @@ mod tests {
             dummy_ctx(),
         )
         .await
+    }
+
+    /// A `session_id` resolves the cwd from the registry and
+    /// ignores an otherwise-unknown `cwd` - this is what lets a call
+    /// forwarded from a mirroring peer succeed without that peer knowing (or
+    /// being trusted to supply) this daemon's own project path.
+    #[tokio::test]
+    async fn get_git_info_dispatches_via_session_id_with_an_unknown_cwd() {
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let st = state();
+        let settings = std::sync::Mutex::new(Settings::default());
+        let real_cwd = std::env::current_dir().unwrap();
+        st.registry.register(
+            RegisterInput {
+                session_id: "s1".into(),
+                cwd: real_cwd,
+                pid: 1,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-01-01T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-01-01T00:00:00Z",
+        );
+        let resp = call(st, "get_git_info", json!({"cwd": "C:\\nope\\not\\registered", "session_id": "s1"})).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
     }
 
     #[tokio::test]

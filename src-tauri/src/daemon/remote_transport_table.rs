@@ -268,32 +268,50 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("list_worktree_details", P),
     ("create_worktree", P),
     ("remove_worktree", P),
-    ("get_recent_branches", P),
+    // PM (was P): Code mode's branch switcher for a session
+    // mirrored from a paired peer machine needs the same read. `resolve_cwd`
+    // (pr_review.rs) resolves `cwd` from the owning daemon's own registry
+    // when `session_id` is sent, ignoring the forwarded `cwd` - no new trust
+    // class, a peer forwarding this already carries send_message/
+    // load_history_page.
+    ("get_recent_branches", PM),
     // Read-only PR-review file browsing (ai_todo 244), mirrors desktop's
     // `ipc::git_diff` commands; pr_review.rs rejects any unknown `cwd`.
-    ("get_range_files", P),
-    ("get_file_diff", P),
+    // PM (was P): Code mode's diff/range-files views for a
+    // session mirrored from a paired peer, same `resolve_cwd` guard as above.
+    ("get_range_files", PM),
+    ("get_file_diff", PM),
     // Read-only: turns hex words in a phone-rendered chat into commit links.
     // pr_review.rs rejects any unknown `cwd`; candidates are hex-filtered.
     ("resolve_commit_refs", P),
     // Read-only: a file's committed content for the PR/commit modal's File
     // view. reject_unknown(cwd)-gated in pr_review.rs; rev/path refuse `-`.
-    ("get_file_at_rev", P),
+    // PM (was P): Code mode's file-at-rev view for a mirrored
+    // session, same `resolve_cwd` guard as get_range_files above.
+    ("get_file_at_rev", PM),
     // Read-only branch-preview tree listing: `git ls-tree` of another branch
     // without checking it out, for Code mode's branch switcher Preview
     // action. Same reject_unknown(cwd) gate as
     // get_range_files/get_file_at_rev above; branch name is
     // `--end-of-options`-guarded and leading-dash-rejected in git_diff.rs so
-    // it can never be read as a git flag.
-    ("list_branch_files", P),
+    // it can never be read as a git flag. PM (was P): same
+    // `resolve_cwd` guard as above.
+    ("list_branch_files", PM),
     // Read-only statusbar chips + location-picker scan (mirrors desktop's
     // `ipc::git` / `ipc::servers` / `ipc::claude_scopes` commands), path
     // params reject_unknown-gated in statusbar.rs. Missing here was the
     // confirmed root cause of the phone's forever-loading git chips.
-    ("get_git_info", P),
-    ("get_git_dirty", P),
-    ("get_commit_sync", P),
-    ("get_commit_history", P),
+    // PM (was P) for the first four: un-hides the git/branch/
+    // commits chips and the commits popover for a session mirrored from a
+    // paired peer machine - `resolve_cwd` resolves `cwd` from the OWNING
+    // daemon's own registry when `session_id` is sent, ignoring the
+    // forwarded `cwd`, so a peer can't steer these reads by whatever path it
+    // sends. `list_project_servers`/`list_claude_md_scopes` stay P: no
+    // mirrored-chat caller for either yet.
+    ("get_git_info", PM),
+    ("get_git_dirty", PM),
+    ("get_commit_sync", PM),
+    ("get_commit_history", PM),
     // Write action off the commits chip's push button (path gated by
     // reject_unknown in statusbar.rs, same as the worktree writes above).
     ("push_commits", P),
@@ -301,7 +319,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // from todo 1007's reachability table). Gated by reject_unknown(cwd) in
     // files.rs, same as the statusbar/worktree/pr_review reads above - without
     // it a remote client could point `git ls-files` at any path on disk.
-    ("list_project_files", P),
+    // PM (was P): Code mode's file tree for a session mirrored
+    // from a paired peer machine needs this too; `resolve_cwd` resolves
+    // `project_dir` from the owning daemon's own registry when `session_id`
+    // is sent.
+    ("list_project_files", PM),
     // Read-only sidebar token-drain-sort leaderboard (todo 1022, split from
     // todo 1007). Aggregate token counts only, ids validated against a strict
     // charset before touching disk (daemon/methods/drain.rs).
@@ -552,6 +574,40 @@ mod tests {
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
         }
+    }
+
+    /// Code mode / commits popover / git chips / dirty-files reads
+    /// for a session mirrored from a paired peer machine - each was
+    /// phone-only (`P`) and is now `PM`, routed by `machines/forward.rs`
+    /// once `session_id` resolves to a mirrored row. `resolve_cwd`
+    /// (pr_review.rs) resolves the real cwd from the OWNING daemon's own
+    /// registry whenever `session_id` is present, so a forwarding peer's
+    /// `cwd` is never trusted - no new trust class over the
+    /// send_message/load_history_page a peer already carries.
+    #[test]
+    fn mirrored_git_and_file_read_methods_are_machine_callable() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in [
+            "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
+            "get_recent_branches", "get_range_files", "get_file_diff", "get_file_at_rev",
+            "list_branch_files", "list_project_files",
+        ] {
+            assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
+        }
+    }
+
+    /// The write/mutating counterparts stay phone-only: this follow-up proxies
+    /// reads only, never a mirrored chat's git mutations (step 6 of the
+    /// todo). `push_commits` has no local-disk write of its own beyond
+    /// `git push`, but it still mutates a remote the owning peer, not this
+    /// daemon, is authoritative for - the frontend keeps it hidden/disabled
+    /// for a mirrored chat (session-statusbar.ts / git-fold.ts) rather than
+    /// proxying it.
+    #[test]
+    fn mirrored_git_write_methods_stay_phone_only() {
+        let peer = Transport::PeerMachine("x".into());
+        assert!(allowed("push_commits", &Transport::Phone));
+        assert!(!allowed("push_commits", &peer), "push_commits must not be callable by a peer machine");
     }
 
     /// The phone's machine picker RPCs are P, never M: a peer machine already

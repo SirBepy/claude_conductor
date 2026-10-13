@@ -50,6 +50,14 @@ export interface ScopeCtx {
   cwd: string;
   /** This chat's own edits, newest last. */
   edits: FileEditView[];
+  /** Set when this chat is hosted on a paired peer machine (multi-machine
+   *  federation): every `invoke` below sends it alongside `cwd` so the
+   *  daemon forwards the read one hop to the owning peer instead of running
+   *  `git` against `cwd`, a path on the PEER's disk (G10 in
+   *  docs/multi-machine.md). `null`/absent for a chat hosted on this
+   *  machine - every call below degrades to the exact same local read as
+   *  before this field existed. */
+  sessionId?: string | null;
 }
 
 // Big enough that git keeps every line of any file this viewer would render.
@@ -66,7 +74,7 @@ interface Range {
   to: string | null;
 }
 
-function gitSurface(cwd: string, f: PrFileChange, range: Range): SurfaceFile {
+function gitSurface(cwd: string, f: PrFileChange, range: Range, sessionId?: string | null): SurfaceFile {
   const deleted = statusLetter(f.status) === "D";
   // A deleted file only exists before the change: the commit's parent, or the
   // working-tree diff's base.
@@ -78,18 +86,18 @@ function gitSurface(cwd: string, f: PrFileChange, range: Range): SurfaceFile {
     removed: f.removed,
     gitDiff: ({ full }) =>
       invoke<string>("get_file_diff", {
-        cwd, from: range.from, to: range.to, path: f.path, context: full ? FULL_FILE_CONTEXT : null,
+        cwd, from: range.from, to: range.to, path: f.path, context: full ? FULL_FILE_CONTEXT : null, sessionId,
       }),
-    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev, path: f.path }),
+    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev, path: f.path, sessionId }),
   };
 }
 
 /** An unchanged file: no diff, its working-tree content. */
-export function plainSurface(cwd: string, path: string): SurfaceFile {
+export function plainSurface(cwd: string, path: string, sessionId?: string | null): SurfaceFile {
   return {
     path,
     absPath: absPath(cwd, path),
-    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: null, path }),
+    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: null, path, sessionId }),
   };
 }
 
@@ -97,16 +105,16 @@ export function plainSurface(cwd: string, path: string): SurfaceFile {
  *  content via `get_file_at_rev(rev: branch)`, never the working tree - this
  *  scope never checks the branch out. `f` is present only for a file the
  *  HEAD-vs-branch diff flagged as changed, which adds a diff view. */
-export function branchFileSurface(cwd: string, path: string, branch: string, f?: PrFileChange): SurfaceFile {
+export function branchFileSurface(cwd: string, path: string, branch: string, f?: PrFileChange, sessionId?: string | null): SurfaceFile {
   return {
     path,
     absPath: absPath(cwd, path),
     added: f?.added,
     removed: f?.removed,
     gitDiff: f
-      ? ({ full }) => invoke<string>("get_file_diff", { cwd, from: null, to: branch, base: "HEAD", path, context: full ? FULL_FILE_CONTEXT : null })
+      ? ({ full }) => invoke<string>("get_file_diff", { cwd, from: null, to: branch, base: "HEAD", path, context: full ? FULL_FILE_CONTEXT : null, sessionId })
       : undefined,
-    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: branch, path }),
+    fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: branch, path, sessionId }),
   };
 }
 
@@ -121,8 +129,8 @@ function isDirty(d: Dirty | null, path: string): boolean {
   return !!d && (d.paths.has(path) || d.dirs.some((dir) => path.startsWith(dir)));
 }
 
-async function rangeFiles(cwd: string, range: Range, dirty: Dirty | null): Promise<Map<string, ScopeFile>> {
-  const files = await invoke<PrFileChange[]>("get_range_files", { cwd, from: range.from, to: range.to });
+async function rangeFiles(cwd: string, range: Range, dirty: Dirty | null, sessionId?: string | null): Promise<Map<string, ScopeFile>> {
+  const files = await invoke<PrFileChange[]>("get_range_files", { cwd, from: range.from, to: range.to, sessionId });
   const out = new Map<string, ScopeFile>();
   for (const f of files) {
     out.set(f.path, {
@@ -131,15 +139,15 @@ async function rangeFiles(cwd: string, range: Range, dirty: Dirty | null): Promi
       added: f.added,
       removed: f.removed,
       wt: isDirty(dirty, f.path),
-      surface: gitSurface(cwd, f, range),
+      surface: gitSurface(cwd, f, range, sessionId),
     });
   }
   return out;
 }
 
 /** `git status --porcelain` paths, quotes stripped: what is uncommitted. */
-async function dirtyPaths(cwd: string): Promise<Dirty> {
-  const raw = await invoke<string[]>("get_git_dirty", { cwd }).catch(() => [] as string[]);
+async function dirtyPaths(cwd: string, sessionId?: string | null): Promise<Dirty> {
+  const raw = await invoke<string[]>("get_git_dirty", { cwd, sessionId }).catch(() => [] as string[]);
   // A rename prints `old -> new`; the new path is the one the tree shows.
   const all = raw.map((p) => p.split(" -> ").pop()!.replace(/^"|"$/g, ""));
   return { paths: new Set(all.filter((p) => !p.endsWith("/"))), dirs: all.filter((p) => p.endsWith("/")) };
@@ -148,8 +156,8 @@ async function dirtyPaths(cwd: string): Promise<Dirty> {
 /** What a push would send, plus what is not even committed yet: everything
  *  between the upstream and the working tree. Without an upstream there is
  *  nothing pushed to compare against, so it falls back to HEAD. */
-async function unpushedRange(cwd: string): Promise<Range> {
-  const sync = await invoke<CommitSync>("get_commit_sync", { cwd }).catch(() => null);
+async function unpushedRange(cwd: string, sessionId?: string | null): Promise<Range> {
+  const sync = await invoke<CommitSync>("get_commit_sync", { cwd, sessionId }).catch(() => null);
   return { from: sync?.has_upstream ? "@{u}" : "HEAD", to: null };
 }
 
@@ -183,7 +191,7 @@ export function chatFiles(ctx: ScopeCtx): Map<string, ScopeFile> {
         // working-tree read; its diff is all this view has.
         fileAtRev: outside
           ? () => Promise.reject(new Error("This file is outside the chat's repo; only its diff is available."))
-          : () => invoke<TextFileData>("get_file_at_rev", { cwd: ctx.cwd, rev: null, path }),
+          : () => invoke<TextFileData>("get_file_at_rev", { cwd: ctx.cwd, rev: null, path, sessionId: ctx.sessionId }),
       },
     });
   }
@@ -191,7 +199,7 @@ export function chatFiles(ctx: ScopeCtx): Map<string, ScopeFile> {
 }
 
 export async function loadScope(ctx: ScopeCtx, ref: ScopeRef): Promise<ScopeData> {
-  const { cwd } = ctx;
+  const { cwd, sessionId } = ctx;
   try {
     switch (ref.kind) {
       case "chat": {
@@ -199,27 +207,27 @@ export async function loadScope(ctx: ScopeCtx, ref: ScopeRef): Promise<ScopeData
         return { changed, paths: [...changed.keys()], error: null };
       }
       case "uncommitted": {
-        const changed = await rangeFiles(cwd, { from: "HEAD", to: null }, null);
+        const changed = await rangeFiles(cwd, { from: "HEAD", to: null }, null, sessionId);
         return { changed, paths: [...changed.keys()], error: null };
       }
       case "unpushed": {
-        const [range, dirty] = await Promise.all([unpushedRange(cwd), dirtyPaths(cwd)]);
-        const changed = await rangeFiles(cwd, range, dirty);
+        const [range, dirty] = await Promise.all([unpushedRange(cwd, sessionId), dirtyPaths(cwd, sessionId)]);
+        const changed = await rangeFiles(cwd, range, dirty, sessionId);
         return { changed, paths: [...changed.keys()], error: null };
       }
       case "all": {
         const [range, dirty, all] = await Promise.all([
-          unpushedRange(cwd),
-          dirtyPaths(cwd),
-          invoke<string[]>("list_project_files", { projectDir: cwd }),
+          unpushedRange(cwd, sessionId),
+          dirtyPaths(cwd, sessionId),
+          invoke<string[]>("list_project_files", { projectDir: cwd, sessionId }),
         ]);
-        const changed = await rangeFiles(cwd, range, dirty);
+        const changed = await rangeFiles(cwd, range, dirty, sessionId);
         const paths = new Set(all.map((p) => p.replace(/\\/g, "/")));
         for (const p of changed.keys()) paths.add(p);
         return { changed, paths: [...paths], error: null };
       }
       case "commit": {
-        const changed = await rangeFiles(cwd, { from: null, to: ref.sha }, null);
+        const changed = await rangeFiles(cwd, { from: null, to: ref.sha }, null, sessionId);
         return { changed, paths: [...changed.keys()], error: null };
       }
       case "pr": {
@@ -227,17 +235,17 @@ export async function loadScope(ctx: ScopeCtx, ref: ScopeRef): Promise<ScopeData
         const oldest = ref.commits[ref.commits.length - 1];
         if (!newest || !oldest) return { changed: new Map(), paths: [], error: null };
         const range = { from: ref.commits.length > 1 ? oldest.sha : null, to: newest.sha };
-        const changed = await rangeFiles(cwd, range, null);
+        const changed = await rangeFiles(cwd, range, null, sessionId);
         return { changed, paths: [...changed.keys()], error: null };
       }
       case "branch": {
         const { name } = ref;
         const [branchPaths, prFiles] = await Promise.all([
-          invoke<string[]>("list_branch_files", { cwd, branch: name }),
+          invoke<string[]>("list_branch_files", { cwd, branch: name, sessionId }),
           // What the branch changes relative to the current HEAD: an exact
           // HEAD..branch diff, not the working tree (this scope never checks
           // the branch out, so the working tree has nothing to do with it).
-          invoke<PrFileChange[]>("get_range_files", { cwd, from: null, to: name, base: "HEAD" }),
+          invoke<PrFileChange[]>("get_range_files", { cwd, from: null, to: name, base: "HEAD", sessionId }),
         ]);
         const changed = new Map<string, ScopeFile>();
         for (const f of prFiles) {
@@ -247,7 +255,7 @@ export async function loadScope(ctx: ScopeCtx, ref: ScopeRef): Promise<ScopeData
             added: f.added,
             removed: f.removed,
             wt: false,
-            surface: branchFileSurface(cwd, f.path, name, f),
+            surface: branchFileSurface(cwd, f.path, name, f, sessionId),
           });
         }
         const paths = new Set(branchPaths.map((p) => p.replace(/\\/g, "/")));
@@ -266,16 +274,16 @@ export const OLDER_COMMITS_PAGE = 30;
 /** One page of the branch's full `git log HEAD`, continuing from `offset`.
  *  Includes unpushed commits too (the log interleaves them by date) - the
  *  caller filters to `pushed` entries not already shown by the unpushed rows. */
-export async function loadCommitHistoryPage(cwd: string, offset: number): Promise<CommitHistory> {
-  return invoke<CommitHistory>("get_commit_history", { cwd, offset, limit: OLDER_COMMITS_PAGE });
+export async function loadCommitHistoryPage(cwd: string, offset: number, sessionId?: string | null): Promise<CommitHistory> {
+  return invoke<CommitHistory>("get_commit_history", { cwd, offset, limit: OLDER_COMMITS_PAGE, sessionId });
 }
 
 /** Branch, upstream and ahead/behind for the commits fold and its push row. */
-export async function loadGitState(cwd: string): Promise<GitState> {
+export async function loadGitState(cwd: string, sessionId?: string | null): Promise<GitState> {
   const [sync, info, branches] = await Promise.all([
-    invoke<CommitSync>("get_commit_sync", { cwd }).catch(() => null),
-    invoke<GitInfo>("get_git_info", { cwd }).catch(() => null),
-    invoke<BranchEntry[]>("get_recent_branches", { cwd }).catch(() => [] as BranchEntry[]),
+    invoke<CommitSync>("get_commit_sync", { cwd, sessionId }).catch(() => null),
+    invoke<GitInfo>("get_git_info", { cwd, sessionId }).catch(() => null),
+    invoke<BranchEntry[]>("get_recent_branches", { cwd, sessionId }).catch(() => [] as BranchEntry[]),
   ]);
   return {
     sync,

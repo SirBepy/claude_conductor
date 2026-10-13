@@ -8,6 +8,7 @@
 mod ask;
 mod attachments;
 mod channels;
+mod git;
 mod hidden_chats;
 mod history;
 mod message_drafts;

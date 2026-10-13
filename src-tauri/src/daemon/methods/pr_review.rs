@@ -27,6 +27,33 @@ pub(super) fn reject_unknown(state: &DaemonState, cwd: &str) -> Result<(), RpcEr
     }
 }
 
+/// Resolves the cwd a git/file read should run against. When `session_id` is
+/// given, ALWAYS resolves it from THIS daemon's own session registry,
+/// ignoring any client-supplied `cwd` entirely: a request forwarded one hop
+/// by `machines/forward.rs` (desktop -> daemon A -> this daemon, the owning
+/// peer) carries a `cwd` that originated from A's mirrored copy of our own
+/// Instance row, so trusting it instead of our own registry would let a
+/// forwarding peer (or anything upstream of it) steer a git/file read by
+/// whatever string it sends, rather than the one THIS daemon actually knows
+/// for that session. The registry is the sole source of truth for where a
+/// session mirrored from this daemon actually lives on disk.
+///
+/// When `session_id` is absent (every existing phone call - the phone has no
+/// reason to send one, cwd is already a path on the SAME machine it is
+/// pairing with), falls back to the legacy cwd-trust path gated by
+/// `reject_unknown`, unchanged.
+pub(super) fn resolve_cwd(state: &DaemonState, cwd: String, session_id: Option<&str>) -> Result<String, RpcError> {
+    if let Some(sid) = session_id {
+        let inst = state
+            .registry
+            .get(sid)
+            .ok_or_else(|| RpcError::invalid_params(format!("unknown session_id: {sid}")))?;
+        return Ok(inst.cwd.to_string_lossy().into_owned());
+    }
+    reject_unknown(state, &cwd)?;
+    Ok(cwd)
+}
+
 pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
@@ -34,13 +61,11 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, #[serde(default)] base: Option<String> }
+                struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, #[serde(default)] base: Option<String>, #[serde(default)] session_id: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                if !is_known_cwd(&state, &p.cwd) {
-                    return Err(RpcError::invalid_params("unknown cwd".to_string()));
-                }
-                let files = crate::ipc::git_diff::get_range_files(p.cwd, p.from, p.to, p.base)
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let files = crate::ipc::git_diff::get_range_files_local(cwd, p.from, p.to, p.base)
                     .await
                     .map_err(RpcError::internal)?;
                 Ok(json!(files))
@@ -72,11 +97,11 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String, #[serde(default)] rev: Option<String>, path: String }
+                struct P { cwd: String, #[serde(default)] rev: Option<String>, path: String, #[serde(default)] session_id: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                let data = crate::ipc::git_diff::get_file_at_rev(p.cwd, p.rev, p.path)
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let data = crate::ipc::git_diff::get_file_at_rev_local(cwd, p.rev, p.path)
                     .await
                     .map_err(RpcError::internal)?;
                 Ok(json!(data))
@@ -90,11 +115,11 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String, branch: String }
+                struct P { cwd: String, branch: String, #[serde(default)] session_id: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                let files = crate::ipc::git_diff::list_branch_files(p.cwd, p.branch)
+                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let files = crate::ipc::git_diff::list_branch_files_local(cwd, p.branch)
                     .await
                     .map_err(RpcError::internal)?;
                 Ok(json!(files))
@@ -106,13 +131,11 @@ pub fn register_pr_review(router: &mut Router, state: Arc<DaemonState>) {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
-            struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, #[serde(default)] base: Option<String>, path: String, #[serde(default)] context: Option<u32> }
+            struct P { cwd: String, from: Option<String>, #[serde(default)] to: Option<String>, #[serde(default)] base: Option<String>, path: String, #[serde(default)] context: Option<u32>, #[serde(default)] session_id: Option<String> }
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            if !is_known_cwd(&state, &p.cwd) {
-                return Err(RpcError::invalid_params("unknown cwd".to_string()));
-            }
-            let diff = crate::ipc::git_diff::get_file_diff(p.cwd, p.from, p.to, p.base, p.path, p.context)
+            let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+            let diff = crate::ipc::git_diff::get_file_diff_local(cwd, p.from, p.to, p.base, p.path, p.context)
                 .await
                 .map_err(RpcError::internal)?;
             Ok(json!(diff))
@@ -165,6 +188,88 @@ mod tests {
             params: Some(json!({"cwd": "C:\\nope\\not\\registered", "branch": "main"})),
         }, dummy_ctx()).await;
         assert!(resp.error.is_some(), "unknown cwd must be rejected");
+    }
+
+    /// `resolve_cwd` is what makes a mirrored session's git/file reads safe to proxy
+    /// to a mirrored session's owning daemon: when `session_id` is given it
+    /// must resolve from THIS daemon's own registry, ignoring whatever `cwd`
+    /// the (possibly forwarding-peer) caller sent - never the reverse.
+    #[tokio::test]
+    async fn resolve_cwd_with_a_session_id_ignores_the_passed_cwd() {
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        let real_cwd = std::env::current_dir().unwrap();
+        state.registry.register(
+            RegisterInput {
+                session_id: "s1".into(),
+                cwd: real_cwd.clone(),
+                pid: 1,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-01-01T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-01-01T00:00:00Z",
+        );
+
+        let resolved = resolve_cwd(&state, "C:\\not-the-real-one".into(), Some("s1")).unwrap();
+        assert_eq!(resolved, real_cwd.to_string_lossy());
+    }
+
+    #[tokio::test]
+    async fn resolve_cwd_with_an_unknown_session_id_is_rejected() {
+        let state = dummy_state();
+        let err = resolve_cwd(&state, "C:\\whatever".into(), Some("no-such-session")).unwrap_err();
+        assert_eq!(err.code, RpcError::invalid_params("x").code);
+    }
+
+    #[tokio::test]
+    async fn resolve_cwd_without_a_session_id_falls_back_to_reject_unknown() {
+        let state = dummy_state();
+        assert!(resolve_cwd(&state, "C:\\nope\\not\\registered".into(), None).is_err());
+        let cwd = std::env::current_dir().unwrap();
+        state.settings.upsert_project_for_cwd(&cwd, "2026-01-01T00:00:00Z");
+        assert_eq!(resolve_cwd(&state, cwd.to_string_lossy().into_owned(), None).unwrap(), cwd.to_string_lossy());
+    }
+
+    /// End-to-end through the router (not calling `resolve_cwd` directly):
+    /// `get_range_files` dispatched with a `session_id` succeeds even though
+    /// its `cwd` is garbage, because the handler resolves the real cwd from
+    /// the registry instead.
+    #[tokio::test]
+    async fn get_range_files_dispatches_via_session_id_even_with_a_bogus_cwd() {
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        let real_cwd = std::env::current_dir().unwrap();
+        state.registry.register(
+            RegisterInput {
+                session_id: "s1".into(),
+                cwd: real_cwd.clone(),
+                pid: 1,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-01-01T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-01-01T00:00:00Z",
+        );
+        let mut r = Router::new();
+        register_pr_review(&mut r, state);
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "get_range_files".into(),
+            params: Some(json!({"cwd": "C:\\nope\\not\\registered", "session_id": "s1", "from": null, "to": "HEAD"})),
+        }, dummy_ctx()).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
     }
 
     #[tokio::test]

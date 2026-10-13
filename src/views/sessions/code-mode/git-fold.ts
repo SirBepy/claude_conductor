@@ -5,10 +5,10 @@
 import { invoke } from "../../../shared/ipc";
 import { BranchSwitcher } from "./branch-switcher";
 import { loadCommitHistoryPage, loadGitState } from "./data";
-import { isCurrent, type CodeModeInstance } from "./code-mode";
+import { isCurrent, isMirroredChat, type CodeModeInstance } from "./code-mode";
 
 export async function loadGit(inst: CodeModeInstance): Promise<void> {
-  const git = await loadGitState(inst.chat.cwd);
+  const git = await loadGitState(inst.chat.cwd, inst.chat.sessionId);
   if (!isCurrent(inst)) return;
   inst.git = git;
   inst.renderExplorer();
@@ -23,6 +23,9 @@ export function resetOlderCommits(inst: CodeModeInstance): void {
 
 export async function runGit(inst: CodeModeInstance, kind: "push" | "pull"): Promise<void> {
   if (inst.gitBusy) return;
+  // Write, no forwarding story for a mirrored chat (G10) - the button is
+  // already disabled in explorer-html.ts's model, this is the backstop.
+  if (isMirroredChat(inst.chat)) return;
   const cwd = inst.chat.cwd;
   inst.gitBusy = kind;
   inst.gitError = null;
@@ -49,7 +52,7 @@ export async function loadOlderCommits(inst: CodeModeInstance): Promise<void> {
   inst.olderLoading = true;
   inst.renderExplorer();
   try {
-    const page = await loadCommitHistoryPage(cwd, inst.olderOffset);
+    const page = await loadCommitHistoryPage(cwd, inst.olderOffset, inst.chat.sessionId);
     if (!isCurrent(inst) || inst.chat.cwd !== cwd) return;
     inst.olderOffset += page.entries.length;
     const unpushedShas = new Set(inst.git?.sync?.ahead.map((c) => c.short_sha) ?? []);
@@ -87,6 +90,7 @@ export function mountBranchSwitcher(inst: CodeModeInstance, ex: HTMLElement): vo
   inst.branchSwitcher = new BranchSwitcher({
     cwd: inst.chat.cwd,
     sessionId: inst.chat.sessionId,
+    mirrored: isMirroredChat(inst.chat),
     initialFilter: seed ?? undefined,
     onCheckedOut: () => {
       inst.branchOpen = false;

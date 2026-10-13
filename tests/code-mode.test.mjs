@@ -362,7 +362,7 @@ describe("Code mode", () => {
     root().querySelector('[data-commit="abc1234"]').click();
     await settle();
     expect(root().querySelector(".cm-ctitle").textContent).toBe("FEAT: one");
-    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: null, to: "abc1234" }]);
+    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: null, to: "abc1234", sessionId: "s1" }]);
     expect(root().querySelector(".cm-tab.on").dataset.tab).toBe("src/a.ts");
     root().querySelector('[data-act="scope-back"]').click();
     await settle();
@@ -372,7 +372,7 @@ describe("Code mode", () => {
   it("Unpushed diffs the upstream against the working tree", async () => {
     openCodeMode(chat({ key: "s3" }), { kind: "scope", scope: "unpushed" });
     await settle();
-    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: "@{u}", to: null }]);
+    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: "@{u}", to: null, sessionId: "s1" }]);
   });
 
   it("Push sends, then reloads and tells the chat its git changed", async () => {
@@ -453,7 +453,7 @@ describe("Code mode", () => {
     // directly) still reads the BRANCH's own content, never the working tree.
     root().querySelector('[data-file="src/unchanged.ts"]').click();
     await settle();
-    expect(calls).toContainEqual(["get_file_at_rev", { cwd: CWD, rev: "feature", path: "src/unchanged.ts" }]);
+    expect(calls).toContainEqual(["get_file_at_rev", { cwd: CWD, rev: "feature", path: "src/unchanged.ts", sessionId: "s1" }]);
   });
 
   it("Check out in the branch-preview header reuses the switcher's own checkout path, filtered to that branch", async () => {

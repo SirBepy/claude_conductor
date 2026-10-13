@@ -58,6 +58,40 @@ proven only by in-process loopback tests. A gap audit on 2026-10-08 found these 
 | G9 | Phone could not tell which machine a chat lives on (tooltip only). | Phone rows show the machine label as text. |
 | G10 | Code mode, commits popover and open-in-editor silently ran against this machine's disk for a mirrored chat. | Hidden for mirrored chats; remote git browsing is a backlog todo. |
 
+## G10 follow-up (2026-10-13, todo 1129): Code mode now proxies its reads
+
+G10's original fix hid Code mode, the commits popover, and the git/branch chips for a mirrored
+chat rather than proxy them. Todo 1129 proxies the READ half instead:
+
+- **Proxied (read-only):** `get_git_info`, `get_git_dirty`, `get_commit_sync`, `get_commit_history`,
+  `get_recent_branches`, `get_range_files`, `get_file_diff`, `get_file_at_rev`, `list_branch_files`,
+  `list_project_files` all take an optional `session_id` now. When the Tauri-facing command
+  (`ipc::git`/`ipc::git_diff`/`ipc::git_branch_preview`/`ipc::files`) sees the session is mirrored
+  (`ipc::mirror::mirrored_client`, the same `AppState.cached_instances` check `ipc::chat::history`
+  uses), it calls the matching `daemon_client::methods::git` wrapper instead of running `git`
+  locally; the daemon's shared forwarder (`machines/forward.rs`) relays the call one hop since each
+  method is now masked `PM` in `remote_transport_table.rs`. The owning peer's own handler
+  (`daemon/methods/pr_review.rs::resolve_cwd`, shared by `statusbar.rs`/`worktrees.rs`/`files.rs`)
+  resolves the real cwd from ITS OWN session registry whenever `session_id` is present, ignoring
+  whatever `cwd` the forwarding call sent - the owning daemon is the only party trusted to say where
+  its own session lives on disk. Each Tauri command's original local-disk logic was renamed
+  `..._local` (`pub(crate)`) and reused verbatim by both the no-session-id local path and the
+  daemon's own RPC handler (which never recurses into mirror routing - a forwarded call always lands
+  on code that reads local disk).
+- **Frontend:** Code mode's `entry.ts` no longer refuses to open for a mirrored chat; every read in
+  `code-mode/data.ts`, `git-fold.ts`, `branch-switcher.ts`, `session-statusbar.ts`, and
+  `commits-popover.ts` threads the chat's `sessionId` alongside `cwd`. The `</>` header button
+  (`session-header.ts`) is no longer hidden either - `setMirrored()` was removed.
+- **Still hidden/disabled (writes, no forwarding story):** `open_in_editor`/`open_in_explorer`
+  (`chat-menu-items.ts`'s VS Code/Terminal/File Explorer items - these launch THIS machine's own
+  apps, meaningless for a peer's disk) and, inside Code mode, `push_commits`/`pull_commits`/
+  `checkout_branch` (the commits fold's Push/Pull buttons and the branch switcher's checkout action -
+  `explorer-html.ts`'s `ExplorerModel.mirrored` / `BranchSwitcherOpts.mirrored` disable them with a
+  "Chat is on another machine" tooltip; `git-fold.ts::runGit` and `branch-switcher.ts::checkout` also
+  refuse server-side as a backstop). `resolve_commit_refs` (hex-commit-link resolution in chat text)
+  stays phone-only (`P`), not yet remasked - a smaller, lower-traffic affordance left for a future
+  pass.
+
 ## Tests
 
 - In-process two-daemon loopback (`remote_server::spawn_on`): `machines/peer_link.rs`,
@@ -76,6 +110,15 @@ proven only by in-process loopback tests. A gap audit on 2026-10-08 found these 
   specs mount through `mountViewPhone` in `e2e/view-harness/harness.ts`, which routes `/api/rpc`
   so `isRemote()` is true.
 - Real hardware: todo 913's checklist (PC + Mac + phone), not runnable from one box.
+- Todo 1129's two-daemon loopback additions in `machines/forward.rs`:
+  `mirrored_git_dirty_reaches_bs_own_registry_cwd_not_the_forwarded_one` and
+  `mirrored_git_info_reaches_bs_own_registry_cwd` spawn B's REAL `register_statusbar` handler
+  (not a stub) against a real temp git repo, and forward a `get_git_dirty`/`get_git_info` call from
+  A with a deliberately bogus `cwd` - proving both the `PM` remask and B's own `resolve_cwd`
+  ignoring the forwarded `cwd` in favor of its own registry. Unit coverage for the other eight
+  remasked methods lives alongside each handler (`daemon/methods/statusbar.rs`,
+  `daemon/methods/worktrees.rs`, `daemon/methods/pr_review.rs`, `daemon/methods/files.rs`) plus
+  `resolve_cwd`'s own tests in `pr_review.rs`.
 
 ## Local rehearsal on one box
 
@@ -88,4 +131,10 @@ instance advertises iroh).
 - One hop only: a phone paired to the PC reaches Mac chats through the PC, never a third machine.
 - A mirrored external (terminal) session has no live stream: `watch_session_transcript` tails a
   local JSONL file and the peer's session stream only serves daemon-hosted chats.
-- Code mode / git views for a mirrored chat are hidden rather than proxied.
+- Code mode / git views for a mirrored chat now proxy their READS only (todo 1129, see the G10
+  follow-up above) - `push_commits`/`pull_commits`/`checkout_branch` and open-in-editor/explorer
+  stay hidden/disabled, and `resolve_commit_refs` stays phone-only.
+- `session_live_cwd` (the "follow the AI into a worktree" git-cwd refinement) still only reads a
+  LOCAL transcript file - for a mirrored chat it silently falls back to the spawn cwd (no error,
+  just no worktree-following), which is what `resolveGitCwd` already sends to the now-proxied
+  `get_git_info`/`get_git_dirty` calls.

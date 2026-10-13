@@ -44,8 +44,11 @@ export interface ChatMenuCtx {
    *  undefined on the phone, which has no route to the file check. */
   hasDeployWorkflow?: boolean;
   /** True when this chat is hosted on a paired peer machine (multi-machine
-   *  federation), never this one - every item below that reads/opens THIS
-   *  machine's disk at `cwd` is wrong for it (G10, docs/multi-machine.md).
+   *  federation), never this one. Only gates `buildOpenProjectItems`' VS
+   *  Code/Terminal/File Explorer entries below, which launch THIS machine's
+   *  own apps against `cwd` - a mirrored chat's cwd is a path on the peer's
+   *  disk (G10, docs/multi-machine.md). "View changes" (Code mode) no longer
+   *  checks this: its reads now proxy to the owning peer instead.
    *  Always false/undefined for a draft (no Instance yet). */
   mirrored?: boolean;
   viewChanges?: () => void;
@@ -174,15 +177,14 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
     {
       icon: "git-diff",
       label: "View changes",
-      // Code mode reads this machine's disk at cwd - wrong disk for a
-      // mirrored chat (G10, docs/multi-machine.md); remote git browsing isn't
-      // built yet.
-      run: ctx.viewChanges && ctx.mirrored !== true
+      // Code mode now proxies its reads one hop to a mirrored chat's owning
+      // peer machine (G10 in docs/multi-machine.md), so this item
+      // is no longer gated on `ctx.mirrored` - only on having a live agent to
+      // view changes for, same as before multi-machine existed.
+      run: ctx.viewChanges
         ? () => { ctx.viewChanges!(); }
         : undefined,
-      disabledReason: ctx.mirrored === true
-        ? NOT_ON_THIS_MACHINE
-        : (!ctx.viewChanges ? (isDraft ? "No active agent" : "Open the chat to view changes") : undefined),
+      disabledReason: !ctx.viewChanges ? (isDraft ? "No active agent" : "Open the chat to view changes") : undefined,
     },
   ];
 }

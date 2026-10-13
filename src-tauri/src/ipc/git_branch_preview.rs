@@ -3,8 +3,12 @@
 //! `reject_option_like` with `git_diff`'s PR/commit-diff commands but has no
 //! other dependency on that module.
 
+use tauri::State;
+
 use super::git::run_git;
 use super::git_diff::reject_option_like;
+use crate::ipc::mirror::mirrored_client;
+use crate::state::AppState;
 
 /// Repo-relative file list for `<branch>` without checking it out, for the
 /// read-only branch-preview scope: `git ls-tree -r --name-only -z
@@ -13,8 +17,12 @@ use super::git_diff::reject_option_like;
 /// so a crafted branch name can never be read as a git flag - this is
 /// phone-reachable, same concern as `get_range_files`/`get_file_at_rev` in
 /// `git_diff`.
-#[tauri::command]
-pub async fn list_branch_files(cwd: String, branch: String) -> Result<Vec<String>, String> {
+///
+/// `pub(crate)` pure local read, reused directly by the daemon's own
+/// `list_branch_files` RPC handler (`daemon/methods/pr_review.rs`) - see
+/// `git::get_git_dirty_local`'s doc for why the Tauri-facing wrapper below
+/// is split out from this one.
+pub(crate) async fn list_branch_files_local(cwd: String, branch: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         reject_option_like("branch", &branch)?;
         let out = run_git(&cwd, &["ls-tree", "-r", "--name-only", "-z", "--end-of-options", &branch])?;
@@ -24,10 +32,29 @@ pub async fn list_branch_files(cwd: String, branch: String) -> Result<Vec<String
     .map_err(|e| format!("list_branch_files join error: {e}"))?
 }
 
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+#[tauri::command]
+pub async fn list_branch_files(
+    cwd: String,
+    branch: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return client
+            .list_branch_files(session_id.as_deref().unwrap(), &cwd, &branch)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    list_branch_files_local(cwd, branch).await
+}
+
 #[cfg(test)]
 mod branch_files_tests {
     use super::*;
-    use super::super::git_diff::{get_file_diff, get_range_files};
+    use super::super::git_diff::{get_file_diff_local, get_range_files_local};
 
     /// A repo with a base commit on the default branch plus a `feature`
     /// branch adding one more file. Returns the default branch's own name
@@ -58,7 +85,7 @@ mod branch_files_tests {
         let head_before = run_git(&repo, &["rev-parse", "HEAD"]).unwrap();
         let status_before = run_git(&repo, &["status", "--porcelain"]).unwrap();
 
-        let files = list_branch_files(repo.clone(), "feature".into()).await.unwrap();
+        let files = list_branch_files_local(repo.clone(), "feature".into()).await.unwrap();
         assert!(files.contains(&"feature.txt".to_string()), "{files:?}");
         assert!(files.contains(&"base.txt".to_string()), "{files:?}");
 
@@ -70,7 +97,7 @@ mod branch_files_tests {
     #[tokio::test]
     async fn rejects_a_dash_prefixed_branch_name() {
         let (_dir, repo, _base) = two_branch_repo();
-        let err = list_branch_files(repo, "--output=x".into()).await.unwrap_err();
+        let err = list_branch_files_local(repo, "--output=x".into()).await.unwrap_err();
         assert!(err.contains("branch"), "{err}");
     }
 
@@ -81,7 +108,7 @@ mod branch_files_tests {
         // base=HEAD..feature diff: both ends are already pinned commits.
         std::fs::write(dir.path().join("base.txt"), "base\nuncommitted-edit\n").unwrap();
 
-        let files = get_range_files(repo, None, Some("feature".into()), Some("HEAD".into())).await.unwrap();
+        let files = get_range_files_local(repo, None, Some("feature".into()), Some("HEAD".into())).await.unwrap();
         assert_eq!(files.len(), 2, "uncommitted edit must not appear: {files:?}");
 
         let added = files.iter().find(|f| f.path == "feature.txt").expect("feature-only file listed");
@@ -97,7 +124,7 @@ mod branch_files_tests {
         let (dir, repo, _base) = two_branch_repo();
         std::fs::write(dir.path().join("base.txt"), "base\nuncommitted-edit\n").unwrap();
 
-        let diff = get_file_diff(repo, None, Some("feature".into()), Some("HEAD".into()), "base.txt".into(), None)
+        let diff = get_file_diff_local(repo, None, Some("feature".into()), Some("HEAD".into()), "base.txt".into(), None)
             .await
             .unwrap();
         assert!(diff.contains("+feature-added-line"), "{diff}");
@@ -107,7 +134,7 @@ mod branch_files_tests {
     #[tokio::test]
     async fn rejects_a_dash_prefixed_base() {
         let (_dir, repo, _base) = two_branch_repo();
-        let err = get_range_files(repo, None, Some("feature".into()), Some("--output=x".into())).await.unwrap_err();
+        let err = get_range_files_local(repo, None, Some("feature".into()), Some("--output=x".into())).await.unwrap_err();
         assert!(err.contains("base"), "{err}");
     }
 }

@@ -15,6 +15,7 @@ pub mod audio_preview;
 pub mod misc;
 pub mod git;
 pub mod git_diff;
+pub(crate) mod mirror;
 pub mod git_branch_preview;
 pub mod git_range_parse;
 pub mod git_commit_refs;

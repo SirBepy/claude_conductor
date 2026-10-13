@@ -84,6 +84,10 @@ export function reanchorConfigPopover(
 
 export interface ChipPopoverWireCtx extends StatusbarPopovers {
   cwd: string | null;
+  /** This chat's session id, sent alongside `cwd` to the commits popover so
+   *  a mirrored chat's history page routes to the owning peer (G10 in
+   *  docs/multi-machine.md). */
+  sessionId: string | null;
   effortAnchor: HTMLElement | null;
   modelAnchor: HTMLElement | null;
   toggleModelPopover: (anchor: HTMLElement) => void;
@@ -146,7 +150,7 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
     const anchor = e.currentTarget as HTMLElement;
     const wasOpen = ctx.commitsPopover.isOpen;
     closeAll();
-    if (!wasOpen && ctx.cwd) ctx.commitsPopover.open(anchor, ctx.cwd);
+    if (!wasOpen && ctx.cwd) ctx.commitsPopover.open(anchor, ctx.cwd, ctx.sessionId);
   });
 
   // The standalone branch and ahead/behind chips are a way into Code mode, on

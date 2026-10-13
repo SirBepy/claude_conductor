@@ -99,9 +99,10 @@ export class SessionStatusbar {
   // of gitCwd, so an off-repo cwd stays visible even while gitCwd (and the
   // git chip's branch/sha data) fall back to the chat's own repo.
   private liveCwd: string | null;
-  // Mirrored chat (multi-machine federation): git/dirty/folder-explorer all
-  // read THIS machine's disk, the wrong one for a chat hosted on a peer -
-  // see the constructor's git-fetch skip and the folder/git click guards below.
+  // Mirrored chat (multi-machine federation, G10 in docs/multi-machine.md):
+  // git/dirty/commits reads now proxy to the owning peer via `sessionId`
+  // below - only the folder-explorer button (which launches THIS machine's
+  // own file manager) still checks this flag, see its click guard below.
   private mirrored: boolean;
   private sessionId: string | null;
   private modelEffort: ModelEffortState;
@@ -160,11 +161,6 @@ export class SessionStatusbar {
     } else {
       this.gitInfoLoaded = true;
     }
-    // Mirrored: git/dirty are never fetched (see the resolveGitCwd skip
-    // below), so mark both loaded now with their EMPTY defaults - otherwise
-    // the git/branch/commits/dirty chips render a skeleton forever instead
-    // of just staying absent.
-    if (this.mirrored) { this.gitInfoLoaded = true; this.dirtyLoaded = true; }
     if (this.sessionId) {
       const cachedMeta = metaCache.get(this.sessionId);
       if (cachedMeta) { this.meta = cachedMeta; this.metaLoaded = true; }
@@ -177,10 +173,11 @@ export class SessionStatusbar {
     if (wantsContext(this.rows)) void this.refreshContextStatus();
     // Resolve the live git cwd (may follow the AI into a worktree), then fetch
     // git info + dirty against it. Owns all git fetching for live sessions.
-    // Skipped for a mirrored chat: `cwd` is a path on the PEER's disk, not
-    // this machine's (G10, docs/multi-machine.md) - fetching here would read
-    // whatever (possibly unrelated) repo happens to sit at that path locally.
-    if (wantsGit(this.rows) && !this.mirrored) void this.resolveGitCwd();
+    // Also runs for a mirrored chat (G10 in docs/multi-machine.md):
+    // `resolveGitCwd`/`refreshGitInfo`/`refreshDirty` all send `this.sessionId`
+    // alongside `cwd`, which the daemon forwards one hop to the owning peer -
+    // `cwd` itself is never read locally for a mirrored chat.
+    if (wantsGit(this.rows)) void this.resolveGitCwd();
     if (hasChip(this.rows, "ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
     if (wantsDrain(this.rows)) void this.refreshDrain();
     if (hasChip(this.rows, "servers") && this.cwd) this.startServersPoll();
@@ -269,6 +266,7 @@ export class SessionStatusbar {
     let offRepo = false;
     await fetchGitInfoData({
       cwd,
+      sessionId: this.sessionId,
       isCurrent: () => this.gitCwd === cwd,
       onSuccess: (info) => {
         // `info` is null from a transport that degrades an unwired command;
@@ -292,6 +290,7 @@ export class SessionStatusbar {
     if (!cwd) return;
     await fetchDirty({
       cwd,
+      sessionId: this.sessionId,
       isCurrent: () => this.gitCwd === cwd,
       onSuccess: (count) => { this.dirtyCount = count; this.dirtyLoaded = true; this.render(); },
       onUnavailable: () => { this.dirtyLoaded = true; this.render(); },
@@ -560,11 +559,13 @@ export class SessionStatusbar {
   private popoverWireCtx(): ChipPopoverWireCtx {
     return {
       ...this.popoverBundle(),
-      // null, not this.cwd, when mirrored: the git-btn/branch-btn/commits-btn
-      // handlers below all gate on `ctx.cwd` already present, so this alone
-      // keeps the commits popover and Code mode's push-flow openers from
-      // reading the peer's path as if it were local (G10).
-      cwd: this.mirrored ? null : this.cwd,
+      // Real cwd even when mirrored: the commits popover and
+      // Code mode's openers now route through `sessionId` below, which the
+      // daemon forwards to the owning peer (G10, docs/multi-machine.md) -
+      // only open-in-explorer (the folder button, wired separately above)
+      // stays local-only, since it launches this machine's own file manager.
+      cwd: this.cwd,
+      sessionId: this.sessionId,
       effortAnchor: this.modelEffort.effortAnchor,
       modelAnchor: this.modelEffort.modelAnchor,
       toggleModelPopover: (anchor) => this.toggleModelPopover(anchor),

@@ -71,24 +71,19 @@ describe("session header config text", () => {
   });
 });
 
-// Multi-machine federation (G10, docs/multi-machine.md): the `</>` Code mode
-// button reads THIS machine's disk at the chat's cwd, the wrong disk for a
-// chat mirrored in from a peer - so it's hidden, not just disabled.
+// Multi-machine federation (G10 in docs/multi-machine.md): Code
+// mode's reads now proxy to a mirrored chat's owning peer machine, so the
+// `</>` button is never hidden for one (unlike the 2026-10-08 build, which
+// hid it via a since-removed `setMirrored`) - see
+// tests/chat-menu-items-mirrored.test.mjs for the "View changes" menu item's
+// matching un-hide, and session-statusbar.ts's `mirrored` flag for why the
+// folder-explorer button (a different, still-local-only affordance) stays
+// gated.
 describe("session header Code mode button (multi-machine)", () => {
   const codeModeBtn = () => header.el.querySelector(".code-mode-btn");
 
-  it("is visible by default (a locally-hosted chat)", () => {
+  it("is visible, with no mirrored-gating mechanism on the header at all", () => {
     expect(codeModeBtn().hidden).toBe(false);
-  });
-
-  it("hides for a mirrored chat", () => {
-    header.setMirrored(true);
-    expect(codeModeBtn().hidden).toBe(true);
-  });
-
-  it("re-shows once no longer mirrored (chat switch back to a local one)", () => {
-    header.setMirrored(true);
-    header.setMirrored(false);
-    expect(codeModeBtn().hidden).toBe(false);
+    expect(header.setMirrored).toBeUndefined();
   });
 });

@@ -20,6 +20,10 @@ export class CommitsPopover {
   private shell = new PopoverShell();
   private anchor: HTMLElement | null = null;
   private cwd: string | null = null;
+  // Set when the chat is hosted on a paired peer machine (G10 in
+  // docs/multi-machine.md): sent alongside `cwd` on every `get_commit_history`
+  // page so the daemon forwards the read to the owning peer.
+  private sessionId: string | null = null;
   private popEl: HTMLElement | null = null;
 
   private history: CommitHistoryEntry[] = [];
@@ -31,9 +35,10 @@ export class CommitsPopover {
 
   get isOpen(): boolean { return this.shell.isOpen; }
 
-  open(anchor: HTMLElement, cwd: string): void {
+  open(anchor: HTMLElement, cwd: string, sessionId: string | null = null): void {
     this.anchor = anchor;
     this.cwd = cwd;
+    this.sessionId = sessionId;
     this.resetHistory();
     this.rebuild();
     void this.loadPage();
@@ -43,6 +48,7 @@ export class CommitsPopover {
     this.shell.close();
     this.anchor = null;
     this.cwd = null;
+    this.sessionId = null;
     this.popEl = null;
     this.resetHistory();
   }
@@ -123,7 +129,7 @@ export class CommitsPopover {
     this.historyLoading = true;
     this.paintSentinel();
     try {
-      const page = await loadCommitHistoryPage(cwd, offset);
+      const page = await loadCommitHistoryPage(cwd, offset, this.sessionId);
       if (this.cwd !== cwd || this.historyGen !== gen) return;
       this.historyLoading = false;
       this.historyMore = page.has_more;

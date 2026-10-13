@@ -3,16 +3,40 @@
 //! the app log on behalf of the frontend.
 
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use crate::files;
+use crate::ipc::mirror::mirrored_client;
+use crate::state::AppState;
 
-#[tauri::command]
-pub async fn list_project_files(project_dir: String) -> Result<Vec<String>, String> {
+/// `pub(crate)` pure local read, reused directly by the daemon's own
+/// `list_project_files` RPC handler (`daemon/methods/files.rs`) - see
+/// `ipc::git::get_git_dirty_local`'s doc for why the Tauri-facing wrapper
+/// below is split out from this one.
+pub(crate) async fn list_project_files_local(project_dir: String) -> Result<Vec<String>, String> {
     let p = PathBuf::from(project_dir);
     tauri::async_runtime::spawn_blocking(move || files::scan(&p))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local scan as before - used by Code mode's file tree/quick-open
+/// and the chat composer's `@`-mention autocomplete.
+#[tauri::command]
+pub async fn list_project_files(
+    project_dir: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return client
+            .list_project_files(session_id.as_deref().unwrap(), &project_dir)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    list_project_files_local(project_dir).await
 }
 
 /// Read a local file and return its contents as a base64 string so the
@@ -159,7 +183,7 @@ pub async fn read_image_file(
 /// of `read_image_file` (which reads any absolute path the agent surfaced).
 const TEXT_FILE_CAP_BYTES: usize = 2 * 1024 * 1024; // 2 MB
 
-#[derive(serde::Serialize, ts_rs::TS)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct TextFileData {
     pub content: String,

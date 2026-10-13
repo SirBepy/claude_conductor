@@ -3,12 +3,23 @@
 //! lives in the sibling `git_diff` module; session/context-transcript
 //! resolution lives in `context_status`; commit-sync/history lives in
 //! `git_sync`.
+//!
+//! Every read-only command below takes an optional `session_id`: when it
+//! resolves to a session mirrored from a paired peer machine (G10,
+//! docs/multi-machine.md), the read is routed one hop to the owning peer via
+//! the daemon (`ipc::mirror::mirrored_client`) instead of running `git`
+//! against `cwd`, which is a path on the PEER's disk, not this one's.
+
+use tauri::State;
+
+use crate::ipc::mirror::mirrored_client;
+use crate::state::AppState;
 
 // Re-exported so `ipc::*`/`ipc::git::*` callers (including the daemon
 // statusbar router's fully-qualified paths) keep resolving after the move.
 pub use super::git_sync::*;
 
-#[derive(serde::Serialize, ts_rs::TS)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct GitInfo {
     pub branch: Option<String>,
@@ -41,8 +52,16 @@ pub fn parse_shortstat(s: &str) -> (Option<u32>, Option<u32>) {
 /// Returns the list of files with uncommitted changes in the given directory.
 /// Used to detect whether there is work to commit before closing a chat session.
 /// Returns an empty vec if the directory is not a git repo or git is unavailable.
-#[tauri::command]
-pub async fn get_git_dirty(cwd: String) -> Vec<String> {
+///
+/// `pub(crate)` (not `#[tauri::command]`): this is the pure local read,
+/// reused directly by the daemon's own `get_git_dirty` RPC handler
+/// (`daemon/methods/statusbar.rs`), which runs in a separate process with no
+/// `AppState` and always wants the local read - by the time a forwarded call
+/// reaches a handler, `machines/forward.rs` already routed it to the owning
+/// peer, so that peer's own handler must read ITS OWN disk, never recurse
+/// into mirror routing again. The Tauri-facing command below (same name,
+/// public) is the only caller that needs the mirror check.
+pub(crate) async fn get_git_dirty_local(cwd: String) -> Vec<String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C").arg(&cwd).args(["status", "--porcelain"]);
@@ -62,6 +81,25 @@ pub async fn get_git_dirty(cwd: String) -> Vec<String> {
     })
     .await
     .unwrap_or_default()
+}
+
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+///
+/// `Result`-wrapped (always `Ok`, never actually fails) solely because Tauri
+/// requires an async command taking a `State<'_, _>` reference to return
+/// `Result` - the JS side still just sees a plain `string[]` on success,
+/// same as before this command took `state`.
+#[tauri::command]
+pub async fn get_git_dirty(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return Ok(client
+            .get_git_dirty(session_id.as_deref().unwrap(), &cwd)
+            .await
+            .unwrap_or_default());
+    }
+    Ok(get_git_dirty_local(cwd).await)
 }
 
 /// Runs `git -C <cwd> <args>`, hiding the console window on Windows. Returns
@@ -97,8 +135,7 @@ pub(super) fn run_git_opt(cwd: &str, args: &[&str]) -> Option<String> {
 /// for the duration of the spawn. On Windows the spawned `git.exe` is
 /// flagged CREATE_NO_WINDOW to suppress the otherwise-visible console
 /// flash on every chat open.
-#[tauri::command]
-pub async fn get_git_info(cwd: String) -> GitInfo {
+pub(crate) async fn get_git_info_local(cwd: String) -> GitInfo {
     tauri::async_runtime::spawn_blocking(move || {
         let branch = run_git_opt(&cwd, &["branch", "--show-current"]);
 
@@ -137,7 +174,22 @@ pub async fn get_git_info(cwd: String) -> GitInfo {
     .unwrap_or(GitInfo { branch: None, repo: None, ahead: None, behind: None, sha: None, insertions: None, deletions: None })
 }
 
-#[derive(serde::Serialize, ts_rs::TS)]
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before. See `get_git_dirty`'s doc for why this
+/// returns `Result` (always `Ok`) and why the pure read is split out.
+#[tauri::command]
+pub async fn get_git_info(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<GitInfo, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return Ok(client
+            .get_git_info(session_id.as_deref().unwrap(), &cwd)
+            .await
+            .unwrap_or(GitInfo { branch: None, repo: None, ahead: None, behind: None, sha: None, insertions: None, deletions: None }));
+    }
+    Ok(get_git_info_local(cwd).await)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct BranchEntry {
     pub name: String,
@@ -149,8 +201,7 @@ pub struct BranchEntry {
 /// Returns recent local branches sorted by last commit date (most recent first),
 /// up to 15. Each entry carries the current-branch marker, short SHA, and
 /// tracking upstream ref if configured.
-#[tauri::command]
-pub async fn get_recent_branches(cwd: String) -> Vec<BranchEntry> {
+pub(crate) async fn get_recent_branches_local(cwd: String) -> Vec<BranchEntry> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C").arg(&cwd).args([
@@ -180,6 +231,21 @@ pub async fn get_recent_branches(cwd: String) -> Vec<BranchEntry> {
     })
     .await
     .unwrap_or_default()
+}
+
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before. See `get_git_dirty_local`'s doc for why
+/// the pure read is split out.
+#[tauri::command]
+pub async fn get_recent_branches(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<Vec<BranchEntry>, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return Ok(client
+            .get_recent_branches(session_id.as_deref().unwrap(), &cwd)
+            .await
+            .unwrap_or_default());
+    }
+    Ok(get_recent_branches_local(cwd).await)
 }
 
 #[cfg(test)]

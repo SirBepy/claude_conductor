@@ -7,6 +7,8 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { basename } from "../../../shared/path-utils";
 import { isRemote } from "../../../shared/transport";
 import { registerOverlayBack } from "../../../shared/back-button";
+import { state } from "../state";
+import { isMirrored } from "../sessions-helpers";
 import { createFileSurface, type FileSurfaceHandle, type SurfaceFile } from "../../../shared/chat/file-surface";
 import type { FileEditView } from "../../../shared/chat/file-edits";
 import type { CodeModeTarget } from "../../../shared/chat/code-mode-bridge";
@@ -50,6 +52,20 @@ export interface CodeModeChat {
   mention: ((relPath: string) => void) | null;
   /** Called after a push / pull / checkout so the chat's git chip refreshes. */
   onGitChanged?: () => void;
+}
+
+/** True when `chat` is hosted on a paired peer machine (multi-machine
+ *  federation): every read below (file tree, diffs, git chips, commits) now
+ *  routes one hop to the owning peer via the daemon (G10 in
+ *  docs/multi-machine.md) - only the WRITE actions (push/pull/
+ *  checkout_branch, which have no forwarding story) stay disabled, gated by
+ *  this same check in `explorerHtml`'s model and `branch-switcher.ts`.
+ *  Exported for `git-fold.ts` (which owns `mountBranchSwitcher`). A chat
+ *  with no matching live Instance (e.g. a history-view transcript) is never
+ *  mirrored - federation only mirrors live sessions. */
+export function isMirroredChat(chat: CodeModeChat): boolean {
+  if (!chat.sessionId) return false;
+  return isMirrored(state.sessions.find((s) => s.session_id === chat.sessionId));
 }
 
 export type { CodeModeTarget };
@@ -137,11 +153,11 @@ export function snapshotView(key: string): ViewSnapshot | null {
 /** Seeds a chat's state from another window's snapshot. Tab sources are
  *  rebuilt from the scope once it loads; until then a tab reads the file as
  *  it is on disk. */
-export function restoreView(key: string, cwd: string, snap: ViewSnapshot): void {
+export function restoreView(key: string, cwd: string, snap: ViewSnapshot, sessionId?: string | null): void {
   const v = viewFor(key);
   v.scope = snap.scope.kind === "pr" ? { kind: snap.prevScope } : snap.scope;
   v.prevScope = snap.prevScope;
-  v.tabs = snap.tabs.map((t) => ({ ...t, surface: plainSurface(cwd, t.path) }));
+  v.tabs = snap.tabs.map((t) => ({ ...t, surface: plainSurface(cwd, t.path, sessionId) }));
   v.active = snap.active;
   v.commitsOpen = snap.commitsOpen;
 }
@@ -280,7 +296,7 @@ export class CodeModeInstance {
       case "pr":
         v.desc = target.desc;
         this.els.desc.dataset.rendered = "";
-        if (target.desc) this.upsertTab({ path: DESC_TAB, status: null, inCommit: true, surface: plainSurface(this.chat.cwd, "") }, true);
+        if (target.desc) this.upsertTab({ path: DESC_TAB, status: null, inCommit: true, surface: plainSurface(this.chat.cwd, "", this.chat.sessionId) }, true);
         this.enterScope({ kind: "pr", title: target.title, commits: target.commits }, false);
         return;
     }
@@ -325,7 +341,7 @@ export class CodeModeInstance {
     this.renderExplorer();
     const edits = this.chat.edits();
     this.editsSeen = edits.length;
-    const data = await loadScope({ cwd: this.chat.cwd, edits }, this.view.scope);
+    const data = await loadScope({ cwd: this.chat.cwd, edits, sessionId: this.chat.sessionId }, this.view.scope);
     if (gen !== this.loadGen || current !== this) return;
     this.data = data;
     this.refreshTabSources();
@@ -386,7 +402,9 @@ export class CodeModeInstance {
     const inCommit = scope.kind === "commit" || scope.kind === "pr";
     // An unchanged file in a branch preview still has to read the branch's
     // own content, never the working tree plainSurface would read.
-    const fallback = scope.kind === "branch" ? branchFileSurface(this.chat.cwd, path, scope.name) : plainSurface(this.chat.cwd, path);
+    const fallback = scope.kind === "branch"
+      ? branchFileSurface(this.chat.cwd, path, scope.name, undefined, this.chat.sessionId)
+      : plainSurface(this.chat.cwd, path, this.chat.sessionId);
     this.upsertTab({ path, status: f?.status ?? null, inCommit, surface: f?.surface ?? fallback }, true);
     this.view.screen = "file";
     this.renderExplorer();
@@ -465,6 +483,7 @@ export class CodeModeInstance {
       branchOpen: this.branchOpen,
       gitBusy: this.gitBusy,
       gitError: this.gitError,
+      mirrored: isMirroredChat(this.chat),
       older: this.older,
       olderLoading: this.olderLoading,
       olderDone: this.olderDone,
@@ -494,7 +513,7 @@ export class CodeModeInstance {
     this.renderExplorer();
     this.els.explorer.querySelector<HTMLElement>(".cm-mi[aria-checked=true]")?.focus();
     const counts = await Promise.all((["unpushed", "uncommitted"] as const).map(async (k) => {
-      const d = await loadScope({ cwd: this.chat.cwd, edits: [] }, { kind: k });
+      const d = await loadScope({ cwd: this.chat.cwd, edits: [], sessionId: this.chat.sessionId }, { kind: k });
       return [k, d.error ? 0 : d.changed.size] as const;
     }));
     if (!this.menuOpen || current !== this) return;

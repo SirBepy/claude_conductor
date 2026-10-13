@@ -73,12 +73,13 @@ export async function refreshContextStatus(opts: {
 
 export async function refreshGitInfo(opts: {
   cwd: string;
+  sessionId?: string | null;
   isCurrent: () => boolean;
   onSuccess: (info: GitInfo) => void;
   onUnavailable: () => void;
 }): Promise<void> {
   try {
-    const info = await fetchGitInfo(opts.cwd);
+    const info = await fetchGitInfo(opts.cwd, opts.sessionId);
     if (!opts.isCurrent()) return;
     opts.onSuccess(info);
   } catch (e) {
@@ -90,12 +91,13 @@ export async function refreshGitInfo(opts: {
 
 export async function refreshDirty(opts: {
   cwd: string;
+  sessionId?: string | null;
   isCurrent: () => boolean;
   onSuccess: (count: number) => void;
   onUnavailable: () => void;
 }): Promise<void> {
   try {
-    const files = await invoke<string[]>("get_git_dirty", { cwd: opts.cwd });
+    const files = await invoke<string[]>("get_git_dirty", { cwd: opts.cwd, sessionId: opts.sessionId });
     if (!opts.isCurrent()) return;
     opts.onSuccess(files.length);
   } catch (e) {

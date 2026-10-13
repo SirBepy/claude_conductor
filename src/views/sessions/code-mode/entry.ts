@@ -5,8 +5,6 @@
 import { isRemote } from "../../../shared/transport";
 import { invoke } from "../../../shared/ipc";
 import { updateSettings } from "../../../shared/settings-update";
-import { state } from "../state";
-import { isMirrored } from "../sessions-helpers";
 import {
   closeCodeMode,
   currentCodeModeKey,
@@ -59,23 +57,6 @@ function canPopOut(chat: CodeModeChat): boolean {
   return !isRemote() && !isCodeWindow() && !!chat.sessionId;
 }
 
-/** True when the chat is hosted on a paired peer machine (multi-machine
- *  federation): every Code mode surface (file tree, diffs, git chips) reads
- *  THIS machine's disk at `chat.cwd`, the wrong disk for a mirrored chat
- *  (G10, docs/multi-machine.md) - remote git browsing isn't built yet.
- *  Belt-and-suspenders guard: the visible entry points (the header button,
- *  the "View changes" menu item) are hidden/disabled at their own render
- *  site, but every one of them - plus the keyboard shortcuts and every
- *  deep-link opener registered via setCodeModeOpener - funnels through
- *  enterCodeMode, so this single check is what actually stops a stale or
- *  missed affordance from opening the wrong machine's files. A chat with no
- *  matching live Instance (e.g. a history-view transcript) is never mirrored
- *  by this check - multi-machine federation only mirrors live sessions. */
-function isMirroredChat(chat: CodeModeChat): boolean {
-  if (!chat.sessionId) return false;
-  return isMirrored(state.sessions.find((s) => s.session_id === chat.sessionId));
-}
-
 export function popOut(chat: CodeModeChat, target: CodeModeTarget = { kind: "default" }): void {
   const snap = snapshotView(chat.key);
   if (isCodeModeOpen()) closeCodeMode();
@@ -89,7 +70,7 @@ function hooksFor(chat: CodeModeChat) {
 
 export async function enterCodeMode(target: CodeModeTarget = { kind: "default" }): Promise<void> {
   const chat = provider?.();
-  if (!chat || isMirroredChat(chat)) return;
+  if (!chat) return;
   if (canPopOut(chat)) {
     if (isPoppedOut(chat.sessionId!)) { forwardToCodeWindow(chat, target); return; }
     if (!isCodeModeOpen() && (await prefersPopOut())) { popOut(chat, target); return; }
@@ -118,8 +99,8 @@ export function togglePopOut(): void {
  *  mode, entering Code mode first if it isn't open. */
 export function quickOpenFile(): void {
   const chat = provider?.();
-  if (!chat?.cwd || isMirroredChat(chat)) return;
-  openQuickOpen(chat.cwd, (path) => void enterCodeMode({ kind: "file", path }));
+  if (!chat?.cwd) return;
+  openQuickOpen(chat.cwd, chat.sessionId, (path) => void enterCodeMode({ kind: "file", path }));
 }
 
 setCodeModeOpener((target) => void enterCodeMode(target));

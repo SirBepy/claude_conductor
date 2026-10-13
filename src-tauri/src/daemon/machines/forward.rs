@@ -583,4 +583,144 @@ mod tests {
 
         a_serve.kill();
     }
+
+    // ── Two-daemon end-to-end coverage for G10's git/file-read PM remask ──
+
+    fn git(cwd: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git").arg("-C").arg(cwd).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// `get_git_dirty` dispatched on A for a session mirrored from B is
+    /// forwarded over real loopback HTTP to B's REAL `get_git_dirty` RPC
+    /// handler (`register_statusbar`, not a stub) and comes back with B's
+    /// actual dirty-file list - proving both halves of this G10 follow-up fix
+    /// end to end: the PM remask (`remote_transport_table.rs`) makes the
+    /// forward happen at all, and B's own `resolve_cwd` resolves the cwd
+    /// from B's OWN session registry rather than trusting the bogus `cwd`
+    /// this call sends - a malicious or merely stale forwarding peer could
+    /// send any string there, and B must never run `git` against it.
+    #[tokio::test]
+    async fn mirrored_git_dirty_reaches_bs_own_registry_cwd_not_the_forwarded_one() {
+        use crate::daemon::methods::register_statusbar;
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        // B's real git repo, with one dirty (uncommitted) file.
+        let repo_dir = tempdir().unwrap();
+        let repo = repo_dir.path().to_path_buf();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "test"]);
+        std::fs::write(repo.join("tracked.txt"), "one\n").unwrap();
+        git(&repo, &["add", "tracked.txt"]);
+        git(&repo, &["commit", "-q", "-m", "base"]);
+        std::fs::write(repo.join("tracked.txt"), "one\ntwo\n").unwrap();
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        b_state.registry.register(
+            RegisterInput {
+                session_id: "b-session-1".into(),
+                cwd: repo.clone(),
+                pid: 4242,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-09-05T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-09-05T00:00:00Z",
+        );
+
+        let mut b_router = Router::new();
+        register_statusbar(&mut b_router, b_state.clone());
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "b-session-1");
+
+        // A bogus cwd that is NOT the real repo - B must ignore this and
+        // resolve "b-session-1" from its own registry instead.
+        let result = forward_one(
+            &state,
+            "get_git_dirty",
+            Some(json!({"session_id": "b-session-1", "cwd": "C:/not-the-real-repo"})),
+            &Transport::Local,
+        )
+        .await;
+        let dirty = match result {
+            Some(Ok(v)) => v,
+            other => panic!("expected the forwarded call to succeed, got {other:?}"),
+        };
+        let files: Vec<String> = serde_json::from_value(dirty).unwrap();
+        assert_eq!(files, vec!["tracked.txt".to_string()], "must reflect B's own registered repo, not the forwarded cwd");
+
+        b_serve.kill();
+    }
+
+    /// Same end-to-end shape as above, for `get_git_info`: B's real repo's
+    /// branch name comes back through A's forwarded call, proving the PM
+    /// remask covers the git-info chip too, not just the dirty chip.
+    #[tokio::test]
+    async fn mirrored_git_info_reaches_bs_own_registry_cwd() {
+        use crate::daemon::methods::register_statusbar;
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        let repo_dir = tempdir().unwrap();
+        let repo = repo_dir.path().to_path_buf();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "test"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        git(&repo, &["add", "a.txt"]);
+        git(&repo, &["commit", "-q", "-m", "base"]);
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        b_state.registry.register(
+            RegisterInput {
+                session_id: "b-session-1".into(),
+                cwd: repo.clone(),
+                pid: 4242,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-09-05T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-09-05T00:00:00Z",
+        );
+
+        let mut b_router = Router::new();
+        register_statusbar(&mut b_router, b_state.clone());
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "b-session-1");
+
+        let result = forward_one(
+            &state,
+            "get_git_info",
+            Some(json!({"session_id": "b-session-1", "cwd": "C:/not-the-real-repo"})),
+            &Transport::Local,
+        )
+        .await;
+        let info = match result {
+            Some(Ok(v)) => v,
+            other => panic!("expected the forwarded call to succeed, got {other:?}"),
+        };
+        assert_eq!(info["branch"], json!("main"), "must reflect B's own registered repo: {info:?}");
+
+        b_serve.kill();
+    }
 }

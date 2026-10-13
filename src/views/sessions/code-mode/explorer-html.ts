@@ -34,6 +34,11 @@ export interface ExplorerModel {
   branchOpen: boolean;
   gitBusy: "push" | "pull" | null;
   gitError: string | null;
+  /** True when this chat is hosted on a paired peer machine: push/pull are
+   *  writes with no forwarding story (G10, docs/multi-machine.md) - the
+   *  commits list and branch switcher above them read fine for a mirrored
+   *  chat, only the push/pull buttons themselves stay disabled. */
+  mirrored?: boolean;
   /** Pushed commits paged in below the unpushed ones via "Show older commits". */
   older?: CommitHistoryEntry[];
   olderLoading?: boolean;
@@ -167,13 +172,13 @@ function commitsHtml(m: ExplorerModel): string {
   const spin = `<i class="ph ph-spinner-gap cm-spin"></i>`;
   const n = sync.ahead.length;
   const pull = sync.behind.length
-    ? `<div class="cm-commit cm-actrow"><button class="cm-pushtext" data-act="pull"${m.gitBusy ? " disabled" : ""} title="Pull ${sync.behind.length} commit${sync.behind.length === 1 ? "" : "s"} from ${escapeHtml(target)}">`
+    ? `<div class="cm-commit cm-actrow"><button class="cm-pushtext" data-act="pull"${m.gitBusy || m.mirrored ? " disabled" : ""} title="${m.mirrored ? "Chat is on another machine" : `Pull ${sync.behind.length} commit${sync.behind.length === 1 ? "" : "s"} from ${escapeHtml(target)}`}">`
       + `${m.gitBusy === "pull" ? spin : `<i class="ph ph-arrow-down"></i>`}Pull ${sync.behind.length} commit${sync.behind.length === 1 ? "" : "s"}</button></div>`
     : "";
   const pushLabel = !sync.has_upstream ? `Publish ${escapeHtml(branchName)}` : n ? `Push ${n} commit${n === 1 ? "" : "s"}` : "Nothing to push";
-  const canPush = !sync.has_upstream || n > 0;
+  const canPush = (!sync.has_upstream || n > 0) && !m.mirrored;
   const pushIcon = m.gitBusy === "push" ? spin : `<i class="ph ${sync.has_upstream ? "ph-arrow-up" : "ph-cloud-arrow-up"}"></i>`;
-  const push = `<div class="cm-commit cm-actrow cm-pushrow"><button class="cm-pushtext" data-act="push"${canPush && !m.gitBusy ? "" : " disabled"} title="${sync.has_upstream ? `Push to ${escapeHtml(target)}` : "Publish this branch to origin"}">${pushIcon}${pushLabel}</button>`
+  const push = `<div class="cm-commit cm-actrow cm-pushrow"><button class="cm-pushtext" data-act="push"${canPush && !m.gitBusy ? "" : " disabled"} title="${m.mirrored ? "Chat is on another machine" : (sync.has_upstream ? `Push to ${escapeHtml(target)}` : "Publish this branch to origin")}">${pushIcon}${pushLabel}</button>`
     + `<span class="grow"></span><button class="cm-branchbtn${m.branchOpen ? " on" : ""}" data-act="branch" aria-haspopup="dialog" aria-expanded="${m.branchOpen}" title="Switch branch">`
     + `<i class="ph ph-git-branch"></i><span>${escapeHtml(sync.has_upstream ? target : branchName)}</span><i class="ph ph-caret-up"></i></button></div>`;
   const err = m.gitError ? `<div class="cm-giterr"><i class="ph ph-warning"></i>${escapeHtml(m.gitError)}</div>` : "";

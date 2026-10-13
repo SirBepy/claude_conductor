@@ -10,8 +10,16 @@ import "./branch-switcher.css";
 
 export interface BranchSwitcherOpts {
   cwd: string;
-  /** This chat's own session id, excluded from the peer-session warning. */
+  /** This chat's own session id, excluded from the peer-session warning, and
+   *  sent alongside `cwd` on every read below so a session mirrored from a
+   *  paired peer machine resolves against the OWNING peer's disk (G10 in
+   *  docs/multi-machine.md), not this one's. */
   sessionId: string | null;
+  /** True when this chat is hosted on a paired peer machine: `checkout_branch`
+   *  is a write with no forwarding story (G10), so it stays disabled here
+   *  even though the read-only branch list/Preview action above it now works
+   *  for a mirrored chat. */
+  mirrored?: boolean;
   onCheckedOut: () => void;
   onClose: () => void;
   /** Preview icon on a row: read-only, no checkout. Omit to hide the icon,
@@ -54,8 +62,8 @@ export class BranchSwitcher {
   private async load(): Promise<void> {
     const { cwd, sessionId } = this.opts;
     const [branches, dirty, instances] = await Promise.all([
-      invoke<BranchEntry[]>("get_recent_branches", { cwd }).catch(() => [] as BranchEntry[]),
-      invoke<string[]>("get_git_dirty", { cwd }).then((d) => d ?? []).catch(() => [] as string[]),
+      invoke<BranchEntry[]>("get_recent_branches", { cwd, sessionId }).catch(() => [] as BranchEntry[]),
+      invoke<string[]>("get_git_dirty", { cwd, sessionId }).then((d) => d ?? []).catch(() => [] as string[]),
       invoke<Instance[]>("list_instances").then((i) => i ?? []).catch(() => [] as Instance[]),
     ]);
     if (!this.host) return;
@@ -69,6 +77,14 @@ export class BranchSwitcher {
 
   private async checkout(name: string): Promise<void> {
     if (this.checkingOut) return;
+    // Write, no forwarding story for a mirrored chat (G10) - the read-only
+    // branch list above still loaded fine, only the actual checkout stays
+    // blocked, same split as `push_commits`/git-fold.ts's runGit.
+    if (this.opts.mirrored) {
+      this.error = "Chat is on another machine";
+      this.render();
+      return;
+    }
     this.checkingOut = name;
     this.error = null;
     this.paintRows();

@@ -3,16 +3,20 @@
 //! of `git.rs` to keep that module to branch/repo/dirty-status concerns;
 //! shares the `run_git`/`run_git_opt` helpers defined there.
 
-use super::git::{run_git, run_git_opt};
+use tauri::State;
 
-#[derive(serde::Serialize, ts_rs::TS)]
+use super::git::{run_git, run_git_opt};
+use crate::ipc::mirror::mirrored_client;
+use crate::state::AppState;
+
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitEntry {
     pub short_sha: String,
     pub message: String,
 }
 
-#[derive(serde::Serialize, ts_rs::TS)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitSync {
     pub ahead: Vec<CommitEntry>,
@@ -22,8 +26,12 @@ pub struct CommitSync {
 
 /// Returns the list of commits that are ahead (local-only) and behind (upstream-only)
 /// the tracking branch. Used for the VSCode-style sync popover on the commits chip.
-#[tauri::command]
-pub async fn get_commit_sync(cwd: String) -> CommitSync {
+///
+/// `pub(crate)` pure local read, reused directly by the daemon's own
+/// `get_commit_sync` RPC handler (`daemon/methods/statusbar.rs`) - see
+/// `git::get_git_dirty_local`'s doc for why the Tauri-facing wrapper below
+/// is split out from this one.
+pub(crate) async fn get_commit_sync_local(cwd: String) -> CommitSync {
     let empty = CommitSync { ahead: vec![], behind: vec![], has_upstream: false };
     tauri::async_runtime::spawn_blocking(move || {
         fn parse_log(raw: Option<String>) -> Vec<CommitEntry> {
@@ -49,7 +57,21 @@ pub async fn get_commit_sync(cwd: String) -> CommitSync {
     .unwrap_or(empty)
 }
 
-#[derive(serde::Serialize, ts_rs::TS)]
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+#[tauri::command]
+pub async fn get_commit_sync(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<CommitSync, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return Ok(client
+            .get_commit_sync(session_id.as_deref().unwrap(), &cwd)
+            .await
+            .unwrap_or(CommitSync { ahead: vec![], behind: vec![], has_upstream: false }));
+    }
+    Ok(get_commit_sync_local(cwd).await)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitHistoryEntry {
     pub short_sha: String,
@@ -59,7 +81,7 @@ pub struct CommitHistoryEntry {
     pub timestamp: i64,
 }
 
-#[derive(serde::Serialize, ts_rs::TS)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct CommitHistory {
     pub entries: Vec<CommitHistoryEntry>,
@@ -71,8 +93,8 @@ pub struct CommitHistory {
 /// `pushed` is set membership against `git rev-list @{u}..HEAD`, not "the first
 /// N are unpushed": merging a local branch interleaves unpushed commits into
 /// the date-ordered log. With no upstream, every commit reads as unpushed.
-#[tauri::command]
-pub async fn get_commit_history(cwd: String, offset: u32, limit: u32) -> CommitHistory {
+/// `pub(crate)` pure local read - see `get_commit_sync_local`'s doc.
+pub(crate) async fn get_commit_history_local(cwd: String, offset: u32, limit: u32) -> CommitHistory {
     let limit = limit.clamp(1, 200);
     tauri::async_runtime::spawn_blocking(move || {
         let has_upstream = run_git_opt(&cwd, &["rev-parse", "@{u}"]).is_some();
@@ -112,6 +134,20 @@ pub async fn get_commit_history(cwd: String, offset: u32, limit: u32) -> CommitH
     })
     .await
     .unwrap_or(CommitHistory { entries: vec![], has_more: false, has_upstream: false })
+}
+
+/// Tauri-facing command: routes to the owning peer when `session_id`
+/// resolves to a mirrored session (G10, docs/multi-machine.md), else runs
+/// the same local read as before.
+#[tauri::command]
+pub async fn get_commit_history(cwd: String, offset: u32, limit: u32, session_id: Option<String>, state: State<'_, AppState>) -> Result<CommitHistory, String> {
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return Ok(client
+            .get_commit_history(session_id.as_deref().unwrap(), &cwd, offset, limit)
+            .await
+            .unwrap_or(CommitHistory { entries: vec![], has_more: false, has_upstream: false }));
+    }
+    Ok(get_commit_history_local(cwd, offset, limit).await)
 }
 
 /// `publish=true` runs `git push -u origin <branch>` (no upstream yet);

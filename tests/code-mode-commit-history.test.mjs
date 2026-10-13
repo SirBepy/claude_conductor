@@ -145,7 +145,7 @@ describe("Code mode: loading older commits", () => {
       if (cmd === "get_git_dirty") return [];
       if (cmd === "get_range_files") return [];
       if (cmd === "get_commit_history") {
-        expect(args).toEqual({ cwd: CWD, offset: 0, limit: 30 });
+        expect(args).toEqual({ cwd: CWD, offset: 0, limit: 30, sessionId: "hist1" });
         return { entries: [{ short_sha: "old0001", message: "FIX: ancient bug", pushed: true, timestamp: 1 }], has_more: true, has_upstream: true };
       }
       return null;
@@ -155,7 +155,7 @@ describe("Code mode: loading older commits", () => {
     expect(root().querySelector(".cm-older-trigger")).not.toBeNull();
     root().querySelector('[data-act="older-commits"]').click();
     await settle();
-    expect(calls).toContainEqual(["get_commit_history", { cwd: CWD, offset: 0, limit: 30 }]);
+    expect(calls).toContainEqual(["get_commit_history", { cwd: CWD, offset: 0, limit: 30, sessionId: "hist1" }]);
     const row = root().querySelector('[data-commit="old0001"]');
     expect(row).not.toBeNull();
     expect(row.classList.contains("cm-older")).toBe(true);
@@ -234,7 +234,7 @@ describe("Code mode: loading older commits", () => {
     root().querySelector('[data-commit="old0001"]').click();
     await settle();
     expect(root().querySelector(".cm-ctitle").textContent).toBe("FIX: ancient bug");
-    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: null, to: "old0001" }]);
+    expect(calls).toContainEqual(["get_range_files", { cwd: CWD, from: null, to: "old0001", sessionId: "hist1" }]);
     expect(root().querySelector(".cm-tab.on").dataset.tab).toBe("src/legacy.ts");
   });
 
