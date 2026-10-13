@@ -59,10 +59,28 @@ fn is_not_found(err: &str) -> bool {
 /// never retry an id already tagged mirrored - unreachable in practice since
 /// the caller's own `is_mirrored` check already sends that case to the
 /// daemon before local disk is ever touched, but kept as an explicit input
-/// so all three cache states (absent / untagged / tagged) are each testable
-/// here.
-pub(crate) fn should_retry_via_daemon(was_not_found: bool, _in_cache: bool, tagged_mirrored: bool) -> bool {
+/// so the tagged state stays testable here. Absent-from-cache and
+/// present-but-untagged retry identically, so the cache presence is not an
+/// input at all.
+pub(crate) fn should_retry_via_daemon(was_not_found: bool, tagged_mirrored: bool) -> bool {
     was_not_found && !tagged_mirrored
+}
+
+/// The daemon client to retry a failed local read through, or `local_err`
+/// back unchanged when no retry applies (see `should_retry_via_daemon`) or
+/// the daemon is not connected. Every command below calls this from its
+/// local-read error arm, where the session may have just been spawned on a
+/// paired machine before this cache saw its `machine` tag.
+async fn daemon_retry_client(
+    state: &AppState,
+    session_id: &str,
+    local_err: String,
+) -> Result<crate::daemon_client::PersistentClient, String> {
+    let tagged_mirrored = is_mirrored(&state.cached_instances.lock().unwrap(), session_id);
+    if !should_retry_via_daemon(is_not_found(&local_err), tagged_mirrored) {
+        return Err(local_err);
+    }
+    state.client().await.ok_or(local_err)
 }
 
 /// Replay the JSONL transcript for `session_id` from disk into ChatEvents.
@@ -96,19 +114,7 @@ pub async fn load_history(
     match local {
         Ok(events) => Ok(events),
         Err(local_err) => {
-            // The session may have just been spawned on a paired machine,
-            // before this cache saw its `machine` tag.
-            let (in_cache, tagged_mirrored) = {
-                let instances = state.cached_instances.lock().unwrap();
-                (
-                    instances.iter().any(|i| i.session_id == session_id),
-                    is_mirrored(&instances, &session_id),
-                )
-            };
-            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
-                return Err(local_err);
-            }
-            let Some(client) = state.client().await else { return Err(local_err) };
+            let client = daemon_retry_client(&state, &session_id, local_err).await?;
             client.load_history(&session_id, cwd.as_deref()).await.map_err(|e| e.to_string())
         }
     }
@@ -135,17 +141,7 @@ pub async fn transcript_stats(
     match local {
         Ok(stats) => Ok(stats),
         Err(local_err) => {
-            let (in_cache, tagged_mirrored) = {
-                let instances = state.cached_instances.lock().unwrap();
-                (
-                    instances.iter().any(|i| i.session_id == session_id),
-                    is_mirrored(&instances, &session_id),
-                )
-            };
-            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
-                return Err(local_err);
-            }
-            let Some(client) = state.client().await else { return Err(local_err) };
+            let client = daemon_retry_client(&state, &session_id, local_err).await?;
             client.transcript_stats(&session_id, cwd.as_deref()).await.map_err(|e| e.to_string())
         }
     }
@@ -188,17 +184,7 @@ pub async fn load_history_page(
     match local {
         Ok(page) => Ok(page),
         Err(local_err) => {
-            let (in_cache, tagged_mirrored) = {
-                let instances = state.cached_instances.lock().unwrap();
-                (
-                    instances.iter().any(|i| i.session_id == session_id),
-                    is_mirrored(&instances, &session_id),
-                )
-            };
-            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
-                return Err(local_err);
-            }
-            let Some(client) = state.client().await else { return Err(local_err) };
+            let client = daemon_retry_client(&state, &session_id, local_err).await?;
             client
                 .load_history_page(&session_id, cwd.as_deref(), before_seq, limit)
                 .await
@@ -238,17 +224,7 @@ pub async fn load_event_detail(
     match local {
         Ok(event) => Ok(event),
         Err(local_err) => {
-            let (in_cache, tagged_mirrored) = {
-                let instances = state.cached_instances.lock().unwrap();
-                (
-                    instances.iter().any(|i| i.session_id == session_id),
-                    is_mirrored(&instances, &session_id),
-                )
-            };
-            if !should_retry_via_daemon(is_not_found(&local_err), in_cache, tagged_mirrored) {
-                return Err(local_err);
-            }
-            let Some(client) = state.client().await else { return Err(local_err) };
+            let client = daemon_retry_client(&state, &session_id, local_err).await?;
             client
                 .load_event_detail(&session_id, cwd.as_deref(), seq, &tool_use_id_retry)
                 .await
@@ -323,19 +299,12 @@ mod tests {
     // Decision fn for whether a local "not found" retries via the daemon.
 
     #[test]
-    fn retries_when_not_found_and_absent_from_cache() {
-        // Brand new session just started on the peer: no row yet at all.
-        assert!(should_retry_via_daemon(true, false, false));
-    }
-
-    #[test]
-    fn retries_when_not_found_and_in_cache_but_untagged() {
-        // Row exists (this machine saw SOME instances_changed) but hasn't
-        // picked up the peer's `machine` tag yet - the exact window between
-        // a chat starting on a peer and this cache's next resync. Retrying
-        // is cheap/harmless, so this is a deliberate "acceptable to retry"
-        // choice, not an oversight.
-        assert!(should_retry_via_daemon(true, true, false));
+    fn retries_when_not_found_and_not_tagged_mirrored() {
+        // A session just started on the peer, either absent from this cache
+        // or present but not yet carrying the peer's `machine` tag - the
+        // window before this cache's next resync. Retrying is cheap and
+        // harmless, so this is a deliberate retry, not an oversight.
+        assert!(should_retry_via_daemon(true, false));
     }
 
     #[test]
@@ -343,23 +312,16 @@ mod tests {
         // Unreachable in practice (the caller's own `is_mirrored` check
         // already routes this to the daemon before reaching local disk) but
         // kept explicit so the decision fn's full input space is covered.
-        assert!(!should_retry_via_daemon(true, true, true));
+        assert!(!should_retry_via_daemon(true, true));
     }
 
     #[test]
-    fn never_retries_a_successful_local_read() {
-        // The common path: a real local session's normal success must never
-        // trigger an extra RPC, regardless of cache state.
-        assert!(!should_retry_via_daemon(false, false, false));
-        assert!(!should_retry_via_daemon(false, true, false));
-        assert!(!should_retry_via_daemon(false, true, true));
-    }
-
-    #[test]
-    fn never_retries_a_non_not_found_local_error() {
-        // Some other local I/O error (permission denied, corrupt file) -
-        // a daemon retry wouldn't help and would just mask the real error.
-        assert!(!should_retry_via_daemon(false, false, false));
+    fn never_retries_without_a_local_not_found() {
+        // A successful read, or some other local I/O error (permission
+        // denied, corrupt file): the common path must never cost an extra
+        // RPC, and a daemon retry would only mask the real error.
+        assert!(!should_retry_via_daemon(false, false));
+        assert!(!should_retry_via_daemon(false, true));
     }
 
     #[test]
