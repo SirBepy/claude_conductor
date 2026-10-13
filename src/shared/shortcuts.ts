@@ -29,7 +29,7 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "open-chat-7", defaultKeys: "ctrl+7", label: "Open chat 7", description: "Open the 7th most recent chat", context: "sessions", suppressInInput: false },
   { id: "open-chat-8", defaultKeys: "ctrl+8", label: "Open chat 8", description: "Open the 8th most recent chat", context: "sessions", suppressInInput: false },
   { id: "open-chat-9", defaultKeys: "ctrl+9", label: "Open chat 9", description: "Open the 9th most recent chat", context: "sessions", suppressInInput: false },
-  { id: "close-chat",  defaultKeys: "ctrl+w", label: "Cancel active turn",  description: "Cancel the current running turn in the focused chat", context: "sessions", suppressInInput: true },
+  { id: "close-chat",  defaultKeys: "ctrl+w", label: "Close chat",  description: "Close the focused chat (always asks to confirm)", context: "sessions", suppressInInput: true },
   { id: "blur-composer", defaultKeys: "escape", label: "Unfocus message box", description: "Move keyboard focus off the message input", context: "sessions", suppressInInput: false },
 
   // Code mode (src/views/sessions/code-mode/) - no view context: it also opens

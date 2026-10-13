@@ -9,8 +9,8 @@ import { selectSession } from "./active-session";
 import { startNewSession, startNewSessionWithFavorite, resumeDraft, resumeParkedDraft } from "./pending-flow";
 import { saveParkedDrafts } from "./pending-draft-storage";
 import { updateThinkingBar } from "./session-thinking-bar";
-import { invoke } from "../../shared/ipc";
 import { showView } from "../../shared/navigation";
+import { closeChatWithConfirm } from "./close-chat";
 import type { SessionConfig } from "./model-effort-modal";
 
 // ── Shared pane + pending state ───────────────────────────────────────────────
@@ -141,7 +141,5 @@ export function selectSessionByIndex(index: number): void {
 export function closeFocusedChat(): void {
   const id = state.selectedId;
   if (!id) return;
-  const sess = state.sessions.find(s => s.session_id === id);
-  if (!sess?.busy) return;
-  void invoke<void>("cancel_turn", { sessionId: id });
+  void closeChatWithConfirm(id);
 }

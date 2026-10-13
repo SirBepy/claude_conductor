@@ -10,6 +10,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./har
 // mounted view, and the strip landing in the composer of a live chat.
 //
 // asserts: src/shared/shortcuts.ts, src/shared/modifier-hint.ts, src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/favorites-strip.ts, src/views/sessions/project-favorites.ts
+// (ctrl+w's label/description changed in shortcuts.ts for todo-driven close-chat confirm work; unrelated to the favourites strip this spec covers)
 
 const FAVORITES_KEY = "claude_companion_project_favorites";
 

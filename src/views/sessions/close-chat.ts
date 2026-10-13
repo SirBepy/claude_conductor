@@ -10,13 +10,8 @@ export function closeNeedsConfirm(sessionId: string): boolean {
   return state.sessions.find((s) => s.session_id === sessionId)?.busy === true;
 }
 
-export async function closeChat(sessionId: string): Promise<void> {
+async function performClose(sessionId: string): Promise<void> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
-  if (closeNeedsConfirm(sessionId)) {
-    const ok = await askConfirm("A turn is in progress. Close and discard it?", { confirmLabel: "Discard" });
-    if (!ok) return;
-    try { await invoke<void>("cancel_turn", { sessionId }); } catch { /* best-effort */ }
-  }
   // Closing cue: play the session character's "death" slot (best-effort;
   // per-slot toggle + mute enforced in the Rust command).
   if (sess) {
@@ -29,4 +24,29 @@ export async function closeChat(sessionId: string): Promise<void> {
   } catch (err) {
     console.error("[sessions] close chat failed", err);
   }
+}
+
+export async function closeChat(sessionId: string): Promise<void> {
+  if (closeNeedsConfirm(sessionId)) {
+    const ok = await askConfirm("A turn is in progress. Close and discard it?", { confirmLabel: "Discard" });
+    if (!ok) return;
+    try { await invoke<void>("cancel_turn", { sessionId }); } catch { /* best-effort */ }
+  }
+  await performClose(sessionId);
+}
+
+/** Like closeChat, but always confirms first (not just when a turn is busy) -
+ *  used by the ctrl+w shortcut, where closing is the only action, so there's
+ *  no surrounding menu click to treat as the user's "yes" already. */
+export async function closeChatWithConfirm(sessionId: string): Promise<void> {
+  const busy = closeNeedsConfirm(sessionId);
+  const ok = await askConfirm(
+    busy ? "A turn is in progress. Close and discard it?" : "Close this chat?",
+    { confirmLabel: busy ? "Discard" : "Close" },
+  );
+  if (!ok) return;
+  if (busy) {
+    try { await invoke<void>("cancel_turn", { sessionId }); } catch { /* best-effort */ }
+  }
+  await performClose(sessionId);
 }
