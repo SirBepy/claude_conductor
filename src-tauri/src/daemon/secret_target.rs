@@ -29,6 +29,12 @@ pub(crate) fn valid_key(key: &str) -> bool {
 /// only part a symlink escape could hide in - and re-appends the
 /// not-yet-existing tail components lexically; a path component that can't
 /// exist on disk yet can't be a symlink either.
+///
+/// "Existing" means present as a directory entry (`symlink_metadata`), not
+/// `Path::exists`, which follows links and reports a dangling symlink or
+/// junction as absent. That dangling link then lands on the canonicalize
+/// step, which fails on it, so it is refused instead of being re-appended
+/// lexically and followed out of cwd by the later write.
 pub(crate) fn resolve_target(cwd: &Path, file: &str) -> Result<PathBuf, String> {
     let candidate = PathBuf::from(file);
     // Reject `..` lexically too: a component that doesn't exist on disk yet
@@ -41,7 +47,7 @@ pub(crate) fn resolve_target(cwd: &Path, file: &str) -> Result<PathBuf, String> 
 
     let mut existing = joined.clone();
     let mut remainder: Vec<std::ffi::OsString> = Vec::new();
-    while !existing.exists() {
+    while std::fs::symlink_metadata(&existing).is_err() {
         let name = existing.file_name().map(|n| n.to_os_string());
         let Some(parent) = existing.parent().map(Path::to_path_buf) else {
             return Err("file path has no existing ancestor".to_string());
@@ -207,6 +213,47 @@ mod tests {
         let inside = root.join("secrets.env");
         let resolved = resolve_target(&root, inside.to_str().unwrap()).unwrap();
         assert_eq!(resolved, std::fs::canonicalize(&root).unwrap().join("secrets.env"));
+    }
+
+    /// A junction inside cwd pointing at a directory outside it that does not
+    /// exist yet. `Path::exists` follows the junction and reports false, so a
+    /// walk keyed on it would treat `link` as "not created yet" and re-append
+    /// it lexically, while the later write follows it out of cwd. `mklink /J`
+    /// needs no symlink privilege and accepts a missing target, so this runs
+    /// on every Windows machine rather than skipping.
+    #[cfg(windows)]
+    #[test]
+    fn dangling_junction_out_of_cwd_is_rejected() {
+        let (tmp, root) = fixture();
+        let outside = tmp.path().join("elsewhere").join("not-yet");
+        let link = root.join("link");
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.arg("/C").arg("mklink").arg("/J").arg(&link).arg(&outside);
+        crate::util::process::hide_console(&mut cmd);
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "mklink /J failed: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(!link.exists(), "fixture must be dangling");
+        assert!(resolve_target(&root, "link/secrets.env").is_err());
+        assert!(resolve_target(&root, "link").is_err());
+    }
+
+    /// Same escape through a dangling file symlink as the target itself.
+    /// Symlink creation needs Developer Mode or admin on Windows, so this one
+    /// skips rather than fails where it is not permitted.
+    #[test]
+    fn dangling_symlink_target_is_rejected() {
+        let (tmp, root) = fixture();
+        let outside = tmp.path().join("outside.env");
+        let link = root.join("x.env");
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&outside, &link);
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&outside, &link);
+        if made.is_err() {
+            eprintln!("skipping: symlink creation not permitted here");
+            return;
+        }
+        assert!(resolve_target(&root, "x.env").is_err());
     }
 
     fn git_fixture() -> (tempfile::TempDir, PathBuf) {
