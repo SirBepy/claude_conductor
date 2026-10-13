@@ -19,14 +19,18 @@
 .PARAMETER Command
   up | eval | shot | down
 
+.PARAMETER Visible
+  Puts the rig window on the desktop instead of the default: headless under server_supervisor,
+  which keeps every rig window off the dev's screen and away from their focus.
+
 .PARAMETER Monitor
-  1-based index into [System.Windows.Forms.Screen]::AllScreens. Moves the rig's OWN window
-  there after launch with SWP_NOACTIVATE, so the debug instance stops landing on top of
-  whatever the dev is reading. Never enumerates or touches any other process's windows.
+  With -Visible only. 1-based index into [System.Windows.Forms.Screen]::AllScreens. Moves the
+  rig's OWN window there after launch with SWP_NOACTIVATE, so the debug instance stops landing on
+  top of whatever the dev is reading. Never enumerates or touches any other process's windows.
 
 .EXAMPLE
   scripts\live-verify.ps1 up
-  scripts\live-verify.ps1 up -Monitor 2
+  scripts\live-verify.ps1 up -Visible -Monitor 2
   scripts\live-verify.ps1 up -SkipBuild
   scripts\live-verify.ps1 eval 0 "document.title"
   scripts\live-verify.ps1 eval 0 -File .for_bepy\probe.js
@@ -59,9 +63,13 @@ param(
     # rebuild - useful when another session holds the exe and blocks one.
     [switch]$SkipBuild,
 
-    # Runs the rig under server_supervisor and docks it headless: its windows,
-    # pop-outs included, never reach the dev's screen or take focus, so typing
-    # elsewhere can never land in the rig. CDP eval/shot work the same.
+    # The rig runs under server_supervisor docked headless by default: its
+    # windows, pop-outs included, never reach the dev's screen or take focus, so
+    # typing elsewhere can never land in the rig. CDP eval/shot work the same.
+    # -Visible opts out and puts the rig window on the desktop instead.
+    [switch]$Visible,
+
+    # Accepted for older callers; headless is the default now.
     [switch]$Headless
 )
 
@@ -292,32 +300,7 @@ try {
 }
 '@
 
-# server_supervisor's local API (127.0.0.1 only). Same token/port files the supervised-run skill
-# reads; the token only ever goes into the request header.
-function Get-SupervisorApi {
-    $dir = Join-Path $env:APPDATA 'com.sirbepy.server-supervisor\supervisor'
-    $tokenPath = Join-Path $dir 'api_token.txt'
-    $portPath = Join-Path $dir 'api_port.txt'
-    if (-not (Test-Path $tokenPath) -or -not (Test-Path $portPath)) { return $null }
-    return [pscustomobject]@{
-        Token   = (Get-Content -Path $tokenPath -Raw).Trim()
-        BaseUrl = "http://127.0.0.1:$((Get-Content -Path $portPath -Raw).Trim())"
-    }
-}
-
-function Invoke-Supervisor($api, [string]$Method, [string]$Path, $Body) {
-    $req = @{ Method = $Method; Uri = "$($api.BaseUrl)$Path"; Headers = @{ Authorization = "Bearer $($api.Token)" } }
-    if ($Body) { $req.Body = ($Body | ConvertTo-Json -Depth 5); $req.ContentType = 'application/json' }
-    return Invoke-RestMethod @req
-}
-
-# The supervisor deduplicates /run by command name, so a leftover rig entry from a crashed run
-# would be returned instead of a fresh launch. Only entries this script names are touched.
-function Remove-SupervisorRig($api, [string]$procId) {
-    if (-not $procId) { return }
-    try { Invoke-Supervisor $api 'POST' "/procs/$procId/stop" | Out-Null } catch { }
-    try { Invoke-Supervisor $api 'DELETE' "/procs/$procId" | Out-Null } catch { }
-}
+. (Join-Path $PSScriptRoot 'supervisor-api.ps1')
 
 function Invoke-CdpDriver($driverCmd, $targetPort, $index, [string[]]$rest) {
     $tmpFile = Join-Path $env:TEMP "live-verify-cdp-$([guid]::NewGuid().ToString('N')).mjs"
@@ -422,23 +405,13 @@ switch ($Command) {
 
         Write-Host "Launching isolated debug instance (label=$InstanceLabel, CDP port=$Port)..."
         $supervisorId = $null
-        if ($Headless) {
+        if (-not $Visible) {
             $api = Get-SupervisorApi
-            if (-not $api) { throw 'server_supervisor is not running, so -Headless has nothing to dock into. Start it, or run up without -Headless.' }
-            $rigName = "live-verify-$InstanceLabel"
-            foreach ($stale in @(Invoke-Supervisor $api 'GET' '/procs' | Where-Object { $_.id -like "*:$rigName" })) {
-                Remove-SupervisorRig $api $stale.id
-            }
-            $started = Invoke-Supervisor $api 'POST' '/run' @{
-                root             = $repoRoot
-                # Bare path: the supervisor's cmd /c turns a quoted one into a literal "\"...\"".
-                # $stateDir is under LOCALAPPDATA, which has no spaces for a normal user name.
-                cmd              = $runExe
-                name             = $rigName
-                kind             = 'ephemeral'
-                use_dynamic_port = $false
-                env              = "CC_DAEMON_INSTANCE=$InstanceLabel`nWEBVIEW2_USER_DATA_FOLDER=$webview2Folder`nWEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=$Port"
-            }
+            if (-not $api) { throw 'server_supervisor is not running, so the rig has nothing to dock into headless. Start it, or pass -Visible to put the rig window on the desktop.' }
+            # Bare path: the supervisor's cmd /c turns a quoted one into a literal "\"...\"".
+            # $stateDir is under LOCALAPPDATA, which has no spaces for a normal user name.
+            $started = Start-SupervisorHeadless $api $repoRoot $runExe "live-verify-$InstanceLabel" `
+                "CC_DAEMON_INSTANCE=$InstanceLabel`nWEBVIEW2_USER_DATA_FOLDER=$webview2Folder`nWEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=$Port"
             $supervisorId = $started.id
             # The window appears a moment after the process; dock as soon as it exists so it
             # spends as little time as possible on the dev's screen.
@@ -469,7 +442,7 @@ switch ($Command) {
 
         Wait-Http "http://127.0.0.1:$Port/json/list" 30 'CDP endpoint'
 
-        if ($Monitor -gt 0 -and -not $Headless) { Move-RigWindowToMonitor $appProc.Id $Monitor }
+        if ($Monitor -gt 0 -and $Visible) { Move-RigWindowToMonitor $appProc.Id $Monitor }
 
         $appIdentity = Get-ProcIdentity $appProc.Id
         $viteIdentity = $null
