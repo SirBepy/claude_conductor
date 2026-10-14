@@ -83,6 +83,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Script scope, not inside Invoke-SweepInSupervisor, so a test that dot-sources this file can
+# override these helpers afterwards.
+. (Join-Path $PSScriptRoot 'supervisor-api.ps1')
+
 $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
 $fakeClaudeBinGiven = $PSBoundParameters.ContainsKey('FakeClaudeBin')
 if (-not $FakeClaudeBin) { $FakeClaudeBin = Join-Path $repoRoot 'e2e\fixtures\fake-claude\claude.cmd' }
@@ -301,7 +305,6 @@ function Get-InSupervisorExitCode {
 # Re-launches this script under server_supervisor with its whole process tree headless, streams
 # its output as it runs, and returns its verdict as an exit code.
 function Invoke-SweepInSupervisor {
-    . (Join-Path $PSScriptRoot 'supervisor-api.ps1')
     $api = Get-SupervisorApi
     if (-not $api) { throw 'server_supervisor is not running, so the sweep has nothing to run headless in. Start it, or pass -Visible to let the app windows open on the desktop.' }
     # Forward -FakeClaudeBin only when the caller gave one; the copy derives the same default itself.
@@ -314,10 +317,12 @@ function Invoke-SweepInSupervisor {
     try {
         do {
             Start-Sleep -Seconds 3
-            $proc = Get-SupervisorProcs $api | Where-Object { $_.id -eq $started.id } | Select-Object -First 1
             # The supervisor deletes an ephemeral command once it exits, so its log can 404 between
             # these two reads; the verdict file below is what carries the summary across that.
-            try { $fresh = @(Invoke-Supervisor $api 'GET' "/procs/$($started.id)/logs" | ForEach-Object { $_.text }) } catch { break }
+            try {
+                $proc = Get-SupervisorProcs $api | Where-Object { $_.id -eq $started.id } | Select-Object -First 1
+                $fresh = @(Invoke-Supervisor $api 'GET' "/procs/$($started.id)/logs" | ForEach-Object { $_.text })
+            } catch { break }
             $fresh | Select-Object -Skip $streamed | ForEach-Object { Write-Host $_ }
             $streamed = $fresh.Count
         } while ($proc -and $proc.status -in 'running', 'starting')
