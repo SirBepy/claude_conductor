@@ -13,6 +13,7 @@ mod activity;
 mod channel;
 mod commit_lock;
 mod context;
+mod context_cap;
 mod create_project;
 mod decision;
 mod drafts;

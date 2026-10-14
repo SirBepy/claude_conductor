@@ -82,6 +82,8 @@ pub(super) async fn on_prompt_submit(
         // replaces a `list` action on the `schedule` tool - the ids arrive for
         // free, and a session with nothing scheduled pays nothing.
         schedule_methods::render_for_injection(&ctx.state, &q.session_id),
+        // Fifth rider: the respawn nudge once the chat passes the context cap.
+        super::context_cap::render_for_injection(&ctx.state, &q.session_id),
     ]
     .into_iter()
     .flatten()
