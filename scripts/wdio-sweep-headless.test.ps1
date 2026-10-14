@@ -50,6 +50,26 @@ if ($match.Count -ne 1 -or [string]$match[0].id -ne 'p:b' -or [string]$match[0].
     $failures += "Get-SupervisorProcs filter: expected only p:b, got '$([string]$match[0].id)'"
 }
 
+# The race: the copy finishes, the supervisor reaps its ephemeral command, and the launcher's next
+# log read 404s. The verdict must still come from the copy's summary, not read as a failure.
+function Get-SupervisorApi { [pscustomobject]@{ Token = 't'; BaseUrl = 'http://127.0.0.1:1' } }
+function Get-SupervisorProcs { }
+function Invoke-Supervisor { throw 'unknown process id: p:wdio-sweep' }
+function Remove-SupervisorRig { }
+function Start-Sleep { }
+function Start-SupervisorHeadless($api, $Root, $Cmd, $Name, $EnvBlock) {
+    $path = [regex]::Match($Cmd, '-VerdictFile (\S+)').Groups[1].Value
+    if ($script:copyWritesSummary) { [System.IO.File]::WriteAllText($path, "=== Summary ===`r`nSWEEP PASSED (or dry run via -WhatIf)") }
+    [pscustomobject]@{ id = 'p:wdio-sweep' }
+}
+$script:copyWritesSummary = $true
+$code = Invoke-SweepInSupervisor 6> $null
+if ($code -ne 0) { $failures += "reaped command with a PASSED summary: expected exit 0, got '$code'" }
+# A copy that died before its summary must never read as a pass.
+$script:copyWritesSummary = $false
+$code = Invoke-SweepInSupervisor 6> $null
+if ($code -ne 1) { $failures += "copy died without a summary: expected exit 1, got '$code'" }
+
 if ($failures.Count -gt 0) {
     foreach ($f in $failures) { Write-Host "FAIL: $f" }
     Write-Host "`nRESULT: FAIL ($($failures.Count) check(s))"
