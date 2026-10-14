@@ -243,9 +243,43 @@ pub fn build_main_window(app: &AppHandle, nav: Option<&str>) -> Result<(), Strin
                 e.to_string()
             })?;
     log::info!("build_main_window: built (hidden until ready heartbeat)");
+    restore_degenerate_size(&window);
     attach_hide_to_tray(&window);
     crate::ipc::ready::watch(app, "main", URL);
     Ok(())
+}
+
+/// `tauri_plugin_window_state` restores a persisted size on `on_window_ready`,
+/// which fires inside `WebviewWindowBuilder::build()` above - so by the time
+/// `build()` returns here, the window may already be sitting at whatever size
+/// was last saved. If that size ever got shrunk down near the 360x200 resize
+/// floor (a stray drag, a snap, anything), it stays saved and gets restored
+/// at that same unusable size on every future open forever - the window ends
+/// up showing little more than its title bar, with no way to tell it apart
+/// from a broken launch short of manually resizing it back up. Snap anything
+/// below a sane floor back to the designed default instead of trusting the
+/// restored state blindly.
+fn restore_degenerate_size(window: &tauri::WebviewWindow) {
+    let Ok(scale) = window.scale_factor() else { return };
+    let Ok(size) = window.inner_size() else { return };
+    let logical = size.to_logical::<f64>(scale);
+    if is_degenerate_size(logical.width, logical.height) {
+        log::warn!(
+            "build_main_window: restored size {}x{} below usable floor, resetting to default",
+            logical.width,
+            logical.height
+        );
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(520.0, 720.0)));
+    }
+}
+
+/// Pure predicate behind `restore_degenerate_size`, split out so the floor
+/// itself is unit-testable without a real window - same split as
+/// `ready.rs`'s `record_heartbeat`/`record_timeout`.
+fn is_degenerate_size(width: f64, height: f64) -> bool {
+    const MIN_USABLE_WIDTH: f64 = 400.0;
+    const MIN_USABLE_HEIGHT: f64 = 300.0;
+    width < MIN_USABLE_WIDTH || height < MIN_USABLE_HEIGHT
 }
 
 #[cfg(test)]
@@ -322,5 +356,20 @@ mod tests {
              tauri::async_runtime::spawn_blocking, never inline - building a \
              window from the WM_COPYDATA window proc freezes the app"
         );
+    }
+
+    use super::is_degenerate_size;
+
+    #[test]
+    fn below_floor_on_either_axis_is_degenerate() {
+        assert!(is_degenerate_size(360.0, 200.0), "at the resize floor - the reported bug shape");
+        assert!(is_degenerate_size(399.0, 720.0), "width alone below floor");
+        assert!(is_degenerate_size(520.0, 299.0), "height alone below floor");
+    }
+
+    #[test]
+    fn at_or_above_floor_is_not_degenerate() {
+        assert!(!is_degenerate_size(400.0, 300.0), "exactly at the floor");
+        assert!(!is_degenerate_size(520.0, 720.0), "the designed default");
     }
 }
