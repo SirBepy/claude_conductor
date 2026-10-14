@@ -121,10 +121,13 @@ pub(crate) fn list_channel_messages_at(root: Option<&Path>, state: &Arc<DaemonSt
     Ok(json!({"messages": messages}))
 }
 
-/// `post_message` tool: appends `text` to this project's channel, then wakes
-/// either every OTHER live session in the project or, if `target` names ids,
-/// only those (see `repo_channel_wake::resolve_targets` for the security
-/// rule) - fire-and-forget, never blocks the caller's own turn on delivery.
+/// `post_message` tool: appends `text` to this project's channel. A post that
+/// names `target` ids wakes exactly those (see
+/// `repo_channel_wake::resolve_targets` for the security rule); a broadcast
+/// wakes nobody and waits for each peer's next `read_messages`. A wake re-reads
+/// the recipient's whole context, and broadcasts were mostly FYIs ("committing
+/// now") that ~29% of a busy listener chat's turns were spent ignoring
+/// (2026-10-14 transcript scan). Fire-and-forget either way.
 pub(crate) fn post_message(
     state: &Arc<DaemonState>,
     session_id: &str,
@@ -159,25 +162,29 @@ pub(crate) fn post_message_at(
         None => repo_channel::post(&project_id, session_id, &author, text, None),
     };
 
-    let mut notified = 0usize;
-    for target_id in &targets {
-        // `msg.text` (already truncated to MAX_TEXT_LEN by `repo_channel::post`
-        // above), NOT the raw `text` argument - otherwise the length cap only
-        // ever applied to the persisted JSON history, and an unbounded string
-        // still landed as a real injected turn in every peer's live session.
-        // No `[repo-channel] {author}: ` wrapper (todo 743): the sender's
-        // identity rides as `author_session_id`, not text a hook could parse.
-        repo_channel_wake::enqueue(state, target_id, session_id, msg.text.clone());
-        repo_channel_wake::spawn_drain(state, target_id);
-        notified += 1;
+    let wake = target.is_some_and(|t| !t.is_empty());
+    if wake {
+        for target_id in &targets {
+            // `msg.text` (already truncated to MAX_TEXT_LEN by `repo_channel::post`
+            // above), NOT the raw `text` argument - otherwise the length cap only
+            // ever applied to the persisted JSON history, and an unbounded string
+            // still landed as a real injected turn in every peer's live session.
+            // No `[repo-channel] {author}: ` wrapper: the sender's
+            // identity rides as `author_session_id`, not text a hook could parse.
+            repo_channel_wake::enqueue(state, target_id, session_id, msg.text.clone());
+            repo_channel_wake::spawn_drain(state, target_id);
+        }
     }
+    let notified = targets.len();
     // `delivered` (todo 717): a bare `notified: 0` read as "no peers exist"
     // and got reported to the dev as fact. It only ever means the note is a
-    // dead drop for a future reader.
+    // dead drop for a future reader. `notified` counts peers who will see the
+    // note; `woken` counts the ones interrupted for it right now.
     Ok(json!({
         "ok": true,
         "message": msg,
         "notified": notified,
+        "woken": if wake { notified } else { 0 },
         "delivered": notified > 0,
     }))
 }
@@ -410,7 +417,8 @@ mod tests {
         state.registry.set_busy("s2", true);
 
         let long = "x".repeat(3000); // exceeds repo_channel::MAX_TEXT_LEN (2000)
-        let v = post_message_at(Some(dir.path()), &state, "s1", &long, None).unwrap();
+        let target = vec!["s2".to_string()];
+        let v = post_message_at(Some(dir.path()), &state, "s1", &long, Some(&target)).unwrap();
         assert_eq!(v["notified"], 1);
 
         let queues = state.repo_channel_wakes.lock().unwrap();
@@ -430,7 +438,8 @@ mod tests {
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-743", "2026-07-30T00:00:00Z");
         state.registry.set_busy("s2", true);
 
-        post_message_at(Some(dir.path()), &state, "s1", "touching pump.rs, anyone on this?", None).unwrap();
+        let target = vec!["s2".to_string()];
+        post_message_at(Some(dir.path()), &state, "s1", "touching pump.rs, anyone on this?", Some(&target)).unwrap();
 
         let queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.get("s2").expect("wake queued for s2");
@@ -454,6 +463,24 @@ mod tests {
         assert_eq!(v["ok"], true);
         assert_eq!(v["notified"], 1, "only s2 shares proj-1 with the poster");
         assert_eq!(v["delivered"], true);
+    }
+
+    #[tokio::test]
+    async fn broadcast_waits_for_read_messages_instead_of_waking_peers() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+        state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
+
+        let v = post_message_at(Some(dir.path()), &state, "s1", "committing now", None).unwrap();
+        assert_eq!(v["woken"], 0);
+        assert!(
+            state.repo_channel_wakes.lock().unwrap().get("s2").is_none(),
+            "a broadcast must not queue a wake turn"
+        );
+
+        let unread = read_messages_at(Some(dir.path()), &state, "s2").unwrap();
+        assert_eq!(unread["messages"][0]["text"], "committing now", "the note still reaches s2's next read");
     }
 
     #[tokio::test]
