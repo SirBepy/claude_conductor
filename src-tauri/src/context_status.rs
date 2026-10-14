@@ -223,7 +223,7 @@ pub fn context_status_for_session(
 
 /// Find the transcript file for `session_id`: registry cwd first, then a
 /// filename scan of `~/.claude/projects/*/<session_id>.jsonl`.
-fn resolve_transcript(
+pub(crate) fn resolve_transcript(
     registry: &crate::sessions::registry::Registry,
     session_id: &str,
 ) -> Option<PathBuf> {
