@@ -107,60 +107,66 @@ async function renderAccountRow(): Promise<void> {
   }
 }
 
-/** Opt-in for the account's claude.ai connectors (Google Drive etc.) in
- * this project's chats. Takes effect on the next turn's spawn. */
-async function renderConnectorsRow(): Promise<void> {
+interface ProjectBooleanToggleRow {
+  toggleId: string;
+  field: "claude_ai_connectors" | "keep_running_in_gaming_mode";
+  onToast: string;
+  offToast: string;
+  /** Names the setting in the failure log and toast. */
+  what: string;
+}
+
+/** A checkbox bound to one boolean on this project's config. A project with
+ *  no config yet is created on first change via `ensureProject`. */
+async function renderProjectBooleanToggleRow(row: ProjectBooleanToggleRow): Promise<void> {
   const cwd = getProjectDetailState().cwd;
-  const toggle = document.getElementById("connectorsEnabled") as HTMLInputElement | null;
+  const toggle = document.getElementById(row.toggleId) as HTMLInputElement | null;
   if (!cwd || !toggle) return;
   const projects = (await api.listProjects()) as unknown as ProjectCfg[];
   const proj = projects.find((p) => p.path === cwd);
-  toggle.checked = !!proj?.claude_ai_connectors;
+  toggle.checked = !!proj?.[row.field];
   toggle.onchange = () => {
     void (async () => {
       toggle.disabled = true;
       try {
         const id = proj?.id ?? (await api.ensureProject(cwd)).id;
-        await api.updateProject(id, { claude_ai_connectors: toggle.checked });
-        showToast(toggle.checked ? "Connectors on for new turns." : "Connectors off for new turns.");
+        await api.updateProject(id, { [row.field]: toggle.checked });
+        showToast(toggle.checked ? row.onToast : row.offToast);
       } catch (e) {
-        console.error("[automation] update connectors failed", e);
-        showToast(`Could not update connectors: ${e}`);
+        console.error(`[automation] update ${row.what} failed`, e);
+        showToast(`Could not update ${row.what}: ${e}`);
       } finally {
         toggle.disabled = false;
-        await renderConnectorsRow();
+        await renderProjectBooleanToggleRow(row);
       }
     })();
   };
+}
+
+/** Opt-in for the account's claude.ai connectors (Google Drive etc.) in
+ * this project's chats. Takes effect on the next turn's spawn. */
+function renderConnectorsRow(): Promise<void> {
+  return renderProjectBooleanToggleRow({
+    toggleId: "connectorsEnabled",
+    field: "claude_ai_connectors",
+    onToast: "Connectors on for new turns.",
+    offToast: "Connectors off for new turns.",
+    what: "connectors",
+  });
 }
 
 /** Gaming mode's per-project allowlist: a chat here is never parked, and a
  *  supervised dev-server entry rooted here is never stopped, while gaming
  *  mode is on. Exported so it can be unit-tested directly without standing
  *  up the whole subview's other rows. */
-export async function renderGamingModeRow(): Promise<void> {
-  const cwd = getProjectDetailState().cwd;
-  const toggle = document.getElementById("gamingModeKeepRunning") as HTMLInputElement | null;
-  if (!cwd || !toggle) return;
-  const projects = (await api.listProjects()) as unknown as ProjectCfg[];
-  const proj = projects.find((p) => p.path === cwd);
-  toggle.checked = !!proj?.keep_running_in_gaming_mode;
-  toggle.onchange = () => {
-    void (async () => {
-      toggle.disabled = true;
-      try {
-        const id = proj?.id ?? (await api.ensureProject(cwd)).id;
-        await api.updateProject(id, { keep_running_in_gaming_mode: toggle.checked });
-        showToast(toggle.checked ? "Exempt from gaming mode." : "Parked by gaming mode like any other project.");
-      } catch (e) {
-        console.error("[automation] update gaming-mode allowlist failed", e);
-        showToast(`Could not update gaming mode setting: ${e}`);
-      } finally {
-        toggle.disabled = false;
-        await renderGamingModeRow();
-      }
-    })();
-  };
+export function renderGamingModeRow(): Promise<void> {
+  return renderProjectBooleanToggleRow({
+    toggleId: "gamingModeKeepRunning",
+    field: "keep_running_in_gaming_mode",
+    onToast: "Exempt from gaming mode.",
+    offToast: "Parked by gaming mode like any other project.",
+    what: "gaming mode setting",
+  });
 }
 
 const TRACKER_LABEL: Record<string, string> = { shortcut: "Shortcut", linear: "Linear" };
