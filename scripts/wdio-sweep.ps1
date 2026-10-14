@@ -75,7 +75,10 @@ param(
     [switch]$Visible,
 
     # Internal: set on the copy Invoke-SweepInSupervisor launches, which runs the sweep itself.
-    [switch]$InSupervisor
+    [switch]$InSupervisor,
+
+    # Internal: where that copy writes its summary for the launcher to read back.
+    [string]$VerdictFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -275,19 +278,20 @@ function Invoke-WdioSpec {
 # cmd /c turns a quoted one into a literal "\"...\"" (see live-verify.ps1), so a path with a space
 # is refused here rather than mangled there.
 function Get-InSupervisorCommand {
-    param([string]$ScriptPath, [switch]$Billed, [switch]$RealClaude, [string]$FakeClaudeBin)
-    foreach ($p in @($ScriptPath, $FakeClaudeBin)) {
+    param([string]$ScriptPath, [string]$VerdictFile, [switch]$Billed, [switch]$RealClaude, [string]$FakeClaudeBin)
+    foreach ($p in @($ScriptPath, $VerdictFile, $FakeClaudeBin)) {
         if ($p -and $p.Contains(' ')) { throw "Cannot run headless with a space in '$p'; pass -Visible, or use a path without spaces." }
     }
     $parts = @('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath, '-InSupervisor')
+    if ($VerdictFile) { $parts += @('-VerdictFile', $VerdictFile) }
     if ($Billed) { $parts += '-Billed' }
     if ($RealClaude) { $parts += '-RealClaude' }
     if ($FakeClaudeBin) { $parts += @('-FakeClaudeBin', $FakeClaudeBin) }
     return ($parts -join ' ')
 }
 
-# The headless copy's verdict, read from its replayed output: the supervisor reports a status, not
-# the exit code, so the sweep's own final line is the only pass/fail signal that survives the hop.
+# The headless copy's verdict, read from its summary: the supervisor reports a status, not the exit
+# code, so the sweep's own final line is the only pass/fail signal that survives the hop.
 function Get-InSupervisorExitCode {
     param([string[]]$Lines)
     if (@($Lines | Where-Object { $_ -match '^SWEEP PASSED' }).Count -gt 0) { return 0 }
@@ -302,24 +306,33 @@ function Invoke-SweepInSupervisor {
     if (-not $api) { throw 'server_supervisor is not running, so the sweep has nothing to run headless in. Start it, or pass -Visible to let the app windows open on the desktop.' }
     # Forward -FakeClaudeBin only when the caller gave one; the copy derives the same default itself.
     $fake = if ($fakeClaudeBinGiven) { $FakeClaudeBin } else { $null }
-    $cmd = Get-InSupervisorCommand -ScriptPath $PSCommandPath -Billed:$Billed -RealClaude:$RealClaude -FakeClaudeBin $fake
+    $verdictPath = Join-Path $env:TEMP "wdio-sweep-verdict-$([guid]::NewGuid().ToString('N')).txt"
+    $cmd = Get-InSupervisorCommand -ScriptPath $PSCommandPath -VerdictFile $verdictPath -Billed:$Billed -RealClaude:$RealClaude -FakeClaudeBin $fake
     $started = Start-SupervisorHeadless $api $repoRoot $cmd 'wdio-sweep' $null
     Write-Host "Running headless under server_supervisor ($($started.id)); its dashboard previews the app window."
-    $lines = @()
+    $streamed = 0
     try {
         do {
             Start-Sleep -Seconds 3
             $proc = Get-SupervisorProcs $api | Where-Object { $_.id -eq $started.id } | Select-Object -First 1
-            # One last read after the copy exits, so its summary is never cut off.
-            $fresh = @(Invoke-Supervisor $api 'GET' "/procs/$($started.id)/logs" | ForEach-Object { $_.text })
-            $fresh | Select-Object -Skip $lines.Count | ForEach-Object { Write-Host $_ }
-            $lines = $fresh
+            # The supervisor deletes an ephemeral command once it exits, so its log can 404 between
+            # these two reads; the verdict file below is what carries the summary across that.
+            try { $fresh = @(Invoke-Supervisor $api 'GET' "/procs/$($started.id)/logs" | ForEach-Object { $_.text }) } catch { break }
+            $fresh | Select-Object -Skip $streamed | ForEach-Object { Write-Host $_ }
+            $streamed = $fresh.Count
         } while ($proc -and $proc.status -in 'running', 'starting')
     } finally {
         # Also what stops the headless copy, and every wdio/app process under it, on Ctrl+C.
         Remove-SupervisorRig $api $started.id
     }
-    return (Get-InSupervisorExitCode -Lines $lines)
+    if (-not (Test-Path $verdictPath)) {
+        Write-Host "`nThe headless copy wrote no summary: it died or was stopped before finishing."
+        return 1
+    }
+    $summary = @(Get-Content -Path $verdictPath)
+    Remove-Item -Path $verdictPath -ErrorAction SilentlyContinue
+    $summary | ForEach-Object { Write-Host $_ }
+    return (Get-InSupervisorExitCode -Lines $summary)
 }
 
 # --- main ---
@@ -373,20 +386,21 @@ if ($MyInvocation.InvocationName -ne '.') {
         $results += Invoke-WdioSpec -SpecName $item.Spec -LogDir $logDir -ExtraEnv $item.Env
     }
 
-    Write-Host "`n=== Summary ==="
+    $summary = @('', '=== Summary ===')
     foreach ($r in $results) {
         $tag = if ($r.Skipped) { '[WhatIf - not run]' } else { "$($r.Passing)p/$($r.Failing)f exit=$($r.ExitCode) [$($r.Status)]" }
-        Write-Host "  $($r.Spec): $tag  log: $($r.LogPath)"
+        $summary += "  $($r.Spec): $tag  log: $($r.LogPath)"
     }
 
     # Status, not raw Failing/ExitCode: a NO SUMMARY run has Failing=0 and ExitCode=0 and would
     # otherwise read as passed here too - the same false-OK the per-spec check used to make.
     $anyFailed = @($results | Where-Object { -not $_.Skipped -and $_.Status -ne 'OK' })
-    if ($anyFailed.Count -gt 0) {
-        Write-Host "`nSWEEP FAILED ($($anyFailed.Count) spec(s))"
-        exit 1
+    $summary += ''
+    $summary += if ($anyFailed.Count -gt 0) { "SWEEP FAILED ($($anyFailed.Count) spec(s))" } else { 'SWEEP PASSED (or dry run via -WhatIf)' }
+    if ($VerdictFile) {
+        [System.IO.File]::WriteAllText($VerdictFile, ($summary -join "`r`n"))
     } else {
-        Write-Host "`nSWEEP PASSED (or dry run via -WhatIf)"
-        exit 0
+        $summary | ForEach-Object { Write-Host $_ }
     }
+    if ($anyFailed.Count -gt 0) { exit 1 } else { exit 0 }
 }

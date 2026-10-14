@@ -22,8 +22,9 @@ $cmd = Get-InSupervisorCommand -ScriptPath 'C:\repo\scripts\wdio-sweep.ps1'
 if ($cmd -ne 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\repo\scripts\wdio-sweep.ps1 -InSupervisor') {
     $failures += "plain command: got '$cmd'"
 }
-$cmd = Get-InSupervisorCommand -ScriptPath 'C:\repo\scripts\wdio-sweep.ps1' -Billed -RealClaude -FakeClaudeBin 'C:\tmp\fake\claude.cmd'
-foreach ($want in '-InSupervisor', '-Billed', '-RealClaude', '-FakeClaudeBin C:\tmp\fake\claude.cmd') {
+$cmd = Get-InSupervisorCommand -ScriptPath 'C:\repo\scripts\wdio-sweep.ps1' -VerdictFile 'C:\tmp\v.txt' -Billed -RealClaude -FakeClaudeBin 'C:\tmp\fake\claude.cmd'
+# The verdict file is what survives the supervisor deleting the finished command and its log.
+foreach ($want in '-InSupervisor', '-VerdictFile C:\tmp\v.txt', '-Billed', '-RealClaude', '-FakeClaudeBin C:\tmp\fake\claude.cmd') {
     if (-not $cmd.Contains($want)) { $failures += "switches: '$want' missing from '$cmd'" }
 }
 
