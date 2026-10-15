@@ -178,16 +178,14 @@ test("the list pins this chat's drafts and gives each person one row", async ({ 
   await expect(panel.locator(".dr-group").first()).toHaveText("From this chat");
   await expect(panel.locator(".dr-card")).toHaveCount(2);
   const first = panel.locator(".dr-card").first();
-  await expect(first.locator(".dr-handle")).toHaveText(["Bruno #2", "Ana #1"]);
+  // One line per draft: the topic, no preview text, who it is for on hover.
+  await expect(first.locator(".dr-topic")).toHaveText("Sprint slip heads-up");
+  await expect(first).toHaveAttribute("title", "To Bruno, Ana");
+  await expect(first).not.toContainText("auth migration");
   // One row per person, not one card per message: a two-recipient card gives
   // both people a row.
   await expect(panel.locator(".dr-person .dr-person-name")).toHaveText(["Bruno", "Ana", "Marko"]);
-  await expect(panel.locator(".dr-person").first().locator(".dr-count")).toHaveText("1 open");
-  // Markdown markers must not leak into the one-line excerpt...
-  await expect(first.locator(".dr-excerpt")).not.toContainText("**");
-  // ...but stripping them must not eat a hyphen inside the text: that fused
-  // the invoice date into "20260314" the first time round.
-  await expect(panel.locator(".dr-card").nth(1).locator(".dr-excerpt")).toContainText("2026-03-14");
+  await expect(panel.locator(".dr-person").first().locator(".dr-count")).toHaveText("1");
 });
 
 test("opening a card renders the markdown as real formatting, not markers", async ({ page }) => {
@@ -222,7 +220,7 @@ test("an edit round-trips to the store as markdown and comes back as a your-edit
   expect(stored.body).toBe("Bruno - it **slips** to Thursday.");
   expect(stored.author).toBe("user");
 
-  await expect(panel.locator(".dr-card").first().locator(".dr-edited")).toHaveText("your edit");
+  await expect(panel.locator(".dr-card").first().locator('.dr-mark[title="Your edit"]')).toHaveCount(1);
 });
 
 test("the recipient dropdown swaps to that person's own version track", async ({ page }) => {
@@ -290,9 +288,10 @@ test("a person row opens just their drafts, and Archive folds one away without d
     .toBe("archived");
   // Back on Marko's view, nothing open, the archived draft one click away.
   await expect(panel.locator(".dr-none")).toHaveText("Nothing open.");
-  await expect(panel.locator(".dr-fold")).toHaveText("1 sent and older");
+  await expect(panel.locator(".dr-fold")).toHaveText("1 older");
   await panel.locator(".dr-fold").click();
   await expect(panel.locator(".dr-card.past")).toHaveCount(1);
+  await expect(panel.locator('.dr-card.past .dr-mark[title="Archived"]')).toHaveCount(1);
 
   await panel.locator("[data-list]").click();
   await expect(panel.locator(".dr-group").first()).toHaveText("From this chat");

@@ -1,16 +1,18 @@
 // "Drafts" pane-window body: the project's draft messages, opened on
 // people rather than on every message ever written. This chat's open drafts
 // are pinned on top, then one row per person, then one section per platform
-// for drafts with no person. Grouping rules live in drafts-grouping.ts; this
-// module owns the list and the person view, drafts-editor.ts one open card.
+// for drafts with no person. One line per draft: state is an icon, never a
+// word, and the text itself only shows once a draft is opened. Grouping rules
+// live in drafts-grouping.ts; this module owns the list and the person view,
+// drafts-editor.ts one open card.
 
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import { escapeHtml } from "../../shared/escape-html";
 import { DraftsEditor } from "./drafts-editor";
-import { handleOf, currentVersion } from "../../shared/message-draft-utils";
+import { currentVersion } from "../../shared/message-draft-utils";
 import { groupDrafts, isOpen, variantFor, type PersonGroup, type PlatformGroup } from "./drafts-grouping";
-import type { DraftVariant, MessageDraft, Person } from "../../types/ipc.generated";
+import type { MessageDraft, Person } from "../../types/ipc.generated";
 import "./drafts-panel.css";
 
 export interface DraftsPanelHandle {
@@ -23,20 +25,6 @@ export interface DraftsPanelHandle {
 interface DraftsView {
   drafts: MessageDraft[];
   people?: Person[];
-}
-
-/** First ~140 chars of the shown version, markers stripped, as one line.
- *  Block markers only match at line start, so a hyphenated word or an ISO date
- *  inside the text survives instead of being fused into one number. */
-export function excerptOf(body: string): string {
-  const flat = body
-    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
-    .replace(/^\s*#{1,6}\s+/gm, "")
-    .replace(/^\s*>\s?/gm, "")
-    .replace(/[*_`~]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return flat.length > 140 ? `${flat.slice(0, 140)}...` : flat;
 }
 
 /** "today", else "Oct 7". */
@@ -210,7 +198,7 @@ class DraftsPanel implements DraftsPanelHandle {
     const now = Date.now();
     const anyOpen = g.mine.length > 0 || g.people.some((p) => p.open > 0) ||
       g.platforms.some((x) => x.drafts.some((d) => isOpen(d, now)));
-    if (!anyOpen) html += `<p class="dr-allclear"><i class="ph ph-check-circle"></i>Nothing waiting on you.</p>`;
+    if (!anyOpen) html += `<p class="dr-allclear"><i class="ph ph-check-circle"></i>All clear</p>`;
     if (g.mine.length) {
       html += `<h3 class="dr-group">From this chat</h3>` + g.mine.map((d) => this.cardHtml(d)).join("");
     }
@@ -223,7 +211,7 @@ class DraftsPanel implements DraftsPanelHandle {
     if (g.quietPlatforms.length) {
       const n = g.quietPlatforms.length;
       if (!g.platforms.length) html += `<h3 class="dr-group">Other places</h3>`;
-      html += this.foldHtml("places", n, `${n} more ${n === 1 ? "place" : "places"}: ${g.quietPlatforms.map((x) => x.name).join(", ")}`,
+      html += this.foldHtml("places", n, `${n} more ${n === 1 ? "place" : "places"}`,
         () => g.quietPlatforms.map((x) => this.platformHtml(x)).join(""));
     }
     return html;
@@ -237,7 +225,7 @@ class DraftsPanel implements DraftsPanelHandle {
     return (
       `<h3 class="dr-group">${escapeHtml(section.name)}</h3>` +
       open.map((d) => this.cardHtml(d, section.key)).join("") +
-      this.foldHtml(section.key, rest.length, `${rest.length} sent and older`,
+      this.foldHtml(section.key, rest.length, `${rest.length} older`,
         () => rest.map((d) => this.cardHtml(d, section.key)).join(""))
     );
   }
@@ -256,18 +244,14 @@ class DraftsPanel implements DraftsPanelHandle {
   }
 
   private personRowHtml(p: PersonGroup): string {
-    const latest = p.drafts[0];
-    const sub = latest ? `${escapeHtml(latest.topic)} &middot; ${shortDate(latest.updated_at, Date.now())}` : "";
     const count = p.open > 0
-      ? `<span class="dr-count">${p.open} open</span>`
-      : `<span class="dr-count quiet">all sent</span>`;
+      ? `<span class="dr-count" title="${p.open} not sent yet"><span class="dr-pending"></span>${p.open}</span>`
+      : "";
     return (
-      `<button type="button" class="dr-person" data-person="${escapeHtml(p.key)}">` +
+      `<button type="button" class="dr-person" data-person="${escapeHtml(p.key)}"` +
+        `${p.relationship ? ` title="${escapeHtml(p.relationship)}"` : ""}>` +
         avatarHtml(p.name, true) +
-        `<span class="dr-person-text">` +
-          `<span class="dr-person-name">${escapeHtml(p.name)}</span>` +
-          `<span class="dr-person-sub">${sub}</span>` +
-        `</span>` +
+        `<span class="dr-person-text"><span class="dr-person-name">${escapeHtml(p.name)}</span></span>` +
         count +
       `</button>`
     );
@@ -296,38 +280,37 @@ class DraftsPanel implements DraftsPanelHandle {
       `</div>` +
       `<h3 class="dr-group">Open</h3>` +
       (open.length ? open.map((d) => this.cardHtml(d, key)).join("") : `<p class="dr-none">Nothing open.</p>`) +
-      this.foldHtml(`sent:${key}`, rest.length, `${rest.length} sent and older`,
+      this.foldHtml(`sent:${key}`, rest.length, `${rest.length} older`,
         () => rest.map((d) => this.cardHtml(d, key)).join(""))
     );
   }
 
-  /** `groupKey` picks which recipient's text to excerpt on a multi-person card. */
+  /** One line: topic, state marks, date. Who it is for lives in the hover
+   *  title, since a person's own view already says who. `groupKey` picks
+   *  whose variant counts as "your edit" on a multi-person card. */
   private cardHtml(d: MessageDraft, groupKey?: string): string {
-    const variant: DraftVariant | undefined = groupKey ? variantFor(d, groupKey) : d.variants[0];
-    const version = variant ? currentVersion(variant) : undefined;
-    const edited = version?.author === "user";
+    const variant = groupKey ? variantFor(d, groupKey) : d.variants[0];
+    const edited = variant ? currentVersion(variant)?.author === "user" : false;
     const now = Date.now();
     const live = isOpen(d, now);
-    const who = d.variants.length > 1
-      ? d.variants.map((v) => `<span class="dr-handle">${escapeHtml(handleOf(v))}</span>`).join("")
-      : groupKey ? "" : `<span class="dr-who">${escapeHtml(variant?.recipient ?? "")}</span>`;
-    const scope = d.origin_session_id === this.sessionId ? "" : `<span class="dr-from">${escapeHtml(d.origin_label)}</span>`;
+    const mark = (icon: string, label: string) =>
+      `<i class="ph ${icon} dr-mark" title="${label}" aria-label="${label}"></i>`;
     // A folded draft says why it folded: sent, put away, or just left unsent.
-    const state = d.state === "archived" ? `<span>archived</span>`
-      : d.state === "copied" ? `<span>sent</span>`
-      : live ? "" : `<span>never sent</span>`;
-    // The chat's name goes last: it is often a long first prompt and is the one
-    // part allowed to be cut off.
-    const meta = [who, edited ? `<span class="dr-edited">your edit</span>` : "", state, scope].filter(Boolean);
+    const state = d.state === "archived" ? mark("ph-archive", "Archived")
+      : d.state === "copied" ? mark("ph-paper-plane-tilt", "Sent")
+      : live ? "" : mark("ph-hourglass-simple", "Never sent");
+    const who = d.variants.map((v) => v.recipient).join(", ");
+    const from = d.origin_session_id === this.sessionId ? "" : ` - from ${d.origin_label}`;
     return (
-      `<button type="button" class="dr-card${live ? "" : " past"}" data-open="${escapeHtml(d.id)}">` +
+      `<button type="button" class="dr-card${live ? "" : " past"}" data-open="${escapeHtml(d.id)}" ` +
+        `title="${escapeHtml(`To ${who}${from}`)}">` +
         `<span class="dr-card-top">` +
           (live && d.state === "needs-you" ? `<span class="dr-pending" title="Not sent yet"></span>` : "") +
           `<span class="dr-topic">${escapeHtml(d.topic)}</span>` +
+          (edited ? mark("ph-pencil-simple", "Your edit") : "") +
+          state +
           `<span class="dr-when">${shortDate(d.updated_at, now)}</span>` +
         `</span>` +
-        `<span class="dr-excerpt">${escapeHtml(excerptOf(version?.body ?? ""))}</span>` +
-        (meta.length ? `<span class="dr-meta-row">${meta.join(`<span class="dr-dot">&middot;</span>`)}</span>` : "") +
       `</button>`
     );
   }
