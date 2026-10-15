@@ -17,6 +17,8 @@ pub enum DraftState {
     /// Set when Copy is actually pressed. Inferred, never claimed - nothing
     /// here can see whether it reached Slack.
     Copied,
+    /// Put away by hand without being sent. Kept, never deleted.
+    Archived,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -57,6 +59,14 @@ pub struct DraftVariant {
     pub handle_n: u32,
     pub versions: Vec<DraftVersion>,
     pub current: u32,
+    /// Vault person id (`People/<id>.md` stem). Older cards carry none and
+    /// `list_message_drafts` resolves them from `recipient` at read time.
+    #[serde(default)]
+    pub person: Option<String>,
+    /// Where it gets sent: "Slack", "Shortcut", "Linear", ... Free text, so a
+    /// new platform needs no code; the panel groups case-insensitively.
+    #[serde(default)]
+    pub platform: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

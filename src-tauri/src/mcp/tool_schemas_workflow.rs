@@ -89,14 +89,19 @@ pub fn workflow_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_WRITE_DRAFT,
-            "description": "Write a message the user will send SOMEWHERE ELSE (Slack, email, a ticket) into this project's Drafts panel, instead of pasting it in a reply where he cannot edit it, format it, or find it again. Never put a draft message in your chat text. `add` needs topic+recipient+body; `revise` needs id+body; `variant` needs id+recipient+body for the same topic worded for a second person; `drop` needs id. Refer to a draft by the handle in the injected list, e.g. `Bruno #2`, which also names the recipient. `body` is markdown.",
+            "description": "Write a message the user will send SOMEWHERE ELSE (Slack, email, a ticket) into this project's Drafts panel, instead of pasting it in a reply where he cannot edit it, format it, or find it again. Never put a draft message in your chat text. `add` needs topic+body plus who it goes to; `revise` needs id+body; `variant` needs id+body plus who, for the same topic worded for a second person; `drop` needs id. Who it goes to: `person` when it is a person (checked against the user's vault - an unknown name is refused, so if you are not certain who the user means, ask them first) and `platform` for where it is sent; a draft with no person (a standup, a ticket comment, another chat) passes `platform` and `recipient` only. Refer to a draft by the handle in the injected list, e.g. `Bruno #2`. `body` is markdown.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["add", "revise", "variant", "drop"]},
                     "id": {"type": "string", "description": "Which draft, for revise/variant/drop. A handle like `Bruno #2` or the short id."},
                     "topic": {"type": "string", "description": "What the message is about, a few words. One card per topic, not per person."},
-                    "recipient": {"type": "string", "description": "Who it goes to. Their name as the user says it."},
+                    "recipient": {"type": "string", "description": "Optional label shown on the card. Defaults to the person's name, else the platform. Use it for a non-person destination, e.g. `sc-56117 comment`."},
+                    "person": {"type": "string", "description": "The person it goes to: their name or a nickname from the user's vault (People/). Resolved to one vault person or refused."},
+                    "platform": {"type": "string", "description": "Where it gets sent, short and capitalised: Slack, Shortcut, Linear, Discord, Email, GitHub, Standup."},
+                    "new_person": {"type": "boolean", "description": "Only after the user confirmed this is someone new: creates their People/<person>.md note. `person` must then be their full name."},
+                    "aliases": {"type": "array", "items": {"type": "string"}, "description": "With new_person: other names the user calls them."},
+                    "relationship": {"type": "string", "description": "With new_person: e.g. `coworker (Zirtue QA)`, `friend`."},
                     "body": {"type": "string", "description": "The message itself, in markdown."},
                     "note": {"type": "string", "description": "What changed, for the version list. Revise only."},
                     "brief": {"type": "string", "description": "Why this message exists and what must land, for a later reviewer."},

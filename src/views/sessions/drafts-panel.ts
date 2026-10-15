@@ -1,13 +1,16 @@
-// "Drafts" FAB-card body (todo 666): the project's draft messages, grouped by
-// what they need. Mount signature matches mountTodosPanel so the card can hold
-// either. This module owns the list; drafts-editor.ts owns one open card.
+// "Drafts" pane-window body: the project's draft messages, opened on
+// people rather than on every message ever written. This chat's open drafts
+// are pinned on top, then one row per person, then one section per platform
+// for drafts with no person. Grouping rules live in drafts-grouping.ts; this
+// module owns the list and the person view, drafts-editor.ts one open card.
 
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import { escapeHtml } from "../../shared/escape-html";
 import { DraftsEditor } from "./drafts-editor";
 import { handleOf, currentVersion } from "../../shared/message-draft-utils";
-import type { MessageDraft } from "../../types/ipc.generated";
+import { groupDrafts, isOpen, variantFor, type PersonGroup, type PlatformGroup } from "./drafts-grouping";
+import type { DraftVariant, MessageDraft, Person } from "../../types/ipc.generated";
 import "./drafts-panel.css";
 
 export interface DraftsPanelHandle {
@@ -19,13 +22,8 @@ export interface DraftsPanelHandle {
 
 interface DraftsView {
   drafts: MessageDraft[];
+  people?: Person[];
 }
-
-const GROUPS = [
-  { key: "needs-you", label: "Needs you", empty: "Nothing waiting on you." },
-  { key: "ready", label: "Ready", empty: "" },
-  { key: "copied", label: "Copied", empty: "" },
-] as const;
 
 /** First ~140 chars of the shown version, markers stripped, as one line.
  *  Block markers only match at line start, so a hyphenated word or an ISO date
@@ -41,15 +39,32 @@ export function excerptOf(body: string): string {
   return flat.length > 140 ? `${flat.slice(0, 140)}...` : flat;
 }
 
-function excerpt(draft: MessageDraft): string {
-  const variant = draft.variants[0];
-  return excerptOf(variant ? (currentVersion(variant)?.body ?? "") : "");
+/** "today", else "Oct 7". */
+export function shortDate(iso: string, now: number): string {
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return "";
+  if (t.toDateString() === new Date(now).toDateString()) return "today";
+  return t.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+/** A stable pastel per name, so a person keeps one colour everywhere. */
+function avatarHtml(name: string, big = false): string {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  const letter = escapeHtml(name.trim().charAt(0).toUpperCase() || "?");
+  return `<span class="dr-av${big ? " lg" : ""}" style="--dr-av-hue:${h}" aria-hidden="true">${letter}</span>`;
+}
+
+type View = { kind: "list" } | { kind: "person"; key: string };
 
 class DraftsPanel implements DraftsPanelHandle {
   private root: HTMLElement;
   private drafts: MessageDraft[] = [];
+  private people: Person[] = [];
   private sessionId: string | null = null;
+  private view: View = { kind: "list" };
+  /** Folds the user opened, by key, for this panel's lifetime only. */
+  private unfolded = new Set<string>();
   private openId: string | null = null;
   private pendingOpenId: string | null = null;
   private editor: DraftsEditor | null = null;
@@ -71,6 +86,9 @@ class DraftsPanel implements DraftsPanelHandle {
     this.disposeEditor();
     this.sessionId = sessionId;
     this.drafts = [];
+    this.people = [];
+    this.view = { kind: "list" };
+    this.unfolded.clear();
     this.openId = null;
     this.pendingOpenId = null;
     this.render();
@@ -94,6 +112,7 @@ class DraftsPanel implements DraftsPanelHandle {
         // A scope change mid-flight must not paint the previous project's cards.
         if (this.sessionId !== sid) return;
         this.drafts = Array.isArray(view?.drafts) ? view.drafts : [];
+        this.people = Array.isArray(view?.people) ? view.people : [];
         if (this.pendingOpenId) {
           const wanted = this.pendingOpenId;
           this.pendingOpenId = null;
@@ -154,19 +173,26 @@ class DraftsPanel implements DraftsPanelHandle {
       this.root.innerHTML = "";
       this.editor = new DraftsEditor(this.root, open, {
         sessionId: this.sessionId,
-        onBack: () => this.close(),
+        onBack: () => this.closeEditor(),
         onChanged: () => this.refresh(),
       });
       return;
     }
     this.disposeEditor();
-    this.root.innerHTML = this.listHtml();
+    const scroll = this.root.scrollTop;
+    this.root.innerHTML = this.view.kind === "person" ? this.personHtml(this.view.key) : this.listHtml();
+    // A live refresh repaints the whole list; keep the reader where they were.
+    this.root.scrollTop = scroll;
   }
 
-  private close(): void {
+  private closeEditor(): void {
     this.disposeEditor();
     this.openId = null;
     this.render();
+  }
+
+  private groups() {
+    return groupDrafts(this.drafts, this.people, this.sessionId, Date.now());
   }
 
   private listHtml(): string {
@@ -179,32 +205,155 @@ class DraftsPanel implements DraftsPanelHandle {
         `</div>`
       );
     }
-    return GROUPS.map((g) => {
-      const rows = this.drafts.filter((d) => d.state === g.key);
-      if (rows.length === 0) return g.empty ? `<div class="dr-group">${g.label}</div><p class="dr-none">${g.empty}</p>` : "";
-      return `<div class="dr-group">${g.label}</div>` + rows.map((d) => this.cardHtml(d)).join("");
-    }).join("");
+    const g = this.groups();
+    let html = "";
+    const now = Date.now();
+    const anyOpen = g.mine.length > 0 || g.people.some((p) => p.open > 0) ||
+      g.platforms.some((x) => x.drafts.some((d) => isOpen(d, now)));
+    if (!anyOpen) html += `<p class="dr-allclear"><i class="ph ph-check-circle"></i>Nothing waiting on you.</p>`;
+    if (g.mine.length) {
+      html += `<h3 class="dr-group">From this chat</h3>` + g.mine.map((d) => this.cardHtml(d)).join("");
+    }
+    if (g.people.length || g.quietPeople.length) {
+      html += `<h3 class="dr-group">People</h3>` + g.people.map((p) => this.personRowHtml(p)).join("");
+      html += this.foldHtml("people", g.quietPeople.length, `${g.quietPeople.length} more ${g.quietPeople.length === 1 ? "person" : "people"}`,
+        () => g.quietPeople.map((p) => this.personRowHtml(p)).join(""));
+    }
+    html += g.platforms.map((x) => this.platformHtml(x)).join("");
+    if (g.quietPlatforms.length) {
+      const n = g.quietPlatforms.length;
+      if (!g.platforms.length) html += `<h3 class="dr-group">Other places</h3>`;
+      html += this.foldHtml("places", n, `${n} more ${n === 1 ? "place" : "places"}: ${g.quietPlatforms.map((x) => x.name).join(", ")}`,
+        () => g.quietPlatforms.map((x) => this.platformHtml(x)).join(""));
+    }
+    return html;
   }
 
-  private cardHtml(d: MessageDraft): string {
-    const handles = d.variants.map((v) => `<span class="dr-handle">${escapeHtml(handleOf(v))}</span>`).join("");
-    const version = d.variants[0] ? currentVersion(d.variants[0]) : undefined;
-    const edited = version?.author === "user";
-    const scope = d.origin_session_id === this.sessionId ? "" : `<span class="dr-dot">&middot;</span>${escapeHtml(d.origin_label)}`;
+  /** One platform's section: open drafts as cards, the rest one click away. */
+  private platformHtml(section: PlatformGroup): string {
+    const now = Date.now();
+    const open = section.drafts.filter((d) => isOpen(d, now));
+    const rest = section.drafts.filter((d) => !isOpen(d, now));
     return (
-      `<button type="button" class="dr-card${d.state === "needs-you" ? " attn" : ""}" data-open="${escapeHtml(d.id)}">` +
-        `<span class="dr-card-top">` +
-          `<span class="dr-topic">${escapeHtml(d.topic)}</span>` +
-          `<span class="dr-ver">v${version?.n ?? 1}</span>` +
+      `<h3 class="dr-group">${escapeHtml(section.name)}</h3>` +
+      open.map((d) => this.cardHtml(d, section.key)).join("") +
+      this.foldHtml(section.key, rest.length, `${rest.length} sent and older`,
+        () => rest.map((d) => this.cardHtml(d, section.key)).join(""))
+    );
+  }
+
+  /** One line that expands in place; renders nothing when there is nothing to
+   *  hide, so an empty fold never appears. */
+  private foldHtml(key: string, count: number, label: string, body: () => string): string {
+    if (count === 0) return "";
+    const isOpenFold = this.unfolded.has(key);
+    return (
+      `<button type="button" class="dr-fold" data-fold="${escapeHtml(key)}" aria-expanded="${isOpenFold}">` +
+        `<i class="ph ph-caret-right"></i>${escapeHtml(label)}` +
+      `</button>` +
+      (isOpenFold ? `<div class="dr-folded">${body()}</div>` : "")
+    );
+  }
+
+  private personRowHtml(p: PersonGroup): string {
+    const latest = p.drafts[0];
+    const sub = latest ? `${escapeHtml(latest.topic)} &middot; ${shortDate(latest.updated_at, Date.now())}` : "";
+    const count = p.open > 0
+      ? `<span class="dr-count">${p.open} open</span>`
+      : `<span class="dr-count quiet">all sent</span>`;
+    return (
+      `<button type="button" class="dr-person" data-person="${escapeHtml(p.key)}">` +
+        avatarHtml(p.name, true) +
+        `<span class="dr-person-text">` +
+          `<span class="dr-person-name">${escapeHtml(p.name)}</span>` +
+          `<span class="dr-person-sub">${sub}</span>` +
         `</span>` +
-        `<span class="dr-excerpt">${escapeHtml(excerpt(d))}</span>` +
-        `<span class="dr-meta-row">${handles}${edited ? `<span class="dr-edited">your edit</span>` : ""}${scope}</span>` +
+        count +
+      `</button>`
+    );
+  }
+
+  private personHtml(key: string): string {
+    const g = this.groups();
+    const p = [...g.people, ...g.quietPeople].find((x) => x.key === key);
+    if (!p) {
+      // The last draft for this person went away underneath us.
+      this.view = { kind: "list" };
+      return this.listHtml();
+    }
+    const now = Date.now();
+    const open = p.drafts.filter((d) => isOpen(d, now));
+    const rest = p.drafts.filter((d) => !isOpen(d, now));
+    const sub = p.personId ? p.relationship : "Not in your vault";
+    return (
+      `<div class="dr-head">` +
+        `<button type="button" class="icon-btn-sq dr-icon" data-list title="Back to drafts"><i class="ph ph-arrow-left"></i></button>` +
+        avatarHtml(p.name, true) +
+        `<span class="dr-person-text">` +
+          `<span class="dr-title">${escapeHtml(p.name)}</span>` +
+          (sub ? `<span class="dr-person-sub">${escapeHtml(sub)}</span>` : "") +
+        `</span>` +
+      `</div>` +
+      `<h3 class="dr-group">Open</h3>` +
+      (open.length ? open.map((d) => this.cardHtml(d, key)).join("") : `<p class="dr-none">Nothing open.</p>`) +
+      this.foldHtml(`sent:${key}`, rest.length, `${rest.length} sent and older`,
+        () => rest.map((d) => this.cardHtml(d, key)).join(""))
+    );
+  }
+
+  /** `groupKey` picks which recipient's text to excerpt on a multi-person card. */
+  private cardHtml(d: MessageDraft, groupKey?: string): string {
+    const variant: DraftVariant | undefined = groupKey ? variantFor(d, groupKey) : d.variants[0];
+    const version = variant ? currentVersion(variant) : undefined;
+    const edited = version?.author === "user";
+    const now = Date.now();
+    const live = isOpen(d, now);
+    const who = d.variants.length > 1
+      ? d.variants.map((v) => `<span class="dr-handle">${escapeHtml(handleOf(v))}</span>`).join("")
+      : groupKey ? "" : `<span class="dr-who">${escapeHtml(variant?.recipient ?? "")}</span>`;
+    const scope = d.origin_session_id === this.sessionId ? "" : `<span class="dr-from">${escapeHtml(d.origin_label)}</span>`;
+    // A folded draft says why it folded: sent, put away, or just left unsent.
+    const state = d.state === "archived" ? `<span>archived</span>`
+      : d.state === "copied" ? `<span>sent</span>`
+      : live ? "" : `<span>never sent</span>`;
+    // The chat's name goes last: it is often a long first prompt and is the one
+    // part allowed to be cut off.
+    const meta = [who, edited ? `<span class="dr-edited">your edit</span>` : "", state, scope].filter(Boolean);
+    return (
+      `<button type="button" class="dr-card${live ? "" : " past"}" data-open="${escapeHtml(d.id)}">` +
+        `<span class="dr-card-top">` +
+          (live && d.state === "needs-you" ? `<span class="dr-pending" title="Not sent yet"></span>` : "") +
+          `<span class="dr-topic">${escapeHtml(d.topic)}</span>` +
+          `<span class="dr-when">${shortDate(d.updated_at, now)}</span>` +
+        `</span>` +
+        `<span class="dr-excerpt">${escapeHtml(excerptOf(version?.body ?? ""))}</span>` +
+        (meta.length ? `<span class="dr-meta-row">${meta.join(`<span class="dr-dot">&middot;</span>`)}</span>` : "") +
       `</button>`
     );
   }
 
   private onClick = (ev: MouseEvent): void => {
-    const card = (ev.target as HTMLElement).closest<HTMLElement>("[data-open]");
+    const el = ev.target as HTMLElement;
+    const fold = el.closest<HTMLElement>("[data-fold]");
+    if (fold) {
+      const key = fold.dataset.fold!;
+      if (!this.unfolded.delete(key)) this.unfolded.add(key);
+      this.render();
+      return;
+    }
+    const person = el.closest<HTMLElement>("[data-person]");
+    if (person) {
+      this.view = { kind: "person", key: person.dataset.person! };
+      this.root.scrollTop = 0;
+      this.render();
+      return;
+    }
+    if (el.closest("[data-list]")) {
+      this.view = { kind: "list" };
+      this.render();
+      return;
+    }
+    const card = el.closest<HTMLElement>("[data-open]");
     if (!card) return;
     this.openId = card.dataset.open ?? null;
     this.render();

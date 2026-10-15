@@ -48,14 +48,14 @@ pub(super) fn write_atomic(path: &Path, store: &Store) {
     }
 }
 
-/// Drops Copied first, then Ready - never a card still marked NeedsYou, which
-/// is the one outcome this store must not silently produce.
+/// Drops Copied and Archived first, then Ready - never a card still marked
+/// NeedsYou, which is the one outcome this store must not silently produce.
 pub(super) fn prune(drafts: &mut Vec<MessageDraft>) {
     if drafts.len() <= MAX_DRAFTS {
         return;
     }
     let mut excess = drafts.len() - MAX_DRAFTS;
-    for state in [DraftState::Copied, DraftState::Ready, DraftState::NeedsYou] {
+    for state in [DraftState::Copied, DraftState::Archived, DraftState::Ready, DraftState::NeedsYou] {
         if excess == 0 {
             break;
         }

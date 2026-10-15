@@ -15,6 +15,7 @@ pub mod auth;
 pub mod hooks;
 pub mod mcp;
 pub mod news;
+pub mod people;
 pub mod notifications;
 pub mod history;
 pub mod ipc;
