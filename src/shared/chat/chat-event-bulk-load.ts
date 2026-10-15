@@ -65,6 +65,11 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
     () => `(${events.length} events, slowest chunk ${Math.round(slowestChunkMs)}ms)`,
   );
   const CHUNK = 8;
+  // Yield only once this much work has run since the last yield, not after
+  // every chunk: a nested setTimeout(0) clamps to 4ms, so yielding per 8
+  // events idled ~430ms of an 851-event open (measured 1.2s total).
+  const YIELD_BUDGET_MS = 16;
+  let sinceYield = performance.now();
   for (let i = 0; i < events.length; i += CHUNK) {
     // A superseding call already re-owns liveBuffer/hydrating from its own
     // line 29/53 - clearing them here would clobber ITS in-flight state
@@ -76,8 +81,9 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
     }
     flushRender(r);
     slowestChunkMs = Math.max(slowestChunkMs, performance.now() - chunkStart);
-    if (i + CHUNK < events.length) {
+    if (i + CHUNK < events.length && performance.now() - sinceYield >= YIELD_BUDGET_MS) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      sinceYield = performance.now();
     }
   }
   donePhase();

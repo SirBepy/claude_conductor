@@ -94,6 +94,10 @@ describe("ChatRenderer — streaming dedup (ai_todo 47)", () => {
     // bulkLoadEvents also processes it in the next iteration — producing 2 messages.
     // The fix ([...events] snapshot) breaks (b), leaving only (a).
     vi.useFakeTimers({ shouldAdvanceTime: false });
+    // bulkLoadEvents only yields once a chunk run passes its time budget, so
+    // advance the clock per read to force the between-chunk yield this race needs.
+    let t = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => (t += 20));
 
     const sid = `sess-race-${Math.random()}`;
 
@@ -141,6 +145,7 @@ describe("ChatRenderer — streaming dedup (ai_todo 47)", () => {
     vi.advanceTimersByTime(0);
     await loadPromise;
     vi.useRealTimers();
+    nowSpy.mockRestore();
 
     const assistants = r.messages.filter((m) => m.kind === "assistant");
     expect(assistants).toHaveLength(1);
