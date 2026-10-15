@@ -52,10 +52,9 @@
 .dr-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
   width: calc(100% - 16px);
   margin: 0 8px 6px;
-  padding: 9px 10px;
+  padding: 8px 10px;
   text-align: left;
   font: inherit;
   color: var(--color-text);
@@ -98,49 +97,12 @@
   font-variant-numeric: tabular-nums;
 }
 
-.dr-excerpt {
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--sb-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.dr-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  font-size: 10.5px;
+/* State marks (sent, never sent, archived, your edit) replace words. */
+.dr-mark {
+  flex: 0 0 auto;
+  font-size: 12px;
   color: var(--sb-muted);
 }
-
-.dr-meta-row > * { flex: 0 0 auto; }
-
-/* A chat's label is often its whole first prompt; one line, cut at the edge. */
-.dr-meta-row > .dr-from {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dr-who { font-weight: 600; color: var(--color-text); }
-
-.dr-handle {
-  font-weight: 600;
-  color: var(--color-text);
-  background: var(--color-surface-alt);
-  border-radius: 20px;
-  padding: 1px 7px;
-}
-
-.dr-edited { color: var(--dr-attention); font-weight: 600; }
-.dr-dot { opacity: 0.5; }
 
 /* Person rows: one per person, the panel's first screen. */
 .dr-person {
@@ -148,7 +110,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 6px 10px;
   text-align: left;
   font: inherit;
   color: var(--color-text);
@@ -168,7 +130,13 @@
   gap: 1px;
 }
 
-.dr-person-name { font-size: 13px; font-weight: 600; }
+.dr-person-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .dr-person-sub {
   font-size: 11px;
@@ -180,12 +148,14 @@
 
 .dr-count {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--dr-attention);
+  color: var(--sb-muted);
+  font-variant-numeric: tabular-nums;
 }
-
-.dr-count.quiet { font-weight: 400; color: var(--sb-muted); }
 
 /* Hue comes from the name (drafts-panel.ts avatarHtml); lightness is fixed so
    every avatar keeps the same dark-letter contrast in both theme modes. */
