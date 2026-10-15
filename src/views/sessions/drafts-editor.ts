@@ -187,6 +187,9 @@ export class DraftsEditor {
         `<div class="dr-head">` +
           `<button type="button" class="icon-btn-sq dr-icon" data-back title="Back to drafts"><i class="ph ph-arrow-left"></i></button>` +
           `<span class="dr-title">${escapeHtml(this.draft.topic)}</span>` +
+          (this.draft.state === "archived"
+            ? `<button type="button" class="icon-btn-sq dr-icon" data-archive title="Unarchive"><i class="ph ph-box-arrow-up"></i></button>`
+            : `<button type="button" class="icon-btn-sq dr-icon" data-archive title="Archive - put away without sending"><i class="ph ph-archive"></i></button>`) +
           `<button type="button" class="icon-btn-sq dr-icon" data-delete title="Delete draft"><i class="ph ph-trash"></i></button>` +
         `</div>` +
         `<div class="dr-meta">` +
@@ -251,6 +254,17 @@ export class DraftsEditor {
     }
     if (el.closest("[data-delete]")) {
       this.remove();
+      return;
+    }
+    if (el.closest("[data-archive]")) {
+      this.flush();
+      if (this.draft.state === "archived") {
+        this.setState("needs-you");
+        return;
+      }
+      // Archiving is "done with this one", so it also leaves the card.
+      this.setState("archived");
+      this.deps.onBack();
       return;
     }
     if (el.closest("[data-copy]")) {

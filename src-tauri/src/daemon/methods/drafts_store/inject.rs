@@ -55,7 +55,7 @@ pub(crate) fn render_for_injection_at(root: Option<&Path>, state: &Arc<DaemonSta
     // chat that never wrote a draft now gets no block at all.
     let open: Vec<&MessageDraft> = drafts
         .iter()
-        .filter(|d| d.state != DraftState::Copied && d.origin_session_id == session_id)
+        .filter(|d| !matches!(d.state, DraftState::Copied | DraftState::Archived) && d.origin_session_id == session_id)
         .collect();
     let edited: Vec<&MessageDraft> = drafts
         .iter()
@@ -140,7 +140,7 @@ mod tests {
             })
             .collect();
         let current = versions.len() as u32;
-        DraftVariant { recipient: recipient.to_string(), handle_n: n, versions, current }
+        DraftVariant { recipient: recipient.to_string(), handle_n: n, versions, current, person: None, platform: None }
     }
 
     fn draft(variants: Vec<DraftVariant>) -> MessageDraft {

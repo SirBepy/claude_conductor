@@ -21,25 +21,38 @@
 /* ── List ─────────────────────────────────────────────────────────────────── */
 
 .dr-group {
+  margin: 0;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.9px;
   font-weight: 700;
-  color: var(--color-text-muted);
-  padding: 10px 10px 4px;
+  color: var(--sb-muted);
+  padding: 14px 10px 5px;
 }
+
+.dr-allclear {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 14px 12px 2px;
+  font-size: 12.5px;
+  color: var(--sb-muted);
+}
+
+.dr-allclear i { font-size: 15px; color: var(--color-success); }
 
 .dr-none {
   margin: 0;
   padding: 0 10px 6px;
   font-size: 11.5px;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
 }
 
 .dr-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   width: calc(100% - 16px);
   margin: 0 8px 6px;
   padding: 9px 10px;
@@ -53,9 +66,20 @@
 }
 
 .dr-card:hover { border-color: var(--color-primary); }
-.dr-card.attn { border-left: 2px solid var(--dr-attention); }
+.dr-card.past { opacity: 0.6; }
+.dr-card.past:hover { opacity: 1; }
 
-.dr-card-top { display: flex; align-items: center; gap: 8px; }
+.dr-card-top { display: flex; align-items: center; gap: 7px; }
+
+/* "Not sent yet" marker: a dot, not a coloured card edge, so an open card reads
+   as a state rather than an alert. */
+.dr-pending {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dr-attention);
+}
 
 .dr-topic {
   flex: 1;
@@ -67,19 +91,17 @@
   white-space: nowrap;
 }
 
-.dr-ver {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--color-text-muted);
-  background: var(--color-surface-alt);
-  border-radius: 4px;
-  padding: 1px 5px;
+.dr-when {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--sb-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .dr-excerpt {
   font-size: 11.5px;
   line-height: 1.45;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -89,11 +111,25 @@
 .dr-meta-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 10.5px;
-  color: var(--color-text-muted);
+  color: var(--sb-muted);
 }
+
+.dr-meta-row > * { flex: 0 0 auto; }
+
+/* A chat's label is often its whole first prompt; one line, cut at the edge. */
+.dr-meta-row > .dr-from {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dr-who { font-weight: 600; color: var(--color-text); }
 
 .dr-handle {
   font-weight: 600;
@@ -105,6 +141,98 @@
 
 .dr-edited { color: var(--dr-attention); font-weight: 600; }
 .dr-dot { opacity: 0.5; }
+
+/* Person rows: one per person, the panel's first screen. */
+.dr-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.dr-person:hover { background: var(--color-surface); }
+
+.dr-person-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dr-person-name { font-size: 13px; font-weight: 600; }
+
+.dr-person-sub {
+  font-size: 11px;
+  color: var(--sb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dr-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dr-attention);
+}
+
+.dr-count.quiet { font-weight: 400; color: var(--sb-muted); }
+
+/* Hue comes from the name (drafts-panel.ts avatarHtml); lightness is fixed so
+   every avatar keeps the same dark-letter contrast in both theme modes. */
+.dr-av {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #1a1424;
+  background: hsl(var(--dr-av-hue, 280) 62% 76%);
+}
+
+.dr-av.lg { width: 30px; height: 30px; font-size: 12.5px; }
+
+.dr-fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 6px 8px;
+  padding: 4px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--sb-muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dr-fold:hover { color: var(--color-text); }
+.dr-fold i { font-size: 11px; transition: transform 0.15s ease-out; }
+.dr-fold[aria-expanded="true"] i { transform: rotate(90deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dr-fold i { transition: none; }
+}
+
+.dr-card:focus-visible,
+.dr-person:focus-visible,
+.dr-fold:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
 
 .dr-empty {
   margin: auto;
@@ -124,7 +252,7 @@
 .dr-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 7px 8px;
   border-bottom: 1px solid var(--color-border);
 }

@@ -33,6 +33,7 @@ use claude_conductor_lib::sessions::repo_channel::ChannelMessage;
 use claude_conductor_lib::sessions::message_drafts::{
     DraftAuthor, DraftReceipt, DraftState, DraftVariant, DraftVersion, MessageDraft,
 };
+use claude_conductor_lib::people::Person;
 use claude_conductor_lib::sessions::user_todos::{TodoState, UserTodo};
 use claude_conductor_lib::sessions::scheduled_items::{
     Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus,
@@ -197,6 +198,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<DraftVersion>());
     out.push_str(&decl::<DraftVariant>());
     out.push_str(&decl::<MessageDraft>());
+    out.push_str(&decl::<Person>());
 
     // repo-channel peer chip inline panel (todo 893)
     out.push_str(&decl::<ChannelMessage>());

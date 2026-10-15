@@ -13,6 +13,11 @@ const SCREENSHOT_DIR = shotDir();
 
 const VIEWER = "sess-A";
 
+// The panel folds anything untouched for a week, so the seed has to be fresh
+// relative to the run, not pinned to a calendar date.
+const NOW_ISO = new Date().toISOString();
+const HOUR_AGO_ISO = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
 function version(n: number, body: string, author: "ai" | "user", note: string) {
   return { n, body, author, note, created_at: "2026-08-26T08:00:00Z" };
 }
@@ -43,8 +48,8 @@ const SEED = [
     state: "needs-you",
     origin_session_id: VIEWER,
     origin_label: "auth-work",
-    created_at: "2026-08-26T08:00:00Z",
-    updated_at: "2026-08-26T08:00:00Z",
+    created_at: NOW_ISO,
+    updated_at: NOW_ISO,
     seen_by_origin: true,
   },
   {
@@ -63,8 +68,8 @@ const SEED = [
     state: "ready",
     origin_session_id: VIEWER,
     origin_label: "auth-work",
-    created_at: "2026-08-26T08:10:00Z",
-    updated_at: "2026-08-26T08:10:00Z",
+    created_at: HOUR_AGO_ISO,
+    updated_at: HOUR_AGO_ISO,
     seen_by_origin: true,
   },
 ];
@@ -167,14 +172,17 @@ async function mountPanel(page: Page, hostCss?: string) {
   return panel;
 }
 
-test("the list groups by state and shows every recipient handle", async ({ page }) => {
+test("the list pins this chat's drafts and gives each person one row", async ({ page }) => {
   const panel = await mountPanel(page);
 
+  await expect(panel.locator(".dr-group").first()).toHaveText("From this chat");
   await expect(panel.locator(".dr-card")).toHaveCount(2);
-  await expect(panel.locator(".dr-group").first()).toHaveText("Needs you");
   const first = panel.locator(".dr-card").first();
   await expect(first.locator(".dr-handle")).toHaveText(["Bruno #2", "Ana #1"]);
-  await expect(first.locator(".dr-ver")).toHaveText("v2");
+  // One row per person, not one card per message: a two-recipient card gives
+  // both people a row.
+  await expect(panel.locator(".dr-person .dr-person-name")).toHaveText(["Bruno", "Ana", "Marko"]);
+  await expect(panel.locator(".dr-person").first().locator(".dr-count")).toHaveText("1 open");
   // Markdown markers must not leak into the one-line excerpt...
   await expect(first.locator(".dr-excerpt")).not.toContainText("**");
   // ...but stripping them must not eat a hyphen inside the text: that fused
@@ -264,6 +272,30 @@ test("the bold button marks the selection instead of typing asterisks", async ({
   await panel.locator('[data-cmd="bold"]').click();
 
   await expect(panel.locator(".dr-body b, .dr-body strong")).toHaveText("plain");
+});
+
+test("a person row opens just their drafts, and Archive folds one away without deleting it", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await panel.locator(".dr-person", { hasText: "Marko" }).click();
+
+  await expect(panel.locator(".dr-title")).toHaveText("Marko");
+  await expect(panel.locator(".dr-person-sub")).toHaveText("Not in your vault");
+  await expect(panel.locator(".dr-card")).toHaveCount(1);
+
+  await panel.locator(".dr-card").click();
+  await panel.locator("[data-archive]").click();
+
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__draftStore.drafts[1].state))
+    .toBe("archived");
+  // Back on Marko's view, nothing open, the archived draft one click away.
+  await expect(panel.locator(".dr-none")).toHaveText("Nothing open.");
+  await expect(panel.locator(".dr-fold")).toHaveText("1 sent and older");
+  await panel.locator(".dr-fold").click();
+  await expect(panel.locator(".dr-card.past")).toHaveCount(1);
+
+  await panel.locator("[data-list]").click();
+  await expect(panel.locator(".dr-group").first()).toHaveText("From this chat");
 });
 
 test("an empty project explains what the panel is for instead of showing a blank box", async ({ page }) => {

@@ -13,8 +13,10 @@ pub use routes::register_drafts_store;
 
 use super::channel::{caller_project, display_name};
 use crate::daemon::state::DaemonState;
-use crate::sessions::message_drafts::{self as store, DraftReceipt, DraftState, MessageDraft};
+use crate::people::{self, Person, Resolved};
+use crate::sessions::message_drafts::{self as store, DraftReceipt, DraftState, MessageDraft, VariantTarget};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -27,7 +29,8 @@ fn parse_state(s: &str) -> Result<DraftState, String> {
         "needs-you" => Ok(DraftState::NeedsYou),
         "ready" => Ok(DraftState::Ready),
         "copied" => Ok(DraftState::Copied),
-        other => Err(format!("unknown draft state: {other} (want needs-you|ready|copied)")),
+        "archived" => Ok(DraftState::Archived),
+        other => Err(format!("unknown draft state: {other} (want needs-you|ready|copied|archived)")),
     }
 }
 
@@ -100,27 +103,126 @@ fn receipts_from(value: Option<&Value>) -> Vec<DraftReceipt> {
 }
 
 pub(crate) fn list_message_drafts(state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
-    list_message_drafts_at(None, state, session_id)
+    list_message_drafts_in(None, people::vault_dir().as_deref(), state, session_id)
 }
 
-/// `root: Some(path)` substitutes a tempdir for the real app-data root
-/// `list_message_drafts` above resolves through `store::list` - the seam
-/// hermetic tests use, same shape as `repo_channel::post_at`.
-pub(crate) fn list_message_drafts_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str) -> Result<Value, String> {
+/// `root`/`vault: Some(path)` substitute tempdirs for the real app-data root
+/// and Obsidian vault - the seam hermetic tests use.
+/// `people` carries only the vault people the listed drafts point at, so the
+/// panel can show a real name and relationship without a second round trip.
+pub(crate) fn list_message_drafts_in(
+    root: Option<&Path>,
+    vault: Option<&Path>,
+    state: &Arc<DaemonState>,
+    session_id: &str,
+) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
-    Ok(json!({"drafts": list_for(root, &project_id)}))
+    let mut drafts = list_for(root, &project_id);
+    let everyone = vault.map(people::list_at).unwrap_or_default();
+    let used = annotate(&mut drafts, &everyone);
+    Ok(json!({"drafts": drafts, "people": used}))
+}
+
+/// Fills `person`/`platform` on variants written before those fields existed,
+/// from the free-text `recipient`, for this response only - the store keeps
+/// what was written. A stored `person` is never second-guessed.
+fn annotate(drafts: &mut [MessageDraft], everyone: &[Person]) -> Vec<Person> {
+    let mut used: BTreeMap<String, Person> = BTreeMap::new();
+    for variant in drafts.iter_mut().flat_map(|d| d.variants.iter_mut()) {
+        if variant.platform.is_none() {
+            variant.platform = store::infer_platform(&variant.recipient).map(str::to_string);
+        }
+        if variant.person.is_none() {
+            if let Resolved::One(p) = people::resolve(everyone, &variant.recipient) {
+                variant.person = Some(p.id.clone());
+            }
+        }
+        if let Some(p) = variant.person.as_ref().and_then(|id| everyone.iter().find(|p| &p.id == id)) {
+            used.entry(p.id.clone()).or_insert_with(|| p.clone());
+        }
+    }
+    used.into_values().collect()
+}
+
+/// The `person` a write names, checked against the vault. An unknown name is
+/// an error on purpose: a draft is the one place a wrong person costs
+/// something, so this refuses rather than guessing. With no vault on this
+/// machine the name is trusted as given.
+fn person_for_write(vault: Option<&Path>, args: &Value) -> Result<Option<Person>, String> {
+    let wanted = args.get("person").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if wanted.is_empty() {
+        return Ok(None);
+    }
+    let Some(vault) = vault else {
+        return Ok(Some(Person { id: wanted.into(), name: wanted.into(), aliases: Vec::new(), relationship: String::new() }));
+    };
+    let everyone = people::list_at(vault);
+    match people::resolve(&everyone, wanted) {
+        Resolved::One(p) => Ok(Some(p.clone())),
+        Resolved::Ambiguous(hits) => {
+            let names: Vec<&str> = hits.iter().map(|p| p.id.as_str()).collect();
+            Err(format!(
+                "\"{wanted}\" matches more than one person in the user's vault: {}. Ask the user which one, then pass that exact name as `person`.",
+                names.join(", ")
+            ))
+        }
+        Resolved::None if args.get("new_person").and_then(|v| v.as_bool()).unwrap_or(false) => {
+            let aliases: Vec<String> = args
+                .get("aliases")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let relationship = args.get("relationship").and_then(|v| v.as_str()).unwrap_or("");
+            people::create_stub_at(vault, wanted, &aliases, relationship).map(Some)
+        }
+        Resolved::None => Err(format!(
+            "No one called \"{wanted}\" in the user's vault (People/). If you are not certain who the user means, ask them first with ask_user_question, suggesting likely matches. Once you know: pass their exact vault name as `person`, or, for someone genuinely new, the full name with `new_person: true` plus `aliases`/`relationship` to create their People note."
+        )),
+    }
+}
+
+/// `recipient` is optional on a write: the person's name, else the platform,
+/// labels the variant and keys its `Bruno #2` handle.
+fn recipient_label(given: &str, person: Option<&Person>, platform: &str) -> Result<String, String> {
+    [given, person.map(|p| p.name.as_str()).unwrap_or(""), platform]
+        .into_iter()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "recipient, person or platform is required".to_string())
+}
+
+/// The platform Claude named, else one read off the recipient text.
+fn platform_for(given: &str, recipient: &str) -> Option<String> {
+    let given = given.trim();
+    if given.is_empty() {
+        store::infer_platform(recipient).map(str::to_string)
+    } else {
+        Some(given.to_string())
+    }
 }
 
 /// The single `write_draft` MCP tool's four actions.
 pub(crate) fn write_draft(state: &Arc<DaemonState>, session_id: &str, action: &str, args: &Value) -> Result<Value, String> {
-    write_draft_at(None, state, session_id, action, args)
+    write_draft_in(None, people::vault_dir().as_deref(), state, session_id, action, args)
 }
 
 /// `root: Some(path)` substitutes a tempdir for the real app-data root each
 /// action below resolves through `store::add`/`revise`/`add_variant`/`remove`
-/// - the seam hermetic tests use, same shape as `repo_channel::post_at`.
+/// - the seam hermetic tests use, same shape as `repo_channel::post_at`. No vault.
 pub(crate) fn write_draft_at(
     root: Option<&Path>,
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    action: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    write_draft_in(root, None, state, session_id, action, args)
+}
+
+pub(crate) fn write_draft_in(
+    root: Option<&Path>,
+    vault: Option<&Path>,
     state: &Arc<DaemonState>,
     session_id: &str,
     action: &str,
@@ -130,7 +232,8 @@ pub(crate) fn write_draft_at(
     let s = |key: &str| args.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let id = s("id");
     let body = s("body");
-    let recipient = s("recipient");
+    let mut recipient = s("recipient");
+    let given_platform = s("platform");
 
     let draft = match action {
         "add" => {
@@ -138,12 +241,12 @@ pub(crate) fn write_draft_at(
             if topic.trim().is_empty() {
                 return Err("topic is required to add a draft".to_string());
             }
-            if recipient.trim().is_empty() {
-                return Err("recipient is required to add a draft".to_string());
-            }
             if body.trim().is_empty() {
                 return Err("body is required to add a draft".to_string());
             }
+            let person = person_for_write(vault, args)?;
+            recipient = recipient_label(&recipient, person.as_ref(), &given_platform)?;
+            let platform = platform_for(&given_platform, &recipient);
             let label = display_name(state, session_id);
             let new = store::NewDraft {
                 topic: &topic,
@@ -153,6 +256,8 @@ pub(crate) fn write_draft_at(
                 receipts: receipts_from(args.get("receipts")),
                 origin_session_id: session_id,
                 origin_label: &label,
+                person: person.as_ref().map(|p| p.id.as_str()),
+                platform: platform.as_deref(),
             };
             let added = match root {
                 Some(r) => store::add_at(&store::draft_path(r, &project_id), new),
@@ -176,9 +281,13 @@ pub(crate) fn write_draft_at(
                 return Err("body is required to add a variant".to_string());
             }
             let full = resolve_id(root, &project_id, &id)?;
+            let person = person_for_write(vault, args)?;
+            recipient = recipient_label(&recipient, person.as_ref(), &given_platform)?;
+            let platform = platform_for(&given_platform, &recipient);
+            let target = VariantTarget { person: person.as_ref().map(|p| p.id.as_str()), platform: platform.as_deref() };
             match root {
-                Some(r) => store::add_variant_at(&store::draft_path(r, &project_id), &full, &recipient, &body)?,
-                None => store::add_variant(&project_id, &full, &recipient, &body)?,
+                Some(r) => store::add_variant_at(&store::draft_path(r, &project_id), &full, &recipient, &body, target)?,
+                None => store::add_variant(&project_id, &full, &recipient, &body, target)?,
             }
         }
         "drop" => {
@@ -336,9 +445,9 @@ mod tests {
         let err = write_draft(&state, "s1", "add", &json!({})).unwrap_err();
         assert!(err.contains("topic"), "got {err}");
         let err = write_draft(&state, "s1", "add", &json!({"topic": "t"})).unwrap_err();
-        assert!(err.contains("recipient"), "got {err}");
-        let err = write_draft(&state, "s1", "add", &json!({"topic": "t", "recipient": "Bruno"})).unwrap_err();
         assert!(err.contains("body"), "got {err}");
+        let err = write_draft(&state, "s1", "add", &json!({"topic": "t", "body": "hi"})).unwrap_err();
+        assert!(err.contains("recipient, person or platform"), "got {err}");
     }
 
     #[test]
@@ -346,7 +455,88 @@ mod tests {
         assert_eq!(parse_state("needs-you").unwrap(), DraftState::NeedsYou);
         assert_eq!(parse_state("ready").unwrap(), DraftState::Ready);
         assert_eq!(parse_state("copied").unwrap(), DraftState::Copied);
+        assert_eq!(parse_state("archived").unwrap(), DraftState::Archived);
         assert!(parse_state("").is_err());
+    }
+
+    fn vault_with(people: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("People")).unwrap();
+        for (name, frontmatter) in people {
+            std::fs::write(dir.path().join("People").join(format!("{name}.md")), format!("---\n{frontmatter}\n---\n")).unwrap();
+        }
+        dir
+    }
+
+    fn add(root: &Path, vault: &Path, args: Value) -> Result<Value, String> {
+        write_draft_in(Some(root), Some(vault), &registered(), "s1", "add", &args)
+    }
+
+    #[test]
+    fn add_refuses_a_person_the_vault_does_not_know_and_says_to_ask() {
+        let (root, vault) = (tempfile::tempdir().unwrap(), vault_with(&[("Bruno Kecman", "aliases: [Bruno]")]));
+        let err = add(root.path(), vault.path(), json!({"topic": "t", "body": "hi", "person": "Stevan"})).unwrap_err();
+        assert!(err.contains("ask them first"), "got {err}");
+        assert!(list_at_path(root.path()).is_empty(), "a refused write must not land");
+    }
+
+    #[test]
+    fn add_resolves_an_alias_to_the_vault_person_and_labels_with_their_name() {
+        let (root, vault) = (tempfile::tempdir().unwrap(), vault_with(&[("Bruno Kecman", "aliases: [Nuno]")]));
+        let v = add(root.path(), vault.path(), json!({"topic": "t", "body": "hi", "person": "nuno", "platform": "Slack"})).unwrap();
+        let variant = &v["draft"]["variants"][0];
+        assert_eq!(variant["person"], "Bruno Kecman");
+        assert_eq!(variant["recipient"], "Bruno Kecman");
+        assert_eq!(variant["platform"], "Slack");
+    }
+
+    #[test]
+    fn add_refuses_an_ambiguous_first_name() {
+        let (root, vault) = (tempfile::tempdir().unwrap(), vault_with(&[("Jon Kojakovic", ""), ("Jon Snow", "")]));
+        let err = add(root.path(), vault.path(), json!({"topic": "t", "body": "hi", "person": "Jon"})).unwrap_err();
+        assert!(err.contains("more than one person"), "got {err}");
+    }
+
+    #[test]
+    fn new_person_creates_their_vault_note_then_drafts_to_them() {
+        let (root, vault) = (tempfile::tempdir().unwrap(), vault_with(&[]));
+        let v = add(
+            root.path(),
+            vault.path(),
+            json!({"topic": "t", "body": "hi", "person": "Johanna Chen", "new_person": true, "aliases": ["Johanna"], "relationship": "coworker"}),
+        )
+        .unwrap();
+        assert_eq!(v["draft"]["variants"][0]["person"], "Johanna Chen");
+        assert!(vault.path().join("People/Johanna Chen.md").exists());
+    }
+
+    #[test]
+    fn a_platform_only_draft_needs_no_person() {
+        let (root, vault) = (tempfile::tempdir().unwrap(), vault_with(&[]));
+        let v = add(root.path(), vault.path(), json!({"topic": "t", "body": "hi", "recipient": "Shortcut ticket sc-56117"})).unwrap();
+        let variant = &v["draft"]["variants"][0];
+        assert_eq!(variant["platform"], "Shortcut");
+        assert!(variant["person"].is_null());
+    }
+
+    #[test]
+    fn list_resolves_old_free_text_recipients_against_the_vault() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "a", "recipient": "Lenar", "body": "x"})).unwrap();
+        write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "b", "recipient": "standup", "body": "y"})).unwrap();
+        let vault = vault_with(&[("Lenar Rakhmatulin", "aliases: [Lenar]\nrelationship: \"coworker (Zirtue QA)\"")]);
+        let v = list_message_drafts_in(Some(root.path()), Some(vault.path()), &state, "s1").unwrap();
+        assert_eq!(v["drafts"][0]["variants"][0]["person"], "Lenar Rakhmatulin");
+        assert_eq!(v["drafts"][1]["variants"][0]["platform"], "Standup");
+        assert_eq!(v["people"].as_array().unwrap().len(), 1);
+        assert_eq!(v["people"][0]["relationship"], "coworker (Zirtue QA)");
+        // Read-time only: the store still holds what was written.
+        assert!(list_at_path(root.path())[0].variants[0].person.is_none());
+    }
+
+    fn list_at_path(root: &Path) -> Vec<MessageDraft> {
+        list_for(Some(root), "proj-1")
     }
 
     #[test]

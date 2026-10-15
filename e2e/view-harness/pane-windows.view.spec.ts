@@ -36,7 +36,9 @@ const DRAFT = {
   origin_session_id: VIEWER,
   origin_label: "deploy",
   created_at: "2026-10-01T08:00:00Z",
-  updated_at: "2026-10-01T08:00:00Z",
+  // Fresh relative to the run: the Drafts panel folds a draft untouched for a
+  // week out of its "From this chat" list, and this spec clicks that card.
+  updated_at: new Date().toISOString(),
   seen_by_origin: true,
 };
 

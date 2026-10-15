@@ -62,6 +62,8 @@ pub struct NewDraft<'a> {
     pub receipts: Vec<DraftReceipt>,
     pub origin_session_id: &'a str,
     pub origin_label: &'a str,
+    pub person: Option<&'a str>,
+    pub platform: Option<&'a str>,
 }
 
 pub fn add(project_id: &str, new: NewDraft<'_>) -> Option<MessageDraft> {
@@ -81,6 +83,8 @@ pub(crate) fn add_at(path: &Path, new: NewDraft<'_>) -> Option<MessageDraft> {
         handle_n,
         versions: Vec::new(),
         current: 0,
+        person: new.person.map(str::to_string),
+        platform: new.platform.map(|p| clamp(p.trim(), MAX_SHORT_LEN)),
     };
     push_version(&mut variant, new.body, DraftAuthor::Ai, "first pass");
     let draft = MessageDraft {
@@ -150,15 +154,28 @@ pub(crate) fn revise_at(path: &Path, id: &str, recipient: &str, body: &str, note
     })
 }
 
+/// Who a new variant is for, beyond its `recipient` label.
+#[derive(Clone, Copy, Default)]
+pub struct VariantTarget<'a> {
+    pub person: Option<&'a str>,
+    pub platform: Option<&'a str>,
+}
+
 /// A second recipient for the same topic: same card, its own version track.
-pub fn add_variant(project_id: &str, id: &str, recipient: &str, body: &str) -> Result<MessageDraft, String> {
+pub fn add_variant(project_id: &str, id: &str, recipient: &str, body: &str, target: VariantTarget<'_>) -> Result<MessageDraft, String> {
     let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
-    add_variant_at(&path, id, recipient, body)
+    add_variant_at(&path, id, recipient, body, target)
 }
 
 /// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
 /// hermetic tests use, same shape as `repo_channel::post_at`.
-pub(crate) fn add_variant_at(path: &Path, id: &str, recipient: &str, body: &str) -> Result<MessageDraft, String> {
+pub(crate) fn add_variant_at(
+    path: &Path,
+    id: &str,
+    recipient: &str,
+    body: &str,
+    target: VariantTarget<'_>,
+) -> Result<MessageDraft, String> {
     if recipient.trim().is_empty() {
         return Err("recipient is required to add a variant".to_string());
     }
@@ -174,6 +191,8 @@ pub(crate) fn add_variant_at(path: &Path, id: &str, recipient: &str, body: &str)
             handle_n,
             versions: Vec::new(),
             current: 0,
+            person: target.person.map(str::to_string),
+            platform: target.platform.map(|p| clamp(p.trim(), MAX_SHORT_LEN)),
         };
         push_version(&mut variant, body, DraftAuthor::Ai, "first pass");
         d.variants.push(variant);
@@ -307,6 +326,31 @@ pub fn last_ai_body(variant: &DraftVariant) -> &str {
         .unwrap_or("")
 }
 
+/// Platforms read off a free-text recipient, first match wins. Discord sits
+/// before the Claude-chat catch-all because "Server chat / Discord" is a
+/// Discord channel, not another Claude chat.
+const PLATFORM_KEYWORDS: &[(&[&str], &str)] = &[
+    (&["discord"], "Discord"),
+    (&["slack"], "Slack"),
+    (&["shortcut", "sc-"], "Shortcut"),
+    (&["linear"], "Linear"),
+    (&["github", "pull request"], "GitHub"),
+    (&["email", "e-mail", "gmail"], "Email"),
+    (&["standup"], "Standup"),
+    (&["claude", "chat"], "Claude chats"),
+];
+
+/// Best guess at where a draft goes, from recipient text like "Shortcut
+/// ticket sc-56117" or "Tajana (Linear comment on REV-7345)". `None` for a
+/// plain name.
+pub fn infer_platform(recipient: &str) -> Option<&'static str> {
+    let text = recipient.to_lowercase();
+    PLATFORM_KEYWORDS
+        .iter()
+        .find(|(words, _)| words.iter().any(|w| text.contains(w)))
+        .map(|(_, platform)| *platform)
+}
+
 /// "Bruno #2". The speakable id the injected block and the panel both use.
 pub fn handle_of(variant: &DraftVariant) -> String {
     format!("{} #{}", variant.recipient, variant.handle_n)
@@ -338,6 +382,8 @@ mod tests {
             receipts: Vec::new(),
             origin_session_id: "s1",
             origin_label: "chat A",
+            person: None,
+            platform: None,
         }
     }
 
@@ -428,7 +474,7 @@ mod tests {
             let key = norm_recipient("Ana");
             let n = handles.get(&key).copied().unwrap_or(0) + 1;
             handles.insert(key, n);
-            let mut v = DraftVariant { recipient: "Ana".into(), handle_n: n, versions: vec![], current: 0 };
+            let mut v = DraftVariant { recipient: "Ana".into(), handle_n: n, versions: vec![], current: 0, person: None, platform: None };
             push_version(&mut v, "plain", DraftAuthor::Ai, "first pass");
             d.variants.push(v);
             Ok(())
@@ -461,6 +507,8 @@ mod tests {
                 handle_n: 1,
                 versions: vec![],
                 current: 0,
+                person: None,
+                platform: None,
             });
         }
         assert!(variant_index(&d, "").is_err());
@@ -502,6 +550,17 @@ mod tests {
     }
 
     #[test]
+    fn infer_platform_reads_real_recipient_labels() {
+        assert_eq!(infer_platform("Shortcut ticket sc-56117"), Some("Shortcut"));
+        assert_eq!(infer_platform("Tajana (Linear comment on REV-7345)"), Some("Linear"));
+        assert_eq!(infer_platform("Server chat / Discord"), Some("Discord"));
+        assert_eq!(infer_platform("zng-admin chat (opening prompt)"), Some("Claude chats"));
+        assert_eq!(infer_platform("standup"), Some("Standup"));
+        assert_eq!(infer_platform("Lenar"), None);
+        assert_eq!(infer_platform("Johanna Chen"), None);
+    }
+
+    #[test]
     fn current_body_falls_back_when_current_points_nowhere() {
         let v = DraftVariant {
             recipient: "Bruno".into(),
@@ -514,9 +573,11 @@ mod tests {
                 created_at: "now".into(),
             }],
             current: 99,
+            person: None,
+            platform: None,
         };
         assert_eq!(current_body(&v), "only");
-        let empty = DraftVariant { recipient: "X".into(), handle_n: 1, versions: vec![], current: 0 };
+        let empty = DraftVariant { recipient: "X".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None };
         assert_eq!(current_body(&empty), "");
     }
 
@@ -544,7 +605,7 @@ mod tests {
     }
 
     fn variant_with_ai(body: &str) -> DraftVariant {
-        let mut v = DraftVariant { recipient: "Bruno".into(), handle_n: 1, versions: vec![], current: 0 };
+        let mut v = DraftVariant { recipient: "Bruno".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None };
         push_version(&mut v, body, DraftAuthor::Ai, "first pass");
         v
     }
