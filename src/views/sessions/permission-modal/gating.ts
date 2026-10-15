@@ -94,10 +94,17 @@ export function getSelectedSessionId(): string | null {
 /** Snapshot the selection; the returned check turns false once the user
  *  switches chats. Any card shown after an await must re-check it: the switch
  *  already ran its own dismissQuestionCard, so a card mounted late lands on
- *  whichever chat is on screen by then, carrying the old chat's question. */
+ *  whichever chat is on screen by then, carrying the old chat's question.
+ *  A brand-new chat's placeholder id being promoted to its real id
+ *  (pending-pane-composer.ts) is the same chat, not a switch. The pending
+ *  record is held by reference because the promotion nulls it in `state`. */
 export function selectionGuard(): () => boolean {
   const at = _selectedSessionId;
-  return () => _selectedSessionId === at;
+  const pending = state.pendingNewSession;
+  return () => {
+    if (_selectedSessionId === at) return true;
+    return !!pending && pending.placeholderId === at && pending.realId !== null && pending.realId === _selectedSessionId;
+  };
 }
 
 export function isForSelectedSession(eventSessionId: string | undefined): boolean {

@@ -112,6 +112,23 @@ describe("a prompt card never mounts over a chat opened while its lookup was in 
     expect(peekPendingPrompt("A")?.payload.id).toBe("p-a");
   });
 
+  it("a new chat's placeholder-to-real id promotion mid-fetch still shows its card", async () => {
+    const { state } = await import("../src/views/sessions/state.ts");
+    state.pendingNewSession = { placeholderId: "pending-1", realId: "A", projectPath: "C:/proj" };
+    setSelectedSessionId("pending-1");
+    const drafts = deferred();
+    getSessionDrafts.mockImplementation(() => drafts.promise);
+
+    const done = showQuestionCard(QUESTION_A);
+    // start_session resolved: same chat, now under its real id.
+    state.pendingNewSession = null;
+    setSelectedSessionId("A");
+    drafts.resolve({ composer: null, auq: null, held: [], held_updated_at: null });
+    await done;
+
+    expect(renderCalls.map((c) => c.sessionId)).toEqual(["A"]);
+  });
+
   it("a replayed permission card re-parks when the chat switched during its rule check", async () => {
     // Question-shaped, so it renders through renderQuestionUI and the spy sees it.
     storePendingPrompt("A", {
