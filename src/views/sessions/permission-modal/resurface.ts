@@ -18,6 +18,7 @@ import {
   storePendingPrompt,
   takePendingPrompt,
   peekPendingPrompt,
+  selectionGuard,
 } from "./gating";
 import type { PendingPrompt } from "./gating";
 import { state } from "../state";
@@ -88,8 +89,16 @@ function surfacePending(pending: PendingPrompt, reopened = false): void {
     allowPermission(payload, "replay respond_permission");
     return;
   }
+  const stillSelected = selectionGuard();
   void (async () => {
     if (await autoAllowIfRemembered(payload)) return;
+    // Switched chats during the rule check: put the park back for switch-back
+    // instead of mounting this card over the chat now on screen.
+    if (!stillSelected() && payload.session_id) {
+      storePendingPrompt(payload.session_id, pending);
+      rerenderSidebar();
+      return;
+    }
     showPermissionCard(payload, pending.draft);
   })();
 }
@@ -167,6 +176,14 @@ export async function rehydratePendingPrompts(sessionId: string): Promise<boolea
   return applyRehydration(sessionId, recs);
 }
 
+/** Rehydrate from the daemon, then replay - but only if the user is still on
+ *  `sessionId` once the fetch lands. Opening another chat mid-fetch leaves the
+ *  prompt parked (sidebar dot) instead of replaying it over the new chat. */
+export async function rehydrateAndReplay(sessionId: string): Promise<void> {
+  const stillSelected = selectionGuard();
+  if (await rehydratePendingPrompts(sessionId) && stillSelected()) replayPendingPrompt(sessionId);
+}
+
 /** Rebuild an answerable payload from the transcript alone. The daemon's prompt
  *  store is memory-only, but the tool_use `input` is in history and a
  *  fire-and-forget answer travels as an ordinary message, not the dead oneshot.
@@ -205,6 +222,7 @@ export async function newestOpenQuestion(sessionId: string): Promise<QuestionReq
  *  than `cardId` is left untouched for its own click. */
 export async function reopenPendingPrompt(sessionId: string, cardId?: string): Promise<boolean> {
   if (!sessionId) return false;
+  const stillSelected = selectionGuard();
   const wanted = (p: PendingPrompt): boolean => !cardId || p.payload.id === cardId;
   let pending = takePendingPrompt(sessionId);
   if (pending && !wanted(pending)) {
@@ -256,6 +274,15 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     if (payload) pending = { kind: "question", payload };
   }
   if (!pending) return false;
+  // The lookups above await the daemon; if the user switched chats meanwhile,
+  // re-park instead of dismissing and replacing the new chat's own card.
+  if (!stillSelected()) {
+    const slot = peekPendingPrompt(sessionId);
+    if (!slot) storePendingPrompt(sessionId, pending);
+    else if (pending.kind === "question" && slot.payload.id !== pending.payload.id) queueSiblingQuestion(sessionId, pending.payload);
+    rerenderSidebar();
+    return true;
+  }
   // Whatever still occupies the session's slot at this point belongs to a
   // DIFFERENT question than `pending` (a match would have been taken - and
   // left empty - by one of the branches above): queue it instead of letting

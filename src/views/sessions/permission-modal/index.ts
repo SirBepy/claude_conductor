@@ -37,6 +37,7 @@ import {
   clearPendingPromptById,
   peekPendingPrompt,
   pendingPromptSessionIds,
+  selectionGuard,
 } from "./gating";
 import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 import { showQuestionCard } from "./question-submit";
@@ -52,7 +53,7 @@ export {
   pendingPromptSessionIds,
 } from "./gating";
 export { dismissQuestionCard } from "./question-ui";
-export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, reopenPendingPrompt } from "./resurface";
+export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, rehydrateAndReplay, reopenPendingPrompt } from "./resurface";
 export { showQuestionCard };
 
 // Sidebar re-render is injected rather than statically imported: a direct
@@ -199,8 +200,16 @@ function handlePermissionRequested(payload: PermissionRequestedPayload): void {
     return;
   }
 
+  const stillSelected = selectionGuard();
   void (async () => {
     if (await autoAllowIfRemembered(payload)) return;
+    // Switched chats during the rule check: park it for switch-back instead
+    // of mounting it over the chat now on screen.
+    if (!stillSelected() && payload.session_id) {
+      storePendingPrompt(payload.session_id, { kind: "permission", payload });
+      rerenderSidebar();
+      return;
+    }
     showPermissionCard(payload);
   })();
 }

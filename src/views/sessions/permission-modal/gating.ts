@@ -91,6 +91,15 @@ export function getSelectedSessionId(): string | null {
   return _selectedSessionId;
 }
 
+/** Snapshot the selection; the returned check turns false once the user
+ *  switches chats. Any card shown after an await must re-check it: the switch
+ *  already ran its own dismissQuestionCard, so a card mounted late lands on
+ *  whichever chat is on screen by then, carrying the old chat's question. */
+export function selectionGuard(): () => boolean {
+  const at = _selectedSessionId;
+  return () => _selectedSessionId === at;
+}
+
 export function isForSelectedSession(eventSessionId: string | undefined): boolean {
   if (!eventSessionId) return false;
   if (_selectedSessionId === eventSessionId) return true;

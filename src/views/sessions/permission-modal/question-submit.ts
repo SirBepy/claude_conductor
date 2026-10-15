@@ -16,6 +16,7 @@ import {
   storePendingPrompt,
   clearPendingPromptById,
   markPendingPromptAnswered,
+  selectionGuard,
 } from "./gating";
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 import { rerenderSidebar } from "./index";
@@ -53,10 +54,17 @@ export async function showQuestionCard(
 
   // Priority: in-memory snapshot (switch-away/back, always freshest), then
   // whichever of daemon/localStorage is NEWER by timestamp (fetchFreshestAuqDraft).
+  const stillSelected = selectionGuard();
   const initialDraft = restoredDraft
     ?? (payload.session_id ? snapshotActiveCardDraft(payload.session_id, payload.id) : undefined)
     ?? (await fetchFreshestAuqDraft(payload.session_id, payload.id))
     ?? undefined;
+  // Switched chats during the draft fetch: the park stored above replays this
+  // card on switch-back, so showing it now would only put it on the wrong chat.
+  if (!stillSelected()) {
+    rerenderSidebar();
+    return;
+  }
 
   renderQuestionUI({
     id: payload.id,
