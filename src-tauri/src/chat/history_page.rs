@@ -36,6 +36,13 @@ fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
     }
 }
 
+/// Hard cap on one page's events, whatever `message_limit` says. Pages count
+/// assistant replies, and a tool-heavy stretch has few of them: one real
+/// transcript's "10 replies" was its whole 34MB file, 18,690 events. The
+/// renderer pays ~1.4ms per event, so this bounds a first paint near 300ms;
+/// scrolling up pages in the rest.
+const MAX_PAGE_EVENTS: usize = 200;
+
 /// Returns true for events that count toward `message_limit`. We count only
 /// AssistantMessage events: a "page size" of N means N assistant replies plus
 /// every surrounding event (UserMessage, ToolUse, ToolResult, TurnUsage,
@@ -48,8 +55,8 @@ fn is_message_event(ev: &ChatEvent) -> bool {
 
 /// Read a paginated window of the JSONL transcript at `path` by tail-reading
 /// from EOF backward in 64KB chunks until `message_limit` message-class
-/// events have been parsed (or the file start is reached). First-page time
-/// is O(20 messages of bytes) regardless of total file size.
+/// events have been parsed, `MAX_PAGE_EVENTS` is hit, or the file start is
+/// reached. Page time scales with the page's bytes, not the file's.
 ///
 /// `seq` values are *byte offsets* of line starts. Frontend treats them as
 /// opaque monotonic ids: pass the previous page's `oldest_seq` as
@@ -96,7 +103,7 @@ pub fn read_page(
                 .rposition(|&b| b == b'\n')
                 .is_none();
         if need_more {
-            let read_size = std::cmp::min(CHUNK as u64, window_start) as usize;
+            let read_size = next_read_size(CHUNK, tail_buf.len(), window_start);
             let read_start = window_start - read_size as u64;
             f.seek(SeekFrom::Start(read_start)).map_err(|e| e.to_string())?;
             let mut chunk = vec![0u8; read_size];
@@ -146,7 +153,7 @@ pub fn read_page(
             None => tail_buf.clear(),
         }
 
-        if messages >= message_limit {
+        if messages >= message_limit || events.len() >= MAX_PAGE_EVENTS {
             break;
         }
         if reached_start && tail_buf.is_empty() {
@@ -166,6 +173,15 @@ pub fn read_page(
         has_more,
         continues_from: None,
     })
+}
+
+/// Bytes to prepend when the buffer holds no newline yet. Grows with the
+/// partial line already buffered rather than staying at `chunk`: every refill
+/// copies the whole buffer, so a fixed step makes one multi-MB line (a tool
+/// result carrying screenshots) cost O(len^2) - a 7MB line was ~400MB of
+/// copying and a 4s chat open. Doubling keeps it amortized O(len).
+fn next_read_size(chunk: usize, buffered: usize, window_start: u64) -> usize {
+    std::cmp::min(chunk.max(buffered) as u64, window_start) as usize
 }
 
 fn empty_page() -> HistoryPage {
@@ -452,6 +468,42 @@ mod tests {
             _ => None,
         });
         assert_eq!(tr, Some((false, None)));
+    }
+
+    #[test]
+    fn read_page_caps_events_when_replies_are_scarce() {
+        // One reply, then a long tool-only run: the reply count alone would
+        // pull the whole file into one page.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("cap.jsonl");
+        let mut lines = vec![assistant_line("a0", 0)];
+        for i in 0..1000 {
+            lines.push(tool_use_line(&format!("t{i}"), i + 1));
+        }
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_jsonl(&p, &refs);
+        let p1 = read_page(&p, None, 10).unwrap();
+        assert_eq!(p1.events.len(), MAX_PAGE_EVENTS);
+        assert!(p1.has_more);
+        // The rest is still reachable, page by page.
+        let p2 = read_page(&p, Some(p1.oldest_seq), 10).unwrap();
+        assert!(p2.newest_seq < p1.oldest_seq);
+        assert_eq!(p2.events.len(), MAX_PAGE_EVENTS);
+    }
+
+    #[test]
+    fn read_size_grows_with_a_long_partial_line() {
+        const CHUNK: usize = 64 * 1024;
+        // Walk the refills one 8MB line takes; a fixed 64KB step needs 128.
+        let line = 8 * 1024 * 1024usize;
+        let (mut buffered, mut refills) = (0usize, 0);
+        while buffered < line {
+            buffered += next_read_size(CHUNK, buffered, u64::MAX);
+            refills += 1;
+        }
+        assert!(refills <= 10, "took {refills} refills");
+        // Never reads past the file start.
+        assert_eq!(next_read_size(CHUNK, 1 << 20, 100), 100);
     }
 
     #[test]

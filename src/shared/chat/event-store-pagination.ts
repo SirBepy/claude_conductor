@@ -13,9 +13,9 @@ import type { CacheEntry, TailListener } from "./event-store";
 import { touchAccess } from "./event-store-eviction";
 import type { DeliveryPolicy } from "./event-store-delivery";
 
-// Page size counts AssistantMessage events only - see read_page in
-// src-tauri/src/chat/history.rs. 10 AI replies plus all surrounding
-// user/tool/turn events typically renders well under 100 ms.
+// Page size counts AssistantMessage events only, plus every user/tool/turn
+// event between them, capped at MAX_PAGE_EVENTS - see read_page in
+// src-tauri/src/chat/history_page.rs.
 const INITIAL_PAGE_SIZE = 10;
 const OLDER_PAGE_SIZE = 10;
 const MAX_EMPTY_PAGES_SKIPPED = 8;
