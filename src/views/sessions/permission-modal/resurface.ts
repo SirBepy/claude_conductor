@@ -280,6 +280,8 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     const slot = peekPendingPrompt(sessionId);
     if (!slot) storePendingPrompt(sessionId, pending);
     else if (pending.kind === "question" && slot.payload.id !== pending.payload.id) queueSiblingQuestion(sessionId, pending.payload);
+    // Same limit as applyRehydration's: no permission/secret sibling queue exists.
+    else if (slot.payload.id !== pending.payload.id) console.warn("[perm-gate] a re-parked prompt was dropped behind an occupied slot after a mid-reopen chat switch", { sessionId, id: pending.payload.id });
     rerenderSidebar();
     return true;
   }
