@@ -182,6 +182,35 @@ impl DraftStore {
     pub fn held_count(&self, session_id: &str) -> usize {
         self.inner.lock().unwrap().get(session_id).map(|e| e.drafts.held.len()).unwrap_or(0)
     }
+
+    /// Hands `from`'s held queue to `to` (a respawn successor), appended after
+    /// anything `to` already holds. Items get fresh ids from `to`'s counter,
+    /// since ids are only unique per session. Every surface reconciles its
+    /// held set from this store on attach, so a queue left under the old id
+    /// is wiped from the successor's chip the moment the pane follows it.
+    /// Returns how many items moved.
+    pub fn move_held(&self, from: &str, to: &str) -> usize {
+        if from == to {
+            return 0;
+        }
+        let mut map = self.inner.lock().unwrap();
+        let Some(src) = map.get_mut(from) else { return 0 };
+        if src.drafts.held.is_empty() {
+            return 0;
+        }
+        let now = now_iso();
+        let items = std::mem::take(&mut src.drafts.held);
+        src.drafts.held_updated_at = Some(now.clone());
+        let moved = items.len();
+        let dst = self.touch(&mut map, to);
+        for item in items {
+            let id = dst.next_held_id;
+            dst.next_held_id += 1;
+            dst.drafts.held.push(HeldDraftItem { id, blocks: item.blocks, updated_at: now.clone() });
+        }
+        dst.drafts.held_updated_at = Some(now);
+        moved
+    }
 }
 
 impl Default for DraftStore {
@@ -223,6 +252,44 @@ mod tests {
         let d = s.get("a");
         assert_eq!(d.held.len(), 1);
         assert_eq!(d.held[0].id, id2);
+    }
+
+    fn held_texts(s: &DraftStore, sid: &str) -> Vec<String> {
+        s.get(sid)
+            .held
+            .iter()
+            .map(|i| match i.blocks.first() {
+                Some(ContentBlock::Text { text }) => text.clone(),
+                _ => String::new(),
+            })
+            .collect()
+    }
+
+    fn text(t: &str) -> Vec<ContentBlock> {
+        vec![ContentBlock::Text { text: t.into() }]
+    }
+
+    #[test]
+    fn move_held_hands_the_queue_to_the_successor_in_order() {
+        let s = DraftStore::new();
+        s.add_held("old", text("one"));
+        s.add_held("old", text("two"));
+        s.add_held("new", text("already here"));
+        assert_eq!(s.move_held("old", "new"), 2);
+        assert!(s.get("old").held.is_empty());
+        assert_eq!(held_texts(&s, "new"), ["already here", "one", "two"]);
+        let ids: Vec<u64> = s.get("new").held.iter().map(|i| i.id).collect();
+        assert_eq!(ids, [1, 2, 3], "moved items take fresh ids from the successor's counter");
+    }
+
+    #[test]
+    fn move_held_with_nothing_queued_creates_no_entry() {
+        let s = DraftStore::new();
+        assert_eq!(s.move_held("old", "new"), 0);
+        s.set_composer("old", "draft".into());
+        assert_eq!(s.move_held("old", "new"), 0);
+        assert!(s.get("new").held_updated_at.is_none());
+        assert_eq!(s.move_held("old", "old"), 0);
     }
 
     #[test]

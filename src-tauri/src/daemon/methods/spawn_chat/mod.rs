@@ -142,6 +142,13 @@ pub(crate) async fn spawn_chat(
         state.registry.set_name(&sid, n.to_string());
     }
     if respawn {
+        // Before the successor link is visible: following that link is what
+        // re-attaches the pane, and attach reconciles the held set from this
+        // store, so the queue has to be under the new id by then.
+        if state.draft_store.move_held(caller_session_id, &sid) > 0 {
+            crate::daemon::methods::drafts::sync_held_count(state, caller_session_id);
+            crate::daemon::methods::drafts::sync_held_count(state, &sid);
+        }
         state.registry.set_successor_of(&sid, caller_session_id);
         // Durable twin of the registry link: the snapshot drops the caller the
         // moment it ends, and the successor's transcript chain must still
