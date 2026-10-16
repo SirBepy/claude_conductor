@@ -219,6 +219,22 @@ function Get-ExeHolders([string]$path) {
         Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target) })
 }
 
+# webview_recovery's request_restart() replaces the tracked AppPid with a new one
+# (Stop-RigTrackedProcess never sees it), and the app's own daemon always execs
+# `current_exe() --daemon` (spawn_self.rs), so after a restart the daemon runs from the rig's
+# private exe copy too. ExePath is a fresh GUID directory per `up`, so matching every live
+# process against it, not by name alone, stays scoped to only this rig's own copy - it can
+# never match Joe's installed app or the production daemon, which run from a different path.
+function Stop-RigExeOrphans([string]$ExePath) {
+    if (-not $ExePath) { return @() }
+    $orphans = @(Get-ExeHolders $ExePath)
+    foreach ($o in $orphans) {
+        Write-Host "killing orphaned rig process pid $($o.ProcessId) (exe matches our private copy, not tracked by PID - self-restart or a daemon child)"
+        taskkill /F /T /PID $o.ProcessId | Out-Null
+    }
+    return $orphans
+}
+
 function Test-HttpUp([string]$url) {
     try {
         $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
@@ -514,6 +530,7 @@ switch ($Command) {
         }
         Stop-RigTrackedProcess -Role 'app' -ProcId $state.AppPid -RecordedCreationTime $state.AppCreationTime -RecordedExePath $state.AppExePath
         Stop-RigTrackedProcess -Role 'vite' -ProcId $state.VitePid -RecordedCreationTime $state.ViteCreationTime -RecordedExePath $state.ViteExePath
+        Stop-RigExeOrphans -ExePath $state.ExePath | Out-Null
         Remove-Item -Path $statePath -Force -ErrorAction SilentlyContinue
 
         # Proof of teardown: only OUR PID should be gone; any other claude-conductor.exe
