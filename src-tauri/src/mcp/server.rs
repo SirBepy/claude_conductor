@@ -309,14 +309,15 @@ mod tests {
         // plus the two sibling-spawn tools (spawn_chat runs beside this chat,
         // respawn replaces it) plus write_user_todo (the Your Todos panel,
         // todo 692) plus schedule (write access to the Schedule panel) plus
-        // create_project (registers a project folder with the app).
+        // create_project (registers a project folder with the app) plus
+        // person (who the user means by a name, from the vault).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 18);
+        assert_eq!(tools.len(), 19);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -338,6 +339,7 @@ mod tests {
         assert!(names.contains(&"write_plan"));
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"create_project"));
+        assert!(names.contains(&"person"));
     }
 
     /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
@@ -374,7 +376,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 22, "18 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 23, "19 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();

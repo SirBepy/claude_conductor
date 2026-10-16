@@ -24,6 +24,7 @@ mod messages;
 // recover a mid-turn delivery's text from the transcript JSONL (that hook
 // context string is the only place the CLI persists it).
 pub(crate) mod nudge;
+mod people;
 mod permission;
 mod plan;
 mod preview;
@@ -194,6 +195,8 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/todos/write", post(user_todos::on_write_user_todo))
         .route("/plan/write", post(plan::on_write_plan))
         .route("/drafts/write", post(drafts::on_write_draft))
+        .route("/people/find", post(people::on_find_person))
+        .route("/people/remember", post(people::on_remember_person))
         .route("/schedule/write", post(schedule::on_write_schedule))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))

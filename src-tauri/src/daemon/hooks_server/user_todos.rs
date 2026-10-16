@@ -6,6 +6,7 @@
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::drafts_store as draft_methods;
+use crate::daemon::methods::people as people_methods;
 use crate::daemon::methods::schedule_mcp as schedule_methods;
 use crate::daemon::methods::user_todos as todo_methods;
 use axum::{
@@ -84,6 +85,9 @@ pub(super) async fn on_prompt_submit(
         schedule_methods::render_for_injection(&ctx.state, &q.session_id),
         // Fifth rider: the respawn nudge once the chat passes the context cap.
         super::context_cap::render_for_injection(&ctx.state, &q.session_id),
+        // Sixth rider: the people of this repo's client, so a name resolves
+        // without a lookup. A repo no vault client note lists pays nothing.
+        people_methods::render_for_injection(&ctx.state, &q.session_id),
     ]
     .into_iter()
     .flatten()
