@@ -39,10 +39,8 @@ export interface DraftGroups {
   people: PersonGroup[];
   /** Everyone else, folded behind one line. */
   quietPeople: PersonGroup[];
-  /** Platforms with something open or touched this week. */
+  /** Every platform, ones with something open or touched this week first. */
   platforms: PlatformGroup[];
-  /** The rest, folded the same way as quiet people. */
-  quietPlatforms: PlatformGroup[];
 }
 
 const norm = (s: string): string => s.trim().toLowerCase();
@@ -115,8 +113,7 @@ export function groupDrafts(
     mine: drafts.filter((d) => d.origin_session_id === sessionId && isOpen(d, now)).sort(newestFirst),
     people: all.filter(active),
     quietPeople: all.filter((g) => !active(g)),
-    platforms: sections.filter(liveSection),
-    quietPlatforms: sections.filter((g) => !liveSection(g)),
+    platforms: [...sections.filter(liveSection), ...sections.filter((g) => !liveSection(g))],
   };
 }
 

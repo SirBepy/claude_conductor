@@ -71,7 +71,7 @@ describe("groupDrafts", () => {
     expect(g.platforms.map((p) => p.name)).toEqual(["Shortcut"]);
   });
 
-  it("folds a platform with nothing open and nothing this week", () => {
+  it("lists a platform with something live before one with nothing this week", () => {
     const g = groupDrafts(
       [
         draft({ variants: [{ platform: "Shortcut" }] }),
@@ -81,8 +81,7 @@ describe("groupDrafts", () => {
       "s1",
       NOW,
     );
-    expect(g.platforms.map((p) => p.name)).toEqual(["Shortcut"]);
-    expect(g.quietPlatforms.map((p) => p.name)).toEqual(["Standup"]);
+    expect(g.platforms.map((p) => p.name)).toEqual(["Shortcut", "Standup"]);
   });
 
   it("merges platform spellings that differ only by case", () => {
