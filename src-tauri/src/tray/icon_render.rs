@@ -1,6 +1,7 @@
 //! Renders the 32x32 tray icon as RGBA PNG bytes: the app's own icon, plus a
-//! small red "in a meeting" dot (top-right) and/or the existing blue update
-//! badge (bottom-right) stamped on top.
+//! small red "in a meeting" dot (top-right), the existing blue update badge
+//! (bottom-right), an amber "a session needs you" dot (top-left), and/or the
+//! dev-build dot (bottom-left) stamped on top.
 
 use image::{ImageEncoder, Rgba, RgbaImage};
 use std::sync::OnceLock;
@@ -25,6 +26,9 @@ pub struct IconCtx {
     /// dev instance is visually distinguishable from the installed app when
     /// both run at once (2026-07-16 incident).
     pub dev: bool,
+    /// True while any live session's registry `awaiting` is "question" - a
+    /// chat is waiting on Joe. Paints the top-left dot.
+    pub input_needed: bool,
 }
 
 /// Paints an alpha-blended filled circle centered at `(cx, cy)` with radius
@@ -79,11 +83,21 @@ fn paint_dev_dot(img: &mut RgbaImage) {
     paint_dot(img, 6.0, SIZE as f32 - 6.0, 4.0, DEV_COLOR);
 }
 
+/// Top-left dot: a live session is awaiting input. Amber/yellow,
+/// deliberately distinct from the orange dev dot (255,140,0) and the red
+/// meeting dot (220,60,60) - Joe picked this over red specifically so it
+/// doesn't clash with the meeting dot when both show at once.
+fn paint_input_needed_dot(img: &mut RgbaImage) {
+    const INPUT_NEEDED_COLOR: [u8; 3] = [250, 204, 21];
+    paint_dot(img, 6.0, 6.0, 4.0, INPUT_NEEDED_COLOR);
+}
+
 pub fn render(ctx: &IconCtx) -> Vec<u8> {
     let mut img = app_icon().clone();
     if ctx.in_meeting { paint_meeting_dot(&mut img); }
     if ctx.updating { paint_update_badge(&mut img); }
     if ctx.dev { paint_dev_dot(&mut img); }
+    if ctx.input_needed { paint_input_needed_dot(&mut img); }
     encode_png(&img)
 }
 
@@ -93,4 +107,45 @@ fn encode_png(img: &RgbaImage) -> Vec<u8> {
         .write_image(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgba8)
         .expect("png encode");
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx(input_needed: bool) -> IconCtx {
+        IconCtx { updating: false, in_meeting: false, dev: false, input_needed }
+    }
+
+    #[test]
+    fn input_needed_paints_amber_top_left_dot() {
+        let bytes = render(&ctx(true));
+        let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let px = img.get_pixel(6, 6).0;
+        assert_eq!([px[0], px[1], px[2]], [250, 204, 21]);
+    }
+
+    #[test]
+    fn no_input_needed_leaves_top_left_dot_unpainted() {
+        let bytes = render(&ctx(false));
+        let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let px = img.get_pixel(6, 6).0;
+        assert_ne!([px[0], px[1], px[2]], [250, 204, 21]);
+    }
+
+    /// Writes the rendered tray icon in both states to disk for Joe's
+    /// acceptance check. Not part of the normal test run - the
+    /// screenshots dir is project scratch, not something `--lib` should write
+    /// on every run. `cargo test --manifest-path src-tauri/Cargo.toml --lib
+    /// write_tray_screenshots -- --ignored`.
+    #[test]
+    #[ignore]
+    fn write_tray_screenshots() {
+        let dir = std::path::Path::new(
+                "../.for_bepy/screenshots/42648-134366361126183567",
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("1009-tray-awaiting-on.png"), render(&ctx(true))).unwrap();
+        std::fs::write(dir.join("1009-tray-awaiting-off.png"), render(&ctx(false))).unwrap();
+    }
 }

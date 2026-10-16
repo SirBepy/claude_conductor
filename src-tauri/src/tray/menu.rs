@@ -19,7 +19,14 @@ pub fn setup(app: &AppHandle) -> Result<()> {
     let initial_update = app.state::<AppState>().update_state.lock().unwrap().clone();
     let menu = build_menu(app, &initial_settings, &initial_update)?;
 
-    let idle_bytes = icon::render(&IconCtx { updating: false, in_meeting: false, dev: cfg!(debug_assertions) });
+    let idle_bytes = icon::render(&IconCtx {
+        updating: false,
+        in_meeting: false,
+        dev: cfg!(debug_assertions),
+        // Correct value isn't known until the daemon's first `instances_changed`;
+        // `render_tray_now(app)` at the end of `setup` repaints from `AppState`.
+        input_needed: false,
+    });
     let idle_icon = Image::from_bytes(&idle_bytes)?;
 
     let tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -208,7 +215,8 @@ pub fn render_tray_now(app: &AppHandle) {
         matches!(s.get("state").and_then(|v| v.as_str()), Some("downloading") | Some("downloaded"))
     };
     let in_meeting = state.meeting_active.load(Ordering::Relaxed);
-    let ctx = IconCtx { updating, in_meeting, dev: cfg!(debug_assertions) };
+    let input_needed = state.input_needed.load(Ordering::Relaxed);
+    let ctx = IconCtx { updating, in_meeting, dev: cfg!(debug_assertions), input_needed };
 
     let bytes = icon::render(&ctx);
     let Some(tray) = app.tray_by_id(TRAY_ID) else { return; };
@@ -222,6 +230,32 @@ pub fn render_tray_now(app: &AppHandle) {
     let gaming_mode_on = *state.gaming_mode.lock().unwrap();
     let tooltip = if gaming_mode_on { "Claude Conductor (Gaming mode on)" } else { "Claude Conductor" };
     let _ = tray.set_tooltip(Some(tooltip));
+}
+
+/// Taskbar flash / dock bounce for a session that just transitioned into
+/// awaiting-input, fired only while no app window is focused -
+/// a focused window means Joe is already looking at the app, so there is
+/// nothing to flash for. Targets `main` and `session-chats`, the only two
+/// windows with a taskbar button (the overlay is `skip_taskbar(true)`), and
+/// only a VISIBLE one of those - a hidden window has no taskbar button to
+/// flash, and the tray dot already covers that case. Marshaled onto the main
+/// thread like every other window call here, since this can be reached from
+/// the async daemon-notification path.
+pub fn glow_if_unfocused(app: &AppHandle) {
+    let h = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let windows: Vec<tauri::WebviewWindow<tauri::Wry>> = ["main", "session-chats"]
+            .iter()
+            .filter_map(|label| h.get_webview_window(label))
+            .collect();
+        let any_focused = windows.iter().any(|w| w.is_focused().unwrap_or(false));
+        if any_focused {
+            return;
+        }
+        if let Some(target) = windows.iter().find(|w| w.is_visible().unwrap_or(false)) {
+            let _ = target.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+    });
 }
 
 fn build_menu(app: &AppHandle, settings: &Settings, update: &serde_json::Value) -> Result<Menu<tauri::Wry>> {
