@@ -67,6 +67,28 @@ impl DaemonState {
         self.registry.clear_awaiting_if_question(session_id)
     }
 
+    /// Reject a self-reported `awaiting: "question"` status if no question
+    /// prompt is actually still open for `session_id`. Without this, a
+    /// report that lands after the answer already settled (or races the
+    /// model's own realization that it was answered) re-flips `awaiting` to
+    /// "question" with nothing backing it - the chat reads INPUT NEEDED and
+    /// re-shows the stale draft, with no card left to resolve it. Same bug
+    /// class as the already-fixed todo 897 sibling race (which guarded the
+    /// CLEAR side); this guards the SET side, at pump.rs's turn-end call site.
+    pub async fn drop_unbacked_question_report(
+        &self,
+        session_id: &str,
+        awaiting: Option<String>,
+    ) -> Option<String> {
+        if awaiting.as_deref() == Some("question") && !self.session_has_pending_question(session_id).await {
+            log::warn!(
+                "daemon: session {session_id} reported awaiting=question with no backing pending prompt - dropping"
+            );
+            return None;
+        }
+        awaiting
+    }
+
     /// Snapshot of all open prompts, for the app's `list_pending_prompts` poll.
     /// Sorted by `seq` (oldest first) - `pending_prompts` is a `HashMap`, whose
     /// own iteration order is not chronological.
@@ -236,5 +258,33 @@ mod tests {
 
         assert!(!st.session_has_pending_question("s1").await);
         assert!(st.clear_question_awaiting_if_no_others_pending("s1").await);
+    }
+
+    /// The pump.rs re-ask race this exists to close: the model self-reports
+    /// `awaiting: "question"` at turn end with no open question prompt for
+    /// the session (e.g. the answer already settled it, or the report raced
+    /// that settle) - the report must be dropped, not applied.
+    #[tokio::test]
+    async fn question_report_with_no_backing_prompt_is_dropped() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let dropped = st.drop_unbacked_question_report("s1", Some("question".into())).await;
+        assert_eq!(dropped, None, "no prompt is open for s1, so the report must not apply");
+    }
+
+    /// A question report backed by a real open prompt must pass through.
+    #[tokio::test]
+    async fn question_report_with_a_backing_prompt_passes_through() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
+        let kept = st.drop_unbacked_question_report("s1", Some("question".into())).await;
+        assert_eq!(kept.as_deref(), Some("question"));
+    }
+
+    /// Non-"question" reports (and None) are never touched by this guard.
+    #[tokio::test]
+    async fn non_question_reports_pass_through_unchanged() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        assert_eq!(st.drop_unbacked_question_report("s1", Some("waiting".into())).await.as_deref(), Some("waiting"));
+        assert_eq!(st.drop_unbacked_question_report("s1", None).await, None);
     }
 }
