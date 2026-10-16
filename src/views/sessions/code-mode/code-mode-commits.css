@@ -113,8 +113,11 @@
   color: var(--color-primary);
 }
 
+/* Muted colour alone read identical to the enabled bold label in screenshots;
+   the opacity is what makes a mirrored chat's unavailable push look unavailable. */
 .cm-pushtext:disabled {
   color: var(--color-text-muted);
+  opacity: 0.5;
   cursor: default;
 }
 
