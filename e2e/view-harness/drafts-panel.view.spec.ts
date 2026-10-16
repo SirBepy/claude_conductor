@@ -272,6 +272,28 @@ test("the bold button marks the selection instead of typing asterisks", async ({
   await expect(panel.locator(".dr-body b, .dr-body strong")).toHaveText("plain");
 });
 
+test("a refresh that brings back the same drafts keeps the rows, so a click landing mid-refresh still counts", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await page.evaluate(() => {
+    (window as any).__row = document.querySelector("#drafts-spec-host .dr-person");
+    (window as any).__lists = 0;
+    const tauri = (window as any).__TAURI__;
+    const inner = tauri.core.invoke;
+    tauri.core.invoke = (cmd: string, args: any) => {
+      if (cmd === "list_message_drafts") (window as any).__lists++;
+      return inner(cmd, args);
+    };
+    // Focusing the window refetches the list - the same path a first click
+    // into an unfocused window takes, between its mousedown and mouseup.
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).__lists)).toBeGreaterThan(0);
+  await page.waitForTimeout(50);
+  expect(await page.evaluate(() => (window as any).__row.isConnected)).toBe(true);
+  await panel.locator(".dr-person", { hasText: "Marko" }).click();
+  await expect(panel.locator(".dr-title")).toHaveText("Marko");
+});
+
 test("a person row opens just their drafts, and Archive folds one away without deleting it", async ({ page }) => {
   const panel = await mountPanel(page);
   await panel.locator(".dr-person", { hasText: "Marko" }).click();

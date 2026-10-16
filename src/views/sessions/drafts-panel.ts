@@ -56,6 +56,8 @@ class DraftsPanel implements DraftsPanelHandle {
   private openId: string | null = null;
   private pendingOpenId: string | null = null;
   private editor: DraftsEditor | null = null;
+  /** What the list/person view last wrote into `root`; null while the editor owns it. */
+  private lastHtml: string | null = null;
   private unlisten: Unlisten | null = null;
   private focusHandler: (() => void) | null = null;
 
@@ -159,6 +161,7 @@ class DraftsPanel implements DraftsPanelHandle {
         return;
       }
       this.root.innerHTML = "";
+      this.lastHtml = null;
       this.editor = new DraftsEditor(this.root, open, {
         sessionId: this.sessionId,
         onBack: () => this.closeEditor(),
@@ -167,8 +170,14 @@ class DraftsPanel implements DraftsPanelHandle {
       return;
     }
     this.disposeEditor();
+    const html = this.view.kind === "person" ? this.personHtml(this.view.key) : this.listHtml();
+    // Clicking into an unfocused window fires `focus`, whose refresh lands
+    // between mousedown and mouseup; replacing the row there swallows the
+    // click. An unchanged list therefore keeps its DOM.
+    if (html === this.lastHtml) return;
     const scroll = this.root.scrollTop;
-    this.root.innerHTML = this.view.kind === "person" ? this.personHtml(this.view.key) : this.listHtml();
+    this.root.innerHTML = html;
+    this.lastHtml = html;
     // A live refresh repaints the whole list; keep the reader where they were.
     this.root.scrollTop = scroll;
   }
