@@ -8,9 +8,9 @@ import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
-import { currentVersion, copyDualPayload } from "../../shared/message-draft-utils";
+import { currentVersion, copyDualPayload, handleOf } from "../../shared/message-draft-utils";
 import type { MessageDraft, DraftVariant } from "../../types/ipc.generated";
-import { ReviseMenuController } from "./drafts-revise";
+import { ReviseMenuController, buildLearnPrompt, sendRevision } from "./drafts-revise";
 
 /** Long enough that a normal sentence pause does not round-trip to the daemon;
  *  the store coalesces anyway, so this only trades chattiness for latency. */
@@ -47,6 +47,8 @@ export class DraftsEditor {
   private reviseMenu: ReviseMenuController;
   /** The version list under the version chip. */
   private versionsOpen = false;
+  /** The version Check & learn was last sent for, so a repaint keeps saying so. */
+  private learnSentFor: number | null = null;
 
   constructor(root: HTMLElement, draft: MessageDraft, deps: DraftsEditorDeps) {
     this.root = root;
@@ -140,8 +142,11 @@ export class DraftsEditor {
     const version = variant ? currentVersion(variant) : undefined;
     const markdown = version?.body ?? "";
     this.saved = markdown;
+    // The format row sits under the body, so sliding it in while typing grows
+    // the bottom edge instead of pushing the text down.
     this.root.innerHTML =
       this.chromeHtml() +
+      `<div class="dr-body" contenteditable="true" spellcheck="true">${renderMarkdown(markdown)}</div>` +
       `<div class="dr-bar">` +
         MARKS.map(
           (m) => `<button type="button" class="dr-fbtn" data-cmd="${m.cmd}" title="${m.title}">` +
@@ -152,7 +157,6 @@ export class DraftsEditor {
         `<button type="button" class="dr-fbtn" data-cmd="formatBlock" data-arg="blockquote" title="Quote">` +
           `<i class="ph ph-quotes"></i></button>` +
       `</div>` +
-      `<div class="dr-body" contenteditable="true" spellcheck="true">${renderMarkdown(markdown)}</div>` +
       this.footHtml() +
       `<div class="dr-rv-host">${this.reviseMenu.menuHtml()}</div>`;
   }
@@ -184,6 +188,14 @@ export class DraftsEditor {
         who +
         `<div class="dr-meta">` +
           this.versionPickerHtml(variant, version?.n) +
+          // Only once the shown text is the user's own: there is nothing to
+          // check or learn from in Claude's untouched version.
+          (version?.author !== "user" ? ""
+            : this.learnSentFor === version.n
+              ? `<button type="button" class="dr-learn" disabled><i class="ph ph-check"></i>Sent to Claude</button>`
+              : `<button type="button" class="dr-learn" data-learn ` +
+                  `title="Ask Claude to fact-check your edit and learn how you like messages written">` +
+                  `<i class="ph ph-graduation-cap"></i>Check &amp; learn</button>`) +
           `<span class="dr-grow"></span>` +
           `<button type="button" class="icon-btn-sq dr-icon dr-copy" data-copy title="Copy - marks it sent"><i class="ph ph-copy"></i></button>` +
           (archived
@@ -278,6 +290,10 @@ export class DraftsEditor {
       this.render();
       return;
     }
+    if (el.closest("[data-learn]")) {
+      this.checkAndLearn();
+      return;
+    }
     if (el.closest("[data-versions]")) {
       this.setVersionsOpen(!this.versionsOpen);
       return;
@@ -346,6 +362,30 @@ export class DraftsEditor {
     range.insertNode(code);
     sel.removeAllRanges();
     this.onInput();
+  }
+
+  /** Sends the edit to the chat that wrote the draft, with Claude's own last
+   *  version beside it, so it can fact-check the edit and learn from the
+   *  difference. Flushes first so the newest keystrokes are what it sees. */
+  private checkAndLearn(): void {
+    const variant = this.variant();
+    const body = this.bodyEl();
+    if (!variant || !body) return;
+    this.flush();
+    const mine = currentVersion(variant);
+    const claudes = variant.versions.filter((v) => v.author === "ai" && v.n < (mine?.n ?? 0)).pop();
+    const text = buildLearnPrompt({
+      topic: this.draft.topic,
+      handle: handleOf(variant),
+      recipient: variant.person ?? variant.recipient,
+      mine: { n: mine?.n ?? 1, body: htmlToMarkdown(body) },
+      claudes: claudes ? { n: claudes.n, body: claudes.body } : null,
+    });
+    void sendRevision(this.draft.origin_session_id, this.deps.sessionId, text).then((sent) => {
+      if (!sent) return;
+      this.learnSentFor = mine?.n ?? null;
+      this.renderChrome();
+    });
   }
 
   private copy(btn: HTMLElement): void {

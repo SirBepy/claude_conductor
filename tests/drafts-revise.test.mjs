@@ -22,7 +22,7 @@ vi.mock("../src/views/sessions/send-with-failure-recovery.ts", () => ({
   sendWithFailureRecovery: (...a) => sendWithFailureRecoveryMock(...a),
 }));
 
-const { buildRevisionPrompt, presetAsk, REVISE_PRESETS } = await import("../src/views/sessions/drafts-revise.ts");
+const { buildRevisionPrompt, buildLearnPrompt, presetAsk, REVISE_PRESETS } = await import("../src/views/sessions/drafts-revise.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
 const target = {
@@ -46,6 +46,38 @@ describe("buildRevisionPrompt", () => {
   it("confines the change to the highlighted span when there is one", () => {
     const p = buildRevisionPrompt({ ...target, selection: "The backfill is slow." }, "Explain it better.");
     expect(p).toContain("Only change this part, leave the rest as it is:\n> The backfill is slow.");
+  });
+});
+
+describe("buildLearnPrompt", () => {
+  const learn = {
+    topic: "Deploy slip",
+    handle: "Bruno #3",
+    recipient: "Bruno Kecman",
+    mine: { n: 3, body: "Bruno, it slips to Thursday." },
+    claudes: { n: 2, body: "Hey Bruno, the backfill is slow." },
+  };
+
+  it("asks for a fact-check that writes any fix back as a new version", () => {
+    const p = buildLearnPrompt(learn);
+    expect(p.split("\n")[0]).toBe("[re: draft Bruno #3 v3 - Deploy slip] Check & learn");
+    expect(p).toContain('write_draft (action revise, id "Bruno #3")');
+  });
+
+  it("carries both versions and says where each kind of lesson is saved, without asking", () => {
+    const p = buildLearnPrompt(learn);
+    expect(p).toContain("Your last version (v2):\n> Hey Bruno, the backfill is slow.");
+    expect(p).toContain("My version (v3):\n> Bruno, it slips to Thursday.");
+    expect(p).toContain("about Bruno Kecman only");
+    expect(p).toContain('People/<their name>.md, under a "## Writing to them" heading');
+    expect(p).toContain("~/.claude/refs/message-drafting.md");
+    expect(p).toContain("without asking");
+  });
+
+  it("still works when Claude never wrote a version", () => {
+    const p = buildLearnPrompt({ ...learn, claudes: null });
+    expect(p).not.toContain("Your last version");
+    expect(p).toContain("My version (v3):");
   });
 });
 
@@ -84,7 +116,7 @@ describe("DraftsEditor Revise menu", () => {
     state.sessions = priorSessions;
   });
 
-  async function mountEditor() {
+  async function mountEditor(versions, current = 1) {
     const { DraftsEditor } = await import("../src/views/sessions/drafts-editor.ts");
     const root = document.createElement("div");
     document.body.appendChild(root);
@@ -97,8 +129,8 @@ describe("DraftsEditor Revise menu", () => {
         {
           recipient: "Bruno",
           handle_n: 2,
-          current: 1,
-          versions: [{ n: 1, body: "Hey Bruno.", author: "ai", note: "", created_at: "2026-10-01T00:00:00Z" }],
+          current,
+          versions: versions ?? [{ n: 1, body: "Hey Bruno.", author: "ai", note: "", created_at: "2026-10-01T00:00:00Z" }],
         },
       ],
       state: "needs-you",
@@ -193,5 +225,29 @@ describe("DraftsEditor Revise menu", () => {
     await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
     const text = sendWithFailureRecoveryMock.mock.calls[0][2][0].text;
     expect(text).toContain("Only change this part, leave the rest as it is:\n> Hey");
+  });
+
+  it("offers Check & learn only once the shown version is the user's own edit", async () => {
+    const untouched = await mountEditor();
+    expect(untouched.querySelector("[data-learn]")).toBeNull();
+
+    document.body.innerHTML = "";
+    const edited = await mountEditor(
+      [
+        { n: 1, body: "Hey Bruno, the backfill is slow.", author: "ai", note: "first pass", created_at: "2026-10-01T00:00:00Z" },
+        { n: 2, body: "Bruno, it slips.", author: "user", note: "your edit", created_at: "2026-10-01T00:00:00Z" },
+      ],
+      2,
+    );
+    const btn = edited.querySelector("[data-learn]");
+    expect(btn).not.toBeNull();
+    btn.click();
+
+    await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
+    const text = sendWithFailureRecoveryMock.mock.calls[0][2][0].text;
+    expect(text).toContain("Check & learn");
+    expect(text).toContain("Your last version (v1):\n> Hey Bruno, the backfill is slow.");
+    expect(text).toContain("My version (v2):\n> Bruno, it slips.");
+    await vi.waitFor(() => expect(edited.querySelector(".dr-learn").textContent).toBe("Sent to Claude"));
   });
 });

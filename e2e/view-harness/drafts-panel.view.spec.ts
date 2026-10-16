@@ -268,8 +268,14 @@ test("the editor has no Ready or Delete button, and formatting only shows while 
   await expect(panel.locator("[data-ready]")).toHaveCount(0);
   await expect(panel.locator("[data-delete]")).toHaveCount(0);
   await expect(panel.locator(".dr-bar")).toBeHidden();
+  const topBefore = (await panel.locator(".dr-body").boundingBox())!.y;
   await panel.locator(".dr-body").click();
   await expect(panel.locator(".dr-bar")).toBeVisible();
+  // The row opens under the body, so the text itself never moves down.
+  await page.waitForTimeout(250);
+  expect((await panel.locator(".dr-body").boundingBox())!.y).toBe(topBefore);
+  const bodyBox = (await panel.locator(".dr-body").boundingBox())!;
+  expect((await panel.locator(".dr-bar").boundingBox())!.y).toBeGreaterThanOrEqual(bodyBox.y + bodyBox.height - 0.5);
   // Pressing a format button keeps the body focused, so the row stays.
   await panel.locator('[data-cmd="bold"]').click();
   await expect(panel.locator(".dr-bar")).toBeVisible();
