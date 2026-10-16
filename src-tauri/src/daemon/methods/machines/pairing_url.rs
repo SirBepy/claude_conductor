@@ -4,8 +4,9 @@
 //! module's own use of the external `url` crate (`url::Url::parse`) stays
 //! unambiguous.
 
-/// The three URL shapes `build_pairing_url` (`ipc::remote_access`) mints,
-/// plus a plain `http://host:port/?pair=code` for a same-LAN direct pair.
+/// `build_pairing_url`'s (`ipc::remote_access`) `conductor://pair?iroh=` link,
+/// the two `https://host/?pair=` shapes older Conductor versions minted, and a
+/// plain `http://host:port/?pair=code` for a hand-given direct address.
 #[derive(Debug, PartialEq)]
 pub(crate) struct ParsedPairing {
     pub code: String,

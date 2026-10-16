@@ -106,8 +106,8 @@
     }
   }
 
-  // Both pairing QR shapes carry `iroh=<endpoint-id>`: the Tailscale-DNS
-  // https URL and, when Tailscale is down, `conductor://pair?iroh=...`.
+  // Every pairing QR carries `iroh=<endpoint-id>`: today's
+  // `conductor://pair?iroh=...` and the https form older desktops minted.
   // A plain URL parse reads searchParams from either scheme the same way.
   function extractIrohParams(raw) {
     try {

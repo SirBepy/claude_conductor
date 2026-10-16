@@ -49,12 +49,6 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     watch_autostart_setting_changes(&handle);
     spawn_auto_update_loop(&handle);
 
-    // Re-apply the phone remote-access reverse proxy if the user left it
-    // on. Best-effort + off-thread: a missing/disconnected tailscale just
-    // logs a warning, never blocks or panics startup.
-    reapply_remote_access_on_boot(&handle);
-
-    crate::ipc::remote_access::start_tailscale_watcher(handle.clone());
     crate::scheduler::spawn(handle.clone());
     crate::when_done::spawn_nightly_scheduler(handle.clone());
     crate::news::spawn_poll_loop(handle.clone());
@@ -121,17 +115,6 @@ fn watch_autostart_setting_changes(app: &tauri::AppHandle) {
 fn spawn_auto_update_loop(app: &tauri::AppHandle) {
     let h = app.clone();
     tauri::async_runtime::spawn(auto_update_loop(h));
-}
-
-/// Re-apply the phone remote-access reverse proxy if the user left it on.
-fn reapply_remote_access_on_boot(app: &tauri::AppHandle) {
-    let enabled = app
-        .state::<AppState>()
-        .settings
-        .lock()
-        .unwrap()
-        .remote_access_enabled;
-    crate::ipc::remote_access::reapply_on_boot(enabled);
 }
 
 /// Make a "System default" audio-output preference follow live OS

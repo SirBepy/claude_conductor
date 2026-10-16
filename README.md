@@ -115,20 +115,18 @@ changed the Android shell. Releases that only touched the desktop app do not reb
 newest release has no APK, the most recent one that does is still current. To build it yourself
 instead, see `CLAUDE.md`'s Android section.
 
-**Prerequisite.** For the Android app, none beyond the desktop: scanning the pairing QR connects the
-phone directly to your desktop, peer-to-peer, whether or not Tailscale is installed and on WiFi or
-mobile data alike. Anything else - a laptop browser, say - still needs Tailscale, because only the
-Android app can make that direct connection. Either way, open Settings > Remote access on the
-desktop and turn it on first.
+**Prerequisite.** None beyond the desktop: scanning the pairing QR connects the phone directly to
+your desktop, peer-to-peer (iroh), on WiFi or mobile data alike, with no VPN or port forwarding.
+Remote access is off by default, so open Settings > Remote access on the desktop and turn it on
+first. While it's off, no phone or other machine can reach the desktop at all.
 
 **Pair the app:**
 
 1. On the desktop, Settings > Remote access shows a QR code and a copyable pairing link once
    remote access is enabled.
-2. On the phone's first launch, tap **Scan QR code** and scan it (camera permission required). This
-   is the direct path, and needs no Tailscale on either device.
-3. To go over Tailscale instead, type the server's `https://` URL into the field and tap the check
-   button. Both devices have to be on your Tailscale network for that address to resolve.
+2. On the phone's first launch, tap **Scan QR code** and scan it (camera permission required).
+3. If you expose the desktop's remote server yourself (your own reverse proxy), you can instead type
+   its `https://` URL into the field and tap the check button.
 4. Once connected the phone drops straight into the desktop's remote-control UI, and remembers how
    it connected for future launches.
 
@@ -151,16 +149,16 @@ machine the phone is connected to are unmarked; chats on the other machine show 
 the glyph. Every chat can be opened and driven from the phone, and the phone's new-chat picker has
 the same machine chips as the desktop.
 
-**Pair them.** On machine A, open Settings > Remote access - it shows the same pairing URL/QR a
-phone uses. On machine B, go to Settings > Remote access > Paired machines, paste that URL into
-"Paste the other machine's pairing URL", and click **Pair**. The optional "URL that machine can
-use to reach this one" field is how A can reach back to B directly; it's prefilled with B's own
-Tailscale URL when Tailscale serve is running, and can be left empty when both sides only have
-iroh. One paste pairs both directions - there's no separate step to run on A. Unpair from either
+**Pair them.** Turn on Settings > Remote access on both machines. On machine A, that page shows the
+same pairing link/QR a phone uses - click **Copy link**. On machine B, go to Settings > Remote
+access > Paired machines, paste that link into "Paste the other machine's pairing URL", and click
+**Pair**. Leave the optional "URL that machine can use to reach this one" field empty and the two
+reach each other over iroh; it only matters if you expose B's remote server at an address of your
+own. One paste pairs both directions - there's no separate step to run on A. Unpair from either
 side at any time.
 
-**Transport.** Conductor reaches a paired machine over a direct URL (Tailscale or LAN) when one is
-known, and falls back to iroh (the same peer-to-peer tunnel the phone uses) otherwise - no port
+**Transport.** Conductor reaches a paired machine over a direct URL when one was given at pairing,
+and over iroh (the same peer-to-peer tunnel the phone uses) otherwise - no port
 forwarding needed either way. Both daemons need to be running for the pairing to work; if the
 other machine goes down, its chats stay in the list but dim out until it's reachable again.
 

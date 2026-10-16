@@ -17,7 +17,7 @@ pub(crate) struct RenderCache {
 
 impl RenderCache {
     /// Each server passes its OWN cell: the hooks server (27182) is loopback-only
-    /// and unauthenticated, the remote server (27183) is tailscale-exposed, so a
+    /// and unauthenticated, the remote server (27183) is iroh-exposed, so a
     /// single shared static would expose locally staged docs across that boundary.
     pub(crate) fn instance(
         cell: &'static OnceLock<Mutex<RenderCache>>,

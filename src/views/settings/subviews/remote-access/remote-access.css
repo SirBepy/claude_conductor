@@ -8,31 +8,6 @@
   color: var(--sb-muted);
 }
 
-.ra-statusline {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: var(--fs-title);
-}
-
-.ra-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.ra-status-warn { color: var(--color-warning); }
-.ra-status-ok { color: var(--color-primary); }
-.ra-status-dim { color: var(--sb-muted); }
-
-.ra-url {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: var(--fs-body);
-  color: var(--color-text);
-  word-break: break-all;
-}
-
 .ra-qr {
   display: flex;
   align-items: center;
