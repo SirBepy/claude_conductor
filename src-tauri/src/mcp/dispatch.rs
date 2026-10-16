@@ -300,16 +300,7 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/todos/write", Value::Object(body), Some("invalid todo write"), None))
         }
         TOOL_WRITE_DRAFT => {
-            // Same omit-absent-keys rule as the todo write above.
-            let mut body = serde_json::Map::new();
-            body.insert("session_id".to_string(), json!(ctx.session_id));
-            body.insert("action".to_string(), ctx.args["action"].clone());
-            for key in ["id", "topic", "recipient", "body", "note", "brief", "receipts"] {
-                if let Some(v) = ctx.args.get(key) {
-                    body.insert(key.to_string(), v.clone());
-                }
-            }
-            Some(ctx.relay("/drafts/write", Value::Object(body), Some("invalid draft write"), None))
+            Some(ctx.relay("/drafts/write", forward_all_args(ctx.args, ctx.session_id), Some("invalid draft write"), None))
         }
         TOOL_SHOW_PREVIEW => {
             // Same endpoint terminal Claude curls. `session_id` scopes the
@@ -344,9 +335,37 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     }
 }
 
+/// Every argument the model sent, plus `session_id`, for a route that reads
+/// the rest as one flattened object. A hand-kept key list here drifted from
+/// the tool's schema once and silently dropped `person`/`platform`; copying
+/// what arrived cannot. Absent keys stay absent, never an explicit null.
+fn forward_all_args(args: &Value, session_id: &str) -> Value {
+    let mut body = args.as_object().cloned().unwrap_or_default();
+    body.insert("session_id".to_string(), json!(session_id));
+    Value::Object(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every property `write_draft` declares reaches the daemon route.
+    #[test]
+    fn write_draft_forwards_every_schema_property() {
+        let tools = super::super::tool_schemas_workflow::workflow_schemas();
+        let schema = tools
+            .iter()
+            .find(|t| t["name"] == TOOL_WRITE_DRAFT)
+            .expect("write_draft is registered");
+        let props = schema["inputSchema"]["properties"].as_object().unwrap();
+        let args: serde_json::Map<String, Value> = props.keys().map(|k| (k.clone(), json!("x"))).collect();
+        let body = forward_all_args(&Value::Object(args), "s1");
+        for key in props.keys() {
+            assert_eq!(body[key.as_str()], json!("x"), "{key} was dropped on the way to the daemon");
+        }
+        assert_eq!(body["session_id"], json!("s1"));
+        assert!(forward_all_args(&json!({"action": "add"}), "s1").get("person").is_none(), "absent stays absent");
+    }
 
     /// An `ok:false` daemon reply (refused target, write failure, or the
     /// "user did not respond in time" timeout) must become an error tool
