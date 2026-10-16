@@ -2,7 +2,7 @@
 //! sibling `persistence` module.
 
 use super::persistence::{
-    load, norm_recipient, prune, prune_versions, store_path_for, variant_index, write_atomic, WRITE_LOCK,
+    expire, load, norm_recipient, prune, prune_versions, store_path_for, variant_index, write_atomic, WRITE_LOCK,
 };
 use super::types::{DraftAuthor, DraftReceipt, DraftState, DraftVariant, DraftVersion, MessageDraft, Store};
 use std::collections::BTreeMap;
@@ -49,9 +49,15 @@ pub fn list(project_id: &str) -> Vec<MessageDraft> {
 }
 
 /// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
-/// hermetic tests use, same shape as `repo_channel::list_at`.
+/// hermetic tests use, same shape as `repo_channel::list_at`. Every read is
+/// also when month-old drafts expire, so there is no schedule to miss.
 pub(crate) fn list_at(path: &Path) -> Vec<MessageDraft> {
-    load(path).drafts
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = load(path);
+    if expire(&mut store.drafts, chrono::Utc::now()) {
+        write_atomic(path, &store);
+    }
+    store.drafts
 }
 
 pub struct NewDraft<'a> {
@@ -328,7 +334,8 @@ pub fn last_ai_body(variant: &DraftVariant) -> &str {
 
 /// Platforms read off a free-text recipient, first match wins. Discord sits
 /// before the Claude-chat catch-all because "Server chat / Discord" is a
-/// Discord channel, not another Claude chat.
+/// Discord channel, not another Claude chat. "Prompts" is a prompt the user
+/// pastes into another Claude chat.
 const PLATFORM_KEYWORDS: &[(&[&str], &str)] = &[
     (&["discord"], "Discord"),
     (&["slack"], "Slack"),
@@ -337,8 +344,34 @@ const PLATFORM_KEYWORDS: &[(&[&str], &str)] = &[
     (&["github", "pull request"], "GitHub"),
     (&["email", "e-mail", "gmail"], "Email"),
     (&["standup"], "Standup"),
-    (&["claude", "chat"], "Claude chats"),
+    (&["prompt", "claude", "chat"], "Prompts"),
 ];
+
+/// What the Prompts platform was called before; drafts written then still
+/// carry it on disk.
+const LEGACY_PROMPTS: &str = "Claude chats";
+
+/// A stored platform name as the panel should show it.
+pub fn canonical_platform(platform: &str) -> &str {
+    if platform == LEGACY_PROMPTS { "Prompts" } else { platform }
+}
+
+/// Where a draft written before `platform` was recorded gets posted, read off
+/// its text. Only Shortcut leaves a trace: a member mention pasted as a
+/// `shortcutapp://` link, or a leading `@name` on a draft whose topic names an
+/// `sc-` ticket. A draft that only mentions a ticket (a Slack DM about sc-56160)
+/// is not a Shortcut comment.
+pub fn infer_platform_from_body(topic: &str, body: &str) -> Option<&'static str> {
+    if body.contains("shortcutapp://") {
+        return Some("Shortcut");
+    }
+    let mentions_first = body.trim_start().starts_with('@');
+    let lower = topic.to_lowercase();
+    let names_ticket = lower
+        .match_indices("sc-")
+        .any(|(i, m)| lower[i + m.len()..].starts_with(|c: char| c.is_ascii_digit()));
+    (mentions_first && names_ticket).then_some("Shortcut")
+}
 
 /// Best guess at where a draft goes, from recipient text like "Shortcut
 /// ticket sc-56117" or "Tajana (Linear comment on REV-7345)". `None` for a
@@ -554,10 +587,45 @@ mod tests {
         assert_eq!(infer_platform("Shortcut ticket sc-56117"), Some("Shortcut"));
         assert_eq!(infer_platform("Tajana (Linear comment on REV-7345)"), Some("Linear"));
         assert_eq!(infer_platform("Server chat / Discord"), Some("Discord"));
-        assert_eq!(infer_platform("zng-admin chat (opening prompt)"), Some("Claude chats"));
+        assert_eq!(infer_platform("zng-admin chat (opening prompt)"), Some("Prompts"));
         assert_eq!(infer_platform("standup"), Some("Standup"));
         assert_eq!(infer_platform("Lenar"), None);
         assert_eq!(infer_platform("Johanna Chen"), None);
+    }
+
+    #[test]
+    fn the_old_claude_chats_name_reads_as_prompts() {
+        assert_eq!(canonical_platform("Claude chats"), "Prompts");
+        assert_eq!(canonical_platform("Slack"), "Slack");
+    }
+
+    /// Real Zirtue bodies: two Shortcut comments, one Slack DM about a ticket.
+    #[test]
+    fn a_shortcut_comment_is_told_apart_from_a_message_about_a_ticket() {
+        let mention = "[@johannachen](shortcutapp://members/65269aeb) thanks for checking";
+        assert_eq!(infer_platform_from_body("sc-56167 result/biller", mention), Some("Shortcut"));
+        assert_eq!(infer_platform_from_body("sc-56157 retest note", "@lenarrakhmatulin a draft now only counts"), Some("Shortcut"));
+        assert_eq!(infer_platform_from_body("Lender under-13 DOB, sc-56160", "Ej, https://app.shortcut.com/zirtue/story/56160"), None);
+        assert_eq!(infer_platform_from_body("lunch", "@bruno see you at 1"), None, "an @mention alone is not a ticket");
+    }
+
+    #[test]
+    fn listing_drops_drafts_untouched_for_a_month_and_keeps_the_rest() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("proj-expire.json");
+        for topic in ["old", "recent", "unreadable"] {
+            add_at(&path, new_draft(topic, "Bruno", "b")).unwrap();
+        }
+        let mut store = store_at(&path);
+        let at = |days: i64| (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+        store.drafts[0].updated_at = at(31);
+        store.drafts[1].updated_at = at(29);
+        store.drafts[2].updated_at = "not a date".into();
+        write_atomic(&path, &store);
+
+        let topics: Vec<String> = list_at(&path).into_iter().map(|d| d.topic).collect();
+        assert_eq!(topics, ["recent", "unreadable"]);
+        assert_eq!(store_at(&path).drafts.len(), 2, "the expiry is written back, not just hidden");
     }
 
     #[test]

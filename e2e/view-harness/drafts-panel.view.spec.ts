@@ -13,7 +13,7 @@ const SCREENSHOT_DIR = shotDir();
 
 const VIEWER = "sess-A";
 
-// The panel folds anything untouched for a week, so the seed has to be fresh
+// The panel hides anything untouched for a week, so the seed has to be fresh
 // relative to the run, not pinned to a calendar date.
 const NOW_ISO = new Date().toISOString();
 const HOUR_AGO_ISO = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -340,13 +340,15 @@ test("a refresh that brings back the same drafts keeps the rows, so a click land
   await expect(panel.locator(".dr-title")).toHaveText("Marko");
 });
 
-test("a person row opens just their drafts, and Archive folds one away without deleting it", async ({ page }) => {
+test("a person row opens just their drafts, and Archive hides one behind the eye without deleting it", async ({ page }) => {
   const panel = await mountPanel(page);
   await panel.locator(".dr-person", { hasText: "Marko" }).click();
 
   await expect(panel.locator(".dr-title")).toHaveText("Marko");
   await expect(panel.locator(".dr-person-sub")).toHaveText("Not in your vault");
   await expect(panel.locator(".dr-card")).toHaveCount(1);
+  // Nothing done yet, so there is nothing for an eye to reveal.
+  await expect(panel.locator("[data-eye]")).toHaveCount(0);
 
   await panel.locator(".dr-card").click();
   await panel.locator("[data-archive]").click();
@@ -354,15 +356,80 @@ test("a person row opens just their drafts, and Archive folds one away without d
   await expect
     .poll(() => page.evaluate(() => (window as any).__draftStore.drafts[1].state))
     .toBe("archived");
-  // Back on Marko's view, nothing open, the archived draft one click away.
+  // Back on Marko's view: nothing open, no fold, the archived draft behind the eye.
   await expect(panel.locator(".dr-none")).toHaveText("Nothing open.");
-  await expect(panel.locator(".dr-fold")).toHaveText("1 older");
-  await panel.locator(".dr-fold").click();
-  await expect(panel.locator(".dr-card.past")).toHaveCount(1);
-  await expect(panel.locator('.dr-card.past .dr-mark[title="Archived"]')).toHaveCount(1);
+  await expect(panel.locator(".dr-line")).toHaveCount(0);
+  await panel.locator("[data-eye]").click();
+  await expect(panel.locator(".dr-quiet .dr-line")).toHaveCount(1);
+  await expect(panel.locator('.dr-line .dr-mark[title="Archived"]')).toHaveCount(1);
 
+  // The eye stays on for the list: Marko, now with nothing open, sits dimmed below the line.
   await panel.locator("[data-list]").click();
   await expect(panel.locator(".dr-group").first()).toHaveText("From this chat");
+  await expect(panel.locator(".dr-quiet .dr-person-name")).toHaveText(["Marko"]);
+  await panel.locator("[data-eye]").click();
+  await expect(panel.locator(".dr-quiet")).toHaveCount(0);
+});
+
+test("the panel has no fold rows: done drafts only show while the eye is on", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await page.evaluate(() => {
+    const store = (window as any).__draftStore;
+    store.drafts[1].state = "copied";
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect(panel.locator(".dr-person .dr-person-name")).toHaveText(["Bruno", "Ana"]);
+  await expect(panel.locator(".dr-fold")).toHaveCount(0);
+  await expect(panel.locator("[data-eye]")).toHaveAttribute("aria-pressed", "false");
+
+  await panel.locator("[data-eye]").click();
+  await expect(panel.locator("[data-eye]")).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator(".dr-quiet .dr-person-name")).toHaveText(["Marko"]);
+  const opacity = await panel.locator(".dr-quiet .dr-person").first().evaluate((el) => getComputedStyle(el).opacity);
+  expect(Number(opacity)).toBeLessThan(1);
+});
+
+test("a Shortcut comment gets a Shortcut tab with one row per ticket, and stays under its person", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await page.evaluate((iso) => {
+    const store = (window as any).__draftStore;
+    store.drafts.push({
+      id: "cccccccc-3333-4333-8333-333333333333",
+      topic: "sc-56157 retest note",
+      brief: "",
+      receipts: [],
+      variants: [{
+        recipient: "Bruno",
+        handle_n: 3,
+        current: 1,
+        platform: "Shortcut",
+        versions: [{ n: 1, body: "@bruno a draft now only counts once", author: "ai", note: "first pass", created_at: iso }],
+      }],
+      state: "needs-you",
+      origin_session_id: "sess-B",
+      origin_label: "zirtue",
+      created_at: iso,
+      updated_at: iso,
+      seen_by_origin: true,
+    });
+    window.dispatchEvent(new Event("focus"));
+  }, NOW_ISO);
+
+  await expect(panel.locator(".dr-tab")).toHaveText(["People", "Shortcut"]);
+  // Under Bruno too: one draft, two ways in.
+  await expect(panel.locator(".dr-person", { hasText: "Bruno" }).locator(".dr-count")).toHaveText("2");
+
+  await panel.locator('.dr-tab', { hasText: "Shortcut" }).click();
+  const row = panel.locator(".dr-ticket");
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".dr-ticket-id")).toHaveText("sc-56157");
+  await expect(row.locator(".dr-ticket-label")).toHaveText("retest note");
+
+  await row.click();
+  await expect(panel.locator(".dr-title")).toHaveText("sc-56157");
+  await expect(panel.locator(".dr-person-sub")).toHaveText("Bruno");
+  await expect(panel.locator(".dr-card .dr-topic")).toHaveText("retest note");
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/drafts-panel-ticket.png`, clip: (await page.locator("#drafts-spec-host").boundingBox())! });
 });
 
 test("an empty project explains what the panel is for instead of showing a blank box", async ({ page }) => {
