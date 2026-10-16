@@ -16,7 +16,7 @@ use super::server::{mcp_error, question_args, tool_error_result, tool_result, wa
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
-    TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
+    TOOL_PERSON, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
 };
 
@@ -301,6 +301,14 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
         }
         TOOL_WRITE_DRAFT => {
             Some(ctx.relay("/drafts/write", forward_all_args(ctx.args, ctx.session_id), Some("invalid draft write"), None))
+        }
+        TOOL_PERSON => {
+            let route = match ctx.args["action"].as_str() {
+                Some("find") => "/people/find",
+                Some("remember") => "/people/remember",
+                _ => return Some(tool_error_result(ctx.id, "action must be find or remember")),
+            };
+            Some(ctx.relay(route, forward_all_args(ctx.args, ctx.session_id), Some("invalid person call"), None))
         }
         TOOL_SHOW_PREVIEW => {
             // Same endpoint terminal Claude curls. `session_id` scopes the

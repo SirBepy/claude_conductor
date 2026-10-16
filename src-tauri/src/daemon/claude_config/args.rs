@@ -65,7 +65,9 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 /// `send_message`, `report_turn_status`, `update_message`, `write_draft`,
 /// `write_user_todo`, `schedule`. None of them reach outside this app's own
 /// state (unlike `spawn_chat`/`respawn`/`close_session`/`post_message`, which
-/// stay gated behind the ordinary permission relay). Without this, a chat
+/// stay gated behind the ordinary permission relay). `person` is the one that
+/// writes elsewhere, and only the user's own vault `People/` notes, one
+/// frontmatter line at a time, each after the user confirmed it. Without this, a chat
 /// started with `auto_accept: false` hangs on the first `schedule`/`write_plan`
 /// call until a human answers the permission card (confirmed live,
 /// `daemon_schedule_e2e.rs::schedule_mcp_tool_add_inject_cancel_live`).
@@ -84,7 +86,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__update_message \
      mcp__cc_conductor__write_draft \
      mcp__cc_conductor__write_user_todo \
-     mcp__cc_conductor__schedule";
+     mcp__cc_conductor__schedule \
+     mcp__cc_conductor__person";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -201,10 +204,11 @@ mod tests {
             "mcp__cc_conductor__write_draft",
             "mcp__cc_conductor__write_user_todo",
             "mcp__cc_conductor__schedule",
+            "mcp__cc_conductor__person",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 10, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 11, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// Todo 1122: a turn ending on thinking alone gets the CLI's "no visible

@@ -155,17 +155,19 @@ fn annotate(drafts: &mut [MessageDraft], everyone: &[Person]) -> Vec<Person> {
 /// The `person` a write names, checked against the vault. An unknown name is
 /// an error on purpose: a draft is the one place a wrong person costs
 /// something, so this refuses rather than guessing. With no vault on this
-/// machine the name is trusted as given.
-fn person_for_write(vault: Option<&Path>, args: &Value) -> Result<Option<Person>, String> {
+/// machine the name is trusted as given. Inside a client's repo, the names
+/// people go by there ("backend") resolve too, and a new person joins that
+/// client.
+fn person_for_write(vault: Option<&Path>, client: Option<&str>, args: &Value) -> Result<Option<Person>, String> {
     let wanted = args.get("person").and_then(|v| v.as_str()).unwrap_or("").trim();
     if wanted.is_empty() {
         return Ok(None);
     }
     let Some(vault) = vault else {
-        return Ok(Some(Person { id: wanted.into(), name: wanted.into(), aliases: Vec::new(), relationship: String::new() }));
+        return Ok(Some(Person { id: wanted.into(), name: wanted.into(), ..Default::default() }));
     };
     let everyone = people::list_at(vault);
-    match people::resolve(&everyone, wanted) {
+    match people::resolve_in(&everyone, wanted, client) {
         Resolved::One(p) => Ok(Some(p.clone())),
         Resolved::Ambiguous(hits) => {
             let names: Vec<&str> = hits.iter().map(|p| p.id.as_str()).collect();
@@ -180,8 +182,9 @@ fn person_for_write(vault: Option<&Path>, args: &Value) -> Result<Option<Person>
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
                 .unwrap_or_default();
-            let relationship = args.get("relationship").and_then(|v| v.as_str()).unwrap_or("");
-            people::create_stub_at(vault, wanted, &aliases, relationship).map(Some)
+            let relationship = args.get("relationship").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let projects = client.map(|c| vec![c.to_string()]).unwrap_or_default();
+            people::create_at(vault, wanted, &people::NewPerson { aliases, relationship, projects, ..Default::default() }).map(Some)
         }
         Resolved::None => Err(format!(
             "No one called \"{wanted}\" in the user's vault (People/). If you are not certain who the user means, ask them first with ask_user_question, suggesting likely matches. Once you know: pass their exact vault name as `person`, or, for someone genuinely new, the full name with `new_person: true` plus `aliases`/`relationship` to create their People note."
@@ -242,6 +245,10 @@ pub(crate) fn write_draft_in(
     let body = s("body");
     let mut recipient = s("recipient");
     let given_platform = s("platform");
+    let client = vault
+        .and_then(|v| super::people::caller_client(state, session_id, &people::clients_at(v)))
+        .map(|c| c.slug);
+    let client = client.as_deref();
 
     let draft = match action {
         "add" => {
@@ -252,7 +259,7 @@ pub(crate) fn write_draft_in(
             if body.trim().is_empty() {
                 return Err("body is required to add a draft".to_string());
             }
-            let person = person_for_write(vault, args)?;
+            let person = person_for_write(vault, client, args)?;
             recipient = recipient_label(&recipient, person.as_ref(), &given_platform)?;
             let platform = platform_for(&given_platform, &recipient);
             let label = display_name(state, session_id);
@@ -289,7 +296,7 @@ pub(crate) fn write_draft_in(
                 return Err("body is required to add a variant".to_string());
             }
             let full = resolve_id(root, &project_id, &id)?;
-            let person = person_for_write(vault, args)?;
+            let person = person_for_write(vault, client, args)?;
             recipient = recipient_label(&recipient, person.as_ref(), &given_platform)?;
             let platform = platform_for(&given_platform, &recipient);
             let target = VariantTarget { person: person.as_ref().map(|p| p.id.as_str()), platform: platform.as_deref() };
@@ -516,6 +523,26 @@ mod tests {
         .unwrap();
         assert_eq!(v["draft"]["variants"][0]["person"], "Johanna Chen");
         assert!(vault.path().join("People/Johanna Chen.md").exists());
+    }
+
+    /// Inside a client's repo, the name a person goes by there resolves, and a
+    /// new person joins that client.
+    #[test]
+    fn a_client_nickname_resolves_and_a_new_person_joins_the_client() {
+        let (root, vault) = (tempfile::tempdir().unwrap(), vault_with(&[("Stevan", "projects: [zirtue]\nproject_aliases: [\"zirtue: backend\"]")]));
+        std::fs::write(vault.path().join("Zirtue.md"), "---\nrepos: [zng-app]\n---\n").unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let cwd = repo.path().join("zng-app");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let state = test_state();
+        state.registry.upsert_interactive("s1", &cwd, "proj-1", "2026-10-17T00:00:00Z");
+        let write = |args: Value| write_draft_in(Some(root.path()), Some(vault.path()), &state, "s1", "add", &args);
+
+        let v = write(json!({"topic": "t", "body": "hi", "person": "backend"})).unwrap();
+        assert_eq!(v["draft"]["variants"][0]["person"], "Stevan");
+        write(json!({"topic": "t", "body": "hi", "person": "Airion Doe", "new_person": true})).unwrap();
+        let note = std::fs::read_to_string(vault.path().join("People/Airion Doe.md")).unwrap();
+        assert!(note.contains("projects: [\"zirtue\"]"), "{note}");
     }
 
     #[test]

@@ -39,6 +39,10 @@ pub const TOOL_SCHEDULE: &str = "schedule";
 // scan, so a folder Claude made from a shell stayed invisible until a chat
 // happened to run in it. Unconditional: any session can start a new project.
 pub const TOOL_CREATE_PROJECT: &str = "create_project";
+// Who the user means by a name, from the people in their Obsidian vault, per
+// client (`methods::people`). One tool with an `action` enum, not two, for the
+// same per-turn schema cost reason as `write_user_todo`.
+pub const TOOL_PERSON: &str = "person";
 
 pub fn workflow_schemas() -> Vec<Value> {
     vec![
@@ -184,6 +188,29 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "path": {"type": "string", "description": "Absolute path of the project folder."}
                 },
                 "required": ["path"]
+            }
+        }),
+        json!({
+            "name": TOOL_PERSON,
+            "description": "Who the user means by a name, nickname or role word, from the people in their Obsidian vault, per client. `find` needs text: call it when the user names someone not in the injected people list, before assuming who they are (names inside pasted material do not count), and follow its `hint` - it says when to ask. `remember` needs person plus what the user just confirmed: `alias` (a name used everywhere, e.g. a voice mishear), `project_alias` (a name used only in this client, e.g. \"backend\"), `join_project` (they work on this client too), or `new: true` with the /people questionnaire answers to create them.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["find", "remember"]},
+                    "text": {"type": "string", "description": "find: the name exactly as the user said it."},
+                    "person": {"type": "string", "description": "remember: their vault name; for new, their full name."},
+                    "alias": {"type": "string"},
+                    "project_alias": {"type": "string"},
+                    "join_project": {"type": "boolean"},
+                    "new": {"type": "boolean"},
+                    "aliases": {"type": "array", "items": {"type": "string"}, "description": "new: other names the user uses."},
+                    "relationship": {"type": "string", "description": "new: where the user knows them from and their role, e.g. `coworker (Zirtue QA)`."},
+                    "gender": {"type": "string"},
+                    "language": {"type": "string", "description": "new: language and tone the user writes to them in."},
+                    "messaged_on": {"type": "array", "items": {"type": "string"}, "description": "new: Slack, Shortcut, Google Chat..."},
+                    "projects": {"type": "array", "items": {"type": "string"}, "description": "new: client slugs. Defaults to this repo's client."}
+                },
+                "required": ["action"]
             }
         }),
     ]

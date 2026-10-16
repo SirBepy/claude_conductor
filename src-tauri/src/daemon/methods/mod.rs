@@ -42,6 +42,9 @@ mod hidden_chats;
 mod history;
 mod lifecycle;
 mod machines;
+/// `find_person`/`remember_person` and the per-turn people block; the vault
+/// reader itself is `crate::people`.
+pub(crate) mod people;
 mod permission;
 mod pr_review;
 mod preview;
