@@ -133,17 +133,16 @@ mod tests {
         assert_ne!([px[0], px[1], px[2]], [250, 204, 21]);
     }
 
-    /// Writes the rendered tray icon in both states to disk for Joe's
-    /// acceptance check. Not part of the normal test run - the
-    /// screenshots dir is project scratch, not something `--lib` should write
-    /// on every run. `cargo test --manifest-path src-tauri/Cargo.toml --lib
+    /// Writes the rendered tray icon in both states to `TRAY_SHOT_DIR` for a
+    /// visual check. Ignored by default so `--lib` never writes files; the
+    /// caller picks the directory (the per-session screenshots folder):
+    /// `$env:TRAY_SHOT_DIR=<dir>; cargo test --manifest-path src-tauri/Cargo.toml --lib
     /// write_tray_screenshots -- --ignored`.
     #[test]
     #[ignore]
     fn write_tray_screenshots() {
-        let dir = std::path::Path::new(
-                "../.for_bepy/screenshots/42648-134366361126183567",
-        );
+        let dir = std::env::var("TRAY_SHOT_DIR").expect("set TRAY_SHOT_DIR to the output folder");
+        let dir = std::path::Path::new(&dir);
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("1009-tray-awaiting-on.png"), render(&ctx(true))).unwrap();
         std::fs::write(dir.join("1009-tray-awaiting-off.png"), render(&ctx(false))).unwrap();
