@@ -46,6 +46,15 @@ describe("applyTicketLinks", () => {
     ]);
   });
 
+  it("links each bare id in a comma-separated list, but not a thousands-grouped number", () => {
+    const root = mount("<p>Tickets 12345,67890 are related. Not 12,345 though.</p>");
+    applyTicketLinks(root, SC);
+    expect(links(root)).toEqual([
+      ["12345", "https://app.shortcut.com/zirtue/story/12345"],
+      ["67890", "https://app.shortcut.com/zirtue/story/67890"],
+    ]);
+  });
+
   it("leaves numbers that are clearly not story ids alone", () => {
     const root = mount("<p>1234 4567890 12,345 1.23456 127.0.0.1:27183 PORT=27183 $12345 /x/12345 abc12345</p>");
     applyTicketLinks(root, SC);
