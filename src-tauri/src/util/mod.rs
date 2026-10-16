@@ -1,6 +1,7 @@
 pub mod claude_bin;
 pub mod path;
 pub mod process;
+pub mod supervisor_client;
 
 /// Shared lock for any test in this crate that mutates a process-global env
 /// var (`CC_DATA_DIR`, `CC_DAEMON_INSTANCE`, ...). The default `--lib` run
