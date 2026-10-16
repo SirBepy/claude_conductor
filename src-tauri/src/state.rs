@@ -99,6 +99,18 @@ pub struct AppState {
     /// `notifications::rules::fire` and the tray tooltip. Always false on
     /// non-Windows. Written by `crate::meeting::start`.
     pub meeting_active: Arc<AtomicBool>,
+    /// True while any live session's registry `awaiting` is "question" -
+    /// paints the tray's top-left amber dot. Written by
+    /// `daemon_link::handlers::handle_instances_changed`, the only place that
+    /// recomputes it, from `Instance.awaiting` and nothing else (the source of
+    /// truth named in the todo).
+    pub input_needed: Arc<AtomicBool>,
+    /// Session ids already known to be awaiting input, used to detect a NEW
+    /// transition into that state (for the taskbar glow) without re-firing for
+    /// one still waiting. `None` until the first `instances_changed` of this
+    /// app run: that first call seeds the set without glowing, so sessions
+    /// already waiting before the app started don't flash the taskbar on boot.
+    pub known_awaiting_sessions: Arc<Mutex<Option<std::collections::HashSet<String>>>>,
     /// Slugs for which a `news::summarizer::generate_for_slug` call is currently
     /// running. Guards against double-spawning when the eager backfill and the
     /// lazy IPC path race on the same new post.
@@ -164,6 +176,8 @@ impl AppState {
             pending_new_chat: Mutex::new(None),
             pending_main_nav: Mutex::new(None),
             meeting_active: Arc::new(AtomicBool::new(false)),
+            input_needed: Arc::new(AtomicBool::new(false)),
+            known_awaiting_sessions: Arc::new(Mutex::new(None)),
             news_inflight: Arc::new(Mutex::new(std::collections::HashSet::new())),
             when_done: Arc::new(Mutex::new(crate::when_done::WhenDoneInner::default())),
             db: Mutex::new(db),
