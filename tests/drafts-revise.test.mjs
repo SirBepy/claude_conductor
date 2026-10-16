@@ -128,14 +128,40 @@ describe("DraftsEditor Revise menu", () => {
     expect(root.querySelector(".dr-rv-menu")).toBeNull();
   });
 
-  it("sends free text on Enter", async () => {
+  it("sends free text typed in the footer box on Enter, and clears the box", async () => {
     const root = await mountEditor();
-    root.querySelector("[data-revise]").click();
-    const input = root.querySelector("[data-revise-free]");
+    const input = root.querySelector(".dr-foot [data-revise-free]");
     input.value = "Mention the Thursday date";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
     expect(sendWithFailureRecoveryMock.mock.calls[0][2][0].text).toContain("Mention the Thursday date");
+    expect(input.value).toBe("");
+  });
+
+  it("the presets menu carries no text box of its own", async () => {
+    const root = await mountEditor();
+    root.querySelector("[data-revise]").click();
+    expect(root.querySelector(".dr-rv-menu [data-revise-free]")).toBeNull();
+    expect(root.querySelectorAll("[data-revise-free]").length).toBe(1);
+  });
+
+  it("the footer box keeps a highlighted span as the scope", async () => {
+    const root = await mountEditor();
+    const body = root.querySelector(".dr-body");
+    const textNode = document.createTreeWalker(body, NodeFilter.SHOW_TEXT).nextNode();
+    const range = document.createRange();
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, "Hey".length);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+
+    const input = root.querySelector("[data-revise-free]");
+    input.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    input.value = "Warmer greeting";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
+    expect(sendWithFailureRecoveryMock.mock.calls[0][2][0].text).toContain("Only change this part, leave the rest as it is:\n> Hey");
   });
 
   it("closes on an outside click", async () => {

@@ -216,13 +216,9 @@ class DraftsPanel implements DraftsPanelHandle {
       html += this.foldHtml("people", g.quietPeople.length, `${g.quietPeople.length} more ${g.quietPeople.length === 1 ? "person" : "people"}`,
         () => g.quietPeople.map((p) => this.personRowHtml(p)).join(""));
     }
+    // Every platform keeps its own heading, even with nothing open: there are
+    // few of them, and each folds its own old drafts already.
     html += g.platforms.map((x) => this.platformHtml(x)).join("");
-    if (g.quietPlatforms.length) {
-      const n = g.quietPlatforms.length;
-      if (!g.platforms.length) html += `<h3 class="dr-group">Other places</h3>`;
-      html += this.foldHtml("places", n, `${n} more ${n === 1 ? "place" : "places"}`,
-        () => g.quietPlatforms.map((x) => this.platformHtml(x)).join(""));
-    }
     return html;
   }
 

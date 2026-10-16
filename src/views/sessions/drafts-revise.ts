@@ -90,11 +90,11 @@ export function reviseMenuHtml(scoped: boolean): string {
       `<button type="button" class="dr-rv-item" data-revise-preset="${p.key}">` +
         `<i class="ph ${p.icon}"></i>${escapeHtml(p.label)}</button>`,
   ).join("");
+  // No free-text box here: the editor's footer box is that box.
   return (
     `<div class="dr-rv-menu" role="menu">` +
       `<div class="dr-rv-scope">${scoped ? "Highlighted part only" : "Whole draft"}</div>` +
       items +
-      `<input type="text" class="dr-rv-input" data-revise-free placeholder="Or tell Claude..." />` +
     `</div>`
   );
 }
@@ -137,12 +137,16 @@ export class ReviseMenuController {
     return this.open ? reviseMenuHtml(!!this.scope) : "";
   }
 
-  /** Keeps the body's selection alive through the Revise click and records
-   *  it, since a focused button or menu input would collapse it. Forward the
+  /** Records the body's selection before a press on the presets button or
+   *  the footer box moves focus and collapses it. The button also keeps the
+   *  selection alive; the box has to take focus to be typed in. Forward the
    *  editor root's own `pointerdown` events here. */
   capturePointerDown(ev: PointerEvent): void {
-    if (!(ev.target as HTMLElement).closest("[data-revise]") || this.open) return;
-    ev.preventDefault();
+    const target = ev.target as HTMLElement;
+    const onButton = !!target.closest("[data-revise]") && !this.open;
+    const onBox = !!target.closest("[data-revise-free]") && document.activeElement !== target;
+    if (!onButton && !onBox) return;
+    if (onButton) ev.preventDefault();
     const sel = window.getSelection();
     const body = this.deps.bodyEl();
     const inBody = !!sel && sel.rangeCount > 0 && !!body?.contains(sel.getRangeAt(0).commonAncestorContainer);
@@ -175,7 +179,9 @@ export class ReviseMenuController {
       this.setOpen(false);
     } else if (ev.key === "Enter" && input.value.trim()) {
       ev.preventDefault();
-      this.send(input.value);
+      const text = input.value;
+      input.value = "";
+      this.send(text);
     }
     return true;
   }
@@ -221,13 +227,10 @@ export class ReviseMenuController {
     this.setOpen(false);
     void sendRevision(draft.origin_session_id, this.deps.sessionId, text).then((sent) => {
       if (!sent) return;
-      const icon = this.deps.root.querySelector("[data-revise] i");
+      const icon = this.deps.root.querySelector("[data-revise-icon]");
       if (!icon) return;
-      icon.className = "ph ph-check";
-      setTimeout(() => {
-        const back = this.deps.root.querySelector("[data-revise] i");
-        if (back) back.className = "ph ph-magic-wand";
-      }, 1500);
+      icon.classList.replace("ph-magic-wand", "ph-check");
+      setTimeout(() => icon.classList.replace("ph-check", "ph-magic-wand"), 1500);
     });
   }
 }

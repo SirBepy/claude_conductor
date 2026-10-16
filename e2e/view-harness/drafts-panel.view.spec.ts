@@ -223,17 +223,56 @@ test("an edit round-trips to the store as markdown and comes back as a your-edit
   await expect(panel.locator(".dr-card").first().locator('.dr-mark[title="Your edit"]')).toHaveCount(1);
 });
 
-test("the recipient dropdown swaps to that person's own version track", async ({ page }) => {
+test("a recipient tab swaps to that person's own version track", async ({ page }) => {
   const panel = await mountPanel(page);
   await panel.locator(".dr-card").first().click();
 
+  await expect(panel.locator(".dr-who-tab")).toHaveText(["Bruno", "Ana"]);
   await expect(panel.locator(".dr-body")).toContainText("Hey Bruno");
-  await panel.locator("[data-recipient]").selectOption("Ana");
+  await panel.locator('[data-recipient="Ana"]').click();
 
   await expect(panel.locator(".dr-body")).toContainText("Hi Ana");
   await expect(panel.locator(".dr-body")).not.toContainText("Hey Bruno");
-  // Ana's track is one version deep; the picker must not offer Bruno's v2.
-  await expect(panel.locator("[data-version] option")).toHaveCount(1);
+  // Ana's track is one version deep: a plain "v1", no picker offering Bruno's v2.
+  await expect(panel.locator("[data-versions]")).toHaveCount(0);
+  await expect(panel.locator(".dr-ver-only")).toHaveText("v1");
+});
+
+test("a one-recipient draft shows no recipient tabs", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await panel.locator(".dr-person", { hasText: "Marko" }).click();
+  await panel.locator(".dr-card").click();
+  await expect(panel.locator(".dr-title")).toHaveText("Invoice follow-up, March");
+  await expect(panel.locator(".dr-who-tab")).toHaveCount(0);
+});
+
+test("the version chip opens every version, newest first and labelled, and picking one shows it", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await panel.locator(".dr-card").first().click();
+
+  await expect(panel.locator("[data-versions]")).toContainText("v2");
+  await panel.locator("[data-versions]").click();
+  await expect(panel.locator(".dr-ver-row .dr-ver-n")).toHaveText(["v2", "v1"]);
+  await expect(panel.locator(".dr-ver-row .dr-ver-note")).toHaveText(["softened", "first pass"]);
+
+  await panel.locator('[data-version-n="1"]').click();
+  await expect(panel.locator(".dr-ver-list")).toHaveCount(0);
+  await expect(panel.locator(".dr-body")).toContainText("is late.");
+  await expect(panel.locator("[data-versions]")).toContainText("v1");
+});
+
+test("the editor has no Ready or Delete button, and formatting only shows while typing", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await panel.locator(".dr-card").first().click();
+
+  await expect(panel.locator("[data-ready]")).toHaveCount(0);
+  await expect(panel.locator("[data-delete]")).toHaveCount(0);
+  await expect(panel.locator(".dr-bar")).toBeHidden();
+  await panel.locator(".dr-body").click();
+  await expect(panel.locator(".dr-bar")).toBeVisible();
+  // Pressing a format button keeps the body focused, so the row stays.
+  await panel.locator('[data-cmd="bold"]').click();
+  await expect(panel.locator(".dr-bar")).toBeVisible();
 });
 
 test("Copy writes rich HTML and markdown in one clipboard call, and marks the card copied", async ({ page }) => {
@@ -256,6 +295,7 @@ test("the bold button marks the selection instead of typing asterisks", async ({
   const panel = await mountPanel(page);
   await panel.locator(".dr-card").first().click();
 
+  await panel.locator(".dr-body").click();
   await page.evaluate(() => {
     const body = document.querySelector<HTMLElement>(".dr-body")!;
     body.innerHTML = "<p>plain words</p>";
@@ -348,6 +388,7 @@ test("the footer stays inside the card and the toolbar stays reachable at the re
       "<p>Line five nears the end.</p><p>Line six closes it out.</p>";
     body.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  await panel.locator(".dr-body").click();
 
   const host = page.locator("#drafts-spec-host");
   const hostBox = (await host.boundingBox())!;

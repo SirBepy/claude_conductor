@@ -1,5 +1,6 @@
-// One draft card's editor (todo 666): a contenteditable that shows bold as
-// bold, a format toolbar, recipient/version pickers and the dual-payload Copy.
+// One draft card's editor: the topic as its title, a version picker beside
+// Copy and Archive, a contenteditable that shows bold as bold (its format
+// toolbar only while typing), and a footer box for asking Claude to change it.
 // The panel owns the list and hands this one draft plus a save callback.
 
 import { invoke } from "../../shared/ipc";
@@ -7,7 +8,7 @@ import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
-import { currentVersion, handleOf, copyDualPayload } from "../../shared/message-draft-utils";
+import { currentVersion, copyDualPayload } from "../../shared/message-draft-utils";
 import type { MessageDraft, DraftVariant } from "../../types/ipc.generated";
 import { ReviseMenuController } from "./drafts-revise";
 
@@ -44,6 +45,8 @@ export class DraftsEditor {
    *  (the timer keeps retrying every AUTOSAVE_MS while the user keeps typing). */
   private autosaveFailures = 0;
   private reviseMenu: ReviseMenuController;
+  /** The version list under the version chip. */
+  private versionsOpen = false;
 
   constructor(root: HTMLElement, draft: MessageDraft, deps: DraftsEditorDeps) {
     this.root = root;
@@ -61,7 +64,6 @@ export class DraftsEditor {
     this.render();
     this.root.addEventListener("click", this.onClick);
     this.root.addEventListener("input", this.onInput);
-    this.root.addEventListener("change", this.onChange);
     this.root.addEventListener("pointerdown", this.onPointerDown);
     this.root.addEventListener("keydown", this.onKeydown);
   }
@@ -71,7 +73,8 @@ export class DraftsEditor {
   update(draft: MessageDraft): void {
     this.draft = draft;
     const body = this.bodyEl();
-    const typing = document.activeElement === body || !!document.activeElement?.closest(".dr-rv-menu");
+    const active = document.activeElement;
+    const typing = active === body || !!active?.closest(".dr-rv-menu, .dr-foot");
     if (body && typing) {
       this.renderChrome();
       return;
@@ -83,9 +86,9 @@ export class DraftsEditor {
     this.flush();
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("input", this.onInput);
-    this.root.removeEventListener("change", this.onChange);
     this.root.removeEventListener("pointerdown", this.onPointerDown);
     this.root.removeEventListener("keydown", this.onKeydown);
+    document.removeEventListener("pointerdown", this.onOutsideVersions, true);
     this.reviseMenu.destroy();
   }
 
@@ -154,67 +157,91 @@ export class DraftsEditor {
       `<div class="dr-rv-host">${this.reviseMenu.menuHtml()}</div>`;
   }
 
-  /** Repaints everything except the contenteditable, so a live update can land
-   *  while the caret is in the body. */
+  /** Repaints the header only, so a live update can land while the caret is
+   *  in the body or the footer box. */
   private renderChrome(): void {
     const head = this.root.querySelector(".dr-top");
-    const foot = this.root.querySelector(".dr-foot");
     if (head) head.outerHTML = this.chromeHtml();
-    if (foot) foot.outerHTML = this.footHtml();
   }
 
   private chromeHtml(): string {
     const variant = this.variant();
     const version = variant ? currentVersion(variant) : undefined;
-    const stamp = version?.author === "user" ? "edited by you" : "by Claude";
-    const recipients = this.draft.variants
-      .map(
-        (v) => `<option value="${escapeHtml(v.recipient)}"${v.recipient === this.recipient ? " selected" : ""}>` +
-          `${escapeHtml(handleOf(v))}</option>`,
-      )
-      .join("");
-    const versions = (variant?.versions ?? [])
-      .slice()
-      .reverse()
-      .map((v) => {
-        const who = v.author === "user" ? "you" : "Claude";
-        const label = v.note ? `v${v.n} - ${v.note}` : `v${v.n} - ${who}`;
-        return `<option value="${v.n}"${v.n === variant?.current ? " selected" : ""}>${escapeHtml(label)}</option>`;
-      })
-      .join("");
+    const archived = this.draft.state === "archived";
+    // Names only, and only when there is a choice to make.
+    const who = this.draft.variants.length > 1
+      ? `<div class="dr-who">` + this.draft.variants.map((v) =>
+          `<button type="button" class="dr-who-tab${v.recipient === this.recipient ? " on" : ""}" ` +
+            `data-recipient="${escapeHtml(v.recipient)}">${escapeHtml(v.recipient)}</button>`).join("") +
+        `</div>`
+      : "";
     return (
       `<div class="dr-top">` +
         `<div class="dr-head">` +
           `<button type="button" class="icon-btn-sq dr-icon" data-back title="Back to drafts"><i class="ph ph-arrow-left"></i></button>` +
           `<span class="dr-title">${escapeHtml(this.draft.topic)}</span>` +
-          (this.draft.state === "archived"
+        `</div>` +
+        who +
+        `<div class="dr-meta">` +
+          this.versionPickerHtml(variant, version?.n) +
+          `<span class="dr-grow"></span>` +
+          `<button type="button" class="icon-btn-sq dr-icon dr-copy" data-copy title="Copy - marks it sent"><i class="ph ph-copy"></i></button>` +
+          (archived
             ? `<button type="button" class="icon-btn-sq dr-icon" data-archive title="Unarchive"><i class="ph ph-box-arrow-up"></i></button>`
             : `<button type="button" class="icon-btn-sq dr-icon" data-archive title="Archive - put away without sending"><i class="ph ph-archive"></i></button>`) +
-          `<button type="button" class="icon-btn-sq dr-icon" data-delete title="Delete draft"><i class="ph ph-trash"></i></button>` +
-        `</div>` +
-        `<div class="dr-meta">` +
-          `<select class="dr-drop" data-recipient aria-label="Recipient">${recipients}</select>` +
-          `<select class="dr-drop" data-version aria-label="Version">${versions}</select>` +
-          `<span class="dr-stamp">${stamp}</span>` +
         `</div>` +
       `</div>`
     );
   }
 
+  /** One chip for the shown version; the full list, newest first, opens under
+   *  it. A chip per version stopped fitting the row past a handful. */
+  private versionPickerHtml(variant: DraftVariant | undefined, current: number | undefined): string {
+    const versions = variant?.versions ?? [];
+    const pen = (author: string) => (author === "user" ? `<i class="ph ph-pencil-simple" aria-label="your edit"></i>` : "");
+    const shown = versions.find((v) => v.n === current);
+    if (versions.length < 2) return `<span class="dr-ver-only">v${current ?? 1}${shown ? pen(shown.author) : ""}</span>`;
+    const list = this.versionsOpen
+      ? `<div class="dr-ver-list" role="menu">` + versions.slice().reverse().map((v) =>
+          `<button type="button" class="dr-ver-row${v.n === current ? " on" : ""}" data-version-n="${v.n}" role="menuitem">` +
+            `<span class="dr-ver-n">v${v.n}</span>` +
+            `<span class="dr-ver-note">${escapeHtml(v.author === "user" ? "Your edit" : v.note || "Claude")}</span>` +
+            pen(v.author) +
+          `</button>`).join("") + `</div>`
+      : "";
+    return (
+      `<button type="button" class="dr-ver-btn${this.versionsOpen ? " open" : ""}" data-versions aria-haspopup="menu" ` +
+        `aria-expanded="${this.versionsOpen}" title="Versions">` +
+        `v${current ?? 1}${shown ? pen(shown.author) : ""}<i class="ph ph-caret-down dr-caret"></i>` +
+      `</button>` + list
+    );
+  }
+
+  /** Free text goes straight to Claude on Enter; the arrow opens the presets. */
   private footHtml(): string {
-    const ready = this.draft.state === "ready";
     return (
       `<div class="dr-foot">` +
-        `<button type="button" class="dr-btn dr-primary" data-copy><i class="ph ph-copy"></i> Copy</button>` +
-        `<button type="button" class="dr-btn${this.reviseMenu.isOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
-          `title="Ask Claude to rework it - the highlighted part, or the whole draft">` +
-          `<i class="ph ph-magic-wand"></i> Revise <i class="ph ph-caret-up dr-caret"></i></button>` +
-        `<span class="dr-grow"></span>` +
-        `<button type="button" class="dr-btn${ready ? " on" : ""}" data-ready>` +
-          `<i class="ph ${ready ? "ph-check-circle" : "ph-circle"}"></i> Ready</button>` +
+        `<i class="ph ph-magic-wand dr-ask-icon" data-revise-icon aria-hidden="true"></i>` +
+        `<input type="text" class="dr-ask-input" data-revise-free ` +
+          `placeholder="Ask Claude to change this..." aria-label="Ask Claude to change this draft" />` +
+        `<button type="button" class="icon-btn-sq dr-icon${this.reviseMenu.isOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
+          `title="Quick changes - the highlighted part, or the whole draft"><i class="ph ph-caret-up"></i></button>` +
       `</div>`
     );
   }
+
+  private setVersionsOpen(open: boolean): void {
+    this.versionsOpen = open;
+    this.renderChrome();
+    if (open) document.addEventListener("pointerdown", this.onOutsideVersions, true);
+    else document.removeEventListener("pointerdown", this.onOutsideVersions, true);
+  }
+
+  private onOutsideVersions = (ev: PointerEvent): void => {
+    const el = ev.target as HTMLElement;
+    if (el.closest(".dr-ver-list") || el.closest("[data-versions]")) return;
+    this.setVersionsOpen(false);
+  };
 
   // ── Events ──────────────────────────────────────────────────────────────
 
@@ -223,27 +250,18 @@ export class DraftsEditor {
     this.saveTimer = setTimeout(() => this.flush(), AUTOSAVE_MS);
   };
 
-  private onChange = (ev: Event): void => {
-    const el = ev.target as HTMLElement;
-    if (el.matches("[data-recipient]")) {
-      this.flush();
-      this.recipient = (el as HTMLSelectElement).value;
-      this.render();
-      return;
-    }
-    if (el.matches("[data-version]")) {
-      this.flush();
-      const n = Number((el as HTMLSelectElement).value);
-      void invoke("set_draft_version", {
-        sessionId: this.deps.sessionId,
-        id: this.draft.id,
-        recipient: this.recipient,
-        n,
-      })
-        .then(() => this.deps.onChanged())
-        .catch((err) => console.error("[drafts-editor] set_draft_version failed", err));
-    }
-  };
+  private pickVersion(n: number): void {
+    this.flush();
+    this.setVersionsOpen(false);
+    void invoke("set_draft_version", {
+      sessionId: this.deps.sessionId,
+      id: this.draft.id,
+      recipient: this.recipient,
+      n,
+    })
+      .then(() => this.deps.onChanged())
+      .catch((err) => console.error("[drafts-editor] set_draft_version failed", err));
+  }
 
   private onClick = (ev: MouseEvent): void => {
     const el = ev.target as HTMLElement;
@@ -252,8 +270,21 @@ export class DraftsEditor {
       this.deps.onBack();
       return;
     }
-    if (el.closest("[data-delete]")) {
-      this.remove();
+    const who = el.closest<HTMLElement>("[data-recipient]");
+    if (who) {
+      this.flush();
+      this.recipient = who.dataset.recipient ?? this.recipient;
+      this.versionsOpen = false;
+      this.render();
+      return;
+    }
+    if (el.closest("[data-versions]")) {
+      this.setVersionsOpen(!this.versionsOpen);
+      return;
+    }
+    const pick = el.closest<HTMLElement>("[data-version-n]");
+    if (pick) {
+      this.pickVersion(Number(pick.dataset.versionN));
       return;
     }
     if (el.closest("[data-archive]")) {
@@ -272,10 +303,6 @@ export class DraftsEditor {
       return;
     }
     if (this.reviseMenu.handleClick(el)) return;
-    if (el.closest("[data-ready]")) {
-      this.setState(this.draft.state === "ready" ? "needs-you" : "ready");
-      return;
-    }
     const code = el.closest("[data-code]");
     if (code) {
       ev.preventDefault();
@@ -294,6 +321,9 @@ export class DraftsEditor {
    *  click is its own (the body's selection capture, right before a focused
    *  button would collapse it). */
   private onPointerDown = (ev: PointerEvent): void => {
+    // The format buttons only show while the body has focus, so pressing one
+    // must not take that focus away before its click lands.
+    if ((ev.target as HTMLElement).closest(".dr-bar")) ev.preventDefault();
     this.reviseMenu.capturePointerDown(ev);
   };
 
@@ -331,16 +361,5 @@ export class DraftsEditor {
     void invoke("set_draft_state", { sessionId: this.deps.sessionId, id: this.draft.id, next })
       .then(() => this.deps.onChanged())
       .catch((err) => console.error("[drafts-editor] set_draft_state failed", err));
-  }
-
-  private remove(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = null;
-    void invoke("delete_draft", { sessionId: this.deps.sessionId, id: this.draft.id })
-      .then(() => {
-        this.deps.onChanged();
-        this.deps.onBack();
-      })
-      .catch((err) => console.error("[drafts-editor] delete_draft failed", err));
   }
 }
