@@ -86,6 +86,10 @@ $ErrorActionPreference = 'Stop'
 # Script scope, not inside Invoke-SweepInSupervisor, so a test that dot-sources this file can
 # override these helpers afterwards.
 . (Join-Path $PSScriptRoot 'supervisor-api.ps1')
+# Script scope, same reason as above: scripts/wdio-sweep-headless.test.ps1 dot-sources this file
+# then overrides the supervisor-api.ps1 helpers at its own script scope, and the headless hop
+# functions below need to see those overrides (see wdio-sweep-headless.ps1's own header).
+. (Join-Path $PSScriptRoot 'wdio-sweep-headless.ps1')
 
 $repoRoot = (git rev-parse --show-toplevel) -replace '/', '\'
 $fakeClaudeBinGiven = $PSBoundParameters.ContainsKey('FakeClaudeBin')
@@ -278,68 +282,6 @@ function Invoke-WdioSpec {
     [PSCustomObject]@{ Spec = $SpecName; Passing = $verdict.Passing; Failing = $verdict.Failing; FirstError = $verdict.FirstError; ExitCode = $exitCode; LogPath = $logPath; Skipped = $false; Status = $status }
 }
 
-# The command line the supervisor runs for the headless copy. Bare paths only: the supervisor's
-# cmd /c turns a quoted one into a literal "\"...\"" (see live-verify.ps1), so a path with a space
-# is refused here rather than mangled there.
-function Get-InSupervisorCommand {
-    param([string]$ScriptPath, [string]$VerdictFile, [switch]$Billed, [switch]$RealClaude, [string]$FakeClaudeBin)
-    foreach ($p in @($ScriptPath, $VerdictFile, $FakeClaudeBin)) {
-        if ($p -and $p.Contains(' ')) { throw "Cannot run headless with a space in '$p'; pass -Visible, or use a path without spaces." }
-    }
-    $parts = @('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath, '-InSupervisor')
-    if ($VerdictFile) { $parts += @('-VerdictFile', $VerdictFile) }
-    if ($Billed) { $parts += '-Billed' }
-    if ($RealClaude) { $parts += '-RealClaude' }
-    if ($FakeClaudeBin) { $parts += @('-FakeClaudeBin', $FakeClaudeBin) }
-    return ($parts -join ' ')
-}
-
-# The headless copy's verdict, read from its summary: the supervisor reports a status, not the exit
-# code, so the sweep's own final line is the only pass/fail signal that survives the hop.
-function Get-InSupervisorExitCode {
-    param([string[]]$Lines)
-    if (@($Lines | Where-Object { $_ -match '^SWEEP PASSED' }).Count -gt 0) { return 0 }
-    return 1
-}
-
-# Re-launches this script under server_supervisor with its whole process tree headless, streams
-# its output as it runs, and returns its verdict as an exit code.
-function Invoke-SweepInSupervisor {
-    $api = Get-SupervisorApi
-    if (-not $api) { throw 'server_supervisor is not running, so the sweep has nothing to run headless in. Start it, or pass -Visible to let the app windows open on the desktop.' }
-    # Forward -FakeClaudeBin only when the caller gave one; the copy derives the same default itself.
-    $fake = if ($fakeClaudeBinGiven) { $FakeClaudeBin } else { $null }
-    $verdictPath = Join-Path $env:TEMP "wdio-sweep-verdict-$([guid]::NewGuid().ToString('N')).txt"
-    $cmd = Get-InSupervisorCommand -ScriptPath $PSCommandPath -VerdictFile $verdictPath -Billed:$Billed -RealClaude:$RealClaude -FakeClaudeBin $fake
-    $started = Start-SupervisorHeadless $api $repoRoot $cmd 'wdio-sweep' $null
-    Write-Host "Running headless under server_supervisor ($($started.id)); its dashboard previews the app window."
-    $streamed = 0
-    try {
-        do {
-            Start-Sleep -Seconds 3
-            # The supervisor deletes an ephemeral command once it exits, so its log can 404 between
-            # these two reads; the verdict file below is what carries the summary across that.
-            try {
-                $proc = Get-SupervisorProcs $api | Where-Object { $_.id -eq $started.id } | Select-Object -First 1
-                $fresh = @(Invoke-Supervisor $api 'GET' "/procs/$($started.id)/logs" | ForEach-Object { $_.text })
-            } catch { break }
-            $fresh | Select-Object -Skip $streamed | ForEach-Object { Write-Host $_ }
-            $streamed = $fresh.Count
-        } while ($proc -and $proc.status -in 'running', 'starting')
-    } finally {
-        # Also what stops the headless copy, and every wdio/app process under it, on Ctrl+C.
-        Remove-SupervisorRig $api $started.id
-    }
-    if (-not (Test-Path $verdictPath)) {
-        Write-Host "`nThe headless copy wrote no summary: it died or was stopped before finishing."
-        return 1
-    }
-    $summary = @(Get-Content -Path $verdictPath)
-    Remove-Item -Path $verdictPath -ErrorAction SilentlyContinue
-    $summary | ForEach-Object { Write-Host $_ }
-    return (Get-InSupervisorExitCode -Lines $summary)
-}
-
 # --- main ---
 # Guarded so the functions above (Get-WdioVerdict, Get-WdioStatus, ...) can be dot-sourced and
 # unit-tested without firing off the actual sweep - dot-sourcing sets InvocationName to '.',
@@ -348,7 +290,9 @@ if ($MyInvocation.InvocationName -ne '.') {
 
     # -WhatIf stays in-process: it only prints the plan, and opens no window to hide.
     if (-not $Visible -and -not $InSupervisor -and -not $WhatIfPreference) {
-        exit (Invoke-SweepInSupervisor)
+        # $PSCommandPath here is THIS file (wdio-sweep.ps1) - must be passed explicitly, see
+        # Invoke-SweepInSupervisor's own comment in wdio-sweep-headless.ps1.
+        exit (Invoke-SweepInSupervisor -ScriptPath $PSCommandPath)
     }
 
     Test-DebugExeFreshness
