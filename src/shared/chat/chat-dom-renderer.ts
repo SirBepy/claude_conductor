@@ -153,7 +153,17 @@ export function buildMessageEl(m: RenderedMessage, sessionId: string | null = nu
   const el = wrap.firstElementChild as HTMLElement;
   // Raw narration (assistant prose, tool calls/results): hidden by default,
   // shown only when the container carries show-raw-chat (see message-filter-pref.ts).
-  if (m.kind === "assistant" || m.kind === "tool_use" || m.kind === "tool_result") {
+  // A finalized /create-pr turn renders its preview card INSIDE the assistant
+  // row (renderMessage), so tagging the whole row would hide the card with the
+  // prose. That row stays visible and only its prose moves into a narration
+  // wrapper, so quiet mode still shows nothing but the card.
+  const prCard = m.kind === "assistant" ? el.querySelector<HTMLElement>(":scope > .pr-preview-card") : null;
+  if (prCard) {
+    const prose = document.createElement("div");
+    prose.className = "chat-narration";
+    while (el.firstChild && el.firstChild !== prCard) prose.appendChild(el.firstChild);
+    el.insertBefore(prose, prCard);
+  } else if (m.kind === "assistant" || m.kind === "tool_use" || m.kind === "tool_result") {
     el.classList.add("chat-narration");
   }
   // Hover-timestamp label. History lines carry a real epoch (parsed from the
