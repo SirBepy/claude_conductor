@@ -20,22 +20,6 @@ pub struct ServerInfo {
     pub port: u16,
 }
 
-/// Directory `server_supervisor` writes its loopback API token/port into.
-fn supervisor_dir() -> Option<std::path::PathBuf> {
-    Some(
-        dirs::config_dir()?
-            .join("com.sirbepy.server-supervisor")
-            .join("supervisor"),
-    )
-}
-
-fn read_trimmed(path: std::path::PathBuf) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 /// Basename of a working-directory path, matching how the supervisor derives its
 /// `project` field (and how the `folder` chip derives its label). Slash-agnostic.
 fn folder_basename(cwd: &str) -> Option<String> {
@@ -55,9 +39,7 @@ pub async fn list_project_servers(cwd: String) -> Vec<ServerInfo> {
 
 async fn list_project_servers_inner(cwd: String) -> Option<Vec<ServerInfo>> {
     let project = folder_basename(&cwd)?;
-    let dir = supervisor_dir()?;
-    let port = read_trimmed(dir.join("api_port.txt"))?;
-    let token = read_trimmed(dir.join("api_token.txt"))?;
+    let (token, port) = crate::util::supervisor_client::supervisor_config()?;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
