@@ -8,6 +8,10 @@ use std::sync::Mutex;
 
 pub(super) const MAX_DRAFTS: usize = 100;
 const MAX_VERSIONS: usize = 30;
+/// A draft nobody touched for this long goes for good. The panel retires a
+/// draft after 7 idle days, so anything this old is already sent, archived or
+/// outdated; the user picked a month as how far back the Drafts history reaches.
+pub(super) const EXPIRE_DAYS: i64 = 30;
 
 /// Same rationale as `user_todos::WRITE_LOCK` - cross-process integrity comes
 /// from the atomic rename, not this lock.
@@ -68,6 +72,19 @@ pub(super) fn prune(drafts: &mut Vec<MessageDraft>) {
             }
         });
     }
+}
+
+/// Drops every draft last touched more than `EXPIRE_DAYS` before `now`; true if
+/// any went. An unreadable `updated_at` is kept, since a parse bug must never
+/// delete drafts.
+pub(super) fn expire(drafts: &mut Vec<MessageDraft>, now: chrono::DateTime<chrono::Utc>) -> bool {
+    let cutoff = now - chrono::Duration::days(EXPIRE_DAYS);
+    let before = drafts.len();
+    drafts.retain(|d| match chrono::DateTime::parse_from_rfc3339(&d.updated_at) {
+        Ok(t) => t >= cutoff,
+        Err(_) => true,
+    });
+    drafts.len() != before
 }
 
 /// Keeps v1 as the origin point plus the most recent tail, so Revert always has

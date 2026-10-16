@@ -124,14 +124,22 @@ pub(crate) fn list_message_drafts_in(
 }
 
 /// Fills `person`/`platform` on variants written before those fields existed,
-/// from the free-text `recipient`, for this response only - the store keeps
-/// what was written. A stored `person` is never second-guessed.
+/// from the free-text `recipient` (else the body, for a Shortcut comment), for
+/// this response only - the store keeps what was written. A stored `person` is
+/// never second-guessed; a stored platform only gets its current name.
 fn annotate(drafts: &mut [MessageDraft], everyone: &[Person]) -> Vec<Person> {
     let mut used: BTreeMap<String, Person> = BTreeMap::new();
-    for variant in drafts.iter_mut().flat_map(|d| d.variants.iter_mut()) {
-        if variant.platform.is_none() {
-            variant.platform = store::infer_platform(&variant.recipient).map(str::to_string);
+    for draft in drafts.iter_mut() {
+        for variant in draft.variants.iter_mut() {
+            variant.platform = match variant.platform.take() {
+                Some(p) => Some(store::canonical_platform(&p).to_string()),
+                None => store::infer_platform(&variant.recipient)
+                    .or_else(|| store::infer_platform_from_body(&draft.topic, store::current_body(variant)))
+                    .map(str::to_string),
+            };
         }
+    }
+    for variant in drafts.iter_mut().flat_map(|d| d.variants.iter_mut()) {
         if variant.person.is_none() {
             if let Resolved::One(p) = people::resolve(everyone, &variant.recipient) {
                 variant.person = Some(p.id.clone());
@@ -533,6 +541,19 @@ mod tests {
         assert_eq!(v["people"][0]["relationship"], "coworker (Zirtue QA)");
         // Read-time only: the store still holds what was written.
         assert!(list_at_path(root.path())[0].variants[0].person.is_none());
+    }
+
+    #[test]
+    fn list_names_old_platforms_the_way_the_panel_shows_them() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "55910 handoff", "recipient": "zng-admin chat", "platform": "Claude chats", "body": "Pick up sc-55910"})).unwrap();
+        write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "sc-56157 retest note", "recipient": "Lenar", "body": "@lenar a draft now only counts once"})).unwrap();
+        write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "Lender DOB, sc-56160", "recipient": "Stevan", "body": "Ej, https://app.shortcut.com/zirtue/story/56160"})).unwrap();
+        let v = list_message_drafts_in(Some(root.path()), None, &state, "s1").unwrap();
+        assert_eq!(v["drafts"][0]["variants"][0]["platform"], "Prompts");
+        assert_eq!(v["drafts"][1]["variants"][0]["platform"], "Shortcut", "an @mention on a ticket topic is a Shortcut comment");
+        assert!(v["drafts"][2]["variants"][0]["platform"].is_null(), "a DM about a ticket is not posted on Shortcut");
     }
 
     fn list_at_path(root: &Path) -> Vec<MessageDraft> {
