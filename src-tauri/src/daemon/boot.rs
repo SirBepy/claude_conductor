@@ -176,14 +176,14 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     });
 
     // Remote-access server (phone cockpit, Phase 1). Localhost-bound + token-
-    // authed; opt-in remote reach via the user's `tailscale serve`. Best-effort:
-    // never fails daemon startup. See daemon/remote_server.rs for the security
+    // authed; reached from outside only through the iroh tunnel below.
+    // Best-effort: never fails daemon startup. See daemon/remote_server.rs for the security
     // boundary.
     let stt = remote_server::spawn(state.clone(), app_data.clone(), router.clone());
 
-    // iroh tunnel to that same server (todo 506 phase 2) - reaches the phone
-    // without Tailscale. Runs alongside `tailscale serve`, not instead of it,
-    // until it is verified on a real device. Same best-effort contract.
+    // iroh tunnel to that same server: how phones and paired
+    // machines reach this daemon. Binds and closes live with the remote-access
+    // switch. Same best-effort contract.
     let _iroh = iroh_tunnel::spawn(app_data.clone());
 
     // Idle-shutdown tick for the STT voice sidecar: every 60s, kill it if it has

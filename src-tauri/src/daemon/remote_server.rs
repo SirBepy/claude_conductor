@@ -1,15 +1,15 @@
-//! Remote-access server: the daemon-side HTTP/WS API that a phone (or any
-//! browser on the tailnet) uses to drive in-app chats. This is the Phase 1
+//! Remote-access server: the daemon-side HTTP/WS API that a phone (or a
+//! paired peer machine) uses to drive in-app chats. This is the Phase 1
 //! vertical slice of the "remote phone cockpit" (see ai_todo 103 + the design
 //! spec). SECURITY-CRITICAL: every authed route can send input to a `claude`
 //! process that holds Bash/Edit/Read tools, so a bypass here is RCE.
 //!
 //! Security boundary (review this):
 //!   1. Binds 127.0.0.1 ONLY (never 0.0.0.0). It is NOT internet-reachable on
-//!      its own; remote access is opt-in by the user running `tailscale serve`
-//!      to reverse-proxy it over the tailnet with Tailscale-managed HTTPS.
+//!      its own; remote reach is the iroh tunnel (`iroh_tunnel.rs`), which only
+//!      binds while the user has switched remote access on.
 //!   2. Per-request bearer-token auth on every data route (defense in depth on
-//!      top of the tailnet). The token's SHA-256 hash is stored in a
+//!      top of the tunnel's switch). The token's SHA-256 hash is stored in a
 //!      daemon-owned file; the plaintext is never persisted by the server
 //!      except the one-time bootstrap handoff file the user copies + deletes.
 //!   3. Fail-closed: if no token hash exists, every authed route returns 401.
@@ -117,7 +117,7 @@ pub fn spawn(
         let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task });
         let app = build_router(ctx);
         log::info!(
-            "remote-access server listening on 127.0.0.1:{bound_port} (expose with `tailscale serve --bg --https=443 http://127.0.0.1:{bound_port}`)"
+            "remote-access server listening on 127.0.0.1:{bound_port}"
         );
         if let Err(e) = axum::serve(listener, app).await {
             log::error!("remote-access server exited: {e}");
@@ -164,6 +164,8 @@ pub(crate) fn spawn_on(
     port: u16,
 ) -> (Arc<crate::daemon::stt::SttSupervisor>, u16, TestServerHandle) {
     DeviceRegistry::ensure_desktop_device(&app_data);
+    // Remote access is off by default; a fixture server exists to be reached.
+    DeviceRegistry::set_enabled(true, &app_data).expect("enable remote access");
     state.init_machines(app_data.clone());
     if let Some(reg) = state.machines.get() {
         reg.ensure_self();

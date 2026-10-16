@@ -154,9 +154,6 @@ export interface AuthStatus { state?: string; [k: string]: unknown; }
 // app-process command's return shape; not a ts-rs generated type.
 export interface RemoteAccessStatus {
   enabled: boolean;
-  tailscale_up: boolean;
-  serve_running: boolean;
-  url: string | null;
 }
 
 export interface PairingQrResult {
@@ -522,9 +519,6 @@ export const api = {
   listRemoteDevices: (): Promise<RemoteDevice[]> => invoke("list_remote_devices"),
   revokeRemoteDevice: (id: string): Promise<boolean> =>
     invoke("revoke_remote_device", { id }),
-  setRemoteKillSwitch: (enabled: boolean): Promise<void> =>
-    invoke("set_remote_kill_switch", { enabled }),
-  getRemoteKillSwitch: (): Promise<boolean> => invoke("get_remote_kill_switch"),
 
   // --- Machines (multi-machine federation, Settings > Remote access) ---
   // Desktop-pipe only; HttpTransport (phone) rejects all five with

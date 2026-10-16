@@ -117,8 +117,8 @@ pub async fn post_pairing_request(base_url: &str, body: Value) -> Result<Value, 
     serde_json::from_str(&text).map_err(|e| PeerError::Protocol(format!("invalid pair response: {e}")))
 }
 
-/// How to physically reach `peer`: `direct_url` if set (same-LAN/Tailscale
-/// pairing); else, if an `iroh_id` is known, dial it and proxy through a
+/// How to physically reach `peer`: `direct_url` if set (a hand-given address
+/// at pairing); else, if an `iroh_id` is known, dial it and proxy through a
 /// loopback port (`state.iroh_dialer`); else there's no way to reach it at all.
 pub async fn reach_url(state: &DaemonState, peer: &PeerMachine) -> Result<String, PeerError> {
     if let Some(direct) = &peer.direct_url {

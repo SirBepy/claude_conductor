@@ -33,7 +33,7 @@ async function commitMachineLabel(root: HTMLElement, input: HTMLInputElement): P
  *  Hidden entirely when list_machines() fails - the phone (RemoteUnavailableError)
  *  and any desktop build without the federation backend yet both degrade the
  *  same way, rather than showing a form that can never do anything. */
-export async function renderMachinesSection(root: HTMLElement, myUrlSeed?: string | null): Promise<void> {
+export async function renderMachinesSection(root: HTMLElement): Promise<void> {
   const section = $(root, "#ra-machines-section");
   if (!section) return;
   try {
@@ -75,13 +75,6 @@ export async function renderMachinesSection(root: HTMLElement, myUrlSeed?: strin
         errorLabel: "unpair_machine",
       },
     );
-
-    // Prefill only once (empty + untouched) - never stomp a value the dev is
-    // mid-typing on a later refresh.
-    const myUrlInput = $(root, "#ra-machine-my-url") as HTMLInputElement | null;
-    if (myUrlInput && myUrlSeed && !myUrlInput.value && document.activeElement !== myUrlInput) {
-      myUrlInput.value = myUrlSeed;
-    }
 
     section.style.display = "";
   } catch (e) {

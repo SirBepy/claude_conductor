@@ -83,11 +83,6 @@ pub struct Settings {
     /// (usage + token = 90 days, skill events kept forever).
     #[serde(default)]
     pub retention: crate::storage::RetentionPolicies,
-    /// Whether the phone remote-access reverse proxy (`tailscale serve`) is
-    /// enabled. Absent in older settings files; `default` (false) keeps remote
-    /// access off until the user opts in from Settings.
-    #[serde(default)]
-    pub remote_access_enabled: bool,
     /// Fallback account for unbound projects and the tray. `None` until the
     /// first account is added (milestone 01) or when the last account is
     /// removed. There is no "default account is special" code path beyond
@@ -189,7 +184,6 @@ impl Default for Settings {
             default_character_whitelist: default_character_whitelist(),
             session_characters: std::collections::HashMap::new(),
             retention: crate::storage::RetentionPolicies::default(),
-            remote_access_enabled: false,
             default_account_id: None,
             jarvis_session_id: None,
             accounts_setup_prompt_dismissed: false,

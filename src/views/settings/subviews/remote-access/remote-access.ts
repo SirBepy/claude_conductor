@@ -1,5 +1,5 @@
 import { html, render } from "lit-html";
-import { api, type RemoteAccessStatus } from "../../../../shared/api";
+import { api } from "../../../../shared/api";
 import { settingsHeader } from "../../ui";
 import { renderMachinesSection, wireMachinePairForm, machinesSectionTemplate } from "./machines-section";
 import { renderEntityList } from "./entity-list";
@@ -17,19 +17,6 @@ function escapeHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function statusLineHtml(s: RemoteAccessStatus): string {
-  if (!s.tailscale_up) {
-    return `<span class="ra-status ra-status-warn"><i class="ph ph-warning"></i> Tailscale isn't connected - start/sign in to Tailscale first</span>`;
-  }
-  const url = s.url
-    ? `<a class="ra-url" id="ra-url-link" href="#">${escapeHtml(s.url)}</a>`
-    : `<span class="ra-url">(no URL yet)</span>`;
-  const serve = s.serve_running
-    ? `<span class="ra-status ra-status-ok"><i class="ph ph-check-circle"></i> Serving</span>`
-    : `<span class="ra-status ra-status-dim"><i class="ph ph-pause-circle"></i> Not serving</span>`;
-  return `${url} ${serve}`;
-}
-
 let currentPairingUrl = "";
 
 async function refreshQr(root: HTMLElement): Promise<void> {
@@ -42,7 +29,7 @@ async function refreshQr(root: HTMLElement): Promise<void> {
     const copyBtn = $(root, "#ra-copy-url");
     if (copyBtn) copyBtn.style.display = "";
   } catch {
-    box.innerHTML = `<span class="ra-qr-fallback">QR unavailable — check Tailscale</span>`;
+    box.innerHTML = `<span class="ra-qr-fallback">Not ready yet - the background service is still starting. Try Refresh QR in a moment.</span>`;
     currentPairingUrl = "";
     const copyBtn = $(root, "#ra-copy-url");
     if (copyBtn) copyBtn.style.display = "none";
@@ -96,32 +83,18 @@ async function hydrate(root: HTMLElement): Promise<void> {
     };
   }
 
-  const statusEl = $(root, "#ra-statusline");
-  if (statusEl) {
-    statusEl.innerHTML = statusLineHtml(status);
-    const link = statusEl.querySelector<HTMLAnchorElement>("#ra-url-link");
-    if (link && status.url) {
-      const url = status.url;
-      link.onclick = (e) => { e.preventDefault(); void api.openExternal(url); };
-    }
-  }
-
-  // Machine pairing is a separate system from the phone/Tailscale remote
-  // access above (iroh/direct-URL based) - it renders (or hides itself, on
-  // the phone) regardless of the toggle/tailscale state gating the sections
-  // below.
+  // Machine pairing is its own section; it renders (or hides itself, on the
+  // phone) regardless of the switch, so existing peers stay listed while off.
   wireMachinePairForm(root);
-  await renderMachinesSection(root, status.url);
+  await renderMachinesSection(root);
+  await renderDeviceList(root);
 
-  const showQr = status.enabled && status.tailscale_up;
+  const showQr = status.enabled;
   const qrSection = $(root, "#ra-qr-section");
-  const killSection = $(root, "#ra-kill-section");
   if (qrSection) qrSection.style.display = showQr ? "" : "none";
-  if (killSection) killSection.style.display = showQr ? "" : "none";
 
   if (showQr) {
     await refreshQr(root);
-    await renderDeviceList(root);
 
     const copyBtn = $(root, "#ra-copy-url");
     if (copyBtn) {
@@ -139,20 +112,6 @@ async function hydrate(root: HTMLElement): Promise<void> {
     const refreshBtn = $(root, "#ra-refresh-qr");
     if (refreshBtn) {
       refreshBtn.onclick = () => { void refreshQr(root); };
-    }
-
-    const killToggle = $(root, "#ra-kill-switch") as HTMLInputElement | null;
-    if (killToggle) {
-      try {
-        const serverEnabled = await api.getRemoteKillSwitch();
-        killToggle.checked = !serverEnabled;
-        killToggle.onchange = () => {
-          void (async () => {
-            try { await api.setRemoteKillSwitch(!killToggle.checked); }
-            catch (e) { console.error("[remote-access] kill switch failed", e); }
-          })();
-        };
-      } catch { /* ignore */ }
     }
   }
 }
@@ -176,7 +135,8 @@ function template() {
 
         <div class="kit-section">
           <p class="ra-explainer">
-            Control this app from your phone over your private Tailscale network.
+            Control this app from your phone, or pair another Conductor machine, peer-to-peer from anywhere.
+            Off means no remote device can reach this machine.
           </p>
           <div class="kit-row">
             <span class="kit-row-label">Enable remote access</span>
@@ -184,9 +144,6 @@ function template() {
               <input type="checkbox" id="ra-enabled">
               <span class="kit-toggle-track"></span>
             </label>
-          </div>
-          <div class="kit-row" style="border:none">
-            <span id="ra-statusline" class="ra-statusline"></span>
           </div>
         </div>
 
@@ -214,19 +171,6 @@ function template() {
         <div class="kit-section" id="ra-devices-section" style="display:none">
           <div class="kit-section-title">Paired devices</div>
           <div id="ra-device-list" class="ra-device-list"></div>
-        </div>
-
-        <div class="kit-section" id="ra-kill-section" style="display:none">
-          <div class="kit-row">
-            <span class="kit-row-label">Block all remote access</span>
-            <label class="kit-toggle">
-              <input type="checkbox" id="ra-kill-switch">
-              <span class="kit-toggle-track"></span>
-            </label>
-          </div>
-          <p class="ra-caption" style="margin-top:4px">
-            Disables the remote server immediately. Paired devices get 503 until re-enabled.
-          </p>
         </div>
 
       </div>

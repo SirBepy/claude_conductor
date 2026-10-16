@@ -19,6 +19,14 @@ pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParam
     let registry = state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
     let mine = registry.self_machine().unwrap_or_else(|| registry.ensure_self());
     let app_data = registry.app_data().to_path_buf();
+    // One paste pairs both directions, so the other machine will dial back
+    // here at once; with this side switched off every one of those calls
+    // would 503 and the pairing would look broken from the far end.
+    if !DeviceRegistry::is_enabled(&app_data) {
+        return Err(RpcError::invalid_params(
+            "remote access is off on this machine - turn it on in Settings > Remote access first, so the other machine can reach back",
+        ));
+    }
 
     let parsed = super::pairing_url::parse_pairing_url(&req.url).map_err(RpcError::invalid_params)?;
     // The URL a `conductor://` (iroh-only) link resolves to today is a
@@ -225,6 +233,26 @@ mod tests {
             )
             .await;
         assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn pair_machine_refuses_while_remote_access_is_off() {
+        let dir = tempdir().unwrap();
+        let mut r = Router::new();
+        super::super::register_machines(&mut r, state_with_machines(dir.path()));
+        let resp = r
+            .dispatch(
+                crate::daemon::rpc::Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "pair_machine".into(),
+                    params: Some(json!({"url": "conductor://pair?iroh=deadbeef&pair=abc"})),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        let err = resp.error.expect("pairing must be refused while switched off");
+        assert!(err.message.contains("remote access is off"), "got {}", err.message);
     }
 
     #[tokio::test]

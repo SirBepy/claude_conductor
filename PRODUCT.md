@@ -82,7 +82,7 @@ app does differently, evidenced by the code itself:
   and hook registration (with explicit user consent for the hook, per the
   first-run modal in src/index.html) - chats run under the app's own per-account
   profile folders, never the terminal's own `~/.claude` (README.md:88).
-- Cross-device operation: a paired phone (QR/Tailscale) gets a remote-control web
+- Cross-device operation: a paired phone (QR, peer-to-peer over iroh) gets a remote-control web
   UI; a paired desktop/laptop machine mirrors the other's chat list and can spawn
   or message sessions on it (README.md's Android companion + Multi-machine
   sections).

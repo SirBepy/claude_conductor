@@ -1,4 +1,5 @@
-//! iroh tunnel to the remote-access server - the Tailscale replacement.
+//! iroh tunnel to the remote-access server: how a phone or a paired machine
+//! reaches this daemon from anywhere, peer-to-peer, with no port forwarding.
 //!
 //! Each accepted QUIC bi-stream is spliced onto a fresh TCP connection to
 //! `127.0.0.1:27183`, so auth and the never-public bind are both unchanged.
@@ -87,15 +88,21 @@ impl IrohTunnel {
     }
 }
 
-/// Start the tunnel. Best-effort like `remote_server::spawn`. Gated on the
-/// remote-access toggle so a user who never enabled it publishes nothing to
-/// n0's address-lookup service.
+/// How often the tunnel re-reads the remote-access switch. The switch lives in
+/// `remote-devices.json`, written by the app process, so polling a small file
+/// is what lets the toggle take effect without a daemon restart.
+const SWITCH_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// After a failed bind, wait this long before retrying so an offline machine
+/// doesn't log a bind warning every poll.
+const BIND_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Start the tunnel. Best-effort like `remote_server::spawn`. Bound only while
+/// the remote-access switch is on, so a user who never enabled it publishes
+/// nothing to n0's address-lookup service; flipping it binds or closes the
+/// endpoint within `SWITCH_POLL`.
 pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
     let tunnel = Arc::new(IrohTunnel::default());
-    if !DeviceRegistry::is_enabled(&app_data) {
-        log::info!("iroh tunnel: remote access is disabled; not binding an endpoint");
-        return tunnel;
-    }
     // Two daemons must never both advertise a tunnel for the same user, so a
     // non-default instance (dev daemon serving a phone directly) skips this
     // entirely; only the default instance's remote server gets tunneled.
@@ -103,32 +110,62 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
         log::info!("iroh tunnel: non-default daemon instance; not advertising a tunnel");
         return tunnel;
     }
+    // Minted up front, even while switched off, so the app process can show a
+    // pairing link (`endpoint_id_from_disk`) the moment the user flips the
+    // switch on instead of waiting for the bind. A local file, nothing published.
+    let secret = load_or_create_secret(&app_data);
     let handle = tunnel.clone();
     tokio::spawn(async move {
         let target_port = resolve_port();
-        let secret = load_or_create_secret(&app_data);
-        let endpoint = match Endpoint::builder(presets::N0)
-            .secret_key(secret)
-            .alpns(vec![ALPN.to_vec()])
-            .bind()
-            .await
-        {
-            Ok(ep) => ep,
-            Err(e) => {
-                log::warn!("iroh tunnel: bind failed: {e}; tunnel disabled this run");
-                return;
+        let mut announced_off = false;
+        loop {
+            let enabled = DeviceRegistry::is_enabled(&app_data);
+            let bound = handle.endpoint.read().ok().and_then(|slot| slot.clone());
+            match (enabled, bound) {
+                (true, None) => {
+                    announced_off = false;
+                    match bind(secret.clone()).await {
+                        Ok(endpoint) => {
+                            if let Ok(mut slot) = handle.endpoint.write() {
+                                *slot = Some(endpoint.clone());
+                            }
+                            log::info!("iroh tunnel: listening as {} -> 127.0.0.1:{target_port}", endpoint.id());
+                            tokio::spawn(accept_loop(endpoint, target_port));
+                        }
+                        Err(e) => {
+                            log::warn!("iroh tunnel: bind failed: {e}; retrying in {}s", BIND_RETRY.as_secs());
+                            tokio::time::sleep(BIND_RETRY).await;
+                        }
+                    }
+                }
+                (false, Some(endpoint)) => {
+                    if let Ok(mut slot) = handle.endpoint.write() {
+                        *slot = None;
+                    }
+                    // Ends `accept_loop` (accept() yields None) and drops every
+                    // live phone/peer connection with it.
+                    endpoint.close().await;
+                    log::info!("iroh tunnel: remote access switched off; endpoint closed");
+                }
+                (false, None) if !announced_off => {
+                    announced_off = true;
+                    log::info!("iroh tunnel: remote access is off; not binding an endpoint");
+                }
+                _ => {}
             }
-        };
-        if let Ok(mut slot) = handle.endpoint.write() {
-            *slot = Some(endpoint.clone());
+            tokio::time::sleep(SWITCH_POLL).await;
         }
-        match handle.ticket() {
-            Some(t) => log::info!("iroh tunnel: listening as {t} -> 127.0.0.1:{target_port}"),
-            None => log::warn!("iroh tunnel: bound but the endpoint id is unreadable"),
-        }
-        accept_loop(endpoint, target_port).await;
     });
     tunnel
+}
+
+async fn bind(secret: SecretKey) -> Result<Endpoint, String> {
+    Endpoint::builder(presets::N0)
+        .secret_key(secret)
+        .alpns(vec![ALPN.to_vec()])
+        .bind()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// `target_port` is always `REMOTE_PORT` in production; tests pass an ephemeral
@@ -162,7 +199,7 @@ async fn accept_loop(endpoint: Endpoint, target_port: u16) {
             }
         });
     }
-    log::warn!("iroh tunnel: accept loop ended");
+    log::info!("iroh tunnel: accept loop ended");
 }
 
 /// Splice one QUIC bi-stream onto a fresh loopback TCP connection.

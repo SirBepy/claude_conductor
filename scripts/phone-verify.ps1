@@ -218,6 +218,11 @@ switch ($Command) {
         }
         [System.IO.File]::WriteAllText((Join-Path $dataDir 'settings.json'), ($settings | ConvertTo-Json -Depth 5))
 
+        # Remote access is off by default, and the phone page authenticates with the daemon's
+        # desktop token over the remote server, which 503s every authed route while it's off.
+        # Schema 1 so the daemon's off-by-default migration leaves this `enabled` alone.
+        [System.IO.File]::WriteAllText((Join-Path $dataDir 'remote-devices.json'), '{"devices":[],"enabled":true,"schema":1}')
+
         $port = Get-FreePort
         $label = "phone-verify-$guid"
 

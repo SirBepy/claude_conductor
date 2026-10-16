@@ -166,6 +166,7 @@ mod tests {
     async fn pair_device_leaves_pairing_code_intact_when_add_device_fails() {
         let dir = tempdir().unwrap();
         DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let code = "retryablecode";
         write_pairing_code(dir.path(), code);
         let registry_path = dir.path().join("remote-devices.json");
@@ -207,6 +208,7 @@ mod tests {
     async fn machine_pair_registers_peer_and_returns_identity_block() {
         let dir = tempdir().unwrap();
         DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let code = "machinecode1";
         write_pairing_code(dir.path(), code);
         let ctx = ctx_with_machines(dir.path().to_path_buf());
@@ -243,6 +245,7 @@ mod tests {
     async fn machine_repair_revokes_the_previous_reverse_device() {
         let dir = tempdir().unwrap();
         DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let ctx = ctx_with_machines(dir.path().to_path_buf());
 
         write_pairing_code(dir.path(), "code-one");
@@ -280,6 +283,7 @@ mod tests {
     async fn machine_pair_starts_the_links_hub_entry_for_the_new_peer() {
         let dir = tempdir().unwrap();
         DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let code = "startslink1";
         write_pairing_code(dir.path(), code);
         let ctx = ctx_with_machines(dir.path().to_path_buf());
@@ -304,6 +308,7 @@ mod tests {
     async fn machine_pair_leaves_pairing_code_intact_when_add_device_fails() {
         let dir = tempdir().unwrap();
         DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let code = "retryable-machine";
         write_pairing_code(dir.path(), code);
         let ctx = ctx_with_machines(dir.path().to_path_buf());

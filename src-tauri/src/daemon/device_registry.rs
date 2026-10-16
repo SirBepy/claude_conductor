@@ -49,11 +49,36 @@ struct DeviceEntry {
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct RegistryFile {
     devices: Vec<DeviceEntry>,
+    /// The one remote-access switch: gates the remote server's authed routes,
+    /// pairing, and whether the iroh tunnel is bound at all.
     #[serde(default = "bool_true")]
     enabled: bool,
+    /// 0 = written before remote access became off-by-default. Every daemon
+    /// boot used to force `enabled: true` (`ensure_desktop_device`), so a
+    /// schema-0 `true` is not a user choice and `migrate` re-derives it.
+    #[serde(default)]
+    schema: u32,
 }
 
+const SCHEMA: u32 = 1;
+
 fn bool_true() -> bool { true }
+
+/// Off-by-default migration: a schema-0 registry keeps remote access on only
+/// if something was actually paired (a phone, or a peer machine), so an
+/// install that never used it stops publishing an iroh endpoint. A schema-0
+/// `false` was the user's own kill switch and stays off.
+fn migrate(mut reg: RegistryFile) -> RegistryFile {
+    if reg.schema < SCHEMA {
+        reg.enabled = reg.enabled && reg.devices.iter().any(|d| d.id != DESKTOP_ID);
+        reg.schema = SCHEMA;
+    }
+    reg
+}
+
+/// The local desktop webview's own token (voice `/ws/transcribe`), not a
+/// remote device: it never counts as "something was paired".
+const DESKTOP_ID: &str = "desktop";
 
 /// Device summary exposed via IPC. token_hash is never included.
 #[derive(Serialize, Clone)]
@@ -76,7 +101,8 @@ fn load(app_data: &Path) -> RegistryFile {
     std::fs::read_to_string(registry_path(app_data))
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .map(migrate)
+        .unwrap_or(RegistryFile { schema: SCHEMA, ..Default::default() })
 }
 
 fn save(reg: &RegistryFile, app_data: &Path) -> Result<(), String> {
@@ -92,19 +118,18 @@ impl DeviceRegistry {
     /// Idempotent: no-op if desktop device already exists.
     pub fn ensure_desktop_device(app_data: &Path) {
         let mut reg = load(app_data);
-        if reg.devices.iter().any(|d| d.id == "desktop") {
+        if reg.devices.iter().any(|d| d.id == DESKTOP_ID) {
             return;
         }
         let token = mint_token();
         reg.devices.push(DeviceEntry {
-            id: "desktop".to_string(),
+            id: DESKTOP_ID.to_string(),
             name: "Desktop (this PC)".to_string(),
             token_hash: sha256_hex(&token),
             created_at: now_secs(),
             kind: DeviceKind::Phone,
             machine_id: None,
         });
-        reg.enabled = true;
         if let Err(e) = save(&reg, app_data) {
             log::error!("device_registry: failed to save desktop device: {e}");
             return;
@@ -119,7 +144,7 @@ impl DeviceRegistry {
         log::info!("device_registry: desktop device registered");
     }
 
-    /// True when the kill switch allows requests (default: true).
+    /// True when remote access is switched on (default: off).
     pub fn is_enabled(app_data: &Path) -> bool {
         load(app_data).enabled
     }
@@ -193,7 +218,8 @@ impl DeviceRegistry {
         }
     }
 
-    /// Set the kill switch. When false, auth_mw returns 503.
+    /// Flip the remote-access switch. When false, auth_mw and pairing return
+    /// 503 and `iroh_tunnel` closes its endpoint on its next poll.
     pub fn set_enabled(enabled: bool, app_data: &Path) -> Result<(), String> {
         let mut reg = load(app_data);
         reg.enabled = enabled;
@@ -251,6 +277,53 @@ mod tests {
         assert!(DeviceRegistry::is_enabled(dir.path()));
         DeviceRegistry::set_enabled(false, dir.path()).unwrap();
         assert!(!DeviceRegistry::is_enabled(dir.path()));
+    }
+
+    #[test]
+    fn fresh_install_is_off_until_enabled() {
+        let dir = tempdir().unwrap();
+        assert!(!DeviceRegistry::is_enabled(dir.path()));
+        DeviceRegistry::ensure_desktop_device(dir.path());
+        assert!(!DeviceRegistry::is_enabled(dir.path()), "registering the desktop token must not switch remote access on");
+    }
+
+    fn write_schema0(dir: &Path, devices: serde_json::Value, enabled: bool) {
+        let body = serde_json::json!({ "devices": devices, "enabled": enabled });
+        std::fs::write(registry_path(dir), body.to_string()).unwrap();
+    }
+
+    fn device_json(id: &str) -> serde_json::Value {
+        serde_json::json!({"id": id, "name": id, "token_hash": sha256_hex(id), "created_at": 0})
+    }
+
+    #[test]
+    fn schema0_with_only_the_desktop_token_migrates_off() {
+        let dir = tempdir().unwrap();
+        write_schema0(dir.path(), serde_json::json!([device_json("desktop")]), true);
+        assert!(!DeviceRegistry::is_enabled(dir.path()));
+    }
+
+    #[test]
+    fn schema0_with_a_paired_phone_stays_on() {
+        let dir = tempdir().unwrap();
+        write_schema0(dir.path(), serde_json::json!([device_json("desktop"), device_json("p1")]), true);
+        assert!(DeviceRegistry::is_enabled(dir.path()));
+    }
+
+    #[test]
+    fn schema0_kill_switch_engaged_stays_off_even_with_a_phone() {
+        let dir = tempdir().unwrap();
+        write_schema0(dir.path(), serde_json::json!([device_json("p1")]), false);
+        assert!(!DeviceRegistry::is_enabled(dir.path()));
+    }
+
+    #[test]
+    fn migration_runs_once_so_enabling_with_nothing_paired_sticks() {
+        let dir = tempdir().unwrap();
+        write_schema0(dir.path(), serde_json::json!([device_json("desktop")]), true);
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        DeviceRegistry::ensure_desktop_device(dir.path());
+        assert!(DeviceRegistry::is_enabled(dir.path()));
     }
 
     #[test]

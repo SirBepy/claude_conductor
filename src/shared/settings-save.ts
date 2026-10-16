@@ -96,7 +96,7 @@ export function saveSettings(): void {
       // a FULL-REPLACE write (no server-side merge), so any key omitted here
       // would reset to its serde default on save - silently wiping things the
       // Settings page never touches (hooks_registered, default_account_id,
-      // retention, sessionCharacters, remote_access_enabled, overlayX/Y, ...).
+      // retention, sessionCharacters, overlayX/Y, ...).
       // The named fields below override this spread with the current DOM values.
       ...prev,
       theme: (() => {
