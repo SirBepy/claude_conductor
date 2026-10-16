@@ -72,7 +72,11 @@ function anchorFor(t: TrackerInfo, id: string): HTMLAnchorElement {
 
 // A bare Shortcut number: 5-6 digits standing alone, so not part of a decimal,
 // a thousands-grouped count, a port (`:27183`), an assignment, a path or money.
-const BARE_SHORTCUT = /(?<![\w/.,:=$-])\d{5,6}(?![\w-]|[.,:]\d)/g;
+// A leading comma only reads as a thousands separator when exactly 3 digits
+// follow it (`12,345`); `12345,67890` is two ids, so the lookahead only blocks
+// a 3-digit trailing group, and the lookbehind lets a comma through when the
+// run right before it is itself a 5-6 digit id.
+const BARE_SHORTCUT = /(?:(?<![\w/.,:=$-])|(?<=\d{5,6},))\d{5,6}(?![\w-]|[.:]\d|,\d{3}(?!\d))/g;
 
 function linkMatches(root: HTMLElement, re: RegExp, skip: string, t: TrackerInfo, idOf: (m: string) => string): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
