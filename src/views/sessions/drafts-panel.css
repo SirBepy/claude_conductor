@@ -278,6 +278,25 @@
 
 .dr-grow { flex: 1; }
 
+.dr-learn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: none;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 55%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dr-learn:hover:not(:disabled) { border-style: solid; }
+.dr-learn:disabled { color: var(--color-success); border-color: transparent; cursor: default; }
+
 .dr-ver-btn,
 .dr-ver-only {
   display: inline-flex;
@@ -358,18 +377,37 @@
 
 .dr-ver-row i { font-size: 11px; color: var(--sb-muted); }
 
-/* Formatting only matters while typing, so the row only shows then; its buttons
-   keep the body focused on press (drafts-editor.ts onPointerDown). */
+/* Formatting only matters while typing, so the row slides up from under the
+   body then; its buttons keep the body focused on press (drafts-editor.ts
+   onPointerDown). Hidden with visibility too, so its buttons drop out of the
+   tab order while collapsed. */
 .dr-bar {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 1px;
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 0 8px;
   flex: 0 0 auto;
+  max-height: 0;
+  opacity: 0;
+  visibility: hidden;
+  overflow: hidden;
+  transform: translateY(6px);
+  transition: max-height 0.18s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease-out,
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 0.18s;
 }
 
-.drafts-panel:has(.dr-body:focus) .dr-bar { display: flex; }
+.drafts-panel:has(.dr-body:focus) .dr-bar {
+  max-height: 34px;
+  padding: 3px 8px 0;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dr-bar { transition: none; transform: none; }
+}
 
 .dr-fbtn {
   width: 25px;

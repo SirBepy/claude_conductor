@@ -55,6 +55,39 @@ export function buildRevisionPrompt(t: RevisionTarget, instruction: string): str
   return lines.join("\n");
 }
 
+export interface LearnTarget {
+  topic: string;
+  handle: string;
+  /** Vault person id when known, else the recipient label. */
+  recipient: string;
+  mine: { n: number; body: string };
+  /** Claude's newest version before the edit, or null if it wrote none. */
+  claudes: { n: number; body: string } | null;
+}
+
+/** "Check & learn": fact-check the user's hand edit, then save what the edit
+ *  says about their style - per-recipient lessons in that person's vault
+ *  note, general ones in the shared style file `write_draft` tells every
+ *  chat to read. Saved without asking: the user chose that, a wrong lesson is
+ *  fixed by editing the note. */
+export function buildLearnPrompt(t: LearnTarget): string {
+  const lines = [
+    `[re: draft ${t.handle} v${t.mine.n} - ${t.topic}] Check & learn`,
+    "I edited this draft by hand. Two jobs:",
+    "",
+    `1. Fact-check my version against what can be verified (the draft's receipts, the code, git, what I said). If anything is wrong, write a corrected version back with write_draft (action revise, id "${t.handle}") and say what you changed. If it is right, leave it.`,
+    "",
+    "2. Learn from my edit" + (t.claudes ? " by comparing it with your last version" : "") +
+      ": work out what it says about how I like messages written, and save each lesson now, without asking:",
+    `   - about ${t.recipient} only (tone, language, how they are addressed): their Obsidian vault note People/<their name>.md, under a "## Writing to them" heading. Re-read the file first and add lines; never rewrite it.`,
+    "   - general, true for any message: ~/.claude/refs/message-drafting.md, one bullet per rule. Create it if it does not exist.",
+    "   Skip anything that only fits this one message. Then list what you saved and where, briefly.",
+  ];
+  if (t.claudes) lines.push("", `Your last version (v${t.claudes.n}):`, quote(t.claudes.body));
+  lines.push("", `My version (v${t.mine.n}):`, quote(t.mine.body));
+  return lines.join("\n");
+}
+
 function quote(text: string): string {
   return text.trim().split("\n").map((l) => `> ${l}`).join("\n");
 }
