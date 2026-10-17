@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-const { groupDrafts, isOpen, STALE_MS, variantFor, withoutTicket } = await import("../src/views/sessions/drafts-grouping.ts");
+const { groupDrafts, isOpen, STALE_MS, variantFor, variantOn, withoutTicket } = await import("../src/views/sessions/drafts-grouping.ts");
 
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const daysAgo = (n) => new Date(NOW - n * 24 * 60 * 60 * 1000).toISOString();
@@ -193,6 +193,13 @@ describe("tracker tabs", () => {
     );
     expect(g.trackers.map((t) => t.name)).toEqual(["Shortcut", "Linear"]);
     expect(g.trackers[1].tickets[0].ticket).toBe("REV-7345");
+  });
+
+  it("a ticket speaks for the variant posted on its tracker, not the card's first one", () => {
+    const d = draft({ topic: "sc-7 note", variants: [{ platform: "Email", recipient: "Ana" }, { person: LENAR.id, platform: "Shortcut" }] });
+    const g = groupDrafts([d], [LENAR], "s1", NOW);
+    expect(g.trackers[0].tickets[0]).toMatchObject({ tracker: "Shortcut", people: ["Lenar Rakhmatulin"] });
+    expect(variantOn(d, "Shortcut").person).toBe(LENAR.id);
   });
 
   it("puts tickets with something open first", () => {

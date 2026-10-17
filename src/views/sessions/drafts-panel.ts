@@ -18,6 +18,7 @@ import {
   groupKeyOf,
   isOpen,
   variantFor,
+  variantOn,
   withoutTicket,
   type DraftGroups,
   type PersonGroup,
@@ -83,6 +84,8 @@ interface CardOpts {
   groupKey?: string;
   face?: boolean;
   ticket?: string | null;
+  /** A ticket view's tracker: picks the variant posted there. */
+  tracker?: string;
 }
 
 class DraftsPanel implements DraftsPanelHandle {
@@ -412,21 +415,29 @@ class DraftsPanel implements DraftsPanelHandle {
     const anyDone = t.drafts.some((d) => !isOpen(d, Date.now()));
     const lead = `<span class="dr-glyph lg" aria-hidden="true"><i class="ph ph-ticket"></i></span>`;
     return this.headHtml(lead, t.ticket ?? "No ticket", t.people.join(", "), anyDone) +
-      this.draftsHtml(t.drafts, { face: true, ticket: t.ticket });
+      this.draftsHtml(t.drafts, { face: true, ticket: t.ticket, tracker: t.tracker });
   }
 
   /** A ticket view's lines say who each went to; a ticket-wide comment shows
    *  its platform instead of a face. */
-  private faceHtml(d: MessageDraft): string {
-    const v = d.variants[0];
+  private faceHtml(d: MessageDraft, opts: CardOpts): string {
+    const v = this.variantOf(d, opts);
     if (!v) return "";
     if (v.platform && groupKeyOf(v).startsWith("x:")) return glyphHtml(v.platform);
     const vault = v.person ? this.people.find((p) => p.id === v.person) : undefined;
     return avatarHtml(vault?.name ?? v.person ?? v.recipient);
   }
 
-  private marks(d: MessageDraft, groupKey?: string): { edited: string; state: string } {
-    const variant = groupKey ? variantFor(d, groupKey) : d.variants[0];
+  /** The variant a row speaks for: the person's or place's in their view,
+   *  the one posted on the tracker in a ticket view, else the first. */
+  private variantOf(d: MessageDraft, opts: CardOpts) {
+    if (opts.groupKey) return variantFor(d, opts.groupKey);
+    if (opts.tracker) return variantOn(d, opts.tracker);
+    return d.variants[0];
+  }
+
+  private marks(d: MessageDraft, opts: CardOpts): { edited: string; state: string } {
+    const variant = this.variantOf(d, opts);
     const mark = (icon: string, label: string) =>
       `<i class="ph ${icon} dr-mark" title="${label}" aria-label="${label}"></i>`;
     const edited = variant && currentVersion(variant)?.author === "user" ? mark("ph-pencil-simple", "Your edit") : "";
@@ -447,13 +458,13 @@ class DraftsPanel implements DraftsPanelHandle {
    *  title, since a person's own view already says who. `groupKey` picks
    *  whose variant counts as "your edit" on a multi-person card. */
   private cardHtml(d: MessageDraft, opts: CardOpts = {}): string {
-    const { edited, state } = this.marks(d, opts.groupKey);
+    const { edited, state } = this.marks(d, opts);
     const topic = opts.ticket !== undefined ? withoutTicket(d.topic, opts.ticket) : d.topic;
     return (
       `<button type="button" class="dr-card" data-open="${escapeHtml(d.id)}" title="${this.titleOf(d)}">` +
         `<span class="dr-card-top">` +
           (d.state === "needs-you" ? `<span class="dr-pending" title="Not sent yet"></span>` : "") +
-          (opts.face ? this.faceHtml(d) : "") +
+          (opts.face ? this.faceHtml(d, opts) : "") +
           `<span class="dr-topic">${escapeHtml(topic)}</span>` +
           edited +
           state +
@@ -465,11 +476,11 @@ class DraftsPanel implements DraftsPanelHandle {
 
   /** A done draft revealed by the eye: no card, one small grey line. */
   private lineHtml(d: MessageDraft, opts: CardOpts): string {
-    const { edited, state } = this.marks(d, opts.groupKey);
+    const { edited, state } = this.marks(d, opts);
     const topic = opts.ticket !== undefined ? withoutTicket(d.topic, opts.ticket) : d.topic;
     return (
       `<button type="button" class="dr-line" data-open="${escapeHtml(d.id)}" title="${this.titleOf(d)}">` +
-        (opts.face ? this.faceHtml(d) : "") +
+        (opts.face ? this.faceHtml(d, opts) : "") +
         `<span class="dr-line-topic">${escapeHtml(topic)}</span>` +
         edited +
         state +
