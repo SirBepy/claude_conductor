@@ -398,9 +398,12 @@ fn with_list_item(text: &str, key: &str, value: &str) -> Option<String> {
         }
         None => out.insert(close, format!("{key}: [{item}]")),
     }
-    let mut joined = out.join("\n");
+    // `lines()` drops `\r`; a note saved with CRLF keeps CRLF, or every edit
+    // would rewrite all its line endings.
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut joined = out.join(nl);
     if text.ends_with('\n') {
-        joined.push('\n');
+        joined.push_str(nl);
     }
     Some(joined)
 }
@@ -589,6 +592,14 @@ mod tests {
         assert_eq!(add_to_list_at(block.path(), "Dani", "aliases", "Donna").unwrap().aliases, vec!["Dani", "Donna"]);
         let missing = vault_with(&[("Old", "---\nname: Old\n---\nbody\n")]);
         assert_eq!(add_to_list_at(missing.path(), "Old", "projects", "zirtue").unwrap().projects, vec!["zirtue"]);
+    }
+
+    #[test]
+    fn a_crlf_note_keeps_its_line_endings() {
+        let vault = vault_with(&[("Win", "---\r\nname: Win\r\naliases: []\r\n---\r\nbody\r\n")]);
+        add_to_list_at(vault.path(), "Win", "aliases", "W").unwrap();
+        let text = fs::read_to_string(vault.path().join("People/Win.md")).unwrap();
+        assert_eq!(text, "---\r\nname: Win\r\naliases: [\"W\"]\r\n---\r\nbody\r\n");
     }
 
     #[test]
