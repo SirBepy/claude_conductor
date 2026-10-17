@@ -65,9 +65,9 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 /// `send_message`, `report_turn_status`, `update_message`, `write_draft`,
 /// `write_user_todo`, `schedule`. None of them reach outside this app's own
 /// state (unlike `spawn_chat`/`respawn`/`close_session`/`post_message`, which
-/// stay gated behind the ordinary permission relay). `person` is the one that
-/// writes elsewhere, and only the user's own vault `People/` notes, one
-/// frontmatter line at a time, each after the user confirmed it. Without this, a chat
+/// stay gated behind the ordinary permission relay). The exception is
+/// `person`: it writes to the user's own vault `People/` notes, one
+/// frontmatter line at a time, and only what the user just confirmed. Without this, a chat
 /// started with `auto_accept: false` hangs on the first `schedule`/`write_plan`
 /// call until a human answers the permission card (confirmed live,
 /// `daemon_schedule_e2e.rs::schedule_mcp_tool_add_inject_cancel_live`).
