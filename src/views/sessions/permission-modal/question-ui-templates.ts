@@ -215,6 +215,12 @@ export function pagerHtml(
   answeredAt: (qi: number) => boolean,
   activeTab: number,
 ): string {
+  // A single panel has nothing to page between, so a dot here would just be
+  // a ring glyph with no meaning (there's no sibling panel to contrast
+  // against) - keep the (invisible, zero-size) .prompt-pager wrapper itself,
+  // since drag-handle.ts's isFullscreenSheet check keys off its presence to
+  // tell a question card apart from other sheet types.
+  if (totalPanels < 2) return `<span class="prompt-pager"></span>`;
   const dots = Array.from({ length: totalPanels }, (_, i) => {
     const isSummaryDot = hasSummary && i === questions.length;
     const answered = isSummaryDot ? questions.every((_, qi) => answeredAt(qi)) : answeredAt(i);
@@ -223,7 +229,6 @@ export function pagerHtml(
       data-dot="${i}" aria-label="${label}, ${answered ? "answered" : "unanswered"}"></button>`;
   }).join("");
   const dotsHtml = `<span class="prompt-dots">${dots}</span>`;
-  if (totalPanels < 2) return `<span class="prompt-pager">${dotsHtml}</span>`;
 
   const nextDisabled = nextArrowDisabled(activeTab, totalPanels, questions, answeredAt);
   return `<span class="prompt-pager">
