@@ -35,6 +35,10 @@ export interface QuestionOption {
   description?: string;
   /** Zero or more; an option can be both recommended AND long-term best. */
   badges?: OptionBadge[];
+  /** HTML fragment showing what this option looks like, rendered in a
+   *  sandboxed frame with the app's stylesheets (option-preview-doc.ts).
+   *  The MCP tool requires one on every option of a `ux` question. */
+  preview?: string;
 }
 
 export const DOMAIN_META = {

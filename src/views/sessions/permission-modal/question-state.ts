@@ -133,6 +133,7 @@ export function extractQuestions(input: unknown): Question[] | null {
               badges: Array.isArray(oo.badges)
                 ? (oo.badges as unknown[]).filter((b): b is OptionBadge => BADGES.has(b as string))
                 : undefined,
+              preview: typeof oo.preview === "string" && oo.preview.trim() ? oo.preview : undefined,
             }];
           })
         : undefined,
