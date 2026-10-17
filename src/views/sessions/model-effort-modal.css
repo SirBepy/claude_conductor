@@ -199,3 +199,43 @@
     border-top: 1px solid var(--color-border, #2a2a36);
   }
 }
+
+/* ── Phone: dock to the bottom edge, same shape as project-picker.css's
+   bottom sheet (that one's own comment covers the breakpoint/dvh rationale) -
+   this is the step right after it in the new-chat chain, and the two used to
+   be visibly inconsistent (sheet, then a centred dialog). The card itself
+   scrolls as a whole (no separate internal list region to scroll instead). */
+@media (max-width: 768px) {
+  #modal-host .modal-card.model-effort-modal-card {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+    /* The base rule's `max-width: 95vw` (95% of a 393px phone = ~373px)
+       otherwise survives into this block and caps the sheet short of the
+       full-width 100% above it. */
+    max-width: 100%;
+    max-height: 75dvh;
+    overflow-y: auto;
+    border-radius: 12px 12px 0 0;
+  }
+  /* Same specificity note as project-picker.css: ID + 3 classes outranks
+     modal.css's ID + 2-class centred-shrink base rule. */
+  #modal-host .modal-card.model-effort-modal-card.modal-card-morph-hidden {
+    transform: translateY(100%);
+  }
+  .model-effort-modal-card .me-char-pane {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Phone, keyboard open: see project-picker.css's twin rule for why this
+   needs --keyboard-inset rather than just a bigger dvh shrink. */
+@media (max-width: 768px) {
+  html[data-mobile-keyboard] #modal-host .modal-card.model-effort-modal-card {
+    bottom: var(--keyboard-inset, 0px);
+    max-height: calc(75dvh - var(--keyboard-inset, 0px));
+  }
+}

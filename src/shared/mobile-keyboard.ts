@@ -13,13 +13,29 @@ let _handler: (() => void) | null = null;
 // the keyboard) - re-baseline opportunistically on any full-height sighting.
 let _closedBaseline = 0;
 
+// Applied to BOTH `root` (.view-sessions) and <html>: #modal-host
+// (shared/modal.ts) mounts straight to document.body, a SIBLING of `root`,
+// not a descendant - a var/attribute set only on `root` never cascades to
+// it, which is why the project/model/location picker bottom sheets couldn't
+// see the keyboard state and fell back to an unreliable dvh-only guess.
+// <html> is an ancestor of both, so mirroring onto it covers both subtrees.
+function clearKeyboardState(el: HTMLElement): void {
+  el.removeAttribute("data-mobile-keyboard");
+  el.style.removeProperty("--keyboard-inset");
+}
+
+function setKeyboardState(el: HTMLElement, open: boolean, inset: number): void {
+  el.toggleAttribute("data-mobile-keyboard", open);
+  el.style.setProperty("--keyboard-inset", `${Math.round(inset)}px`);
+}
+
 function apply(): void {
   const root = _root;
   const vv = window.visualViewport;
   if (!root) return;
   if (!isMobileViewport() || !vv) {
-    root.removeAttribute("data-mobile-keyboard");
-    root.style.removeProperty("--keyboard-inset");
+    clearKeyboardState(root);
+    clearKeyboardState(document.documentElement);
     return;
   }
   const layoutH = window.innerHeight;
@@ -31,8 +47,8 @@ function apply(): void {
   const stuckGap = Math.max(0, layoutH - visualH);
   const inset = open && stuckGap > OPEN_THRESHOLD ? stuckGap : 0;
 
-  root.toggleAttribute("data-mobile-keyboard", open);
-  root.style.setProperty("--keyboard-inset", `${Math.round(inset)}px`);
+  setKeyboardState(root, open, inset);
+  setKeyboardState(document.documentElement, open, inset);
 }
 
 /** Wires the `.view-sessions` root to `visualViewport`; returns a detach
@@ -50,8 +66,8 @@ export function initMobileKeyboard(root: HTMLElement): () => void {
       vv?.removeEventListener("resize", _handler);
       vv?.removeEventListener("scroll", _handler);
     }
-    root.removeAttribute("data-mobile-keyboard");
-    root.style.removeProperty("--keyboard-inset");
+    clearKeyboardState(root);
+    clearKeyboardState(document.documentElement);
     _root = null;
     _handler = null;
     _closedBaseline = 0;
