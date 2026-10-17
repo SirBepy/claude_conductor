@@ -44,8 +44,15 @@ fn respawned_attached_sessions(
 /// (`sessions/persistence.rs:205-206`), so a dead session would otherwise
 /// light the dot forever. Mirrored (peer-machine) rows are not special-cased:
 /// they render in the sidebar's Input Needed segment too, so they also count.
+/// Jarvis and its workers never do (`isJarvisOrWorker` drops them before the
+/// sidebar derives its question set): a worker's question is Jarvis's to
+/// relay, with no row for Joe to open.
 fn is_awaiting_input(i: &crate::types::Instance) -> bool {
-    i.awaiting.as_deref() == Some("question") && i.ended_at.is_none() && i.end_reason.is_none()
+    i.awaiting.as_deref() == Some("question")
+        && i.ended_at.is_none()
+        && i.end_reason.is_none()
+        && !i.jarvis
+        && i.worker_of.is_none()
 }
 
 /// Session ids newly awaiting input in `now` that were not already in `prev`.
@@ -387,6 +394,16 @@ mod tests {
         #[test]
         fn no_awaiting_value_is_not_awaiting_input() {
             assert!(!is_awaiting_input(&instance(None, false, None)));
+        }
+
+        #[test]
+        fn a_jarvis_or_worker_question_is_not_awaiting_input() {
+            let mut worker = instance(Some("question"), false, None);
+            worker.worker_of = Some("jarvis-1".into());
+            assert!(!is_awaiting_input(&worker));
+            let mut jarvis = instance(Some("question"), false, None);
+            jarvis.jarvis = true;
+            assert!(!is_awaiting_input(&jarvis));
         }
 
         #[test]
