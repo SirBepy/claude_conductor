@@ -36,6 +36,23 @@ describe("extractQuestions chip fields", () => {
     expect(out[0].options[0].badges).toEqual(["recommended"]);
   });
 
+  it("keeps an option's preview HTML and drops a blank or non-string one", () => {
+    const out = extractQuestions({
+      questions: [{
+        question: "Which look?",
+        domain: "ux",
+        options: [
+          { label: "A", preview: "<div class='row'>A</div>" },
+          { label: "B", preview: "   " },
+          { label: "C", preview: 7 },
+        ],
+      }],
+    });
+    expect(out[0].options[0].preview).toBe("<div class='row'>A</div>");
+    expect(out[0].options[1].preview).toBeUndefined();
+    expect(out[0].options[2].preview).toBeUndefined();
+  });
+
   it("a non-array badges value is ignored, not crashed on", () => {
     const out = extractQuestions({
       questions: [{ question: "Q?", options: [{ label: "A", badges: "recommended" }] }],

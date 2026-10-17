@@ -6,6 +6,8 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { splitAsk } from "./question-state";
+import { previewLayout, previewedOptions, stageHtml, tilePictureHtml } from "./option-previews";
+import type { PreviewLayout } from "./option-previews";
 import { BADGE_META, DOMAIN_META } from "./types";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqAttachment, OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
@@ -65,7 +67,13 @@ export function questionZonesHtml(q: Question): string {
   `;
 }
 
-export function optsRowsHtml(q: Question, qi: number, selections: Map<number, Selection>, noneLabel: string): string {
+export function optsRowsHtml(
+  q: Question,
+  qi: number,
+  selections: Map<number, Selection>,
+  noneLabel: string,
+  layout: PreviewLayout | null = null,
+): string {
   return (q.options ?? []).map((opt) => {
     const selected = q.multiSelect
       ? (selections.get(qi) as Set<string> | undefined)?.has(opt.label) ?? false
@@ -77,6 +85,7 @@ export function optsRowsHtml(q: Question, qi: number, selections: Map<number, Se
     const isNone = q.multiSelect && opt.label === noneLabel;
     return `
       <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}">
+        ${layout === "tiles" ? tilePictureHtml(opt) : ""}
         <input type="${inputType}" name="q-${qi}" data-label="${escapeHtml(opt.label)}" ${selected ? "checked" : ""} />
         <span class="prompt-opt__body">
           <span class="prompt-opt__top"><span class="prompt-opt__label">${escapeHtml(opt.label)}</span>${badgesHtml(opt.badges)}</span>
@@ -130,9 +139,14 @@ export function panelHtml(
   opts: QuestionUIOpts,
 ): string {
   const isActive = qi === activeTab;
+  const layout = previewLayout(q);
+  // --tile-cols: one column per previewed option, so 2 tiles fill the width
+  // instead of leaving a third column empty.
+  const optsStyle = layout === "tiles" ? ` style="--tile-cols:${previewedOptions(q).length}"` : "";
   const pickSect = q.options?.length
     ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
-       <div class="prompt-q__opts">${optsRowsHtml(q, qi, selections, noneLabel)}</div>`
+       ${layout === "stage" ? stageHtml(q, qi) : ""}
+       <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout)}</div>`
     : "";
   // Emitted even while empty (`.composer-attachments:empty` hides it) - the
   // paste path patches this node in place instead of re-rendering.
@@ -140,7 +154,7 @@ export function panelHtml(
     ? `<div class="prompt-attachments composer-attachments" data-attach-panel="${qi}"></div>`
     : "";
   return `
-    <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
+    <section class="prompt-panel${isActive ? " is-active" : ""}${layout ? ` prompt-panel--preview-${layout}` : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
       ${questionZonesHtml(q)}
       ${pickSect}
       ${attachHtml}
