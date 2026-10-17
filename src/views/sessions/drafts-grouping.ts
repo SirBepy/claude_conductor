@@ -43,6 +43,8 @@ export interface PlatformGroup {
 
 export interface TicketGroup {
   key: string;
+  /** "Shortcut", "Linear". */
+  tracker: string;
   /** "sc-56160", "REV-7345", or null for comments that name no ticket. */
   ticket: string | null;
   /** The newest draft's topic with the ticket id taken out. */
@@ -164,7 +166,7 @@ export function groupDrafts(
         const ticket = ticketOf(d, tracker);
         const tkey = `t:${norm(tracker)}:${ticket ?? ""}`;
         const byTicket = tickets.get(tracker) ?? new Map<string, TicketGroup>();
-        const t = byTicket.get(tkey) ?? { key: tkey, ticket, label: "", people: [], drafts: [], open: 0, latest: 0 };
+        const t = byTicket.get(tkey) ?? { key: tkey, tracker, ticket, label: "", people: [], drafts: [], open: 0, latest: 0 };
         take(t, d, now);
         if (!key.startsWith("x:")) {
           const who = vault?.name ?? v.person ?? v.recipient;
@@ -223,4 +225,11 @@ export function groupDrafts(
  *  card has several recipients, else the only one. */
 export function variantFor(d: MessageDraft, groupKey: string): DraftVariant | undefined {
   return d.variants.find((v) => groupKeyOf(v) === groupKey) ?? d.variants[0];
+}
+
+/** The variant a ticket view should show: the one posted on that tracker,
+ *  since one card can hold an email to one person and a Shortcut comment to
+ *  another. */
+export function variantOn(d: MessageDraft, tracker: string): DraftVariant | undefined {
+  return d.variants.find((v) => trackerOf(v) === tracker) ?? d.variants[0];
 }

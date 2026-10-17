@@ -398,7 +398,15 @@ test("a Shortcut comment gets a Shortcut tab with one row per ticket, and stays 
       topic: "sc-56157 retest note",
       brief: "",
       receipts: [],
+      // The Shortcut comment is the SECOND variant: the ticket view must show
+      // it, not the email to Ana that happens to come first.
       variants: [{
+        recipient: "Ana",
+        handle_n: 2,
+        current: 1,
+        platform: "Email",
+        versions: [{ n: 1, body: "Hi Ana", author: "ai", note: "first pass", created_at: iso }],
+      }, {
         recipient: "Bruno",
         handle_n: 3,
         current: 1,
@@ -429,6 +437,7 @@ test("a Shortcut comment gets a Shortcut tab with one row per ticket, and stays 
   await expect(panel.locator(".dr-title")).toHaveText("sc-56157");
   await expect(panel.locator(".dr-person-sub")).toHaveText("Bruno");
   await expect(panel.locator(".dr-card .dr-topic")).toHaveText("retest note");
+  await expect(panel.locator(".dr-card .dr-av")).toHaveText("B");
   await page.screenshot({ path: `${SCREENSHOT_DIR}/drafts-panel-ticket.png`, clip: (await page.locator("#drafts-spec-host").boundingBox())! });
 });
 
