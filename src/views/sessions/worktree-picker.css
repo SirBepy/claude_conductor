@@ -35,6 +35,38 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ── Phone: dock to the bottom edge, same shape as project-picker.css's
+   bottom sheet - this class backs both the worktree sub-picker and
+   location-picker.ts's "Open <project>" card, both steps in the same
+   new-chat chain that project-picker.css's sheet already docks. */
+@media (max-width: 768px) {
+  #modal-host .modal-card.wt-picker-modal {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+    max-height: 75dvh;
+    border-radius: 12px 12px 0 0;
+  }
+  #modal-host .modal-card.wt-picker-modal.modal-card-morph-hidden {
+    transform: translateY(100%);
+  }
+  .wt-picker-modal .modal-footer {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Phone, keyboard open: see project-picker.css's twin rule for why this
+   needs --keyboard-inset rather than just a bigger dvh shrink. */
+@media (max-width: 768px) {
+  html[data-mobile-keyboard] #modal-host .modal-card.wt-picker-modal {
+    bottom: var(--keyboard-inset, 0px);
+    max-height: calc(75dvh - var(--keyboard-inset, 0px));
+  }
+}
 .wt-picker-body {
   display: flex;
   flex-direction: column;

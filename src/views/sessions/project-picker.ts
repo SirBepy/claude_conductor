@@ -14,6 +14,8 @@ import {
 } from "./project-favorites";
 import { PROJECTS_ROOT_SETTINGS_KEY } from "./projects-root";
 import { isNoProjectPath } from "../../shared/no-project";
+import { fuzzyScore } from "../../shared/chat/caret-popup/fuzzy-score";
+import { isMobileViewport } from "../../shared/mobile-viewport";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
 import { api } from "../../shared/api";
@@ -236,13 +238,15 @@ export function openProjectPickerModal(
     };
     document.addEventListener("keydown", onEscapeKeydown);
 
-    // 0 = exact name, 1 = name starts with, 2 = name contains, 3 = path only
+    // 0 = exact name, 1 = name starts with, 2 = name contains, 3 = name fuzzy
+    // (letters of the query in order, e.g. "mcp" finds "mc_plugins_tag"), 4 = path only
     const matchRank = (p: ProjectGroup, f: string): number => {
       const n = p.name.toLowerCase();
       if (n === f) return 0;
       if (n.startsWith(f)) return 1;
       if (n.includes(f)) return 2;
-      return 3;
+      if (fuzzyScore(n, f) > 0) return 3;
+      return 4;
     };
 
     // Only ever called once `localProjects` is populated - the search input
@@ -262,8 +266,8 @@ export function openProjectPickerModal(
       // reconnecting the drive brings it straight back.
       let rows = list.filter((p) => p.path_exists !== false).filter((p) =>
         !f
-        || p.name.toLowerCase().includes(f)
-        || p.path.toLowerCase().includes(f)
+        || fuzzyScore(p.name.toLowerCase(), f) > 0
+        || fuzzyScore(p.path.toLowerCase(), f) > 0
       );
       if (sort === "name") {
         rows = rows.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -513,11 +517,15 @@ export function openProjectPickerModal(
       hydrateCharacterAvatars(host).catch(() => {});
       // Autofocus the search input on first render. Re-focus on subsequent
       // renders only if focus was already inside the modal (avoid stealing
-      // focus from the dropdown).
+      // focus from the dropdown). Skipped on mobile: grabbing focus here pops
+      // the keyboard before the sheet has even finished opening, which the
+      // keyboard-open CSS (above) then has to race to react to - leaving the
+      // keyboard down until the user deliberately taps the field avoids the
+      // race instead of trying to win it.
       const input = host.querySelector<HTMLInputElement>("#project-picker-search");
       const active = document.activeElement;
       const focusIsInsideModal = active instanceof HTMLElement && host.contains(active);
-      if (input && !focusIsInsideModal) {
+      if (input && !focusIsInsideModal && !isMobileViewport()) {
         // Defer to next tick so lit-html finishes attaching DOM.
         setTimeout(() => input.focus(), 0);
       }
@@ -551,6 +559,21 @@ export function openProjectPickerModal(
       renderModal,
     };
 
+    // Each project's last-activity/todo-count fetch lands separately
+    // (warmProjectStats fires one request per project). Re-rendering on
+    // every single arrival reshuffles "Most recent"/"Most todos" sort order
+    // mid-list as each one lands - rows visibly jump up from the bottom one
+    // at a time. Coalesce arrivals that land close together into one
+    // re-render instead of one per project.
+    let statsRenderTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleStatsRender = (): void => {
+      if (resolved || statsRenderTimer) return;
+      statsRenderTimer = setTimeout(() => {
+        statsRenderTimer = null;
+        if (!resolved) renderModal();
+      }, 80);
+    };
+
     // Applies a resolved (or revalidated) project list: paints it and kicks
     // per-project stat revalidation. Morphs (presentHostCard) only when
     // replacing the loading shell; a later revalidation just patches in
@@ -561,10 +584,10 @@ export function openProjectPickerModal(
       localProjects = groups;
       if (wasLoading) void presentHostCard(renderModal);
       else renderModal();
-      warmProjectStats(groups, () => { if (!resolved) renderModal(); });
+      warmProjectStats(groups, scheduleStatsRender);
     };
 
-    if (localProjects) warmProjectStats(localProjects, () => { if (!resolved) renderModal(); });
+    if (localProjects) warmProjectStats(localProjects, scheduleStatsRender);
 
     setBackdropCancel(() => finish(null));
     void presentHostCard(renderModal);

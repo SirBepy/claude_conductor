@@ -1,6 +1,6 @@
 // asserts: src/views/sessions/project-picker.css
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, capture } from "./harness";
+import { mountView, capture, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Phone: dock the project picker to the bottom instead of centring it
 // (todo 1077). Before this change project-picker.css had no phone breakpoint
@@ -39,6 +39,23 @@ const BASE_INVOKE = {
 
 async function openPicker(page: Page): Promise<void> {
   await mountView(page, { invoke: BASE_INVOKE });
+  await page.evaluate(() => {
+    void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
+  });
+  await page.waitForSelector(".project-picker-row");
+}
+
+/** Same picker, but behind a real mounted `.view-sessions` - needed only for
+ *  the --keyboard-inset test below, since that signal is written by
+ *  mobile-keyboard.ts's initMobileKeyboard(view), which sessions.ts only
+ *  calls while the sessions view is actually mounted (unlike the picker
+ *  itself, which mounts into #modal-host regardless of which view is up). */
+async function openPickerInSessionsView(page: Page): Promise<void> {
+  await mountView(page, {
+    view: "sessions",
+    invoke: { ...SESSIONS_BASE_INVOKE, ...BASE_INVOKE, list_instances: [], get_active_sessions: [] },
+  });
+  await page.locator(".view-sessions").waitFor();
   await page.evaluate(() => {
     void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
   });
@@ -124,5 +141,52 @@ test.describe("view-harness / project picker phone bottom sheet", () => {
     const searchAfter = (await page.locator("#project-picker-search").boundingBox())!;
     expect(searchAfter.y).toBeGreaterThanOrEqual(0);
     expect(searchAfter.y + searchAfter.height).toBeLessThanOrEqual(420);
+  });
+
+  // Autofocusing the search input used to fire unconditionally, popping the
+  // keyboard immediately on open - before the sheet had even finished its
+  // slide-up, racing the keyboard-open CSS below. Leaving focus alone on
+  // mobile means the keyboard only opens when the user deliberately taps in.
+  test("phone: search input does not autofocus - keyboard stays down until tapped", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openPicker(page);
+    await expect(page.locator("#project-picker-search")).not.toBeFocused();
+  });
+
+  test("desktop: search input still autofocuses", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openPicker(page);
+    await expect(page.locator("#project-picker-search")).toBeFocused();
+  });
+
+  test("phone: a keyboard the OS did NOT resize for still clears the sheet, via --keyboard-inset", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openPickerInSessionsView(page);
+
+    const card = page.locator(".project-picker-modal");
+    const before = (await card.boundingBox())!;
+    expect(Math.round(before.y + before.height)).toBe(PHONE.height); // flush to the bottom, keyboard closed
+
+    // The bug this fix targets: Android's adjustResize never actually shrinks
+    // window.innerHeight (the layout viewport the `dvh` test above relies
+    // on), only window.visualViewport does - mobile-keyboard.ts's own doc
+    // comment on `apply()` calls this out as the thing it reads instead.
+    // Decouple them here the same way mobile-keyboard.view.spec.ts's sibling
+    // suite does: fake visualViewport shrinking while innerHeight holds.
+    const KEYBOARD_PX = 350;
+    await page.evaluate((keyboardPx) => {
+      const vv = window.visualViewport!;
+      Object.defineProperty(vv, "height", { value: window.innerHeight - keyboardPx, configurable: true });
+      vv.dispatchEvent(new Event("resize"));
+    }, KEYBOARD_PX);
+
+    await expect(page.locator("html")).toHaveAttribute("data-mobile-keyboard", "");
+
+    const after = (await card.boundingBox())!;
+    // Lifted clear of the keyboard rather than sitting flush to the physical
+    // bottom edge underneath it (what `dvh` alone leaves behind here, since
+    // the layout viewport this test fakes never actually shrank).
+    expect(PHONE.height - (after.y + after.height)).toBeGreaterThanOrEqual(KEYBOARD_PX - 20);
+    expect(after.height).toBeLessThan(before.height);
   });
 });

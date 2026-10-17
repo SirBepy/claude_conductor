@@ -294,6 +294,21 @@
   }
 }
 
+/* ── Phone, keyboard open: lift above it instead of letting it cover the
+   sheet ──────────────────────────────────────────────────────────────────
+   `dvh` alone (above) only shrinks if Android actually resized the layout
+   viewport (adjustResize) - unreliable in practice (see mobile-keyboard.ts).
+   --keyboard-inset (mirrored onto <html> by mobile-keyboard.ts) is the real
+   signal: the px gap adjustResize left uncompensated, 0 when it did resize.
+   Lifting `bottom` by it moves the whole sheet up off the keyboard; shrinking
+   `max-height` by the same amount keeps its top edge from overshooting. */
+@media (max-width: 768px) {
+  html[data-mobile-keyboard] #modal-host .modal-card.project-picker-modal {
+    bottom: var(--keyboard-inset, 0px);
+    max-height: calc(75dvh - var(--keyboard-inset, 0px));
+  }
+}
+
 /* ── Favourite slots 1-9 (placement P4: inline in the footer) ─────────────
    Sharing the footer strip instead of taking a row of its own keeps the card
    70px shorter; the cost is that Cancel leaves ~440px for nine tiles, so a
