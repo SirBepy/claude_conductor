@@ -264,10 +264,12 @@ export function openProjectPickerModal(
       // already drops the unconfigured ones; what reaches here is a project
       // with real config whose folder moved, hidden rather than deleted so
       // reconnecting the drive brings it straight back.
+      // Name fuzzy, path substring only: a long absolute path holds almost
+      // any short query's letters in order ("cat" in c:/users/.../taskbar).
       let rows = list.filter((p) => p.path_exists !== false).filter((p) =>
         !f
         || fuzzyScore(p.name.toLowerCase(), f) > 0
-        || fuzzyScore(p.path.toLowerCase(), f) > 0
+        || p.path.toLowerCase().includes(f)
       );
       if (sort === "name") {
         rows = rows.slice().sort((a, b) => a.name.localeCompare(b.name));
