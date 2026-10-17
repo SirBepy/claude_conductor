@@ -14,6 +14,8 @@ import {
 } from "./question-ui-templates";
 import type { QuestionRenderState } from "./question-ui-templates";
 import { focusActivePanel } from "./question-keyboard";
+import { attachQuestionSwipe } from "./question-swipe";
+import { attachOptionPreviews } from "./option-previews";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import type { Question, QuestionUIOpts, Selection } from "./types";
@@ -64,6 +66,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   // later card reuses the host.
   host.addEventListener("mouseover", handleTicketHover);
   host.addEventListener("mouseout", handleTicketHoverOut);
+  attachQuestionSwipe(host, state, goToTab);
+  // "Choose this" on a preview stage picks exactly like tapping the row.
+  const previews = attachOptionPreviews({
+    host, questions, selections, choose: (qi, label) => applyPick(qi, label, true, true),
+  });
   let hintTimer: number | undefined;
 
   // Brief feedback for a paste that couldn't attach (see attachments.ts's
@@ -380,6 +387,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       syncAnswerBar();
 
       paintAttachmentStrips();
+      previews.sync();
 
       host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
         ?.addEventListener("click", cancel);
