@@ -113,6 +113,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_gaming_mode(&mut router, state.clone());
     methods::register_drafts_store(&mut router, state.clone());
     methods::register_ask(&mut router, state.clone());
+    methods::register_voice(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());
     // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
     // `to` (multi-machine chat parity): reached only via a paired peer's
