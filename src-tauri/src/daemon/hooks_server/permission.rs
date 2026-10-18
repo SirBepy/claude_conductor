@@ -109,50 +109,58 @@ pub(super) async fn on_permission_request(
         );
         return (StatusCode::OK, Json(json!({"behavior": "allow", "updatedInput": body.input})));
     }
-    if let Some(sid) = body.session_id.as_deref() {
-        if !wait_for_permission_slot(&ctx.state, sid).await {
-            return (
-                StatusCode::OK,
-                Json(json!({
-                    "behavior": "deny",
-                    "message": "a prior permission prompt for this session never resolved",
-                })),
-            );
+    let decision = ask_human(&ctx.state, &body.id, &body.tool_name, body.input, body.session_id.as_deref()).await;
+    (StatusCode::OK, Json(decision))
+}
+
+/// Raises one permission card and blocks until a human answers it, returning
+/// the `{"behavior": "allow"|"deny", ...}` decision. Shared by the CLI's
+/// `approval_prompt` route above and by MCP handlers that gate one action of
+/// an otherwise pre-trusted tool themselves (`schedule`'s new_chat target).
+/// The auto-accept check is the caller's job: this always asks.
+pub(super) async fn ask_human(
+    state: &Arc<DaemonState>,
+    id: &str,
+    tool_name: &str,
+    input: Value,
+    session_id: Option<&str>,
+) -> Value {
+    if let Some(sid) = session_id {
+        if !wait_for_permission_slot(state, sid).await {
+            return json!({
+                "behavior": "deny",
+                "message": "a prior permission prompt for this session never resolved",
+            });
         }
     }
     let payload = json!({
-        "id": body.id,
-        "tool_name": body.tool_name,
-        "input": body.input,
-        "session_id": body.session_id,
+        "id": id,
+        "tool_name": tool_name,
+        "input": input,
+        "session_id": session_id,
     });
     let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
-    ctx.state.pending.lock().await.insert(body.id.clone(), tx);
-    ctx.state.add_prompt(&body.id, "permission-requested", payload.clone(), false).await;
+    state.pending.lock().await.insert(id.to_string(), tx);
+    state.add_prompt(id, "permission-requested", payload.clone(), false).await;
     // Push the phone if Joe is away (ai_todo 119): Claude is now blocked on him.
-    ctx.state.fire_blocked_prompt(body.session_id.as_deref(), &body.id);
+    state.fire_blocked_prompt(session_id, id);
     // Wake Jarvis (todo 272 chunk 3) if this prompt belongs to one of its
     // workers - no-op for every other session.
-    crate::daemon::jarvis_wake::wake_on_worker_blocked(
-        &ctx.state, body.session_id.as_deref(), &body.id, Some(body.tool_name.as_str()),
-    ).await;
+    crate::daemon::jarvis_wake::wake_on_worker_blocked(state, session_id, id, Some(tool_name)).await;
     // Daemon-authoritative "needs input", same as the question path: without
     // it the only record of this prompt is a window-local JS Map, so any
     // surface that didn't receive the broadcast keeps rendering In Progress.
-    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), true).await;
-    let subs = ctx.state.notifier.publish("permission_request", payload);
+    super::question::set_question_awaiting(state, session_id, true).await;
+    let subs = state.notifier.publish("permission_request", payload);
     log::info!(
         "[perm-relay] published permission_request id={} tool={} session={:?} -> {} subscriber(s)",
-        body.id, body.tool_name, body.session_id, subs
+        id, tool_name, session_id, subs
     );
-    let result = match await_answer(rx, PROMPT_TIMEOUT).await {
-        Some(val) => (StatusCode::OK, Json(val)),
+    let decision = match await_answer(rx, PROMPT_TIMEOUT).await {
+        Some(val) => val,
         None => {
-            ctx.state.pending.lock().await.remove(&body.id);
-            (
-                StatusCode::OK,
-                Json(json!({"behavior": "deny", "message": "user did not respond in time"})),
-            )
+            state.pending.lock().await.remove(id);
+            json!({"behavior": "deny", "message": "user did not respond in time"})
         }
     };
     // Answered or timed out - claude resumes the same turn, so the row goes
@@ -160,9 +168,9 @@ pub(super) async fn on_permission_request(
     // newer turn that already wrote a real end-of-turn status, AND against a
     // coincident AskUserQuestion card that is still genuinely open (todo 897)
     // - this plain tool-permission prompt resolving must not hide that.
-    super::question::set_question_awaiting(&ctx.state, body.session_id.as_deref(), false).await;
-    ctx.state.remove_prompt(&body.id).await;
-    result
+    super::question::set_question_awaiting(state, session_id, false).await;
+    state.remove_prompt(id).await;
+    decision
 }
 
 #[cfg(test)]

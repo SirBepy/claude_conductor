@@ -120,11 +120,12 @@ pub(crate) async fn spawn_worker(
     let sid = session.session_id.clone();
 
     let now = chrono::Utc::now().to_rfc3339();
-    // auto_accept=true, no character: a worker is spawned unattended by
-    // Jarvis itself, so requiring manual approval on every tool call would
-    // stall the fleet.
+    // No character. Auto-accept follows the owner's setting (default on): a
+    // worker is spawned unattended by Jarvis itself, so manual approval on
+    // every tool call would stall the fleet.
+    let auto_accept = state.settings.snapshot().jarvis_workers_auto_accept();
     crate::daemon::session_registration::register_new_session(
-        state, &sid, &cwd_path, &model, WORKER_DEFAULT_EFFORT, &session.account_id, &now, true, None, false,
+        state, &sid, &cwd_path, &model, WORKER_DEFAULT_EFFORT, &session.account_id, &now, auto_accept, None, false,
     );
     state.registry.set_worker_of(&sid, Some(jarvis_session_id.to_string()));
     if let Some(n) = name {
@@ -209,28 +210,24 @@ pub(crate) async fn fleet_status(state: &Arc<DaemonState>, jarvis_session_id: &s
     Ok(json!({"workers": workers}))
 }
 
-/// `respond_worker_prompt` tool: answers a pending permission/question prompt
-/// raised by one of the calling Jarvis's workers, routed to
-/// `permission::respond_permission_inner`/`respond_question_inner` by the
-/// prompt's recorded `event` kind (`daemon::state::DaemonState::prompt_event`)
-/// - the caller only supplies the allow/message/updated_input shape, it
-/// doesn't (and shouldn't need to) know which underlying kind it's answering.
-/// Ownership-checked the same way as `send_to_session`: the prompt's owning
-/// session must be one of this Jarvis's own workers, so Jarvis can't resolve
-/// (allow OR deny) a prompt belonging to an unrelated session on the machine.
+/// `respond_worker_prompt` tool: answers a pending PERMISSION prompt raised
+/// by one of the calling Jarvis's workers, via
+/// `permission::respond_permission_inner`. Ownership-checked the same way as
+/// `send_to_session`: the prompt's owning session must be one of this
+/// Jarvis's own workers, so Jarvis can't resolve (allow OR deny) a prompt
+/// belonging to an unrelated session on the machine.
 ///
-/// A question prompt has no `allow`/`updated_input` concept - its answer is a
-/// free-form `answers` value. `answers`, when given, is forwarded as-is (a
-/// structured multi-question form survives intact); otherwise `message` (if
-/// given, else an empty object) is wrapped as the answer, preserving the
-/// pre-todo-272 single-string behavior. `allow` is ignored either way.
+/// A worker's question is refused and stays pending for Joe. The ordinary
+/// auto-accept path never answers a question either
+/// (`hooks_server::permission::is_auto_accept_eligible`), so a worker asking
+/// one is the one point where a human still sees what the fleet is doing,
+/// even when Jarvis itself has read something malicious.
 pub(crate) async fn respond_worker_prompt(
     state: &Arc<DaemonState>,
     jarvis_session_id: &str,
     request_id: &str,
     allow: bool,
     message: Option<String>,
-    answers: Option<Value>,
     updated_input: Option<Value>,
 ) -> Result<bool, String> {
     if !is_jarvis_caller(state, jarvis_session_id) {
@@ -250,19 +247,16 @@ pub(crate) async fn respond_worker_prompt(
     }
 
     let event = state.prompt_event(request_id).await.unwrap_or_default();
-    let delivered = match event.as_str() {
-        "permission-requested" => {
-            crate::daemon::methods::permission::respond_permission_inner(
-                state, request_id, allow, updated_input, message,
-            ).await
-        }
-        "question-requested" => {
-            let answers = answers.or_else(|| message.map(Value::String)).unwrap_or_else(|| json!({}));
-            crate::daemon::methods::permission::respond_question_inner(state, request_id, answers, false).await
-        }
-        _ => false,
-    };
-    Ok(delivered)
+    match event.as_str() {
+        "permission-requested" => Ok(crate::daemon::methods::permission::respond_permission_inner(
+            state, request_id, allow, updated_input, message,
+        )
+        .await),
+        "question-requested" => Err(
+            "worker questions are for Joe to answer - this one stays pending on his screen".to_string(),
+        ),
+        _ => Ok(false),
+    }
 }
 
 #[cfg(test)]
@@ -312,48 +306,55 @@ mod tests {
         assert!(err.contains("not fleet-eligible"), "{err}");
     }
 
-    // ── respond_worker_prompt structured answers (todo 272) ─────────────────
+    // ── respond_worker_prompt: permissions only ─────────────────────────────
 
-    /// Wires a jarvis + owned worker pair and a recorded question-kind
-    /// prompt with a live oneshot in `state.pending`, so a test can call
-    /// `respond_worker_prompt` and read back exactly what
-    /// `respond_question_inner` sent down the channel.
-    async fn setup_question_prompt(state: &Arc<DaemonState>, jarvis_id: &str, worker_id: &str, request_id: &str) -> tokio::sync::oneshot::Receiver<Value> {
+    /// Wires a jarvis + owned worker pair and a recorded prompt of `event`
+    /// kind with a live oneshot in `state.pending`, so a test can call
+    /// `respond_worker_prompt` and read back what was sent down the channel.
+    async fn setup_worker_prompt(
+        state: &Arc<DaemonState>,
+        jarvis_id: &str,
+        worker_id: &str,
+        request_id: &str,
+        event: &str,
+    ) -> tokio::sync::oneshot::Receiver<Value> {
         state.registry.upsert_interactive(jarvis_id, std::path::Path::new("."), "proj-x", "2026-07-27T00:00:00Z");
         state.registry.set_jarvis(jarvis_id, true);
         state.registry.upsert_interactive(worker_id, std::path::Path::new("."), "proj-x", "2026-07-27T00:00:00Z");
         state.registry.set_worker_of(worker_id, Some(jarvis_id.to_string()));
-        state.add_prompt(request_id, "question-requested", json!({"session_id": worker_id}), true).await;
+        state.add_prompt(request_id, event, json!({"session_id": worker_id}), true).await;
         let (tx, rx) = tokio::sync::oneshot::channel();
         state.pending.lock().await.insert(request_id.to_string(), tx);
         rx
     }
 
+    /// The one point where a human still sees the fleet: Jarvis can't answer
+    /// a worker's question for Joe, and the card stays open for him.
     #[tokio::test]
-    async fn respond_worker_prompt_forwards_structured_answers_intact() {
+    async fn respond_worker_prompt_refuses_a_question_and_leaves_it_pending() {
         let state = test_state();
-        let rx = setup_question_prompt(&state, "jv-fleet-2", "worker-2", "req-struct").await;
-        let form = json!({"q1": "yes", "q2": "no"});
+        let mut rx = setup_worker_prompt(&state, "jv-fleet-2", "worker-2", "req-q", "question-requested").await;
 
-        let delivered = respond_worker_prompt(&state, "jv-fleet-2", "req-struct", false, None, Some(form.clone()), None)
+        let err = respond_worker_prompt(&state, "jv-fleet-2", "req-q", true, Some("yes".to_string()), None)
             .await
-            .expect("owned worker's question prompt must resolve");
-        assert!(delivered);
-        let sent = rx.await.expect("respond_question_inner must send on the oneshot");
-        assert_eq!(sent, json!({"answers": form}), "a structured multi-question form must survive intact");
+            .expect_err("a worker question is Joe's to answer");
+        assert!(err.contains("Joe"), "{err}");
+        assert!(rx.try_recv().is_err(), "nothing was sent to the worker");
+        assert!(state.pending.lock().await.contains_key("req-q"), "the answer channel is still open");
+        assert_eq!(state.prompt_event("req-q").await.as_deref(), Some("question-requested"), "the card is still listed");
     }
 
     #[tokio::test]
-    async fn respond_worker_prompt_falls_back_to_message_when_answers_absent() {
+    async fn respond_worker_prompt_still_answers_a_permission_prompt() {
         let state = test_state();
-        let rx = setup_question_prompt(&state, "jv-fleet-3", "worker-3", "req-msg").await;
+        let rx = setup_worker_prompt(&state, "jv-fleet-3", "worker-3", "req-p", "permission-requested").await;
 
-        let delivered = respond_worker_prompt(&state, "jv-fleet-3", "req-msg", false, Some("plain answer".to_string()), None, None)
+        let delivered = respond_worker_prompt(&state, "jv-fleet-3", "req-p", true, None, None)
             .await
-            .expect("owned worker's question prompt must resolve");
+            .expect("owned worker's permission prompt must resolve");
         assert!(delivered);
-        let sent = rx.await.expect("respond_question_inner must send on the oneshot");
-        assert_eq!(sent, json!({"answers": "plain answer"}), "pre-todo-272 message-as-string path must be unchanged");
+        let sent = rx.await.expect("respond_permission_inner must send on the oneshot");
+        assert_eq!(sent["behavior"], "allow", "got {sent}");
     }
 
     #[tokio::test]

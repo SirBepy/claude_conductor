@@ -75,6 +75,16 @@ pub(crate) fn register_new_session(
     }
 }
 
+/// Auto-accept for a chat an agent starts on its own (`spawn_chat`,
+/// `schedule` new_chat). A `continuation` (`respawn`) keeps the parent's flag,
+/// since it is the same conversation under a new id; a genuinely new agent
+/// copies it only while `Settings::spawned_chats_inherit_auto_accept` is on,
+/// so one chat fooled by injected text can't hand its zero-prompt mode to
+/// every chat it starts.
+pub(crate) fn spawned_auto_accept(parent: bool, inherit: bool, continuation: bool) -> bool {
+    parent && (inherit || continuation)
+}
+
 /// Flag `session_id` as the Jarvis singleton in the registry AND force-persist
 /// `chat_config`'s auto-accept flag in the same call (hardening adjacent to
 /// todo 441): Jarvis runs fully unattended, so even a future spawn path that
@@ -135,5 +145,32 @@ mod tests {
 
         assert!(!created_new);
         assert!(rx.try_recv().is_err(), "a second registration of the same project must not republish");
+    }
+
+    #[test]
+    fn a_spawned_chat_inherits_auto_accept_only_while_the_setting_is_on() {
+        assert!(spawned_auto_accept(true, true, false), "default: the child copies the parent");
+        assert!(!spawned_auto_accept(true, false, false), "setting off: a new agent starts with prompts");
+        assert!(!spawned_auto_accept(false, true, false), "a parent without auto-accept never grants it");
+    }
+
+    #[test]
+    fn a_respawn_keeps_the_flag_regardless_of_the_setting() {
+        assert!(spawned_auto_accept(true, false, true));
+        assert!(!spawned_auto_accept(false, false, true));
+    }
+
+    #[test]
+    fn both_spawn_settings_default_on_when_absent_and_honor_an_explicit_off() {
+        let s = Settings::default();
+        assert!(s.spawned_chats_inherit_auto_accept());
+        assert!(s.jarvis_workers_auto_accept());
+        let off: Settings = serde_json::from_value(json!({
+            "spawnedChatsInheritAutoAccept": false,
+            "jarvisWorkersAutoAccept": false,
+        }))
+        .unwrap();
+        assert!(!off.spawned_chats_inherit_auto_accept());
+        assert!(!off.jarvis_workers_auto_accept());
     }
 }

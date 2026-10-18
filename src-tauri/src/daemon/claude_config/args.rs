@@ -65,7 +65,10 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 /// `send_message`, `report_turn_status`, `update_message`, `write_draft`,
 /// `write_user_todo`, `schedule`. None of them reach outside this app's own
 /// state (unlike `spawn_chat`/`respawn`/`close_session`/`post_message`, which
-/// stay gated behind the ordinary permission relay). The exception is
+/// stay gated behind the ordinary permission relay), with one carve-out:
+/// `schedule`'s new_chat target starts a real `claude` process when it fires,
+/// so `hooks_server::schedule::approve_new_chat` raises its own permission
+/// card for that action when the caller lacks auto-accept. The exception is
 /// `person`: it writes to the user's own vault `People/` notes, one
 /// frontmatter line at a time, and only what the user just confirmed. Without this, a chat
 /// started with `auto_accept: false` hangs on the first `schedule`/`write_plan`

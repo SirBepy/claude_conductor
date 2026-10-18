@@ -241,6 +241,24 @@ impl Settings {
     /// sound. Defaults to `false` (off) when absent.
     pub fn select_on_session_click(&self) -> bool { self.bool_extra("selectOnSessionClick") }
 
+    /// Whether a chat an agent starts (`spawn_chat`, `schedule` new_chat)
+    /// copies its parent's auto-accept flag. Defaults to `true` when absent:
+    /// Joe runs every chat with auto-accept on and chose to keep that, with
+    /// the switch there for when it stops being true. `respawn` ignores it,
+    /// since it continues the same conversation rather than starting a new
+    /// agent.
+    pub fn spawned_chats_inherit_auto_accept(&self) -> bool {
+        self.extra.get("spawnedChatsInheritAutoAccept").and_then(|v| v.as_bool()).unwrap_or(true)
+    }
+
+    /// Whether Jarvis fleet workers start with auto-accept on. Defaults to
+    /// `true` when absent, the pre-setting behavior: Jarvis can approve a
+    /// worker's permission prompts itself, so turning this off adds friction
+    /// rather than a human check.
+    pub fn jarvis_workers_auto_accept(&self) -> bool {
+        self.extra.get("jarvisWorkersAutoAccept").and_then(|v| v.as_bool()).unwrap_or(true)
+    }
+
     fn bool_extra(&self, key: &str) -> bool {
         self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
     }

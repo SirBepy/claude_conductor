@@ -4,7 +4,8 @@
 //! tagged. Guards instead: `cwd` must be either the caller's own working
 //! directory or a project already in `Settings.projects` (never an arbitrary
 //! path), one spawn per turn; and it inherits the caller's own model/effort/
-//! account/auto-accept, plus the character on the `respawn` path only.
+//! account, plus the character on the `respawn` path only. Auto-accept is
+//! inherited per `session_registration::spawned_auto_accept`.
 //!
 //! Cross-machine spawn forwarding (`resolve_machine`, `spawn_chat_for_peer`,
 //! `spawn_chat_or_forward`) lives in this module's own `forward` submodule
@@ -126,6 +127,11 @@ pub(crate) async fn spawn_chat(
         .then(|| state.settings.snapshot().session_characters.get(caller_session_id).cloned())
         .flatten();
     let now = chrono::Utc::now().to_rfc3339();
+    let auto_accept = crate::daemon::session_registration::spawned_auto_accept(
+        inherited.auto_accept,
+        state.settings.snapshot().spawned_chats_inherit_auto_accept(),
+        respawn,
+    );
     crate::daemon::session_registration::register_new_session(
         state,
         &sid,
@@ -134,7 +140,7 @@ pub(crate) async fn spawn_chat(
         &effort,
         &session.account_id,
         &now,
-        inherited.auto_accept,
+        auto_accept,
         character_id.as_deref(),
         false,
     );
