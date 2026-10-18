@@ -1,7 +1,10 @@
 import { html, render } from "lit-html";
 import { api } from "../../../../shared/api";
 import { settingsHeader } from "../../ui";
-import { renderMachinesSection, wireMachinePairForm, machinesSectionTemplate } from "./machines-section";
+import { getTransport } from "../../../../shared/transport";
+import {
+  renderMachinesSection, resetMachinesSection, wireMachinePairForm, machinesSectionTemplate,
+} from "./machines-section";
 import { renderEntityList } from "./entity-list";
 import "./remote-access.css";
 
@@ -120,11 +123,28 @@ export async function renderRemoteAccessView(
   root: HTMLElement,
 ): Promise<() => void> {
   render(template(), root);
+  resetMachinesSection();
 
   try { await hydrate(root); }
   catch (e) { console.error("[remote-access] render failed", e); }
 
-  return () => { /* no teardown */ };
+  // A pair started from the OTHER machine lands here with no click on this
+  // side, so the list (and the now-consumed pairing code) refresh off the
+  // daemon's event instead of waiting for the page to be reopened.
+  let unlisten: (() => void) | undefined;
+  let disposed = false;
+  void getTransport()
+    .listen("machines-changed", () => {
+      void renderMachinesSection(root);
+      if (($(root, "#ra-enabled") as HTMLInputElement | null)?.checked) void refreshQr(root);
+    })
+    .then((u) => { if (disposed) u(); else unlisten = u; })
+    .catch((e) => console.error("[remote-access] machines-changed listen failed", e));
+
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
 }
 
 function template() {

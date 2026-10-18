@@ -115,6 +115,36 @@
   color: var(--color-warning);
 }
 
+.ra-machine-linked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: var(--fs-body);
+  color: var(--color-primary);
+  animation: ra-linked-in 240ms ease-out;
+}
+
+.ra-machine-linked[hidden] {
+  display: none;
+}
+
+/* A just-linked peer's row glows once in the accent and settles back to the
+   normal row background, so the eye lands on it without a lasting badge. */
+.ra-device-row.ra-row-new {
+  animation: ra-row-arrive 2.4s ease-out;
+}
+
+@keyframes ra-linked-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes ra-row-arrive {
+  0%, 30% { background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface-alt, #1a1d27)); }
+  100% { background: var(--color-surface-alt, #1a1d27); }
+}
+
 .btn-danger-sm {
   padding: 4px 10px;
   font-size: var(--fs-body);

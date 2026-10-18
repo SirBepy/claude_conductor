@@ -303,6 +303,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "message_drafts_changed" => {
             let _ = app.emit("message-drafts-changed", params);
         }
+        // A machine was paired or unpaired (`MachineHub::sync_links`), from
+        // this side or the other one. Settings > Remote access re-reads its
+        // Paired machines list and marks the new peer.
+        "machines_changed" => {
+            let _ = app.emit("machines-changed", params);
+        }
         // "Your Todos" FAB list changed (`methods::user_todos::publish_changed`).
         // Pure forward: the panel also refetches on open and on window focus, so
         // this is just the fast live-update nudge (todo 952).

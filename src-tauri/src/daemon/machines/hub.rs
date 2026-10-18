@@ -55,6 +55,11 @@ impl MachineHub {
             let handle = super::peer_link::spawn_link(state.clone(), peer);
             guard.insert(machine_id, handle);
         }
+        drop(guard);
+        // Every pairing mutation on either side ends here, including the
+        // receiving side of a pair it didn't initiate, so this is what lets
+        // that machine's open Settings page show the new peer live.
+        state.notifier.publish("machines_changed", serde_json::json!({}));
     }
 }
 
