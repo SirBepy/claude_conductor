@@ -76,7 +76,7 @@ pub(crate) fn map_peer_err(e: PeerError) -> RpcError {
 /// request that itself arrived FROM a peer (`Transport::PeerMachine`) -
 /// that's always about OUR own local sessions, and forwarding it again would
 /// loop. Every other request whose `session_id`/`id` resolves to a mirrored
-/// row (`state.mirror.owner_of`) is forwarded if the method is one the
+/// row (`machines::mirrored_owner`, local registry first) is forwarded if the method is one the
 /// owning peer accepts (`remote_handlers::allowed` against
 /// `Transport::PeerMachine`, the same allowlist a real peer request is
 /// checked against) - a `None` from `extract_session_id` or a local
@@ -102,7 +102,7 @@ async fn forward_one(
     }
     let params_value = params.unwrap_or(Value::Null);
     let session_id = extract_session_id(method, &params_value)?;
-    let machine_id = state.mirror.owner_of(&session_id)?;
+    let machine_id = super::mirrored_owner(state, &session_id)?;
 
     if !allowed(method, &Transport::PeerMachine(machine_id.clone())) {
         return Some(Err(RpcError {
@@ -256,6 +256,27 @@ mod tests {
         let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
         let result = forward_one(&state, "send_message", Some(json!({"session_id": "unmirrored"})), &Transport::Local).await;
         assert!(result.is_none());
+    }
+
+    /// A peer reporting one of OUR session ids must not pull Joe's traffic
+    /// for that local chat over to itself: local always wins.
+    #[tokio::test]
+    async fn a_local_session_a_peer_also_claims_is_handled_locally() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        state.registry.upsert_interactive("local-claimed", std::path::Path::new("C:/x"), "proj", "2026-10-18T00:00:00Z");
+        mirror_owned_session(&state, "local-claimed");
+        for method in ["send_message", "respond_permission", "respond_question", "set_auto_accept"] {
+            let result = forward_one(
+                &state,
+                method,
+                Some(json!({"session_id": "local-claimed", "text": "hi"})),
+                &Transport::Local,
+            )
+            .await;
+            assert!(result.is_none(), "{method} for a local chat must fall through to the local handler");
+        }
     }
 
     #[tokio::test]

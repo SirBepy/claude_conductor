@@ -67,8 +67,9 @@ impl MirrorState {
             .collect()
     }
 
-    /// Which machine hosts `session_id`, if it is a mirrored row (not a
-    /// locally-registered one - callers check `registry` first). Falls back
+    /// Which machine hosts `session_id`, if it is a mirrored row. Knows
+    /// nothing about local sessions, so routing code calls
+    /// `machines::mirrored_owner` (local registry first) instead. Falls back
     /// to the pending-owner map for an id too new to have appeared in a
     /// real mirrored row yet, pruning it first if it has outlived
     /// `PENDING_TTL` - a real row always wins once it shows up.

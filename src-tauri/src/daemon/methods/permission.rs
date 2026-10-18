@@ -177,9 +177,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                     // with no way to ever answer it. Joe answers it on the
                     // machine (or phone) where the chat actually runs.
                     prompts.extend(
-                        state
-                            .mirror
-                            .prompts()
+                        crate::daemon::machines::mirrored_prompts(&state)
                             .into_iter()
                             .filter(|p| p["event"].as_str() != Some("secret-requested")),
                     );

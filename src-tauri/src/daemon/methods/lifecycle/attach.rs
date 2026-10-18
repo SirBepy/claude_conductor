@@ -88,7 +88,7 @@ pub fn register_attach(router: &mut Router, state: Arc<DaemonState>) {
                 let Some(session) = map.get(&p.session_id).map(|s| s.clone()) else {
                     // Not a local session - maybe one mirrored in from a
                     // paired peer machine (see `spawn_mirrored_relay`'s doc).
-                    let Some(machine_id) = state.mirror.owner_of(&p.session_id) else {
+                    let Some(machine_id) = crate::daemon::machines::mirrored_owner(&state, &p.session_id) else {
                         return Err(err_to_rpc(LifecycleError::NotFound(p.session_id.clone())));
                     };
                     let registry = state

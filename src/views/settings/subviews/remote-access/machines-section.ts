@@ -5,6 +5,7 @@
 
 import { html } from "lit-html";
 import { api } from "../../../../shared/api";
+import { isRemote } from "../../../../shared/transport";
 import { renderEntityList } from "./entity-list";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
@@ -84,6 +85,13 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
             <span class="ra-device-name">${escapeHtml(p.label)}</span>
             <span class="ra-device-date">${escapeHtml(p.os)}${p.reach ? ` &middot; ${escapeHtml(p.reach)}` : ""}</span>
           </div>
+          ${isRemote() ? "" : `<label class="ra-machine-drive" title="Off: ${escapeHtml(p.label)} still sees every chat here, but can only drive the chats it started">
+            <span class="ra-machine-drive-label">Can drive chats</span>
+            <span class="kit-toggle">
+              <input type="checkbox" class="ra-machine-drive-input" data-id="${escapeHtml(p.machine_id)}" ${p.can_drive === false ? "" : "checked"}>
+              <span class="kit-toggle-track"></span>
+            </span>
+          </label>`}
           <button class="btn-danger-sm ra-unpair-btn" data-id="${escapeHtml(p.machine_id)}">Unpair</button>
         </div>
       `,
@@ -104,6 +112,8 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
       },
     );
 
+    wireDriveToggles(root);
+
     const freshIds = new Set(fresh.map((p) => p.machine_id));
     root.querySelectorAll<HTMLElement>("#ra-machine-list .ra-device-row").forEach((row) => {
       if (row.dataset.id && freshIds.has(row.dataset.id)) row.classList.add("ra-row-new");
@@ -115,6 +125,25 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
     console.error("[remote-access] list_machines unavailable", e);
     section.style.display = "none";
   }
+}
+
+/** A failed save puts the switch back, since the daemon still holds the old
+ *  value. */
+function wireDriveToggles(root: HTMLElement): void {
+  root.querySelectorAll<HTMLInputElement>("#ra-machine-list .ra-machine-drive-input").forEach((input) => {
+    input.onchange = () => {
+      const id = input.dataset.id ?? "";
+      const value = input.checked;
+      input.disabled = true;
+      void api
+        .setMachineCanDrive(id, value)
+        .catch((e) => {
+          console.error("[remote-access] set_machine_can_drive failed", e);
+          input.checked = !value;
+        })
+        .finally(() => { input.disabled = false; });
+    };
+  });
 }
 
 export function wireMachinePairForm(root: HTMLElement): void {

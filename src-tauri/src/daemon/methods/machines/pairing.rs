@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::pairing_url::{decide_reach, ReachDecision};
 use super::PairMachineParams;
 use crate::daemon::device_registry::DeviceRegistry;
-use crate::daemon::machines::{self, peer_client, PeerMachine, PeerMachineView};
+use crate::daemon::machines::{self, peer_client, PeerMachine};
 use crate::daemon::rpc::{ConnectionContext, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 
@@ -118,7 +118,7 @@ pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParam
     };
     registry.upsert_peer(peer.clone());
     crate::daemon::machines::MachineHub::sync_links(state);
-    serde_json::to_value(PeerMachineView::from(&peer)).map_err(|e| RpcError::internal(e.to_string()))
+    serde_json::to_value(registry.view(&peer)).map_err(|e| RpcError::internal(e.to_string()))
 }
 
 pub(super) async fn unpair_machine(state: &Arc<DaemonState>, machine_id: &str) -> Result<Value, RpcError> {

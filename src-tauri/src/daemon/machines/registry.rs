@@ -46,6 +46,9 @@ pub struct PeerMachineView {
     pub direct_url: Option<String>,
     pub reverse_device_id: Option<String>,
     pub added_at: u64,
+    /// Whether this peer may drive chats it didn't start here
+    /// (`MachineRegistry::can_drive`).
+    pub can_drive: bool,
     /// How `peer_client::reach_url` would resolve this peer right now, for
     /// the machines list UI to show at a glance: `"direct"` (has a
     /// `direct_url`), `"iroh"` (no direct url but a known iroh id, so the
@@ -66,8 +69,10 @@ pub fn reach_kind(peer: &PeerMachine) -> &'static str {
     }
 }
 
-impl From<&PeerMachine> for PeerMachineView {
-    fn from(p: &PeerMachine) -> Self {
+impl PeerMachineView {
+    /// Built through the registry, not a bare `From<&PeerMachine>`, because
+    /// `can_drive` lives on `MachinesFile` beside the peer list.
+    fn new(p: &PeerMachine, can_drive: bool) -> Self {
         Self {
             machine_id: p.machine_id.clone(),
             label: p.label.clone(),
@@ -76,6 +81,7 @@ impl From<&PeerMachine> for PeerMachineView {
             direct_url: p.direct_url.clone(),
             reverse_device_id: p.reverse_device_id.clone(),
             added_at: p.added_at,
+            can_drive,
             reach: reach_kind(p),
         }
     }
@@ -87,6 +93,12 @@ pub struct MachinesFile {
     pub self_: Option<SelfMachine>,
     #[serde(default)]
     pub peers: Vec<PeerMachine>,
+    /// Peers whose "can drive this PC's chats" switch is off: they still see
+    /// every chat, but may only drive the ones they started here
+    /// (`machines::peer_scope`). Kept apart from `PeerMachine` so absence
+    /// means the default (on), and a re-pair keeps the owner's choice.
+    #[serde(default)]
+    pub view_only_peers: Vec<String>,
 }
 
 fn registry_path(app_data: &Path) -> PathBuf {
@@ -214,8 +226,35 @@ impl MachineRegistry {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let idx = guard.peers.iter().position(|p| p.machine_id == machine_id)?;
         let removed = guard.peers.remove(idx);
+        guard.view_only_peers.retain(|id| id != machine_id);
         self.save(&guard);
         Some(removed)
+    }
+
+    /// `peer` as the token-free view list/pair responses carry.
+    pub fn view(&self, peer: &PeerMachine) -> PeerMachineView {
+        PeerMachineView::new(peer, self.can_drive(&peer.machine_id))
+    }
+
+    /// Whether `machine_id` may drive chats it did not start here. True for
+    /// every peer unless the owner switched it off.
+    pub fn can_drive(&self, machine_id: &str) -> bool {
+        !self.inner.lock().unwrap_or_else(|e| e.into_inner()).view_only_peers.iter().any(|id| id == machine_id)
+    }
+
+    /// Flips a paired peer's "can drive this PC's chats" switch. Returns
+    /// false (and stores nothing) for an id that isn't a paired peer.
+    pub fn set_can_drive(&self, machine_id: &str, value: bool) -> bool {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if !guard.peers.iter().any(|p| p.machine_id == machine_id) {
+            return false;
+        }
+        guard.view_only_peers.retain(|id| id != machine_id);
+        if !value {
+            guard.view_only_peers.push(machine_id.to_string());
+        }
+        self.save(&guard);
+        true
     }
 }
 

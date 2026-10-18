@@ -259,7 +259,7 @@ pub(crate) async fn post_message_or_forward_at(
     }
 
     // Cross-machine: `to` is a session mirrored from a paired peer.
-    let Some(machine_id) = state.mirror.owner_of(to_id) else {
+    let Some(machine_id) = crate::daemon::machines::mirrored_owner(state, to_id) else {
         return json!({"ok": false, "error": format!("unknown target session: {to_id}")});
     };
     let Some(registry) = state.machines.get() else {

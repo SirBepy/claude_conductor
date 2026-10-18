@@ -34,7 +34,7 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
                 let peers: Vec<PeerMachineView> = state
                     .machines
                     .get()
-                    .map(|r| r.peers().iter().map(PeerMachineView::from).collect())
+                    .map(|r| r.peers().iter().map(|p| r.view(p)).collect())
                     .unwrap_or_default();
                 Ok(json!({ "self": mine, "peers": peers }))
             }
@@ -73,6 +73,26 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
                 let req: SetLabelParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 pairing::set_machine_label(&state, &req.label)
+            }
+        }
+    });
+
+    // Desktop-pipe only (absent from the transport table): the switch that
+    // limits a paired machine is never flippable by that machine, or by the
+    // phone.
+    router.register("set_machine_can_drive", {
+        let state = state.clone();
+        move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let req: SetCanDriveParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let registry =
+                    state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
+                if !registry.set_can_drive(&req.machine_id, req.value) {
+                    return Err(RpcError::invalid_params(format!("unknown machine: {}", req.machine_id)));
+                }
+                Ok(json!({ "ok": true }))
             }
         }
     });
@@ -140,6 +160,12 @@ struct UnpairMachineParams {
 #[derive(Debug, Deserialize)]
 struct SetLabelParams {
     label: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetCanDriveParams {
+    machine_id: String,
+    value: bool,
 }
 
 #[cfg(test)]
