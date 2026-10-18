@@ -75,6 +75,7 @@ mod usage;
 // and the per-turn injection hook, todo 692) calls this module's handlers
 // directly - same non-RPC shape as `channel` above.
 pub(crate) mod user_todos;
+mod voice;
 
 pub use channels::register_channels;
 pub use context::register_context;
@@ -100,6 +101,7 @@ pub use statusbar::register_statusbar;
 pub use step_comments::register_step_comments;
 pub use usage::register_usage;
 pub use user_todos::register_user_todos;
+pub use voice::register_voice;
 pub use worktrees::register_worktrees;
 
 #[cfg(test)]
