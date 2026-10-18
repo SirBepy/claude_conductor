@@ -218,6 +218,13 @@
   .composer-shell:has(.session-thinking[hidden]) .session-composer {
     border-radius: 0;
   }
+  /* The desktop focus glow is a ring that sits outside the border, in the
+     margin sessions.css:632 gives the shell - full-bleed removes that
+     margin, so the ring has nowhere to sit and instead reads as a second
+     colored band stacked on the border-color change, top and bottom. */
+  .composer-shell:has(.composer-textarea:focus) {
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {
