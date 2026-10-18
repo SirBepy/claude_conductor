@@ -82,6 +82,24 @@ describe("lockInputToHost", () => {
     unlock();
   });
 
+  it("never blocks reload (ctrl+r, F5), the way out of a wedged modal", () => {
+    const host = document.createElement("div");
+    const outsideBtn = document.createElement("button");
+    document.body.append(host, outsideBtn);
+    const unlock = lockInputToHost(host);
+
+    for (const evt of [keydown("r", { ctrlKey: true }), keydown("R", { ctrlKey: true, shiftKey: true }), keydown("F5")]) {
+      outsideBtn.dispatchEvent(evt);
+      expect(evt.defaultPrevented).toBe(false);
+    }
+    // A plain "r" outside the host is still swallowed.
+    const plain = keydown("r");
+    outsideBtn.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+
+    unlock();
+  });
+
   it("allowKey still blocks the leak but lets the modal's own handler see the key", () => {
     const host = document.createElement("div");
     const outsideBtn = document.createElement("button");
