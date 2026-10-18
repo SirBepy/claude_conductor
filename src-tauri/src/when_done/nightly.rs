@@ -3,11 +3,12 @@
 //! `nightlyWhenDone` (`{ enabled, action, time: "HH:MM" }`), written by the
 //! Settings > System view; read fresh every tick so a save applies at once.
 
-use super::{arm, ArmMode, ProtocolPhase, TerminalAction};
+use super::engine::Overdue;
+use super::{arm, ArmMode, OverdueAction, ProtocolPhase, TerminalAction};
 use crate::state::AppState;
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Deserialize;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 const TICK: Duration = Duration::from_secs(30);
@@ -22,23 +23,38 @@ struct NightlyConfig {
     enabled: bool,
     action: TerminalAction,
     time: String,
+    /// Hours after the arm time before an unfired arm is considered overdue.
+    /// Default (3) lands at 05:00 for the default 02:00 arm time.
+    #[serde(rename = "overdueHours")]
+    overdue_hours: f64,
+    /// What to do once overdue: give up (back to normal) or force the action
+    /// regardless of busy chats / the user still being at the PC.
+    #[serde(rename = "overdueAction")]
+    overdue_action: OverdueAction,
 }
 
 impl Default for NightlyConfig {
     fn default() -> Self {
-        Self { enabled: false, action: TerminalAction::Shutdown, time: "02:00".into() }
+        Self {
+            enabled: false,
+            action: TerminalAction::Shutdown,
+            time: "02:00".into(),
+            overdue_hours: 3.0,
+            overdue_action: OverdueAction::Cancel,
+        }
     }
 }
 
-/// The enabled config's action and time, or `None` when off, absent, or
-/// malformed (a bad value must never arm anything).
-fn parse_config(raw: Option<&serde_json::Value>) -> Option<(TerminalAction, NaiveTime)> {
+/// The enabled config's action, time, and overdue plan, or `None` when off,
+/// absent, or malformed (a bad value must never arm anything).
+fn parse_config(raw: Option<&serde_json::Value>) -> Option<(TerminalAction, NaiveTime, Duration, OverdueAction)> {
     let cfg: NightlyConfig = serde_json::from_value(raw?.clone()).ok()?;
     if !cfg.enabled {
         return None;
     }
     let at = NaiveTime::parse_from_str(&cfg.time, "%H:%M").ok()?;
-    Some((cfg.action, at))
+    let overdue_after = Duration::from_secs_f64(cfg.overdue_hours.max(0.0) * 3600.0);
+    Some((cfg.action, at, overdue_after, cfg.overdue_action))
 }
 
 /// The night (the date its arm time falls on) that is due to arm at `now`, if
@@ -69,7 +85,7 @@ pub fn spawn(app: AppHandle) {
             tokio::time::sleep(TICK).await;
             let state = app.state::<AppState>();
             let raw = state.settings.lock().unwrap().extra.get("nightlyWhenDone").cloned();
-            let Some((action, at)) = parse_config(raw.as_ref()) else { continue };
+            let Some((action, at, overdue_after, overdue_action)) = parse_config(raw.as_ref()) else { continue };
             let Some(night) = due_night(Local::now().naive_local(), at, last_armed) else { continue };
             last_armed = Some(night);
 
@@ -78,8 +94,9 @@ pub fn spawn(app: AppHandle) {
                 log::info!("when_done: nightly arm skipped, a when-done run is already armed");
                 continue;
             }
-            log::info!("when_done: nightly arm ({action:?})");
-            arm(&app, action, ArmMode::Nightly);
+            log::info!("when_done: nightly arm ({action:?}, overdue {overdue_action:?} after {overdue_after:?})");
+            let overdue = Overdue { deadline: Instant::now() + overdue_after, action: overdue_action };
+            arm(&app, action, ArmMode::Nightly, Some(overdue));
         }
     });
 }
@@ -127,11 +144,38 @@ mod tests {
     fn parses_only_an_enabled_well_formed_config() {
         assert_eq!(
             parse_config(Some(&json!({ "enabled": true, "action": "sleep", "time": "01:15" }))),
-            Some((TerminalAction::Sleep, NaiveTime::from_hms_opt(1, 15, 0).unwrap()))
+            Some((
+                TerminalAction::Sleep,
+                NaiveTime::from_hms_opt(1, 15, 0).unwrap(),
+                Duration::from_secs(3 * 3600),
+                OverdueAction::Cancel,
+            ))
         );
-        assert_eq!(parse_config(Some(&json!({ "enabled": true }))), Some((TerminalAction::Shutdown, two_am())));
+        assert_eq!(
+            parse_config(Some(&json!({ "enabled": true }))),
+            Some((TerminalAction::Shutdown, two_am(), Duration::from_secs(3 * 3600), OverdueAction::Cancel))
+        );
         assert_eq!(parse_config(Some(&json!({ "enabled": false, "time": "02:00" }))), None);
         assert_eq!(parse_config(Some(&json!({ "enabled": true, "time": "2am" }))), None);
         assert_eq!(parse_config(None), None);
+    }
+
+    #[test]
+    fn parses_overdue_hours_and_action() {
+        assert_eq!(
+            parse_config(Some(&json!({
+                "enabled": true,
+                "overdueHours": 1.5,
+                "overdueAction": "force",
+            }))),
+            Some((TerminalAction::Shutdown, two_am(), Duration::from_secs_f64(1.5 * 3600.0), OverdueAction::Force))
+        );
+        // A negative overdueHours never parses into a negative Duration (which
+        // would panic): it floors at zero, meaning "overdue immediately".
+        assert_eq!(
+            parse_config(Some(&json!({ "enabled": true, "overdueHours": -5 })))
+                .map(|(_, _, overdue_after, _)| overdue_after),
+            Some(Duration::ZERO)
+        );
     }
 }

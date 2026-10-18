@@ -167,7 +167,7 @@ async fn full_run_progresses_through_phases_and_fires_terminal_once() {
         }));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Manual).await;
+    run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Manual, None).await;
 
     let g = world.lock().unwrap();
     // Phase progression: Watching -> CountingDown -> Firing, nothing between.
@@ -204,7 +204,7 @@ async fn cancel_mid_countdown_short_circuits_and_terminal_never_fires() {
         Arc::new(Mutex::new(|_w: &mut World| {}));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual).await;
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual, None).await;
 
     let g = world.lock().unwrap();
     // The countdown was entered (proving this is a mid-countdown cancel, not
@@ -249,7 +249,7 @@ async fn nightly_run_skips_auto_resolve_and_waits_for_the_user_to_be_away() {
         }));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Nightly).await;
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Nightly, None).await;
 
     let g = world.lock().unwrap();
     assert_eq!(
@@ -278,7 +278,7 @@ async fn nightly_countdown_returns_to_watching_when_the_user_comes_back() {
         Arc::new(Mutex::new(|w: &mut World| w.user_idle_secs = NIGHTLY_AWAY_SECS));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Nightly).await;
+    run_engine_with_deps(deps, TerminalAction::Sleep, ArmMode::Nightly, None).await;
 
     let g = world.lock().unwrap();
     assert_eq!(
@@ -315,7 +315,7 @@ async fn no_progress_guard_gives_up_with_a_distinct_phase_and_blocking_ids() {
     }));
 
     let deps = deps_for(world.clone(), tick);
-    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual).await;
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual, None).await;
 
     let g = world.lock().unwrap();
     assert_eq!(
@@ -332,4 +332,65 @@ async fn no_progress_guard_gives_up_with_a_distinct_phase_and_blocking_ids() {
         "carries a human-readable reason, got {:?}",
         g.state.gave_up_reason
     );
+}
+
+/// A nightly overdue cutoff set to cancel gives up (back to normal) instead of
+/// waiting forever, even though the user never steps away and the terminal
+/// action never fires.
+#[tokio::test(start_paused = true)]
+async fn nightly_overdue_cancel_gives_up_instead_of_firing() {
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![],
+        // Never away: ready_to_fire would otherwise never be true.
+        user_idle_secs: 0,
+        ..Default::default()
+    }));
+
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> = Arc::new(Mutex::new(|_w: &mut World| {}));
+
+    let deadline = world.lock().unwrap().clock;
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(
+        deps,
+        TerminalAction::Shutdown,
+        ArmMode::Nightly,
+        Some(Overdue { deadline, action: OverdueAction::Cancel }),
+    )
+    .await;
+
+    let g = world.lock().unwrap();
+    assert_eq!(g.phases, vec![ProtocolPhase::Watching, ProtocolPhase::GaveUp], "gives up from Watching");
+    assert!(g.terminal_calls.is_empty(), "must never fire the terminal action");
+    assert_eq!(g.state.phase, ProtocolPhase::GaveUp);
+}
+
+/// A nightly overdue cutoff set to force fires the terminal action even
+/// though the user never stepped away - the whole point of forcing.
+#[tokio::test(start_paused = true)]
+async fn nightly_overdue_force_fires_despite_the_user_never_leaving() {
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![],
+        user_idle_secs: 0,
+        ..Default::default()
+    }));
+
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> = Arc::new(Mutex::new(|_w: &mut World| {}));
+
+    let deadline = world.lock().unwrap().clock;
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(
+        deps,
+        TerminalAction::Shutdown,
+        ArmMode::Nightly,
+        Some(Overdue { deadline, action: OverdueAction::Force }),
+    )
+    .await;
+
+    let g = world.lock().unwrap();
+    assert_eq!(
+        g.phases,
+        vec![ProtocolPhase::Watching, ProtocolPhase::CountingDown, ProtocolPhase::Firing],
+        "forced through despite the user never leaving"
+    );
+    assert_eq!(g.terminal_calls, vec![TerminalAction::Shutdown]);
 }

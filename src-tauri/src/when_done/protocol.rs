@@ -19,6 +19,17 @@ pub enum ArmMode {
     Nightly,
 }
 
+/// Nightly only: what to do once the overdue cutoff passes without the arm
+/// having fired (chats still busy, or the user still at the PC). Read from the
+/// `nightlyWhenDone.overdueAction` settings key - never used for a manual arm,
+/// which has no cutoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OverdueAction {
+    Cancel,
+    Force,
+}
+
 /// Where the protocol currently is in its lifecycle.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
