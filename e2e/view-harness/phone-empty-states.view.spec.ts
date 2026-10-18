@@ -6,6 +6,11 @@
 // mount chain before asserting, same as before, so they only ever observe
 // the final state - the skeletons are long gone by then. Ran this file
 // after that change - still passes.
+//
+// Reviewed again against the mobile Chats overhaul's sidebar-entries.ts
+// gating (project rail / Hidden row skip inline rendering on the phone
+// transport) - this file's empty-state block runs before and independent of
+// that gate. Ran this file after that change - still passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, mountSessionsList, SESSIONS_BASE_INVOKE, capture } from "./harness";
 

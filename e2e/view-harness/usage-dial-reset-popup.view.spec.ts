@@ -3,6 +3,11 @@ import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Todo 418: .oc-reset-pop opens ABOVE its dial. The overlay window reserves
 // 78px of headroom for it (overlay.css:75); the phone header has none.
+//
+// Reviewed against the mobile Chats overhaul (DIAL_SCALE stayed 0.6, compact
+// stayed true; the new click-opened detail popover is separate from this
+// hover-only .oc-reset-pop suppression). Ran this file after that change -
+// still passes.
 
 const PHONE = { width: 393, height: 852 };
 
