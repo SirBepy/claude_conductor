@@ -2,6 +2,7 @@
 // Reviewed 2026-10-08: code-mode/entry.ts now also refuses to open for a mirrored chat (`Instance.machine != null`), and session-header.ts gained setMirrored() to hide the `</>` button for one; every fixture here is a locally-hosted session (machine: null via sessionInstance's default), so this spec's contract is unaffected.
 // Reviewed 2026-10-08: tick() now also reloads the "all" scope on an edit-count change, not just "chat" - a timing-only addition this spec never asserted against (no test here drives the chat's edit count or waits out the 1s tick), so its contract is unaffected.
 // Reviewed 2026-10-13 (G10 follow-up, docs/multi-machine.md): Code mode's reads now thread an optional `sessionId` through every invoke call (data.ts, git-fold.ts, branch-switcher.ts) so a session mirrored from a paired peer machine proxies through the daemon instead of reading local disk; every fixture here is a locally-hosted session (`sessionInstance`'s default has no `machine`), so `sessionId` is always sent alongside the same `cwd` this spec already asserts against - no call shape this spec checks changed. Re-ran this spec file directly (`npx playwright test e2e/view-harness/code-mode.view.spec.ts`): 11/11 pass.
+// Reviewed 2026-10-18: session-header.ts's setRemote() (the "Started from phone" badge) was removed outright - this spec never asserted that badge, so its contract is unaffected.
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 

@@ -261,14 +261,6 @@
   white-space: nowrap;
 }
 
-.session-remote-badge {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  margin-left: 4px;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
 /* Machine mark (multi-machine federation): a small glyph, never a pill -
    the row's own opacity (below) already carries the offline signal, so the
    badge itself only dims a little further, matching the row it sits in. */

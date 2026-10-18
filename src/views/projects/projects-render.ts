@@ -51,14 +51,11 @@ function cardTemplate(g: ProjectGroup): TemplateResult {
       <div class="avatar">${unsafeHTML(avatar)}</div>
       <div class="body">
         <div class="name">${displayName}</div>
-        ${g.live || g.any_remote || g.any_automated
+        ${g.live || g.any_automated
           ? html`
             <div class="proj-tags">
               ${g.live
                 ? html`<span class="proj-tag proj-tag-live" title="${g.live} live" aria-label="${g.live} live"><span class="proj-tag-dot"></span>${g.live}</span>`
-                : ""}
-              ${g.any_remote
-                ? html`<span class="proj-tag" title="started from phone" aria-label="started from phone"><i class="ph ph-device-mobile"></i>phone</span>`
                 : ""}
               ${g.any_automated
                 ? html`<span class="proj-tag" title="auto" aria-label="auto"><i class="ph ph-gear"></i>auto</span>`

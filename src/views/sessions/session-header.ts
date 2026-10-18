@@ -138,18 +138,6 @@ export class SessionHeader {
     }
   }
 
-  setRemote(isRemote: boolean): void {
-    const existing = this.el.querySelector(".session-header-remote-badge");
-    if (isRemote && !existing) {
-      const icon = document.createElement("i");
-      icon.className = "ph ph-device-mobile session-header-remote-badge";
-      icon.title = "Started from phone";
-      this._titleEl.appendChild(icon);
-    } else if (!isRemote && existing) {
-      existing.remove();
-    }
-  }
-
   setAvatar(charId: string | null, url: string | null, status: string, cwd?: string | null): void {
     const badge = projBadgeHtml(cwd ?? null, "session-header-proj-badge");
     if (charId) {

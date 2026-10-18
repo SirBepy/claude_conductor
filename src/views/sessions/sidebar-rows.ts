@@ -37,7 +37,7 @@ export interface RowOptions {
   title: string;
   /** Project folder name, escaped. */
   projectLabel: string;
-  /** Phone/autopilot badges after the project name. "" when neither flag is set. */
+  /** Autopilot badge after the project name. "" when not autopilot. */
   badges: string;
   /** Portrait's secondary slot: model battery + drain chip, for every row kind. */
   portraitSecondary: string;
@@ -82,7 +82,6 @@ function buildRowOptions(args: {
   /** Portrait-only bottom-left dot; differs from `avatarStatusClass` only
    *  for a closing live session. */
   dotClass: string;
-  isRemote: boolean;
   isAutopilot: boolean;
   /** Whether this row is the selected/active one. Suppresses the frozen row
    *  tint below - active already paints its own background, and resolving
@@ -116,7 +115,7 @@ function buildRowOptions(args: {
   const machineBadge = args.machine
     ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>${machineLabel}`
     : "";
-  const badges = `${args.isRemote ? `<i class="ph ph-device-mobile session-remote-badge" ${tipAttr}="Started from phone"></i>` : ""}${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${machineBadge}`;
+  const badges = `${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${machineBadge}`;
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
@@ -182,7 +181,6 @@ export function sessionRowOptions(
     avatarStatusClass: statusClass,
     statusTitle,
     dotClass,
-    isRemote: !!s.is_remote,
     isAutopilot: !!s.autopilot,
     isActive: ctx.isActive,
     needsAttention,
@@ -219,8 +217,6 @@ export function draftRowOptions(
     projectLabel: pending.projectName || "New session",
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
-    // A draft has no session yet, so it was never started from a phone.
-    isRemote: false,
     isAutopilot: false,
     isActive,
     needsAttention: false,
@@ -248,8 +244,6 @@ export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptio
     projectLabel: d.projectName || "New session",
     avatarStatusClass: IDLE_DOT_CLASS,
     dotClass: IDLE_DOT_CLASS,
-    // Same as draftRowOptions - a parked draft has no session yet.
-    isRemote: false,
     isAutopilot: false,
     isActive: false,
     needsAttention: false,
