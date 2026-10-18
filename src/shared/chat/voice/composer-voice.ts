@@ -88,6 +88,17 @@ export class ComposerVoice {
     if (this.controller?.isRecording) await this.controller.stop();
   }
 
+  /** Send pressed while still dictating: stop cleanly and await the sidecar's
+   *  trailing flush (`controller.stop()`'s own ~300ms wait) before the caller
+   *  reads the textarea, so words spoken in the instant before the click land
+   *  in the sent text instead of arriving after send has already read it and
+   *  leaking into the composer on the next `onFinal`. No-op if not recording -
+   *  unlike `reset()`, this never zeroes commitPos/volatileLen itself; the
+   *  normal onFinal/onStateChange path already does that once the flush lands. */
+  async finishForSend(): Promise<void> {
+    if (this.controller?.isRecording) await this.controller.stop();
+  }
+
   reset(): void {
     this.isUsed = false;
     this.commitPos = 0;
