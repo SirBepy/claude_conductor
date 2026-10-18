@@ -9,8 +9,6 @@
 //! turn, never a wake of its own.
 
 use crate::daemon::state::DaemonState;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
 use std::sync::Arc;
 
 /// Joe's pick, 2026-10-14. A fresh chat already starts at ~50-60k (system
@@ -21,12 +19,21 @@ const OPT_IN_SKILL: &str = "auto-respawn";
 
 pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
     let path = crate::context_status::resolve_transcript(&state.registry, session_id)?;
-    let status = crate::context_status::compute_context_status(&path)?;
-    let note = cap_note(status.occupancy)?;
+    note_for_transcript(&path)
+}
+
+fn note_for_transcript(path: &std::path::Path) -> Option<String> {
     // The opt-in lives in the transcript itself, so it needs no stored state,
     // survives a daemon restart, and dies with the chat: a successor has to run
-    // the skill again. Checked only past the cap, so most turns never scan.
-    opted_in(&path).then_some(note)
+    // the skill again. It rides the occupancy score's own streaming pass, so the
+    // (tool-heavy, multi-megabyte) transcript is read once per turn and never
+    // held in memory whole; only lines naming the skill are parsed.
+    let mut opted = false;
+    let status = crate::context_status::compute_context_status_visiting(path, |line| {
+        opted = opted || line_opts_in(line);
+    })?;
+    let note = cap_note(status.occupancy)?;
+    opted.then_some(note)
 }
 
 fn cap_note(occupancy: u64) -> Option<String> {
@@ -39,33 +46,23 @@ fn cap_note(occupancy: u64) -> Option<String> {
     })
 }
 
-/// True once the chat invoked the skill: a `Skill` tool call naming it, or
-/// Joe typing the slash command. Parsed, not substring-matched, so a chat that
-/// merely mentions the skill's name (or edits this file) never opts itself in.
-fn opted_in(transcript: &Path) -> bool {
-    let Ok(file) = std::fs::File::open(transcript) else { return false };
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
-        if !line.contains(OPT_IN_SKILL) {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        if line_opts_in(&v) {
-            return true;
-        }
+/// True when this transcript line is the chat invoking the skill: a `Skill`
+/// tool call naming it, or Joe typing the slash command. Parsed, not
+/// substring-matched, so a chat that merely mentions the skill's name (or edits
+/// this file) never opts itself in.
+fn line_opts_in(line: &str) -> bool {
+    if !line.contains(OPT_IN_SKILL) {
+        return false;
     }
-    false
+    serde_json::from_str::<serde_json::Value>(line.trim()).is_ok_and(|v| value_opts_in(&v))
 }
 
-fn line_opts_in(v: &serde_json::Value) -> bool {
+fn value_opts_in(v: &serde_json::Value) -> bool {
     let Some(content) = v.get("message").and_then(|m| m.get("content")) else { return false };
     let typed = |text: &str| text.contains(&format!("<command-name>/{OPT_IN_SKILL}</command-name>"));
     match v.get("type").and_then(|t| t.as_str()) {
         Some("assistant") => content.as_array().is_some_and(|blocks| {
-            blocks.iter().any(|b| {
-                b.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                    && b.get("name").and_then(|n| n.as_str()) == Some("Skill")
-                    && b.get("input").and_then(|i| i.get("skill")).and_then(|s| s.as_str()) == Some(OPT_IN_SKILL)
-            })
+            blocks.iter().any(|b| crate::skill_usage::parser::skill_tool_use_name(b) == Some(OPT_IN_SKILL))
         }),
         Some("user") => match content {
             serde_json::Value::String(s) => typed(s),
@@ -92,6 +89,10 @@ mod tests {
         f
     }
 
+    fn opted_in(f: &tempfile::NamedTempFile) -> bool {
+        std::fs::read_to_string(f.path()).unwrap().lines().any(line_opts_in)
+    }
+
     #[test]
     fn below_the_cap_injects_nothing() {
         assert_eq!(cap_note(CONTEXT_CAP_TOKENS - 1), None);
@@ -112,7 +113,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"run /auto-respawn to opt in"}]}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"new_string":"\"skill\":\"auto-respawn\""}}]}}"#,
         ]);
-        assert!(!opted_in(f.path()), "mentioning the skill must not opt a chat in");
+        assert!(!opted_in(&f), "mentioning the skill must not opt a chat in");
     }
 
     #[test]
@@ -120,7 +121,7 @@ mod tests {
         let f = transcript(&[
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"auto-respawn"}}]}}"#,
         ]);
-        assert!(opted_in(f.path()));
+        assert!(opted_in(&f));
     }
 
     #[test]
@@ -128,7 +129,25 @@ mod tests {
         let f = transcript(&[
             r#"{"type":"user","message":{"content":"<command-message>auto-respawn</command-message>\n<command-name>/auto-respawn</command-name>"}}"#,
         ]);
-        assert!(opted_in(f.path()));
+        assert!(opted_in(&f));
+    }
+
+    const PAST_CAP_USAGE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":200000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
+
+    #[test]
+    fn past_the_cap_an_opted_in_chat_gets_the_note_from_one_pass() {
+        let f = transcript(&[
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"auto-respawn"}}]}}"#,
+            PAST_CAP_USAGE,
+        ]);
+        let note = note_for_transcript(f.path()).expect("opted in and past the cap");
+        assert!(note.contains("200k"), "{note}");
+    }
+
+    #[test]
+    fn past_the_cap_a_chat_that_never_opted_in_gets_nothing() {
+        let f = transcript(&[PAST_CAP_USAGE]);
+        assert_eq!(note_for_transcript(f.path()), None);
     }
 
     #[test]

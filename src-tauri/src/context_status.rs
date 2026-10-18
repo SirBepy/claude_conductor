@@ -162,6 +162,16 @@ fn usage_from_line(v: &serde_json::Value) -> Option<(u64, Option<String>)> {
 /// and non-usage lines; returns None when the file is missing/unreadable or has
 /// no usage lines at all. Never panics.
 pub fn compute_context_status(transcript_path: &Path) -> Option<ContextStatus> {
+    compute_context_status_visiting(transcript_path, |_| {})
+}
+
+/// [`compute_context_status`] that also hands every raw line to `visit`, so a
+/// caller needing its own scan of the same transcript gets it from this one
+/// streaming pass instead of opening the file again.
+pub(crate) fn compute_context_status_visiting(
+    transcript_path: &Path,
+    mut visit: impl FnMut(&str),
+) -> Option<ContextStatus> {
     let file = std::fs::File::open(transcript_path).ok()?;
     let mut reader = BufReader::new(file);
 
@@ -184,6 +194,7 @@ pub fn compute_context_status(transcript_path: &Path) -> Option<ContextStatus> {
             Ok(_) => {}
             Err(_) => break,
         }
+        visit(&line);
         if !line.contains("input_tokens") {
             continue;
         }

@@ -4,6 +4,21 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+/// The skill name a `tool_use` content block invoked, if it is a `Skill`
+/// call naming one. `None` for any other tool_use, any non-tool_use block,
+/// or a `Skill` call whose `input.skill` is missing or not a string.
+/// Shared with `hooks_server::context_cap`'s opt-in scan so both readers of
+/// a transcript's `Skill` tool_use blocks agree on what counts as one.
+pub(crate) fn skill_tool_use_name(block: &Value) -> Option<&str> {
+    if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+        return None;
+    }
+    if block.get("name").and_then(Value::as_str) != Some("Skill") {
+        return None;
+    }
+    block.pointer("/input/skill").and_then(Value::as_str)
+}
+
 pub fn parse_transcript(path: &Path) -> Vec<SkillUsageEvent> {
     let Ok(file) = std::fs::File::open(path) else { return vec![] };
     let lines: Vec<Value> = BufReader::new(file)
@@ -53,24 +68,12 @@ pub fn parse_transcript(path: &Path) -> Vec<SkillUsageEvent> {
                 // Collect every Skill tool_use in this turn, in order.
                 let mut skills_in_turn: Vec<(String, String)> = Vec::new(); // (tool_use_id, skill_name)
                 for c in content {
-                    if c.get("type").and_then(|v| v.as_str()) == Some("tool_use")
-                        && c.get("name").and_then(|v| v.as_str()) == Some("Skill")
-                    {
-                        let skill_name = c
-                            .pointer("/input/skill")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        if skill_name.is_empty() {
-                            continue;
-                        }
-                        let id = c
-                            .get("id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        skills_in_turn.push((id, skill_name));
+                    let Some(skill_name) = skill_tool_use_name(c) else { continue };
+                    if skill_name.is_empty() {
+                        continue;
                     }
+                    let id = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    skills_in_turn.push((id, skill_name.to_string()));
                 }
                 if skills_in_turn.is_empty() {
                     continue;
@@ -292,4 +295,27 @@ fn split_usage(weights: &[usize], total: &TokenBreakdown) -> Vec<TokenBreakdown>
         out.push(piece);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skill_tool_use_name_reads_a_skill_block() {
+        let block = serde_json::json!({"type": "tool_use", "name": "Skill", "input": {"skill": "auto-respawn"}});
+        assert_eq!(skill_tool_use_name(&block), Some("auto-respawn"));
+    }
+
+    #[test]
+    fn skill_tool_use_name_ignores_a_non_skill_tool_use() {
+        let block = serde_json::json!({"type": "tool_use", "name": "Edit", "input": {"skill": "auto-respawn"}});
+        assert_eq!(skill_tool_use_name(&block), None);
+    }
+
+    #[test]
+    fn skill_tool_use_name_is_none_without_input_skill() {
+        let block = serde_json::json!({"type": "tool_use", "name": "Skill", "input": {}});
+        assert_eq!(skill_tool_use_name(&block), None);
+    }
 }
