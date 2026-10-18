@@ -113,10 +113,16 @@ async fn accept_loop(listener: TcpListener, endpoint: Endpoint, remote: Endpoint
 /// inverse of `iroh_tunnel::forward`, matching
 /// `android/src-tauri/src/iroh_tunnel.rs::forward`.
 async fn forward(tcp: TcpStream, endpoint: Endpoint, remote: EndpointAddr) -> std::io::Result<()> {
-    let conn = endpoint
-        .connect(remote, ALPN)
-        .await
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let conn = match endpoint.connect(remote.clone(), ALPN).await {
+        Ok(c) => c,
+        Err(e) => {
+            // Warn, not debug: a peer that can never be dialed otherwise
+            // leaves no trace at the default log level, only a silent
+            // "Failed to load" in the UI.
+            log::warn!("iroh dialer: connect to {} failed: {e}", remote.id);
+            return Err(std::io::Error::other(e.to_string()));
+        }
+    };
     let (mut send, mut recv) = conn.open_bi().await.map_err(|e| std::io::Error::other(e.to_string()))?;
     let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp);
     let up = async {
@@ -226,5 +232,26 @@ mod tests {
         }
 
         health_handle.abort();
+    }
+
+    /// Manual reachability probe over the REAL n0 relay + DNS discovery, which
+    /// the offline tests above never touch: dials `CC_DIAL_IROH_ID` from a fresh
+    /// dialer and GETs its `/api/health`. Run with
+    /// `CC_DIAL_IROH_ID=<id> cargo test --lib live_dial_health_probe -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_dial_health_probe() {
+        let Ok(id) = std::env::var("CC_DIAL_IROH_ID") else {
+            eprintln!("CC_DIAL_IROH_ID not set; nothing to probe");
+            return;
+        };
+        let dialer = IrohDialer::new().await.expect("dialer bind");
+        let port = dialer.proxy_port(&id).await.expect("proxy port");
+        let started = std::time::Instant::now();
+        let health = super::super::peer_client::PeerClient::new(&format!("http://127.0.0.1:{port}"), "")
+            .health()
+            .await;
+        eprintln!("live_dial {id}: {:?} after {:?}", health, started.elapsed());
+        assert!(health.is_ok(), "could not reach {id} over iroh");
     }
 }
