@@ -1,10 +1,25 @@
 package com.sirbepy.conductor.mobile
 
+import android.graphics.Color
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.ViewGroup
 import android.webkit.WebView
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 
@@ -13,7 +28,21 @@ import androidx.webkit.WebViewFeature
 private const val BACK_HOOK_JS =
   "(function(){try{return !!(window.__ccHandleBack && window.__ccHandleBack() === true)}catch(e){return false}})()"
 
+// BIOMETRIC_WEAK, not STRONG: STRONG | DEVICE_CREDENTIAL is unsupported on
+// API 28-29 (minSdk is 28), and the PIN fallback is the point.
+private const val UNLOCK_AUTHENTICATORS = BIOMETRIC_WEAK or DEVICE_CREDENTIAL
+private const val LOCK_BACKGROUND = "#0f1117"
+
 class MainActivity : TauriActivity() {
+  // The WebView keeps loading (and connecting to the PC) underneath an opaque
+  // lock screen, so unlocking shows a ready app instead of starting the load.
+  // The lock screen eats every touch, and dispatchKeyEvent eats every key, so
+  // nothing reaches the app until the phone's own fingerprint/PIN passes.
+  private var locked = true
+  private var promptShowing = false
+  private var backgroundedAt: Long? = null
+  private lateinit var lockScreen: LinearLayout
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // App always renders dark (frontend forces color-scheme: dark via CSS); lock
     // night-mode so native chrome (status/nav bar via enableEdgeToEdge's auto style)
@@ -21,6 +50,112 @@ class MainActivity : TauriActivity() {
     AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    lockScreen = buildLockScreen()
+    attachLockScreen()
+  }
+
+  // Wry hands the WebView over with setContentView, which drops every view
+  // already in the content frame, the lock screen included. Re-adding it on
+  // top here keeps it covering the WebView however late that arrives.
+  override fun setContentView(view: android.view.View?) {
+    super.setContentView(view)
+    attachLockScreen()
+  }
+
+  override fun setContentView(view: android.view.View?, params: ViewGroup.LayoutParams?) {
+    super.setContentView(view, params)
+    attachLockScreen()
+  }
+
+  private fun attachLockScreen() {
+    if (!this::lockScreen.isInitialized) return
+    (lockScreen.parent as? ViewGroup)?.removeView(lockScreen)
+    addContentView(lockScreen, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+  }
+
+  override fun onStart() {
+    super.onStart()
+    if (!locked && AppLockPolicy.shouldRelock(backgroundedAt, SystemClock.elapsedRealtime())) lock()
+    backgroundedAt = null
+    // Posted: BiometricPrompt needs the activity resumed, which onStart isn't yet.
+    if (locked) lockScreen.post { promptUnlock() }
+  }
+
+  override fun onStop() {
+    super.onStop()
+    if (!locked) backgroundedAt = SystemClock.elapsedRealtime()
+  }
+
+  // A hardware keyboard would otherwise type into the focused composer behind
+  // the lock screen. Back still runs, and installBackHook sends it home.
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (locked && event.keyCode != KeyEvent.KEYCODE_BACK) return true
+    return super.dispatchKeyEvent(event)
+  }
+
+  private fun lock() {
+    locked = true
+    lockScreen.visibility = android.view.View.VISIBLE
+    lockScreen.bringToFront()
+  }
+
+  private fun unlock() {
+    locked = false
+    lockScreen.visibility = android.view.View.GONE
+  }
+
+  private fun promptUnlock() {
+    if (!locked || promptShowing || isFinishing) return
+    val canAuth = BiometricManager.from(this).canAuthenticate(UNLOCK_AUTHENTICATORS)
+    if (canAuth == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
+      // No fingerprint, PIN, pattern or password on the phone at all: there is
+      // nothing to check against, and the phone itself is open to anyone.
+      Log.w("AppLock", "no screen lock set on this phone; app lock skipped")
+      unlock()
+      return
+    }
+    val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+      override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+        promptShowing = false
+        unlock()
+      }
+
+      // Cancel, too many tries, or the prompt closed by leaving the app: stay
+      // locked; the Unlock button or the next return asks again.
+      override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+        promptShowing = false
+      }
+    })
+    val info = BiometricPrompt.PromptInfo.Builder()
+      .setTitle("Unlock Conductor")
+      .setSubtitle("This phone can control your PC's chats")
+      .setAllowedAuthenticators(UNLOCK_AUTHENTICATORS)
+      .build()
+    promptShowing = true
+    prompt.authenticate(info)
+  }
+
+  private fun buildLockScreen(): LinearLayout {
+    val dp = { v: Float -> TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt() }
+    return LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      setBackgroundColor(Color.parseColor(LOCK_BACKGROUND))
+      isClickable = true
+      isFocusable = true
+      addView(TextView(context).apply {
+        text = "Conductor is locked"
+        setTextColor(Color.WHITE)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        gravity = Gravity.CENTER
+      })
+      addView(Button(context).apply {
+        text = "Unlock"
+        setOnClickListener { promptUnlock() }
+      }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+        topMargin = dp(16f)
+      })
+    }
   }
 
   // Chromium's algorithmic darkening would otherwise re-darken the already-dark
@@ -40,6 +175,11 @@ class MainActivity : TauriActivity() {
   private fun installBackHook(webView: WebView) {
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
+        // Locked: the SPA must not act on it, so back just leaves the app.
+        if (locked) {
+          moveTaskToBack(true)
+          return
+        }
         webView.evaluateJavascript(BACK_HOOK_JS) { result ->
           if (result == "true") return@evaluateJavascript
           // No SPA hook (setup screen, page still loading): AppPlugin's default.
