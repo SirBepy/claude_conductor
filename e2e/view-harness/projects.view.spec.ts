@@ -104,7 +104,7 @@ async function navCalls(page: Page): Promise<string[]> {
 }
 
 test.describe("view-harness / projects", () => {
-  test("populated list: varied live/remote/automated tags, long-name truncation, four sort options", async ({ page }) => {
+  test("populated list: varied live/automated tags, long-name truncation, four sort options", async ({ page }) => {
     await mountProjects(page, POPULATED);
     await page.locator(".project-card").first().waitFor();
     await expect(page.locator(".project-card")).toHaveCount(7);
@@ -119,18 +119,16 @@ test.describe("view-harness / projects", () => {
     await expect(liveTag).toHaveAttribute("aria-label", "2 live");
     await expect(liveTag).toHaveAttribute("title", "2 live");
 
-    // Phone + automated: Phosphor icon + short text label, never emoji.
-    const remoteTag = page.locator('.project-card:has-text("Gamma") .proj-tag');
-    await expect(remoteTag).toContainText("phone");
-    await expect(remoteTag).toHaveAttribute("title", "started from phone");
-    await expect(remoteTag.locator("i.ph-device-mobile")).toBeAttached();
-
+    // Automated: Phosphor icon + short text label, never emoji.
     const autoTag = page.locator('.project-card:has-text("Delta") .proj-tag');
     await expect(autoTag).toContainText("auto");
     await expect(autoTag.locator("i.ph-gear")).toBeAttached();
 
-    // A project with all three tags together (Epsilon) renders all three chips.
-    await expect(page.locator('.project-card:has-text("Epsilon") .proj-tag')).toHaveCount(3);
+    // A project with live + automated together (Epsilon) renders both chips.
+    // any_remote is still set on its fixture but no longer renders a tag -
+    // the phone-origin badge was removed project-wide (chat sidebar, header,
+    // and this project card) per Joe's repeated request to stop surfacing it.
+    await expect(page.locator('.project-card:has-text("Epsilon") .proj-tag')).toHaveCount(2);
 
     // The worktree/parent-segment project shows its parent segment in the name.
     await expect(page.locator('.project-card:has-text("api")')).toContainText("monorepo");
