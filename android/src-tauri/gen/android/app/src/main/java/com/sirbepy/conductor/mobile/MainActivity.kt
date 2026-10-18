@@ -4,14 +4,10 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatDelegate
@@ -41,7 +37,7 @@ class MainActivity : TauriActivity() {
   private var locked = true
   private var promptShowing = false
   private var backgroundedAt: Long? = null
-  private lateinit var lockScreen: LinearLayout
+  private lateinit var lockScreen: View
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // App always renders dark (frontend forces color-scheme: dark via CSS); lock
@@ -57,12 +53,12 @@ class MainActivity : TauriActivity() {
   // Wry hands the WebView over with setContentView, which drops every view
   // already in the content frame, the lock screen included. Re-adding it on
   // top here keeps it covering the WebView however late that arrives.
-  override fun setContentView(view: android.view.View?) {
+  override fun setContentView(view: View?) {
     super.setContentView(view)
     attachLockScreen()
   }
 
-  override fun setContentView(view: android.view.View?, params: ViewGroup.LayoutParams?) {
+  override fun setContentView(view: View?, params: ViewGroup.LayoutParams?) {
     super.setContentView(view, params)
     attachLockScreen()
   }
@@ -95,13 +91,13 @@ class MainActivity : TauriActivity() {
 
   private fun lock() {
     locked = true
-    lockScreen.visibility = android.view.View.VISIBLE
+    lockScreen.visibility = View.VISIBLE
     lockScreen.bringToFront()
   }
 
   private fun unlock() {
     locked = false
-    lockScreen.visibility = android.view.View.GONE
+    lockScreen.visibility = View.GONE
   }
 
   private fun promptUnlock() {
@@ -120,10 +116,12 @@ class MainActivity : TauriActivity() {
         unlock()
       }
 
-      // Cancel, too many tries, or the prompt closed by leaving the app: stay
-      // locked; the Unlock button or the next return asks again.
+      // Cancel, too many tries, or the prompt closed by leaving the app: send
+      // the app to the background, still locked. Re-prompting in place would
+      // trap the user in the prompt; the next return asks again (onStart).
       override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
         promptShowing = false
+        moveTaskToBack(true)
       }
     })
     val info = BiometricPrompt.PromptInfo.Builder()
@@ -135,26 +133,13 @@ class MainActivity : TauriActivity() {
     prompt.authenticate(info)
   }
 
-  private fun buildLockScreen(): LinearLayout {
-    val dp = { v: Float -> TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt() }
-    return LinearLayout(this).apply {
-      orientation = LinearLayout.VERTICAL
-      gravity = Gravity.CENTER
+  // A bare cover, nothing to press: the prompt is the only way in, and it
+  // opens on its own every time the app comes to the front.
+  private fun buildLockScreen(): View {
+    return View(this).apply {
       setBackgroundColor(Color.parseColor(LOCK_BACKGROUND))
       isClickable = true
       isFocusable = true
-      addView(TextView(context).apply {
-        text = "Conductor is locked"
-        setTextColor(Color.WHITE)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-        gravity = Gravity.CENTER
-      })
-      addView(Button(context).apply {
-        text = "Unlock"
-        setOnClickListener { promptUnlock() }
-      }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-        topMargin = dp(16f)
-      })
     }
   }
 

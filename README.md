@@ -144,8 +144,9 @@ countdown - tap **Edit connection** to go back and change the address.
 
 **App lock.** The phone asks for its own fingerprint or screen-lock PIN every time the app
 starts, and again after five minutes in the background. The app keeps loading behind the lock
-screen, so it is ready the moment you unlock. Cancel the prompt and it stays locked until you tap
-**Unlock**. A phone with no screen lock set skips this, since there is nothing to check against.
+screen, so it is ready the moment you unlock. Cancelling the prompt sends the app to the
+background, still locked, and the prompt opens again the next time you open the app. A phone with no
+screen lock set skips this, since there is nothing to check against.
 The app also opts out of Android backup and device-to-device transfer, so its stored connection
 token never leaves the phone.
 
