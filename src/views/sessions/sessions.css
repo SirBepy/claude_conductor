@@ -411,7 +411,7 @@
 }
 
 /* Wider horizontal padding for the usage-detail popover specifically
-   (Joi, 2026-10-18: "I still dont see the padding, make it wider" - the
+   (Joe, 2026-10-18: "I still dont see the padding, make it wider" - the
    first attempt lived above .session-more-menu's own unconditional
    `padding: 4px`, which won the cascade tie by source order regardless of
    this rule's content - moved after it, same lesson as session-list.css's

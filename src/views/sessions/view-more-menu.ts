@@ -30,8 +30,9 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
-import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, loadSort, isMirrored } from "./sessions-helpers";
-import { isAutoAccept } from "./permission-modal";
+import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, loadSort, loadUnreadSet, deriveQuestionSet, isMirrored } from "./sessions-helpers";
+import { isAutoAccept, pendingPromptSessionIds } from "./permission-modal";
+import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { invoke } from "../../shared/ipc";
 import { isRemote } from "../../shared/transport";
 import { cachedHasDeployWorkflow, refreshDeployWorkflowCache } from "./deploy-workflow-gate";
@@ -262,10 +263,21 @@ const viewMenu = createMoreMenu<[]>({
           const sub = document.createElement("div");
           sub.className = "session-more-menu smore-submenu";
           const sort = loadSort();
+          // Same status computation sidebar-entries.ts uses for every other
+          // row (code-check, 2026-10-18): empty sets here silently blanked a
+          // hidden chat's status dot/attention pulse even when it was
+          // genuinely rate-limited, closing, or needing input.
+          const unread = loadUnreadSet();
+          const attention = pendingPromptSessionIds();
+          if (state.selectedId) attention.delete(state.selectedId);
+          const question = deriveQuestionSet(hiddenSessions);
+          for (const id of pendingPromptSessionIds()) question.add(id);
+          const rateLimited = new Set(hiddenSessions.filter(isBlocked).map((s) => s.session_id));
+          const closing = new Set(hiddenSessions.filter((s) => s.closing).map((s) => s.session_id));
           sub.innerHTML = `<ul class="sessions-list smore-hidden-list">${hiddenSessions
             .map((s) => renderSidebarRow(sessionRowOptions(s, {
               isActive: s.session_id === state.selectedId,
-              unread: new Set(), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
+              unread, attention, question, rateLimited, closing,
               sort, drainMap: new Map(), scheduledCountMap: new Map(), kbdHint: "",
             })))
             .join("")}</ul>`;
