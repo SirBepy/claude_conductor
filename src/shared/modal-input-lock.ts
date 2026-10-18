@@ -27,6 +27,11 @@ export function isAnyModalOpen(): boolean {
   return lockedHosts.length > 0;
 }
 
+function isReloadKey(e: KeyboardEvent): boolean {
+  if (e.key === "F5") return true;
+  return (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "r";
+}
+
 function ensureGlobalGuard(): void {
   if (globalGuardDisposer) return;
   // Focus half: the backdrop stops clicks by hit-testing, but focus is
@@ -45,6 +50,9 @@ function ensureGlobalGuard(): void {
   // background.
   const onKeyDown = (e: KeyboardEvent) => {
     if (lockedHosts.length === 0) return;
+    // Reload is the escape hatch when a modal wedges (a card left up with
+    // dead handlers), so the lock must never be what stops it.
+    if (isReloadKey(e)) return;
     const inside = isInsideLockedHost(e.target);
 
     // Number-key select (todo 835): skipped while typing into the modal's

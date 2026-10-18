@@ -236,7 +236,15 @@ export async function openModelEffortModal(
       close({ model, effort, autoAccept, characterId: charPane.currentCharacterId(), accountId: accountField.accountId });
     }
 
+    // Escape or a backdrop click on the cold loading shell closes the modal
+    // while loadAndBuild() is still awaiting its reads. Its presentHostCard()
+    // must not run after that: it would re-open the host on a card nobody
+    // owns (Escape listener gone, backdrop cancel null) with the input lock
+    // armed again, swallowing every key outside the card.
+    let closed = false;
+
     function close(result: SessionConfig | null) {
+      closed = true;
       cancelCharacterPaneSound();
       closeHostCard();
       document.removeEventListener("keydown", onKey);
@@ -288,6 +296,7 @@ export async function openModelEffortModal(
         accountsRead,
         projectAccountRead,
       );
+      if (closed) return;
       models = data.models;
       model = data.model;
       effort = data.effort;
