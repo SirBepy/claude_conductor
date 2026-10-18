@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::title::{
     assistant_text, extract_cc_title, is_real_user_turn, is_titleable_user_turn,
-    normalise_and_truncate, user_prompt_label, TITLE_MILESTONES,
+    normalise_and_truncate, user_prompt_label,
 };
 
 // Keep in sync with title.rs's session_title precedence (last_override_title >
@@ -32,7 +32,9 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
 
     let mut turn = 0usize;
     let mut latest_marker: Option<String> = None;
-    let mut milestone_title: Option<String> = None;
+    // ai_milestone_title's freeze: set once, at the end of the first turn that
+    // carried a marker, and never replaced by a later turn's marker.
+    let mut frozen_title: Option<String> = None;
     let mut first_prompt: Option<String> = None;
     let mut system_model: Option<String> = None;
 
@@ -69,13 +71,13 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
         }
 
         if is_titleable_user_turn(&v) {
-            if TITLE_MILESTONES.contains(&turn) { milestone_title = latest_marker.clone(); }
+            if frozen_title.is_none() { frozen_title = latest_marker.clone(); }
             turn += 1;
             continue;
         }
         if let Some(text) = assistant_text(&v) {
             if let Some(t) = extract_cc_title(&text) {
-                if !t.trim().is_empty() { latest_marker = Some(t); }
+                if !t.trim().is_empty() && frozen_title.is_none() { latest_marker = Some(t); }
             }
             if let Some(status) = crate::chat::markers::detect_awaiting(&text) {
                 out.last_status = Some(status);
@@ -87,10 +89,8 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
             }
         }
     }
-    if TITLE_MILESTONES.contains(&turn) { milestone_title = latest_marker.clone(); }
-
     if out.title.is_none() {
-        out.title = milestone_title.or(latest_marker)
+        out.title = frozen_title.or(latest_marker)
             .and_then(|t| normalise_and_truncate(&t, max_chars))
             .or(first_prompt);
     }

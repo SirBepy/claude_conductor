@@ -92,9 +92,10 @@ pub fn spawn(state: Arc<DaemonState>) {
 }
 
 /// For each live session whose transcript mtime advanced since the last tick,
-/// refreshes its name: a `/close` rename override wins, else the AI milestone
-/// title (the `<cc-title:…>` Claude emits, adopted at user-turn 1/5/15). This
-/// is what makes a chat re-title itself live as it grows. The first user prompt
+/// refreshes its name: a `/close` rename override wins, else the AI title
+/// (frozen at the end of the first turn that produced one, see
+/// `ai_milestone_title`). This is what swaps a fresh chat's first-prompt name
+/// for its AI title live. The first user prompt
 /// remains the registration-time fallback, so we don't recompute it here.
 /// Prunes the mtime cache to the sessions still passed in. Returns true if any
 /// name actually changed.

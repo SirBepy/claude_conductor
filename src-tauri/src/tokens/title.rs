@@ -107,8 +107,8 @@ pub fn last_override_title(path: &Path, max_chars: usize) -> Option<String> {
 /// Resolves a session's display title. Precedence, highest first:
 /// 1. a curated override (a `custom-title`/`agent-name` line from /close's
 ///    rename or any future manual rename) — sticky, a human choice always wins;
-/// 2. an AI milestone title (the `<cc-title:…>` Claude emits, snapshotted at
-///    user-turn 1, 5 and 15 — see `ai_milestone_title`);
+/// 2. the first AI title (frozen at the end of the first user turn that
+///    produced one, see `ai_milestone_title`);
 /// 3. the first user prompt.
 /// This is what the sidebar / history / restore paths use.
 pub fn session_title(path: &Path, max_chars: usize) -> Option<String> {
@@ -116,12 +116,6 @@ pub fn session_title(path: &Path, max_chars: usize) -> Option<String> {
         .or_else(|| ai_milestone_title(path, max_chars))
         .or_else(|| first_user_prompt(path, max_chars))
 }
-
-/// User-turn milestones at which a fresh AI title is adopted. The title from
-/// the highest milestone reached (that carried a marker) wins, so the title
-/// refines as the conversation grows but only ever changes a bounded number of
-/// times — never every turn.
-pub(crate) const TITLE_MILESTONES: [usize; 3] = [1, 5, 15];
 
 /// Extracts the inner text of the LAST `<cc-title:…>` marker in `text`, if any.
 /// Tolerates the XML-style `<cc-title>…</cc-title>` variant some model versions
@@ -216,10 +210,11 @@ fn user_turn_text(v: &serde_json::Value) -> String {
     }
 }
 
-/// Milestone-numbering predicate. Drops the harness's bookkeeping user turns
-/// (`[Request interrupted by user]`, which can never carry a reply, and
-/// `<auq-answer/>`), which otherwise shift every milestone off the turns that
-/// do carry a marker. Kept separate from walker.rs's `is_real_user_turn`.
+/// Turn-boundary predicate for the AI title freeze. Drops the harness's
+/// bookkeeping user turns (`[Request interrupted by user]`, which can never
+/// carry a reply, and `<auq-answer/>`, which continues the turn that asked),
+/// so the first turn's title isn't frozen before that turn really ends. Kept
+/// separate from walker.rs's `is_real_user_turn`.
 pub(crate) fn is_titleable_user_turn(v: &serde_json::Value) -> bool {
     if !is_real_user_turn(v) { return false; }
     let t = user_turn_text(v);
@@ -249,25 +244,24 @@ pub(crate) fn assistant_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// AI title, snapshotting the newest candidate each time a milestone turn
-/// (1/5/15) completes. Two sources per line: a `type:"ai-title"` record
-/// (todo 435's `report_turn_status`) or the pre-435 `<cc-title:…>` marker -
-/// so a chat spanning the migration still titles itself correctly.
+/// The chat's AI title: the newest candidate as of the end of the first user
+/// turn that produced one, then frozen for good - a chat keeps the title it
+/// was first given (Joe, 2026-10-18), so later turns never rename it. Within
+/// that turn the last candidate wins. Two sources per line: a
+/// `type:"ai-title"` record (todo 435's `report_turn_status`) or the pre-435
+/// `<cc-title:…>` marker - so a chat spanning the migration still titles itself.
 pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
-    let last_milestone = *TITLE_MILESTONES.last().unwrap();
     let mut turn = 0usize;
     let mut latest: Option<String> = None;
-    let mut best: Option<String> = None;
     for line in reader.lines().map_while(|r| r.ok()) {
         if line.trim().is_empty() { continue; }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
         if is_titleable_user_turn(&v) {
-            // The turn that just ended is complete; snapshot if it was a milestone.
-            if TITLE_MILESTONES.contains(&turn) { best = latest.clone(); }
+            // The turn that just ended is complete; its title, if any, is final.
+            if latest.is_some() { break; }
             turn += 1;
-            if turn > last_milestone { break; }
             continue;
         }
         if turn == 0 { continue; }
@@ -281,8 +275,7 @@ pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
             }
         }
     }
-    if TITLE_MILESTONES.contains(&turn) { best = latest.clone(); }
-    best.or(latest).and_then(|t| normalise_and_truncate(&t, max_chars))
+    latest.and_then(|t| normalise_and_truncate(&t, max_chars))
 }
 
 /// Scans a transcript for the first real user prompt and returns it
@@ -632,11 +625,10 @@ mod tests {
         assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("New Tool Title"));
     }
 
-    /// Legacy marker on turn 1, new `ai-title` record by turn 5: milestone 1
-    /// freezes the legacy title, holds through turns 2-4, then milestone 5
-    /// re-snapshots onto the newer source.
+    /// Legacy marker on turn 1, new `ai-title` record by turn 5: turn 1's
+    /// title is frozen, the later record never renames the chat.
     #[test]
-    fn milestone_title_mixes_legacy_and_new_sources_across_turns() {
+    fn first_title_holds_across_legacy_and_new_sources() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
         let mut lines = vec![
@@ -649,25 +641,36 @@ mod tests {
         lines.push(ai_title_line("New Style Title"));
         let body = lines.join("\n");
         std::fs::write(&path, format!("{body}\n")).unwrap();
-        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("New Style Title"));
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Old Style Title"));
     }
 
     #[test]
-    fn milestone_title_advances_to_fifth_turn() {
+    fn later_turns_never_rename_the_chat() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
         let mut lines = vec![
             user_line("turn one"),
             assistant_line("<cc-title:Early Topic>"),
         ];
-        // turns 2,3,4 carry markers too, but only milestones count.
         for n in 2..=5 {
             lines.push(user_line(&format!("turn {n}")));
             lines.push(assistant_line(&format!("<cc-title:Turn {n} Title>")));
         }
         std::fs::write(&path, lines.join("\n")).unwrap();
-        // Turn 5 is a milestone; its title wins over turn 1's, turns 2-4 ignored.
-        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Turn 5 Title"));
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Early Topic"));
+    }
+
+    #[test]
+    fn untitled_first_turn_takes_the_next_turns_title() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [
+            user_line("one"), assistant_line("no title on this one"),
+            user_line("two"), assistant_line("<cc-title:Second Turn Title>"),
+            user_line("three"), assistant_line("<cc-title:Third Turn Title>"),
+        ].join("\n");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Second Turn Title"));
     }
 
     // The two failure modes seen in a real chat that stayed on its first-prompt
@@ -690,40 +693,19 @@ mod tests {
     }
 
     #[test]
-    fn auq_answers_and_interrupts_do_not_shift_milestones() {
+    fn auq_answer_continues_the_first_turn() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("t.jsonl");
-        // Five genuine instructions, padded with the bookkeeping turns the
-        // harness writes. Milestone 5 must land on the fifth REAL instruction.
+        // Turn 1 asks a question and is answered: the answer is bookkeeping,
+        // not a new turn, so the title written after it is still turn 1's.
         let body = [
-            user_line("one"), assistant_line("<cc-title:T1>"),
-            user_line("[Request interrupted by user]"),
-            user_line("two"), assistant_line("<cc-title:T2>"),
+            user_line("one"), assistant_line("asking first"),
             user_line("<auq-answer/>User answered the question(s):\nQ: pick one"),
-            assistant_line("<cc-title:T3-not-a-turn>"),
-            user_line("three"), assistant_line("<cc-title:T3>"),
-            user_line("four"), assistant_line("<cc-title:T4>"),
-            user_line("five"), assistant_line("<cc-title:T5 Final>"),
+            assistant_line("<cc-title:Answered Topic>"),
+            user_line("two"), assistant_line("<cc-title:T2>"),
         ].join("\n");
         std::fs::write(&path, body).unwrap();
-        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("T5 Final"));
-    }
-
-    #[test]
-    fn milestone_survives_a_turn_that_ends_on_a_tool_call() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("t.jsonl");
-        // Turn 5 ends on a question (no marker). The snapshot takes the most
-        // recent marker instead of forfeiting the milestone entirely.
-        let mut lines = vec![user_line("one"), assistant_line("<cc-title:First>")];
-        for n in 2..=4 {
-            lines.push(user_line(&format!("turn {n}")));
-            lines.push(assistant_line(&format!("<cc-title:Turn {n}>")));
-        }
-        lines.push(user_line("turn 5"));
-        lines.push(assistant_line("no marker on this one, it ended on a question"));
-        std::fs::write(&path, lines.join("\n")).unwrap();
-        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Turn 4"));
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Answered Topic"));
     }
 
     #[test]
@@ -771,17 +753,4 @@ mod tests {
         assert_eq!(session_title(&path, 60).as_deref(), Some("just chatting"));
     }
 
-    #[test]
-    fn title_after_fifteenth_turn_holds_at_turn_fifteen() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("t.jsonl");
-        let mut lines = Vec::new();
-        for n in 1..=20 {
-            lines.push(user_line(&format!("turn {n}")));
-            lines.push(assistant_line(&format!("<cc-title:Title At {n}>")));
-        }
-        std::fs::write(&path, lines.join("\n")).unwrap();
-        // 15 is the last milestone; turns 16-20 are ignored even though present.
-        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Title At 15"));
-    }
 }
