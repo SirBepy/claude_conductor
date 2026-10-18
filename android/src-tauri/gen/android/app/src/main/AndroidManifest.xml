@@ -10,7 +10,14 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- Backup is off because the WebView localStorage holds the PC's bearer token
+         (rc_token); adb backup or a cloud/device-transfer restore would carry it to
+         another device. dataExtractionRules covers Android 12+, where allowBackup
+         alone no longer stops device-to-device transfer. -->
     <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.conductor_mobile"
