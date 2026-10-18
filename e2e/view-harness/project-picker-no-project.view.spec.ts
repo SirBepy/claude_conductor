@@ -6,6 +6,12 @@ import { mountView } from "./harness";
 // G8 touched project-picker.ts's listMachines() gate (now unconditional, not
 // desktop-only) - a no-op here: this spec mounts via mountView (isTauri true,
 // isRemote false), the branch that already ran listMachines() before G8.
+//
+// Search loosened to fuzzy (subsequence) matching on top of the existing
+// exact/startsWith/includes tiers - a no-op here, this spec never searches.
+//
+// Reviewed against project-picker.ts's new cold-load skeleton + row entrance
+// animation - re-ran this file after that change, all tests still pass.
 
 // "No project" is a real folder (the Obsidian vault) that must read as no
 // project at all: renamed, pinned first whatever the sort, its path hidden,

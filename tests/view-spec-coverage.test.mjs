@@ -23,6 +23,9 @@ const MACHINE_CHIPS_SPEC = "e2e/view-harness/project-picker-phone-machine-chips.
 // project-picker-stats-reflow.view.spec.ts (stats-settle reflow fix) is a
 // 5th header-linked dependent of project-picker.ts, added alongside it.
 const STATS_REFLOW_SPEC = "e2e/view-harness/project-picker-stats-reflow.view.spec.ts";
+// new-session-cold-cache.view.spec.ts (cold-load skeleton + row entrance
+// animation) is a 6th header-linked dependent, added alongside it.
+const COLD_CACHE_SPEC = "e2e/view-harness/new-session-cold-cache.view.spec.ts";
 
 describe("view-spec-coverage: import-derived link (auto, no header)", () => {
   it("maps question-ui.ts to the spec that dynamically imports it", () => {
@@ -69,7 +72,10 @@ describe("view-spec-coverage: header-derived link (// asserts:, for UI-driven sp
 
   it("clears once every header-linked spec is in the same diff", () => {
     const findings = findStaleSpecs(
-      [PROJECT_PICKER, ADD_PROJECT_SPEC, FAVORITES_SPEC, NO_PROJECT_SPEC, MACHINE_CHIPS_SPEC, STATS_REFLOW_SPEC],
+      [
+        PROJECT_PICKER, ADD_PROJECT_SPEC, FAVORITES_SPEC, NO_PROJECT_SPEC, MACHINE_CHIPS_SPEC, STATS_REFLOW_SPEC,
+        COLD_CACHE_SPEC,
+      ],
       depMap,
     );
     expect(findings[PROJECT_PICKER]).toBeUndefined();

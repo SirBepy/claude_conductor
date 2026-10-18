@@ -182,6 +182,11 @@ export function openProjectPickerModal(
     let showTodos: boolean = readShowTodos();
     let optionsOpen = false;
     let filter = "";
+    // Set true for exactly one renderModal() call: the cold-load -> real-data
+    // swap in applyGroups below. Rows read it to stagger their entrance;
+    // every later re-render (search, sort, a stat landing) leaves it false so
+    // rows just update in place instead of replaying the animation.
+    let enterAnimation = false;
 
     // ── Favourite slots 1-9 (desktop only) ──────────────────────────────────
     let favorites: FavoriteSlots = readFavorites();
@@ -336,9 +341,27 @@ export function openProjectPickerModal(
 
     const renderModal = () => {
       if (!localProjects) {
+        // Shares .project-picker-modal's size/position (not the generic
+        // .modal-card-loading spinner box other chain steps use) so the
+        // loading -> loaded swap never resizes the card - only the rows
+        // inside it change, via the enter-animation branch below.
         render(
-          html`<div class="modal-card modal-card-loading" data-picker-step="project" role="dialog" aria-modal="true" aria-label="Pick project">
-            <i class="ph ph-circle-notch" aria-hidden="true"></i> Loading projects&hellip;
+          html`<div class="modal-card project-picker-modal project-picker-modal--loading" data-picker-step="project" role="dialog" aria-modal="true" aria-label="Pick project">
+            <header class="modal-header"><h3>Pick project</h3></header>
+            <div class="modal-body project-picker-body">
+              <div class="project-picker-search-skeleton v-skeleton" aria-hidden="true"></div>
+              <ul class="project-picker-list" aria-hidden="true">
+                ${Array.from({ length: 6 }, () => html`
+                  <li class="project-picker-skeleton-row">
+                    <div class="project-picker-avatar v-skeleton"></div>
+                    <div class="project-picker-info">
+                      <span class="project-picker-skeleton-line project-picker-skeleton-line--name v-skeleton"></span>
+                      <span class="project-picker-skeleton-line project-picker-skeleton-line--path v-skeleton"></span>
+                    </div>
+                  </li>
+                `)}
+              </ul>
+            </div>
           </div>`,
           slot,
         );
@@ -467,11 +490,18 @@ export function openProjectPickerModal(
                 return rows.map((p, i) => {
                   const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
                   const missing = p.path_exists === false;
+                  // Capped at 10 rows' worth of delay - past that, further
+                  // rows are mostly below the fold anyway, and an unbounded
+                  // stagger would make a long list take visibly longer to
+                  // finish settling.
+                  const riseStyle = enterAnimation
+                    ? `position:relative;--v-row-delay:${Math.min(i, 9) * 28}ms`
+                    : "position:relative";
                   return html`
                       <li
-                        class="project-picker-row ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${missing ? "project-picker-row--missing" : ""}"
+                        class="project-picker-row ${enterAnimation ? "v-row-rise" : ""} ${i === Math.min(selectedIdx, rows.length - 1) ? "selected" : ""} ${missing ? "project-picker-row--missing" : ""}"
                         data-row-idx=${i}
-                        style="position:relative"
+                        style=${riseStyle}
                         @pointerdown=${(e: PointerEvent) => startFavoriteDrag(favRailState, favRailDeps, e, { kind: "row", path: p.path })}
                         @mouseenter=${() => {
                           const fav = slotOf(favorites, p.path);
@@ -577,15 +607,23 @@ export function openProjectPickerModal(
     };
 
     // Applies a resolved (or revalidated) project list: paints it and kicks
-    // per-project stat revalidation. Morphs (presentHostCard) only when
-    // replacing the loading shell; a later revalidation just patches in
-    // place, same as a sort/filter change.
+    // per-project stat revalidation. The loading shell already matches the
+    // real card's size/position (project-picker-modal), so replacing it is a
+    // content-only re-render with a per-row entrance (enterAnimation) rather
+    // than another presentHostCard() shrink/expand morph - that whole-card
+    // pop on top of the shell's own entrance read as a jarring double motion.
+    // A later revalidation just patches in place, same as a sort/filter change.
     const applyGroups = (groups: ProjectGroup[]): void => {
       if (resolved) return;
       const wasLoading = !localProjects;
       localProjects = groups;
-      if (wasLoading) void presentHostCard(renderModal);
-      else renderModal();
+      if (wasLoading) {
+        enterAnimation = true;
+        renderModal();
+        enterAnimation = false;
+      } else {
+        renderModal();
+      }
       warmProjectStats(groups, scheduleStatsRender);
     };
 

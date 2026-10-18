@@ -1,4 +1,7 @@
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/machine-field.ts
+//
+// Search loosened to fuzzy (subsequence) matching on top of the existing
+// exact/startsWith/includes tiers - a no-op here, this spec never searches.
 import { test, expect, type Page } from "@playwright/test";
 import { mountViewPhone, capture } from "./harness";
 
@@ -11,6 +14,9 @@ import { mountViewPhone, capture } from "./harness";
 // projects, resolves with that peer's id) is pinned in
 // tests/project-picker-machine-flow.test.mjs - project-picker.ts exposes no
 // DOM hook for an e2e spec to read the resolved value mid-chain.
+//
+// Reviewed against project-picker.ts's new cold-load skeleton + row entrance
+// animation - re-ran this file after that change, all tests still pass.
 
 const PHONE = { width: 390, height: 800 };
 

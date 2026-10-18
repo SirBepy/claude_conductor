@@ -10,6 +10,11 @@ import { mountView, capture, SESSIONS_BASE_INVOKE } from "./harness";
 // Pattern matches the AUQ/question-card bottom sheet (permission-modal-shell.css,
 // auq-mobile-sheet.view.spec.ts): flush to the side edges, docked to the
 // bottom, rounded top corners only, safe-area-aware bottom padding.
+//
+// Reviewed against project-picker.css's new cold-load skeleton rules (added
+// alongside project-picker.ts's entrance animation): purely additive, no
+// existing selector's box model changed. Ran this file after that change -
+// still passes.
 
 const PHONE = { width: 393, height: 852 };
 

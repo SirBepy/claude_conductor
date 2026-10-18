@@ -205,6 +205,42 @@
   color: var(--color-warning);
   font-style: italic;
 }
+/* ── Cold-load skeleton ────────────────────────────────────────────────────
+   Reuses .project-picker-modal's own sizing (see the loading branch in
+   project-picker.ts) so the loading -> loaded swap never changes the card's
+   footprint, just what's drawn inside it. Deliberately its own class, not
+   .project-picker-row - e2e specs wait on ".project-picker-row" as the
+   signal that real data has landed, so a shared class would let that
+   selector match a skeleton placeholder instead. */
+.project-picker-search-skeleton {
+  height: 34px;
+  border-radius: 6px;
+}
+.project-picker-skeleton-row {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #2e2e40);
+  cursor: default;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.project-picker-skeleton-row:last-child {
+  border-bottom: none;
+}
+.project-picker-skeleton-line {
+  display: block;
+  height: 11px;
+  border-radius: 4px;
+}
+.project-picker-skeleton-line--name {
+  width: 42%;
+  margin-bottom: 5px;
+}
+.project-picker-skeleton-line--path {
+  width: 68%;
+}
+
 .project-picker-empty {
   padding: 16px;
   text-align: center;
