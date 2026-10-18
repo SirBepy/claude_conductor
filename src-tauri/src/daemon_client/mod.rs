@@ -59,6 +59,9 @@ pub struct PersistentClient {
     closed: tokio::sync::watch::Receiver<bool>,
     /// ai_todo 228 diagnostics: see `NEXT_GENERATION`.
     pub generation: u64,
+    /// The daemon's own build version from the handshake (`None` from a
+    /// daemon too old to send one). `ensure_daemon` compares it to this app's.
+    pub daemon_version: Option<String>,
 }
 
 impl PersistentClient {
@@ -79,8 +82,9 @@ impl PersistentClient {
         if resp.get("handshake").and_then(Value::as_str) != Some("ok") {
             return Err(ClientError::Handshake(resp.to_string()));
         }
+        let daemon_version = resp.get("daemon_version").and_then(Value::as_str).map(str::to_string);
         let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
-        log::info!("daemon: connected (generation {generation})");
+        log::info!("daemon: connected (generation {generation}, daemon {})", daemon_version.as_deref().unwrap_or("?"));
         // Split into independent read/write halves.
         let (read_half, write_half) = tokio::io::split(pipe);
         let writer = Arc::new(Mutex::new(write_half));
@@ -163,6 +167,7 @@ impl PersistentClient {
             next_id: Arc::new(Mutex::new(0)),
             closed: closed_rx,
             generation,
+            daemon_version,
         })
     }
 
@@ -310,7 +315,10 @@ pub async fn ensure_daemon() -> Result<PersistentClient, ClientError> {
 
     let addr = daemon_addr_for_current_user();
     if let Ok(c) = PersistentClient::connect(&addr).await {
-        return Ok(c);
+        if !daemon_is_stale(c.daemon_version.as_deref()) {
+            return Ok(c);
+        }
+        retire_stale_daemon(c, &addr).await;
     }
     // Pre-spawn: wait up to 2s in case the daemon is already starting.
     for _ in 0..10 {
@@ -332,6 +340,75 @@ pub async fn ensure_daemon() -> Result<PersistentClient, ClientError> {
         }
     }
     PersistentClient::connect(&addr).await
+}
+
+/// This app's own build. The daemon is this same binary run as `--daemon`, so
+/// in a release build any other version is a daemon left over from before an
+/// update.
+const APP_VERSION: &str = crate::daemon::health::DAEMON_VERSION;
+
+/// Set once this process has replaced a stale daemon, so a replacement that
+/// somehow still reports another version is used rather than restarted in a loop.
+static RETIRED_STALE_DAEMON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True when the connected daemon is a different build than this app and
+/// should be replaced. Debug builds never replace one: `cargo tauri dev`
+/// attaching to the installed app's daemon (above) is a deliberate mismatch.
+fn daemon_is_stale(reported: Option<&str>) -> bool {
+    !cfg!(debug_assertions)
+        && !RETIRED_STALE_DAEMON.load(Ordering::Relaxed)
+        && version_differs(reported, APP_VERSION)
+}
+
+fn version_differs(reported: Option<&str>, mine: &str) -> bool {
+    reported != Some(mine)
+}
+
+/// A daemon outlives the app by design (closing the window or quitting the app
+/// leaves chats running), so an update that replaces the app binary does not
+/// replace a running daemon. On Windows the installer happens to kill it; on
+/// macOS nothing does, and a Mac was found still running a month-old daemon
+/// under a current app, missing every daemon-side fix since. Stop it the same
+/// way the tray's "Stop daemon" does (in-app chats are persisted and the new
+/// daemon's boot restores them, `daemon::boot`), wait for its address to free up, and let the
+/// caller spawn this build's own.
+async fn retire_stale_daemon(client: PersistentClient, addr: &str) {
+    RETIRED_STALE_DAEMON.store(true, Ordering::Relaxed);
+    log::warn!(
+        "daemon: running daemon is {} but this app is {APP_VERSION}; restarting it",
+        client.daemon_version.as_deref().unwrap_or("an unversioned build")
+    );
+    if let Err(e) = client.shutdown_daemon().await {
+        log::warn!("daemon: stale daemon shutdown failed: {e}");
+    }
+    drop(client);
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if PersistentClient::connect(addr).await.is_err() {
+            return;
+        }
+    }
+    log::warn!("daemon: stale daemon still answering after 10s; continuing with it");
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::version_differs;
+
+    #[test]
+    fn a_daemon_from_another_build_differs() {
+        assert!(version_differs(Some("0.2.98"), "0.2.122"));
+    }
+
+    #[test]
+    fn a_daemon_that_reports_no_version_differs() {
+        assert!(version_differs(None, "0.2.122"));
+    }
+
+    #[test]
+    fn the_same_build_does_not_differ() {
+        assert!(!version_differs(Some("0.2.122"), "0.2.122"));
+    }
 }
 
 // The `persistent_client_health_against_real_daemon` test (exercises `connect`
