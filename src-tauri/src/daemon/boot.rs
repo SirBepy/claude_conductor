@@ -11,7 +11,7 @@ use crate::daemon::session::new_session_map;
 use crate::daemon::settings_cache::SettingsCache;
 use crate::daemon::state::DaemonState;
 use crate::daemon::{
-    busy_watchdog, channel_adopt, channels, claude_config, detector_task, health, hooks_server,
+    browser, busy_watchdog, channel_adopt, channels, claude_config, detector_task, health, hooks_server,
     instance, iroh_tunnel, machines, methods, remote_server, resume_interrupted, schedule,
 };
 #[cfg(unix)]
@@ -200,6 +200,17 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         });
     }
 
+    // Claude's own browser: registered after the remote server took its
+    // router clone, so these window controls stay desktop-pipe only. Same 60s
+    // tick ends idle per-chat drivers, then Chrome itself.
+    browser::rpc::register(&mut router);
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            browser::get().sweep_idle().await;
+        }
+    });
+
     // Restore Interactive (in-app) chats persisted before the last shutdown.
     // The registry is in-memory only; without this, every daemon restart (reboot,
     // crash, kill-orphans) drops every in-app chat from the sidebar. Must run
@@ -295,5 +306,6 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     kill_all_sessions(&state);
     // Graceful teardown: never let the Python STT sidecar outlive the daemon.
     stt.kill().await;
+    browser::get().shutdown().await;
     Ok(())
 }

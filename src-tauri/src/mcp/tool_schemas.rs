@@ -28,13 +28,19 @@ pub use super::tool_schemas_workflow::{
 /// listing them for every session would be pure token cost for nothing. A
 /// normal session's tool list must stay byte-identical to before these
 /// existed (acceptance criterion, todo 272 chunk 2b).
-pub fn tool_list_response(id: &Value, is_jarvis: bool) -> Value {
+///
+/// `browser` gates the `browser_*` tools the same way: Playwright MCP's own
+/// schemas, listed only while Settings' "Claude's own browser" switch is on.
+pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool) -> Value {
     let mut tools = super::tool_schemas_core::core_schemas();
     tools.extend(super::tool_schemas_coordination::coordination_schemas());
     tools.extend(super::tool_schemas_workflow::workflow_schemas());
 
     if is_jarvis {
         tools.extend(super::tool_schemas_jarvis::jarvis_schemas());
+    }
+    if browser {
+        tools.extend(crate::daemon::browser::tool_schemas());
     }
 
     json!({
