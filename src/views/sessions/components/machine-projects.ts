@@ -24,7 +24,6 @@ export function projectConfigToGroup(pc: ProjectConfig): ProjectGroup {
     automation_enabled: false,
     tokens_7d: 0n,
     live: 0,
-    any_remote: false,
     any_automated: false,
     last_active_at: null,
     path_exists: true, // can't stat a peer's filesystem from here

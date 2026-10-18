@@ -103,7 +103,6 @@ describe("Projects view sort + filter logic", () => {
       automation_enabled: false,
       tokens_7d: over.tokens_7d ?? 0,
       live: over.live ?? 0,
-      any_remote: over.any_remote ?? false,
       any_automated: over.any_automated ?? false,
       last_active_at: over.last_active_at ?? null,
     };

@@ -23,7 +23,6 @@ interface Fixture {
   path: string;
   parent_segment?: string | null;
   live?: number;
-  any_remote?: boolean;
   any_automated?: boolean;
   tokens_7d?: number;
   last_active_at?: string | null;
@@ -42,7 +41,6 @@ function group(f: Fixture): ProjectGroup {
     automation_enabled: f.any_automated ?? false,
     tokens_7d: (f.tokens_7d ?? 0) as unknown as bigint,
     live: f.live ?? 0,
-    any_remote: f.any_remote ?? false,
     any_automated: f.any_automated ?? false,
     last_active_at: f.last_active_at ?? null,
     path_exists: true,
@@ -55,13 +53,12 @@ function group(f: Fixture): ProjectGroup {
 const POPULATED: ProjectGroup[] = [
   group({ name: "Alpha", path: "/repos/alpha", tokens_7d: 12000, last_active_at: "2026-09-10T10:00:00Z" }),
   group({ name: "Beta", path: "/repos/beta", live: 2, tokens_7d: 4000, last_active_at: "2026-09-17T09:00:00Z" }),
-  group({ name: "Gamma", path: "/repos/gamma", any_remote: true, tokens_7d: 800, last_active_at: "2026-09-16T08:00:00Z" }),
+  group({ name: "Gamma", path: "/repos/gamma", tokens_7d: 800, last_active_at: "2026-09-16T08:00:00Z" }),
   group({ name: "Delta", path: "/repos/delta", any_automated: true, tokens_7d: 20000, last_active_at: "2026-09-15T08:00:00Z" }),
   group({
     name: "Epsilon",
     path: "/repos/epsilon",
     live: 1,
-    any_remote: true,
     any_automated: true,
     tokens_7d: 500,
     last_active_at: "2026-09-14T08:00:00Z",
@@ -125,9 +122,9 @@ test.describe("view-harness / projects", () => {
     await expect(autoTag.locator("i.ph-gear")).toBeAttached();
 
     // A project with live + automated together (Epsilon) renders both chips.
-    // any_remote is still set on its fixture but no longer renders a tag -
-    // the phone-origin badge was removed project-wide (chat sidebar, header,
-    // and this project card) per Joe's repeated request to stop surfacing it.
+    // The phone-origin badge (any_remote) was removed project-wide (chat
+    // sidebar, header, and this project card) per Joe's repeated request to
+    // stop surfacing it, and the field itself is gone from ProjectGroup.
     await expect(page.locator('.project-card:has-text("Epsilon") .proj-tag')).toHaveCount(2);
 
     // The worktree/parent-segment project shows its parent segment in the name.

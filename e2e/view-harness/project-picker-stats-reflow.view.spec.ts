@@ -25,9 +25,9 @@ import { mountView } from "./harness";
 // this file after that change - still passes.
 
 const PROJECTS = [
-  { id: "p-alpha", path: "C:/Projects/alpha", name: "alpha", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_remote: false, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },
-  { id: "p-beta", path: "C:/Projects/beta", name: "beta", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_remote: false, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },
-  { id: "p-gamma", path: "C:/Projects/gamma", name: "gamma", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_remote: false, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },
+  { id: "p-alpha", path: "C:/Projects/alpha", name: "alpha", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },
+  { id: "p-beta", path: "C:/Projects/beta", name: "beta", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },
+  { id: "p-gamma", path: "C:/Projects/gamma", name: "gamma", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },
 ];
 
 const BASE_INVOKE = {
