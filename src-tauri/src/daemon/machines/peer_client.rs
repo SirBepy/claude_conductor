@@ -13,6 +13,10 @@ use super::registry::PeerMachine;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
+/// JSON-RPC "method not found": the closest standard code for a peer that
+/// refuses a method for this transport.
+const METHOD_REFUSED: i64 = -32601;
+
 #[derive(Debug)]
 pub enum PeerError {
     Unreachable(String),
@@ -70,8 +74,8 @@ impl PeerClient {
 
     /// POST `/api/rpc {method, params}`. Mirrors `rpc_dispatch`: success is
     /// the raw result value (no wrapper), a 500 body is an `RpcError`
-    /// (`code`/`message`/`data`), and 401/403 are checked BEFORE any JSON
-    /// parse since the 403 branch's body is plain text, not JSON.
+    /// (`code`/`message`/`data`), and 401/403/503 are checked BEFORE any
+    /// JSON parse since those bodies are plain text or empty, not JSON.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, PeerError> {
         let url = format!("{}/api/rpc", self.base_url);
         let body = serde_json::json!({ "method": method, "params": params });
@@ -84,8 +88,22 @@ impl PeerClient {
             .await
             .map_err(|e| PeerError::Unreachable(e.to_string()))?;
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(PeerError::Unauthorized);
+        }
+        // 403 is the peer refusing this METHOD for a paired machine (its
+        // transport table), not our token: calling it "re-pair required" sent
+        // the reader chasing a pairing that was fine.
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let why = resp.text().await.unwrap_or_default();
+            return Err(PeerError::Rejected {
+                code: METHOD_REFUSED,
+                message: format!("that machine does not accept `{method}` from a paired machine{}", if why.is_empty() { String::new() } else { format!(": {why}") }),
+            });
+        }
+        // The peer's remote-access switch is off; its body is empty, not JSON.
+        if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            return Err(PeerError::Unreachable("remote access is switched off on that machine".into()));
         }
         let value: Value = resp.json().await.map_err(|e| PeerError::Protocol(e.to_string()))?;
         if !status.is_success() {
@@ -157,6 +175,8 @@ mod tests {
                     return StatusCode::UNAUTHORIZED.into_response();
                 }
                 match body.get("method").and_then(Value::as_str).unwrap_or("") {
+                    "desktop_only" => (StatusCode::FORBIDDEN, "method not allowed over remote").into_response(),
+                    "switched_off" => StatusCode::SERVICE_UNAVAILABLE.into_response(),
                     "boom" => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(serde_json::json!({"code": -32000, "message": "boom failed", "data": null})),
@@ -189,6 +209,31 @@ mod tests {
         let client = PeerClient::new(&base, "wrong-token");
         let err = client.call("echo", serde_json::json!({})).await.unwrap_err();
         assert!(matches!(err, PeerError::Unauthorized));
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn call_maps_403_to_a_method_refusal_not_a_token_problem() {
+        let (base, handle) = spawn_rpc_server().await;
+        let client = PeerClient::new(&base, "good-token");
+        match client.call("desktop_only", serde_json::json!({})).await.unwrap_err() {
+            PeerError::Rejected { code, message } => {
+                assert_eq!(code, METHOD_REFUSED);
+                assert!(message.contains("desktop_only"), "got {message}");
+            }
+            other => panic!("expected Rejected, got {other:?}"),
+        }
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn call_maps_503_to_remote_access_switched_off() {
+        let (base, handle) = spawn_rpc_server().await;
+        let client = PeerClient::new(&base, "good-token");
+        match client.call("switched_off", serde_json::json!({})).await.unwrap_err() {
+            PeerError::Unreachable(msg) => assert!(msg.contains("switched off"), "got {msg}"),
+            other => panic!("expected Unreachable, got {other:?}"),
+        }
         handle.abort();
     }
 
