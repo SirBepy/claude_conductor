@@ -9,7 +9,7 @@ import { mountView, invokeCalls } from "./harness";
 const PROJECT = {
   id: "proj1", path: "C:/repo", name: "repo", parent_segment: null,
   avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0,
-  any_remote: false, any_automated: false, last_active_at: null, path_exists: true,
+  any_automated: false, last_active_at: null, path_exists: true,
   worktrees: [{ path: "C:/repo/wt-a", name: "wt-a", tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }],
   last_worktree_path: null, last_start_folder_rel: null,
 };

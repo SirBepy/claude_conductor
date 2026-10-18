@@ -263,7 +263,6 @@ pub struct ProjectGroup {
     pub automation_enabled: bool,
     pub tokens_7d: u64,
     pub live: u32,
-    pub any_remote: bool,
     pub any_automated: bool,
     pub last_active_at: Option<String>,
     pub path_exists: bool,

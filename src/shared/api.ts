@@ -143,7 +143,6 @@ export interface ProjectGroup {
   automation_enabled: boolean;
   tokens_7d: number;
   live: number;
-  any_remote: boolean;
   any_automated: boolean;
   last_active_at: string | null;
 }

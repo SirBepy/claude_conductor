@@ -59,7 +59,6 @@ pub mod groups_test_helpers {
                 .entry(key.clone())
                 .or_insert_with(|| empty_group(&inst.cwd.to_string_lossy()));
             entry.live = entry.live.saturating_add(1);
-            entry.any_remote = entry.any_remote || inst.is_remote;
             entry.any_automated = entry.any_automated
                 || matches!(inst.kind, crate::sessions::kinds::InstanceKind::Automated);
             update_last_active(&mut entry.last_active_at, &now_iso);
@@ -94,7 +93,6 @@ pub mod groups_test_helpers {
             automation_enabled: false,
             tokens_7d: 0,
             live: 0,
-            any_remote: false,
             any_automated: false,
             last_active_at: None,
             path_exists: true,
@@ -473,7 +471,6 @@ mod build_groups_tests {
         let groups = build_groups(&[], &[], &[inst], 1714389600000);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].live, 1);
-        assert!(groups[0].any_remote);
         assert!(groups[0].any_automated);
     }
 
@@ -534,7 +531,6 @@ mod build_groups_tests {
                 automation_enabled: false,
                 tokens_7d: 0,
                 live: 0,
-                any_remote: false,
                 any_automated: false,
                 last_active_at: None,
                 path_exists: true,
@@ -569,7 +565,6 @@ mod build_groups_tests {
                 automation_enabled: false,
                 tokens_7d: 0,
                 live: 0,
-                any_remote: false,
                 any_automated: false,
                 last_active_at: None,
                 path_exists: true,
@@ -604,7 +599,6 @@ mod build_groups_tests {
                 automation_enabled: false,
                 tokens_7d: 0,
                 live: 0,
-                any_remote: false,
                 any_automated: false,
                 last_active_at: None,
                 path_exists,
@@ -703,7 +697,6 @@ mod fold_worktrees_tests {
             automation_enabled: false,
             tokens_7d: 0,
             live: 0,
-            any_remote: false,
             any_automated: false,
             last_active_at: None,
             path_exists: true,
