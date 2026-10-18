@@ -35,6 +35,17 @@ pub async fn set_machine_label(label: String, state: State<'_, AppState>) -> Res
         .map_err(|e| e.to_string())
 }
 
+/// Desktop-only: limits (or restores) what `machine_id` may do to this
+/// machine's chats - see `daemon::machines::peer_scope`.
+#[tauri::command]
+pub async fn set_machine_can_drive(machine_id: String, value: bool, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call("set_machine_can_drive", serde_json::json!({ "machine_id": machine_id, "value": value }))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn list_machines(state: State<'_, AppState>) -> Result<Value, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;

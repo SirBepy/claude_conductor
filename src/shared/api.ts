@@ -184,6 +184,9 @@ export interface PeerMachineView {
   direct_url: string | null;
   reverse_device_id: string | null;
   added_at: number;
+  /** Whether this peer may drive chats it didn't start here. Off: it still
+   *  sees every chat, but only drives the ones it started. */
+  can_drive: boolean;
   /** Absent until the parallel Rust builder lands live reachability; treat
    *  a missing value as "unknown", never as offline. */
   reach?: "direct" | "iroh" | "none";
@@ -520,8 +523,9 @@ export const api = {
     invoke("revoke_remote_device", { id }),
 
   // --- Machines (multi-machine federation, Settings > Remote access) ---
-  // Desktop-pipe only; HttpTransport (phone) rejects all five with
-  // RemoteUnavailableError, so callers must catch and hide the machine UI.
+  // The mutators are desktop-pipe only; HttpTransport (phone) rejects them
+  // with RemoteUnavailableError. listMachines/listMachineProjects reach the
+  // phone too, for its new-chat machine picker.
   listMachines: (): Promise<ListMachinesResult> => invoke("list_machines"),
   pairMachine: (url: string, myUrl: string | null): Promise<PeerMachineView> =>
     invoke("pair_machine", { url, myUrl }),
@@ -529,6 +533,8 @@ export const api = {
     invoke("unpair_machine", { machineId }),
   setMachineLabel: (label: string): Promise<SelfMachine> =>
     invoke("set_machine_label", { label }),
+  setMachineCanDrive: (machineId: string, value: boolean): Promise<{ ok: boolean }> =>
+    invoke("set_machine_can_drive", { machineId, value }),
   listMachineProjects: (machineId: string): Promise<ProjectConfig[]> =>
     invoke("list_machine_projects", { machineId }),
 

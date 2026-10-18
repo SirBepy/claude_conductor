@@ -87,6 +87,22 @@
   color: var(--sb-muted);
 }
 
+/* margin-left:auto parks the switch beside Unpair; the row's space-between
+   would otherwise strand it in the middle. */
+.ra-machine-drive {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: 12px;
+  cursor: pointer;
+}
+
+.ra-machine-drive-label {
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
+}
+
 .ra-machine-label-input {
   padding: 5px 8px;
   background: var(--color-surface-alt);

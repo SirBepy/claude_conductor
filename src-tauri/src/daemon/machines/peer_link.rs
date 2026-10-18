@@ -164,7 +164,10 @@ async fn refresh_prompts(state: &Arc<DaemonState>, peer: &PeerMachine) {
         }
     };
     match client.call("list_pending_prompts", serde_json::Value::Null).await {
-        Ok(serde_json::Value::Array(prompts)) => state.mirror.set_prompts(&peer.machine_id, prompts),
+        Ok(serde_json::Value::Array(prompts)) => {
+            let prompts = drop_local_collisions(state, &peer.machine_id, prompts, |p| p["payload"]["session_id"].as_str());
+            state.mirror.set_prompts(&peer.machine_id, prompts)
+        }
         Ok(other) => {
             log::warn!("peer_link: list_pending_prompts for {} returned non-array: {other:?}", peer.machine_id)
         }
@@ -182,8 +185,32 @@ fn handle_frame(state: &Arc<DaemonState>, machine_id: &str, label: &str, txt: &s
     }
     let Some(arr) = frame.pointer("/params/instances") else { return };
     let Ok(rows) = serde_json::from_value::<Vec<Instance>>(arr.clone()) else { return };
+    let rows = drop_local_collisions(state, machine_id, rows, |i| Some(i.session_id.as_str()));
     state.mirror.set_instances(machine_id, label, rows);
     publish_instances_changed(state);
+}
+
+/// Drops (and logs) every row or prompt a peer reports under one of OUR
+/// session ids. Honest peers never do this, since ids are fresh uuids, so a
+/// hit means a broken or hostile peer trying to claim a local chat. The read
+/// side (`machines::mirrored_owner`/`mirrored_prompts`/`all_instances`) also
+/// refuses collisions, covering a local chat created after the frame landed.
+fn drop_local_collisions<T>(
+    state: &DaemonState,
+    machine_id: &str,
+    items: Vec<T>,
+    session_id: impl Fn(&T) -> Option<&str>,
+) -> Vec<T> {
+    items
+        .into_iter()
+        .filter(|item| match session_id(item) {
+            Some(sid) if super::is_local_session(state, sid) => {
+                log::warn!("peer_link: {machine_id} reported local session {sid} as its own; dropped");
+                false
+            }
+            _ => true,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -236,6 +263,29 @@ mod tests {
         let rows = state.mirror.instances();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].machine.as_ref().unwrap().id, "mach-b");
+    }
+
+    #[test]
+    fn handle_frame_drops_a_row_claiming_a_local_session_id() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("ours", std::path::Path::new("C:/x"), "p", "2026-10-18T00:00:00Z");
+        let row = |sid: &str| serde_json::json!({
+            "session_id": sid, "pid": 1, "cwd": "C:/x", "project_id": "p",
+            "kind": "interactive", "started_at": "2026-09-05T00:00:00Z",
+        });
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "instances_changed",
+            "params": {"instances": [row("ours"), row("theirs")]},
+        });
+        handle_frame(&state, "mach-b", "Mac Mini", &frame.to_string());
+        let ids: Vec<String> = state.mirror.instances().into_iter().map(|i| i.session_id).collect();
+        assert_eq!(ids, vec!["theirs".to_string()]);
+        assert_eq!(state.mirror.owner_of("ours"), None, "the claim never reached the mirror");
     }
 
     /// End-to-end over real loopback sockets: two `DaemonState`s each run

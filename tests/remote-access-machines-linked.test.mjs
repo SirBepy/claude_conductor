@@ -21,6 +21,7 @@ const api = {
 };
 vi.mock("../src/shared/api.ts", () => ({ api }));
 vi.mock("../src/shared/transport.ts", () => ({
+  isRemote: () => false,
   getTransport: () => ({
     listen: async (event, cb) => {
       if (event === "machines-changed") onMachinesChanged = cb;

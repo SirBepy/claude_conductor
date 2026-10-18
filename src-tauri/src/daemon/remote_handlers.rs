@@ -21,6 +21,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::daemon::device_registry::{DeviceKind, DeviceRegistry};
+use crate::daemon::machines::peer_scope;
 use crate::daemon::rpc::Transport;
 
 use super::remote_server::RemoteCtx;
@@ -106,8 +107,14 @@ pub(super) async fn send_message(
     // a request that itself arrived FROM a peer (`Transport::PeerMachine`):
     // that would always be about OUR own sessions, and re-forwarding it would
     // loop, same guard `machines/forward.rs::forward_one` applies.
+    if let Transport::PeerMachine(peer) = current_transport() {
+        let params = serde_json::json!({ "session_id": id });
+        if let Err(reason) = peer_scope::check(&ctx.state, "send_message", &params, &peer).await {
+            return (StatusCode::FORBIDDEN, reason).into_response();
+        }
+    }
     if ctx.state.sessions.get(&id).is_none() {
-        if let Some(machine_id) = ctx.state.mirror.owner_of(&id) {
+        if let Some(machine_id) = crate::daemon::machines::mirrored_owner(&ctx.state, &id) {
             if matches!(current_transport(), Transport::PeerMachine(_)) {
                 return (StatusCode::FORBIDDEN, "a peer machine's own request is never re-forwarded").into_response();
             }
@@ -193,6 +200,16 @@ pub(super) async fn rpc_dispatch(
         )
             .into_response();
     }
+    let peer_id = match &transport {
+        Transport::PeerMachine(id) => Some(id.clone()),
+        _ => None,
+    };
+    if let Some(id) = &peer_id {
+        let params = body.params.clone().unwrap_or(serde_json::Value::Null);
+        if let Err(reason) = peer_scope::check(&ctx.state, &body.method, &params, id).await {
+            return (StatusCode::FORBIDDEN, reason).into_response();
+        }
+    }
     let method = body.method.clone();
     let (tx, _rx) = tokio::sync::mpsc::channel(16);
     let conn = crate::daemon::rpc::ConnectionContext::new(tx);
@@ -215,6 +232,20 @@ pub(super) async fn rpc_dispatch(
             if method == "list_instances" {
                 if let Some(arr) = result.as_array_mut() {
                     strip_hidden_instances_json(arr, keeps_jarvis(&transport));
+                }
+            }
+            if let Some(id) = &peer_id {
+                // Stamped whatever the switch says now, so turning it off
+                // later still leaves the peer its own chats.
+                if peer_scope::STARTS_A_CHAT.contains(&method.as_str()) {
+                    if let Some(sid) = result.get("session_id").and_then(serde_json::Value::as_str) {
+                        crate::sessions::chat_config::set_started_by_machine(sid, id);
+                    }
+                }
+                if method == "list_pending_prompts" && peer_scope::is_view_only(&ctx.state, id) {
+                    if let Some(arr) = result.as_array_mut() {
+                        peer_scope::retain_own_prompts(arr, id);
+                    }
                 }
             }
             Json(result).into_response()
@@ -267,7 +298,7 @@ pub(super) async fn stream_ws(
         }
     }
     // Not a local session - maybe one mirrored in from a paired peer.
-    let Some(owner) = ctx.state.mirror.owner_of(&id) else {
+    let Some(owner) = crate::daemon::machines::mirrored_owner(&ctx.state, &id) else {
         return (StatusCode::NOT_FOUND, "no such session").into_response();
     };
     // Refuse a peer-to-peer relay chain: only a phone/browser or the desktop

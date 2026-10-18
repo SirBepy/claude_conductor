@@ -403,6 +403,7 @@ pub fn run() {
             ipc::pair_machine,
             ipc::unpair_machine,
             ipc::set_machine_label,
+            ipc::set_machine_can_drive,
             ipc::list_machines,
             ipc::list_machine_projects,
             ipc::push_preview,

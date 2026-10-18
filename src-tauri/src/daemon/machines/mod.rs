@@ -16,6 +16,7 @@ pub mod iroh_dial;
 pub mod mirror;
 pub mod peer_client;
 pub mod peer_link;
+pub mod peer_scope;
 pub mod registry;
 pub mod relay;
 
@@ -38,8 +39,39 @@ use crate::types::Instance;
 /// mirrored rows show up everywhere a local row already does.
 pub fn all_instances(state: &DaemonState) -> Vec<Instance> {
     let mut out = state.registry.list();
-    out.extend(state.mirror.instances());
+    let local: std::collections::HashSet<String> = out.iter().map(|i| i.session_id.clone()).collect();
+    out.extend(state.mirror.instances().into_iter().filter(|i| !local.contains(&i.session_id)));
     out
+}
+
+/// True when `session_id` is hosted on this daemon: a registry row, or a
+/// live child that has no row yet.
+pub fn is_local_session(state: &DaemonState, session_id: &str) -> bool {
+    state.registry.get(session_id).is_some() || state.sessions.get(session_id).is_some()
+}
+
+/// The paired peer that owns `session_id`, and never one for a session
+/// hosted here. A peer sees our real session ids over `/api/global/stream`
+/// and can report one back as its own; resolving the local registry first is
+/// what keeps Joe's messages and approvals for a local chat from being routed
+/// to that peer. Every "is this mirrored?" routing decision goes through this,
+/// not `MirrorState::owner_of` directly.
+pub fn mirrored_owner(state: &DaemonState, session_id: &str) -> Option<String> {
+    if is_local_session(state, session_id) {
+        return None;
+    }
+    state.mirror.owner_of(session_id)
+}
+
+/// Every cached mirrored prompt, minus any whose session id names a local
+/// chat: a peer could otherwise plant a card that renders as one of ours.
+pub fn mirrored_prompts(state: &DaemonState) -> Vec<serde_json::Value> {
+    state
+        .mirror
+        .prompts()
+        .into_iter()
+        .filter(|p| !p["payload"]["session_id"].as_str().is_some_and(|sid| is_local_session(state, sid)))
+        .collect()
 }
 
 /// Single publish point for the `instances_changed` notifier event, used by
@@ -87,5 +119,31 @@ mod merged_tests {
         assert!(local.machine.is_none());
         let remote = all.iter().find(|i| i.session_id == "remote-1").unwrap();
         assert_eq!(remote.machine, Some(MachineRef { id: "mach-b".into(), label: "Mac Mini".into(), online: true }));
+    }
+
+    #[test]
+    fn a_peer_row_and_prompt_claiming_a_local_id_never_surface() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("local-1", std::path::Path::new("C:/x"), "proj", "2026-10-18T00:00:00Z");
+        let claimed = state.registry.get("local-1").unwrap();
+        let mut honest = claimed.clone();
+        honest.session_id = "remote-1".into();
+        state.mirror.set_instances("mach-b", "Mac Mini", vec![claimed, honest]);
+        state.mirror.set_prompts(
+            "mach-b",
+            vec![
+                serde_json::json!({"id": "fake", "event": "permission-requested", "payload": {"session_id": "local-1"}}),
+                serde_json::json!({"id": "real", "event": "permission-requested", "payload": {"session_id": "remote-1"}}),
+            ],
+        );
+
+        let all = all_instances(&state);
+        let local_rows: Vec<_> = all.iter().filter(|i| i.session_id == "local-1").collect();
+        assert_eq!(local_rows.len(), 1, "one row for the local chat, not a second mirrored copy");
+        assert!(local_rows[0].machine.is_none());
+        assert_eq!(mirrored_owner(&state, "local-1"), None);
+        assert_eq!(mirrored_owner(&state, "remote-1").as_deref(), Some("mach-b"));
+        let ids: Vec<_> = mirrored_prompts(&state).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, vec!["real".to_string()]);
     }
 }

@@ -92,6 +92,23 @@ chat rather than proxy them. Todo 1129 proxies the READ half instead:
   stays phone-only (`P`), not yet remasked - a smaller, lower-traffic affordance left for a future
   pass.
 
+## Trust boundary (2026-10-18 security audit, todos 1217 and 1184)
+
+- **Local always wins.** A peer sees this daemon's real session ids over `/api/global/stream` and
+  could report one back as its own. `machines::mirrored_owner` checks the local registry (and live
+  session map) before `MirrorState::owner_of`, and every routing site goes through it: the RPC
+  forwarder, the REST send route, the stream relay, `attach_session` and `post_message`.
+  `peer_link` also drops such rows and prompts on arrival, and `all_instances`/`mirrored_prompts`
+  filter them on read.
+- **Per-peer drive switch.** `MachinesFile::view_only_peers` lists peers whose "Can drive chats"
+  switch is off (default on; unpair clears it; flipped only over the desktop pipe via
+  `set_machine_can_drive`). `machines::peer_scope::check` runs in `remote_handlers::rpc_dispatch`
+  and the REST send route for every `Transport::PeerMachine` call: read methods (`SEE_ONLY`) and
+  chat-starting ones (`STARTS_A_CHAT`) pass, anything else needs a target chat whose
+  `ChatConfig::started_by_machine` is that peer. Prompt answers are judged by the prompt's own
+  session, not a caller-supplied `session_id`. `rpc_dispatch` stamps `started_by_machine` on every
+  chat a peer starts, and trims a view-only peer's `list_pending_prompts` to its own chats.
+
 ## Tests
 
 - In-process two-daemon loopback (`remote_server::spawn_on`): `machines/peer_link.rs`,

@@ -45,6 +45,13 @@ pub struct ChatConfig {
     /// Empty for a chat that started fresh. Written only via `set_predecessor`.
     #[serde(default)]
     pub predecessor: String,
+    /// The paired machine that started this chat here (`start_session` or
+    /// `spawn_chat` arriving over `Transport::PeerMachine`). Empty for a chat
+    /// started on this machine or by the phone. A peer whose "can drive this
+    /// PC's chats" switch is off may still drive the chats it started, so
+    /// this outlives a daemon restart. Written only via `set_started_by_machine`.
+    #[serde(default)]
+    pub started_by_machine: String,
 }
 
 /// Serialize read-modify-write within a process. Cross-process integrity comes
@@ -155,6 +162,19 @@ pub fn set_predecessor(session_id: &str, predecessor: &str) {
     let Some(path) = config_path() else { return };
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     set_predecessor_at(&path, session_id, predecessor);
+}
+
+/// Record which paired machine started `session_id`. Preserves everything
+/// else on the entry. Best-effort, never panics.
+pub fn set_started_by_machine(session_id: &str, machine_id: &str) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if session_id.is_empty() || machine_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(&path);
+    map.entry(session_id.to_string()).or_default().started_by_machine = machine_id.to_string();
+    write_atomic(&path, &map);
 }
 
 /// The chat `session_id` took over from, or None if it started fresh.
