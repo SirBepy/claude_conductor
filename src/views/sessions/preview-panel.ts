@@ -384,5 +384,15 @@ export async function mountPreviewWindow(root: HTMLElement, sessionId: string): 
   const controller = mountPreviewWindowShell(root, mountPreviewTab);
   controller.setSessionScope(sessionId);
   controller.open();
+  // The chat window re-invokes `open_preview_window` to focus this window
+  // rather than re-sending a snapshot straight to it (separate realm, no
+  // other channel) - see `open_preview_window`'s doc for why this is needed
+  // even while already open.
+  const { listen } = await import("../../shared/events");
+  void listen<{ sessionId?: string; snapshotId?: string }>("preview-window-set-session", (p) => {
+    if (!p?.sessionId) return;
+    controller.setSessionScope(p.sessionId);
+    controller.open(p.snapshotId);
+  });
   return controller;
 }

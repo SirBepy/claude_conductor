@@ -202,7 +202,13 @@ export class PaneWindows {
   private openPreview(snapshotId?: string): void {
     if (!this.panels.includes("preview")) return;
     if (this.popped) {
-      if (this.sessionId) savePreviewOpen(this.sessionId, true);
+      if (!this.sessionId) return;
+      savePreviewOpen(this.sessionId, true);
+      // Already popped out: focus that window and tell it which snapshot to
+      // show, rather than leaving it on whatever it last had selected.
+      void invoke("open_preview_window", { sessionId: this.sessionId, snapshotId }).catch((err) => {
+        console.error("[pane-windows] open_preview_window failed", err);
+      });
       return;
     }
     if (previewBusyElsewhere(this.layout)) {
