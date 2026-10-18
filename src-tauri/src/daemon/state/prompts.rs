@@ -122,8 +122,8 @@ impl DaemonState {
 
     /// The recorded `event` kind for a still-open prompt (`"permission-requested"`
     /// or `"question-requested"`), if any. `jarvis::respond_worker_prompt` uses
-    /// this to route an answer to the right `respond_*_inner` without the
-    /// caller needing to know which kind of prompt it's answering.
+    /// this to answer only permission prompts and refuse questions, which stay
+    /// pending for Joe.
     pub async fn prompt_event(&self, id: &str) -> Option<String> {
         self.pending_prompts
             .lock()

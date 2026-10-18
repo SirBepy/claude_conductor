@@ -73,10 +73,16 @@ fn add(
         .registry
         .get(session_id)
         .ok_or_else(|| format!("unknown caller session: {session_id}"))?;
-    let inherited = crate::sessions::chat_config::get(session_id).unwrap_or_default();
+    let settings = state.settings.snapshot();
+    let mut inherited = crate::sessions::chat_config::get(session_id).unwrap_or_default();
+    inherited.auto_accept = crate::daemon::session_registration::spawned_auto_accept(
+        inherited.auto_accept,
+        settings.spawned_chats_inherit_auto_accept(),
+        false,
+    );
     let item = build_item(
         &caller.cwd,
-        &state.settings.snapshot().projects,
+        &settings.projects,
         &inherited,
         session_id,
         args,

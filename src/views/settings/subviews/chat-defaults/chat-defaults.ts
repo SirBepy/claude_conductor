@@ -18,9 +18,19 @@ function parseModels(raw: string): string[] {
   return out;
 }
 
+/** Both default on when absent, matching `Settings::spawned_chats_inherit_auto_accept`
+ *  and `Settings::jarvis_workers_auto_accept` on the daemon side. */
+function readSpawnFlags(settings: Record<string, unknown>): { inherit: boolean; workers: boolean } {
+  return {
+    inherit: settings["spawnedChatsInheritAutoAccept"] !== false,
+    workers: settings["jarvisWorkersAutoAccept"] !== false,
+  };
+}
+
 function template(
   models: string[],
   flags: { autoAccept: boolean },
+  spawn: { inherit: boolean; workers: boolean },
   sort: SessionSort,
 ) {
   return html`
@@ -40,6 +50,18 @@ function template(
             </select>
           </div>
           ${isRemote() ? "" : toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}
+          ${isRemote() ? "" : toggleRow({
+            label: "Chats an agent starts inherit auto-allow",
+            inputId: "chatDefaultsInheritAutoAllow",
+            checked: spawn.inherit,
+            tooltip: "A chat started by spawn_chat or a scheduled new chat copies its parent's auto-allow. Off: it asks for permissions. Respawn always keeps the flag.",
+          })}
+          ${isRemote() ? "" : toggleRow({
+            label: "Jarvis workers auto-allow",
+            inputId: "chatDefaultsWorkersAutoAllow",
+            checked: spawn.workers,
+            tooltip: "Workers Jarvis spawns run with auto-allow. Off: they ask, and Jarvis can approve their permission prompts. Worker questions always come to you.",
+          })}
         </div>
 
         ${isRemote()
@@ -65,9 +87,10 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   const settings = getSettings();
   let models = readModels(settings);
   let flags = readDefaultFlags(settings);
+  let spawn = readSpawnFlags(settings);
   const sort = loadSort();
 
-  render(template(models, flags, sort), root);
+  render(template(models, flags, spawn, sort), root);
 
   const sortSelect = root.querySelector<HTMLSelectElement>("#chatDefaultsSort");
   if (sortSelect) {
@@ -91,12 +114,18 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
     models = readModelsField();
     const autoAllow = root.querySelector<HTMLInputElement>("#chatDefaultsAutoAllow")?.checked ?? flags.autoAccept;
     flags = { autoAccept: autoAllow };
+    spawn = {
+      inherit: root.querySelector<HTMLInputElement>("#chatDefaultsInheritAutoAllow")?.checked ?? spawn.inherit,
+      workers: root.querySelector<HTMLInputElement>("#chatDefaultsWorkersAutoAllow")?.checked ?? spawn.workers,
+    };
     // Fresh-read + retry (todo 1004): building from the frontend's own
     // settings cache could revert a concurrent daemon-owned write.
     await updateSettings((fresh) => ({
       ...fresh,
       models,
       defaultAutoAllow: autoAllow,
+      spawnedChatsInheritAutoAccept: spawn.inherit,
+      jarvisWorkersAutoAccept: spawn.workers,
     }));
   }
 
@@ -110,6 +139,9 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   if (autoAllowEl) autoAllowEl.addEventListener("change", () => void persist());
   const remoteEl = root.querySelector<HTMLInputElement>("#chatDefaultsRemote");
   if (remoteEl) remoteEl.addEventListener("change", () => void persist());
+  for (const id of ["#chatDefaultsInheritAutoAllow", "#chatDefaultsWorkersAutoAllow"]) {
+    root.querySelector<HTMLInputElement>(id)?.addEventListener("change", () => void persist());
+  }
 
   const modelsInput = root.querySelector<HTMLInputElement>("#chatDefaultsModels");
   if (modelsInput) modelsInput.addEventListener("input", () => persistDebounced());

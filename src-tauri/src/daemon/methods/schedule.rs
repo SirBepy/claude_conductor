@@ -5,12 +5,11 @@
 //! reading and rewriting the same file. The desktop app still reads
 //! `scheduled-items.json` directly for its own `schedule_list` Tauri command
 //! (same as `get_session_config` / `list_auto_accept` read `chat-config.json`
-//! directly), but `schedule_list` is ALSO registered here as a daemon RPC
-//! (read-only, `SAFE_METHODS`-allowlisted) so the remote/phone client - which
-//! has no Tauri runtime and no direct filesystem access - can list the same
-//! items (ai_todo 257). Only the read is exposed remotely; the mutators
-//! (`schedule_create` / `_update` / `_delete` / `_fire_now`) below stay
-//! desktop-only pending a deliberate decision on phone-side write access.
+//! directly), but every method here is ALSO a daemon RPC so the phone - which
+//! has no Tauri runtime and no direct filesystem access - can use the same
+//! items. `schedule_list` and the mutators (`schedule_create` / `_update` /
+//! `_delete` / `_fire_now`) are all phone-reachable (`P` in
+//! `remote_transport_table.rs`, see its rationale comment).
 
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;

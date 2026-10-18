@@ -55,11 +55,55 @@ pub(super) async fn on_write_schedule(
         name: body.name,
         id: body.id,
     };
+    if let Err(e) = approve_new_chat(&ctx, &body.session_id, &args).await {
+        return (StatusCode::OK, Json(json!({"ok": false, "error": e})));
+    }
     match schedule_mcp::write_schedule(&ctx.state, &body.session_id, &args) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
     }
 }
+
+/// `schedule` is pre-trusted (`claude_config::args::PRETRUSTED_TOOLS`) so a
+/// reminder into the calling chat never stops for a card, but `add` with the
+/// new_chat target (the default) starts a real `claude` process later, and a
+/// repeating one outlives the chat that made it. That one action asks a human
+/// unless the caller already runs with auto-accept, the same rule the CLI's
+/// own permission relay applies. An unregistered caller skips the card:
+/// `write_schedule` refuses it anyway, and a card for a session nobody can
+/// see would only hang the call.
+async fn approve_new_chat(ctx: &Arc<HookCtx>, session_id: &str, args: &ScheduleArgs) -> Result<(), String> {
+    let new_chat = args.action == "add" && args.target.as_deref().unwrap_or("new_chat") == "new_chat";
+    if !new_chat || ctx.state.registry.get(session_id).is_none() {
+        return Ok(());
+    }
+    let auto_accept = crate::sessions::chat_config::get(session_id).map(|c| c.auto_accept).unwrap_or(false);
+    if auto_accept {
+        return Ok(());
+    }
+    let input = json!({
+        "action": "add",
+        "target": "new_chat",
+        "prompt": args.prompt,
+        "in_minutes": args.in_minutes,
+        "at": args.at,
+        "repeat": args.repeat,
+        "cwd": args.cwd,
+        "name": args.name,
+    });
+    let id = uuid::Uuid::new_v4().to_string();
+    let decision = super::permission::ask_human(&ctx.state, &id, SCHEDULE_TOOL, input, Some(session_id)).await;
+    if decision["behavior"] == "allow" {
+        Ok(())
+    } else {
+        Err(decision["message"]
+            .as_str()
+            .map(|m| format!("not scheduled: {m}"))
+            .unwrap_or_else(|| "not scheduled: Joe declined the new chat".to_string()))
+    }
+}
+
+const SCHEDULE_TOOL: &str = "mcp__cc_conductor__schedule";
 
 #[cfg(test)]
 mod tests {
@@ -124,6 +168,62 @@ mod tests {
         assert_eq!(v["ok"], false);
         let err = v["error"].as_str().unwrap_or_default();
         assert!(err.contains("add") && err.contains("cancel"), "got {err}");
+    }
+
+    /// Fresh id per test: chat_config is a real on-disk store, and a minted
+    /// uuid can never have an auto-accept record there.
+    fn registered(ctx: &Arc<HookCtx>) -> String {
+        let sid = format!("sched-gate-{}", uuid::Uuid::new_v4());
+        ctx.state.registry.upsert_interactive(&sid, std::path::Path::new("."), "proj-x", "2026-10-18T00:00:00Z");
+        sid
+    }
+
+    async fn first_pending_id(ctx: &Arc<HookCtx>) -> String {
+        for _ in 0..200 {
+            if let Some(id) = ctx.state.pending.lock().await.keys().next().cloned() {
+                return id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("no permission card was raised");
+    }
+
+    /// A declined card must stop the item before `write_schedule` runs, so
+    /// this never touches the real scheduled-items.json.
+    #[tokio::test]
+    async fn a_new_chat_add_without_auto_accept_raises_a_card_and_a_deny_refuses_it() {
+        let ctx = ctx();
+        let sid = registered(&ctx);
+        let task_ctx = ctx.clone();
+        let mut body = add_body(&sid);
+        body.repeat = Some("daily".to_string());
+        let handle = tokio::spawn(async move {
+            on_write_schedule(AxState(task_ctx), ValidatedJson(body)).await.into_response()
+        });
+
+        let id = first_pending_id(&ctx).await;
+        let prompts = ctx.state.list_prompts().await;
+        let card = prompts.iter().find(|p| p["id"] == id.as_str()).expect("card is listed");
+        assert_eq!(card["payload"]["tool_name"], SCHEDULE_TOOL);
+        assert_eq!(card["payload"]["input"]["repeat"], "daily", "the card shows what would be scheduled");
+
+        let tx = ctx.state.pending.lock().await.remove(&id).unwrap();
+        tx.send(json!({"behavior": "deny", "message": "no"})).unwrap();
+        let v: Value = serde_json::from_str(&body_text(handle.await.unwrap()).await).unwrap();
+        assert_eq!(v["ok"], false);
+        assert!(v["error"].as_str().unwrap_or_default().starts_with("not scheduled"), "got {v}");
+    }
+
+    #[tokio::test]
+    async fn a_this_chat_reminder_and_a_cancel_never_raise_a_card() {
+        let ctx = ctx();
+        let sid = registered(&ctx);
+        let mut reminder = ScheduleArgs { action: "add".into(), target: Some("this_chat".into()), ..Default::default() };
+        assert_eq!(approve_new_chat(&ctx, &sid, &reminder).await, Ok(()));
+        reminder.action = "cancel".into();
+        reminder.target = None;
+        assert_eq!(approve_new_chat(&ctx, &sid, &reminder).await, Ok(()));
+        assert!(ctx.state.pending.lock().await.is_empty());
     }
 
     #[test]
