@@ -30,17 +30,29 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
-import { loadHiddenSessions, isMirrored } from "./sessions-helpers";
+import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, loadSort, isMirrored } from "./sessions-helpers";
 import { isAutoAccept } from "./permission-modal";
 import { invoke } from "../../shared/ipc";
 import { isRemote } from "../../shared/transport";
 import { cachedHasDeployWorkflow, refreshDeployWorkflowCache } from "./deploy-workflow-gate";
+import { renderSidebarRow, sessionRowOptions } from "./sidebar-rows";
+import { renderProjectRail } from "./project-rail";
+import { selectSession } from "./active-session";
+import { renderSidebar } from "./sidebar";
 
 let _whenDoneSubMenu: HTMLElement | null = null;
+// Filter-by-project and Hidden (below) share this: at most one of this
+// menu's own submenus is open at a time, so reopening one closes the other.
+let _viewSubMenu: HTMLElement | null = null;
 
 function closeWhenDoneSub(): void {
   _whenDoneSubMenu?.remove();
   _whenDoneSubMenu = null;
+}
+
+function closeViewSubMenu(): void {
+  _viewSubMenu?.remove();
+  _viewSubMenu = null;
 }
 
 export function refreshViewMoreIndicator(): void {
@@ -91,10 +103,11 @@ function _updateWhenDoneParent(el: HTMLElement): void {
 const viewMenu = createMoreMenu<[]>({
   className: "session-more-menu view-more-menu",
   isOutside: (target, menu, btn) =>
-    !menu.contains(target) && target !== btn && !_whenDoneSubMenu?.contains(target),
+    !menu.contains(target) && target !== btn && !_whenDoneSubMenu?.contains(target) && !_viewSubMenu?.contains(target),
   /** Move the relocated host controls back before the menu DOM is dropped. */
   beforeClose: (menu) => {
     closeWhenDoneSub();
+    closeViewSubMenu();
     closeActiveChatSubmenu();
     const host = document.getElementById("view-more-host");
     if (host) {
@@ -186,6 +199,89 @@ const viewMenu = createMoreMenu<[]>({
           }
         });
       });
+    }
+
+    // ── Filter by project / Hidden (phone only) ─────────────────────────────
+    // Critique P1/P2 (todo: mobile Chats overhaul): both used to live inline
+    // in the sidebar - the project rail as a permanent chip row, Hidden
+    // pinned to the list's bottom via margin-top:auto, directly under the
+    // floating "new chat" FAB. Desktop's sidebar has room for both and no
+    // FAB to collide with, so this stays phone-only; sidebar-entries.ts
+    // still renders both inline there, byte-unchanged.
+    if (isRemote()) {
+      const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s));
+
+      const filterBtn = document.createElement("button");
+      filterBtn.className = "smore-item smore-has-sub";
+      filterBtn.innerHTML = `<i class="ph ph-funnel-simple"></i><span>Filter by project</span><i class="ph ph-caret-right smore-sub-caret"></i>`;
+      menu.appendChild(filterBtn);
+      filterBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (_viewSubMenu) {
+          closeViewSubMenu();
+          return;
+        }
+        const sub = document.createElement("div");
+        sub.className = "session-more-menu smore-submenu smore-filter-submenu";
+        document.body.appendChild(sub);
+        _viewSubMenu = sub;
+        // Real component, not a reimplementation: same renderProjectRail the
+        // desktop/inline rail calls, just given this submenu as its host. A
+        // toggle re-renders both this submenu (active/off chip state) and the
+        // real sidebar list (so the filter actually applies below).
+        const onFilterChange = () => {
+          renderProjectRail(sub, listSessions, onFilterChange);
+          const listEl = document.getElementById("sessions-list");
+          if (listEl) renderSidebar(listEl);
+        };
+        renderProjectRail(sub, listSessions, onFilterChange);
+        positionSubmenu(sub, filterBtn);
+      });
+
+      const hidden = loadHiddenSessions();
+      const hiddenProjects = loadHiddenProjects();
+      const hiddenSessions = listSessions.filter(
+        (s) => hidden.has(s.session_id) && !hiddenProjects.has(String(s.cwd ?? "")),
+      );
+
+      const hiddenBtn = document.createElement("button");
+      hiddenBtn.className = "smore-item smore-has-sub" + (hiddenSessions.length ? "" : " is-disabled");
+      if (!hiddenSessions.length) hiddenBtn.title = "No hidden chats";
+      hiddenBtn.innerHTML =
+        `<i class="ph ph-eye-slash"></i><span>Hidden</span>` +
+        (hiddenSessions.length ? `<span class="smore-count-badge">${hiddenSessions.length}</span>` : "") +
+        `<i class="ph ph-caret-right smore-sub-caret"></i>`;
+      menu.appendChild(hiddenBtn);
+      if (hiddenSessions.length) {
+        hiddenBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (_viewSubMenu) {
+            closeViewSubMenu();
+            return;
+          }
+          const sub = document.createElement("div");
+          sub.className = "session-more-menu smore-submenu";
+          const sort = loadSort();
+          sub.innerHTML = `<ul class="sessions-list smore-hidden-list">${hiddenSessions
+            .map((s) => renderSidebarRow(sessionRowOptions(s, {
+              isActive: s.session_id === state.selectedId,
+              unread: new Set(), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
+              sort, drainMap: new Map(), scheduledCountMap: new Map(), kbdHint: "",
+            })))
+            .join("")}</ul>`;
+          document.body.appendChild(sub);
+          _viewSubMenu = sub;
+          positionSubmenu(sub, hiddenBtn);
+          sub.addEventListener("click", (ev) => {
+            const li = (ev.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id]");
+            const id = li?.dataset.sessionId;
+            if (!id) return;
+            const pane = document.querySelector<HTMLElement>(".session-pane");
+            if (pane) void selectSession(id, pane);
+            close();
+          });
+        });
+      }
     }
 
     // ── "This chat" section: only when a session or draft is active ─────────

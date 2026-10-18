@@ -20,6 +20,7 @@ import {
 } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
+import { isRemote } from "../../shared/transport";
 import { pendingPromptSessionIds } from "./permission-modal";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
@@ -78,8 +79,12 @@ export function buildSidebarEntries(
   // the "Hidden" section below - a hidden project means nothing from it shows.
   const hiddenProjects = loadHiddenProjects();
   const projectHidden = (s: Instance): boolean => hiddenProjects.has(String(s.cwd ?? ""));
+  // Phone: the rail lives in the kebab menu's "Filter by project" submenu
+  // instead (view-more-menu.ts, critique P2) - no room for a permanent chip
+  // row above a single-pane list, and the FAB has nothing to collide with on
+  // desktop's wider sidebar, so this stays inline there unchanged.
   const railHost = listEl.parentElement?.querySelector<HTMLElement>("#project-rail");
-  if (railHost) renderProjectRail(railHost, listSessions, rerender);
+  if (railHost && !isRemote()) renderProjectRail(railHost, listSessions, rerender);
 
   const hiddenSessions = listSessions.filter(s => hidden.has(s.session_id) && !projectHidden(s));
 
@@ -234,7 +239,10 @@ export function buildSidebarEntries(
 
   // Hidden section - always at the bottom; its header's margin-top:auto
   // (session-list.css) pins it to the sidebar's bottom edge when there's room.
-  if (hiddenSessions.length > 0) {
+  // Phone: lives in the kebab menu's "Hidden" submenu instead (view-more-
+  // menu.ts, critique P1) - that bottom pin is exactly what put it in the
+  // floating "new chat" FAB's footprint. Desktop has no FAB, so unchanged.
+  if (hiddenSessions.length > 0 && !isRemote()) {
     const hiddenCollapsed = loadHiddenCollapsed();
     const chevronCls = hiddenCollapsed ? "ph-caret-right" : "ph-caret-down";
     entries.push({
