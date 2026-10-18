@@ -38,7 +38,7 @@ phone ──HTTP/WS──> PC daemon ──peer link (HTTP/WS, direct URL or iro
 | Question and permission cards | Clients poll `list_pending_prompts`. For a mirrored chat the owning peer's prompts are cached in `MirrorState` by `peer_link` and merged into the local answer; answers carry `session_id` so `forward_one` routes them back to the owner. |
 | New chat on the other machine | `start_session` with `machine_id`: `lifecycle/core.rs::forward_start_session` relays it, and records the new id's owner so the follow-up `attach_session`/`send_message` route before the next mirror frame arrives. |
 | Phone send | `POST /api/sessions/:id/send` (its own REST route, not `/api/rpc`) forwards to the owner when the id is mirrored. |
-| Machine indicator | Sidebar row glyph (desktop: tooltip; phone: visible label). The new-chat picker lists machines by label on both desktop and phone. |
+| Machine indicator | Per-machine icon after the row's project name (`machine-icons.ts`: OS logo, or a stable pool icon when another machine holds that logo). Desktop marks mirrored rows only; the phone marks every row once a peer is paired. No text label. The new-chat machine chips show the same icon before the label. |
 
 ## Gap audit (2026-10-08) and resolution
 
@@ -55,7 +55,7 @@ proven only by in-process loopback tests. A gap audit on 2026-10-08 found these 
 | G6 | Desktop history for a mirrored chat read the local JSONL (absent), and the live stream only attached after a local send. | Route history through the daemon RPC and attach on open for mirrored rows. |
 | G7 | The receiving side of a pairing registered the peer but never started its link until a restart. | `pair_machine_peer` calls `MachineHub::sync_links`. |
 | G8 | Phone had no machine picker (`list_machines`/`list_machine_projects` not phone-reachable, picker gated on desktop). | Add both to the table as `P`, lift the gate. |
-| G9 | Phone could not tell which machine a chat lives on (tooltip only). | Phone rows show the machine label as text. |
+| G9 | Phone could not tell which machine a chat lives on (tooltip only). | Phone rows carry every machine's icon, own daemon included (the text label it first got was replaced 2026-10-18). |
 | G10 | Code mode, commits popover and open-in-editor silently ran against this machine's disk for a mirrored chat. | Hidden for mirrored chats; remote git browsing is a backlog todo. |
 
 ## G10 follow-up (2026-10-13, todo 1129): Code mode now proxies its reads
@@ -105,8 +105,8 @@ chat rather than proxy them. Todo 1129 proxies the READ half instead:
   `send_message_never_reforwards_a_peers_own_request`), the pending-owner assertion in
   `start_session_with_a_different_machine_id_forwards_and_strips_it`, and
   `remote_pairing.rs::machine_pair_starts_the_links_hub_entry_for_the_new_peer`.
-- View harness: `sidebar-machine-mark.view.spec.ts` (desktop glyph, phone label, long label at
-  390px) and `project-picker-phone-machine-chips.view.spec.ts` (phone machine chips). The phone
+- View harness: `sidebar-machine-mark.view.spec.ts` (desktop icon, phone icons on every row,
+  no-wrap at 390px) and `project-picker-phone-machine-chips.view.spec.ts` (phone machine chips). The phone
   specs mount through `mountViewPhone` in `e2e/view-harness/harness.ts`, which routes `/api/rpc`
   so `isRemote()` is true.
 - Real hardware: todo 913's checklist (PC + Mac + phone), not runnable from one box.

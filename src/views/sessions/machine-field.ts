@@ -7,6 +7,7 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { attachChipKeyboardActivation } from "../../shared/account-chip";
 import type { SelfMachine, PeerMachineView } from "../../shared/api";
+import { assignMachineIcons } from "./machine-icons";
 import "../../shared/account-chip.css";
 
 /** `null` = this machine - the default every time the picker opens (multi-
@@ -23,13 +24,15 @@ export interface MachineFieldContext {
 function machineChipHtml(
   label: string,
   machineId: string,
+  icon: string | undefined,
   selected: boolean,
   offline: boolean,
 ): string {
   const cls = `account-chip machine-chip${selected ? " sel" : ""}${offline ? " machine-chip--offline" : ""}`;
   const tip = offline ? ` data-tip="${escapeHtml(label)} is offline"` : "";
   const stateAttrs = offline ? ` aria-disabled="true"` : ` role="button" tabindex="0"`;
-  return `<span class="${cls}" data-machine-id="${escapeHtml(machineId)}"${stateAttrs}${tip}>${escapeHtml(label)}</span>`;
+  const glyph = icon ? `<i class="ph ${icon}"></i>` : "";
+  return `<span class="${cls}" data-machine-id="${escapeHtml(machineId)}"${stateAttrs}${tip}>${glyph}${escapeHtml(label)}</span>`;
 }
 
 /** From a phone, "this machine" is ambiguous (which one?), so the self chip
@@ -47,10 +50,13 @@ export function selfChipLabel(self: SelfMachine | null): string {
 export function renderMachineFieldHtml(state: MachineFieldState, ctx: MachineFieldContext): string {
   if (ctx.peers.length === 0) return "";
   const selfLabel = selfChipLabel(ctx.self);
+  // Same assignment the sidebar rows use, so a chip and its machine's rows
+  // always show the same icon.
+  const icons = assignMachineIcons([...(ctx.self ? [ctx.self] : []), ...ctx.peers]);
   const chips = [
-    machineChipHtml(selfLabel, "", state.machineId === null, false),
+    machineChipHtml(selfLabel, "", ctx.self ? icons.get(ctx.self.machine_id) : undefined, state.machineId === null, false),
     ...ctx.peers.map((p) =>
-      machineChipHtml(p.label, p.machine_id, state.machineId === p.machine_id, p.reach === "none"),
+      machineChipHtml(p.label, p.machine_id, icons.get(p.machine_id), state.machineId === p.machine_id, p.reach === "none"),
     ),
   ].join("");
   return `

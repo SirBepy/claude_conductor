@@ -138,16 +138,20 @@ Paired devices can be revoked any time from Settings > Remote access on the desk
 ## Multi-machine
 
 Run Conductor on two machines (say a Windows PC and a Mac), pair them once, and each app's chat
-list shows both machines' chats together. A chat hosted on the other machine gets a small machine
-glyph next to it (dimmed when that machine is offline) and opens, streams, and accepts messages
+list shows both machines' chats together. A chat hosted on the other machine gets that machine's
+icon after its project name (dimmed when that machine is offline) and opens, streams, and accepts messages
 like a local one: its history, question and permission cards, stop, model/effort switch,
 auto-accept and pasted attachments all go to the machine the chat runs on. Code mode, the git
 chips and open-in-editor are hidden for such a chat, since they read this machine's disk.
 
-**From the phone.** A phone paired with either machine sees both machines' chats. Chats on the
-machine the phone is connected to are unmarked; chats on the other machine show its name next to
-the glyph. Every chat can be opened and driven from the phone, and the phone's new-chat picker has
-the same machine chips as the desktop.
+**From the phone.** A phone paired with either machine sees both machines' chats, and every chat
+carries its machine's icon, including the chats on the machine the phone is connected through.
+Every chat can be opened and driven from the phone, and the phone's new-chat picker has the same
+machine chips as the desktop.
+
+**Machine icons.** Each machine's icon is its OS logo (Windows, Apple, Linux). If two paired
+machines run the same OS, one keeps the logo and the other gets an icon of its own, the same one on
+every device. The new-chat machine chips show the same icons.
 
 **Pair them.** Turn on Settings > Remote access on both machines. On machine A, that page shows the
 same pairing link/QR a phone uses - click **Copy link**. On machine B, go to Settings > Remote

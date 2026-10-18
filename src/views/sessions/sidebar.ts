@@ -14,6 +14,7 @@ import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/p
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachRowTooltips } from "../../shared/row-tooltip";
 import { buildSidebarEntries } from "./sidebar-entries";
+import { ensureMachineIcons } from "./machine-icons";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 
 let sidebarListEl: HTMLElement | null = null;
@@ -270,6 +271,12 @@ export function renderSidebar(listEl: HTMLElement): void {
   );
 
   reconcileList(listEl, entries, loadAnimEnabled());
+  // Rows render the generic machine glyph until list_machines lands; this
+  // re-renders once the per-machine icons are known.
+  ensureMachineIcons(
+    state.sessions.flatMap((s) => (s.machine ? [s.machine.id] : [])),
+    () => renderSidebar(listEl),
+  );
   // Delegated, so it survives every reconcile without rebinding per row.
   attachRowTooltips(listEl);
   // Resolve hero avatar images to data URLs (idempotent per character id).
