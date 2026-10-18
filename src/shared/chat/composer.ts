@@ -124,6 +124,8 @@ export class Composer {
     getDraftText: () => this.getDraftText(),
     setDraftText: (text, clearAttachments) => this.setDraftText(text, clearAttachments),
     getCwd: () => this.opts.projectDir ?? null,
+    isVoiceRecording: () => this.cv.state === "recording" || this.cv.state === "connecting",
+    onVoiceStateChange: (cb) => this.cv.subscribe((s) => cb(s === "recording" || s === "connecting")),
   };
 
   private _visibilityHandler = (): void => {

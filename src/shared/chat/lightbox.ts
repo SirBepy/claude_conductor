@@ -33,6 +33,15 @@ export interface LightboxComposerBridge {
    *  Omit or return null to still surface user/builtin skills with no
    *  @file results (mirrors Composer's own null fallback). */
   getCwd?(): string | null;
+  /** True while the composer is actively dictating (recording or
+   *  connecting). The overlay's z-index:9999 covers the mic button, so
+   *  without this, dictation looks stopped the moment an attachment preview
+   *  opens even though audio capture never paused - Joe hit this directly
+   *  (2026-10-18). */
+  isVoiceRecording?(): boolean;
+  /** Subscribe to recording-state flips while the overlay is open. Returns
+   *  an unsubscribe function. */
+  onVoiceStateChange?(cb: (recording: boolean) => void): () => void;
 }
 
 // Registered by Composer itself (ctor/destroy), so the lightbox's own textbox
@@ -66,6 +75,23 @@ let openBridge: LightboxComposerBridge | null = null;
 let composerCore: ComposerCore | null = null;
 let slashProvider: SlashProvider | null = null;
 let fileProvider: FileProvider | null = null;
+
+// Recording-still-live badge (see LightboxComposerBridge.isVoiceRecording).
+let voiceBadge: HTMLDivElement | null = null;
+let voiceUnsub: (() => void) | null = null;
+
+function setVoiceBadge(recording: boolean): void {
+  if (!overlay) return;
+  if (recording && !voiceBadge) {
+    voiceBadge = document.createElement("div");
+    voiceBadge.className = "lightbox-voice-badge";
+    voiceBadge.innerHTML = '<i class="ph ph-microphone"></i> Recording';
+    overlay.appendChild(voiceBadge);
+  } else if (!recording && voiceBadge) {
+    voiceBadge.remove();
+    voiceBadge = null;
+  }
+}
 
 export function openLightbox(content: LightboxContent): void {
   closeLightbox(); // clears openBridge, so capture below must follow it
@@ -151,6 +177,9 @@ export function openLightbox(content: LightboxContent): void {
   document.body.appendChild(overlay);
   overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer")?.focus();
   document.addEventListener("keydown", onEsc);
+
+  if (openBridge?.isVoiceRecording?.()) setVoiceBadge(true);
+  voiceUnsub = openBridge?.onVoiceStateChange?.(setVoiceBadge) ?? null;
   backDisposer?.();
   backDisposer = registerOverlayBack(() => {
     closeLightbox();
@@ -162,6 +191,9 @@ export function closeLightbox(): void {
   if (!overlay) return;
   backDisposer?.();
   backDisposer = null;
+  voiceUnsub?.();
+  voiceUnsub = null;
+  voiceBadge = null;
   closeAllMenus();
   const box = overlay.querySelector<HTMLTextAreaElement>(".lightbox-composer");
   if (box && openBridge) openBridge.setDraftText(box.value, false);

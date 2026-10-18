@@ -155,6 +155,19 @@ export class ComposerVoice {
     this.controller = null;
   }
 
+  private stateListeners = new Set<(state: VoiceState) => void>();
+
+  /** Notified on every state flip, in addition to the mic button + highlight
+   *  updates `onStateChange` already drives. Exists for a surface that isn't
+   *  the composer itself - the lightbox's full-screen overlay (z-index 9999)
+   *  covers the mic button, so dictation looks stopped while previewing an
+   *  attachment even though it never paused; the lightbox subscribes here to
+   *  show its own indicator. Returns an unsubscribe function. */
+  subscribe(cb: (state: VoiceState) => void): () => void {
+    this.stateListeners.add(cb);
+    return () => this.stateListeners.delete(cb);
+  }
+
   applyState(): void {
     if (!this.micBtn) return;
     this.micBtn.classList.toggle("recording", this.state === "recording");
@@ -163,6 +176,7 @@ export class ComposerVoice {
 
   private onStateChange(s: VoiceState): void {
     this.state = s;
+    this.stateListeners.forEach((cb) => cb(s));
     if ((s === "idle" || s === "error") && this.volatileLen > 0 && this.textarea) {
       const v = this.textarea.value;
       this.textarea.value =

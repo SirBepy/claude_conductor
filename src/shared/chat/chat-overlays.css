@@ -45,6 +45,33 @@
   right: 60px;
 }
 
+/* Shown while dictation is still live under the overlay - the overlay's own
+   z-index:9999 hides the composer's mic button, so without this, recording
+   silently continuing reads as "it stopped" (todo: voice dictation + image
+   attachment, 2026-10-18). */
+.lightbox-voice-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fff;
+  border-radius: 100px;
+  padding: 6px 12px 6px 10px;
+  font-size: 0.78rem;
+}
+
+.lightbox-voice-badge i {
+  color: #ef4444;
+  /* voice-pulse is defined in voice/voice.css (always loaded - the composer
+     imports it); CSS keyframes are global, so reusing the name here is fine. */
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
 .lightbox-content {
   max-width: 90vw;
   max-height: 90vh;
