@@ -1,21 +1,35 @@
 // @vitest-environment jsdom
 //
-// Multi-machine federation (H2): a session mirrored in from a paired peer
-// machine gets a small `.session-machine-badge` glyph next to the project
-// name, and the whole row dims (`is-machine-offline`) when that peer has
-// gone offline. A locally-hosted row (Instance.machine === null) gets
-// neither - this is the regression a stray `machine: undefined` read would
-// silently pass (badge always "", never asserted false).
+// Multi-machine federation: a session mirrored in from a paired peer machine
+// carries that machine's icon after the project name, and the whole row dims
+// (`is-machine-offline`) when that peer has gone offline. On desktop a
+// locally-hosted row (Instance.machine === null) carries no mark - no mark
+// means "this machine". On the phone, which is none of the machines, local
+// rows carry this daemon's own icon once a peer is paired.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 if (!globalThis.CSS) globalThis.CSS = window.CSS ?? { escape: (s) => s };
 
-vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => ({})) }));
+const MACHINES = {
+  self: { machine_id: "pc-id", label: "Main_Desktop", os: "windows" },
+  peers: [{ machine_id: "mac-id", label: "mac", os: "macos", iroh_id: null, direct_url: null, reverse_device_id: null, added_at: 0, reach: "iroh" }],
+};
+let machinesResponse = MACHINES;
+vi.mock("../src/shared/ipc.ts", () => ({
+  invoke: vi.fn(async (cmd) => (cmd === "list_machines" ? machinesResponse : {})),
+}));
+
+let remote = false;
+vi.mock("../src/shared/transport.ts", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, isRemote: () => remote };
+});
 
 const { renderSidebar } = await import("../src/views/sessions/sidebar.ts");
 const { state } = await import("../src/views/sessions/state.ts");
+const { resetMachineIconsForTests } = await import("../src/views/sessions/machine-icons.ts");
 
 function makeList() {
   const ul = document.createElement("ul");
@@ -36,7 +50,7 @@ function baseInstance(id, over = {}) {
     started_at: "2026-06-12T00:00:00Z",
     transcript_path: null,
     bridge_session_id: null,
-    name: null,
+    name: "Supabase setup",
     ended_at: null,
     end_reason: null,
     busy: false,
@@ -48,10 +62,23 @@ function baseInstance(id, over = {}) {
   };
 }
 
+const MAC = { id: "mac-id", label: "mac", online: true };
+
+/** Renders, lets list_machines resolve, and renders again the way the
+ *  sidebar's own onChange callback does. */
+async function renderSettled(el) {
+  renderSidebar(el);
+  await vi.advanceTimersByTimeAsync(50);
+  vi.runAllTimers();
+}
+
 describe("sidebar machine mark (multi-machine federation)", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.useFakeTimers();
+    resetMachineIconsForTests();
+    machinesResponse = MACHINES;
+    remote = false;
     state.sessions = [];
     state.parkedDrafts = [];
     state.filter = "";
@@ -60,57 +87,92 @@ describe("sidebar machine mark (multi-machine federation)", () => {
     state.daemonConnected = true;
   });
 
-  it("a local row (machine: null) has no machine badge or offline class", () => {
+  it("a titled row is two lines: title over project, the machine icon after the project", async () => {
     const el = makeList();
-    state.sessions = [baseInstance("local-1", { machine: null })];
-    renderSidebar(el);
-    vi.runAllTimers();
+    state.sessions = [baseInstance("mirrored-1", { machine: MAC })];
+    await renderSettled(el);
+    const li = el.querySelector('li[data-session-id="mirrored-1"]');
+    expect(li.querySelector(".session-row-text.is-two-line")).not.toBeNull();
+    expect(li.querySelector(".session-row-title-text").textContent).toBe("Supabase setup");
+    const project = li.querySelector(".session-row-project");
+    expect(project.querySelector(".proj-name").textContent).toBe("proj");
+    expect(project.querySelector(".session-machine-badge")).not.toBeNull();
+  });
+
+  it("desktop: a local row has no machine badge or offline class", async () => {
+    const el = makeList();
+    state.sessions = [baseInstance("local-1"), baseInstance("mirrored-1", { machine: MAC })];
+    await renderSettled(el);
     const li = el.querySelector('li[data-session-id="local-1"]');
-    expect(li).not.toBeNull();
     expect(li.querySelector(".session-machine-badge")).toBeNull();
     expect(li.classList.contains("is-machine-offline")).toBe(false);
   });
 
-  it("a mirrored online row shows the glyph with an 'On <label>' tip", () => {
+  it("a mirrored Mac row gets the Apple logo with an 'On <label>' tip", async () => {
     const el = makeList();
-    state.sessions = [
-      baseInstance("mirrored-1", { machine: { id: "m1", label: "Mac Mini", online: true } }),
-    ];
-    renderSidebar(el);
-    vi.runAllTimers();
-    const li = el.querySelector('li[data-session-id="mirrored-1"]');
-    const badge = li.querySelector(".session-machine-badge");
-    expect(badge).not.toBeNull();
+    state.sessions = [baseInstance("mirrored-1", { machine: MAC })];
+    await renderSettled(el);
+    const badge = el.querySelector('li[data-session-id="mirrored-1"] .session-machine-badge');
+    expect(badge.classList.contains("ph-apple-logo")).toBe(true);
     expect(badge.classList.contains("session-machine-badge--offline")).toBe(false);
-    expect(badge.getAttribute("data-tip")).toBe("On Mac Mini");
-    expect(li.classList.contains("is-machine-offline")).toBe(false);
+    expect(badge.getAttribute("data-tip")).toBe("On mac");
   });
 
-  it("a mirrored offline row gets the --offline glyph and is-machine-offline", () => {
+  it("a mirrored row keeps the generic glyph when list_machines is unavailable", async () => {
+    machinesResponse = {};
     const el = makeList();
-    state.sessions = [
-      baseInstance("mirrored-2", { machine: { id: "m2", label: "Mac Mini", online: false } }),
-    ];
-    renderSidebar(el);
-    vi.runAllTimers();
+    state.sessions = [baseInstance("mirrored-1", { machine: MAC })];
+    await renderSettled(el);
+    const badge = el.querySelector('li[data-session-id="mirrored-1"] .session-machine-badge');
+    expect(badge.classList.contains("ph-desktop")).toBe(true);
+  });
+
+  it("a mirrored offline row gets the --offline glyph and is-machine-offline", async () => {
+    const el = makeList();
+    state.sessions = [baseInstance("mirrored-2", { machine: { ...MAC, online: false } })];
+    await renderSettled(el);
     const li = el.querySelector('li[data-session-id="mirrored-2"]');
     const badge = li.querySelector(".session-machine-badge");
-    expect(badge).not.toBeNull();
     expect(badge.classList.contains("session-machine-badge--offline")).toBe(true);
-    expect(badge.getAttribute("data-tip")).toBe("On Mac Mini (offline)");
+    expect(badge.getAttribute("data-tip")).toBe("On mac (offline)");
     expect(li.classList.contains("is-machine-offline")).toBe(true);
   });
 
-  it("shows the glyph on an ended row too (identity, not status)", () => {
+  it("phone: a local row carries this daemon's own icon once a peer is paired", async () => {
+    remote = true;
+    const el = makeList();
+    state.sessions = [baseInstance("local-1"), baseInstance("mirrored-1", { machine: MAC })];
+    await renderSettled(el);
+    const badge = el.querySelector('li[data-session-id="local-1"] .session-machine-badge');
+    expect(badge).not.toBeNull();
+    expect(badge.classList.contains("ph-windows-logo")).toBe(true);
+    expect(badge.getAttribute("data-tip")).toBe("On Main_Desktop");
+  });
+
+  it("phone: no peer paired, so local rows stay unmarked", async () => {
+    remote = true;
+    machinesResponse = { self: MACHINES.self, peers: [] };
+    const el = makeList();
+    state.sessions = [baseInstance("local-1")];
+    await renderSettled(el);
+    expect(el.querySelector('li[data-session-id="local-1"] .session-machine-badge')).toBeNull();
+  });
+
+  it("no row ever renders a text machine label", async () => {
+    remote = true;
+    const el = makeList();
+    state.sessions = [baseInstance("local-1"), baseInstance("mirrored-1", { machine: MAC })];
+    await renderSettled(el);
+    expect(el.querySelector(".session-machine-label")).toBeNull();
+    expect(el.textContent).not.toContain("Main_Desktop");
+  });
+
+  it("shows the glyph on an ended row too (identity, not status)", async () => {
     const el = makeList();
     state.sessions = [
-      baseInstance("mirrored-3", {
-        machine: { id: "m3", label: "Mac Mini", online: true },
-        ended_at: "2026-06-12T01:00:00Z",
-      }),
+      baseInstance("mirrored-3", { machine: MAC, ended_at: "2026-06-12T01:00:00Z" }),
     ];
-    renderSidebar(el);
-    vi.runAllTimers();
+    await renderSettled(el);
     // Ended rows may land in a collapsed "Hidden"/history segment depending on
     // sidebar-entries' grouping - the assertion is on the badge markup itself,
     // not on visibility, so query the whole list rather than one li.

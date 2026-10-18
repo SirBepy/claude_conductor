@@ -17,6 +17,7 @@ import {
 } from "./sidebar-row-visuals";
 import type { LeadingExtras } from "./sidebar-row-visuals";
 import { chainRowKey } from "./successor-follow";
+import { GENERIC_MACHINE_ICON, hasPairedMachines, machineIcon, selfMachineLabel } from "./machine-icons";
 
 /** Every sidebar row - live session, draft, or parked draft - is built from
  *  this ONE bag of slot values and rendered by the ONE template below, so a
@@ -33,26 +34,53 @@ export interface RowOptions {
   /** Hover text on `.session-avatar`. "" for every state but close_failed. */
   statusTitle: string;
   avatarExtras?: LeadingExtras;
-  /** Chat title, escaped plain text - the portrait tooltip value. "" for draft/parked - no name to show. */
+  /** Chat title, escaped plain text - the bold first line. "" for draft/parked - no name to show. */
   title: string;
   /** Project folder name, escaped. */
   projectLabel: string;
-  /** Autopilot badge after the project name. "" when not autopilot. */
+  /** Autopilot badge after the title (or the project name on a title-less
+   *  row). "" when not autopilot. */
   badges: string;
+  /** Machine glyph after the project name. "" for a row that carries none. */
+  machineBadge: string;
   /** Portrait's secondary slot: model battery + drain chip, for every row kind. */
   portraitSecondary: string;
 }
 
-/** The one `<li>` template for the whole sidebar list. */
+/** The one `<li>` template for the whole sidebar list. A titled row is two
+ *  lines, title over project; a draft/parked row has no title yet, so its
+ *  project name stays the single bold line rather than sitting under a
+ *  placeholder heading (d153323b). */
 export function renderSidebarRow(o: RowOptions): string {
-  const text = `<span class="session-row-project" data-tip="${o.title}"><span class="proj-name">${o.projectLabel}</span>${o.badges}</span>
-              <span class="session-chips">${o.portraitSecondary}</span>`;
+  const chips = `<span class="session-chips">${o.portraitSecondary}</span>`;
+  const text = o.title
+    ? `<span class="session-row-title"><span class="session-row-title-text" data-tip="${o.title}">${o.title}</span>${o.badges}</span>
+              ${chips}
+              <span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.machineBadge}</span>`
+    : `<span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.badges}${o.machineBadge}</span>
+              ${chips}`;
   return `<li data-${o.idAttr}="${escapeHtml(o.id)}"${o.liExtraAttrs} class="${o.liClasses}">
             ${leadingVisual(o.charId, o.statusClass, o.cwd, o.avatarExtras, o.statusTitle)}
-            <div class="session-row-text">
+            <div class="session-row-text${o.title ? " is-two-line" : ""}">
               ${text}
             </div>
           </li>`;
+}
+
+/**
+ * The machine glyph for a row. A mirrored row (`machine` set) always carries
+ * its machine's icon. A row hosted on this daemon is unmarked on desktop,
+ * where no mark means "this machine"; the phone is not one of the machines,
+ * so there its own daemon's rows are marked too, once a peer exists to tell
+ * them apart from.
+ */
+function machineBadgeHtml(machine: MachineRef | null | undefined, markLocal: boolean): string {
+  if (!machine && (!markLocal || !isRemote() || !hasPairedMachines())) return "";
+  const icon = machine ? machineIcon(machine.id) ?? GENERIC_MACHINE_ICON : machineIcon(null);
+  if (!icon) return "";
+  const offline = machine?.online === false;
+  const label = machine ? machine.label : selfMachineLabel() ?? "this machine";
+  return `<i class="ph ${icon} session-machine-badge${offline ? " session-machine-badge--offline" : ""}" data-tip="On ${escapeHtml(label)}${offline ? " (offline)" : ""}"></i>`;
 }
 
 /** The dot a live row shows when nothing is in flight - `statusDotClass`'s
@@ -103,19 +131,12 @@ function buildRowOptions(args: {
   /** Set only for a session mirrored in from a paired peer machine (multi-
    *  machine federation); undefined/null for every locally-hosted row. */
   machine?: MachineRef | null;
+  /** A live session hosted on this daemon (machine null), as opposed to a
+   *  draft/parked row, which runs nowhere yet and never gets a machine mark. */
+  isLocalSession?: boolean;
 }): RowOptions {
   const tipAttr = "data-tip";
-  const machineOffline = args.machine?.online === false;
-  // Phone shows the machine as visible text (no room for a hover tooltip on
-  // a touch device); desktop keeps the glyph + tooltip only - decided UX, G9
-  // in docs/multi-machine.md.
-  const machineLabel = args.machine && isRemote()
-    ? `<span class="session-machine-label${machineOffline ? " session-machine-label--offline" : ""}">${escapeHtml(args.machine.label)}</span>`
-    : "";
-  const machineBadge = args.machine
-    ? `<i class="ph ph-desktop session-machine-badge${machineOffline ? " session-machine-badge--offline" : ""}" ${tipAttr}="On ${escapeHtml(args.machine.label)}${machineOffline ? " (offline)" : ""}"></i>${machineLabel}`
-    : "";
-  const badges = `${args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : ""}${machineBadge}`;
+  const badges = args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : "";
   return {
     idAttr: args.identity.idAttr,
     id: args.identity.id,
@@ -133,6 +154,7 @@ function buildRowOptions(args: {
     title: escapeHtml(args.title),
     projectLabel: escapeHtml(args.projectLabel),
     badges,
+    machineBadge: machineBadgeHtml(args.machine, !!args.isLocalSession),
     portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
   };
 }
@@ -191,6 +213,7 @@ export function sessionRowOptions(
     model: s.model,
     drainChip,
     machine: s.machine,
+    isLocalSession: true,
   });
 }
 

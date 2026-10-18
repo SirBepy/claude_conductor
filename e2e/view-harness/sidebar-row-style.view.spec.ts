@@ -37,15 +37,21 @@ async function mountSessions(page: import("@playwright/test").Page): Promise<voi
 }
 
 test.describe("view-harness / chat row style", () => {
-  test("Portrait row drops the title and the 3-dot button", async ({ page }) => {
+  test("Portrait row shows the title over the project, and no 3-dot button", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
     await expect(row).toHaveClass(/row-portrait/);
-    // Project name is the visible text; the title is only in the hover tooltip.
+    // The title is the bold first line (tooltip keeps the full text once it
+    // ellipsizes); the project name is the small line under it.
+    await expect(row.locator(".session-row-title-text")).toHaveText("Session card round six chips");
+    await expect(row.locator(".session-row-title-text")).toHaveAttribute("data-tip", "Session card round six chips");
     await expect(row.locator(".proj-name")).toHaveText("claude_usage_in_taskbar");
-    await expect(row).not.toContainText("Session card round six chips");
-    await expect(row.locator(".session-row-project")).toHaveAttribute("data-tip", "Session card round six chips");
+    const [title, project] = await Promise.all([
+      row.locator(".session-row-title").boundingBox(),
+      row.locator(".session-row-project").boundingBox(),
+    ]);
+    expect(project!.y).toBeGreaterThanOrEqual(title!.y + title!.height - 1);
     // The menu moved to right-click, so the button must be gone entirely.
     await expect(row.locator(".session-row-menu-btn")).toHaveCount(0);
   });
@@ -77,7 +83,7 @@ test.describe("view-harness / chat row style", () => {
         maskImage: style.getPropertyValue("mask-image") || style.getPropertyValue("-webkit-mask-image"),
         art: Math.round((a.top + a.height / 2) * 100) / 100,
         badge: mid(".session-proj-badge"),
-        name: mid(".proj-name"),
+        text: mid(".session-row-text"),
         battery: mid(".session-model-battery"),
       };
     });
@@ -90,9 +96,9 @@ test.describe("view-harness / chat row style", () => {
     expect(box.maskImage).not.toBe("none");
     // The bug that made everything "look 1px low": a separator inside the avatar
     // wrapper shortened the visible art, so the art's centre diverged from every
-    // other element's. All four must agree.
+    // other element's. All four must agree (the two-line text block as a whole).
     expect(box.badge).toBe(box.art);
-    expect(box.name).toBe(box.art);
+    expect(box.text).toBe(box.art);
     expect(box.battery).toBe(box.art);
   });
 

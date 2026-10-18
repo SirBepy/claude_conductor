@@ -90,12 +90,27 @@
   display: none;
 }
 
-/* Name and battery share one baseline. With only two things to place, a second
-   row left them stranded at opposite edges of mostly empty space. */
+/* A title-less (draft/parked) row: name and battery share one baseline. */
 .sessions-list li.row-portrait .session-row-text {
   flex-direction: row;
   align-items: center;
   gap: 8px;
+}
+/* A titled row: title over project in the left column, the chips spanning
+   both lines on the right so the battery stays centred on the avatar. */
+.sessions-list li.row-portrait .session-row-text.is-two-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 1px;
+}
+.sessions-list li.row-portrait .session-row-text.is-two-line .session-row-title,
+.sessions-list li.row-portrait .session-row-text.is-two-line .session-row-project {
+  grid-column: 1;
+}
+.sessions-list li.row-portrait .session-row-text.is-two-line .session-chips {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 .sessions-list li.row-portrait .session-row-project {
   flex: 1 1 auto;
