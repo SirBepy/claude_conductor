@@ -133,6 +133,13 @@ first. While it's off, no phone or other machine can reach the desktop at all.
 While it connects, the phone shows "Reaching your PC…" and keeps retrying on its own with a visible
 countdown - tap **Edit connection** to go back and change the address.
 
+**App lock.** The phone asks for its own fingerprint or screen-lock PIN every time the app
+starts, and again after five minutes in the background. The app keeps loading behind the lock
+screen, so it is ready the moment you unlock. Cancel the prompt and it stays locked until you tap
+**Unlock**. A phone with no screen lock set skips this, since there is nothing to check against.
+The app also opts out of Android backup and device-to-device transfer, so its stored connection
+token never leaves the phone.
+
 Paired devices can be revoked any time from Settings > Remote access on the desktop.
 
 ## Multi-machine
@@ -160,6 +167,13 @@ access > Paired machines, paste that link into "Paste the other machine's pairin
 reach each other over iroh; it only matters if you expose B's remote server at an address of your
 own. One paste pairs both directions - there's no separate step to run on A. Unpair from either
 side at any time.
+
+**What a paired machine may do.** Pairing gives the other machine full control of this machine's
+chats by default. Each row under Paired machines has a **Can drive chats** switch. Switched off,
+that machine still sees every chat here (list, history, git), and can still start chats here and
+drive those, but sending, answering cards, stopping, or changing settings on any other chat here is
+refused, and it only sees the question and permission cards of its own chats. The switch belongs to
+the machine whose chats it protects; unpairing resets it to on.
 
 **Transport.** Conductor reaches a paired machine over a direct URL when one was given at pairing,
 and over iroh (the same peer-to-peer tunnel the phone uses) otherwise - no port
