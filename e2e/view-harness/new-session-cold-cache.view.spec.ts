@@ -1,3 +1,4 @@
+// asserts: src/views/sessions/project-picker.ts, src/views/sessions/model-effort-modal.ts
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
@@ -5,9 +6,12 @@ import { mountView, SESSIONS_BASE_INVOKE, delayInvokes } from "./harness";
 import { shotDir } from "./shot-dir";
 
 // Todo 809: forces new-session-cache.ts's cold-cache path (boot's own
-// warmNewSessionCache() otherwise always warms it first) so
-// .modal-card-loading (src/shared/modal.css) actually renders. The delay is
-// an addInitScript ahead of the boot navigation - too late post-mount.
+// warmNewSessionCache() otherwise always warms it first) so each cold step's
+// own loading shell actually renders. The delay is an addInitScript ahead of
+// the boot navigation - too late post-mount. The two steps now use different
+// shells: project-picker's is its own skeleton (project-picker.ts, matches
+// the real card's size), model/effort's is still the shared
+// .modal-card-loading spinner (src/shared/modal.css).
 
 // shotDir() resolves the running session's own id and creates the directory - never a
 // hand-rolled literal (todo 958).
@@ -55,22 +59,26 @@ async function mountColdSessions(page: Page): Promise<void> {
 test.describe("view-harness / new-session cold cache", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("cold project-picker and model/effort steps show the loading spinner shell", async ({ page }) => {
+  test("cold project-picker and model/effort steps each show their own loading shell", async ({ page }) => {
     await mountColdSessions(page);
 
     await page.locator("#sessionsFab").click();
 
-    const loadingCard = page.locator(".modal-card-loading");
-    await expect(loadingCard).toBeVisible();
-    await expect(loadingCard).toContainText("Loading projects");
+    // project-picker's cold shell shares .project-picker-modal's size/position
+    // and shows skeleton rows instead of a spinner (project-picker.ts).
+    const pickerLoading = page.locator(".project-picker-modal--loading");
+    await expect(pickerLoading).toBeVisible();
+    await expect(pickerLoading.locator(".project-picker-skeleton-row").first()).toBeVisible();
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "project-picker-cold.png") });
 
     await expect(page.locator(".project-picker-modal")).toBeVisible({ timeout: DELAY_MS + 2000 });
 
     await page.locator(".project-picker-row").click();
 
-    await expect(loadingCard).toBeVisible();
-    await expect(loadingCard).toContainText("Loading");
+    // model/effort's cold shell still uses the shared generic spinner.
+    const modelEffortLoading = page.locator(".modal-card-loading");
+    await expect(modelEffortLoading).toBeVisible();
+    await expect(modelEffortLoading).toContainText("Loading");
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "model-effort-cold.png") });
 
     await expect(page.locator(".model-effort-modal-card")).toBeVisible({ timeout: DELAY_MS + 2000 });

@@ -84,6 +84,19 @@
   border-radius: var(--radius-card, 8px);
 }
 
+/* List-row staggered entrance: fade + rise, delay set per-row via a custom
+ * property so a freshly-populated list cascades in instead of popping as one
+ * block. Only applied on the cold-load -> real-data swap (callers gate it,
+ * never on a plain re-render), so it plays once per list, not on every sort. */
+@keyframes v-row-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.v-row-rise {
+  animation: v-row-rise var(--motion-base) var(--motion-ease) both;
+  animation-delay: var(--v-row-delay, 0ms);
+}
+
 /* Standardized empty state: icon slot + primary line + hint line. */
 .v-empty {
   display: flex;
@@ -113,6 +126,7 @@
   .v-enter,
   .v-card,
   .v-row,
+  .v-row-rise,
   .v-pulse,
   .v-skeleton,
   .v-details summary .ph,

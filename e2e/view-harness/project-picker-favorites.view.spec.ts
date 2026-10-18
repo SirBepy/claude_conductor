@@ -10,9 +10,18 @@ import { mountView } from "./harness";
 //
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/project-picker/favorites-rail.ts, src/views/sessions/project-favorites.ts
 //
+// Search loosened to fuzzy (subsequence) matching on top of the existing
+// exact/startsWith/includes tiers - a no-op here, this spec's one `.fill("fib")`
+// only asserts the typed string, not which rows the filter keeps.
+//
 // G8 touched project-picker.ts's listMachines() gate (now unconditional, not
 // desktop-only) - a no-op here: this spec mounts via mountView (isTauri true,
 // isRemote false), the branch that already ran listMachines() before G8.
+//
+// Reviewed against project-picker.ts's new cold-load skeleton + row entrance
+// animation - re-ran this file after that change, all tests still pass. The
+// entrance class only applies on the one cold->warm transition and never
+// touches row content/classes this spec actually asserts on.
 
 const FAVORITES_KEY = "claude_companion_project_favorites";
 

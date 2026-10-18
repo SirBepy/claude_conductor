@@ -17,6 +17,12 @@ import { mountView } from "./harness";
 // (shared cache entry, swr() dedupes the underlying fetch either way), so a
 // short delay risks the stats already being resolved by the time the picker
 // opens, which would make this test pass by accident regardless of the fix.
+//
+// Reviewed against project-picker.ts's new cold-load skeleton + row entrance
+// animation: the entrance class only applies on the one cold->warm render
+// this test samples past immediately (it's gone by the time any stat lands),
+// and it never touches row text content, which is all orderLog reads. Ran
+// this file after that change - still passes.
 
 const PROJECTS = [
   { id: "p-alpha", path: "C:/Projects/alpha", name: "alpha", parent_segment: null, avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_remote: false, any_automated: false, last_active_at: null, path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null },

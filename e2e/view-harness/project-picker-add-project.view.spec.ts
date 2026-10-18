@@ -12,6 +12,11 @@ import { mountView, invokeCalls, delayInvokes } from "./harness";
 //
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/project-picker/add-project.ts, src/views/sessions/projects-root.ts
 //
+// Search loosened to fuzzy (subsequence) matching on top of the existing
+// exact/startsWith/includes tiers - checked: none of this spec's no-match
+// queries ("side-quest", "../evil", "first-one") are a letter-subsequence of
+// the fixture names/paths ("zng-app", "countoff") or apply when the list is empty.
+//
 // G8 touched project-picker.ts's listMachines() gate (now unconditional, not
 // desktop-only) - a no-op here: this spec mounts via mountView (isTauri true,
 // isRemote false), the branch that already ran listMachines() before G8.
@@ -143,7 +148,9 @@ test.describe("view-harness / add a project inline", () => {
     await page.evaluate(() => {
       void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
     });
-    await expect(page.locator(".modal-card-loading")).toBeVisible();
+    // project-picker's own cold-load skeleton, not the shared generic
+    // .modal-card-loading spinner other chain steps use (project-picker.ts).
+    await expect(page.locator(".project-picker-modal--loading")).toBeVisible();
 
     await expect(page.locator(".project-picker-modal")).toHaveCount(1);
     await expect(page.locator(".pp-inline-hint")).toContainText("No projects yet");
