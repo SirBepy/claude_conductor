@@ -57,7 +57,7 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
                     "name": {"type": "string", "description": "Optional short label for the new chat."},
-                    "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. Omit to spawn locally, the default."}
+                    "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. If it fails because that machine is offline or unreachable, do not retry blindly or spawn here instead: ask the user to wake that machine and open Conductor on it, then try again. Omit to spawn locally, the default."}
                 },
                 "required": ["cwd", "prompt"]
             }
