@@ -39,7 +39,6 @@ function renderChrome(r: SessionRecord): void {
   if (chips) {
     const parts = [`<span class="chip active">● Active</span>`];
     if (r.kind === "automated") parts.push(`<span class="chip automated">⚙ Automated</span>`);
-    if (r.is_remote) parts.push(`<span class="chip remote">📱 From phone</span>`);
     chips.innerHTML = parts.join("");
     chips.style.display = "flex";
   }
