@@ -1,5 +1,6 @@
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
+use crate::sessions::registry_turn::TurnActivity;
 use std::sync::Arc;
 
 /// True when the turn currently running was opened by the user typing `/close`.
@@ -30,10 +31,31 @@ fn has_dont_close_arg(last_prompt: &str) -> bool {
 
 /// True when a `/close` turn's stand-down (closing flagged, tool never
 /// confirmed) is a genuine failure rather than an intentional `--dont-close`
-/// dry run. Pure so it's unit-testable without a live `Session`/`ChildStdin`
-/// (mirrors `hook_session_end_should_close` in `hooks_server::lifecycle`).
-pub(crate) fn close_stand_down_is_failure(last_prompt: &str, close_confirmed: bool) -> bool {
-    !close_confirmed && !has_dont_close_arg(last_prompt)
+/// dry run OR a legitimate in-progress pause. Pure so it's unit-testable
+/// without a live `Session`/`ChildStdin` (mirrors `hook_session_end_should_close`
+/// in `hooks_server::lifecycle`).
+///
+/// `activity` is the same Stop-hook ground truth `correct()` already uses to
+/// validate a self-reported turn status (todo 1221): `/close`'s own Phase 2
+/// can dispatch a background subagent and legitimately end its current turn
+/// on `report_turn_status("working")`, fully intending to confirm
+/// `close_session` on a LATER turn once that subagent returns. Without this
+/// check, every such turn was indistinguishable from a real deviation (the
+/// model killing the terminal instead of calling the tool, todo 436) and got
+/// flagged `close_failed` - which then read as "Done" in the sidebar segment
+/// grouping despite the session actively working. `Idle`/`Unknown` still flag
+/// as failure: only positive evidence of continued work exempts the stand-down.
+pub(crate) fn close_stand_down_is_failure(
+    last_prompt: &str,
+    close_confirmed: bool,
+    activity: TurnActivity,
+) -> bool {
+    !close_confirmed
+        && !has_dont_close_arg(last_prompt)
+        && !matches!(
+            activity,
+            TurnActivity::Working | TurnActivity::WaitingOnProcess | TurnActivity::WaitingOnSchedule
+        )
 }
 
 /// EOF counterpart of `close_stand_down_is_failure`: skips the `--dont-close`
@@ -190,19 +212,39 @@ mod tests {
     /// terminal-kill script instead) - must be flagged as a failure.
     #[test]
     fn close_stand_down_is_failure_when_never_confirmed() {
-        assert!(close_stand_down_is_failure("/close", false));
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle));
     }
 
     #[test]
     fn close_stand_down_not_failure_when_confirmed() {
-        assert!(!close_stand_down_is_failure("/close", true));
+        assert!(!close_stand_down_is_failure("/close", true, TurnActivity::Idle));
     }
 
     /// `--dont-close` is an intentional dry run; standing down unconfirmed
     /// is expected there, not a failure.
     #[test]
     fn close_stand_down_not_failure_on_dont_close_flag() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false));
+        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle));
+    }
+
+    /// Todo 1221: a `/close` turn that dispatched a background subagent
+    /// (Phase 2) and correctly ended on `report_turn_status("working")`
+    /// must NOT be flagged a failure just because `close_session` hasn't
+    /// been called yet - the Stop hook's own ground truth says the model is
+    /// still genuinely working, not deviating.
+    #[test]
+    fn close_stand_down_not_failure_while_a_background_task_is_still_working() {
+        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::Working));
+        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnProcess));
+        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnSchedule));
+    }
+
+    /// `Idle`/`Unknown` give no positive evidence of continued work, so the
+    /// pre-1221 failure behavior is unchanged for them.
+    #[test]
+    fn close_stand_down_still_a_failure_on_idle_or_unknown_activity() {
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle));
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Unknown));
     }
 
     /// The EOF branch's own logic (todo 467 blind spot 1), previously
@@ -217,15 +259,15 @@ mod tests {
     /// flag always completes normally, so reaching EOF still-closing is a genuine crash.
     #[test]
     fn eof_path_diverges_from_result_line_path_on_dont_close() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false));
+        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle));
         assert!(close_stand_down_is_failure_at_eof(false));
     }
 
     /// Todo 498 blind spot 4: a genuine `--dont-close` argument still exempts.
     #[test]
     fn dont_close_word_boundary_exempts_genuine_flag() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false));
-        assert!(!close_stand_down_is_failure("/close --dont-close please", false));
+        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle));
+        assert!(!close_stand_down_is_failure("/close --dont-close please", false, TurnActivity::Idle));
     }
 
     /// A longer token that merely contains the string (a different flag name,
@@ -233,7 +275,7 @@ mod tests {
     /// whitespace-delimited token counts.
     #[test]
     fn dont_close_word_boundary_rejects_substring_mentions() {
-        assert!(close_stand_down_is_failure("/close --dont-close-yet", false));
-        assert!(close_stand_down_is_failure("/close xx--dont-closexx", false));
+        assert!(close_stand_down_is_failure("/close --dont-close-yet", false, TurnActivity::Idle));
+        assert!(close_stand_down_is_failure("/close xx--dont-closexx", false, TurnActivity::Idle));
     }
 }

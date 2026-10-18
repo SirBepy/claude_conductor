@@ -456,7 +456,10 @@ pub(crate) async fn run_stdout_pump(
                                     closing_flagged = false;
                                     let prompt = pump_session.last_prompt.lock().ok()
                                         .map(|p| p.clone()).unwrap_or_default();
-                                    if close_stand_down_is_failure(&prompt, close_confirmed) {
+                                    let activity = state_for_pump
+                                        .registry
+                                        .turn_activity(&pump_session.session_id);
+                                    if close_stand_down_is_failure(&prompt, close_confirmed, activity) {
                                         log::warn!(
                                             "daemon: session {} /close armed but never confirmed via close_session tool; chat still open",
                                             pump_session.session_id
