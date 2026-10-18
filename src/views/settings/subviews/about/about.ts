@@ -19,7 +19,7 @@ function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
       onAction: () => {
         if (state.version) {
           void api.openExternal(
-            `https://github.com/SirBepy/claude_conductor/releases/tag/v${state.version}`,
+            `https://github.com/SirBepy/claude_conductor/releases/tag/tauri-v${state.version}`,
           );
         }
       },
