@@ -1,4 +1,11 @@
 // asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/pending-pane-mount.ts
+//
+// Reviewed against pending-pane-mount.ts's new skeleton placeholders
+// (statusbar + .session-messages, seeded to kill the blank-flash gap before
+// the real statusbar/renderer mount): both tests here `await` the whole
+// mount chain before asserting, same as before, so they only ever observe
+// the final state - the skeletons are long gone by then. Ran this file
+// after that change - still passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, mountSessionsList, SESSIONS_BASE_INVOKE, capture } from "./harness";
 
