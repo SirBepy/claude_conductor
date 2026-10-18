@@ -12,7 +12,10 @@ use std::sync::Arc;
 
 /// `start_session`'s `machine_id` branch (D3): forwards to that peer's own
 /// `start_session` with `machine_id` stripped (the peer has no use for it -
-/// it always spawns locally) and returns its result verbatim. The mirror
+/// it always spawns locally) and `account_id` stripped (account ids are
+/// per-machine registry entries, so this machine's picked account means
+/// nothing over there; the peer falls back to its own default account), and
+/// returns its result verbatim. The mirror
 /// delivers the new row via the peer's own `instances_changed` broadcast, so
 /// no local publish is needed here.
 async fn forward_start_session(
@@ -36,6 +39,7 @@ async fn forward_start_session(
     }
     if let Some(obj) = params_value.as_object_mut() {
         obj.remove("machine_id");
+        obj.remove("account_id");
     }
     let client = crate::daemon::machines::client_for(state, &peer).await.map_err(map_peer_err)?;
     let result = client.call("start_session", params_value).await.map_err(map_peer_err)?;
@@ -360,6 +364,9 @@ mod machine_target_tests {
             if has_machine_id {
                 return Err::<Value, RE>(RE::invalid_params("machine_id must not be forwarded"));
             }
+            if params.as_ref().and_then(|p| p.get("account_id")).is_some() {
+                return Err::<Value, RE>(RE::invalid_params("account f225 not found in the registry"));
+            }
             Ok(json!({"session_id": "peer-spawned-1"}))
         });
         let b_state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
@@ -393,7 +400,7 @@ mod machine_target_tests {
                     jsonrpc: "2.0".into(),
                     id: json!(1),
                     method: "start_session".into(),
-                    params: Some(start_session_params(json!({"machine_id": "mach-b"}))),
+                    params: Some(start_session_params(json!({"machine_id": "mach-b", "account_id": "acct-on-a-only"}))),
                 },
                 dummy_ctx(),
             )
