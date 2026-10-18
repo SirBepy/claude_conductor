@@ -2,7 +2,7 @@
 // Owns the VoiceController lifecycle, positional tracking (commitPos/volatileLen),
 // and the mic button visual state. Composer delegates all voice concerns here.
 
-import { VoiceController, warmVoiceEngine, type VoiceState } from "./controller";
+import { VoiceController, warmVoiceEngine, cleanDictatedText, type VoiceState } from "./controller";
 import { getSettings } from "../../state";
 
 /** Off unless the user turned it on in Settings > Notifications > Audio. */
@@ -22,6 +22,11 @@ export class ComposerVoice {
   commitPos = 0;
   volatileLen = 0;
   isUsed = false;
+
+  /** Where this dictation session's text started (set on start, read again
+   *  on stop to know the span to hand the cleanup pass - `commitPos` itself
+   *  has moved on by then, advanced by every `onFinal` in between). */
+  private dictationStartPos = 0;
 
   private controller: VoiceController | null = null;
   private micBtn: HTMLButtonElement | null = null;
@@ -67,9 +72,11 @@ export class ComposerVoice {
     const c = this.ensureController();
     if (c.isRecording) {
       await c.stop();
+      await this.cleanupDictation();
       return;
     }
     this.commitPos = insertPos;
+    this.dictationStartPos = insertPos;
     this.volatileLen = 0;
     await c.start();
   }
@@ -79,13 +86,47 @@ export class ComposerVoice {
     const c = this.ensureController();
     if (c.isRecording) return;
     this.commitPos = insertPos;
+    this.dictationStartPos = insertPos;
     this.volatileLen = 0;
     await c.start();
   }
 
   /** Push-to-talk release: stop if we're recording. */
   async stopForPtt(): Promise<void> {
-    if (this.controller?.isRecording) await this.controller.stop();
+    if (!this.controller?.isRecording) return;
+    await this.controller.stop();
+    await this.cleanupDictation();
+  }
+
+  /** Runs the cheap haiku cleanup pass over the span this dictation session
+   *  just committed (`dictationStartPos` to the now-settled `commitPos`),
+   *  replacing it in place. Silent per design: no review step, no visible
+   *  diff - the composer just ends up holding the cleaned text. Fails open:
+   *  any error (no account, offline, empty result) leaves the raw transcript
+   *  untouched rather than risking losing or corrupting it. Also bails if the
+   *  user edited that exact span while the pass was in flight, so a stray
+   *  Haiku response never clobbers a manual edit made in the meantime. */
+  private async cleanupDictation(): Promise<void> {
+    if (!this.textarea || !this.isUsed) return;
+    const start = this.dictationStartPos;
+    const end = this.commitPos;
+    if (end <= start) return;
+    const raw = this.textarea.value.slice(start, end);
+    if (!raw.trim()) return;
+    let cleaned: string;
+    try {
+      cleaned = await cleanDictatedText(raw);
+    } catch (e) {
+      console.warn("[voice] cleanup failed, keeping raw transcript", e);
+      return;
+    }
+    if (!this.textarea || !cleaned || cleaned === raw) return;
+    const v = this.textarea.value;
+    if (v.slice(start, end) !== raw) return; // edited underneath us - don't touch it
+    this.textarea.value = v.slice(0, start) + cleaned + v.slice(end);
+    this.commitPos = start + cleaned.length;
+    this.textarea.selectionStart = this.textarea.selectionEnd = this.commitPos;
+    this.cb.onAfterEdit();
   }
 
   /** Send pressed while still dictating: stop cleanly and await the sidecar's
@@ -95,7 +136,9 @@ export class ComposerVoice {
    *  leaking into the composer on the next `onFinal`. No-op if not recording -
    *  unlike `reset()`, this never zeroes commitPos/volatileLen itself; the
    *  normal onFinal/onStateChange path already does that once the flush lands.
-   *  Same underlying wait as `stopForPtt()` - it just delegates. */
+   *  Same underlying wait as `stopForPtt()` - it just delegates, so Send also
+   *  waits out the cleanup pass `stopForPtt()` now runs, meaning the message
+   *  that actually gets sent is always the cleaned text, not the raw one. */
   async finishForSend(): Promise<void> {
     await this.stopForPtt();
   }

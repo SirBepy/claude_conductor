@@ -7,6 +7,14 @@ import { isRemote } from "../../transport";
 import { remoteToken } from "../../http-transport";
 import { getSelectedMic, listMics } from "./voice-devices";
 
+/** Runs the daemon's dictation-cleanup pass (a cheap haiku `claude -p` call
+ *  that strips stutters/repeated words without rephrasing) on one finalized
+ *  transcript. Throws on failure - callers keep the raw transcript rather
+ *  than silently losing it. */
+export async function cleanDictatedText(raw: string): Promise<string> {
+  return invoke<string>("voice_clean_transcript", { text: raw });
+}
+
 export type VoiceState = "idle" | "connecting" | "recording" | "error";
 
 export interface VoiceCallbacks {

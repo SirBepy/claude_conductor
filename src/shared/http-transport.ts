@@ -331,6 +331,9 @@ export class HttpTransport implements Transport {
           session_id: args.sessionId ?? args.session_id,
           thread_id: args.threadId ?? args.thread_id,
         });
+      // Dictation cleanup pass: stateless, same reachability as Ask above.
+      case "voice_clean_transcript":
+        return this.rpc<T>("voice_clean_transcript", { text: args.text });
       // Drafts panel (todo 1007): same fab-dial reachability as Todos above.
       // A DIFFERENT command namespace than the already-working
       // get_session_drafts/set_composer_draft (composer/AUQ draft sync, PM
