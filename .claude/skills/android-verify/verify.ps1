@@ -10,6 +10,7 @@ $AndroidDir = Join-Path $RepoRoot "android"
 $ApkOutputsDir = Join-Path $AndroidDir "src-tauri\gen\android\app\build\outputs\apk"
 $KeystoreReadme = "C:\Users\tecno\.android-keystores\README.txt"
 $Package = "com.sirbepy.conductor.mobile"
+. (Join-Path $RepoRoot "scripts\resolve-android-java-home.ps1")
 
 function Fail($msg) {
     Write-Host "FAIL: $msg" -ForegroundColor Red
@@ -42,9 +43,11 @@ if (-not $NoBuild) {
     $ndkHome = if ($env:NDK_HOME) { $env:NDK_HOME } elseif (Test-Path $ndkRoot) {
         (Get-ChildItem $ndkRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName
     } else { $null }
-    $javaHome = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { "C:\Program Files\Android\Android Studio\jbr" }
+    # The shared resolver, not raw $env:JAVA_HOME: this machine's JAVA_HOME is a
+    # JDK too new for Gradle 8.14.3, which dies configuring :buildSrc.
+    $javaHome = Resolve-AndroidJavaHome
 
-    if (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not (Test-Path $javaHome)) {
+    if (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not $javaHome -or -not (Test-Path $javaHome)) {
         Fail "could not resolve ANDROID_HOME/NDK_HOME/JAVA_HOME (sdk=$sdkHome ndk=$ndkHome java=$javaHome). Set them and retry."
     }
 
