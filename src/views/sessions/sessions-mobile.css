@@ -21,23 +21,57 @@
 
   /* Each pane fills the body; the attribute decides which one is shown.
      Scoped under .view-sessions to outrank session-list.css's unconditional
-     260px width, which Vite emits later in the bundle (source-order tie). */
-  .view-sessions .sessions-sidebar {
+     260px width, which Vite emits later in the bundle (source-order tie).
+     position:absolute + a transform slide (instead of a bare display:none
+     toggle) is what makes the pane switch animate instead of popping - both
+     panes stay laid out, just slid off-screen. Safe because
+     .sessions-layout's own height comes from .view-body's flex:1 (base.css),
+     never from a child's participation in flex layout. */
+  .view-sessions .sessions-sidebar,
+  .view-sessions .session-pane {
+    position: absolute;
+    inset: 0;
     width: 100%;
+  }
+  .view-sessions .sessions-sidebar {
     flex-shrink: 1;
     border-right: none;
   }
+
+  /* Default / list mode: list is the active pane, chat parked off-screen to
+     the right - inert as well as invisible, so a backgrounded chat can't be
+     tabbed/swiped into by assistive tech. Its visibility only flips to
+     hidden once its own slide-out finishes (delayed transition), so a
+     chat -> list back navigation stays visible for the whole exit; becoming
+     active (below) overrides with a 0-delay transition instead, so THAT
+     pane is visible from the very start of its own slide-in. */
+  .view-sessions .sessions-sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--motion-base) var(--motion-ease);
+  }
   .view-sessions .session-pane {
-    width: 100%;
+    transform: translateX(100%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform var(--motion-base) var(--motion-ease),
+      visibility 0s var(--motion-base);
   }
 
-  /* Default / list mode: list visible, chat hidden. */
-  .view-sessions:not([data-mobile-pane="chat"]) .session-pane {
-    display: none;
+  /* Chat mode: chat becomes the active pane and slides in from the right,
+     list parks off-screen to the left, back button revealed. */
+  .view-sessions[data-mobile-pane="chat"] .session-pane {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform var(--motion-base) var(--motion-ease);
   }
-  /* Chat mode: chat visible, list hidden, back button revealed. */
   .view-sessions[data-mobile-pane="chat"] .sessions-sidebar {
-    display: none;
+    transform: translateX(-100%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform var(--motion-base) var(--motion-ease),
+      visibility 0s var(--motion-base);
   }
   .view-sessions[data-mobile-pane="chat"] .sessions-back {
     display: inline-flex;
@@ -183,5 +217,16 @@
   .composer-shell .session-composer,
   .composer-shell:has(.session-thinking[hidden]) .session-composer {
     border-radius: 0;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  /* !important: the active/inactive state rules above each redeclare their
+     own `transition` (to control the visibility delay) at higher
+     specificity than this block's bare selectors, so overriding without it
+     would only win for whichever pair happens to be the default state. */
+  .view-sessions .sessions-sidebar,
+  .view-sessions .session-pane {
+    transition: none !important;
   }
 }

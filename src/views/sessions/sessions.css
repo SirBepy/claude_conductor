@@ -534,6 +534,27 @@
   user-select: text;
 }
 
+/* Placeholder shown only while a fresh pending pane's renderer is still
+   attaching (attachPendingRenderer's await) - see pending-pane-mount.ts.
+   Wiped the instant the real renderer/hint lands. */
+.session-messages-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+.session-messages-skeleton-bubble {
+  height: 42px;
+  border-radius: 14px;
+  align-self: flex-start;
+  width: 60%;
+  max-width: 320px;
+}
+.session-messages-skeleton-bubble:nth-child(2) {
+  align-self: flex-end;
+  width: 40%;
+}
+
 /* Top compartment of .composer-shell, fused to the input box below (no
  * gap) - rounds only the top corners; see the :has() rule further down. */
 .session-thinking {

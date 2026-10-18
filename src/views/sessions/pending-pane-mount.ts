@@ -43,12 +43,15 @@ export function mountPendingChrome(
     onDiscard: onDiscard ? () => onDiscard(pane) : undefined,
   });
   pane.innerHTML = [
-    `<div class="session-statusbar-host"></div>`,
-    // Empty on purpose: the hint mounts later, via mountPendingHint() AFTER
-    // attachPendingRenderer() - ChatRenderer.attach() does `container.innerHTML
-    // = ""` on the SAME `.session-messages` element (chat-renderer.ts), so a
-    // hint seeded here would be wiped before it ever painted a frame.
-    `<div class="session-messages"></div>`,
+    // Skeleton placeholders, not the real statusbar/hint - both get wiped and
+    // replaced once their own async mount step resolves (mountPendingStatusbar's
+    // two awaits; attachPendingRenderer's renderer.attach(), which does
+    // `container.innerHTML = ""` on this same .session-messages element, see
+    // mountPendingHint's own comment below). Seeding them here is what keeps
+    // the pane from going visibly blank between the mobile-pane attribute
+    // flip (instant) and those awaits resolving.
+    `<div class="session-statusbar-host"><div class="session-statusbar-skeleton v-skeleton" aria-hidden="true"></div></div>`,
+    `<div class="session-messages"><div class="session-messages-skeleton" aria-hidden="true"><div class="session-messages-skeleton-bubble v-skeleton"></div><div class="session-messages-skeleton-bubble v-skeleton"></div></div></div>`,
     `<div class="composer-shell">`,
     `  <div class="session-thinking" hidden><span class="thinking-text"></span><span class="held-chip-slot"></span><button class="thinking-pause-btn icon-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i></button></div>`,
     `  <div class="session-composer"></div>`,
