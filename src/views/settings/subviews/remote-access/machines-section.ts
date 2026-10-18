@@ -33,11 +33,39 @@ async function commitMachineLabel(root: HTMLElement, input: HTMLInputElement): P
  *  Hidden entirely when list_machines() fails - the phone (RemoteUnavailableError)
  *  and any desktop build without the federation backend yet both degrade the
  *  same way, rather than showing a form that can never do anything. */
+/** Peer ids seen by the last render, so the next one can tell which peer
+ *  just arrived. `null` until the first render: everything already paired
+ *  when the page opens is old news, not a fresh link. */
+let knownPeerIds: Set<string> | null = null;
+
+/** How long the "Linked with" line and the new row's highlight stay up. */
+const LINKED_NOTICE_MS = 6000;
+let linkedTimer: ReturnType<typeof setTimeout> | undefined;
+
+function announceLinked(root: HTMLElement, labels: string[]): void {
+  const el = $(root, "#ra-machine-linked");
+  if (!el || labels.length === 0) return;
+  el.innerHTML = `<i class="ph ph-check-circle"></i> Linked with ${labels.map(escapeHtml).join(", ")}`;
+  el.hidden = false;
+  clearTimeout(linkedTimer);
+  linkedTimer = setTimeout(() => { el.hidden = true; }, LINKED_NOTICE_MS);
+}
+
+/** Forget the previous page's peers, so reopening the view never announces
+ *  a machine that was paired while it was closed as if it just happened. */
+export function resetMachinesSection(): void {
+  knownPeerIds = null;
+  clearTimeout(linkedTimer);
+}
+
 export async function renderMachinesSection(root: HTMLElement): Promise<void> {
   const section = $(root, "#ra-machines-section");
   if (!section) return;
   try {
     const { self, peers } = await api.listMachines();
+    const previous = knownPeerIds;
+    const fresh = previous ? peers.filter((p) => !previous.has(p.machine_id)) : [];
+    knownPeerIds = new Set(peers.map((p) => p.machine_id));
 
     const labelInput = $(root, "#ra-machine-label") as HTMLInputElement | null;
     if (labelInput && document.activeElement !== labelInput) {
@@ -75,6 +103,12 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
         errorLabel: "unpair_machine",
       },
     );
+
+    const freshIds = new Set(fresh.map((p) => p.machine_id));
+    root.querySelectorAll<HTMLElement>("#ra-machine-list .ra-device-row").forEach((row) => {
+      if (row.dataset.id && freshIds.has(row.dataset.id)) row.classList.add("ra-row-new");
+    });
+    announceLinked(root, fresh.map((p) => p.label));
 
     section.style.display = "";
   } catch (e) {
@@ -119,6 +153,7 @@ export function machinesSectionTemplate() {
         <span class="kit-row-label">This machine</span>
         <input type="text" id="ra-machine-label" class="ra-machine-label-input" maxlength="40" placeholder="Label">
       </div>
+      <p id="ra-machine-linked" class="ra-machine-linked" hidden></p>
       <div id="ra-machine-list" class="ra-device-list"></div>
       <div class="ra-machine-pair-form">
         <input type="text" id="ra-machine-pair-url" class="ra-token-field" placeholder="Paste the other machine's pairing URL">
