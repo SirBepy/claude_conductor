@@ -16,7 +16,6 @@ export interface SessionRecord {
   kind?: string;
   pid?: number;
   project_id?: string;
-  is_remote?: boolean;
   bridge_session_id?: string | null;
   name?: string | null;
   started_at?: string;

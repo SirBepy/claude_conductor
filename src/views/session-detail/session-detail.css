@@ -11,7 +11,6 @@
 }
 .chip.active { background: #1d3a23; color: #6ad98a; }
 .chip.automated { background: #3a2a1d; color: #f2b457; }
-.chip.remote { background: #2a2845; color: #8a9eff; }
 .session-detail-actions {
   display: flex; gap: 6px; flex-wrap: wrap;
   padding: 8px 14px 0;
