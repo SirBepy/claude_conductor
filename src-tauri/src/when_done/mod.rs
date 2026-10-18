@@ -21,9 +21,10 @@ mod engine;
 mod idle;
 mod nightly;
 
-pub use protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner};
+pub use protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner, OverdueAction};
 pub use nightly::spawn as spawn_nightly_scheduler;
 use engine::run_engine;
+pub(crate) use engine::Overdue;
 
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, Manager};
@@ -35,12 +36,18 @@ pub async fn arm_when_done(
     action: TerminalAction,
     app: AppHandle,
 ) -> Result<ProtocolState, String> {
-    Ok(arm(&app, action, ArmMode::Manual))
+    Ok(arm(&app, action, ArmMode::Manual, None))
 }
 
 /// Shared by the manual command and the nightly scheduler: reset to a fresh
 /// Watching state, spawn the engine in `mode`, emit, and return the new state.
-pub(crate) fn arm(app: &AppHandle, action: TerminalAction, mode: ArmMode) -> ProtocolState {
+/// `overdue` is the nightly cutoff (`None` for a manual arm, which has none).
+pub(crate) fn arm(
+    app: &AppHandle,
+    action: TerminalAction,
+    mode: ArmMode,
+    overdue: Option<Overdue>,
+) -> ProtocolState {
     let state = app.state::<AppState>();
     // Abort any existing engine task and reset to a fresh Watching state.
     let new_state = {
@@ -60,7 +67,7 @@ pub(crate) fn arm(app: &AppHandle, action: TerminalAction, mode: ArmMode) -> Pro
 
     let app_for_task = app.clone();
     let handle = tauri::async_runtime::spawn(async move {
-        run_engine(app_for_task, action, mode).await;
+        run_engine(app_for_task, action, mode, overdue).await;
     });
     {
         let mut inner = state.when_done.lock().unwrap();

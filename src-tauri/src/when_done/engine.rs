@@ -1,9 +1,19 @@
-pub use super::protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState};
+pub use super::protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState, OverdueAction};
 use super::deps::EngineDeps;
 use super::idle::{log_comment, next_countdown, waiting_on_ids};
 use crate::state::AppState;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
+
+/// Nightly only: once `deadline` passes without the arm having fired, stop
+/// waiting - either give up and go back to normal, or force the action
+/// regardless of busy/away state. `deadline` is computed once, at arm time,
+/// from the configured number of overdue hours.
+#[derive(Clone, Copy)]
+pub(crate) struct Overdue {
+    pub(crate) deadline: Instant,
+    pub(crate) action: OverdueAction,
+}
 
 const TICK_MS: u64 = 1000;
 pub(super) const COUNTDOWN_SECS: u32 = 30;
@@ -38,8 +48,13 @@ pub(super) fn is_cancelled(app: &AppHandle) -> bool {
 
 /// The engine task. Thin production wiring: build the real seams, then run the
 /// phase machine. All behavior lives in `run_engine_with_deps`.
-pub(super) async fn run_engine(app: AppHandle, action: TerminalAction, mode: ArmMode) {
-    run_engine_with_deps(EngineDeps::production(app), action, mode).await;
+pub(super) async fn run_engine(
+    app: AppHandle,
+    action: TerminalAction,
+    mode: ArmMode,
+    overdue: Option<Overdue>,
+) {
+    run_engine_with_deps(EngineDeps::production(app), action, mode, overdue).await;
 }
 
 /// Outcome of the CountingDown phase.
@@ -49,6 +64,17 @@ enum Countdown {
     /// Nightly only: the user came back or a chat went busy mid-countdown, so
     /// the engine drops back to Watching instead of firing.
     Interrupted,
+}
+
+/// Outcome of the Watching phase.
+enum WatchOutcome {
+    /// Ready to count down. `forced` is true only when a nightly overdue
+    /// cutoff forced this through regardless of busy/away state - the
+    /// countdown must not let a nightly interrupt check reverse that.
+    Ready { forced: bool },
+    /// Cancelled, or gave up (either the no-progress runaway guard, or a
+    /// nightly overdue cutoff set to cancel rather than force).
+    GiveUp,
 }
 
 /// Whether the engine may leave Watching (or keep counting down). A nightly arm
@@ -63,12 +89,18 @@ fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
 /// fires, the protocol is cancelled, or the runaway guard trips. A nightly run
 /// drops back to Watching if interrupted. Chats are never closed: every one is
 /// still there after boot.
-async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction, mode: ArmMode) {
+async fn run_engine_with_deps(
+    deps: EngineDeps,
+    action: TerminalAction,
+    mode: ArmMode,
+    overdue: Option<Overdue>,
+) {
     loop {
-        if !watch(&deps, mode, action).await {
-            return;
-        }
-        match countdown(&deps, mode).await {
+        let forced = match watch(&deps, mode, action, overdue).await {
+            WatchOutcome::GiveUp => return,
+            WatchOutcome::Ready { forced } => forced,
+        };
+        match countdown(&deps, mode, forced).await {
             Countdown::Finished => break,
             Countdown::Cancelled => return,
             Countdown::Interrupted => continue,
@@ -93,19 +125,20 @@ async fn run_engine_with_deps(deps: EngineDeps, action: TerminalAction, mode: Ar
 }
 
 /// Phase: Watching. Wait until `ready_to_fire`, auto-resolving prompts on a
-/// manual arm. False when cancelled or the runaway guard gave up on the
-/// protocol (todo 894: distinct from a plain cancel, see `ProtocolState::gave_up`).
-async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction) -> bool {
+/// manual arm. `GiveUp` when cancelled, the runaway guard gave up (todo 894:
+/// distinct from a plain cancel, see `ProtocolState::gave_up`), or a nightly
+/// overdue cutoff passed with `OverdueAction::Cancel`.
+async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction, overdue: Option<Overdue>) -> WatchOutcome {
     let mut no_progress_since = (deps.now)();
     let mut last_idle_signature: Option<Vec<(String, bool)>> = None;
 
     loop {
         if (deps.is_cancelled)() {
-            return false;
+            return WatchOutcome::GiveUp;
         }
         tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
         if (deps.is_cancelled)() {
-            return false;
+            return WatchOutcome::GiveUp;
         }
 
         if mode == ArmMode::Manual {
@@ -120,6 +153,25 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction) -> bool
             s.countdown_remaining_secs = None;
             s.waiting_on = waiting.clone();
         });
+
+        // Nightly overdue cutoff: stop waiting once the deadline passes,
+        // regardless of busy/away state.
+        if let Some(ov) = overdue {
+            if (deps.now)() >= ov.deadline {
+                match ov.action {
+                    OverdueAction::Force => return WatchOutcome::Ready { forced: true },
+                    OverdueAction::Cancel => {
+                        const REASON: &str =
+                            "nightly arm overdue past its cutoff; cancelling, back to normal";
+                        log_comment(&format!("[when-done] {REASON}"));
+                        (deps.mutate_and_emit)(&mut |s| {
+                            *s = ProtocolState::gave_up(action, REASON, waiting.clone());
+                        });
+                        return WatchOutcome::GiveUp;
+                    }
+                }
+            }
+        }
 
         // Runaway guard: if the busy signature is unchanged for too long, bail.
         // Not on a nightly arm: nobody is there to re-arm it, and staying armed
@@ -136,18 +188,21 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction) -> bool
             (deps.mutate_and_emit)(&mut |s| {
                 *s = ProtocolState::gave_up(action, REASON, waiting.clone());
             });
-            return false;
+            return WatchOutcome::GiveUp;
         }
 
         // All live sessions idle? (Empty list counts as idle: nothing to wait on.)
         if ready_to_fire(deps, mode) {
-            return true;
+            return WatchOutcome::Ready { forced: false };
         }
     }
 }
 
-/// Phase: CountingDown. 30s, decrement + emit each second.
-async fn countdown(deps: &EngineDeps, mode: ArmMode) -> Countdown {
+/// Phase: CountingDown. 30s, decrement + emit each second. `forced` is set
+/// when a nightly overdue cutoff forced entry into this phase; while true, the
+/// nightly interrupt check below is skipped, since the whole point of forcing
+/// was to stop waiting on the user/chats.
+async fn countdown(deps: &EngineDeps, mode: ArmMode, forced: bool) -> Countdown {
     if (deps.is_cancelled)() {
         return Countdown::Cancelled;
     }
@@ -167,7 +222,7 @@ async fn countdown(deps: &EngineDeps, mode: ArmMode) -> Countdown {
         if (deps.is_cancelled)() {
             return Countdown::Cancelled;
         }
-        if mode == ArmMode::Nightly && !ready_to_fire(deps, mode) {
+        if mode == ArmMode::Nightly && !forced && !ready_to_fire(deps, mode) {
             return Countdown::Interrupted;
         }
         remaining = next;

@@ -5,11 +5,16 @@ import type { TerminalAction } from "../../../../types/ipc.generated";
 import type { SettingsShape } from "../../../../shared/state";
 import { toggleRow } from "../../ui";
 
+export type OverdueAction = "cancel" | "force";
+
 // Read by the Rust nightly scheduler (src-tauri/src/when_done/nightly.rs).
 export interface NightlyWhenDone {
   enabled: boolean;
   action: TerminalAction;
   time: string;
+  // Hours after the arm time before an unfired arm is considered overdue.
+  overdueHours: number;
+  overdueAction: OverdueAction;
 }
 
 export function readNightly(s: SettingsShape): NightlyWhenDone {
@@ -18,6 +23,8 @@ export function readNightly(s: SettingsShape): NightlyWhenDone {
     enabled: raw.enabled === true,
     action: raw.action === "sleep" ? "sleep" : "shutdown",
     time: typeof raw.time === "string" && /^\d{2}:\d{2}$/.test(raw.time) ? raw.time : "02:00",
+    overdueHours: typeof raw.overdueHours === "number" && raw.overdueHours >= 0 ? raw.overdueHours : 3,
+    overdueAction: raw.overdueAction === "force" ? "force" : "cancel",
   };
 }
 
@@ -43,6 +50,17 @@ export function wireNightly(root: HTMLElement): void {
   time?.addEventListener("change", () => {
     if (/^\d{2}:\d{2}$/.test(time.value)) saveNightly({ time: time.value });
   });
+
+  const overdueHours = root.querySelector<HTMLInputElement>("#nightlyWhenDoneOverdueHours");
+  overdueHours?.addEventListener("change", () => {
+    const n = Number(overdueHours.value);
+    if (Number.isFinite(n) && n >= 0) saveNightly({ overdueHours: n });
+  });
+
+  const overdueAction = root.querySelector<HTMLSelectElement>("#nightlyWhenDoneOverdueAction");
+  overdueAction?.addEventListener("change", () => {
+    saveNightly({ overdueAction: overdueAction.value === "force" ? "force" : "cancel" });
+  });
 }
 
 export function nightlySection(n: NightlyWhenDone) {
@@ -53,7 +71,7 @@ export function nightlySection(n: NightlyWhenDone) {
         label: "Sleep or shut down once chats are done",
         inputId: "nightlyWhenDoneEnabled",
         checked: n.enabled,
-        tooltip: "Every night at the set time, arms When done. It waits until every chat is idle and you've been away from the PC for 15 minutes. Chats are left open, not closed.",
+        tooltip: "Every night at the set time, arms When done. It waits until every chat is idle and you've been away from the PC for 15 minutes, up to the \"give up waiting\" cutoff below. Chats are left open, not closed.",
       })}
       <div class="kit-row">
         <span class="kit-row-label">Action</span>
@@ -65,6 +83,25 @@ export function nightlySection(n: NightlyWhenDone) {
       <div class="kit-row">
         <span class="kit-row-label">Starting at</span>
         <input type="time" id="nightlyWhenDoneTime" .value=${n.time}>
+      </div>
+      <div class="kit-row">
+        <span class="kit-row-label">Give up waiting after</span>
+        <input
+          type="number"
+          id="nightlyWhenDoneOverdueHours"
+          style="width:64px"
+          min="0"
+          step="0.5"
+          .value=${String(n.overdueHours)}
+        >
+        <span class="kit-row-label">hours</span>
+      </div>
+      <div class="kit-row">
+        <span class="kit-row-label">If still waiting then</span>
+        <select id="nightlyWhenDoneOverdueAction" class="kit-select">
+          <option value="cancel" ?selected=${n.overdueAction === "cancel"}>Cancel it, back to normal</option>
+          <option value="force" ?selected=${n.overdueAction === "force"}>Do it anyway</option>
+        </select>
       </div>
     </div>
   `;
