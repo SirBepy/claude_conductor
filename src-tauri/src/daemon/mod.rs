@@ -3,6 +3,7 @@
 
 mod boot;
 pub mod broadcast;
+pub mod browser;
 pub mod busy_watchdog;
 pub mod channel_adopt;
 pub mod claude_ai_connectors;

@@ -1,0 +1,1 @@
+{"name":"claude-browser-runtime","private":true,"dependencies":{"@playwright/mcp":"0.0.83"}}

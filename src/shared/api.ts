@@ -535,6 +535,11 @@ export const api = {
     invoke("set_machine_label", { label }),
   setMachineCanDrive: (machineId: string, value: boolean): Promise<{ ok: boolean }> =>
     invoke("set_machine_can_drive", { machineId, value }),
+
+  // --- Claude's own browser (Settings > Chat defaults). Desktop-pipe only. ---
+  browserStatus: (): Promise<{ running: boolean; shown: boolean }> => invoke("browser_status"),
+  browserSetShown: (shown: boolean): Promise<{ ok: boolean; shown: boolean }> =>
+    invoke("browser_set_shown", { shown }),
   listMachineProjects: (machineId: string): Promise<ProjectConfig[]> =>
     invoke("list_machine_projects", { machineId }),
 

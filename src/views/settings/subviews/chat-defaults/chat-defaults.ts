@@ -6,6 +6,7 @@ import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
 import type { SessionSort } from "../../../sessions/sessions-helpers";
 import { readModels, readDefaultFlags } from "../../../../shared/effort-presets";
 import { settingsHeader, toggleRow } from "../../ui";
+import { browserSectionTemplate, readBrowserEnabled, wireBrowserSection, BROWSER_SETTING_KEY } from "./browser-section";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -32,6 +33,7 @@ function template(
   flags: { autoAccept: boolean },
   spawn: { inherit: boolean; workers: boolean },
   sort: SessionSort,
+  browser: boolean,
 ) {
   return html`
     <div class="view view-settings-chat-defaults">
@@ -78,6 +80,8 @@ function template(
               <p class="cd-hint">Models offered in the New session picker, comma-separated.</p>
             </div>`}
 
+        ${isRemote() ? "" : browserSectionTemplate(browser)}
+
       </div>
     </div>
   `;
@@ -88,9 +92,11 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   let models = readModels(settings);
   let flags = readDefaultFlags(settings);
   let spawn = readSpawnFlags(settings);
+  let browser = readBrowserEnabled(settings);
   const sort = loadSort();
 
-  render(template(models, flags, spawn, sort), root);
+  render(template(models, flags, spawn, sort, browser), root);
+  if (!isRemote()) wireBrowserSection(root);
 
   const sortSelect = root.querySelector<HTMLSelectElement>("#chatDefaultsSort");
   if (sortSelect) {
@@ -118,6 +124,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
       inherit: root.querySelector<HTMLInputElement>("#chatDefaultsInheritAutoAllow")?.checked ?? spawn.inherit,
       workers: root.querySelector<HTMLInputElement>("#chatDefaultsWorkersAutoAllow")?.checked ?? spawn.workers,
     };
+    browser = root.querySelector<HTMLInputElement>("#chatDefaultsBrowser")?.checked ?? browser;
     // Fresh-read + retry (todo 1004): building from the frontend's own
     // settings cache could revert a concurrent daemon-owned write.
     await updateSettings((fresh) => ({
@@ -126,6 +133,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
       defaultAutoAllow: autoAllow,
       spawnedChatsInheritAutoAccept: spawn.inherit,
       jarvisWorkersAutoAccept: spawn.workers,
+      [BROWSER_SETTING_KEY]: browser,
     }));
   }
 
@@ -139,7 +147,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   if (autoAllowEl) autoAllowEl.addEventListener("change", () => void persist());
   const remoteEl = root.querySelector<HTMLInputElement>("#chatDefaultsRemote");
   if (remoteEl) remoteEl.addEventListener("change", () => void persist());
-  for (const id of ["#chatDefaultsInheritAutoAllow", "#chatDefaultsWorkersAutoAllow"]) {
+  for (const id of ["#chatDefaultsInheritAutoAllow", "#chatDefaultsWorkersAutoAllow", "#chatDefaultsBrowser"]) {
     root.querySelector<HTMLInputElement>(id)?.addEventListener("change", () => void persist());
   }
 

@@ -35,6 +35,7 @@ pub mod tokens;
 pub mod tray;
 pub mod types;
 pub mod util;
+pub mod voice;
 pub mod when_done;
 pub mod tickets;
 
@@ -404,6 +405,8 @@ pub fn run() {
             ipc::unpair_machine,
             ipc::set_machine_label,
             ipc::set_machine_can_drive,
+            ipc::browser_status,
+            ipc::browser_set_shown,
             ipc::list_machines,
             ipc::list_machine_projects,
             ipc::push_preview,
@@ -418,6 +421,7 @@ pub fn run() {
             ipc::ask_list_threads,
             ipc::ask_send,
             ipc::ask_delete_thread,
+            ipc::voice_clean_transcript,
             ipc::list_user_todos,
             ipc::set_user_todo_state,
             ipc::mark_todos_seen,

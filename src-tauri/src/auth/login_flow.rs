@@ -15,7 +15,7 @@ use tokio::time::sleep;
 const CDP_PORT: u16 = 9242; // avoid clashes with 9222
 const LOGIN_TIMEOUT_SECS: u64 = 10 * 60;
 
-fn find_browser() -> Option<PathBuf> {
+pub(crate) fn find_browser() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let candidates = [

@@ -259,6 +259,11 @@ impl Settings {
         self.extra.get("jarvisWorkersAutoAccept").and_then(|v| v.as_bool()).unwrap_or(true)
     }
 
+    /// Whether chats get the `browser` tool, which drives Claude's own Chrome
+    /// profile. Off when absent: the profile holds accounts Joe set up for
+    /// Claude, so nothing reaches it until he turns this on.
+    pub fn claude_browser_enabled(&self) -> bool { self.bool_extra("claudeBrowserEnabled") }
+
     fn bool_extra(&self, key: &str) -> bool {
         self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
     }

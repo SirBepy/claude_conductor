@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
 
+use super::dispatch_browser::browser_tools;
 use super::dispatch_jarvis::jarvis_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, tool_result, waiting_target};
@@ -56,6 +57,7 @@ pub(super) fn dispatch_tool_with(
         .or_else(|| channel_tools(&ctx, name))
         .or_else(|| user_facing_tools(&ctx, name))
         .or_else(|| jarvis_tools(&ctx, name))
+        .or_else(|| browser_tools(&ctx, name))
         .unwrap_or_else(|| mcp_error(id, -32601, "unknown tool"))
 }
 

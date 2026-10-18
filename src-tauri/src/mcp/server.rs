@@ -125,6 +125,7 @@ pub fn run_stdio() {
     // is fixed for its whole lifetime (one child per turn - see
     // `write_mcp_config`), so there's no need to re-read it per request.
     let is_jarvis = std::env::var("CC_JARVIS").is_ok();
+    let browser = std::env::var("CC_BROWSER").is_ok();
 
     announce_attached(port, session_id.clone());
 
@@ -160,7 +161,7 @@ pub fn run_stdio() {
                 }
             }),
             "notifications/initialized" => continue,
-            "tools/list" => tool_list_response(&id, is_jarvis),
+            "tools/list" => tool_list_response(&id, is_jarvis, browser),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -244,7 +245,7 @@ mod tests {
                     "serverInfo": {"name": "cc_conductor", "version": "0.1.0"}
                 }
             }),
-            "tools/list" => tool_list_response(&id, is_jarvis),
+            "tools/list" => tool_list_response(&id, is_jarvis, false),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -392,6 +393,42 @@ mod tests {
         assert!(names.contains(&"send_to_session"));
         assert!(names.contains(&"fleet_status"));
         assert!(names.contains(&"respond_worker_prompt"));
+    }
+
+    /// The switch off (every test above) lists no browser tool at all; on,
+    /// the base set gains exactly Playwright's tools, minus the withheld one.
+    #[test]
+    fn tools_list_browser_adds_the_playwright_tools() {
+        let base = tool_list_response(&json!(1), false, false)["result"]["tools"].as_array().unwrap().len();
+        let resp = tool_list_response(&json!(1), false, true);
+        let tools = resp["result"]["tools"].as_array().unwrap();
+        let browser: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .filter(|n| n.starts_with("browser_"))
+            .collect();
+        assert_eq!(tools.len(), base + browser.len());
+        assert_eq!(browser.len(), 24, "25 Playwright MCP 0.0.83 tools minus browser_run_code_unsafe");
+        assert!(browser.contains(&"browser_navigate"));
+        assert!(browser.contains(&"browser_take_screenshot"));
+    }
+
+    #[test]
+    fn dispatch_tool_routes_browser_tools_to_the_browser_route() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        POSTED_URLS.with(|u| u.borrow_mut().clear());
+        POSTED_BODIES.with(|b| b.borrow_mut().clear());
+        let args = json!({"url": "https://example.com"});
+        dispatch_tool_with(&rt, &json!(1), "browser_navigate", &args, "sess-1", 1234, fake_http_post);
+        let posted = POSTED_URLS.with(|u| u.borrow().clone());
+        assert!(posted.iter().any(|u| u.ends_with("/browser/call")), "posted {posted:?}");
+        let body = POSTED_BODIES.with(|b| b.borrow()[0].clone());
+        assert_eq!(body["name"], json!("browser_navigate"));
+        assert_eq!(body["arguments"], args);
+        assert_eq!(body["session_id"], json!("sess-1"));
+
+        let refused = dispatch_tool_with(&rt, &json!(2), "browser_run_code_unsafe", &json!({}), "s", 1234, fake_http_post);
+        assert_eq!(refused["error"]["code"], -32601, "a withheld tool is unknown, never relayed");
     }
 
     #[test]
