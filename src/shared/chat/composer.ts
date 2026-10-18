@@ -543,6 +543,22 @@ export class Composer {
       console.warn("[composer] re-entry blocked — double-fire suspect");
       return;
     }
+    // Send pressed mid-dictation: the sidecar is still transcribing, so the
+    // textarea may be missing the last word or two. Flush first - the send
+    // button shows a brief spinner (same `.spinning` affordance as elsewhere)
+    // so this reads as instant rather than a stall, while `finishForSend`
+    // actually waits for the trailing transcript to land before the text
+    // below is read.
+    if (this.cv.state === "recording") {
+      this.sending = true;
+      this.sendBtn?.classList.add("spinning");
+      try {
+        await this.cv.finishForSend();
+      } finally {
+        this.sendBtn?.classList.remove("spinning");
+        this.sending = false;
+      }
+    }
     const text = (this.textarea?.value ?? "").trim();
     const empty = !text && this.att.isEmpty();
 
