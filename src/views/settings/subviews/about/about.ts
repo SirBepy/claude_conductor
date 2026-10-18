@@ -10,18 +10,18 @@ import { getSettings } from "../../../../shared/state";
 import { updateSettings } from "../../../../shared/settings-update";
 import { settingsHeader } from "../../ui";
 
-function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
+export function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
   if (isMac && (state.state === "available" || state.state === "downloading" ||
       state.state === "downloaded" || state.state === "error")) {
     return {
       statusText: state.version ? `v${state.version} available` : "Update available",
       actionLabel: "Download from GitHub",
       onAction: () => {
-        if (state.version) {
-          void api.openExternal(
-            `https://github.com/SirBepy/claude_conductor/releases/tag/tauri-v${state.version}`,
-          );
-        }
+        void api.openExternal(
+          state.version
+            ? `https://github.com/SirBepy/claude_conductor/releases/tag/tauri-v${state.version}`
+            : "https://github.com/SirBepy/claude_conductor/releases/latest",
+        );
       },
     };
   }
