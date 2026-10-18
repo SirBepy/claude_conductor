@@ -105,6 +105,19 @@ describe("pop-out window is never a one-way door", () => {
     expect(previewWindow(layer).hidden).toBe(true);
   });
 
+  it("a push while popped out sends that snapshot to the pop-out window", () => {
+    const { layer, preview } = mountPane();
+    preview.open();
+    preview.popOut();
+    invokeCalls.length = 0;
+
+    preview.open("snap-2");
+    expect(invokeCalls).toEqual([
+      { cmd: "open_preview_window", args: { sessionId: "sess-A", snapshotId: "snap-2" } },
+    ]);
+    expect(previewWindow(layer).hidden).toBe(true);
+  });
+
   it("a background chat's push opens that chat's Preview next time it is shown", () => {
     const { windows, layer } = mountPane();
     localStorage.setItem("cc_preview_panel_open:sess-B", "1");

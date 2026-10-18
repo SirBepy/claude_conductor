@@ -5,9 +5,18 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Open (or focus) the preview pop-out window (todo 290), scoped to
 /// `session_id`. Mirrors `open_chats_for_session`'s exists-vs-build split.
+/// `snapshot_id`, when given, is the specific preview the caller wants on
+/// screen (e.g. a chat card's "Open in panel") - an already-open window would
+/// otherwise just get focused while still showing whatever it last had
+/// selected (Joe, 2026-10-13: clicking a new preview's pop button kept
+/// showing a stale one).
 // `(async)`: can build `session-preview` - see the module doc's deadlock rule.
 #[tauri::command(async)]
-pub fn open_preview_window(app: AppHandle, session_id: String) -> Result<(), String> {
+pub fn open_preview_window(
+    app: AppHandle,
+    session_id: String,
+    snapshot_id: Option<String>,
+) -> Result<(), String> {
     crate::ipc::chat::attachments::validate_session_id(&session_id)?;
     let label = "session-preview";
     if let Some(existing) = app.get_webview_window(label) {
@@ -17,7 +26,7 @@ pub fn open_preview_window(app: AppHandle, session_id: String) -> Result<(), Str
         existing.set_focus().map_err(|e| e.to_string())?;
         let _ = app.emit(
             "preview-window-set-session",
-            serde_json::json!({ "sessionId": session_id }),
+            serde_json::json!({ "sessionId": session_id, "snapshotId": snapshot_id }),
         );
         return Ok(());
     }
