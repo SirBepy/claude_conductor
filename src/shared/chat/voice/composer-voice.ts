@@ -94,9 +94,10 @@ export class ComposerVoice {
    *  in the sent text instead of arriving after send has already read it and
    *  leaking into the composer on the next `onFinal`. No-op if not recording -
    *  unlike `reset()`, this never zeroes commitPos/volatileLen itself; the
-   *  normal onFinal/onStateChange path already does that once the flush lands. */
+   *  normal onFinal/onStateChange path already does that once the flush lands.
+   *  Same underlying wait as `stopForPtt()` - it just delegates. */
   async finishForSend(): Promise<void> {
-    if (this.controller?.isRecording) await this.controller.stop();
+    await this.stopForPtt();
   }
 
   reset(): void {
