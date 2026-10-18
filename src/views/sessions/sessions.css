@@ -273,6 +273,31 @@
   flex-shrink: 0;
 }
 
+/* Critique P0, round 2 (Joe, 2026-10-18): keep the dial's own size/position,
+   just shrink the centre account icon so more of the ring itself is visible
+   instead of being crowded out - the ring already carries the real signal
+   (pace colour, safe-pace arc), the icon is only identity. Scoped to this
+   header row, not .oc-ic globally, so the desktop overlay window (same class,
+   different context) is untouched. */
+.usage-dial-row .oc-ic {
+  font-size: 10px;
+}
+
+/* Joe, 2026-10-18 (round 2): dim the HEADER dial itself (top-right of the
+   screen) - not the tap-popover's card, which should stay full saturation.
+   Covers both the ring svg and .oc-ic (nested inside .oc-dial) in one filter,
+   same "mute without recomputing colour" approach, just the right target. */
+.usage-dial-row .oc-dial {
+  filter: saturate(0.5) brightness(0.88);
+}
+
+/* Tap-opened usage detail popover (usage-dials.ts's usageDetailMenu) - the
+   real dashboard account card (account-selector.ts), not a hand-built
+   layout (two custom layouts were tried and rejected first, Joe 2026-10-18).
+   Sizing/padding rules for it live after .session-more-menu's own base rule
+   below (source-order, see the comment there); card/ring/text styling itself
+   is entirely dashboard.css's. */
+
 .view-more-menu .view-more-sort-label {
   display: block;
   padding: 6px 10px 2px;
@@ -385,6 +410,20 @@
   overflow-x: hidden;
 }
 
+/* Wider horizontal padding for the usage-detail popover specifically
+   (Joi, 2026-10-18: "I still dont see the padding, make it wider" - the
+   first attempt lived above .session-more-menu's own unconditional
+   `padding: 4px`, which won the cascade tie by source order regardless of
+   this rule's content - moved after it, same lesson as session-list.css's
+   .active-row fix earlier this session). */
+.usage-detail-menu {
+  padding: 16px 32px;
+}
+.usage-detail-menu .dash-sel-row {
+  width: 260px;
+  margin-bottom: 0;
+}
+
 .session-more-menu::-webkit-scrollbar { width: 8px; }
 .session-more-menu::-webkit-scrollbar-thumb {
   background: var(--color-border);
@@ -425,6 +464,34 @@
   background: #fbbf24;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+/* Count badge for a menu item that opens a list (Hidden's N chats). */
+.smore-count-badge {
+  margin-left: auto;
+  background: var(--color-primary);
+  color: var(--color-background);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Filter-by-project submenu: the real .project-rail reused as a floating
+   panel instead of an inline bar, so its own bottom-border (meant to divide
+   it from the list below it) and outer padding read as stray chrome here. */
+.smore-filter-submenu .project-rail {
+  border-bottom: none;
+  padding: 6px 10px;
+}
+
+/* Hidden submenu: real sidebar rows in a floating panel, capped so a long
+   hidden list scrolls instead of growing off-screen. */
+.smore-hidden-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  min-width: 220px;
 }
 
 .smore-item.smore-danger {

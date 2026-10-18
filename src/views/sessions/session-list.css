@@ -392,3 +392,29 @@
 .sessions-list li.active .session-row-text.is-two-line .session-row-project {
   opacity: 0.8;
 }
+
+/* Critique P3: a 100%-opacity full-row fill was the only loud, full-bleed
+   colour in an otherwise quiet system (every other state here is a tint +
+   stripe) - on a half-attention phone glance it read as "something just
+   happened" rather than "this is the chat you had open last". Placed after
+   the unconditional .active rules above: equal specificity means the later
+   declaration wins a media-query match, not just the media query itself. */
+@media (max-width: 768px) {
+  .sessions-list li.active {
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    color: var(--color-text);
+    box-shadow: inset 2px 0 0 var(--color-primary);
+  }
+  .sessions-list li.active .session-row-badge {
+    color: var(--color-text-muted);
+    opacity: 1;
+  }
+  .sessions-list li.active .session-row-project,
+  .sessions-list li.active .session-row-title,
+  .sessions-list li.active .session-row-text.is-two-line .session-machine-badge {
+    color: var(--color-text);
+  }
+  .sessions-list li.active .session-row-text.is-two-line .session-row-project {
+    opacity: 1;
+  }
+}

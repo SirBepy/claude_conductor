@@ -3,18 +3,23 @@
 // text "usage-chip": Joe wanted to see BOTH configured payment accounts at a
 // glance, each with its own colour icon, reusing the overlay window's exact
 // dial-ring visuals (shared/usage-dial.ts + overlay.css) instead of a new
-// component drifting from that look. Clicking a dial does a REAL claude.ai
-// poll for just that account (api.refreshUsageLive), not a cached re-read -
-// see daemon/methods/usage.rs's request_live_usage_refresh for how the phone
-// reaches the desktop app to do it. A per-dial spinner (the same .oc-ic-spin
-// swap the overlay uses) shows while that's in flight.
+// component drifting from that look. Tapping a dial opens its real dashboard
+// account card (account-selector.ts) in a popover - a phone has no hover, so
+// that's the touch-reachable replacement for the desktop overlay's hover-only
+// `.oc-info`. A hand-built detail layout was tried first and twice rejected
+// as "ugly"/"awkward" (Joe, 2026-10-18) before landing on reusing the real,
+// already-shipped home-screen component instead of a third custom one.
 
-import { api } from "../../shared/api";
+import { api, type UsageRecord } from "../../shared/api";
+import type { Account } from "../../types/ipc.generated";
 import { getSettings } from "../../shared/state";
 import "../overlay/overlay.css";
+import "../dashboard/dashboard.css";
 import { cellHtml, tickOverlayResetPopups } from "../../shared/usage-dial";
-import { buildOverlayRows } from "../overlay/overlay-logic";
+import { buildOverlayRows, type OverlayRow } from "../overlay/overlay-logic";
 import { visibleInterval } from "../../shared/visible-interval";
+import { createMoreMenu } from "./more-menu-base";
+import { buildAccountCardsHTML, wireAccountCardClicks, tickAccountCardCountdowns } from "../dashboard/account-selector";
 
 const POLL_MS = 60_000;
 const RESET_TICK_MS = 1_000;
@@ -23,52 +28,64 @@ const RESET_TICK_MS = 1_000;
 // overlay's full-size dial.
 const DIAL_SCALE = 0.6;
 
-async function renderUsageDials(host: HTMLElement): Promise<void> {
-  let accounts: Awaited<ReturnType<typeof api.listAccounts>>;
-  let usageMap: Awaited<ReturnType<typeof api.getUsageMap>>;
-  try {
-    [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
-  } catch {
-    host.hidden = true;
-    return;
-  }
-
-  if (!accounts.length) {
-    host.hidden = true;
-    return;
-  }
-
-  const settings = getSettings();
-  const rows = buildOverlayRows(accounts, usageMap);
-  host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE, true)).join("");
-  host.hidden = false;
-}
-
-async function refreshClickedAccount(host: HTMLElement, cell: HTMLElement, accountId: string): Promise<void> {
-  cell.classList.add("oc-refreshing");
-  try {
-    await api.refreshUsageLive(accountId);
-  } catch (e) {
-    console.error("usage-dials: refreshUsageLive failed", e);
-  } finally {
-    // A full re-render replaces `cell` outright once fresh data is in, so
-    // this is a harmless no-op on the (by then detached) old node in the
-    // success path - it only matters if renderUsageDials itself threw.
-    cell.classList.remove("oc-refreshing");
-  }
-  await renderUsageDials(host);
-}
+/** Tap-opened detail panel for one account - the real dashboard account card
+ *  (account-selector.ts's buildAccountCardsHTML), not a one-off layout. Built
+ *  with createMoreMenu so it gets the same floating-panel chrome, outside-
+ *  click dismiss, and Escape handling every other menu in this view already
+ *  has. Clicking the card does the same live-refresh poll the dial itself
+ *  used to do on tap (api.refreshUsageLive), via wireAccountCardClicks. */
+const usageDetailMenu = createMoreMenu<[Account, UsageRecord | undefined, () => Promise<void>]>({
+  className: "session-more-menu usage-detail-menu",
+  build: (menu, close, account, usage, render) => {
+    const settings = getSettings();
+    // dashboard.css's .dash-* rules are deliberately scoped under
+    // .view-dashboard (not globally) so they can't leak into other views -
+    // wrap in it here too, rather than ungating the real rules, to get the
+    // genuine cascade instead of an unstyled card.
+    menu.innerHTML = `<div class="view-dashboard">${buildAccountCardsHTML([account], usage ? { [account.id]: usage } : {}, account.id, settings)}</div>`;
+    wireAccountCardClicks(menu, () => {
+      close();
+      void api.refreshUsageLive(account.id)
+        .catch((e) => console.error("usage-dials: refreshUsageLive failed", e))
+        .then(() => render());
+    });
+  },
+});
 
 /** Mounts the dial row into an already-present header host element; returns a
  * teardown that stops the poll. Safe to call with a host that stays hidden
  * (no accounts yet) - it just re-checks on the next poll tick. */
 export function mountUsageDials(host: HTMLElement): () => void {
-  void renderUsageDials(host);
+  let lastAccounts: Account[] = [];
+  let lastUsageMap: Record<string, UsageRecord> = {};
+
+  const render = async (): Promise<void> => {
+    let accounts: Account[];
+    let usageMap: Record<string, UsageRecord>;
+    try {
+      [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
+    } catch {
+      host.hidden = true;
+      return;
+    }
+    if (!accounts.length) {
+      host.hidden = true;
+      return;
+    }
+    lastAccounts = accounts;
+    lastUsageMap = usageMap;
+    const settings = getSettings();
+    const rows: OverlayRow[] = buildOverlayRows(accounts, usageMap);
+    host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE, true)).join("");
+    host.hidden = false;
+  };
+  void render();
 
   const onClick = (e: MouseEvent): void => {
     const cell = (e.target as HTMLElement | null)?.closest<HTMLElement>(".oc-cell[data-acc-id]");
     const id = cell?.dataset["accId"];
-    if (cell && id) void refreshClickedAccount(host, cell, id);
+    const account = lastAccounts.find((a) => a.id === id);
+    if (cell && account) usageDetailMenu.toggle(cell, account, lastUsageMap[account.id], render);
   };
   host.addEventListener("click", onClick);
 
@@ -76,10 +93,14 @@ export function mountUsageDials(host: HTMLElement): () => void {
   // hidden window. The existing onVisible below already re-renders on regain
   // (unconditionally, not gated on a full hidden period), so it stays - it
   // is not an exact duplicate of visibleInterval's own flush-on-return.
-  const disposeRender = visibleInterval(() => void renderUsageDials(host), POLL_MS);
-  const disposeTick = visibleInterval(() => tickOverlayResetPopups(host), RESET_TICK_MS);
+  const disposeRender = visibleInterval(() => void render(), POLL_MS);
+  const disposeTick = visibleInterval(() => {
+    tickOverlayResetPopups(host);
+    const menu = usageDetailMenu.element();
+    if (menu) tickAccountCardCountdowns(menu);
+  }, RESET_TICK_MS);
   const onVisible = () => {
-    if (document.visibilityState === "visible") void renderUsageDials(host);
+    if (document.visibilityState === "visible") void render();
   };
   document.addEventListener("visibilitychange", onVisible);
 
@@ -88,5 +109,6 @@ export function mountUsageDials(host: HTMLElement): () => void {
     disposeTick();
     document.removeEventListener("visibilitychange", onVisible);
     host.removeEventListener("click", onClick);
+    usageDetailMenu.close();
   };
 }
