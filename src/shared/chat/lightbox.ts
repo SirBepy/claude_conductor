@@ -42,6 +42,9 @@ export interface LightboxComposerBridge {
   /** Subscribe to recording-state flips while the overlay is open. Returns
    *  an unsubscribe function. */
   onVoiceStateChange?(cb: (recording: boolean) => void): () => void;
+  /** Send the main composer's current draft now - used by the lightbox's own
+   *  Ctrl+Enter (write back the caption, close, then send). */
+  send?(): void;
 }
 
 // Registered by Composer itself (ctor/destroy), so the lightbox's own textbox
@@ -169,6 +172,15 @@ export function openLightbox(content: LightboxContent): void {
       anchor: wrap,
       providers: [slashProvider, fileProvider] as unknown as SuggestProvider<unknown>[],
       features: { paste: false },
+      // Ctrl/Cmd+Enter writes the caption back (closeLightbox syncs it via
+      // the captured bridge, same as any other close), then sends - so
+      // finishing a caption sends the message and dismisses the preview in
+      // one keystroke instead of needing a separate close.
+      onCtrlEnter: () => {
+        const bridge = openBridge;
+        closeLightbox();
+        bridge?.send?.();
+      },
     });
   }
 

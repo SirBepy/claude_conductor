@@ -1,4 +1,5 @@
 // Reviewed 2026-10-08: question-ui.ts's confirmQuestionRendered now also threads the prompt's sessionId to confirm_question_rendered (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
+// Reviewed 2026-10-19: lightbox.ts's caption box now sends+closes on Ctrl/Cmd+Enter - a different key than this spec's Escape, no change to the contract here.
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 

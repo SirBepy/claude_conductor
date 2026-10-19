@@ -5,6 +5,10 @@ import { mountView } from "./harness";
 // Phone image viewer: two fingers pinch-zoom the image (it used to only know
 // mouse wheel + tap, so a pinch re-anchored a one-finger pan instead), and a
 // pinch never ends as a tap that toggles zoom or closes the lightbox.
+//
+// Reviewed 2026-10-19: lightbox.ts's caption box now sends+closes on Ctrl/Cmd+Enter,
+// a desktop-keyboard-only path with no touch counterpart - no change to this spec's
+// contract.
 
 test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 800 } });
 
