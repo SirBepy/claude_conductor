@@ -5,9 +5,16 @@ import { shotDir } from "./shot-dir";
 const SCREENSHOT_DIR = shotDir();
 
 // The chat pane's windows (Joe, 2026-10-01): Ask / Todos / Drafts / Preview as
-// tabs in windows you drag by a title bar, resize from any edge, snap into a
-// corner, dock beside the chat as a real split (both sides at once), and tear
-// tabs out of or into. Real pointer input on the real FAB, not internal state.
+// windows you drag by a title bar, resize from any edge, snap into a corner,
+// dock beside the chat as a real split (both sides at once), and tear tabs out
+// of or into. Real pointer input on the real FAB, not internal state.
+//
+// Fresh-chat default (Joe, 2026-10-19): each panel opens into its OWN window,
+// not bundled as tabs of one shared centred window. Ask and Drafts default to
+// the bottom-right corner; Todos and Preview default to a full-height dock on
+// the right, stacking as two windows in that column when both are open. A few
+// gesture tests below merge two panels into one window on purpose, since the
+// fresh default no longer hands them a shared tab bar to drag from.
 
 const VIEWER = "sess-A";
 
@@ -107,11 +114,12 @@ async function dragTab(page: Page, panel: string, to: { x: number; y: number }):
 
 const chatWidth = (page: Page) => page.locator("#chat-col").evaluate((el) => el.getBoundingClientRect().width);
 
-test("a window opens centred with a title bar and its X top-right, and drags by the bar", async ({ page }) => {
+test("a window opens at the bottom-right corner with a title bar and its X top-right, and drags by the bar", async ({ page }) => {
   await mountPane(page);
   await openFromDial(page, "drafts");
   const start = await box(page, "drafts");
-  expect(Math.abs(start.x + start.width / 2 - 640)).toBeLessThanOrEqual(1);
+  expect(Math.round(start.x + start.width)).toBe(1272);
+  expect(Math.round(start.y + start.height)).toBe(792);
 
   const x = (await win(page, "drafts").locator('[data-pw-act="close"]').boundingBox())!;
   expect(x.x + x.width).toBeGreaterThan(start.x + start.width - 12);
@@ -122,6 +130,51 @@ test("a window opens centred with a title bar and its X top-right, and drags by 
   const moved = await box(page, "drafts");
   expect(Math.round(moved.x)).toBe(Math.round(start.x - 150));
   expect(Math.round(moved.y)).toBe(Math.round(start.y - 60));
+});
+
+test("fresh chat: Ask and Drafts each default to the bottom-right corner, in their own window", async ({ page }) => {
+  // Each check gets its own fresh mount: a corner window sits right over the
+  // FAB's own resting spot and hides it (manager.ts's syncFabCover), so a real
+  // dial click can't open a second corner panel on top of a first one already
+  // there - same as a real user, who would have to move or close it first.
+  await mountPane(page);
+  await openFromDial(page, "drafts");
+  const drafts = await box(page, "drafts");
+  expect(Math.round(drafts.x + drafts.width)).toBe(1272);
+  expect(Math.round(drafts.y + drafts.height)).toBe(792);
+  await expect(win(page, "drafts").locator("[data-spine]")).toHaveCount(0);
+
+  await mountPane(page);
+  await openFromDial(page, "ask");
+  const ask = await box(page, "ask");
+  expect(Math.round(ask.x + ask.width)).toBe(1272);
+  expect(Math.round(ask.y + ask.height)).toBe(792);
+  await expect(win(page, "ask").locator("[data-spine]")).toHaveCount(0);
+});
+
+test("fresh chat: Todos and Preview both default to a full-height right dock, stacking as two windows when both are open", async ({ page }) => {
+  await mountPane(page);
+  await openFromDial(page, "todos");
+  const todosAlone = await box(page, "todos");
+  expect(Math.round(todosAlone.x + todosAlone.width)).toBe(1280);
+  expect(Math.round(todosAlone.y)).toBe(0);
+  expect(Math.round(todosAlone.height)).toBe(800);
+
+  // Docking (unlike a corner snap) pushes the FAB left of the dock via
+  // --pw-dock-r, so it stays reachable to open the second one.
+  await openFromDial(page, "preview");
+  await expect(page.locator(".pw-window:visible")).toHaveCount(2);
+  const todosStacked = await box(page, "todos");
+  const preview = await box(page, "preview");
+  // Two separate windows sharing the dock column, not merged into tabs.
+  await expect(win(page, "todos").locator("[data-spine]")).toHaveCount(0);
+  await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(0);
+  expect(Math.round(todosStacked.x + todosStacked.width)).toBe(1280);
+  expect(Math.round(preview.x + preview.width)).toBe(1280);
+  expect(Math.round(todosStacked.height)).toBe(400);
+  expect(Math.round(preview.height)).toBe(400);
+  expect(Math.round(todosStacked.y)).toBe(0);
+  expect(Math.round(preview.y)).toBe(400);
 });
 
 test("dropping on the right edge docks it as a split: the chat shrinks, and the divider resizes it", async ({ page }) => {
@@ -145,23 +198,27 @@ test("dropping on the right edge docks it as a split: the chat shrinks, and the 
   expect(Math.round(await chatWidth(page))).toBe(Math.round(full - wider.width));
 });
 
-test("Preview opens as a tab of the one window; torn out to the right edge it docks there on its own", async ({ page }) => {
+test("two solo corner windows merge into tabs when one is dropped on the other's bar", async ({ page }) => {
   await mountPane(page);
-  await openFromDial(page, "preview");
-  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
-  await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(4);
+  await openFromDial(page, "drafts");
+  // Clear of the shared corner first, so Ask's own open doesn't just overlap it.
+  await dragBar(page, "drafts", { x: 300, y: 300 });
+  await box(page, "drafts");
 
-  await dragTab(page, "preview", { x: 1278, y: 400 });
-  await expect(page.locator(".pw-window:visible")).toHaveCount(2);
-  const preview = await box(page, "preview");
-  expect(Math.round(preview.x + preview.width)).toBe(1280);
-  await expect(win(page, "preview").locator("[data-spine]")).toHaveCount(0);
+  await openFromDial(page, "ask");
+  await box(page, "ask");
+  const draftsBar = (await win(page, "drafts").locator(".pw-bar").boundingBox())!;
+  await dragBar(page, "ask", { x: draftsBar.x + draftsBar.width / 2, y: draftsBar.y + draftsBar.height / 2 });
+
+  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await expect(win(page, "ask").locator("[data-spine]")).toHaveCount(2);
+  await expect(win(page, "ask").locator('[data-spine="drafts"]')).toHaveCount(1);
 });
 
 test("both sides dock at once, Preview right and Drafts left, with the chat in between", async ({ page }) => {
   await mountPane(page);
+  // Preview's fresh default already docks it right; no tear-off needed.
   await openFromDial(page, "preview");
-  await dragTab(page, "preview", { x: 1278, y: 400 });
   const preview = await box(page, "preview");
   expect(Math.round(preview.x + preview.width)).toBe(1280);
 
@@ -179,8 +236,8 @@ test("both sides dock at once, Preview right and Drafts left, with the chat in b
 
 test("a window dropped on a docked window's lower half stacks under it; the seam resizes both, and closing one gives the other the side", async ({ page }) => {
   await mountPane(page);
+  // Preview's fresh default already docks it right; no tear-off needed.
   await openFromDial(page, "preview");
-  await dragTab(page, "preview", { x: 1278, y: 400 });
   await openFromDial(page, "ask");
   await box(page, "ask");
   await dragBar(page, "ask", { x: 1100, y: 600 });
@@ -212,15 +269,25 @@ test("a window dropped on a docked window's lower half stacks under it; the seam
 
 test("a tab dropped on a docked window's upper half tears out and stacks above it", async ({ page }) => {
   await mountPane(page);
+  // Preview's fresh default already docks it right, alone.
+  await openFromDial(page, "preview");
+  await box(page, "preview");
+
+  // Merge Drafts and Ask first: the fresh default opens each solo, so there is
+  // no tab to drag out until two windows are combined.
+  await openFromDial(page, "drafts");
+  await dragBar(page, "drafts", { x: 300, y: 300 });
   await openFromDial(page, "ask");
-  await dragBar(page, "ask", { x: 1278, y: 400 });
-  // Let the dock glide finish, or the press lands where the tab used to be.
   await box(page, "ask");
+  const draftsBar = (await win(page, "drafts").locator(".pw-bar").boundingBox())!;
+  await dragBar(page, "ask", { x: draftsBar.x + draftsBar.width / 2, y: draftsBar.y + draftsBar.height / 2 });
+  await expect(win(page, "ask").locator('[data-spine="drafts"]')).toHaveCount(1);
+
   await dragTab(page, "drafts", { x: 1100, y: 200 });
 
-  await expect(page.locator(".pw-window:visible")).toHaveCount(2);
+  await expect(page.locator(".pw-window:visible")).toHaveCount(3);
   const top = await box(page, "drafts");
-  const bottom = await box(page, "ask");
+  const bottom = await box(page, "preview");
   expect(Math.round(top.y)).toBe(0);
   expect(Math.round(top.height)).toBe(400);
   expect(Math.round(bottom.y)).toBe(400);
@@ -243,6 +310,8 @@ test("opening Preview from the dial loads the chat's latest snapshot", async ({ 
 
 test("a corner drop parks a small window there, and pulling it off a dock floats it again", async ({ page }) => {
   await mountPane(page);
+  // Preview's fresh default already docks it right: this drag both floats it
+  // off that dock AND parks it in the corner, in one gesture.
   await openFromDial(page, "preview");
   await dragBar(page, "preview", { x: 1276, y: 796 });
   const corner = await box(page, "preview");
@@ -254,10 +323,19 @@ test("a corner drop parks a small window there, and pulling it off a dock floats
 
 test("a tab dragged out of the bar becomes its own window, and dropped on another window's bar joins it", async ({ page }) => {
   await mountPane(page);
+  // Merge Ask into Todos' dock first: the fresh default opens each solo, so
+  // there is no tab to drag until two windows are combined. Todos (dock)
+  // opens first - Ask's corner default would otherwise sit over the FAB and
+  // hide it, like a real user, before Todos ever got a chance to open.
+  await openFromDial(page, "todos");
   await openFromDial(page, "ask");
+  await box(page, "todos");
+  const todosBar = (await win(page, "todos").locator(".pw-bar").boundingBox())!;
+  await dragBar(page, "ask", { x: todosBar.x + todosBar.width / 2, y: todosBar.y + todosBar.height / 2 });
   await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await expect(win(page, "ask").locator('[data-spine="todos"]')).toHaveCount(1);
 
-  const tab = (await win(page, "ask").locator('[data-spine="todos"]').boundingBox())!;
+  const tab = (await page.locator('.pw-window:visible [data-spine="todos"]').boundingBox())!;
   await page.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2);
   await page.mouse.down();
   await page.mouse.move(300, 200, { steps: 10 });
@@ -266,11 +344,11 @@ test("a tab dragged out of the bar becomes its own window, and dropped on anothe
 
   await expect(page.locator(".pw-window:visible")).toHaveCount(2);
   await expect(win(page, "todos")).toBeVisible();
-  await expect(win(page, "ask").locator('[data-spine="todos"]')).toHaveCount(0);
+  await expect(page.locator('.pw-window:visible [data-spine="todos"]')).toHaveCount(0);
 
-  // Back in: drag the Todos window by its bar onto Ask's bar, past its tabs.
-  const askTabs = (await win(page, "ask").locator(".pw-tabs").boundingBox())!;
-  await dragBar(page, "todos", { x: askTabs.x + askTabs.width + 30, y: askTabs.y + askTabs.height / 2 });
+  // Back in: drag the Todos window by its bar onto Ask's bar.
+  const askBar = (await win(page, "ask").locator(".pw-bar").boundingBox())!;
+  await dragBar(page, "todos", { x: askBar.x + askBar.width - 30, y: askBar.y + askBar.height / 2 });
   await expect(page.locator(".pw-window:visible")).toHaveCount(1);
   await expect(page.locator('.pw-window:visible [data-spine="todos"]')).toHaveCount(1);
 });

@@ -44,6 +44,26 @@ function mountPane() {
 
 const previewWindow = (layer) => layer.querySelector('.pw-window[data-active="preview"]');
 
+/** Drafts and Preview start in separate windows by default (Joe, 2026-10-19:
+ *  Ask/Drafts snap bottom-right, Todos/Preview dock right, each solo). The
+ *  "busy elsewhere" dot only has a tab strip to render on once a window
+ *  holds more than one tab, so these tests seed a layout as if the user had
+ *  already dragged Drafts and Preview into one shared window - the exact
+ *  on-disk shape `rememberLayout` would have written for that drag. */
+function seedMergedDraftsPreview(sessionId) {
+  const layout = {
+    windows: [
+      { id: "w-shared", tabs: ["drafts", "preview"], active: "drafts", placement: { kind: "float", rect: null }, open: false },
+      { id: "w-ask", tabs: ["ask"], active: "ask", placement: { kind: "snap", corner: "se" }, open: false },
+      { id: "w-todos", tabs: ["todos"], active: "todos", placement: { kind: "dock", side: "right" }, open: false },
+    ],
+    dockShare: { left: null, right: null },
+  };
+  const store = JSON.parse(localStorage.getItem("cc.paneWindows.chats") ?? "{}");
+  store[sessionId] = { layout, at: Date.now() };
+  localStorage.setItem("cc.paneWindows.chats", JSON.stringify(store));
+}
+
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
@@ -126,12 +146,15 @@ describe("pop-out window is never a one-way door", () => {
   });
 });
 
-// Preview shares the default window with Ask/Todos/Drafts (Joe, 2026-10-01):
-// a push must never yank that window off a tab in use, a draft mid-edit above all.
+// A push must never yank a shared window off a tab in use, a draft mid-edit
+// above all - only reachable once Drafts and Preview already share a window
+// (Joe, 2026-10-19: they default to separate windows now; sharing one is a
+// manual drag, seeded here via seedMergedDraftsPreview).
 describe("a push into a window busy on another tab", () => {
   const tab = (layer, panel) => layer.querySelector(`[data-spine="${panel}"]`);
 
   it("stays on the tab and dots Preview's until Preview is shown", () => {
+    seedMergedDraftsPreview("sess-A");
     const { layer, windows, preview } = mountPane();
     windows.openPanel("drafts");
     preview.open("snap-1");
@@ -150,10 +173,13 @@ describe("a push into a window busy on another tab", () => {
     const { layer, preview } = mountPane();
     preview.open("snap-1");
     expect(previewWindow(layer).hidden).toBe(false);
-    expect(tab(layer, "preview").classList.contains("has-unseen")).toBe(false);
+    // Solo window by default: no tab strip at all, so there's no dot surface
+    // for a stray "has-unseen" to land on in the first place.
+    expect(tab(layer, "preview")).toBeNull();
   });
 
   it("a background chat's push to a chat left on Drafts dots instead of switching", () => {
+    seedMergedDraftsPreview("sess-B");
     const { layer, windows } = mountPane();
     windows.setSessionScope("sess-B", "/repo");
     windows.openPanel("drafts");

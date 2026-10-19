@@ -4,10 +4,38 @@
 
 import { loadOpen as loadPreviewOpen } from "../rail-panel";
 import {
-  isShowing, normalize, openPanel, windowOf, type PaneLayout,
+  isShowing, newWindowId, openPanel, windowOf, type PaneLayout, type Placement,
 } from "../../../../vendor/tauri_kit/frontend/pane-windows/layout";
 import { createLayoutStore } from "../../../../vendor/tauri_kit/frontend/pane-windows/memory";
 import type { PanelKey } from "./panels";
+
+/** Where a panel starts before it has ever been moved in this chat (Joe,
+ *  2026-10-19): Preview and Todos default to a full-height dock on the
+ *  right, Ask and Drafts default to the bottom-right corner - nothing
+ *  auto-opens, this only decides where a panel lands once the user opens it
+ *  themselves. Each panel gets its own window rather than sharing the old
+ *  single "main" tab strip, so these placements don't collide. Once a panel
+ *  is dragged anywhere (including back to centre), the stored layout below
+ *  wins and this never runs again for that chat. */
+const FRESH_PLACEMENT: Record<PanelKey, Placement> = {
+  ask: { kind: "snap", corner: "se" },
+  drafts: { kind: "snap", corner: "se" },
+  todos: { kind: "dock", side: "right" },
+  preview: { kind: "dock", side: "right" },
+};
+
+function freshLayout(panels: readonly PanelKey[]): PaneLayout<PanelKey> {
+  return {
+    windows: panels.map((p) => ({
+      id: newWindowId(),
+      tabs: [p],
+      active: p,
+      placement: FRESH_PLACEMENT[p],
+      open: false,
+    })),
+    dockShare: { left: null, right: null },
+  };
+}
 
 /** Oldest chats fall off first past 60; one untouched that long is not coming back. */
 const store = createLayoutStore<PanelKey>({ key: "cc.paneWindows.chats", max: 60 });
@@ -33,7 +61,7 @@ function legacyCard(sessionId: string): { panel: PanelKey; open: boolean } | nul
 export function recallLayout(sessionId: string, panels: readonly PanelKey[]): PaneLayout<PanelKey> {
   const hit = store.recall(sessionId, panels);
   if (hit) return reconcilePreview(hit, sessionId);
-  const layout = normalize(null, panels);
+  const layout = freshLayout(panels);
   const old = legacyCard(sessionId);
   if (old) {
     const main = layout.windows.find((w) => w.tabs.includes(old.panel));
