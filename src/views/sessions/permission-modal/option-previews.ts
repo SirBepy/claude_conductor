@@ -10,10 +10,10 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
 import { previewDocument } from "./option-preview-doc";
+import { attachSwipe } from "./swipe-detector";
 import type { Question, QuestionOption, Selection } from "./types";
 
 export const TILE_MAX = 3;
-const SWIPE_PX = 40;
 
 export type PreviewLayout = "tiles" | "stage";
 
@@ -192,29 +192,19 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
 
   // Vertical swipe on the picture. The iframe would swallow the touch, so a
   // transparent .prompt-stage__hit layer sits over it to receive it.
-  let touch: { qi: number; x: number; y: number } | null = null;
-  host.addEventListener("touchstart", (e) => {
-    const t = e.touches[0];
-    const hit = (e.target as Element).closest?.(".prompt-stage__hit");
-    const qi = Number(hit?.closest<HTMLElement>(".prompt-stage")?.dataset.stage);
-    touch = hit && t && e.touches.length === 1 && Number.isFinite(qi) ? { qi, x: t.clientX, y: t.clientY } : null;
-  }, { passive: true });
-  host.addEventListener("touchmove", (e) => {
-    const t = e.touches[0];
-    if (!touch || !t) return;
-    // Stops the panel scrolling under a swipe meant for the picture.
-    if (Math.abs(t.clientY - touch.y) > Math.abs(t.clientX - touch.x) && e.cancelable) e.preventDefault();
-  }, { passive: false });
-  host.addEventListener("touchend", (e) => {
-    const t = e.changedTouches[0];
-    const start = touch;
-    touch = null;
-    if (!start || !t) return;
-    const dy = t.clientY - start.y;
-    if (Math.abs(dy) < SWIPE_PX || Math.abs(dy) < Math.abs(t.clientX - start.x)) return;
-    step(start.qi, dy < 0 ? 1 : -1);
+  attachSwipe(host, {
+    axis: "y",
+    startsOn: (target) => {
+      const hit = target.closest(".prompt-stage__hit");
+      if (!hit) return false;
+      const qi = Number(hit.closest<HTMLElement>(".prompt-stage")?.dataset.stage);
+      return Number.isFinite(qi);
+    },
+    onSwipe: (direction, startTarget) => {
+      const qi = Number(startTarget.closest<HTMLElement>(".prompt-stage")?.dataset.stage);
+      step(qi, direction);
+    },
   });
-  host.addEventListener("touchcancel", () => { touch = null; });
 
   return { sync };
 }
