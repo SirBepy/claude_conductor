@@ -46,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   dismissSecretCard();
   state.sessions = [];
+  window.__TAURI__ = undefined;
 });
 
 describe("showSecretCard", () => {
@@ -144,6 +145,30 @@ describe("showSecretCard", () => {
     showSecretCard(payload());
     dismissSecretCard("some-other-id");
     expect(card()).not.toBeNull();
+  });
+
+  it("the Save button carries no icon (the app's other Save buttons are text-only)", () => {
+    showSecretCard(payload());
+    expect(card().querySelector('[data-act="save"]').innerHTML).not.toContain("ph-floppy-disk");
+  });
+
+  it("the file path is a clickable reveal button on desktop, and opens it in the file manager", () => {
+    window.__TAURI__ = {};
+    invokeMock.mockResolvedValue(undefined);
+    showSecretCard(payload());
+    const revealBtn = card().querySelector('[data-act="reveal"]');
+    expect(revealBtn).not.toBeNull();
+    expect(revealBtn.textContent).toContain("C:\\repo\\.secrets.env");
+
+    revealBtn.click();
+    expect(invokeMock).toHaveBeenCalledWith("reveal_file_in_explorer", { path: "C:\\repo\\.secrets.env" });
+  });
+
+  it("the file path is inert text (no reveal button) on the remote/phone transport", () => {
+    window.__TAURI__ = undefined;
+    showSecretCard(payload());
+    expect(card().querySelector('[data-act="reveal"]')).toBeNull();
+    expect(card().textContent).toContain("C:\\repo\\.secrets.env");
   });
 
   it("never passes the typed value to console.* ", async () => {
