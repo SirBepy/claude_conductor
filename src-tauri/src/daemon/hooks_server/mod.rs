@@ -21,6 +21,7 @@ mod drafts;
 mod jarvis;
 mod lifecycle;
 mod messages;
+mod origin_guard;
 // pub(crate): chat::parser's "attachment" arm needs parse_mid_turn_frame to
 // recover a mid-turn delivery's text from the transcript JSONL (that hook
 // context string is the only place the CLI persists it).
@@ -204,6 +205,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))
         .route("/hooks/subagent-start", post(subagents::on_subagent_start))
         .route("/hooks/subagent-stop", post(subagents::on_subagent_stop))
+        .layer(axum::middleware::from_fn(origin_guard::guard))
         .with_state(ctx);
 
     tokio::spawn(async move {
