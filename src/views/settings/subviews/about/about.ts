@@ -10,21 +10,9 @@ import { getSettings } from "../../../../shared/state";
 import { updateSettings } from "../../../../shared/settings-update";
 import { settingsHeader } from "../../ui";
 
-export function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdateDeps {
-  if (isMac && (state.state === "available" || state.state === "downloading" ||
-      state.state === "downloaded" || state.state === "error")) {
-    return {
-      statusText: state.version ? `v${state.version} available` : "Update available",
-      actionLabel: "Download from GitHub",
-      onAction: () => {
-        void api.openExternal(
-          state.version
-            ? `https://github.com/SirBepy/claude_conductor/releases/tag/tauri-v${state.version}`
-            : "https://github.com/SirBepy/claude_conductor/releases/latest",
-        );
-      },
-    };
-  }
+// Same on every platform: the release publishes a signed darwin-aarch64
+// updater entry, so the Mac installs in-app like Windows does.
+export function deriveUpdateDeps(state: UpdateState): AboutUpdateDeps {
   if (state.state === "downloaded") {
     return {
       statusText: "Ready to install",
@@ -55,9 +43,6 @@ export function deriveUpdateDeps(state: UpdateState, isMac: boolean): AboutUpdat
 }
 
 export async function renderAboutView(root: HTMLElement): Promise<() => void> {
-  const platform = await api.getPlatform();
-  const isMac = platform === "darwin";
-
   let updateState: UpdateState = { state: "up-to-date" };
   const versionInfo = await api.getVersionInfo().catch(() => ({
     version: "unknown",
@@ -73,7 +58,7 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
     (typeof rawAutoUpdate === "string" &&
      (rawAutoUpdate === "never" || rawAutoUpdate === "onStartup" || rawAutoUpdate === "immediate"))
       ? rawAutoUpdate
-      : "immediate";
+      : "onStartup";
 
   const deps: AboutPageDeps = {
     appName: "Claude Companion",
@@ -104,7 +89,7 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
     },
     onBack: () => { void (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("settings"); },
     onOpenLink: (url) => { void api.openExternal(url); },
-    update: deriveUpdateDeps(updateState, isMac),
+    update: deriveUpdateDeps(updateState),
     onRerender: () => doRender(),
   };
 
@@ -129,13 +114,13 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
   const initialState = await api.getUpdateState().catch(() => null);
   if (initialState) {
     updateState = initialState;
-    deps.update = deriveUpdateDeps(updateState, isMac);
+    deps.update = deriveUpdateDeps(updateState);
     doRender();
   }
 
   const unlisten = api.onUpdateStateChange((state) => {
     updateState = state;
-    deps.update = deriveUpdateDeps(updateState, isMac);
+    deps.update = deriveUpdateDeps(updateState);
     doRender();
   });
 

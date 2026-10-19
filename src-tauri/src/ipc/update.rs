@@ -49,12 +49,13 @@ pub async fn run_update_check(app: &AppHandle, auto_install: bool) -> serde_json
     result
 }
 
+/// The About page's "Check for updates now" (and its error Retry). Never
+/// installs, whatever the Auto-update mode: a found update only surfaces the
+/// Download & Install button, and the user decides. The mode governs the
+/// startup check alone (bootstrap.rs).
 #[tauri::command]
 pub async fn check_for_updates(app: AppHandle) -> Result<serde_json::Value, String> {
-    use crate::types::AutoUpdateMode;
-    let auto_install = app.state::<crate::state::AppState>()
-        .settings.lock().unwrap().auto_update == AutoUpdateMode::Immediate;
-    Ok(run_update_check(&app, auto_install).await)
+    Ok(run_update_check(&app, false).await)
 }
 
 #[tauri::command]
