@@ -224,3 +224,46 @@ describe("new chat opened during a close", () => {
     expect(listEl.querySelector('li[data-placeholder-id="P2"]')).not.toBeNull();
   });
 });
+
+// Regression for "clicking a chat row does nothing": renderSidebar re-runs on
+// every background refresh tick (recovery heartbeat, drain-map debounce,
+// scheduled-count poll, ...) and rebuilds every row's html string from
+// current state, even for rows whose data hasn't changed. If a reconcile with
+// an UNCHANGED row's html landed between a click's mousedown and mouseup, the
+// old updateNode unconditionally replaced that row's children, detaching the
+// mousedown target - and a browser never fires `click` for a detached target,
+// so the row looked permanently unclickable. Same mechanism as the Drafts
+// panel's focus-refresh bug (6c3db673), different trigger.
+describe("unchanged-row reconcile preserves click target", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.useFakeTimers();
+  });
+
+  it("keeps a row's inner nodes identical across a reconcile with unchanged html", () => {
+    const listEl = makeList();
+    reconcileList(listEl, [row("A"), row("B")], true);
+    vi.runAllTimers();
+
+    const titleSpan = listEl.querySelector('li[data-session-id="A"] span');
+    expect(titleSpan).not.toBeNull();
+
+    // A background refresh tick reconciles with the SAME html for row A - this
+    // must be a no-op for A's subtree, as if the user's mousedown already
+    // landed on titleSpan and mouseup hasn't fired yet.
+    reconcileList(listEl, [row("A"), row("B")], true);
+
+    expect(listEl.querySelector('li[data-session-id="A"] span')).toBe(titleSpan);
+  });
+
+  it("still applies a row's html when it actually changes", () => {
+    const listEl = makeList();
+    const changedRow = (id) => ({ key: `s:${id}`, html: `<li data-session-id="${id}"><span>${id}-updated</span></li>` });
+
+    reconcileList(listEl, [row("A")], true);
+    vi.runAllTimers();
+
+    reconcileList(listEl, [changedRow("A")], true);
+    expect(listEl.querySelector('li[data-session-id="A"] span').textContent).toBe("A-updated");
+  });
+});
