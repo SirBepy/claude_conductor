@@ -34,6 +34,11 @@ function hash(s: string): number {
  * every other machine on that OS gets a pool icon seeded by its own id.
  * Keyed only on ids and OSes, never on which daemon is asking, so the phone,
  * the PC and the Mac all compute the same icon for the same machine.
+ *
+ * 1 logo + CLASH_POOL.length machines per OS get distinct icons; beyond
+ * that, extra machines on the same OS share the generic desktop glyph - an
+ * explicit, documented collision, since growing CLASH_POOL further isn't
+ * worth it for a count of paired machines this far past what Joe pairs.
  */
 export function assignMachineIcons(machines: ReadonlyArray<{ machine_id: string; os: string }>): Map<string, string> {
   const sorted = [...machines].sort((a, b) => (a.machine_id < b.machine_id ? -1 : a.machine_id > b.machine_id ? 1 : 0));
@@ -51,6 +56,8 @@ export function assignMachineIcons(machines: ReadonlyArray<{ machine_id: string;
   }
   for (const id of clashed) {
     const start = hash(id) % CLASH_POOL.length;
+    // Stays UNKNOWN_ICON only when the pool is exhausted: the documented
+    // collision above, shared by every machine past the pool.
     let icon = UNKNOWN_ICON;
     for (let i = 0; i < CLASH_POOL.length; i++) {
       const candidate = CLASH_POOL[(start + i) % CLASH_POOL.length]!;

@@ -43,4 +43,15 @@ describe("assignMachineIcons", () => {
   it("an OS with no logo falls back to the generic desktop glyph", () => {
     expect(assignMachineIcons([{ machine_id: "x", os: "freebsd" }]).get("x")).toBe("ph-desktop");
   });
+
+  it("13 machines on one OS exhaust the pool: the overflow shares the generic glyph, documented, not silent", () => {
+    const machines = Array.from({ length: 13 }, (_, i) => ({ machine_id: `m-${String(i).padStart(2, "0")}`, os: "windows" }));
+    const icons = assignMachineIcons(machines);
+    const values = [...icons.values()];
+    // 1 OS logo + 10 CLASH_POOL icons keep 11 machines distinct; the rest
+    // share the generic desktop glyph as a 12th, documented, repeated value.
+    expect(new Set(values).size).toBe(12);
+    const overflow = values.filter((v) => v === "ph-desktop");
+    expect(overflow.length).toBe(machines.length - 11);
+  });
 });
