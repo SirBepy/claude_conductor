@@ -18,10 +18,21 @@ pub const ASK_EFFORT: &str = "medium";
 
 /// `--allowedTools` only PRE-APPROVES: it is not an exhaustive allowlist, so
 /// absence from here does not stop a tool running.
-const ALLOWED_TOOLS: &str = "Read Grep Glob WebSearch WebFetch";
+const ALLOWED_TOOLS: &str = "Read Grep Glob";
 
-/// The actual read-only guarantee. `Task` too: a subagent would not inherit it.
-const DENIED_TOOLS: &str = "Edit Write NotebookEdit Bash BashOutput KillShell Task";
+/// The actual read-only guarantee. `Task` too: a subagent would not inherit
+/// it. `WebSearch`/`WebFetch` are denied, not merely left un-pre-approved:
+/// no `--permission-prompt-tool`/`--permission-mode` is set on
+/// this spawn (see `ask()` below), so an un-pre-approved tool that isn't
+/// explicitly denied would still run silently in this non-interactive `-p`
+/// session instead of being blocked. Joe decided 2026-10-19 to drop both -
+/// 16 Ask sessions since 2026-09-22 made zero WebSearch/WebFetch calls - so
+/// there is no reason for the sidecar to ever reach the network, read-only
+/// transcript question or not: the transcript it reads can carry text
+/// injected by an earlier WebFetch in the main chat, and a WebFetch here
+/// would be a silent exfiltration path for it.
+const DENIED_TOOLS: &str =
+    "Edit Write NotebookEdit Bash BashOutput KillShell Task WebSearch WebFetch";
 
 /// What came back from one sidecar run.
 pub struct AskAnswer {
@@ -83,6 +94,41 @@ Omit that line entirely when the question was purely informational. Never write 
     )
 }
 
+/// The full `claude` CLI argv for one Ask run (excluding the binary path
+/// itself and stdio/env/cwd, which `ask()` sets on the `Command` directly).
+/// Extracted so a test can pin exactly what reaches the process - including
+/// that nothing here sets `--permission-prompt-tool`/`--permission-mode`/
+/// `--dangerously-skip-permissions`, which would let a tool absent from
+/// `ALLOWED_TOOLS` run anyway instead of needing `DENIED_TOOLS`.
+fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str) -> Vec<String> {
+    let mut args = vec![
+        "-p".to_string(),
+        prompt.to_string(),
+        "--model".to_string(),
+        ASK_MODEL.to_string(),
+        "--effort".to_string(),
+        ASK_EFFORT.to_string(),
+        "--allowedTools".to_string(),
+        ALLOWED_TOOLS.to_string(),
+        "--disallowedTools".to_string(),
+        DENIED_TOOLS.to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+    ];
+    match resume {
+        Some(id) => {
+            args.push("--resume".to_string());
+            args.push(id.to_string());
+        }
+        None => {
+            args.push("--session-id".to_string());
+            args.push(new_session_id.to_string());
+        }
+    }
+    args
+}
+
 /// Runs one question. `resume` continues an existing sidecar thread; `None`
 /// starts a fresh one with `new_session_id`.
 pub async fn ask(
@@ -106,27 +152,7 @@ pub async fn ask(
     let prompt = build_prompt(question, transcript, cwd);
 
     let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
-    cmd.arg("-p")
-        .arg(&prompt)
-        .arg("--model")
-        .arg(ASK_MODEL)
-        .arg("--effort")
-        .arg(ASK_EFFORT)
-        .arg("--allowedTools")
-        .arg(ALLOWED_TOOLS)
-        .arg("--disallowedTools")
-        .arg(DENIED_TOOLS)
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--verbose");
-    match resume {
-        Some(id) => {
-            cmd.arg("--resume").arg(id);
-        }
-        None => {
-            cmd.arg("--session-id").arg(new_session_id);
-        }
-    }
+    cmd.args(cli_args(&prompt, resume, new_session_id));
     cmd.current_dir(&run_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -247,10 +273,7 @@ mod tests {
     #[test]
     fn allowed_tools_are_read_only() {
         for t in ALLOWED_TOOLS.split(' ') {
-            assert!(
-                matches!(t, "Read" | "Grep" | "Glob" | "WebSearch" | "WebFetch"),
-                "{t} is not a read-only tool"
-            );
+            assert!(matches!(t, "Read" | "Grep" | "Glob"), "{t} is not a read-only tool");
         }
     }
 
@@ -260,6 +283,48 @@ mod tests {
         // so a mutating tool has to be named in the deny list to be refused.
         for t in ["Edit", "Write", "NotebookEdit", "Bash", "Task"] {
             assert!(DENIED_TOOLS.split(' ').any(|d| d == t), "{t} is not denied");
+        }
+    }
+
+    #[test]
+    fn built_args_deny_web_tools_and_carry_no_permission_bypass() {
+        let args = cli_args("q", None, "sid");
+
+        let disallowed_idx = args.iter().position(|a| a == "--disallowedTools").unwrap();
+        let disallowed = &args[disallowed_idx + 1];
+        assert!(disallowed.split(' ').any(|t| t == "WebFetch"), "got: {disallowed}");
+        assert!(disallowed.split(' ').any(|t| t == "WebSearch"), "got: {disallowed}");
+
+        let allowed_idx = args.iter().position(|a| a == "--allowedTools").unwrap();
+        let allowed = &args[allowed_idx + 1];
+        assert!(!allowed.contains("WebFetch"), "got: {allowed}");
+        assert!(!allowed.contains("WebSearch"), "got: {allowed}");
+
+        // Confirms this comment's premise is actually true, not just asserted:
+        // no flag here would let a denied tool run anyway.
+        assert!(!args.iter().any(|a| {
+            a == "--permission-prompt-tool" || a == "--permission-mode" || a == "--dangerously-skip-permissions"
+        }));
+    }
+
+    #[test]
+    fn built_args_resume_vs_fresh_session() {
+        let fresh = cli_args("q", None, "new-sid");
+        assert!(fresh.windows(2).any(|w| w == ["--session-id".to_string(), "new-sid".to_string()]));
+
+        let resumed = cli_args("q", Some("old-sid"), "new-sid");
+        assert!(resumed.windows(2).any(|w| w == ["--resume".to_string(), "old-sid".to_string()]));
+    }
+
+    #[test]
+    fn web_tools_are_denied_not_just_unapproved() {
+        // WebSearch/WebFetch must not merely be absent from
+        // ALLOWED_TOOLS - they have to be in DENIED_TOOLS, since this spawn
+        // sets no --permission-prompt-tool/--permission-mode that would
+        // otherwise let an un-pre-approved tool run anyway.
+        for t in ["WebSearch", "WebFetch"] {
+            assert!(!ALLOWED_TOOLS.split(' ').any(|a| a == t), "{t} must not be pre-approved");
+            assert!(DENIED_TOOLS.split(' ').any(|d| d == t), "{t} must be explicitly denied");
         }
     }
 
