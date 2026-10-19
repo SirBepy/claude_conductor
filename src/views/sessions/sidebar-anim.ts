@@ -111,7 +111,18 @@ function suppressTransientScrollbar(listEl: HTMLElement): void {
   settleTimers.set(listEl, setTimeout(() => listEl.classList.remove("anim-settling"), SETTLE_MS));
 }
 
+// Every renderSidebar call rebuilds every row's html string from current
+// state, even rows whose data hasn't changed (e.g. a background refresh
+// tick for a different session). Without this, updateNode would wipe and
+// rebuild a kept row's children on every such pass - and if a click's
+// mousedown lands on a child (title text, icon) that gets detached between
+// mousedown and mouseup, the browser never fires the click at all. Same
+// mechanism as the Drafts panel's focus-refresh bug (6c3db673), different
+// trigger (periodic re-render, not just window focus).
+const lastRowHtml = new WeakMap<HTMLLIElement, string>();
+
 function updateNode(kept: HTMLLIElement, html: string): void {
+  if (lastRowHtml.get(kept) === html) return;
   const tmp = document.createElement("ul");
   tmp.innerHTML = html;
   const fresh = tmp.firstElementChild as HTMLLIElement | null;
@@ -121,6 +132,7 @@ function updateNode(kept: HTMLLIElement, html: string): void {
   for (const attr of fresh.attributes) {
     if (attr.name !== "class") kept.setAttribute(attr.name, attr.value);
   }
+  lastRowHtml.set(kept, html);
 }
 
 function parseHtml(html: string): HTMLLIElement | null {
@@ -314,7 +326,11 @@ export function reconcileList(
       nodes.push(kept);
     } else {
       const newLi = parseHtml(entry.html);
-      if (newLi) { enterKeys.add(entry.key); nodes.push(newLi); }
+      if (newLi) {
+        enterKeys.add(entry.key);
+        nodes.push(newLi);
+        lastRowHtml.set(newLi, entry.html);
+      }
     }
   }
 
