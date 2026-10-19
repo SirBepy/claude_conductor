@@ -19,7 +19,9 @@ pub enum AutoUpdateMode {
 }
 
 impl Default for AutoUpdateMode {
-    fn default() -> Self { Self::Immediate }
+    // Notify, then the user clicks Download & Install: an update never lands
+    // on its own unless the user picks Immediate.
+    fn default() -> Self { Self::OnStartup }
 }
 
 impl<'de> Deserialize<'de> for AutoUpdateMode {
@@ -370,6 +372,14 @@ mod tests {
         let raw = r#"{ "autoUpdate": true }"#;
         let s: Settings = serde_json::from_str(raw).unwrap();
         assert_eq!(s.auto_update, AutoUpdateMode::Immediate);
+    }
+
+    #[test]
+    fn auto_update_defaults_to_on_startup_when_missing_or_null() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.auto_update, AutoUpdateMode::OnStartup);
+        let s: Settings = serde_json::from_str(r#"{ "autoUpdate": null }"#).unwrap();
+        assert_eq!(s.auto_update, AutoUpdateMode::OnStartup);
     }
 
     #[test]
