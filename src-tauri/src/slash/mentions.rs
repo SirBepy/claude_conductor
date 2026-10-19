@@ -122,18 +122,27 @@ block is machine-generated, not something the user typed.\n\n{}\n{MENTION_BLOCK_
     ))
 }
 
-/// Removes an appended context block from transcript text. The daemon writes
-/// the block into the wire message, so it lands in the CLI's JSONL and would
-/// otherwise leak into a derived chat title.
+/// Removes every appended context block from transcript text. The daemon
+/// writes the block into the wire message, so it lands in the CLI's JSONL and
+/// would otherwise leak into a derived chat title. Loops rather than stopping
+/// after one hit: `nudge::on_tool_batch` can augment several queued messages
+/// in the same batch, each carrying its own block, and `parse_mid_turn_frame`
+/// needs all of them gone before it re-splits the body on blank lines.
 pub fn strip_block(s: &str) -> std::borrow::Cow<'_, str> {
-    let Some(open) = s.find(MENTION_BLOCK_OPEN) else { return std::borrow::Cow::Borrowed(s) };
-    let after = match s[open..].find(MENTION_BLOCK_CLOSE) {
-        Some(rel) => open + rel + MENTION_BLOCK_CLOSE.len(),
-        None => s.len(),
-    };
-    let mut out = s[..open].trim_end().to_string();
-    out.push_str(&s[after..]);
-    std::borrow::Cow::Owned(out.trim().to_string())
+    if !s.contains(MENTION_BLOCK_OPEN) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut cur = s.to_string();
+    while let Some(open) = cur.find(MENTION_BLOCK_OPEN) {
+        let after = match cur[open..].find(MENTION_BLOCK_CLOSE) {
+            Some(rel) => open + rel + MENTION_BLOCK_CLOSE.len(),
+            None => cur.len(),
+        };
+        let mut out = cur[..open].trim_end().to_string();
+        out.push_str(&cur[after..]);
+        cur = out;
+    }
+    std::borrow::Cow::Owned(cur.trim().to_string())
 }
 
 /// `enumerate::scan_all` reads every `SKILL.md` body under `~/.claude`, and
