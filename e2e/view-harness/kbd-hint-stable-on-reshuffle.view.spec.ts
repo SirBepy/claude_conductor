@@ -13,6 +13,7 @@ import { mountSessionsList, sessionInstance, fireEvent } from "./harness";
 // re-animating, for as long as Ctrl stays held.
 //
 // asserts: src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/sessions.css
+// (sessions.css's .sessions-empty-row centering rules are unrelated to kbd-hint badges)
 
 const S1 = sessionInstance({ session_id: "s1", cwd: "C:/Projects/aaa" });
 const S2 = sessionInstance({ session_id: "s2", cwd: "C:/Projects/zzz" });

@@ -134,12 +134,18 @@
 
 .sessions-empty-row {
   display: flex !important;
+  /* .sessions-list is a column flex (session-list.css); flex:1 lets this
+     lone row fill the list and center its card both ways. */
+  flex: 1;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 12px 12px !important;
   color: var(--color-text-muted) !important;
   font-size: 0.85rem !important;
   font-style: italic;
+  text-align: center;
   cursor: default !important;
   pointer-events: none;
   border-bottom: none !important;
