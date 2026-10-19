@@ -390,7 +390,7 @@ mod tests {
     }
 
     /// A personal repo (no client note lists it) still creates them tied to
-    /// no client, same as passing no `projects` did before this change.
+    /// no client, whatever `projects` the model passes.
     #[test]
     fn new_person_outside_any_client_ignores_a_projects_tag_too() {
         let (state, _d) = in_repo("fibo");

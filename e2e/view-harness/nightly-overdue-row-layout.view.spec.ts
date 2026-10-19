@@ -1,12 +1,10 @@
 // asserts: src/views/settings/subviews/system/nightly.ts
 
-// The "Give up waiting after [N] hours" row used to float its number input
-// mid-row: `.kit-row` is `justify-content: space-between` over its direct
-// children, and the row previously had THREE of them (label, input, "hours"
-// label), so the input landed in the leftover middle gap instead of sitting
-// next to its own unit. The fix wraps the input and "hours" label in one
-// inline-flex span, so the row goes back to two space-between children and
-// the pair lands together at the row's right edge.
+// `.kit-row` is `justify-content: space-between` over its direct children,
+// so the "Give up waiting after [N] hours" row keeps exactly two: the label,
+// and one inline-flex span holding the number input and its "hours" unit.
+// A third direct child would land the input in the leftover middle gap,
+// away from its unit; with two, the pair sits together at the right edge.
 
 import { test, expect } from "@playwright/test";
 import { mountView, capture } from "./harness";
