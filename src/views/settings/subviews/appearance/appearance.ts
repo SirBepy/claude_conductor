@@ -1,110 +1,16 @@
 import { html, render } from "lit-html";
-import { SIRBEPY_PALETTES } from "../../../../../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default";
 import { attachTooltips } from "../../../../shared/row-tooltip";
 import { saveSettings } from "../../../../shared/settings-save";
-import { getSettings, setSettings } from "../../../../shared/state";
+import { getSettings } from "../../../../shared/state";
 import { isRemote } from "../../../../shared/transport";
 import { LS_ANIM } from "../../../sessions/sidebar-anim";
 import { settingsHeader, toggleRow } from "../../ui";
 import { backgroundSection, hydrateBackgroundFx } from "./components/background/background";
+import { hydrateThemePicker, themePickerSection } from "./theme-picker";
 import "./appearance.css";
 
 function $(id: string): HTMLElement | null {
   return document.getElementById(id);
-}
-
-// ── Theme (ported from subviews/themes/themes.ts) ───────────────────────────
-
-function resolveThemeId(baseId: string, isLight: boolean): string {
-  return isLight ? baseId + "-light" : baseId;
-}
-
-function parseThemeId(fullId: string): { baseId: string; isLight: boolean } {
-  const isLight = fullId.endsWith("-light");
-  return { baseId: isLight ? fullId.replace("-light", "") : fullId, isLight };
-}
-
-/**
- * Applies a flat theme id ("void" | "void-light") as the styleguide 2D pair:
- * data-theme="<palette>" + data-mode="light|dark". Storage stays the flat id.
- */
-function applyThemeAttrs(fullId: string): void {
-  const { baseId, isLight } = parseThemeId(fullId);
-  const el = document.documentElement;
-  el.dataset.theme = baseId;
-  el.dataset.mode = isLight ? "light" : "dark";
-}
-
-function renderThemeCards(activeTheme: string): void {
-  const themeGrid = $("themeGrid");
-  const modeLabelDark = $("modeLabelDark");
-  const modeLabelLight = $("modeLabelLight");
-  if (!themeGrid) return;
-  const { baseId: activeBase, isLight } = parseThemeId(activeTheme);
-  const colorKey: "darkSwatch" | "lightSwatch" = isLight ? "lightSwatch" : "darkSwatch";
-  themeGrid.innerHTML = "";
-  for (const t of SIRBEPY_PALETTES) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "kit-palette-card v-focusable" + (t.id === activeBase ? " kit-palette-card--active" : "");
-    card.dataset.palette = t.id;
-    card.setAttribute("aria-label", `${t.label} theme`);
-    card.setAttribute("aria-pressed", String(t.id === activeBase));
-    card.innerHTML = `
-      <span class="kit-palette-swatch">${t[colorKey].map((c) => `<span style="background:${c}"></span>`).join("")}</span>
-      <span class="kit-palette-label">${t.label}</span>
-    `;
-    card.onclick = () => applyTheme(t.id);
-    themeGrid.appendChild(card);
-  }
-
-  if (modeLabelDark) modeLabelDark.style.color = isLight ? "var(--sb-muted)" : "var(--color-primary)";
-  if (modeLabelLight) modeLabelLight.style.color = isLight ? "var(--color-primary)" : "var(--sb-muted)";
-}
-
-function applyTheme(baseId: string): void {
-  const themeModToggle = $("themeModToggle") as HTMLInputElement | null;
-  const isLight = themeModToggle ? themeModToggle.checked : false;
-  const fullId = resolveThemeId(baseId, isLight);
-  applyThemeAttrs(fullId);
-  const s = getSettings();
-  s.theme = fullId;
-  setSettings(s);
-  saveSettings();
-
-  const themeGrid = $("themeGrid");
-  if (themeGrid) {
-    for (const card of themeGrid.querySelectorAll<HTMLElement>(".kit-palette-card")) {
-      const isActive = card.dataset.palette === baseId;
-      card.classList.toggle("kit-palette-card--active", isActive);
-      card.setAttribute("aria-pressed", String(isActive));
-    }
-  }
-  const modeLabelDark = $("modeLabelDark");
-  const modeLabelLight = $("modeLabelLight");
-  if (modeLabelDark) modeLabelDark.style.color = isLight ? "var(--sb-muted)" : "var(--color-primary)";
-  if (modeLabelLight) modeLabelLight.style.color = isLight ? "var(--color-primary)" : "var(--sb-muted)";
-}
-
-function hydrateTheme(): void {
-  const themeModToggle = $("themeModToggle") as HTMLInputElement | null;
-  if (!themeModToggle) return;
-  const s = getSettings();
-  const savedTheme = (s.theme as string) || document.documentElement.dataset.theme || "void";
-  themeModToggle.checked = savedTheme.endsWith("-light");
-  renderThemeCards(savedTheme);
-
-  themeModToggle.onchange = () => {
-    const cur = getSettings();
-    const { baseId } = parseThemeId((cur.theme as string) || "void");
-    const isLight = themeModToggle.checked;
-    const fullId = resolveThemeId(baseId, isLight);
-    applyThemeAttrs(fullId);
-    cur.theme = fullId;
-    setSettings(cur);
-    saveSettings();
-    renderThemeCards(fullId);
-  };
 }
 
 // ── Usage colors / overlay / interface (ported from subviews/visuals/visuals.ts) ──
@@ -190,7 +96,7 @@ export async function renderAppearanceView(
   render(template(), root);
 
   try {
-    hydrateTheme();
+    hydrateThemePicker();
     await hydrateUsageColorsAndInterface();
     hydrateBackgroundFx();
   } catch (e) { console.error("[appearance] render failed", e); }
@@ -205,24 +111,7 @@ function template() {
       <div class="view-body">
 
         ${isRemote() ? "" : html`
-        <div class="kit-section">
-          <div class="kit-section-title">Theme</div>
-          <div class="kit-row" style="justify-content: space-between;">
-            <div class="option-label-row">
-              <i class="ph ph-moon"></i>
-              <span>Dark Mode</span>
-            </div>
-            <div class="mode-toggle-row">
-              <span class="mode-toggle-label" id="modeLabelDark">Dark</span>
-              <label class="kit-toggle">
-                <input type="checkbox" id="themeModToggle">
-                <span class="kit-toggle-track"></span>
-              </label>
-              <span class="mode-toggle-label" id="modeLabelLight">Light</span>
-            </div>
-          </div>
-          <div class="kit-palette-grid" id="themeGrid"></div>
-        </div>
+        ${themePickerSection()}
 
         <div class="kit-section">
           <div class="kit-section-title">Usage colors</div>

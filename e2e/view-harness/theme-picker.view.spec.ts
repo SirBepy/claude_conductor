@@ -2,25 +2,50 @@ import { expect, test } from "@playwright/test";
 import { capture, fireEvent, mountView } from "./harness";
 import { SIRBEPY_PALETTES } from "../../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default";
 
-// asserts: src/views/settings/subviews/appearance/appearance.ts, src/shared/theme-sync.ts, src/shared/boot.ts
+// asserts: src/views/settings/subviews/appearance/appearance.ts, src/views/settings/subviews/appearance/theme-picker.ts, src/shared/theme-sync.ts, src/shared/boot.ts
 
-test("Appearance lists every kit palette and picking one repaints the window", async ({ page }) => {
-  await page.setViewportSize({ width: 960, height: 900 });
+const bgOf = (sel: string) => (page: import("@playwright/test").Page) =>
+  page.locator(sel).evaluate((el) => getComputedStyle(el).backgroundColor);
+
+// Joe's real Settings window width, where the picker has to fit.
+test.use({ viewport: { width: 474, height: 900 } });
+
+test("hovering a dot previews it without applying; clicking applies it", async ({ page }) => {
   await mountView(page, { view: "settings-appearance" });
 
-  const cards = page.locator("#themeGrid .kit-palette-card");
-  await expect(cards).toHaveCount(SIRBEPY_PALETTES.length);
+  const dots = page.locator("#themePicker .tp-dot");
+  await expect(dots).toHaveCount(SIRBEPY_PALETTES.length);
+  await expect(page.locator("#themePicker .tp-group")).toHaveText(["SirBepy", "Editor classics"]);
 
-  await page.locator('#themeGrid .kit-palette-card[data-palette="nord"]').click();
+  // Hover: only the preview repaints, to Gruvbox's dark background.
+  await page.locator('.tp-dot[data-palette="gruvbox"]').hover();
+  await expect(page.locator(".tp-preview")).toHaveAttribute("data-theme", "gruvbox");
+  await expect(page.locator("#themeName")).toHaveText("Gruvbox");
+  // Polled: the preview cross-fades its background.
+  await expect.poll(() => bgOf(".tp-preview")(page)).toBe("rgb(29, 32, 33)");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "void");
+
+  // Leaving the dot puts the preview back on the applied theme.
+  await page.mouse.move(2, 2);
+  await expect(page.locator(".tp-preview")).toHaveAttribute("data-theme", "void");
+
+  // Click applies to the whole window and marks the dot.
+  await page.locator('.tp-dot[data-palette="nord"]').click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "nord");
-  await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
-  // The picked palette's own tokens resolve, i.e. its stylesheet is loaded.
+  await expect(page.locator('.tp-dot[data-palette="nord"]')).toHaveAttribute("aria-pressed", "true");
   const bg = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue("--color-background").trim(),
   );
   expect(bg.toLowerCase()).toBe("#2e3440");
 
-  await capture(page.locator(".view-settings-appearance .kit-section").first(), "theme-picker-nord-dark");
+  // Light switch keeps the palette and flips the mode everywhere.
+  await page.locator('#themeModeSeg button[data-mode="light"]').click();
+  await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+  await expect(page.locator(".tp-preview")).toHaveAttribute("data-mode", "light");
+  await expect.poll(() => bgOf(".tp-preview")(page)).toBe("rgb(229, 233, 240)");
+
+  await page.mouse.move(2, 2);
+  await capture(page.locator(".view-settings-appearance .kit-section").first(), "theme-picker-nord-light");
 });
 
 // The Chats window boots through the same initBoot path as the main window;

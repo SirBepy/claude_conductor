@@ -25,7 +25,7 @@ describe("appearance settings screen on the phone", () => {
     const root = document.createElement("div");
     document.body.appendChild(root);
     const dispose = await renderAppearanceView(root);
-    expect(root.querySelector("#themeModToggle")).toBeNull();
+    expect(root.querySelector("#themePicker")).toBeNull();
     expect(root.querySelector("#colorApplyDashboard")).toBeNull();
     expect(root.querySelector("#overlayBackgroundStyle")).toBeNull();
     expect(root.querySelector("#backgroundFxEnabled")).toBeNull();
@@ -37,7 +37,7 @@ describe("appearance settings screen on the phone", () => {
     const root = document.createElement("div");
     document.body.appendChild(root);
     const dispose = await renderAppearanceView(root);
-    expect(root.querySelector("#themeModToggle")).not.toBeNull();
+    expect(root.querySelector("#themePicker")).not.toBeNull();
     expect(root.querySelector("#colorApplyDashboard")).not.toBeNull();
     expect(root.querySelector("#overlayBackgroundStyle")).not.toBeNull();
     expect(root.querySelector("#backgroundFxEnabled")).not.toBeNull();
