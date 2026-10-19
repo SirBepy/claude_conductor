@@ -1,0 +1,210 @@
+/* Theme picker (theme-picker.ts). The preview carries its own data-theme /
+ * data-mode, so every palette colour token inside it resolves to the hovered palette
+ * while the rest of the window keeps the applied one. */
+
+.tp-preview {
+  display: flex;
+  height: 196px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-background);
+  color: var(--color-text);
+  pointer-events: none;
+  user-select: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.tp-pv-rail {
+  width: 132px;
+  flex-shrink: 0;
+  background: var(--color-surface-alt);
+  border-right: 1px solid var(--color-border);
+}
+
+/* Mirrors .sessions-list li / li.active (session-list.css): that list's own
+ * class carries phone-width layout rules that fire at this window's width. */
+.tp-pv-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.tp-pv-row.is-active {
+  background: var(--color-primary);
+  color: var(--color-background);
+}
+.tp-pv-avatar {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-surface-3);
+  box-shadow: inset 0 0 0 2px var(--color-border);
+}
+.tp-pv-avatar.is-busy {
+  box-shadow: inset 0 0 0 2px var(--color-warning);
+}
+.tp-pv-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.tp-pv-text b {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tp-pv-text small {
+  font-size: 10px;
+  color: var(--sb-muted);
+}
+.tp-pv-row.is-active .tp-pv-text small {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.tp-pv-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tp-pv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+}
+.tp-pv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 45%, transparent);
+  color: var(--color-success);
+  font: 500 10px/1.3 var(--font-mono, monospace);
+}
+/* Real .msg bubbles, sized down to fit the preview. */
+.tp-pv-msgs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 10px 0;
+  overflow: hidden;
+}
+.tp-pv-msgs .msg {
+  margin-bottom: 7px;
+  padding: 5px 9px;
+  font-size: 11.5px;
+}
+.tp-pv-composer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 10px 9px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+  background: var(--color-surface);
+  color: var(--sb-muted);
+  font-size: 11px;
+}
+
+.tp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 0 2px;
+}
+.tp-name {
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+/* Dark / Light segmented switch */
+.tp-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+.tp-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sb-muted);
+  font-family: inherit;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+.tp-seg button[aria-pressed="true"] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.tp-group {
+  margin: 12px 2px 7px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sb-muted);
+}
+.tp-dots {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+  justify-items: center;
+}
+/* Background / surface split diagonally, the palette's accent in the middle. */
+.tp-dot {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--tp-surface);
+  background: linear-gradient(135deg, var(--tp-bg) 50%, var(--tp-surface) 50%);
+  cursor: pointer;
+  transition: transform 0.12s var(--motion-ease);
+}
+.tp-dot::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--tp-accent);
+  transform: translate(-50%, -50%);
+}
+.tp-dot:hover,
+.tp-dot:focus-visible {
+  transform: scale(1.08);
+}
+.tp-dot:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.tp-dot[aria-pressed="true"] {
+  border-color: var(--color-text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 45%, transparent);
+}

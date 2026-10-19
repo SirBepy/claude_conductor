@@ -1,3 +1,4 @@
 /* Appearance subview - merges themes.ts + visuals.ts. Most widget rules
- * (.kit-section, .kit-row, .kit-toggle, .kit-palette-*, .mode-toggle-row,
- * .info-wrap/.info-icon/.info-tooltip) live in the kit / styles/tooltips.css already. */
+ * (.kit-section, .kit-row, .kit-toggle, .info-wrap/.info-icon/.info-tooltip)
+ * live in the kit / styles/tooltips.css already; the theme picker's own rules
+ * are in theme-picker.css. */

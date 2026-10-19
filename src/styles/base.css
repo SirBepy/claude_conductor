@@ -1,7 +1,10 @@
 /* The themes' own --color-text-muted measures 3.53:1 on a chip background, under
    the 4.5:1 floor for text that size. Mixing it toward --color-text clears the
-   floor in every theme and both modes, which a hardcoded hex could not. */
-:root {
+   floor in every theme and both modes, which a hardcoded hex could not.
+   Also declared on any [data-theme] scope: a derived var resolves where it is
+   declared, so the theme picker's preview (a nested data-theme) would otherwise
+   inherit the page palette's values instead of its own. */
+:root, [data-theme] {
     --sb-muted: color-mix(in srgb, var(--color-text-muted) 62%, var(--color-text));
 
     /* No vendor theme defines a warning hue (--color-surface/-border/-text
