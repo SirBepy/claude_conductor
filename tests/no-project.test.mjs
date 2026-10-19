@@ -43,3 +43,19 @@ describe("no-project labels", () => {
     expect(html).toBe(NO_PROJECT_ICON_HTML);
   });
 });
+
+describe("renderAvatar image branch", () => {
+  it("escapes an avatar path that carries HTML-special characters", () => {
+    // A stored avatar path is attacker-influenced data (round 2 security
+    // audit, 2026-10-18): it must not be able to break out of the img src
+    // attribute and inject a new attribute/element.
+    const html = renderAvatar({ kind: "image", value: 'x.png"><script>alert(1)</script>' });
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&quot;");
+  });
+
+  it("still renders a normal avatar path as a plain file:/// src", () => {
+    const html = renderAvatar({ kind: "image", value: "C:\\Users\\tecno\\avatar.png" });
+    expect(html).toContain('src="file:///C:/Users/tecno/avatar.png"');
+  });
+});
