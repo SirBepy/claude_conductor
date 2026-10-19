@@ -123,8 +123,17 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
                 match frame {
                     Some(Ok(Message::Text(txt))) => {
                         deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
-                        handle_frame(state, &peer.machine_id, &peer.label, &txt);
-                        maybe_refresh_prompts_after_frame(state, peer).await;
+                        // Only re-check prompts when the frame actually changed our
+                        // cached view of the peer: a row's `awaiting` flipping (new
+                        // question, or one just answered) IS a row change, so it is
+                        // already covered. A prompt answered on the peer with no
+                        // accompanying row change (rare) is still caught within 2s
+                        // by `prompt_tick` below, so skipping the refresh on a
+                        // no-op frame costs nothing but saves the per-frame RPC
+                        // round trip that amplified the hot loop.
+                        if handle_frame(state, &peer.machine_id, &peer.label, &txt) {
+                            maybe_refresh_prompts_after_frame(state, peer).await;
+                        }
                     }
                     Some(Ok(_)) => deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER, // ping/pong/binary: still alive
                     Some(Err(_)) | None => return, // errored or closed
@@ -165,7 +174,18 @@ async fn refresh_prompts(state: &Arc<DaemonState>, peer: &PeerMachine) {
     };
     match client.call("list_pending_prompts", serde_json::Value::Null).await {
         Ok(serde_json::Value::Array(prompts)) => {
-            let prompts = drop_local_collisions(state, &peer.machine_id, prompts, |p| p["payload"]["session_id"].as_str());
+            // A prompt (raw JSON from `list_pending_prompts`) never carries a
+            // `machine` tag the way an `Instance` row does, so every collision
+            // here is "untagged" and counted - there is no silently-dropped-
+            // elsewhere case to defer to.
+            let (prompts, collisions) =
+                drop_local_collisions(state, prompts, |_: &serde_json::Value| false, |p| p["payload"]["session_id"].as_str());
+            if collisions > 0 {
+                log::warn!(
+                    "peer_link: {} reported {collisions} local session id(s) in its prompt list; dropped",
+                    peer.machine_id
+                );
+            }
             state.mirror.set_prompts(&peer.machine_id, prompts)
         }
         Ok(other) => {
@@ -178,39 +198,68 @@ async fn refresh_prompts(state: &Arc<DaemonState>, peer: &PeerMachine) {
 /// Ignores every method except `instances_changed` (a later chunk forwards
 /// chat streams over this same link). Malformed frames are dropped, not
 /// fatal to the link - a peer's own bug shouldn't tear down our reconnect.
-fn handle_frame(state: &Arc<DaemonState>, machine_id: &str, label: &str, txt: &str) {
-    let Ok(frame) = serde_json::from_str::<serde_json::Value>(txt) else { return };
+///
+/// Returns whether the frame actually changed our cached view of the peer
+/// (per `MirrorState::set_instances`), and only re-publishes
+/// `instances_changed` locally when it did. Two paired daemons each run a
+/// link to the other, and `remote_ws_pump::pump_global_events` forwards
+/// every publish immediately, so republishing an unchanged frame would feed
+/// it straight back to the peer's own link, which republishes it back to
+/// us, forever - the feedback loop behind the daemon.log flood this guards
+/// against.
+fn handle_frame(state: &Arc<DaemonState>, machine_id: &str, label: &str, txt: &str) -> bool {
+    let Ok(frame) = serde_json::from_str::<serde_json::Value>(txt) else { return false };
     if frame.get("method").and_then(serde_json::Value::as_str) != Some("instances_changed") {
-        return;
+        return false;
     }
-    let Some(arr) = frame.pointer("/params/instances") else { return };
-    let Ok(rows) = serde_json::from_value::<Vec<Instance>>(arr.clone()) else { return };
-    let rows = drop_local_collisions(state, machine_id, rows, |i| Some(i.session_id.as_str()));
-    state.mirror.set_instances(machine_id, label, rows);
-    publish_instances_changed(state);
+    let Some(arr) = frame.pointer("/params/instances") else { return false };
+    let Ok(rows) = serde_json::from_value::<Vec<Instance>>(arr.clone()) else { return false };
+    let (rows, collisions) = drop_local_collisions(state, rows, |i: &Instance| i.machine.is_some(), |i| Some(i.session_id.as_str()));
+    if collisions > 0 {
+        log::warn!("peer_link: {machine_id} reported {collisions} local session id(s) as its own; dropped");
+    }
+    let changed = state.mirror.set_instances(machine_id, label, rows);
+    if changed {
+        publish_instances_changed(state);
+    }
+    changed
 }
 
-/// Drops (and logs) every row or prompt a peer reports under one of OUR
-/// session ids. Honest peers never do this, since ids are fresh uuids, so a
-/// hit means a broken or hostile peer trying to claim a local chat. The read
+/// Drops every row or prompt a peer reports under one of OUR session ids,
+/// returning the survivors plus a count of how many untagged collisions were
+/// found. An item already carrying a `machine` tag (an `Instance` row that is
+/// a peer's own mirrored copy of a THIRD machine, or a stale echo of us) is
+/// left alone here, not logged: `MirrorState::set_instances` already drops
+/// those silently one hop later, and logging them again here per row per
+/// frame is exactly the hot-loop log spam this guards against. Only an UNTAGGED
+/// collision - a peer claiming raw, untagged ownership of our session id,
+/// which an honest peer never does since ids are fresh uuids - is suspicious,
+/// and it is counted and logged once per call, never once per row. The read
 /// side (`machines::mirrored_owner`/`mirrored_prompts`/`all_instances`) also
 /// refuses collisions, covering a local chat created after the frame landed.
 fn drop_local_collisions<T>(
     state: &DaemonState,
-    machine_id: &str,
     items: Vec<T>,
+    is_tagged: impl Fn(&T) -> bool,
     session_id: impl Fn(&T) -> Option<&str>,
-) -> Vec<T> {
-    items
+) -> (Vec<T>, usize) {
+    let mut collisions = 0usize;
+    let kept = items
         .into_iter()
-        .filter(|item| match session_id(item) {
-            Some(sid) if super::is_local_session(state, sid) => {
-                log::warn!("peer_link: {machine_id} reported local session {sid} as its own; dropped");
-                false
+        .filter(|item| {
+            if is_tagged(item) {
+                return true;
             }
-            _ => true,
+            match session_id(item) {
+                Some(sid) if super::is_local_session(state, sid) => {
+                    collisions += 1;
+                    false
+                }
+                _ => true,
+            }
         })
-        .collect()
+        .collect();
+    (kept, collisions)
 }
 
 #[cfg(test)]
@@ -286,6 +335,85 @@ mod tests {
         let ids: Vec<String> = state.mirror.instances().into_iter().map(|i| i.session_id).collect();
         assert_eq!(ids, vec!["theirs".to_string()]);
         assert_eq!(state.mirror.owner_of("ours"), None, "the claim never reached the mirror");
+    }
+
+    #[test]
+    fn drop_local_collisions_counts_only_untagged_hits() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("ours", std::path::Path::new("C:/x"), "p", "2026-10-18T00:00:00Z");
+
+        // A plain (sid, tagged) pair stands in for an Instance/prompt row here -
+        // the two real call sites each pass their own `is_tagged`/`session_id`
+        // closures over their own item type.
+        let rows = vec![
+            ("ours", true),   // a one-hop echo of us, already carrying a machine tag
+            ("ours", false),  // a bare claim of our session id, no tag at all
+            ("theirs", false), // an honest, unrelated row
+        ];
+        let (kept, collisions) = drop_local_collisions(
+            &state,
+            rows,
+            |(_, tagged): &(&str, bool)| *tagged,
+            |(sid, _): &(&str, bool)| Some(*sid),
+        );
+        assert_eq!(collisions, 1, "only the untagged collision counts - a tagged echo is left for set_instances to drop silently, never logged here");
+        assert_eq!(kept.len(), 2, "the tagged row survives this filter (set_instances drops it one hop later); only the untagged collision is removed here");
+    }
+
+    #[test]
+    fn handle_frame_republishes_only_when_the_frame_changed_something() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let mut rx = state.notifier.subscribe();
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "instances_changed",
+            "params": {"instances": [{
+                "session_id": "s1", "pid": 1, "cwd": "C:/x", "project_id": "p",
+                "kind": "interactive", "started_at": "2026-09-05T00:00:00Z",
+            }]},
+        })
+        .to_string();
+
+        assert!(handle_frame(&state, "mach-b", "Mac Mini", &frame), "the first delivery changes the mirror");
+        assert!(!handle_frame(&state, "mach-b", "Mac Mini", &frame), "an identical re-delivery of the same frame is a no-op");
+
+        assert!(rx.try_recv().is_ok(), "the real change must still publish instances_changed once");
+        assert!(rx.try_recv().is_err(), "the unchanged echo must not publish a second time - this is the A-republishes-to-B-republishes-to-A feedback loop");
+    }
+
+    #[test]
+    fn handle_frame_tagged_echo_of_a_local_session_is_silently_dropped() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("ours", std::path::Path::new("C:/x"), "p", "2026-10-18T00:00:00Z");
+        // Tagged with OUR OWN machine id, the way a peer's one-hop echo of a
+        // row it mirrored from us would arrive - distinct from the untagged
+        // claim `handle_frame_drops_a_row_claiming_a_local_session_id` covers.
+        let tagged_echo = serde_json::json!({
+            "session_id": "ours", "pid": 1, "cwd": "C:/x", "project_id": "p",
+            "kind": "interactive", "started_at": "2026-09-05T00:00:00Z",
+            "machine": {"id": "this-daemon", "label": "Us", "online": true},
+        });
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "instances_changed",
+            "params": {"instances": [tagged_echo]},
+        });
+        handle_frame(&state, "mach-b", "Mac Mini", &frame.to_string());
+        assert!(state.registry.get("ours").is_some(), "the local session itself must be untouched");
+        assert_eq!(state.mirror.owner_of("ours"), None, "the tagged echo must never be adopted as a mirrored row");
+        assert!(state.mirror.instances().is_empty(), "set_instances drops the tagged row silently, same as the loop guard it already had");
     }
 
     /// End-to-end over real loopback sockets: two `DaemonState`s each run

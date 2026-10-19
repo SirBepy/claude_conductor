@@ -107,7 +107,15 @@ impl MirrorState {
     /// already carrying a `machine` tag (the peer's own mirror of a THIRD
     /// machine, or a stale echo of us) are dropped, so mirroring never
     /// transitively chains past one hop.
-    pub fn set_instances(&self, machine_id: &str, label: &str, rows: Vec<Instance>) {
+    ///
+    /// Returns whether the peer's cached view actually changed (a new peer
+    /// entry, an online transition, or the filtered rows differing from what
+    /// was already cached) - `peer_link::handle_frame` uses this to decide
+    /// whether to re-publish `instances_changed` locally. Without it, two
+    /// daemons each mirroring the other form a feedback loop: A republishes
+    /// B's unchanged frame, which reaches B's link and makes B republish,
+    /// forever, bounded only by round-trip latency.
+    pub fn set_instances(&self, machine_id: &str, label: &str, rows: Vec<Instance>) -> bool {
         let rows: Vec<Instance> = rows.into_iter().filter(|i| i.machine.is_none()).collect();
         // A real row for an id just superseded any pending-owner guess for
         // it - whether that guess named this machine or (in theory) a stale
@@ -119,8 +127,14 @@ impl MirrorState {
             }
         }
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let prompts = guard.get(machine_id).map(|p| p.prompts.clone()).unwrap_or_default();
+        let prev = guard.get(machine_id);
+        let changed = match prev {
+            None => true,
+            Some(p) => !p.online || p.instances != rows,
+        };
+        let prompts = prev.map(|p| p.prompts.clone()).unwrap_or_default();
         guard.insert(machine_id.to_string(), MirroredPeer { label: label.to_string(), online: true, instances: rows, prompts });
+        changed
     }
 
     /// Flips the online flag without touching the cached rows - a dropped
@@ -259,6 +273,16 @@ mod tests {
         m.set_instances("mach-b", "Mac Mini", vec![fixture("s1", None)]);
         assert_eq!(m.owner_of("s1").as_deref(), Some("mach-b"));
         assert_eq!(m.owner_of("unknown"), None);
+    }
+
+    #[test]
+    fn set_instances_reports_change_only_when_the_view_actually_differs() {
+        let m = MirrorState::new();
+        assert!(m.set_instances("mach-b", "Mac Mini", vec![fixture("s1", None)]), "a brand new peer entry is always a change");
+        assert!(!m.set_instances("mach-b", "Mac Mini", vec![fixture("s1", None)]), "an identical re-delivery of the same snapshot is not a change");
+        assert!(m.set_instances("mach-b", "Mac Mini", vec![fixture("s1", None), fixture("s2", None)]), "a differing row set is a change");
+        m.set_online("mach-b", false);
+        assert!(m.set_instances("mach-b", "Mac Mini", vec![fixture("s1", None), fixture("s2", None)]), "coming back online with the same rows is still a change");
     }
 
     #[test]
