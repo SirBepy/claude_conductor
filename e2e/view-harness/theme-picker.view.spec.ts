@@ -33,3 +33,20 @@ test("a booted window follows settings-changed to a new theme", async ({ page })
   await expect(page.locator("html")).toHaveAttribute("data-theme", "gruvbox");
   await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
 });
+
+// Schedule and Preview pop-outs skip initBoot, so main.ts wires them itself:
+// the saved theme on open, then every later change.
+for (const [label, url] of [
+  ["Schedule window", "/index.html?schedulewindow=1"],
+  ["Preview window", "/index.html?previewwindow=1#preview?session=s1"],
+] as const) {
+  test(`${label} opens on the saved theme and follows settings-changed`, async ({ page }) => {
+    await mountView(page, { invoke: { get_settings: { theme: "nord" } } });
+    await page.goto(`http://localhost:4420${url}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "nord");
+
+    await fireEvent(page, "settings-changed", [{ theme: "dracula-light" }]);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dracula");
+    await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
+  });
+}

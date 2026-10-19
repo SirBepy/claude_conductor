@@ -250,6 +250,8 @@ if (detachedSessionId) {
   // view straight into #app; no router, no boot (this window only shows the
   // calendar and cross-navigates to the Chats window on item click).
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
+  void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
+  followAppearanceChanges();
   void import("./views/schedule/schedule").then((m) => m.renderScheduleView(app));
 } else if (codeSessionId) {
   // Solo Code mode render; no router, no sidemenu, no boot.
@@ -260,6 +262,8 @@ if (detachedSessionId) {
 } else if (previewSessionId) {
   // Solo preview render; no router, no sidemenu, no boot.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
+  void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
+  followAppearanceChanges();
   void import("./views/sessions/preview-panel").then((m) => m.mountPreviewWindow(app, previewSessionId));
 } else {
   mountRouter(app);
