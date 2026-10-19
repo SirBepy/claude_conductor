@@ -50,9 +50,10 @@ export class ComposerCore {
         return;
       }
     }
-    // Ctrl/Cmd+Enter takes onCtrlEnter when the host supplies one (only the
-    // main Composer does, for its queued-message shortcut) - fires even on
-    // mobile, since the modifier implies a physical keyboard is attached.
+    // Ctrl/Cmd+Enter takes onCtrlEnter when the host supplies one (the main
+    // Composer, for its queued-message shortcut, and the lightbox caption
+    // box, for send+close) - fires even on mobile, since the modifier
+    // implies a physical keyboard is attached.
     if (e.key === "Enter" && !e.shiftKey && (e.ctrlKey || e.metaKey) && this.opts.onCtrlEnter) {
       e.preventDefault();
       this.opts.onCtrlEnter();

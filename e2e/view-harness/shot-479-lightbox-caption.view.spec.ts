@@ -110,8 +110,9 @@ async function whitePixelRatio(page: Page, target: Locator): Promise<number> {
   }, png);
 }
 
-/** Enter must stay a plain newline: the lightbox box mirrors a draft, it has
- *  no send path. */
+/** Plain Enter must stay a newline (the lightbox box mirrors a draft); only
+ *  Ctrl/Cmd+Enter sends and closes (lightbox.ts's onCtrlEnter, covered by
+ *  tests/lightbox-ctrl-enter-send.test.mjs - this stub bridge has no send()). */
 async function expectEnterInsertsNewline(input: Locator, overlay: Locator): Promise<void> {
   await input.fill("line one");
   await input.press("Enter");

@@ -126,6 +126,7 @@ export class Composer {
     getCwd: () => this.opts.projectDir ?? null,
     isVoiceRecording: () => this.cv.state === "recording" || this.cv.state === "connecting",
     onVoiceStateChange: (cb) => this.cv.subscribe((s) => cb(s === "recording" || s === "connecting")),
+    send: () => void this.send(),
   };
 
   private _visibilityHandler = (): void => {

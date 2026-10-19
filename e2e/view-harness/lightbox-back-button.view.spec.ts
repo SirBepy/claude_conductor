@@ -4,6 +4,10 @@ import { mountView } from "./harness";
 // Regression (commit 7c355cf9): the phone hardware back button used to skip
 // straight past an open lightbox/gallery to the view stack (or exit), instead
 // of closing the topmost overlay first.
+//
+// Reviewed 2026-10-19: lightbox.ts's caption box now sends+closes on Ctrl/Cmd+Enter,
+// a desktop-keyboard-only path with no phone back-button counterpart - no change to
+// this spec's contract.
 
 declare global {
   interface Window {

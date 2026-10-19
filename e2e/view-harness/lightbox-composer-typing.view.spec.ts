@@ -3,9 +3,11 @@ import { mountView } from "./harness";
 
 // Lightbox composer adopts the shared typing core (composer-unification):
 // "/" skill-suggestion popup + purple highlight backdrop, same as the main
-// composer/AUQ card/preview-panel - not a reimplementation. Draft-mirror
-// contract only (no send path), so this only asserts the typing experience,
-// never a submit.
+// composer/AUQ card/preview-panel - not a reimplementation. Plain Enter stays
+// a draft-mirror newline, never a submit; Ctrl/Cmd+Enter's send+close path
+// (lightbox.ts's onCtrlEnter) is covered by tests/lightbox-ctrl-enter-send.test.mjs
+// instead, since it needs a mounted Composer this view harness's stub bridge
+// doesn't provide.
 
 const SLASH_ENTRIES = [
   { name: "close", args: null, description: "Session retrospective", source: { kind: "user-skill" } },
