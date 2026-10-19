@@ -54,8 +54,9 @@ pub struct SpawnOutput {
 /// `quote` quotes on ANY of `cmd.exe`'s operators, not just whitespace/`"`:
 /// a bare `&`/`|`/`<`/`>` in a whitespace-free prefix (`pwn&calc`) would
 /// split or redirect the line, and `cmd.exe` treats them as literal inside
-/// quotes. `%` still expands inside quotes, which is why
-/// `is_valid_project_name` also rejects it at the source.
+/// quotes. `%` still expands inside quotes and has no in-quote escape, so the
+/// prefix drops it outright: the prefix is not always a validated project
+/// name, the Automation tab's free-text session-name prefix overrides it.
 fn build_cmdline(claude: &str, input: &SpawnInput) -> String {
     fn quote(arg: &str) -> String {
         let needs_quoting = arg.is_empty()
@@ -75,7 +76,7 @@ fn build_cmdline(claude: &str, input: &SpawnInput) -> String {
         quote(claude),
         "--remote-control".into(),
         "--remote-control-session-name-prefix".into(),
-        quote(&input.session_name_prefix),
+        quote(&input.session_name_prefix.replace('%', "")),
         // No --mcp-config/--settings here: both need a turn id known before
         // spawn, but a channel's real session id is only resolved after the fact.
         "--disallowedTools".into(),
@@ -305,11 +306,20 @@ mod tests {
 
     #[test]
     fn build_cmdline_quotes_every_cmd_metacharacter_without_whitespace() {
-        for raw in ["a|b", "a<b", "a>b", "a^b", "a%b", "a!b", "a(b)"] {
+        for raw in ["a|b", "a<b", "a>b", "a^b", "a!b", "a(b)"] {
             let cmdline = build_cmdline("C:\\fake\\claude.exe", &input_with_prefix(raw));
             let quoted = format!("\"{raw}\"");
             assert!(cmdline.contains(&quoted), "{raw} must be quoted: {cmdline}");
         }
+    }
+
+    /// A custom Automation prefix is free text, and quoting does not stop
+    /// `cmd.exe` expanding `%VAR%`, so no `%` may reach the command line.
+    #[test]
+    fn build_cmdline_strips_percent_from_the_prefix() {
+        let cmdline = build_cmdline("C:\\fake\\claude.exe", &input_with_prefix("x%USERNAME%y"));
+        assert!(!cmdline.contains('%'), "a % in the prefix must never reach cmd.exe: {cmdline}");
+        assert!(cmdline.contains("xUSERNAMEy"), "{cmdline}");
     }
 
     /// The program token is the resolved absolute path, never the bare word
