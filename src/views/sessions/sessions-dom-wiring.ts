@@ -119,6 +119,9 @@ export async function wireOverflowMenu(
  * Ctrl+Shift+1-9 (new chat from a favourite project slot) is registered
  * globally in boot.ts instead, since it must work even when this view isn't
  * mounted. */
+// > kbd-hint-in's 160ms animation + its 120ms max stagger delay (sessions.css).
+const KBD_HINT_ENTER_MS = 300;
+
 export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): () => void {
   for (let i = 0; i < 9; i++) {
     const slot = i + 1;
@@ -126,8 +129,22 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
   }
   shortcuts.register("close-chat", closeFocusedChat);
 
+  let enterTimer: ReturnType<typeof setTimeout> | undefined;
   const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
+    const wasActive = listEl.classList.contains("kbd-hint-active");
     listEl.classList.toggle("kbd-hint-active", hint.numbers);
+    if (hint.numbers && !wasActive) {
+      // Rising edge only: play the stagger-in once, then drop the class so a
+      // Ctrl+N jump mid-hold (which can reshuffle segments and reassign which
+      // badge number lands on which row) updates the badges in place instead
+      // of replaying the entrance - see sessions.css's kbd-hint-entering.
+      clearTimeout(enterTimer);
+      listEl.classList.add("kbd-hint-entering");
+      enterTimer = setTimeout(() => listEl.classList.remove("kbd-hint-entering"), KBD_HINT_ENTER_MS);
+    } else if (!hint.numbers) {
+      clearTimeout(enterTimer);
+      listEl.classList.remove("kbd-hint-entering");
+    }
     if (hint.favorites) {
       showFavoritesStrip(pane, triggerNewSessionFavoriteGlobal);
     } else {
@@ -140,6 +157,7 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
       shortcuts.unregister(`open-chat-${i}`);
     }
     shortcuts.unregister("close-chat");
+    clearTimeout(enterTimer);
     unlistenModifierHint();
     hideFavoritesStrip(pane);
   };

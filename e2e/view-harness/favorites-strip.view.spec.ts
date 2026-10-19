@@ -11,6 +11,10 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./har
 //
 // asserts: src/shared/shortcuts.ts, src/shared/modifier-hint.ts, src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/favorites-strip.ts, src/views/sessions/project-favorites.ts
 // (ctrl+w's label/description changed in shortcuts.ts for todo-driven close-chat confirm work; unrelated to the favourites strip this spec covers)
+// (sessions-dom-wiring.ts split kbd-hint-active into an always-on display
+// class plus a one-shot kbd-hint-entering class for the stagger-in keyframe,
+// so a Ctrl+N jump mid-hold doesn't replay the entrance - this spec's
+// Control-down check still sees the animation on the rising edge, unaffected)
 
 const FAVORITES_KEY = "claude_companion_project_favorites";
 
