@@ -23,6 +23,14 @@ const PROJECTS_ROOT_SETTINGS_KEY: &str = "newProjectLastParent";
 /// this is a single path SEGMENT - joining it onto the root can never climb
 /// out of it on its own; `register_create_project` below still re-checks via
 /// a canonicalized prefix comparison as defense in depth.
+///
+/// Also rejects `& ^ % ! ( )` and control characters: a project
+/// name becomes a channel's `--remote-control-session-name-prefix` value at
+/// `channels::spawn::build_cmdline`, which now quotes on these too, but a
+/// folder name is user/attacker-chosen content that reaches a `cmd.exe`
+/// command line at all only because of that later spawn - denying the
+/// cmd.exe operator set here closes the gap for any other future consumer of
+/// a project name that is less careful about quoting.
 pub(crate) fn is_valid_project_name(name: &str) -> bool {
     let t = name.trim();
     if t.is_empty() {
@@ -31,7 +39,13 @@ pub(crate) fn is_valid_project_name(name: &str) -> bool {
     if t == "." || t == ".." {
         return false;
     }
-    !t.chars().any(|c| matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    !t.chars().any(|c| {
+        c.is_control()
+            || matches!(
+                c,
+                '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '&' | '^' | '%' | '!' | '(' | ')'
+            )
+    })
 }
 
 /// Parent directory of `path`, or `None` at a drive/filesystem root (ported
@@ -274,6 +288,23 @@ mod tests {
     fn rejects_absolute_paths() {
         assert!(!is_valid_project_name("/etc/passwd"));
         assert!(!is_valid_project_name("\\\\server\\share"));
+    }
+
+    /// RED against the pre-fix deny-list, which stopped at `\ / : * ? " < > |`
+    /// and let a folder named e.g. `pwn&calc` through - that name becomes a
+    /// channel's `--remote-control-session-name-prefix`, so it must never
+    /// reach `cmd.exe` carrying a live command separator/operator.
+    #[test]
+    fn rejects_cmd_exe_operators() {
+        for ch in ['&', '^', '%', '!', '(', ')'] {
+            assert!(!is_valid_project_name(&format!("pwn{ch}calc")), "{ch} must be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_control_characters() {
+        assert!(!is_valid_project_name("bad\u{0007}name"));
+        assert!(!is_valid_project_name("bad\nname"));
     }
 
     #[test]
