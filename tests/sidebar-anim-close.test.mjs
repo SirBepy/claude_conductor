@@ -266,4 +266,31 @@ describe("unchanged-row reconcile preserves click target", () => {
     reconcileList(listEl, [changedRow("A")], true);
     expect(listEl.querySelector('li[data-session-id="A"] span').textContent).toBe("A-updated");
   });
+
+  // Same bug, same fix, but for Joe's "Sidebar animations: off" setting (animEnabled
+  // false) - that branch used to unconditionally wipe listEl.innerHTML on every
+  // reconcile regardless of whether anything changed, so a user with animations
+  // disabled still had clicks swallowed by the race this whole fix exists for.
+  it("preserves a row's inner nodes with animations disabled too", () => {
+    const listEl = makeList();
+    reconcileList(listEl, [row("A"), row("B")], false);
+
+    const titleSpan = listEl.querySelector('li[data-session-id="A"] span');
+    expect(titleSpan).not.toBeNull();
+
+    reconcileList(listEl, [row("A"), row("B")], false);
+
+    expect(listEl.querySelector('li[data-session-id="A"] span')).toBe(titleSpan);
+  });
+
+  it("still applies and removes rows correctly with animations disabled", () => {
+    const listEl = makeList();
+    const changedRow = (id) => ({ key: `s:${id}`, html: `<li data-session-id="${id}"><span>${id}-updated</span></li>` });
+
+    reconcileList(listEl, [row("A"), row("B")], false);
+    reconcileList(listEl, [changedRow("A")], false);
+
+    expect(listEl.querySelector('li[data-session-id="A"] span').textContent).toBe("A-updated");
+    expect(listEl.querySelector('li[data-session-id="B"]')).toBeNull();
+  });
 });
