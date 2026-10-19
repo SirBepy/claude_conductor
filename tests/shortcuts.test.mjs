@@ -1,6 +1,6 @@
 // tests/shortcuts.test.mjs
 import { describe, it, expect } from "vitest";
-import { normalizeEvent, findConflict } from "../src/shared/shortcuts.ts";
+import { normalizeEvent, findConflict, getAll } from "../src/shared/shortcuts.ts";
 
 describe("normalizeEvent", () => {
   it("ctrl+n", () => {
@@ -58,5 +58,12 @@ describe("findConflict", () => {
   it("finds chats-view shortcut by default binding", () => {
     const conflict = findConflict("ctrl+1");
     expect(conflict?.id).toBe("open-chat-1");
+  });
+});
+
+describe("new-chat shortcut", () => {
+  it("fires even while an input/textarea has focus", () => {
+    const def = getAll().find(d => d.id === "new-chat");
+    expect(def?.suppressInInput).toBe(false);
   });
 });
