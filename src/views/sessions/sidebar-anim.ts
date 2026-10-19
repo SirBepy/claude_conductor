@@ -254,17 +254,35 @@ export function reconcileList(
   // Strip rows we've already committed to animating out
   const visibleEntries = entries.filter(e => !exitingKeys.has(e.key));
 
-  if (!animEnabled) {
-    for (const li of listEl.querySelectorAll<HTMLLIElement>("li.row-exiting")) removeExitNode(li);
-    listEl.innerHTML = visibleEntries.map(e => e.html).join("");
-    return;
-  }
-
   // Current live nodes (not animating out)
   const existing = new Map<string, HTMLLIElement>();
   for (const li of listEl.querySelectorAll<HTMLLIElement>("li:not(.row-exiting)")) {
     const k = keyOf(li);
     if (k) existing.set(k, li);
+  }
+
+  if (!animEnabled) {
+    for (const li of listEl.querySelectorAll<HTMLLIElement>("li.row-exiting")) removeExitNode(li);
+    // Same keyed reuse as the animated path below (updateNode no-ops an
+    // unchanged row, so a click surviving mid-reconcile isn't FLIP-exclusive) -
+    // just without any FLIP/enter/exit choreography.
+    const keptKeys = new Set(visibleEntries.map(e => e.key));
+    for (const [k, li] of existing) {
+      if (!keptKeys.has(k)) li.remove();
+    }
+    const nodes: HTMLLIElement[] = [];
+    for (const entry of visibleEntries) {
+      const kept = existing.get(entry.key);
+      if (kept) {
+        updateNode(kept, entry.html);
+        nodes.push(kept);
+      } else {
+        const newLi = parseHtml(entry.html);
+        if (newLi) { nodes.push(newLi); lastRowHtml.set(newLi, entry.html); }
+      }
+    }
+    for (const node of nodes) listEl.appendChild(node);
+    return;
   }
 
   const newKeys = new Set(visibleEntries.map(e => e.key));
