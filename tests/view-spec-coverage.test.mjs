@@ -26,6 +26,10 @@ const STATS_REFLOW_SPEC = "e2e/view-harness/project-picker-stats-reflow.view.spe
 // new-session-cold-cache.view.spec.ts (cold-load skeleton + row entrance
 // animation) is a 6th header-linked dependent, added alongside it.
 const COLD_CACHE_SPEC = "e2e/view-harness/new-session-cold-cache.view.spec.ts";
+// project-picker-dead-after-raced-escape.view.spec.ts (the raced-Escape /
+// stale-finish() guard in selectProjectRow) is a 7th header-linked
+// dependent, added alongside it.
+const RACED_ESCAPE_SPEC = "e2e/view-harness/project-picker-dead-after-raced-escape.view.spec.ts";
 
 describe("view-spec-coverage: import-derived link (auto, no header)", () => {
   it("maps question-ui.ts to the spec that dynamically imports it", () => {
@@ -74,7 +78,7 @@ describe("view-spec-coverage: header-derived link (// asserts:, for UI-driven sp
     const findings = findStaleSpecs(
       [
         PROJECT_PICKER, ADD_PROJECT_SPEC, FAVORITES_SPEC, NO_PROJECT_SPEC, MACHINE_CHIPS_SPEC, STATS_REFLOW_SPEC,
-        COLD_CACHE_SPEC,
+        COLD_CACHE_SPEC, RACED_ESCAPE_SPEC,
       ],
       depMap,
     );
