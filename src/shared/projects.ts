@@ -74,7 +74,7 @@ export function renderAvatar(avatar: Avatar | undefined | null, projectPath?: st
   }
   if (avatar.kind === "emoji") return escapeHtml(avatar.value ?? "");
   if (avatar.kind === "image") {
-    const src = `file:///${String(avatar.value).replaceAll("\\", "/")}`;
+    const src = escapeHtml(`file:///${String(avatar.value).replaceAll("\\", "/")}`);
     return `<img src="${src}" style="width:100%;height:100%;object-fit:cover;border-radius:7px" alt="">`;
   }
   if (avatar.kind === "character") {
