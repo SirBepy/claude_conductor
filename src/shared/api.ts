@@ -276,7 +276,6 @@ export const api = {
   getAppVersion: (): Promise<string> => invoke("get_app_version"),
   getVersionInfo: (): Promise<{ version: string; build_date: string; installed_at: string | null }> =>
     invoke("get_version_info"),
-  getPlatform: (): Promise<string> => invoke("get_platform"),
   openExternal: (url: string): Promise<unknown> => invoke("open_external", { url }),
 
   // --- Chats window ---

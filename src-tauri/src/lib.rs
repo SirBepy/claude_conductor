@@ -222,7 +222,6 @@ pub fn run() {
             ipc::play_sound_preview,
             ipc::list_audio_output_devices,
             ipc::copy_logs,
-            ipc::get_platform,
             ipc::get_app_version,
             ipc::get_version_info,
             ipc::pick_folder,

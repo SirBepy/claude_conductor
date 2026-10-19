@@ -89,15 +89,6 @@ pub async fn frontend_ping(app: AppHandle, raf_tick: u64) {
 }
 
 #[tauri::command]
-pub async fn get_platform() -> String {
-    match std::env::consts::OS {
-        "macos" => "darwin".into(),
-        "windows" => "win32".into(),
-        other => other.into(),
-    }
-}
-
-#[tauri::command]
 pub async fn get_app_version(app: AppHandle) -> String {
     if option_env!("CI").is_none() {
         return "local-build".to_string();
