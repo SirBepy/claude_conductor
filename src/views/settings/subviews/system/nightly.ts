@@ -86,15 +86,19 @@ export function nightlySection(n: NightlyWhenDone) {
       </div>
       <div class="kit-row">
         <span class="kit-row-label">Give up waiting after</span>
-        <input
-          type="number"
-          id="nightlyWhenDoneOverdueHours"
-          style="width:64px"
-          min="0"
-          step="0.5"
-          .value=${String(n.overdueHours)}
-        >
-        <span class="kit-row-label">hours</span>
+        <!-- kit-row spreads its children with space-between, so the input and
+             its unit share one wrapper to sit together at the right edge. -->
+        <span style="display:inline-flex;align-items:center;gap:8px">
+          <input
+            type="number"
+            id="nightlyWhenDoneOverdueHours"
+            style="width:64px"
+            min="0"
+            step="0.5"
+            .value=${String(n.overdueHours)}
+          >
+          <span class="kit-row-label">hours</span>
+        </span>
       </div>
       <div class="kit-row">
         <span class="kit-row-label">If still waiting then</span>
