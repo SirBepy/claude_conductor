@@ -22,6 +22,14 @@ const MAX_ORDINAL: u64 = 64;
 #[derive(Deserialize)]
 pub(super) struct SendMessageBody {
     session_id: String,
+    // `message` alias: the sibling UpdateMessageBody below has its OWN unrelated
+    // `message: u64` field (an ordinal), and this route's tool is literally named
+    // `send_message` - both nudge a caller toward guessing `message` here too.
+    // Documented 8x across 2026-08-09 through 2026-10-19 in
+    // project_report_turn_status_relay_decode_error.md, the last time landing a
+    // "Failed to send" marker mid-transcript in a chat Joe was reading. Accepting
+    // the alias is cheaper than relying on every caller recalling the right name.
+    #[serde(alias = "message")]
     text: String,
 }
 
@@ -106,6 +114,20 @@ mod tests {
     async fn body_json(resp: axum::response::Response) -> serde_json::Value {
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[test]
+    fn send_message_body_accepts_the_documented_text_field() {
+        let body: SendMessageBody =
+            serde_json::from_str(r#"{"session_id":"s1","text":"hi"}"#).unwrap();
+        assert_eq!(body.text, "hi");
+    }
+
+    #[test]
+    fn send_message_body_also_accepts_the_commonly_guessed_message_field() {
+        let body: SendMessageBody =
+            serde_json::from_str(r#"{"session_id":"s1","message":"hi"}"#).unwrap();
+        assert_eq!(body.text, "hi");
     }
 
     #[tokio::test]
