@@ -57,6 +57,16 @@ fn is_auto_accept_eligible(auto_accept: bool, input: &Value) -> bool {
     auto_accept && !super::question::is_question_shaped(input)
 }
 
+/// `person`'s `find` action only reads the vault (`methods::people::find_person`
+/// never writes), so it stays frictionless even with auto-accept off, same as
+/// before `person` was dropped from `PRETRUSTED_TOOLS`. `remember` writes to
+/// the vault and always falls through to a real card: unlike the app-local
+/// writers in `PRETRUSTED_TOOLS`, that text comes back on every future turn,
+/// in every project, as a trusted fact.
+pub(super) fn is_person_find(tool_name: &str, input: &Value) -> bool {
+    tool_name == "mcp__cc_conductor__person" && input.get("action").and_then(|v| v.as_str()) == Some("find")
+}
+
 /// Serializes a second concurrent permission prompt for one session behind
 /// the first (todo 978). Unlike questions, permission prompts have no
 /// sibling-queue machinery anywhere - the daemon registered and published
@@ -102,7 +112,7 @@ pub(super) async fn on_permission_request(
         .and_then(crate::sessions::chat_config::get)
         .map(|c| c.auto_accept)
         .unwrap_or(false);
-    if is_auto_accept_eligible(auto_accept, &body.input) {
+    if is_auto_accept_eligible(auto_accept, &body.input) || is_person_find(&body.tool_name, &body.input) {
         log::debug!(
             "[perm-relay] server-side auto-accept id={} tool={} session={:?}",
             body.id, body.tool_name, body.session_id
@@ -191,6 +201,16 @@ mod tests {
         assert!(!is_auto_accept_eligible(true, &question), "question-shaped always needs a human");
     }
 
+    /// `person`'s `find` is read-only and must bypass the card regardless
+    /// of auto-accept; `remember` (and any other tool) must not.
+    #[test]
+    fn is_person_find_matches_only_the_person_find_call() {
+        assert!(is_person_find("mcp__cc_conductor__person", &json!({"action": "find", "text": "Stevan"})));
+        assert!(!is_person_find("mcp__cc_conductor__person", &json!({"action": "remember", "person": "Stevan"})));
+        assert!(!is_person_find("mcp__cc_conductor__person", &json!({})));
+        assert!(!is_person_find("Bash", &json!({"action": "find"})));
+    }
+
     fn state_with_busy_session(sid: &str) -> Arc<DaemonState> {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let settings = std::sync::Mutex::new(Settings::default());
@@ -269,6 +289,52 @@ mod tests {
         handle.await.unwrap();
 
         assert_eq!(state.registry.get("s1").unwrap().awaiting.as_deref(), Some("working"));
+    }
+
+    /// End-to-end: `person`'s `find` must reach the CLI's real
+    /// `--permission-prompt-tool` route (not just the pure helper above) and
+    /// come back allowed with no card raised, even though `person` was
+    /// dropped from `PRETRUSTED_TOOLS` and this session has no auto-accept.
+    #[tokio::test]
+    async fn person_find_is_allowed_through_the_relay_with_no_card_and_auto_accept_off() {
+        let state = state_with_busy_session("s1");
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        let body = PermRequestBody {
+            id: "p1".to_string(),
+            tool_name: "mcp__cc_conductor__person".to_string(),
+            input: json!({"action": "find", "text": "Stevan"}),
+            session_id: Some("s1".to_string()),
+        };
+        let resp = on_permission_request(AxState(ctx), ValidatedJson(body)).await.into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["behavior"], "allow", "{v}");
+        assert!(state.pending.lock().await.is_empty(), "find must never raise a card");
+    }
+
+    /// The write side of the same tool must NOT get the same free pass:
+    /// `remember` with auto-accept off raises a real, answerable card, same
+    /// as any other non-pretrusted tool.
+    #[tokio::test]
+    async fn person_remember_without_auto_accept_still_raises_a_card() {
+        let state = state_with_busy_session("s1");
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        let task_ctx = ctx.clone();
+        let body = PermRequestBody {
+            id: "p1".to_string(),
+            tool_name: "mcp__cc_conductor__person".to_string(),
+            input: json!({"action": "remember", "person": "Stevan", "alias": "Stef"}),
+            session_id: Some("s1".to_string()),
+        };
+        let handle = tokio::spawn(async move {
+            on_permission_request(AxState(task_ctx), ValidatedJson(body)).await
+        });
+        await_pending(&state, "p1").await;
+        let prompts = state.list_prompts().await;
+        assert!(prompts.iter().any(|p| p["id"] == "p1"), "remember must show a permission card");
+        let tx = state.pending.lock().await.remove("p1").unwrap();
+        tx.send(json!({"behavior": "allow"})).unwrap();
+        handle.await.unwrap();
     }
 
     /// An id the registry has never seen (hook tests, terminal-side sessions)

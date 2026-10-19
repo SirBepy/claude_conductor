@@ -80,6 +80,13 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 /// `approval_prompt`/`ask_user_question` - pretrusting it means the FIRST
 /// call lands straight on that dedicated card instead of stacking a generic
 /// "allow tool request_secret?" permission prompt in front of it.
+///
+/// `person` is deliberately NOT here: `remember` writes to the user's
+/// Obsidian vault, and that text comes back on every future turn, in every
+/// project, as a trusted "People on <client>" fact - a tricked agent
+/// pretrusting it could plant lasting instructions machine-wide. It goes
+/// through the ordinary permission relay instead, which auto-allows only a
+/// `find` call (read-only) at `hooks_server::permission::is_person_find`.
 pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question \
      mcp__cc_conductor__request_secret \
      mcp__cc_conductor__show_preview \
@@ -89,8 +96,7 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__update_message \
      mcp__cc_conductor__write_draft \
      mcp__cc_conductor__write_user_todo \
-     mcp__cc_conductor__schedule \
-     mcp__cc_conductor__person";
+     mcp__cc_conductor__schedule";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -207,11 +213,19 @@ mod tests {
             "mcp__cc_conductor__write_draft",
             "mcp__cc_conductor__write_user_todo",
             "mcp__cc_conductor__schedule",
-            "mcp__cc_conductor__person",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 11, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 10, "unexpected extra/missing entry: {tools:?}");
+    }
+
+    /// `person` writes to the user's vault and must go through the ordinary
+    /// permission relay (so `remember` gets a card with auto-accept off),
+    /// not skip it like the app-local writers above.
+    #[test]
+    fn pretrusted_tools_excludes_person() {
+        let tools: Vec<&str> = PRETRUSTED_TOOLS.split(' ').collect();
+        assert!(!tools.contains(&"mcp__cc_conductor__person"), "person must not be pre-trusted: {tools:?}");
     }
 
     /// Todo 1122: a turn ending on thinking alone gets the CLI's "no visible
