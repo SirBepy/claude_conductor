@@ -194,6 +194,7 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
   // transparent .prompt-stage__hit layer sits over it to receive it.
   attachSwipe(host, {
     axis: "y",
+    dropOnCrossAxis: false,
     startsOn: (target) => {
       const hit = target.closest(".prompt-stage__hit");
       if (!hit) return false;
