@@ -37,7 +37,7 @@ import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
 import { mountReconnectStrip } from "./reconnect-strip";
-import { applyBackgroundFx } from "./background-fx";
+import { applyAppearance, followAppearanceChanges } from "./theme-sync";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
 
@@ -233,15 +233,6 @@ async function maybeShowSettingsLoadNotice(): Promise<void> {
   }
 }
 
-export function applyThemeFromSettings(s: SettingsShape): void {
-  const fullId = (s.theme as string) || "void";
-  const isLight = fullId.endsWith("-light");
-  const baseId = isLight ? fullId.replace("-light", "") : fullId;
-  const el = document.documentElement;
-  el.dataset.theme = baseId;
-  el.dataset.mode = isLight ? "light" : "dark";
-}
-
 function coerceSettings(s: SettingsShape): SettingsShape {
   const colorApplyTo = (s.colorApplyTo as Record<string, boolean | undefined> | undefined) || {};
   s.colorApplyTo = {
@@ -261,11 +252,7 @@ function coerceSettings(s: SettingsShape): SettingsShape {
 export function applySettingsToDocument(s: SettingsShape): SettingsShape {
   const coerced = coerceSettings(s);
   setSettings(coerced);
-  applyThemeFromSettings(coerced);
-  applyBackgroundFx(
-    !!coerced.backgroundEnabled,
-    coerced.backgroundVariant === "gradient" ? "gradient" : "pattern",
-  );
+  applyAppearance(coerced);
   return coerced;
 }
 
@@ -297,6 +284,8 @@ export function initBoot(): void {
   });
 
   // Live subscriptions.
+  // Lives for the whole window lifetime, so the unlisten is dropped.
+  followAppearanceChanges();
   api.onHistoryUpdated((h) => {
     setUsageHistory(h);
     refreshDashboardView();

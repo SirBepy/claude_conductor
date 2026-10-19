@@ -21,6 +21,7 @@ import "./styles/motion.css";
 
 import { mountRouter, registerView } from "./router";
 import { initBoot, applySettingsToDocument } from "./shared/boot";
+import { followAppearanceChanges } from "./shared/theme-sync";
 import { api } from "./shared/api";
 import { ensureRemoteToken } from "./shared/remote-gate";
 import { isRemote } from "./shared/transport";
@@ -239,8 +240,10 @@ if (detachedSessionId) {
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
   // Skip mountRouter + initBoot's live-subscription wiring (this window is
   // single-purpose), but still fetch settings once so theme/background match
-  // the rest of the app instead of index.html's static defaults.
+  // the rest of the app instead of index.html's static defaults, and follow
+  // later theme changes made in the main window.
   void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
+  followAppearanceChanges();
   void import("./views/sessions/sessions").then((m) => m.renderDetachedSession(app, detachedSessionId));
 } else if (isScheduleWindow) {
   // Solo calendar render. Hide the static legacy views and mount the schedule
@@ -252,6 +255,7 @@ if (detachedSessionId) {
   // Solo Code mode render; no router, no sidemenu, no boot.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
   void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
+  followAppearanceChanges();
   void import("./views/sessions/code-mode/popout").then((m) => m.mountCodeWindow(app, codeSessionId));
 } else if (previewSessionId) {
   // Solo preview render; no router, no sidemenu, no boot.
