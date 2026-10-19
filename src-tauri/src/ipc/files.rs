@@ -137,25 +137,26 @@ fn is_allowed_external_url(url: &str) -> bool {
     }
     // Chat links to local files (`file:///C:/.../shot.png`) are a working
     // affordance, so a file: URL is judged as the path it names.
-    let local = if lower.starts_with("file:///") {
-        &trimmed[8..]
-    } else if lower.starts_with("file://") {
-        &trimmed[7..]
-    } else {
-        trimmed
+    // `file:///C:/x` keeps its leading slash after the `file://` strip, which
+    // is the real root on macOS/Linux but has to go on a Windows drive path.
+    let mut local = if lower.starts_with("file://") { &trimmed[7..] } else { trimmed };
+    let is_drive = |s: &str| {
+        let b = s.as_bytes();
+        b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/')
     };
-    // A Windows drive path ("C:\..." / "C:/...") contains a colon but is not
-    // a URI scheme - check that before the generic scheme guard below, or
-    // every local path on this OS would be misread as an unknown scheme.
-    let bytes = local.as_bytes();
-    let is_drive_path = bytes.len() > 2
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'\\' | b'/');
-    if !is_drive_path {
-        return false; // javascript:, data:, UNC shares, relative paths, any other scheme
+    if local.starts_with('/') && is_drive(&local[1..]) {
+        local = &local[1..];
     }
-    is_openable_local_file(std::path::Path::new(local))
+    let accepted = if is_drive(local) {
+        // A second ':' after the drive is an NTFS stream suffix
+        // (`x.exe::$DATA`) that would hide the real extension.
+        !local[2..].contains(':')
+    } else {
+        // A POSIX absolute path; `//` is a network path and stays refused,
+        // like a Windows UNC share, a relative path or any other scheme.
+        cfg!(not(windows)) && local.starts_with('/') && !local.starts_with("//")
+    };
+    accepted && is_openable_local_file(std::path::Path::new(local))
 }
 
 /// The shell opener runs a program for an executable or script, so a link
@@ -165,7 +166,8 @@ fn is_openable_local_file(path: &std::path::Path) -> bool {
     const EXECUTABLE: &[&str] = &[
         "exe", "com", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi",
         "msp", "scr", "pif", "cpl", "hta", "lnk", "url", "reg", "jar", "appref-ms", "application",
-        "gadget", "msc", "inf", "sys", "dll",
+        "gadget", "msc", "inf", "sys", "dll", "command", "sh", "tool", "scpt", "pkg", "workflow",
+        "terminal", "desktop",
     ];
     let Ok(target) = path.canonicalize() else { return false };
     if !target.is_file() {
@@ -408,7 +410,7 @@ fn write_text_file_impl(path: &str, content: &str, roots: &[PathBuf]) -> Result<
     let target = PathBuf::from(path)
         .canonicalize()
         .map_err(|e| format!("file not found: {e}"))?;
-    if !roots.iter().any(|root| target.starts_with(root)) {
+    if !roots.iter().any(|root| crate::util::path::confine_absolute(root, &target).is_ok()) {
         return Err(
             "write_text_file: path is outside every registered project root and the app data dir"
                 .to_string(),
@@ -496,6 +498,25 @@ mod tests {
         let (as_path, as_url) = (is_allowed_external_url(&raw), is_allowed_external_url(&url));
         let _ = std::fs::remove_file(&path);
         assert!(as_path && as_url, "a chat link to a screenshot keeps opening");
+    }
+
+    #[test]
+    fn rejects_an_ntfs_stream_suffix_that_hides_the_extension() {
+        let path = temp_file_with_ext("exe");
+        let raw = format!("{}::$DATA", path.to_str().unwrap());
+        let ok = is_allowed_external_url(&raw);
+        let _ = std::fs::remove_file(&path);
+        assert!(!ok);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn accepts_a_posix_absolute_path_and_its_file_url() {
+        let path = temp_file_with_ext("html");
+        let raw = path.to_str().unwrap().to_string();
+        let (as_path, as_url) = (is_allowed_external_url(&raw), is_allowed_external_url(&format!("file://{raw}")));
+        let _ = std::fs::remove_file(&path);
+        assert!(as_path && as_url, "the macOS preview Open in browser path must keep working");
     }
 
     #[test]
