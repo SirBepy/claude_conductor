@@ -11,6 +11,7 @@
 
 import { invoke } from "../../../shared/ipc";
 import { escapeHtml } from "../../../shared/escape-html";
+import { isRemote } from "../../../shared/transport";
 import { state } from "../state";
 import { sessionSubtitle, projectName } from "../sessions-helpers";
 import { clearHost, ensureHost, renderCardShell } from "./host";
@@ -91,11 +92,33 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   `;
 
   function bodyHtml(): string {
+    // reveal_file_in_explorer acts on the desktop's own disk - the phone has
+    // none, so the path renders as inert text there instead of a dead button
+    // (same gate file-surface.ts uses for its own desktop-only reveal action).
+    const fileRow = isRemote()
+      ? `<code>${escapeHtml(payload.file)}</code>`
+      : `<button type="button" class="secret-card__file" data-act="reveal" title="Show in File Explorer">
+          <code>${escapeHtml(payload.file)}</code>
+          <i class="ph ph-arrow-square-out"></i>
+        </button>`;
     return `
       <p class="secret-card__label">${escapeHtml(payload.label)}</p>
       <div class="secret-card__meta">
-        <div><span class="secret-card__meta-k">Session</span> ${escapeHtml(sessionLabel(payload.session_id))}</div>
-        <div><span class="secret-card__meta-k">Saves to</span> <code>${escapeHtml(payload.file)}</code> (<code>${escapeHtml(payload.key)}</code>)</div>
+        <div class="secret-card__meta-row">
+          <i class="ph ph-chat-circle-text"></i>
+          <div class="secret-card__meta-text">
+            <span class="secret-card__meta-k">Session</span>
+            <span class="secret-card__meta-v">${escapeHtml(sessionLabel(payload.session_id))}</span>
+          </div>
+        </div>
+        <div class="secret-card__meta-row">
+          <i class="ph ph-file-text"></i>
+          <div class="secret-card__meta-text">
+            <span class="secret-card__meta-k">Saves to</span>
+            ${fileRow}
+            <span class="secret-card__meta-key">as <code>${escapeHtml(payload.key)}</code></span>
+          </div>
+        </div>
       </div>
       <input
         type="password"
@@ -109,11 +132,11 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   }
 
   function footerHtml(): string {
+    // No icon on Save - the app's other Save buttons (e.g. cc-modal-save) are
+    // text-only, and a one-off icon here read as inconsistent (Joe, 2026-10-19).
     return `
       <button type="button" class="btn btn-secondary" data-act="cancel">Cancel</button>
-      <button type="button" class="btn btn-primary" data-act="save" disabled>
-        <i class="ph ph-floppy-disk"></i> Save
-      </button>
+      <button type="button" class="btn btn-primary" data-act="save" disabled>Save</button>
     `;
   }
 
@@ -128,7 +151,7 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
     saveBtn.disabled = busy || !input.value;
     saveBtn.innerHTML = busy
       ? `<i class="ph ph-spinner secret-card__spin"></i> Saving&hellip;`
-      : `<i class="ph ph-floppy-disk"></i> Save`;
+      : `Save`;
   }
 
   async function save(): Promise<void> {
@@ -179,6 +202,10 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
     });
     saveBtn.addEventListener("click", () => void save());
     host.querySelector<HTMLButtonElement>('[data-act="cancel"]')!.addEventListener("click", () => void cancel());
+    host.querySelector<HTMLButtonElement>('[data-act="reveal"]')?.addEventListener("click", () => {
+      void invoke<void>("reveal_file_in_explorer", { path: payload.file })
+        .catch((err) => console.warn("[secret-card] reveal failed:", err));
+    });
     input.focus();
   }
 
