@@ -48,7 +48,7 @@ const BOOT_SEED: Record<Entry, InvokeMap> = {
     get_history: [],
     get_token_history: [],
     get_active_sessions: [],
-    // A settings object (not null) so applyThemeFromSettings runs; coerceSettings
+    // A settings object (not null) so applyAppearance runs; coerceSettings
     // fills the rest.
     get_settings: { theme: "void" },
     fetch_available_models: [],

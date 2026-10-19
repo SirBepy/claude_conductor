@@ -42,7 +42,7 @@ function readBackgroundStyle(settings: SettingsShape): "circles" | "card" {
 }
 
 /** Mirror the user's chosen theme/mode onto this window's <html>. The overlay
- * skips initBoot(), so it never runs boot.ts's applyThemeFromSettings and would
+ * skips initBoot(), so it never runs theme-sync.ts's applyAppearance and would
  * otherwise stay stuck on overlay.html's static `data-theme="void"` default.
  * Replicated (not imported) to keep boot.ts's heavy view graph out of the
  * overlay chunk (see overlay-main.ts). Runs from refresh(), which fires on both
