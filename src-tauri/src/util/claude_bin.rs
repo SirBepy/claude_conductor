@@ -239,6 +239,54 @@ pub fn resolve() -> Result<OsString, NotFound> {
     Err(NotFound { searched: candidates, shell_probed: cfg!(not(windows)) })
 }
 
+/// Like [`resolve`], but never takes the bare-name PATH shortcut: always an
+/// absolute (or at least fully-qualified) path, never the literal `"claude"`.
+///
+/// `resolve()`'s shortcut is safe for its other callers because they hand the
+/// result to `Command::new`, whose own PATH search never consults the
+/// child's cwd. A caller that instead builds its own Windows command line
+/// (`channels::spawn::build_cmdline`) and runs it with no shell in between
+/// needs this variant: `CreateProcessW`'s module search checks the child's
+/// current directory BEFORE `PATH`, so a bare `"claude"` would let a
+/// `claude.cmd`/`claude.exe` planted in that directory run instead of the
+/// real CLI. `which::which` itself only ever searches `PATH`, so using its
+/// resolved path instead of the bare name closes that gap.
+pub fn resolve_absolute() -> Result<PathBuf, NotFound> {
+    static FOUND: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(hit) = FOUND.get() {
+        return Ok(hit.clone());
+    }
+
+    if let Some(over) = std::env::var_os(BIN_ENV) {
+        let p = PathBuf::from(&over);
+        if p.is_file() {
+            let _ = FOUND.set(p.clone());
+            return Ok(p);
+        }
+        log::warn!("claude_bin: {BIN_ENV} is set to {} but that is not a file", p.display());
+    }
+
+    if let Ok(p) = which::which("claude") {
+        let _ = FOUND.set(p.clone());
+        return Ok(p);
+    }
+
+    let home = dirs::home_dir();
+    let candidates = fixed_candidates(home.as_deref());
+    if let Some(p) = first_existing(&candidates) {
+        log::info!("claude_bin: PATH lookup failed, using {}", p.display());
+        let _ = FOUND.set(p.clone());
+        return Ok(p);
+    }
+
+    if let Some(p) = login_shell_probe() {
+        let _ = FOUND.set(p.clone());
+        return Ok(p);
+    }
+
+    Err(NotFound { searched: candidates, shell_probed: cfg!(not(windows)) })
+}
+
 /// Lenient variant for spawn sites that already treat a failure to launch as a
 /// soft, logged error (auth probes, the news summarizer, the ask sidecar).
 /// Falls back to the bare name so those paths keep their existing behavior and

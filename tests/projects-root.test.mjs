@@ -114,4 +114,19 @@ describe("isValidProjectName", () => {
       expect(isValidProjectName(`bad${ch}name`)).toBe(false);
     }
   });
+
+  // A created name becomes a channel's --remote-control-session-name-prefix
+  // on the daemon side, which reaches a cmd.exe command line - a name with no
+  // whitespace (e.g. "pwn&calc") used to pass this check and the daemon's
+  // own deny-list, going into that command line unquoted.
+  it("rejects cmd.exe command separators/operators", () => {
+    for (const ch of ["&", "^", "%", "!", "(", ")"]) {
+      expect(isValidProjectName(`pwn${ch}calc`)).toBe(false);
+    }
+  });
+
+  it("rejects control characters", () => {
+    expect(isValidProjectName("bad\u0007name")).toBe(false);
+    expect(isValidProjectName("bad\nname")).toBe(false);
+  });
 });

@@ -73,12 +73,19 @@ export function joinProjectPath(root: string, name: string): string {
 
 /** Whether a typed search term could be a folder name. Gates the "Create
  *  <name>" row: offering to create `../evil` or `C:\Windows` from a search
- *  box is not a feature. */
+ *  box is not a feature.
+ *
+ *  Also rejects `& ^ % ! ( )` and control characters: a created name becomes
+ *  a channel's `--remote-control-session-name-prefix` on the daemon side
+ *  (`create_project::is_valid_project_name`, kept in lockstep with this
+ *  function), which reaches a `cmd.exe` command line - a name carrying one of
+ *  cmd.exe's own operators must never be offered as a folder to create. */
 export function isValidProjectName(name: string): boolean {
   const t = name.trim();
   if (t.length === 0) return false;
   if (t === "." || t === "..") return false;
-  // Path separators, drive colons and the Windows-illegal set. Tested rather
-  // than assumed: these are exactly the characters CreateDirectory rejects.
-  return !/[\\/:*?"<>|]/.test(t);
+  // Path separators, drive colons, the Windows-illegal set, cmd.exe's
+  // command-separator/operator characters, and control characters.
+  if (/[\x00-\x1f\x7f]/.test(t)) return false;
+  return !/[\\/:*?"<>|&^%!()]/.test(t);
 }

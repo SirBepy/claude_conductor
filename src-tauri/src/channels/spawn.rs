@@ -41,11 +41,29 @@ pub struct SpawnOutput {
     pub process_handle: isize,
 }
 
-fn build_cmdline(input: &SpawnInput) -> String {
+/// `claude` is the already-resolved program to run - an absolute path from
+/// [`crate::util::claude_bin::resolve_absolute`], never the bare word
+/// `"claude"`: `CreateProcessW`'s own module search checks the child's
+/// current directory BEFORE `PATH`, so a bare name would let a
+/// `claude.cmd`/`claude.exe` planted in the project folder run instead of the
+/// real CLI. `cmd.exe` stays in the picture rather than calling
+/// `CreateProcessW` on `claude` directly, because a common real install is an
+/// npm-shimmed `claude.cmd`, which `CreateProcessW` cannot execute on its own
+/// (no PE header, no interpreter).
+///
+/// `quote` quotes on ANY of `cmd.exe`'s operators, not just whitespace/`"`:
+/// a bare `&`/`|`/`<`/`>` in a whitespace-free prefix (`pwn&calc`) would
+/// split or redirect the line, and `cmd.exe` treats them as literal inside
+/// quotes. `%` still expands inside quotes, which is why
+/// `is_valid_project_name` also rejects it at the source.
+fn build_cmdline(claude: &str, input: &SpawnInput) -> String {
     fn quote(arg: &str) -> String {
-        if !arg.is_empty()
-            && !arg.contains(|c: char| c.is_whitespace() || c == '"')
-        {
+        let needs_quoting = arg.is_empty()
+            || arg.contains(|c: char| {
+                c.is_whitespace()
+                    || matches!(c, '"' | '&' | '|' | '<' | '>' | '^' | '%' | '!' | '(' | ')')
+            });
+        if !needs_quoting {
             return arg.to_string();
         }
         let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
@@ -54,7 +72,7 @@ fn build_cmdline(input: &SpawnInput) -> String {
     let mut parts: Vec<String> = vec![
         "cmd.exe".into(),
         "/C".into(),
-        "claude".into(),
+        quote(claude),
         "--remote-control".into(),
         "--remote-control-session-name-prefix".into(),
         quote(&input.session_name_prefix),
@@ -87,7 +105,9 @@ pub fn spawn_child(input: SpawnInput) -> Result<SpawnOutput, SpawnError> {
     // block as ANSI and mangles it.
     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x00000400;
 
-    let cmdline = build_cmdline(&input);
+    let claude = crate::util::claude_bin::resolve_absolute()
+        .map_err(|e| SpawnError::ClaudeNotFound(e.to_string()))?;
+    let cmdline = build_cmdline(&claude.to_string_lossy(), &input);
     let mut cmdline_w = crate::util::process::to_wide(&cmdline);
     let cwd_w: Vec<u16> = input
         .cwd
@@ -251,4 +271,69 @@ pub fn resolve_claude_pid(spawned_pid: u32) -> Option<u32> {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn resolve_claude_pid(_spawned_pid: u32) -> Option<u32> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input_with_prefix(prefix: &str) -> SpawnInput {
+        SpawnInput {
+            project_id: "proj-1".to_string(),
+            cwd: PathBuf::from("."),
+            session_name_prefix: prefix.to_string(),
+            continue_flag: false,
+            spawn_env: crate::accounts::env::SpawnEnv { set: Vec::new(), unset: Vec::new() },
+        }
+    }
+
+    /// A prefix from a whitespace-free project folder name (`pwn&calc`)
+    /// must still be quoted, or `&` runs a second command.
+    #[test]
+    fn build_cmdline_quotes_a_prefix_with_no_whitespace_but_a_command_separator() {
+        let cmdline = build_cmdline("C:\\fake\\claude.exe", &input_with_prefix("pwn&calc"));
+        assert!(
+            cmdline.contains("\"pwn&calc\""),
+            "the prefix must be quoted so cmd.exe cannot split on `&`: {cmdline}"
+        );
+        assert_eq!(
+            cmdline.matches("pwn&calc").count(),
+            1,
+            "the hostile token must appear exactly once, inside the quotes: {cmdline}"
+        );
+    }
+
+    #[test]
+    fn build_cmdline_quotes_every_cmd_metacharacter_without_whitespace() {
+        for raw in ["a|b", "a<b", "a>b", "a^b", "a%b", "a!b", "a(b)"] {
+            let cmdline = build_cmdline("C:\\fake\\claude.exe", &input_with_prefix(raw));
+            let quoted = format!("\"{raw}\"");
+            assert!(cmdline.contains(&quoted), "{raw} must be quoted: {cmdline}");
+        }
+    }
+
+    /// The program token is the resolved absolute path, never the bare word
+    /// "claude": `CreateProcessW`'s module search checks the child's cwd
+    /// before PATH, so a bare name runs a `claude.cmd` planted in the project.
+    #[test]
+    fn build_cmdline_uses_the_resolved_absolute_path_not_the_bare_word() {
+        let absolute = "C:\\Users\\joe\\.local\\bin\\claude.cmd";
+        let cmdline = build_cmdline(absolute, &input_with_prefix("ordinary-prefix"));
+        assert!(cmdline.contains(absolute), "expected {absolute} in: {cmdline}");
+        assert!(
+            !cmdline.split_whitespace().any(|tok| tok == "claude"),
+            "the bare word \"claude\" must never be the program token: {cmdline}"
+        );
+    }
+
+    #[test]
+    fn build_cmdline_keeps_continue_flag_and_fixed_args() {
+        let mut input = input_with_prefix("ordinary");
+        input.continue_flag = true;
+        let cmdline = build_cmdline("C:\\fake\\claude.exe", &input);
+        assert!(cmdline.starts_with("cmd.exe /C "), "{cmdline}");
+        assert!(cmdline.contains("--remote-control"), "{cmdline}");
+        assert!(cmdline.contains("--disallowedTools AskUserQuestion"), "{cmdline}");
+        assert!(cmdline.contains("--continue"), "{cmdline}");
+    }
 }
