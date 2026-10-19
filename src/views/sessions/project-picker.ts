@@ -326,6 +326,15 @@ export function openProjectPickerModal(
         return;
       }
       const result = await openLocationModal(p);
+      // An Escape landing before the location card paints (it waits on
+      // loadScopes()) still hits this picker's own Escape handler and
+      // resolves it. Re-presenting renderModal then would reopen a card
+      // whose finish() is a permanent no-op, so close whatever the stale
+      // location step left on screen instead.
+      if (resolved) {
+        closeHostCard();
+        return;
+      }
       if (!result) {
         setBackdropCancel(() => finish(null));
         await presentHostCard(renderModal);
