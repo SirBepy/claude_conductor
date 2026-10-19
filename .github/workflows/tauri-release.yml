@@ -65,7 +65,9 @@ jobs:
           fi
 
   # Gates the tag, so a red check stops the release before anything is published
-  # to the auto-updater. Fast checks only: the wdio e2e suite needs a built
+  # to the auto-updater. Runs alongside `build` rather than before it (each is
+  # ~20 min): the tag and publish jobs wait on both, so a red test still ships
+  # nothing and only costs one unused build. Fast checks only: the wdio e2e suite needs a built
   # binary and a display, and the 31 #[ignore]'d integration tests spawn a real
   # `claude`, so neither belongs in front of every push to master.
   test:
@@ -136,8 +138,10 @@ jobs:
           CARGO_TARGET_DIR: target
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
+  # Waits on build too, so a failed build never leaves an orphan tag behind that
+  # makes `check` skip the next push's release of the same version.
   tag:
-    needs: [check, test]
+    needs: [check, test, build]
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -151,7 +155,7 @@ jobs:
           git push origin "${{ needs.check.outputs.tag }}"
 
   build:
-    needs: [check, tag]
+    needs: check
     if: needs.check.outputs.should_release == 'true'
     strategy:
       fail-fast: false
@@ -326,7 +330,7 @@ jobs:
           path: release-staging/
 
   android:
-    needs: [check, tag]
+    needs: check
     if: needs.check.outputs.should_release == 'true' && needs.check.outputs.android_changed == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -455,8 +459,10 @@ jobs:
     needs: [check, tag, build, android]
     # !cancelled() rather than success(): the android job is skipped on releases
     # that did not touch android/, and a skipped need would otherwise skip publish
-    # too. The desktop build still has to have passed.
-    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.build.result == 'success' }}
+    # too. The desktop build and the tag still have to have passed; the tag check
+    # is what keeps a red `test` (which runs beside `build`, not before it) from
+    # publishing.
+    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.build.result == 'success' && needs.tag.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
