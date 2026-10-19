@@ -65,17 +65,22 @@ test.describe("view-harness / project picker survives a raced Location-step canc
   test("cancelling the late Location card does not resurrect a dead Pick-project card", async ({ page }) => {
     await raceEscapePastTheLocationStep(page);
 
-    // The Location step keeps running regardless of the race above (its own
-    // promise is untouched) and still paints its card once loadScopes lands.
-    await page.locator(".wt-picker-modal").waitFor();
-    await expect(page.locator(".wt-picker-modal h3")).toHaveText("Open repo");
-
-    await page.locator(".wt-picker-modal .btn-secondary", { hasText: "Cancel" }).click();
-
-    // Give selectProjectRow's post-await continuation a tick to run.
+    // The outer Escape's own closeHostCard() tears the host down on its own
+    // COLLAPSE_MS timer (150ms), well before list_claude_md_scopes's delayed
+    // 300ms resolves - confirms the host actually closes, not just that it
+    // never opened.
     await expect(page.locator("#modal-host")).not.toHaveClass(/\bopen\b/);
     await expect(page.locator(".project-picker-modal")).toHaveCount(0);
+
+    // openLocationModal's start() now learns its owner (the outer
+    // project-picker promise) already resolved via the isCancelled callback,
+    // and skips presentHostCard() instead of painting a zombie "Open repo"
+    // card once the delayed list_claude_md_scopes lands. Wait past the delay
+    // and assert the card never appears at all - no flash, nothing to cancel.
+    await page.waitForTimeout(DELAY_MS + 200);
     await expect(page.locator(".wt-picker-modal")).toHaveCount(0);
+    await expect(page.locator("#modal-host")).not.toHaveClass(/\bopen\b/);
+    await expect(page.locator(".project-picker-modal")).toHaveCount(0);
 
     // Raw reload bypass (7c188e9a) must stay intact regardless.
     const reloadAllowed = await page.evaluate(() => {

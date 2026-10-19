@@ -52,7 +52,14 @@ export function resolveRememberedLocation(project: ProjectGroup): { path: string
   return { path: `${wt.path}\\${rel.replace(/\//g, "\\")}`, name: wt.name };
 }
 
-export function openLocationModal(project: ProjectGroup): Promise<{ path: string; name: string } | null> {
+// `isCancelled` reports whether this modal's OWNER (the project picker) has
+// already resolved. The owner can resolve while `loadScopes()` is in flight
+// (an Escape lands while the picker's own card is still mounted), and a
+// presentHostCard() after that would repaint onto a host the owner tore down.
+export function openLocationModal(
+  project: ProjectGroup,
+  isCancelled?: () => boolean,
+): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const slot = modalCardSlot();
     // kebab-menu.ts precedent: Escape returns focus to whatever opened this
@@ -101,6 +108,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
 
     const changeWorktree = async () => {
       const result = await openWorktreePickerModal(project);
+      if (isCancelled?.()) { finish(null); return; }
       setBackdropCancel(() => finish(null));
       if (result) {
         currentWt = result;
@@ -116,6 +124,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
       await presentHostCard(renderModal);
       if (result) {
         await loadScopes();
+        if (isCancelled?.()) { finish(null); return; }
         renderModal();
       }
     };
@@ -263,6 +272,7 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
       setBackdropCancel(() => finish(null));
       if (!hasWorktreeChoice(project.worktrees.length)) {
         await loadScopes();
+        if (isCancelled?.()) { finish(null); return; }
         if ((scopes?.length ?? 0) <= 1 && !scopesError) {
           finish({ path: currentWt.path, name: currentWt.name });
           return;
@@ -271,7 +281,9 @@ export function openLocationModal(project: ProjectGroup): Promise<{ path: string
         return;
       }
       await presentHostCard(renderModal);
+      if (isCancelled?.()) { finish(null); return; }
       await loadScopes();
+      if (isCancelled?.()) { finish(null); return; }
       renderModal();
     };
     void start();

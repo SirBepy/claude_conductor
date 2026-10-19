@@ -325,12 +325,13 @@ export function openProjectPickerModal(
         finish({ path: p.path, name: p.name, machineId: null });
         return;
       }
-      const result = await openLocationModal(p);
+      const result = await openLocationModal(p, () => resolved);
       // An Escape landing before the location card paints (it waits on
       // loadScopes()) still hits this picker's own Escape handler and
       // resolves it. Re-presenting renderModal then would reopen a card
       // whose finish() is a permanent no-op, so close whatever the stale
-      // location step left on screen instead.
+      // location step left on screen instead (a backstop: the isCancelled
+      // callback above already stops the location step from repainting).
       if (resolved) {
         closeHostCard();
         return;
