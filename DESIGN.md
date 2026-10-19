@@ -78,13 +78,14 @@ stat cards, tables, and rings all pack multiple data points into a small
 footprint, consistent with a tool built for someone who checks it often rather
 than a landing page meant to be read once.
 
-The app ships four selectable theme palettes (Void, Nebula, Glacier, Cosmo,
-each with a dark and light mode - src/views/settings/subviews/appearance/
-appearance.ts:24-27) built on the same structural system documented here. Void
-dark is the shipped default (src/index.html:2, `html[data-theme="void"]
-[data-mode="dark"]`) and is what this document treats as canonical; the other
-three swap the accent hue, a couple of font families, and card radius, but
-share every layout, motion, and component rule below.
+The app ships sixteen selectable theme palettes, each with a dark and light
+mode, listed in vendor/tauri_kit/frontend/settings/palettes/sirbepy-default.ts
+(`SIRBEPY_PALETTES`) and built on the same structural system documented here.
+Void dark is the shipped default (src/index.html:2, `html[data-theme="void"]
+[data-mode="dark"]`) and is what this document treats as canonical; the others
+swap the colour tokens (and, for Nebula, Glacier and Cosmo, a couple of font
+families and card radius), but share every layout, motion, and component rule
+below.
 
 **Key Characteristics:**
 - Flat surfaces, ambient (not directional) drop shadows for elevation.
