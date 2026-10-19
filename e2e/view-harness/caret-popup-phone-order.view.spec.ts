@@ -2,6 +2,10 @@ import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 
 // asserts: src/shared/chat/caret-popup/popup.css
+// Reviewed 2026-10-19: the mobile `display: flex` rule is now gated
+// `:not([hidden])` (it used to beat `el.hidden = true`, leaving an empty
+// bordered strip floating above the composer when no popup was open) -
+// additive guard, no change to this spec's open/order contract.
 // On a phone the "/" popup's best match sits at the bottom, next to the input
 // and the thumb; desktop keeps it on top. Also the first row a phone sees
 // without scrolling, even when the list overflows the popup's max-height.

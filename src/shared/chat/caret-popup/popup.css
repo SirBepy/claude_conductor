@@ -50,7 +50,7 @@
    column-reverse keeps DOM order (and the keyboard index) untouched, and a
    reversed scroller starts scrolled to its end, so the top pick shows first. */
 @media (max-width: 768px) {
-  .caret-popup {
+  .caret-popup:not([hidden]) {
     display: flex;
     flex-direction: column-reverse;
   }
