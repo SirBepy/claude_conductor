@@ -76,16 +76,20 @@ fn frame(messages: &[String]) -> String {
 /// The preamble paragraph has no embedded blank line (the plural/singular
 /// wording differs but neither variant contains "\n\n"), so the first
 /// `"\n\n"` split lands exactly on the preamble/body boundary; everything
-/// after is `body`, which is itself `messages.join("\n\n")` - splitting it
-/// back on the same separator recovers the original per-item strings.
-/// Ambiguous only if an original message itself contained a literal blank
-/// line, which `frame` has no way to escape either.
+/// after is `body`, which is itself `messages.join("\n\n")` after each item
+/// was passed through `slash::mentions::augment` - `strip_block` removes any
+/// appended `<conductor-slash-context>` blocks (which themselves contain
+/// blank lines) before the body is split back on the same separator, so the
+/// recovered list matches the original per-item strings. Ambiguous only if
+/// an original message itself contained a literal blank line, which `frame`
+/// has no way to escape either.
 ///
 /// Returns `None` if `text` isn't (or no longer looks like) a `frame()`
 /// output - callers should skip the entry rather than fabricate a message.
 pub(crate) fn parse_mid_turn_frame(text: &str) -> Option<Vec<String>> {
     let inner = text.strip_prefix(FRAME_OPEN)?.strip_suffix(FRAME_CLOSE)?;
     let (_preamble, body) = inner.split_once("\n\n")?;
+    let body = crate::slash::mentions::strip_block(body);
     Some(body.split("\n\n").map(str::to_string).collect())
 }
 
@@ -128,13 +132,20 @@ pub(super) async fn on_tool_batch(
     }
 
     let held = ctx.state.draft_store.get(&q.session_id).held;
+    let session = ctx.state.sessions.get(&q.session_id).map(|s| s.clone());
+    let project_dir = session.as_ref().map(|s| s.cwd.as_path());
     let mut delivered_ids: Vec<u64> = Vec::new();
     let mut messages: Vec<String> = Vec::new();
     let mut delivered_blocks: Vec<ContentBlock> = Vec::new();
     for item in &held {
         let Some(text) = item_text(&item.blocks) else { continue };
         delivered_ids.push(item.id);
-        messages.push(text);
+        // A slash command Joe typed mid-sentence while busy gets the same
+        // instructions-pointer block a normal send gets (`lifecycle::teardown`'s
+        // `send_message_inner`) - without this, a skill named here never
+        // reaches the model at all, since the CLI only auto-expands a command
+        // in leading position and this path bypasses that entirely.
+        messages.push(crate::slash::mentions::augment(&text, project_dir).await);
         delivered_blocks.extend(item.blocks.iter().cloned());
     }
     // The common case by volume: nothing queued means EMPTY stdout, never an
@@ -169,12 +180,12 @@ pub(super) async fn on_tool_batch(
     // Content shape matches `chat::parser::parse_line`'s "attachment" arm
     // exactly (one UserMessage, one block per delivered item) so those two
     // never render as two separate rows.
-    if let Some(session) = ctx.state.sessions.get(&q.session_id).map(|s| s.clone()) {
+    if let Some(session) = &session {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
-        crate::daemon::broadcast::publish(&session, crate::types::chat::ChatEvent::UserMessage {
+        crate::daemon::broadcast::publish(session, crate::types::chat::ChatEvent::UserMessage {
             content: delivered_blocks.clone(),
             timestamp: now_ms,
             remote_echo: true,
@@ -362,6 +373,35 @@ mod tests {
     fn parse_mid_turn_frame_round_trips_several_messages() {
         let msgs = vec!["first".to_string(), "second".to_string(), "third one".to_string()];
         assert_eq!(parse_mid_turn_frame(&frame(&msgs)), Some(msgs));
+    }
+
+    // `on_tool_batch` now runs each held item's text through
+    // `slash::mentions::augment` before framing it, exactly like a normal
+    // send does (`lifecycle::teardown::send_message_inner`) - otherwise a
+    // skill named mid-sentence in a busy-session message never reaches the
+    // model. The appended `<conductor-slash-context>` block embeds its own
+    // blank line, so recovery must strip it before re-splitting the body on
+    // "\n\n", or a two-item batch comes back garbled into extra rows.
+    #[test]
+    fn parse_mid_turn_frame_recovers_mention_augmented_items() {
+        use crate::slash::{SlashEntry, SlashSource};
+        let entry = SlashEntry {
+            name: "close".to_string(),
+            args: None,
+            description: "closes the session".to_string(),
+            source: SlashSource::UserSkill,
+            path: Some("/home/u/.claude/skills/close/SKILL.md".to_string()),
+        };
+        let block = crate::slash::mentions::build_block("do /close now", std::slice::from_ref(&entry))
+            .expect("the fixture entry matches the mentioned command");
+        let augmented_first = format!("do /close now\n\n{block}");
+        let msgs = vec![augmented_first, "plain second message".to_string()];
+        let recovered = parse_mid_turn_frame(&frame(&msgs)).unwrap();
+        assert_eq!(
+            recovered,
+            vec!["do /close now".to_string(), "plain second message".to_string()],
+            "the appended block must not split one item into several recovered rows"
+        );
     }
 
     #[test]
