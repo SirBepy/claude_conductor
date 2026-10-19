@@ -1,4 +1,5 @@
 import { html, render } from "lit-html";
+import { SIRBEPY_PALETTES } from "../../../../../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default";
 import { attachTooltips } from "../../../../shared/row-tooltip";
 import { saveSettings } from "../../../../shared/settings-save";
 import { getSettings, setSettings } from "../../../../shared/state";
@@ -13,20 +14,6 @@ function $(id: string): HTMLElement | null {
 }
 
 // ── Theme (ported from subviews/themes/themes.ts) ───────────────────────────
-
-interface ThemeDef {
-  id: string;
-  label: string;
-  darkColors: string[];
-  lightColors: string[];
-}
-
-const THEMES: ThemeDef[] = [
-  { id: "void",    label: "Void",    darkColors: ["#16151f", "#1e1d2b", "#9d7dfc", "#6e8fff", "#e2e0f0"], lightColors: ["#f0eff5", "#ffffff", "#7c5cdb", "#4a6bdf", "#1e1d2b"] },
-  { id: "nebula",  label: "Nebula",  darkColors: ["#0f1629", "#172040", "#c084fc", "#a78bfa", "#e2dff0"], lightColors: ["#f2f0fa", "#ffffff", "#9333ea", "#7c3aed", "#1a1040"] },
-  { id: "glacier", label: "Glacier", darkColors: ["#0c1a24", "#112430", "#38bdf8", "#22d3ee", "#e0f0f8"], lightColors: ["#eef6fa", "#ffffff", "#0284c7", "#0891b2", "#0c2430"] },
-  { id: "cosmo",   label: "Cosmo",   darkColors: ["#1a0a1e", "#241430", "#f472b6", "#fb923c", "#f0e4f5"], lightColors: ["#faf0f4", "#ffffff", "#db2777", "#ea580c", "#2a1030"] },
-];
 
 function resolveThemeId(baseId: string, isLight: boolean): string {
   return isLight ? baseId + "-light" : baseId;
@@ -54,9 +41,9 @@ function renderThemeCards(activeTheme: string): void {
   const modeLabelLight = $("modeLabelLight");
   if (!themeGrid) return;
   const { baseId: activeBase, isLight } = parseThemeId(activeTheme);
-  const colorKey: "darkColors" | "lightColors" = isLight ? "lightColors" : "darkColors";
+  const colorKey: "darkSwatch" | "lightSwatch" = isLight ? "lightSwatch" : "darkSwatch";
   themeGrid.innerHTML = "";
-  for (const t of THEMES) {
+  for (const t of SIRBEPY_PALETTES) {
     const card = document.createElement("button");
     card.type = "button";
     card.className = "kit-palette-card v-focusable" + (t.id === activeBase ? " kit-palette-card--active" : "");
