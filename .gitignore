@@ -19,6 +19,8 @@ playwright-report/
 .for_bepy/
 .claude/scheduled_tasks.lock
 .claude/last-session-status.json
+# Per-machine Claude Code approvals; "always allow" can save a command with a live token in it
+.claude/settings.local.json
 # Scratch (cache, critiques, private waivers); config.json is the SHARED waiver list and IS tracked
 .impeccable/*
 !.impeccable/config.json
