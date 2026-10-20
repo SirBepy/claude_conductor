@@ -11,7 +11,10 @@ import { saveParkedDrafts } from "./pending-draft-storage";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { showView } from "../../shared/navigation";
 import { closeChatWithConfirm } from "./close-chat";
+import { askConfirm } from "../../shared/confirm";
 import type { SessionConfig } from "./model-effort-modal";
+import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
+import { refreshWrapUpIndicator } from "./session-header";
 
 // ── Shared pane + pending state ───────────────────────────────────────────────
 // Written by sessions.ts via the setters below; read by the control functions.
@@ -138,6 +141,28 @@ export function selectSessionByIndex(index: number): void {
   void selectSession(id, pane);
 }
 
+/** Ctrl+W on a not-yet-sent draft: closeChatWithConfirm's clear_session call
+ *  is a no-op here (no real session exists yet for the placeholder id), so it
+ *  never reached the "discard-pending-draft" path the X button and 3-dot menu
+ *  use - route there instead, same confirm the shortcut always shows. */
+function closeFocusedDraft(): void {
+  void (async () => {
+    const ok = await askConfirm("Close this chat?", { confirmLabel: "Close", focusConfirm: true });
+    if (!ok) return;
+    document.dispatchEvent(new CustomEvent("discard-pending-draft"));
+  })();
+}
+
+export function closeFocusedChat(): void {
+  const id = state.selectedId;
+  if (!id) return;
+  if (state.pendingNewSession?.placeholderId === id) {
+    closeFocusedDraft();
+    return;
+  }
+  void closeChatWithConfirm(id);
+}
+
 /** Ctrl+Shift+W: flips "Wrap up when done" for the focused chat. A no-op on
  *  a not-yet-sent draft (no `session_id` to persist against yet) - same gate
  *  as the chat menu's own item. */
@@ -149,11 +174,3 @@ export function toggleWrapUpOnDoneForFocusedChat(): void {
   refreshWrapUpIndicator(state.selectedId, id, next);
   rerenderSidebar();
 }
-
-export function closeFocusedChat(): void {
-  const id = state.selectedId;
-  if (!id) return;
-  void closeChatWithConfirm(id);
-}
-import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
-import { refreshWrapUpIndicator } from "./session-header";
