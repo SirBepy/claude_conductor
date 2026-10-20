@@ -67,7 +67,15 @@ export function buildPreviewDocumentHtml(html: string): string {
     : /<html[^>]*>/i.test(wrapped)
       ? wrapped.replace(/<html[^>]*>/i, (m) => `${m}<head>${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}</head>`)
       : `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${wrapped}`;
-  return /<\/body>/i.test(withHead)
-    ? withHead.replace(/<\/body>/i, `${DIAGNOSTICS_BODY_END_SCRIPT}</body>`)
+  // The LAST </body>, not the first: a mockup's own inline script commonly
+  // builds HTML strings containing the literal text "</body>" (e.g. an
+  // AI-generated mockup that itself renders HTML), and .replace() with no
+  // global flag would splice the diagnostics script into that string
+  // instead of the real closing tag, truncating the script and silently
+  // dropping everything after it.
+  const bodyCloseTags = [...withHead.matchAll(/<\/body>/gi)];
+  const lastBodyClose = bodyCloseTags[bodyCloseTags.length - 1];
+  return lastBodyClose
+    ? withHead.slice(0, lastBodyClose.index) + DIAGNOSTICS_BODY_END_SCRIPT + withHead.slice(lastBodyClose.index)
     : `${withHead}${DIAGNOSTICS_BODY_END_SCRIPT}`;
 }
