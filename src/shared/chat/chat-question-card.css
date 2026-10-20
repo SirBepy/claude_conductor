@@ -65,8 +65,10 @@
   color: var(--color-text-muted);
   background: var(--color-surface-3);
 }
-/* Diagnostic marker for the Rust-side hard-block hang-safety fallback -
-   subtle, not an error state. */
+/* Shared subtle-marker style for a question card's small inline icon badges:
+   either the Rust-side hard-block hang-safety fallback diagnostic, or the
+   "an older question in this chat is still open" notice - neither is an
+   error state. */
 .question-card-degraded-badge {
   flex-shrink: 0;
   opacity: 0.45;
