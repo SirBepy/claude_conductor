@@ -10,27 +10,42 @@ Set-Location $repoRoot
 
 . (Join-Path $PSScriptRoot "resolve-android-java-home.ps1")
 
-Write-Host "[1/5] git submodule update --init --recursive (vendor/tauri_kit)"
-git submodule update --init --recursive
+# A native command that exits non-zero does not trip $ErrorActionPreference, so a
+# failed submodule init or pnpm install used to fall through to "Bootstrap complete"
+# and surface later as an unrelated "'vite' is not recognized" or rollup resolve error.
+function Assert-Exit0([string]$what) {
+    if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
+}
 
-Write-Host "[2/5] pnpm install"
+# Main worktree is always the first line of `git worktree list --porcelain`.
+$mainLine = git worktree list --porcelain | Where-Object { $_ -like "worktree *" } | Select-Object -First 1
+$mainWorktree = ($mainLine -replace "^worktree ", "") -replace "/", "\"
+
+Write-Host "[1/6] git submodule update --init --recursive (vendor/tauri_kit)"
+git submodule update --init --recursive
+Assert-Exit0 "git submodule update"
+if (-not (Test-Path (Join-Path $repoRoot "vendor\tauri_kit\frontend"))) {
+    throw "vendor/tauri_kit/frontend is missing after submodule init; the vite build cannot resolve ../vendor/tauri_kit/..."
+}
+
+Write-Host "[2/6] pnpm install"
 pnpm install
+Assert-Exit0 "pnpm install"
+if (-not (Test-Path (Join-Path $repoRoot "node_modules\.bin\vite.CMD"))) {
+    throw "node_modules/.bin/vite.CMD is missing after pnpm install"
+}
 
 $typesDir = Join-Path $repoRoot "src\types"
 $generatedFile = Join-Path $typesDir "ipc.generated.ts"
 
 if (Test-Path $generatedFile) {
-    Write-Host "[3/5] src/types/ipc.generated.ts already present, skipping"
+    Write-Host "[3/6] src/types/ipc.generated.ts already present, skipping"
 } else {
-    Write-Host "[3/5] seeding src/types/ipc.generated.ts"
+    Write-Host "[3/6] seeding src/types/ipc.generated.ts"
     if (-not (Test-Path $typesDir)) {
         New-Item -ItemType Directory -Path $typesDir | Out-Null
     }
 
-    # Main worktree is always the first line of `git worktree list --porcelain`.
-    $porcelain = git worktree list --porcelain
-    $mainLine = $porcelain | Where-Object { $_ -like "worktree *" } | Select-Object -First 1
-    $mainWorktree = ($mainLine -replace "^worktree ", "") -replace "/", "\"
     $sourceFile = Join-Path $mainWorktree "src\types\ipc.generated.ts"
 
     if (($mainWorktree -ne $repoRoot) -and (Test-Path $sourceFile)) {
@@ -48,8 +63,8 @@ $tauriSettingsGradle = Join-Path $androidDir "src-tauri\gen\android\tauri.settin
 $tauriActivityKt = Join-Path $androidDir "src-tauri\gen\android\app\src\main\java\com\sirbepy\conductor\mobile\generated\TauriActivity.kt"
 
 if (-not (Test-Path $androidDir)) {
-    Write-Host "[4/5] android/ not present, skipping"
-    Write-Host "[5/5] android/ not present, skipping"
+    Write-Host "[4/6] android/ not present, skipping"
+    Write-Host "[5/6] android/ not present, skipping"
 } else {
     # These three are never persistent env vars on this machine (confirmed 2026-08-05) -
     # every android command sets them ad hoc. Auto-detect the standard install locations
@@ -64,12 +79,12 @@ if (-not (Test-Path $androidDir)) {
     $javaHome = Resolve-AndroidJavaHome
 
     if ((Test-Path $tauriSettingsGradle) -and (Test-Path $tauriActivityKt)) {
-        Write-Host "[4/5] android/ codegen output already present, skipping"
+        Write-Host "[4/6] android/ codegen output already present, skipping"
     } elseif (-not (Test-Path $sdkHome) -or -not $ndkHome -or -not $javaHome -or -not (Test-Path $javaHome)) {
-        Write-Host "[4/5] could not auto-detect ANDROID_HOME/NDK_HOME/JAVA_HOME - skipping."
+        Write-Host "[4/6] could not auto-detect ANDROID_HOME/NDK_HOME/JAVA_HOME - skipping."
         Write-Host "  run manually from android/: cargo tauri android init (with those three set)"
     } else {
-        Write-Host "[4/5] android/ codegen output missing, running cargo tauri android init"
+        Write-Host "[4/6] android/ codegen output missing, running cargo tauri android init"
         Push-Location $androidDir
         try {
             $env:ANDROID_HOME = $sdkHome
@@ -85,7 +100,7 @@ if (-not (Test-Path $androidDir)) {
     # that gives per-build inheritance to `cargo tauri android build` without a wrapper
     # script. Gitignored: the NDK path is machine-specific (see the release target-dir trap).
     if (-not $ndkHome) {
-        Write-Host "[5/5] could not auto-detect NDK_HOME - skipping android/.cargo/config.toml"
+        Write-Host "[5/6] could not auto-detect NDK_HOME - skipping android/.cargo/config.toml"
     } else {
         $clangBin = Join-Path $ndkHome "toolchains\llvm\prebuilt\windows-x86_64\bin"
         $tauriConfPath = Join-Path $androidDir "src-tauri\tauri.conf.json"
@@ -95,9 +110,9 @@ if (-not (Test-Path $androidDir)) {
         $ar = Join-Path $clangBin "llvm-ar.exe"
 
         if (-not (Test-Path $clang) -or -not (Test-Path $ar)) {
-            Write-Host "[5/5] NDK clang/llvm-ar not found under $clangBin - skipping android/.cargo/config.toml"
+            Write-Host "[5/6] NDK clang/llvm-ar not found under $clangBin - skipping android/.cargo/config.toml"
         } else {
-            Write-Host "[5/5] writing android/.cargo/config.toml (NDK cross-compile env)"
+            Write-Host "[5/6] writing android/.cargo/config.toml (NDK cross-compile env)"
             $cargoDir = Join-Path $androidDir ".cargo"
             if (-not (Test-Path $cargoDir)) {
                 New-Item -ItemType Directory -Path $cargoDir | Out-Null
@@ -116,6 +131,20 @@ CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "$clangToml"
             [System.IO.File]::WriteAllText((Join-Path $cargoDir "config.toml"), $configToml)
         }
     }
+}
+
+# e2e/drivers/ is gitignored and per-machine, so a fresh worktree has no msedgedriver and
+# every wdio spec dies with "Unable to connect to localhost:4444". Copy from the main checkout.
+$driversDir = Join-Path $repoRoot "e2e\drivers"
+$mainDriversDir = Join-Path $mainWorktree "e2e\drivers"
+if (Test-Path (Join-Path $driversDir "msedgedriver.exe")) {
+    Write-Host "[6/6] e2e/drivers/msedgedriver.exe already present, skipping"
+} elseif (($mainWorktree -ne $repoRoot) -and (Test-Path (Join-Path $mainDriversDir "msedgedriver.exe"))) {
+    Write-Host "[6/6] copying e2e/drivers from main worktree: $mainDriversDir"
+    New-Item -ItemType Directory -Path $driversDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $mainDriversDir "*") -Destination $driversDir -Recurse -Force
+} else {
+    Write-Host "[6/6] no msedgedriver.exe in $driversDir and none to copy from the main worktree - wdio specs will fail until it is placed there (see e2e/wdio.conf.js)"
 }
 
 Write-Host "Bootstrap complete."

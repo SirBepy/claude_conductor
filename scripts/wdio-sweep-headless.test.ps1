@@ -70,6 +70,33 @@ $script:copyWritesSummary = $false
 $code = Invoke-SweepInSupervisor 6> $null
 if ($code -ne 1) { $failures += "copy died without a summary: expected exit 1, got '$code'" }
 
+# A scratch worktree's chat specs hop to the main checkout's cwd but keep this tree's own wdio.js,
+# config and spec; every other spec, and every spec in the main checkout, stays put.
+$script:repoRoot = 'C:\wt\app'
+$script:mainWorktree = 'C:\main\app'
+$script:inScratchWorktree = $true
+$inv = Get-WdioCommandLine -SpecName 'chat-flow' -LogPath 'C:\log\c.log'
+if ($inv.WorkingDirectory -ne 'C:\main\app') { $failures += "scratch worktree chat-flow cwd: got '$($inv.WorkingDirectory)'" }
+foreach ($want in 'C:\wt\app\node_modules\@wdio\cli\bin\wdio.js', 'C:\wt\app\e2e\wdio.conf.js', 'C:\wt\app\e2e\specs\chat-flow.e2e.js') {
+    if (-not $inv.CommandLine.Contains($want)) { $failures += "scratch worktree chat-flow: '$want' missing from '$($inv.CommandLine)'" }
+}
+$inv = Get-WdioCommandLine -SpecName 'smoke' -LogPath 'C:\log\s.log'
+if ($inv.WorkingDirectory -ne 'C:\wt\app' -or -not $inv.CommandLine.StartsWith('pnpm exec wdio')) {
+    $failures += "scratch worktree smoke: expected the plain pnpm invocation in the worktree, got '$($inv.CommandLine)' in '$($inv.WorkingDirectory)'"
+}
+$script:inScratchWorktree = $false
+$inv = Get-WdioCommandLine -SpecName 'chat-flow' -LogPath 'C:\log\c.log'
+if ($inv.WorkingDirectory -ne 'C:\wt\app' -or -not $inv.CommandLine.StartsWith('pnpm exec wdio')) {
+    $failures += "main checkout chat-flow: expected the plain pnpm invocation, got '$($inv.CommandLine)'"
+}
+
+# No driver anywhere must abort the sweep up front rather than run every spec against nothing.
+$script:repoRoot = Join-Path $env:TEMP "wdio-sweep-nodriver-$PID"
+$script:mainWorktree = $script:repoRoot
+$threw = $false
+try { Assert-WdioDriver } catch { $threw = $true }
+if (-not $threw) { $failures += 'missing msedgedriver: expected Assert-WdioDriver to throw' }
+
 if ($failures.Count -gt 0) {
     foreach ($f in $failures) { Write-Host "FAIL: $f" }
     Write-Host "`nRESULT: FAIL ($($failures.Count) check(s))"
