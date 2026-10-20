@@ -1,7 +1,8 @@
 # STT sidecar: localhost-only WebSocket server on 127.0.0.1:27184.
 # Binary frames = raw 16 kHz mono Int16LE PCM. Text frames = JSON control
 # {"cmd": "start"|"stop"|"reload_vocab"|"shutdown"}. Emits JSON results.
-import argparse, asyncio, concurrent.futures, json, os, pathlib, sys
+# The first frame of every connection must be {"cmd":"auth","token":<CC_STT_TOKEN>}.
+import argparse, asyncio, concurrent.futures, hmac, json, os, pathlib, sys
 import websockets
 from engine import StreamingEngine, build_asr
 
@@ -22,8 +23,36 @@ if sys.platform == "win32":
     ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler_ref, True)
 
 
-def make_handler(app_data, asr_future):
+AUTH_TIMEOUT_S = 5.0
+
+
+async def _authenticate(ws, token):
+    """True iff the peer is the daemon: no Origin header (a browser page always
+    sends one, the daemon's client never does) and a first frame carrying the
+    per-install secret. Anything else is closed before any engine work."""
+    if ws.request is not None and ws.request.headers.get("Origin") is not None:
+        await ws.close(code=1008, reason="origin not allowed")
+        return False
+    try:
+        first = await asyncio.wait_for(ws.recv(), AUTH_TIMEOUT_S)
+        if isinstance(first, str):
+            msg = json.loads(first)
+            sent = msg.get("token") if msg.get("cmd") == "auth" else None
+            if isinstance(sent, str) and hmac.compare_digest(sent.encode(), token.encode()):
+                return True
+    except Exception:
+        pass
+    await ws.close(code=1008, reason="unauthorized")
+    return False
+
+
+def make_handler(app_data, asr_future, token):
     async def handle(ws):
+        if not await _authenticate(ws, token):
+            return
+        # Tells the daemon's health probe the secret was accepted without
+        # waiting on the (possibly slow) model load below.
+        await ws.send(json.dumps({"type": "authed"}))
         # Wait on the process-wide model load (kicked off in _main). Awaiting the
         # shared future here - rather than loading per connection - means the
         # model is loaded exactly once and every later connect resolves instantly.
@@ -67,7 +96,7 @@ def make_handler(app_data, asr_future):
     return handle
 
 
-async def _main(app_data, port):
+async def _main(app_data, port, token):
     # Kick off the model load in the background so the port binds immediately
     # (the daemon relay only retries its connect for ~10 s). The first connect -
     # normally the chat-open warm-up - awaits this and pays the load; every later
@@ -76,7 +105,7 @@ async def _main(app_data, port):
         asyncio.get_running_loop().run_in_executor(None, build_asr)
     )
     # max_size=None: binary audio frames must not hit the default 1 MiB cap.
-    async with websockets.serve(make_handler(app_data, asr_future), "127.0.0.1", port, max_size=None):
+    async with websockets.serve(make_handler(app_data, asr_future, token), "127.0.0.1", port, max_size=None):
         print(f"stt-sidecar listening on 127.0.0.1:{port}", flush=True)
         await asyncio.Future()  # run forever
 
@@ -86,7 +115,12 @@ if __name__ == "__main__":
     ap.add_argument("--app-data", required=True)
     ap.add_argument("--port", type=int, default=27184)
     a = ap.parse_args()
+    # Env, not argv: a command line is readable by every local process.
+    secret = os.environ.get("CC_STT_TOKEN", "")
+    if not secret:
+        print("CC_STT_TOKEN is required", file=sys.stderr, flush=True)
+        sys.exit(2)
     try:
-        asyncio.run(_main(a.app_data, a.port))
+        asyncio.run(_main(a.app_data, a.port, secret))
     except KeyboardInterrupt:
         sys.exit(0)

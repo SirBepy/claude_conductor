@@ -47,10 +47,15 @@ async fn relay_transcribe(browser: WebSocket, stt: Arc<crate::daemon::stt::SttSu
 
     stt.on_connect();
     // Brief retry so the freshly-spawned sidecar has time to bind its socket.
-    let url = format!("ws://127.0.0.1:{}", crate::daemon::stt::SIDECAR_PORT);
     let mut sidecar = None;
     for _ in 0..50 {
-        if let Ok((s, _)) = tokio_tungstenite::connect_async(&url).await {
+        if let Some(s) = crate::daemon::stt::connect_authed(
+            crate::daemon::stt::SIDECAR_PORT,
+            stt.token(),
+            std::time::Duration::from_secs(2),
+        )
+        .await
+        {
             sidecar = Some(s);
             break;
         }
