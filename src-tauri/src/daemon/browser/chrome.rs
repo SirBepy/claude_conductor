@@ -73,6 +73,12 @@ impl Chrome {
             if cdp_alive(port).await {
                 log::info!("claude-browser: adopting running chrome on port {port}");
                 *guard = Some(Running { child: None, port });
+                // The previous daemon's `shown` flag died with it; read the
+                // window's real position so idle shutdown doesn't close a
+                // window still on Joe's screen. A failed lookup leaves it false.
+                if let Some(on_screen) = window_on_screen(port).await {
+                    self.shown.store(on_screen, Ordering::SeqCst);
+                }
                 return Ok(port);
             }
         }
@@ -238,6 +244,26 @@ async fn cdp_alive(port: u16) -> bool {
     }
 }
 
+/// Whether a `Browser.getWindowForTarget` result sits on a screen rather than
+/// at the parking spot. Chrome may nudge the parked position a little, so
+/// "far negative on both axes" means parked. `None` when bounds are absent.
+fn bounds_on_screen(win: &Value) -> Option<bool> {
+    let left = win["bounds"]["left"].as_i64()?;
+    let top = win["bounds"]["top"].as_i64()?;
+    Some(!(left <= PARKED_XY / 2 && top <= PARKED_XY / 2))
+}
+
+/// Reads the live window's position over CDP; `None` if any step fails.
+async fn window_on_screen(port: u16) -> Option<bool> {
+    let http = format!("http://127.0.0.1:{port}");
+    let ws = cdp::browser_ws_url(&http).await.ok()?;
+    let target = first_page_target(&http, &ws).await.ok()?;
+    let win = cdp::call(&ws, "Browser.getWindowForTarget", json!({ "targetId": target }), CDP_TIMEOUT)
+        .await
+        .ok()?;
+    bounds_on_screen(&win)
+}
+
 /// A page target to anchor window calls on, opening a blank tab if every tab
 /// was closed.
 async fn first_page_target(http: &str, browser_ws: &str) -> Result<String, String> {
@@ -288,6 +314,18 @@ mod tests {
         assert!(args.contains(&"--user-data-dir=C:/p".to_string()));
         assert!(args.contains(&"--remote-debugging-port=0".to_string()));
         assert!(args.iter().any(|a| a == "--window-position=-32000,-32000"), "starts off-screen");
+    }
+
+    #[test]
+    fn parked_bounds_read_as_hidden_and_visible_bounds_as_shown() {
+        let parked = json!({ "windowId": 1, "bounds": { "left": PARKED_XY, "top": PARKED_XY } });
+        assert_eq!(bounds_on_screen(&parked), Some(false));
+        let shown = json!({ "windowId": 1, "bounds": { "left": SHOWN_BOUNDS.0, "top": SHOWN_BOUNDS.1 } });
+        assert_eq!(bounds_on_screen(&shown), Some(true));
+        // A monitor left of the primary has a negative left but a normal top.
+        let left_monitor = json!({ "bounds": { "left": -1500, "top": 40 } });
+        assert_eq!(bounds_on_screen(&left_monitor), Some(true));
+        assert_eq!(bounds_on_screen(&json!({})), None, "no bounds: unknown, not shown");
     }
 
     #[tokio::test]
