@@ -60,7 +60,7 @@ describe("publishToClaudeAi", () => {
 
   it("uploads when the preview moved past the link, and shows the link", async () => {
     const fresh = { ...LINK, version: 4 };
-    invokeMock.mockResolvedValueOnce(fresh);
+    invokeMock.mockResolvedValueOnce({ published: fresh, stored: true });
     const out = await publishToClaudeAi("p", LINK, 4);
     expect(invokeMock).toHaveBeenCalledWith("publish_to_claude_ai", { id: "p" });
     expect(out).toEqual(fresh);
@@ -68,6 +68,30 @@ describe("publishToClaudeAi", () => {
     expect(toasts()[0]).toContain("Publishing to claude.ai");
     expect(toasts().at(-1)).toContain("claude.ai/artifact/AB12");
     expect(toasts().at(-1)).toContain("as Joe");
+  });
+
+  it("ignores a second click on the same preview while the first run is open", async () => {
+    let finish;
+    invokeMock.mockReturnValueOnce(new Promise((r) => (finish = r)));
+    const first = publishToClaudeAi("same", null, 1);
+    const second = await publishToClaudeAi("same", null, 1);
+    expect(second).toBeNull();
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(toasts().at(-1)).toContain("Already publishing");
+    finish({ published: LINK, stored: true });
+    await first;
+    // Settled runs release the id, so a later click can publish again.
+    invokeMock.mockResolvedValueOnce({ published: LINK, stored: true });
+    await publishToClaudeAi("same", null, 1);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("says so when the preview was removed before the link could be saved", async () => {
+    invokeMock.mockResolvedValueOnce({ published: LINK, stored: false });
+    const out = await publishToClaudeAi("gone", null, 3);
+    expect(out).toBeNull();
+    expect(toasts().at(-1)).toContain("claude.ai/artifact/AB12");
+    expect(toasts().at(-1)).toContain("(preview was removed, link not saved)");
   });
 
   it("reports a failure", async () => {

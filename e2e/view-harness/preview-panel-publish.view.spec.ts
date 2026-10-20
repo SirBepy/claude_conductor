@@ -24,7 +24,7 @@ test("the More options menu publishes the shown snapshot and toasts the link", a
         html: "<main style='padding:24px;font-family:system-ui'><h1>Handover</h1><p>State of the app.</p></main>",
         source: "chat", session_id: "sess-1", version: 3, created_at: new Date().toISOString(), published: stale,
       },
-      publish_to_claude_ai: LINK,
+      publish_to_claude_ai: { published: LINK, stored: true },
       render_preview_doc: "data:text/html,<body style='background:#15151e;color:#e0e0e0;font-family:system-ui;padding:24px'><h1>Handover</h1><p>State of the app.</p></body>",
     },
   });
