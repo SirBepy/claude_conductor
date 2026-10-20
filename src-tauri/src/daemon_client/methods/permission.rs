@@ -107,7 +107,7 @@ impl PersistentClient {
     /// `respond_permission`/`respond_question`, the daemon's `respond_secret`
     /// RPC takes no `session_id` param: the prompt's owning session already
     /// rode along in the prompt payload the daemon itself stored at request
-    /// time, and `respond_secret` is desktop/phone-only (never forwarded to a
+    /// time, and `respond_secret` is desktop-pipe-only (never forwarded to a
     /// peer machine - see `remote_transport_table.rs`), so there is no
     /// `machines/forward.rs` routing need for it either.
     ///
