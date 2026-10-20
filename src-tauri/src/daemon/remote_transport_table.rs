@@ -387,12 +387,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Drafts panel: same fab-dial reachability as Todos above (todo 1007).
     // A DIFFERENT command namespace than get_session_drafts/set_composer_draft
     // (composer/AUQ draft sync, PM above) - this is the Drafts panel's own
-    // list/edit/delete store (methods/drafts_store/routes.rs).
+    // list/edit store (methods/drafts_store/routes.rs).
     ("list_message_drafts", P),
     ("set_draft_body", P),
     ("set_draft_version", P),
     ("set_draft_state", P),
-    ("delete_draft", P),
     // Peer-message chip's inline panel (todo 893): a read-only, non-consuming
     // backlog fetch for the caller's own project, same shared-SPA
     // reachability as the Drafts panel above - it renders identically on the
@@ -491,7 +490,7 @@ mod tests {
             "ask_list_threads", "ask_send", "ask_delete_thread",
             "voice_clean_transcript",
             "list_message_drafts", "set_draft_body", "set_draft_version",
-            "set_draft_state", "delete_draft",
+            "set_draft_state",
             "ensure_jarvis_session",
             "list_machines", "list_machine_projects",
         ] {

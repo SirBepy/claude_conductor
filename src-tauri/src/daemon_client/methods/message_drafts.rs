@@ -42,8 +42,4 @@ impl PersistentClient {
     pub async fn set_draft_state(&self, session_id: &str, id: &str, next: &str) -> Result<Value, ClientError> {
         self.call("set_draft_state", json!({"session_id": session_id, "id": id, "state": next})).await
     }
-
-    pub async fn delete_draft(&self, session_id: &str, id: &str) -> Result<Value, ClientError> {
-        self.call("delete_draft", json!({"session_id": session_id, "id": id})).await
-    }
 }

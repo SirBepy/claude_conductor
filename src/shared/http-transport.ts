@@ -364,11 +364,6 @@ export class HttpTransport implements Transport {
           id: args.id,
           next: args.next,
         });
-      case "delete_draft":
-        return this.rpc<T>("delete_draft", {
-          session_id: args.sessionId ?? args.session_id,
-          id: args.id,
-        });
       case "start_session": {
         // Daemon expects snake_case; tolerate camelCase from callers (matches
         // the set_session_effort normalization pattern above). Params forwarded

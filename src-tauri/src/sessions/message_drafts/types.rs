@@ -10,10 +10,11 @@ use ts_rs::TS;
 #[serde(rename_all = "kebab-case")]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub enum DraftState {
-    /// Written or edited, not yet acted on.
+    /// Written or edited, not yet acted on. `ready` is the retired fourth
+    /// state: drafts stored with it still load, as this one.
     #[default]
+    #[serde(alias = "ready")]
     NeedsYou,
-    Ready,
     /// Set when Copy is actually pressed. Inferred, never claimed - nothing
     /// here can see whether it reached Slack.
     Copied,

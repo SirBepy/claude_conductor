@@ -479,19 +479,17 @@ describe("HttpTransport.call mapping", () => {
     });
   });
 
-  it("forwards set_draft_version, set_draft_state and delete_draft to the rpc", async () => {
+  it("forwards set_draft_version and set_draft_state to the rpc", async () => {
     await new HttpTransport().call("set_draft_version", { sessionId: "s1", id: "d1", recipient: "slack", n: 2 });
     expect(body()).toEqual({
       method: "set_draft_version",
       params: { session_id: "s1", id: "d1", recipient: "slack", n: 2 },
     });
-    await new HttpTransport().call("set_draft_state", { sessionId: "s1", id: "d1", next: "ready" });
+    await new HttpTransport().call("set_draft_state", { sessionId: "s1", id: "d1", next: "archived" });
     expect(body(1)).toEqual({
       method: "set_draft_state",
-      params: { session_id: "s1", id: "d1", next: "ready" },
+      params: { session_id: "s1", id: "d1", next: "archived" },
     });
-    await new HttpTransport().call("delete_draft", { sessionId: "s1", id: "d1" });
-    expect(body(2)).toEqual({ method: "delete_draft", params: { session_id: "s1", id: "d1" } });
   });
 
   // Multi-machine federation (H1): start_session forwards the picker's chosen

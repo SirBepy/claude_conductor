@@ -438,7 +438,6 @@ pub fn run() {
             ipc::set_draft_body,
             ipc::set_draft_version,
             ipc::set_draft_state,
-            ipc::delete_draft,
             ipc::get_session_drafts,
             ipc::set_composer_draft,
             ipc::clear_composer_draft,
