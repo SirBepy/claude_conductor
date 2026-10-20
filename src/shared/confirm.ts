@@ -15,6 +15,12 @@ export interface ConfirmOptions {
   cancelLabel?: string;
   /** Style the confirm button as destructive (red). Defaults to true. */
   danger?: boolean;
+  /** Focus the confirm button instead of cancel. Defaults to false (cancel
+   *  focused, so a stray Enter can't confirm a destructive action). Set this
+   *  only when the dialog itself followed a deliberate keyboard gesture (e.g.
+   *  Ctrl+W) - Enter closing the loop is then the expected outcome, not a
+   *  misfire. */
+  focusConfirm?: boolean;
 }
 
 /** Splits "Question? rest of the explanation" into a bold title (up to and
@@ -107,6 +113,6 @@ export function askConfirm(text: string, options: ConfirmOptions = {}): Promise<
     box.append(head, actions);
     overlay.append(box);
     document.body.appendChild(overlay);
-    cancelBtn.focus();
+    (options.focusConfirm ? confirmBtn : cancelBtn).focus();
   });
 }

@@ -17,6 +17,8 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./har
 // class plus a one-shot kbd-hint-entering class for the stagger-in keyframe,
 // so a Ctrl+N jump mid-hold doesn't replay the entrance - this spec's
 // Control-down check still sees the animation on the rising edge, unaffected)
+// (close-chat row-removal fix touched wireDocumentListeners's cc:session-closed
+// handler only - unrelated to the Ctrl+Shift favourites strip this spec covers)
 
 const FAVORITES_KEY = "claude_companion_project_favorites";
 

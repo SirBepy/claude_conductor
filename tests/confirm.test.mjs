@@ -69,6 +69,16 @@ describe("askConfirm", () => {
     document.querySelector(".app-confirm-cancel").click();
   });
 
+  it("focuses cancel by default, confirm when focusConfirm is set", () => {
+    void askConfirm("a");
+    expect(document.activeElement).toBe(document.querySelector(".app-confirm-cancel"));
+    document.querySelector(".app-confirm-cancel").click();
+
+    void askConfirm("b", { focusConfirm: true });
+    expect(document.activeElement).toBe(document.querySelector(".app-confirm-ok"));
+    document.querySelector(".app-confirm-ok").click();
+  });
+
   it("stops Escape from reaching underlying handlers (capture phase)", async () => {
     let leaked = false;
     const listener = () => { leaked = true; };

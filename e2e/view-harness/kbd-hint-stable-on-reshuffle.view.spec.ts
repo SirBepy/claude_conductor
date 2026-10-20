@@ -13,6 +13,8 @@ import { mountSessionsList, sessionInstance, fireEvent } from "./harness";
 // re-animating, for as long as Ctrl stays held.
 //
 // asserts: src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/sessions.css
+// (close-chat row-removal fix touched wireDocumentListeners's cc:session-closed
+// handler only - unrelated to the Ctrl+N hint-badge wiring this spec covers)
 // (sessions.css's .sessions-empty-row centering rules are unrelated to kbd-hint badges)
 
 const S1 = sessionInstance({ session_id: "s1", cwd: "C:/Projects/aaa" });
