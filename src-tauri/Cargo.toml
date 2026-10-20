@@ -56,7 +56,6 @@ cpal = "0.15"
 tauri_kit_audio = { path = "../vendor/tauri_kit/tauri/audio" }
 tauri_kit_webview_recovery = { path = "../vendor/tauri_kit/tauri/webview_recovery" }
 which = "7"
-zip = { version = "2", default-features = false, features = ["deflate"] }
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 dashmap = "6"
