@@ -3,7 +3,7 @@
 // (see tests/add-account-wizard-logic.test.mjs). The modal itself
 // (add-account-wizard.ts) is the only caller.
 
-import type { Account, AccountIdentity, LoginCheckOutcome, OauthAccountInfo } from "../../../../types/ipc.generated";
+import type { Account, AccountIdentity, AuthState, LoginCheckOutcome, OauthAccountInfo } from "../../../../types/ipc.generated";
 
 // Bare Phosphor icon names (no "ph-" prefix) - the wizard renders
 // `ph ph-${icon}`. Kept local to this feature; nothing else in the app picks
@@ -192,26 +192,47 @@ export interface IdentitySurfaceView {
   tokenExpiryLabel: string;
   refreshExpiryLabel: string;
   hasCookie: boolean;
-  /** Non-null (drift or "not logged in yet") = show the red warning row. */
+  /** True when a cookie file is on disk but `get_auth_state_map` says usage
+   * polling is failing with it (expired/revoked) - distinct from `!hasCookie`
+   * (never connected). Both cases need the same fix (recapture the cookie),
+   * so `showConnectUsage` folds them together for the button, but the row's
+   * warning text only fires for this one - "never connected" isn't a
+   * regression worth alarming about. */
+  usageNeedsLogin: boolean;
+  /** Union of `!hasCookie` and `usageNeedsLogin` - whether the "Connect
+   * usage" action should be offered at all. */
+  showConnectUsage: boolean;
+  /** Non-null (drift, or usage tracking login expired) = show the red warning row. */
   warningMessage: string | null;
 }
 
 /** Maps a registry `Account` + its live `AccountIdentity` (or `null` before
  * the fetch resolves / on error) to the identity-surface row content. Falls
  * back to the registry's own `email`/`subscription_tier` when the live read
- * hasn't come back yet, so the row never shows blank fields while loading. */
+ * hasn't come back yet, so the row never shows blank fields while loading.
+ * `usageAuthState` is this account's `get_auth_state_map` entry - the only
+ * signal that a cookie already on disk (`identity.hasCookie`) has gone stale,
+ * since `hasCookie` itself is just file-presence and never clears on its
+ * own. */
 export function buildIdentitySurface(
   account: Pick<Account, "email" | "subscription_tier">,
   identity: AccountIdentity | null,
+  usageAuthState: AuthState | undefined = undefined,
   now: number = Date.now(),
 ): IdentitySurfaceView {
   const oauth = identity?.oauthAccount ?? null;
+  const hasCookie = identity?.hasCookie ?? false;
+  const usageNeedsLogin = usageAuthState === "needslogin";
   return {
     loggedInAsEmail: oauth?.emailAddress ?? null,
     tierLabel: tierLabel(oauth?.organizationType ?? account.subscription_tier),
     tokenExpiryLabel: formatTokenExpiry(identity?.tokenExpiresAt ?? null, now),
     refreshExpiryLabel: formatRefreshExpiry(identity?.refreshTokenExpiresAt ?? null, now),
-    hasCookie: identity?.hasCookie ?? false,
-    warningMessage: identity?.drift ? (identity.driftMessage ?? "Identity mismatch - re-verify this account.") : null,
+    hasCookie,
+    usageNeedsLogin,
+    showConnectUsage: !hasCookie || usageNeedsLogin,
+    warningMessage: identity?.drift
+      ? (identity.driftMessage ?? "Identity mismatch - re-verify this account.")
+      : (hasCookie && usageNeedsLogin ? "Usage tracking login expired - click Connect usage to reconnect." : null),
   };
 }
