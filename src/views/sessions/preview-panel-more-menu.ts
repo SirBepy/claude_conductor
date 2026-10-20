@@ -14,6 +14,8 @@ export interface PvMoreMenuDeps {
   onOpenBrowser: () => void;
   onSetDeviceWidth: (w: DeviceWidth) => void;
   getDeviceWidth: () => DeviceWidth;
+  /** Absent when there is nothing to publish (no snapshot) or on the phone. */
+  publish?: { label: string; icon: string; title: string; onClick: () => void };
 }
 
 const SIZES: Array<{ w: DeviceWidth; icon: string; label: string }> = [
@@ -37,6 +39,19 @@ const pvMenu = createMoreMenu<[PvMoreMenuDeps]>({
     browserItem.innerHTML = `<i class="ph ph-arrow-square-out"></i><span>Open in browser</span>`;
     browserItem.onclick = () => { close(); deps.onOpenBrowser(); };
     menu.appendChild(browserItem);
+
+    const publish = deps.publish;
+    if (publish) {
+      const publishItem = document.createElement("button");
+      publishItem.type = "button";
+      publishItem.className = "smore-item";
+      publishItem.dataset.publish = "";
+      publishItem.title = publish.title;
+      publishItem.innerHTML = `<i class="ph ${publish.icon}"></i><span></span>`;
+      publishItem.querySelector("span")!.textContent = publish.label;
+      publishItem.onclick = () => { close(); publish.onClick(); };
+      menu.appendChild(publishItem);
+    }
 
     const sep1 = document.createElement("div");
     sep1.className = "smore-sep";

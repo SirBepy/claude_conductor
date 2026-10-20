@@ -103,10 +103,10 @@ Chats can drive a browser of their own: a separate Chrome profile, signed in onl
 
 ## Publish to claude.ai
 
-Previews and drafts have a **Publish to claude.ai** button (the cloud-upload icon), which gives you a `claude.ai/artifact/...` link like the ones teammates share.
+Previews (in the panel's **More options** menu) and drafts (the cloud-upload icon) can be published to claude.ai, which gives you a `claude.ai/artifact/...` link like the ones teammates share.
 
 - **Private until you share it.** The page uploads under the chat's account, the link is copied, and a toast shows it. Open the link and press **Share** on claude.ai to let others see it. Nothing is ever public without that click.
-- **One link per preview or draft.** Publishing again after a change updates the same page, and the icon turns into a link icon while the page is up to date (clicking it then just copies the link again).
+- **One link per preview or draft.** Publishing again after a change updates the same page; while the page is up to date the action becomes **Copy claude.ai link** instead of uploading again.
 - **What gets published:** a preview exactly as the panel shows it; a draft as a clean, readable page made from its text.
 - **Cost and limits:** each publish runs one short background Claude turn on your subscription (under a minute). Desktop only. To unpublish, open the page and delete it on claude.ai.
 

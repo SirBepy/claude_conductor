@@ -64,8 +64,11 @@ describe("publishToClaudeAi", () => {
     const out = await publishToClaudeAi({ target: "preview", id: "p" }, LINK, 4, null);
     expect(invokeMock).toHaveBeenCalledWith("publish_to_claude_ai", { params: { target: "preview", id: "p" } });
     expect(out).toEqual(fresh);
-    expect(document.querySelector(".toast-msg")?.textContent).toContain("claude.ai/artifact/AB12");
-    expect(document.querySelector(".toast-msg")?.textContent).toContain("as Joe");
+    const toasts = [...document.querySelectorAll(".toast-msg")].map((t) => t.textContent);
+    // No button to spin (the menu-item path), so the run announces itself first.
+    expect(toasts[0]).toContain("Publishing to claude.ai");
+    expect(toasts.at(-1)).toContain("claude.ai/artifact/AB12");
+    expect(toasts.at(-1)).toContain("as Joe");
   });
 
   it("restores the button and reports a failure", async () => {
