@@ -8,6 +8,53 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import server
 
 
+TOKEN = "dummy-test-token"
+
+
+async def _expect_closed_without_service(connect_kwargs, first_frame):
+    """The connection must end without ever yielding authed/ready, and a
+    shutdown frame must not kill the test process (os._exit is patched out by
+    the caller)."""
+    asr_future = asyncio.get_running_loop().create_future()
+    asr_future.set_result(None)
+    async with websockets.serve(server.make_handler("/tmp", asr_future, TOKEN), "127.0.0.1", 0) as s:
+        port = s.sockets[0].getsockname()[1]
+        async with websockets.connect(f"ws://127.0.0.1:{port}", **connect_kwargs) as ws:
+            with pytest.raises(websockets.ConnectionClosed):
+                # The server may close before this send lands (Origin check).
+                if first_frame is not None:
+                    await ws.send(first_frame)
+                while True:
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), 3))
+                    assert msg["type"] not in ("authed", "ready")
+
+
+@pytest.mark.asyncio
+async def test_wrong_token_is_closed_without_service():
+    await _expect_closed_without_service({}, json.dumps({"cmd": "auth", "token": "nope"}))
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_shutdown_does_not_exit(monkeypatch):
+    exited = []
+    monkeypatch.setattr(server.os, "_exit", lambda code: exited.append(code))
+    await _expect_closed_without_service({}, json.dumps({"cmd": "shutdown"}))
+    assert exited == []
+
+
+@pytest.mark.asyncio
+async def test_binary_first_frame_is_rejected():
+    await _expect_closed_without_service({}, b"\x00\x00")
+
+
+@pytest.mark.asyncio
+async def test_browser_origin_is_rejected_even_with_the_right_token():
+    await _expect_closed_without_service(
+        {"origin": "https://evil.example"},
+        json.dumps({"cmd": "auth", "token": TOKEN}),
+    )
+
+
 class FakeEngine:
     def __init__(self, *a, **k):
         self.reset_called = 0
@@ -33,9 +80,11 @@ async def test_start_audio_stop_emits_ready_partial_final(monkeypatch):
     # and the real model is never loaded here.
     asr_future = asyncio.get_running_loop().create_future()
     asr_future.set_result(None)
-    async with websockets.serve(server.make_handler("/tmp", asr_future), "127.0.0.1", 0) as s:
+    async with websockets.serve(server.make_handler("/tmp", asr_future, TOKEN), "127.0.0.1", 0) as s:
         port = s.sockets[0].getsockname()[1]
         async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+            await ws.send(json.dumps({"cmd": "auth", "token": TOKEN}))
+            assert json.loads(await ws.recv())["type"] == "authed"
             assert json.loads(await ws.recv())["type"] == "ready"
             await ws.send(json.dumps({"cmd": "start"}))
             await ws.send(b"\x00\x00" * 4000)  # dummy PCM frame

@@ -6,7 +6,9 @@
 //!   - 5-min idle shutdown (`maybe_idle_shutdown`, driven by a 60s daemon tick),
 //!   - graceful kill on daemon exit (`kill`).
 //!
-//! The sidecar is localhost-only, unauthenticated, host-PC-only; it owns its own
+//! The sidecar is localhost-only and host-PC-only; every connection must open
+//! with an auth frame carrying the per-install secret (`CC_STT_TOKEN`, kept in
+//! `<app_data>/voice/stt-token`) and carry no browser Origin. It owns its own
 //! socket post-spawn and spawns no children. Windows spawns must never flash a
 //! console, so every `Command` runs through `hide_console_tokio`.
 //!
@@ -34,6 +36,7 @@ const GIVE_UP_THRESHOLD: usize = 8;
 
 pub struct SttSupervisor {
     app_data: PathBuf,
+    token: String,
     child: Mutex<Option<Child>>,
     active_conns: AtomicUsize,
     last_active: Mutex<Instant>,
@@ -60,21 +63,74 @@ fn backoff_for(consecutive_failures: usize) -> Duration {
 /// Health-probe an already-listening port via a real WS handshake, since the
 /// sidecar exposes no HTTP endpoint - a bare TCP connect can't tell "our
 /// sidecar" apart from any other process that happens to hold the port.
-async fn probe_sidecar_alive() -> bool {
-    probe_alive_on(SIDECAR_PORT).await
+async fn probe_sidecar_alive(token: &str) -> bool {
+    probe_alive_on(SIDECAR_PORT, token).await
 }
 
-async fn probe_alive_on(port: u16) -> bool {
-    let url = format!("ws://127.0.0.1:{port}");
-    match tokio::time::timeout(Duration::from_millis(500), tokio_tungstenite::connect_async(&url))
-        .await
-    {
-        Ok(Ok((mut ws, _))) => {
+/// "Alive" means a sidecar that accepted OUR secret: an unauthenticated
+/// squatter, or a pre-token sidecar that never answers the auth frame, is not
+/// adopted (it would also be unable to serve the relay).
+async fn probe_alive_on(port: u16, token: &str) -> bool {
+    match connect_authed(port, token, Duration::from_millis(500)).await {
+        Some(mut ws) => {
             let _ = ws.close(None).await;
             true
         }
-        _ => false,
+        None => false,
     }
+}
+
+pub type SidecarWs =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Opens the sidecar socket, sends the auth frame, and waits for the sidecar's
+/// `authed` reply. `None` on any failure or timeout. The sidecar sends `authed`
+/// before its model load, so this stays fast even on a cold start.
+pub async fn connect_authed(port: u16, token: &str, within: Duration) -> Option<SidecarWs> {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let url = format!("ws://127.0.0.1:{port}");
+    let attempt = async {
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.ok()?;
+        let auth = serde_json::json!({ "cmd": "auth", "token": token }).to_string();
+        ws.send(Message::Text(auth)).await.ok()?;
+        loop {
+            match ws.next().await? {
+                Ok(Message::Text(t)) => {
+                    let v: serde_json::Value = serde_json::from_str(&t).ok()?;
+                    return (v["type"] == "authed").then_some(ws);
+                }
+                Ok(Message::Ping(_) | Message::Pong(_)) => continue,
+                _ => return None,
+            }
+        }
+    };
+    tokio::time::timeout(within, attempt).await.ok().flatten()
+}
+
+/// Per-install secret the sidecar demands as its first frame. Persisted (not
+/// minted per spawn) because a sidecar can outlive the daemon and be adopted by
+/// the next one, which must still be able to authenticate to it.
+fn load_or_mint_token(app_data: &std::path::Path) -> String {
+    let dir = app_data.join("voice");
+    let file = dir.join("stt-token");
+    if let Ok(existing) = std::fs::read_to_string(&file) {
+        let t = existing.trim();
+        if t.len() >= 32 {
+            return t.to_string();
+        }
+    }
+    let mut bytes = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+    let token = crate::util::to_hex(&bytes);
+    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::write(&file, &token) {
+        // The in-memory token still works for sidecars this daemon spawns;
+        // only cross-restart adoption is lost.
+        log::warn!("stt-sidecar: could not persist token: {e}");
+    }
+    token
 }
 
 impl SttSupervisor {
@@ -94,6 +150,7 @@ impl SttSupervisor {
         }
 
         Arc::new(Self {
+            token: load_or_mint_token(&app_data),
             app_data,
             child: Mutex::new(None),
             active_conns: AtomicUsize::new(0),
@@ -106,6 +163,10 @@ impl SttSupervisor {
             gave_up: std::sync::atomic::AtomicBool::new(false),
             last_stderr: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     fn sidecar_dir(&self) -> PathBuf {
@@ -206,7 +267,7 @@ impl SttSupervisor {
         // hold the port. A healthy responder wins ADOPTION over a doomed
         // spawn attempt - this is the real-world case (267 spawns/day against
         // a perfectly healthy orphan).
-        if probe_sidecar_alive().await {
+        if probe_sidecar_alive(&self.token).await {
             self.consecutive_failures.store(0, Ordering::SeqCst);
             *self.backoff_until.lock().await = None;
             *self.last_stderr.lock().await = None;
@@ -252,6 +313,8 @@ impl SttSupervisor {
             .arg(&self.app_data)
             .arg("--port")
             .arg(SIDECAR_PORT.to_string())
+            // Env, not argv: a command line is readable by every local process.
+            .env("CC_STT_TOKEN", &self.token)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -352,7 +415,7 @@ impl SttSupervisor {
         // would act on a process only ever verified via a WS handshake.
         // Request shutdown over that same verified channel instead.
         if self.adopted.load(Ordering::SeqCst) {
-            if send_shutdown_cmd(port).await {
+            if send_shutdown_cmd(port, &self.token).await {
                 self.adopted.store(false, Ordering::SeqCst);
                 log::info!("stt-sidecar: sent shutdown to adopted sidecar on port {port}");
             } else {
@@ -365,14 +428,11 @@ impl SttSupervisor {
 /// Sends the sidecar's `{"cmd":"shutdown"}` control message (server.py's
 /// `handle`) over a fresh WS connection to `port`. `true` iff connect + send
 /// both succeeded.
-async fn send_shutdown_cmd(port: u16) -> bool {
+async fn send_shutdown_cmd(port: u16, token: &str) -> bool {
     use futures_util::SinkExt;
     use tokio_tungstenite::tungstenite::Message;
 
-    let url = format!("ws://127.0.0.1:{port}");
-    let Ok(Ok((mut ws, _))) =
-        tokio::time::timeout(Duration::from_millis(500), tokio_tungstenite::connect_async(&url)).await
-    else {
+    let Some(mut ws) = connect_authed(port, token, Duration::from_millis(500)).await else {
         return false;
     };
     ws.send(Message::Text(r#"{"cmd":"shutdown"}"#.to_string())).await.is_ok()
@@ -402,32 +462,85 @@ mod tests {
         tokio::spawn(async move {
             let _ = listener.accept().await; // accept and go silent, no WS handshake
         });
-        assert!(!probe_alive_on(port).await);
+        assert!(!probe_alive_on(port, TOKEN).await);
     }
 
     #[tokio::test]
     async fn probe_rejects_closed_port() {
         // Port 1 is a reserved low port that is never listening in this test env.
-        assert!(!probe_alive_on(1).await);
+        assert!(!probe_alive_on(1, TOKEN).await);
     }
 
-    // ADVERSARIAL: a real WS-speaking server on a scratch port must be ADOPTED.
+    const TOKEN: &str = "dummy-test-token";
+
+    /// Stand-in sidecar: accepts one WS connection, checks the auth frame
+    /// against `expected`, answers `authed` only on a match, then reports the
+    /// next frame it receives (if any) on the returned channel.
+    async fn fake_sidecar(
+        expected: String,
+    ) -> (u16, tokio::sync::oneshot::Receiver<String>) {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let Ok((stream, _)) = listener.accept().await else { return };
+            let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else { return };
+            let Some(Ok(first)) = ws.next().await else { return };
+            let v: serde_json::Value =
+                serde_json::from_str(&first.into_text().unwrap_or_default()).unwrap_or_default();
+            if v["cmd"] != "auth" || v["token"] != expected.as_str() {
+                let _ = ws.close(None).await;
+                return;
+            }
+            let _ = ws.send(Message::Text(r#"{"type":"authed"}"#.into())).await;
+            if let Some(Ok(msg)) = ws.next().await {
+                let _ = tx.send(msg.into_text().unwrap_or_default());
+            }
+        });
+        (port, rx)
+    }
+
+    // ADVERSARIAL: a real sidecar that accepts our secret must be ADOPTED.
     #[tokio::test]
-    async fn probe_accepts_real_websocket_server() {
+    async fn probe_accepts_sidecar_that_accepts_our_token() {
+        let (port, _rx) = fake_sidecar(TOKEN.to_string()).await;
+        assert!(probe_alive_on(port, TOKEN).await);
+    }
+
+    // A WS server that handshakes but never answers `authed` (a pre-token
+    // sidecar, or any squatter) is not ours to adopt.
+    #[tokio::test]
+    async fn probe_rejects_websocket_server_that_never_authenticates() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             if let Ok((stream, _)) = listener.accept().await {
                 if let Ok(ws) = tokio_tungstenite::accept_async(stream).await {
-                    // Hold the accepted socket open briefly so the client's
-                    // close handshake (probe_alive_on calls ws.close()) has
-                    // something to complete against.
                     let _ = ws;
-                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    tokio::time::sleep(Duration::from_millis(800)).await;
                 }
             }
         });
-        assert!(probe_alive_on(port).await);
+        assert!(!probe_alive_on(port, TOKEN).await);
+    }
+
+    // A sidecar holding a different secret closes on us: no adoption.
+    #[tokio::test]
+    async fn probe_rejects_sidecar_with_a_different_token() {
+        let (port, _rx) = fake_sidecar("some-other-token".to_string()).await;
+        assert!(!probe_alive_on(port, TOKEN).await);
+    }
+
+    #[test]
+    fn token_is_minted_once_and_reused_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = load_or_mint_token(dir.path());
+        assert!(first.len() >= 32);
+        assert_eq!(load_or_mint_token(dir.path()), first);
+        let other = tempfile::tempdir().unwrap();
+        assert_ne!(load_or_mint_token(other.path()), first);
     }
 
     // ADVERSARIAL: a listener that accepts the TCP connection then closes it
@@ -441,7 +554,7 @@ mod tests {
                 drop(stream); // accept, then slam the connection shut
             }
         });
-        assert!(!probe_alive_on(port).await);
+        assert!(!probe_alive_on(port, TOKEN).await);
     }
 
     // ADVERSARIAL: a listener that speaks valid HTTP but never upgrades to
@@ -460,55 +573,37 @@ mod tests {
                 let _ = stream.shutdown().await;
             }
         });
-        assert!(!probe_alive_on(port).await);
+        assert!(!probe_alive_on(port, TOKEN).await);
     }
 
     // todo 466 regression: an ADOPTED sidecar (no owned Child) must still be
     // reachable for shutdown - the control message itself must go out.
     #[tokio::test]
     async fn send_shutdown_cmd_delivers_the_control_message() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            use futures_util::StreamExt;
-            if let Ok((stream, _)) = listener.accept().await {
-                if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
-                    if let Some(Ok(msg)) = ws.next().await {
-                        let _ = tx.send(msg.into_text().unwrap_or_default());
-                    }
-                }
-            }
-        });
-        assert!(send_shutdown_cmd(port).await);
+        let (port, rx) = fake_sidecar(TOKEN.to_string()).await;
+        assert!(send_shutdown_cmd(port, TOKEN).await);
         let received = rx.await.expect("server must receive the shutdown message");
         assert_eq!(received, r#"{"cmd":"shutdown"}"#);
     }
 
+    // The control message must never go out to a sidecar that rejected us.
+    #[tokio::test]
+    async fn send_shutdown_cmd_is_not_sent_without_authentication() {
+        let (port, _rx) = fake_sidecar("some-other-token".to_string()).await;
+        assert!(!send_shutdown_cmd(port, TOKEN).await);
+    }
+
     #[tokio::test]
     async fn send_shutdown_cmd_fails_on_closed_port() {
-        assert!(!send_shutdown_cmd(1).await);
+        assert!(!send_shutdown_cmd(1, TOKEN).await);
     }
 
     // todo 466 regression: kill() on an ADOPTED sidecar (child=None,
     // adopted=true) must actually request shutdown, not silently no-op.
     #[tokio::test]
     async fn kill_shuts_down_an_adopted_sidecar_instead_of_noop() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            use futures_util::StreamExt;
-            if let Ok((stream, _)) = listener.accept().await {
-                if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
-                    if let Some(Ok(msg)) = ws.next().await {
-                        let _ = tx.send(msg.into_text().unwrap_or_default());
-                    }
-                }
-            }
-        });
-
         let sup = SttSupervisor::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        let (port, rx) = fake_sidecar(sup.token().to_string()).await;
         sup.adopted.store(true, Ordering::SeqCst);
         sup.kill_on_port(port).await;
 
