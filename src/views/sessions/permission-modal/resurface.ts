@@ -308,7 +308,10 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   // prompt uuid, so it always falls through to "newest open question" above,
   // which IS this card when only one question is open) - dismissing and
   // remounting it would just flicker it shut then open again for nothing.
-  if (pending.kind === "question" && getActiveCardId() === pending.payload.id) return true;
+  if (pending.kind === "question" && getActiveCardId() === pending.payload.id) {
+    storePendingPrompt(sessionId, pending);
+    return true;
+  }
   // Only safe to drop what's on screen now we hold a replacement.
   dismissQuestionCard();
   rerenderSidebar();
