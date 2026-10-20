@@ -27,6 +27,14 @@ async function mountPhoneSession(page: Page): Promise<void> {
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
   await page.locator("#sessions-list li[data-session-id='s1']").click();
   await page.locator("#session-pane .session-composer").waitFor();
+  // The pane slides in over --motion-base; a card measured mid-slide inherits
+  // the remaining translateX, so wait for the pane to settle first.
+  await page.waitForFunction(() => {
+    const pane = document.querySelector(".session-pane");
+    if (!pane) return false;
+    const t = getComputedStyle(pane).transform;
+    return t === "none" || new DOMMatrix(t).m41 === 0;
+  });
 }
 
 async function overrideSafeArea(page: Page, bottom: number): Promise<void> {
@@ -140,7 +148,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await mountPhoneSession(page);
     await openQuestionCard(page, SHORT_QUESTIONS);
 
-    const box = (await page.locator(".prompt-card").boundingBox())!;
+    const box = await settledBox(page.locator(".prompt-card"));
     expect(box.x).toBe(0);
     expect(box.width).toBe(PHONE.width);
   });
@@ -157,7 +165,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     const card = page.locator(".prompt-card");
     await expect(card).toBeVisible();
     await expect(card.locator(".prompt-card__tool")).toContainText("Bash");
-    const box = (await card.boundingBox())!;
+    const box = await settledBox(card);
     expect(box.x).toBe(0);
     expect(box.width).toBe(PHONE.width);
   });

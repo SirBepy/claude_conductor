@@ -32,6 +32,17 @@ async function openChat(page: Page, sessionId: string): Promise<void> {
   await page.locator("#session-pane .session-messages .msg").first().waitFor();
 }
 
+/** The first message exists before the cold-path reveal finishes. Leaving a
+ *  chat while its transcript is still held (opacity 0, or mid-fade) and coming
+ *  back under load reads that in-flight fade, not the retained pane, so the
+ *  blank-out check below must start from two fully revealed chats. */
+async function waitRevealed(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const el = document.querySelector("#session-pane .session-messages") as HTMLElement | null;
+    return !!el && getComputedStyle(el).opacity === "1";
+  });
+}
+
 /** A cold open keeps working after the first message paints: shiki replaces
  *  each fence, then the load re-pins to the bottom. Scrolling before that lands
  *  gets undone, so settle first. */
@@ -113,7 +124,9 @@ test.describe("view-harness / chat switching reuses the rendered transcript", ()
   test("the transcript never blanks out on the way back in", async ({ page }) => {
     await mountSessions(page);
     await openChat(page, "s1");
+    await waitRevealed(page);
     await openChat(page, "s2");
+    await waitRevealed(page);
 
     // The cold path holds the transcript at opacity 0 while it assembles. A
     // retained pane must be painted the moment it is back in the document.
