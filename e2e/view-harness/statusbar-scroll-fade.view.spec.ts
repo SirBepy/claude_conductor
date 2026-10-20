@@ -110,16 +110,19 @@ test.describe("view-harness / statusbar scroll fade", () => {
 
     const row = page.locator("#session-pane .sb-row").first();
     await expect(row).toHaveClass(/sb-row-scroll/);
-    const target = await row.evaluate((el) => {
+    // Open the popover first: Playwright scrolls the button into view before
+    // clicking it (and a still-resizing chip can reset the row), so scrolling
+    // after the click is what leaves a known position for the re-render to keep.
+    await page.locator("#session-pane .sb-effort-btn").click();
+    await page.locator(".sb-effort-slider").waitFor();
+    const before = await row.evaluate((el) => {
       el.scrollLeft = 40;
       return el.scrollLeft;
     });
-    expect(target).toBeGreaterThan(0);
+    expect(before).toBeGreaterThan(0);
 
     // Drive a real re-render through the effort popover's commit path (statusbar
     // owns this end-to-end, no chat renderer needed).
-    await page.locator("#session-pane .sb-effort-btn").click();
-    await page.locator(".sb-effort-slider").waitFor();
     await page.locator(".sb-effort-slider").evaluate((el: HTMLInputElement) => {
       el.value = "0";
       el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -127,6 +130,6 @@ test.describe("view-harness / statusbar scroll fade", () => {
 
     await expect(page.locator("#session-pane .sb-effort-btn")).toHaveText(/low/i);
     await expect(row).toHaveClass(/sb-row-scroll/);
-    await expect.poll(() => row.evaluate((el) => el.scrollLeft)).toBe(target);
+    await expect.poll(() => row.evaluate((el) => el.scrollLeft)).toBe(before);
   });
 });

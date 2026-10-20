@@ -287,7 +287,9 @@ test("desktop keeps the side-by-side split: docking Preview shrinks the chat ins
 
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="preview"]').click();
-  await page.locator(`${PREVIEW} [data-pw-act="dock"]`).click();
+  // Preview starts docked on the right in a fresh chat; the title bar's dock
+  // button is a toggle, so pressing it here would float the window instead.
+  await expect(page.locator(PREVIEW)).toBeVisible();
   await page.waitForTimeout(280);
 
   const rail = (await railBox(page))!;

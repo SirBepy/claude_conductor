@@ -20,10 +20,10 @@ const SEEDED_THREAD = {
 };
 
 /** Mounts the real FAB into a full-bleed fake pane, with ask_* faked in-page. */
-async function mountFab(page: Page, seed: unknown[]): Promise<void> {
+async function mountFab(page: Page, seed: unknown[], layout?: unknown): Promise<void> {
   await mountView(page);
   await page.evaluate(
-    async ({ seed, viewer }) => {
+    async ({ seed, viewer, layout }) => {
       const w = window as unknown as Record<string, any>;
       const store = { threads: JSON.parse(JSON.stringify(seed)) as any[] };
       w.__askStore = store;
@@ -70,6 +70,13 @@ async function mountFab(page: Page, seed: unknown[]): Promise<void> {
         "position:fixed;inset:0;z-index:1;background:var(--color-background)";
       document.body.appendChild(pane);
 
+      if (layout) {
+        // Recalled by setSessionScope below, so a chat can start with panels
+        // already merged into one tabbed window.
+        const mem = await import("/views/sessions/pane-windows/memory.ts");
+        mem.rememberLayout(viewer, layout as never);
+      }
+
       const mod = await import("/views/sessions/fab-dial.ts");
       w.__fabHandle = mod.mountFabDial(pane, {
         onDraft: (text: string) => w.__drafts.push(text),
@@ -77,7 +84,7 @@ async function mountFab(page: Page, seed: unknown[]): Promise<void> {
       });
       w.__fabHandle.setSessionScope(viewer, "/proj");
     },
-    { seed, viewer: VIEWER },
+    { seed, viewer: VIEWER, layout },
   );
 }
 
@@ -99,19 +106,19 @@ test("FAB rests closed, fans out to four, and opens Ask in a floating card", asy
   await page.locator('[data-dial="ask"]').click();
   await expect(page.locator(".pw-window:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeVisible();
-  // Centred, the window is clear of the FAB's spot, so the FAB stays usable;
-  // it only yields to a window actually lying on top of it.
-  await expect(fab).toBeVisible();
+  // A fresh chat parks Ask in the bottom-right corner, right where the FAB
+  // rests, so the FAB yields to the window instead of sitting on its footer.
+  await expect(fab).toBeHidden();
 });
 
-test("Preview is a toggle in the dial and opens as a tab of the one shared window", async ({ page }) => {
+test("Preview is a toggle in the dial and opens in its own right-docked window", async ({ page }) => {
   await mountFab(page, []);
   await page.locator(".fab-dial-fab").click();
 
   const preview = page.locator('[data-dial="preview"]');
   await expect(preview).toHaveClass(/is-toggle/);
   await preview.click();
-  await expect(page.locator('.pw-window[data-win="main"][data-active="preview"]')).toBeVisible();
+  await expect(page.locator('.pw-window[data-active="preview"]')).toBeVisible();
   await expect(page.locator(".pw-window:visible")).toHaveCount(1);
 
   await page.locator(".fab-dial-fab").click();
@@ -121,9 +128,14 @@ test("Preview is a toggle in the dial and opens as a tab of the one shared windo
 });
 
 test("the tabs switch panels without closing the card", async ({ page }) => {
-  await mountFab(page, [SEEDED_THREAD]);
-  await page.locator(".fab-dial-fab").click();
-  await page.locator('[data-dial="ask"]').click();
+  // Fresh chats give every panel its own window, so the shared tab strip only
+  // exists once panels were merged; start from a chat that already merged them.
+  await mountFab(page, [SEEDED_THREAD], {
+    windows: [
+      { id: "w-main", tabs: ["ask", "todos"], active: "ask", placement: { kind: "snap", corner: "se" }, open: true },
+    ],
+    dockShare: { left: null, right: null },
+  });
   await expect(page.locator(".ask-panel")).toBeVisible();
 
   await page.locator('[data-spine="todos"]').click();
