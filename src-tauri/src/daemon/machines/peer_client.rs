@@ -46,6 +46,15 @@ fn build_http() -> Result<reqwest::Client, PeerError> {
         .map_err(|e| PeerError::Protocol(e.to_string()))
 }
 
+/// One process-wide client so repeated calls to a peer reuse a pooled
+/// connection. `client_for` makes a new `PeerClient` per call, and over iroh
+/// each fresh TCP connection to the loopback proxy costs a new QUIC handshake.
+/// The pool is keyed by host:port, so peers never share a connection.
+fn shared_http() -> &'static reqwest::Client {
+    static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    HTTP.get_or_init(|| build_http().unwrap_or_else(|_| reqwest::Client::new()))
+}
+
 pub struct PeerClient {
     base_url: String,
     token: String,
@@ -59,7 +68,7 @@ impl PeerClient {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             token: token.to_string(),
-            http: build_http().unwrap_or_else(|_| reqwest::Client::new()),
+            http: shared_http().clone(),
         }
     }
 
@@ -165,6 +174,14 @@ mod tests {
         Json, Router,
     };
     use tokio::net::TcpListener;
+
+    #[test]
+    fn every_peer_client_shares_one_http_client() {
+        assert!(std::ptr::eq(shared_http(), shared_http()));
+        // Distinct peers still get a usable client; sharing is by pool, not by peer.
+        let _a = PeerClient::new("http://127.0.0.1:1", "a");
+        let _b = PeerClient::new("http://127.0.0.1:2", "b");
+    }
 
     async fn spawn_rpc_server() -> (String, tokio::task::JoinHandle<()>) {
         let app = Router::new().route(
