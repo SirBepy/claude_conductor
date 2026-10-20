@@ -264,8 +264,9 @@ pub(super) async fn stream_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let Some((kind, _machine_id)) = DeviceRegistry::resolve_token(&q.token, &ctx.app_data) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let (kind, _machine_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
     };
     if let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) {
         let state = ctx.state.clone();
@@ -330,8 +331,9 @@ pub(super) async fn global_stream_ws(
 ) -> Response {
     // The upgraded socket runs outside auth_mw's TRANSPORT scope, so the
     // device kind is resolved here from the query token instead.
-    let Some((kind, _machine_id)) = DeviceRegistry::resolve_token(&q.token, &ctx.app_data) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let (kind, _machine_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
     };
     let keep_jarvis = matches!(kind, DeviceKind::Phone);
     let state = ctx.state.clone();
