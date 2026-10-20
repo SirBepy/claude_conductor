@@ -71,6 +71,12 @@ export interface QuestionRequestedPayload {
    *  (hooks_server/question.rs) when the model ignored the redirect to the
    *  MCP tool - never present on the normal path. */
   degraded_builtin?: boolean;
+  /** Set by `post_fire_and_forget_question` (hooks_server/question.rs) when
+   *  this session already had ANOTHER open, unanswered question at the
+   *  moment this one was asked. Without it, an old unanswered question that
+   *  the model circles back to later resurfaces with no hint that it isn't
+   *  new, and reads as a duplicate of whatever was just answered. */
+  has_older_pending?: boolean;
   /** Daemon-assigned monotonic order (`DaemonState::next_prompt_seq`) - lets
    *  `markLatestQuestion` tell a genuinely newer question apart from a stale
    *  one surfaced out of order (the prompt store's snapshot order is not
@@ -136,6 +142,10 @@ export interface QuestionUIOpts {
    *  diagnostic marker on the LIVE card that tool-views.ts shows on the
    *  historical transcript card. */
   degradedBuiltin?: boolean;
+  /** Mirrors QuestionRequestedPayload.has_older_pending - badges this card so
+   *  it's clear it isn't a duplicate of one just answered, it's a different
+   *  question that was left open while something else was going on. */
+  hasOlderPending?: boolean;
   onSubmit: (
     answers: Answers,
     extras: { additionalMessage: string; attachments: AuqAttachment[] },

@@ -325,11 +325,17 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       const degradedBadge = opts.degradedBuiltin
         ? `<i class="ph-fill ph-flask question-card-degraded-badge" title="Answered via the disabled legacy AskUserQuestion path"></i>`
         : "";
+      // Not a NEW duplicate - an older question for this same chat was left
+      // open (the model moved on, then circled back to it) and had no way to
+      // say so until now.
+      const olderPendingBadge = opts.hasOlderPending
+        ? `<i class="ph-fill ph-clock-counter-clockwise question-card-degraded-badge" title="An earlier question in this chat is still open too - this one isn't a repeat of what you just answered"></i>`
+        : "";
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
       const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
       const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
-      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
       const footerHtml = `
