@@ -57,7 +57,7 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   let error: string | null = null;
 
   const escHandler = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") void cancel();
+    if (e.key === "Escape") { if (isRemote()) teardownEsc(); else void cancel(); }
   };
 
   // Removes the DOM too (not just the Escape listener) - this is the same
@@ -84,10 +84,13 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   setActivePermissionCard(teardownEsc);
   _active = { id: payload.id, teardown: teardownEsc };
 
+  // Titled as the AI's ask, not the app's: the label is model-written free
+  // text, so a tricked agent could otherwise pass for the app's own
+  // re-authentication prompt.
   const title = `
     <span class="prompt-card__title">
       <i class="ph ph-lock-key"></i>
-      Secret requested
+      The AI in ${escapeHtml(sessionLabel(payload.session_id))} is asking for a secret
     </span>
   `;
 
@@ -102,15 +105,11 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
           <i class="ph ph-arrow-square-out"></i>
         </button>`;
     return `
-      <p class="secret-card__label">${escapeHtml(payload.label)}</p>
+      <figure class="secret-card__quote">
+        <figcaption class="secret-card__quote-k">The AI's words</figcaption>
+        <blockquote class="secret-card__label">&ldquo;${escapeHtml(payload.label)}&rdquo;</blockquote>
+      </figure>
       <div class="secret-card__meta">
-        <div class="secret-card__meta-row">
-          <i class="ph ph-chat-circle-text"></i>
-          <div class="secret-card__meta-text">
-            <span class="secret-card__meta-k">Session</span>
-            <span class="secret-card__meta-v">${escapeHtml(sessionLabel(payload.session_id))}</span>
-          </div>
-        </div>
         <div class="secret-card__meta-row">
           <i class="ph ph-file-text"></i>
           <div class="secret-card__meta-text">
@@ -120,13 +119,19 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
           </div>
         </div>
       </div>
-      <input
+      <p class="secret-card__warning">
+        <i class="ph ph-warning"></i>
+        <span>Only paste a key meant for <code>${escapeHtml(payload.file)}:${escapeHtml(payload.key)}</code>. The app never asks for your passwords.</span>
+      </p>
+      ${isRemote()
+        ? `<p class="secret-card__desktop-only"><i class="ph ph-desktop"></i> Enter this secret on the desktop. A phone can't submit it.</p>`
+        : `<input
         type="password"
         class="secret-card__input"
         autocomplete="off"
         spellcheck="false"
         placeholder="Paste the secret value"
-      >
+      >`}
       ${error ? `<div class="secret-card__error"><i class="ph ph-warning-circle"></i> ${escapeHtml(error)}</div>` : ""}
     `;
   }
@@ -134,6 +139,12 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   function footerHtml(): string {
     // No icon on Save - the app's other Save buttons (e.g. cc-modal-save) are
     // text-only, and a one-off icon here read as inconsistent (Joe, 2026-10-19).
+    // The phone can't answer a secret prompt (respond_secret is desktop-only),
+    // so it only gets a local dismiss; the daemon-side prompt stays pending
+    // for the desktop.
+    if (isRemote()) {
+      return `<button type="button" class="btn btn-secondary" data-act="dismiss">Close</button>`;
+    }
     return `
       <button type="button" class="btn btn-secondary" data-act="cancel">Cancel</button>
       <button type="button" class="btn btn-primary" data-act="save" disabled>Save</button>
@@ -189,6 +200,10 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   }
 
   function attach(): void {
+    if (isRemote()) {
+      host.querySelector<HTMLButtonElement>('[data-act="dismiss"]')!.addEventListener("click", teardownEsc);
+      return;
+    }
     const input = host.querySelector<HTMLInputElement>(".secret-card__input")!;
     const saveBtn = host.querySelector<HTMLButtonElement>('[data-act="save"]')!;
     input.addEventListener("input", () => {
