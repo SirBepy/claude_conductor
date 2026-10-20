@@ -7,6 +7,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 // production bundle emits tauri_kit tokens.css's `html, body { padding: 0 }`
 // AFTER base.css, while the dev server keeps import order, so only a build
 // showed it. These pin the rule against that reset regardless of order.
+// Only base.css's body band padding is in scope; its token block is not.
 
 const PHONE = { width: 393, height: 852 };
 const TOP = 32;
