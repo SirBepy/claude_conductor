@@ -106,17 +106,37 @@
   color: var(--color-text);
 }
 
-/* Quiet like the code-mode button above; accent-coloured only while on, so
-   the one piece of state this button carries doesn't need a separate badge. */
-.session-header .wrap-up-btn {
+/* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which
+   read as clutter) - same geometry as .session-header-proj-badge (bottom
+   right), mirrored to the free top-right corner so the two never collide.
+   Unlike the project badge this one IS interactive, so pointer-events stays
+   default and it gets its own hover/focus state. */
+.session-header-avatar-wrap .wrap-up-btn {
+  position: absolute;
+  top: -2px;
+  right: -5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--color-surface, #0d0f15);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.7);
   color: var(--color-text-muted);
+  cursor: pointer;
 }
 
-.session-header .wrap-up-btn:hover,
-.session-header .wrap-up-btn:focus-visible {
+.session-header-avatar-wrap .wrap-up-btn i { font-size: 9px; }
+
+.session-header-avatar-wrap .wrap-up-btn:hover,
+.session-header-avatar-wrap .wrap-up-btn:focus-visible {
   color: var(--color-text);
 }
 
-.session-header .wrap-up-btn.is-on {
+.session-header-avatar-wrap .wrap-up-btn.is-on {
   color: var(--color-accent, #7c6af7);
+  border-color: var(--color-accent, #7c6af7);
 }

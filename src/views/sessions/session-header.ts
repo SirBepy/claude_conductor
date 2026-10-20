@@ -62,6 +62,7 @@ export class SessionHeader {
   private readonly _cfgModelEl: HTMLElement;
   private readonly _cfgSepEl: HTMLElement;
   private readonly _cfgEffortEl: HTMLElement;
+  private readonly _wrapUpBtn: HTMLButtonElement;
 
   private readonly _onDiscard: (() => void) | undefined;
 
@@ -99,7 +100,7 @@ export class SessionHeader {
       `    </span>`,
       `  </span>`,
       `</div>`,
-      `<button class="icon-btn wrap-up-btn" title="${escapeHtml(wrapUpTooltip(false))}" aria-label="Wrap up when done">`,
+      `<button class="wrap-up-btn" title="${escapeHtml(wrapUpTooltip(false))}" aria-label="Wrap up when done">`,
       `  <i class="ph-bold ph-flag-checkered"></i>`,
       `</button>`,
       `<button class="icon-btn code-mode-btn" title="Code mode (Ctrl+Shift+E)" aria-label="Code mode">`,
@@ -118,13 +119,21 @@ export class SessionHeader {
     this._cfgModelEl = el.querySelector(".meta-cfg-model")!;
     this._cfgSepEl = el.querySelector(".meta-cfg-sep")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
+    this._wrapUpBtn = el.querySelector(".wrap-up-btn")!;
+    // Corner badge on the avatar, not a separate icon in the button row
+    // (Joe, 2026-10-20: disliked the flag sitting in the icon row). Moved
+    // into `_wrap` here and re-moved after every `setAvatar` call below,
+    // since `setAvatar` replaces `_wrap.innerHTML` wholesale - appendChild
+    // RELOCATES the existing node (same element, same listener), it never
+    // clones, so this survives repeated avatar swaps without re-binding.
+    this._wrap.appendChild(this._wrapUpBtn);
 
     el.querySelector<HTMLButtonElement>(".code-mode-btn")!.addEventListener("click", (e) => {
       e.stopPropagation();
       this.onCodeModeClick?.();
     });
 
-    el.querySelector<HTMLButtonElement>(".wrap-up-btn")!.addEventListener("click", (e) => {
+    this._wrapUpBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.onWrapUpToggleClick?.();
     });
@@ -201,6 +210,10 @@ export class SessionHeader {
         badge,
       ].join("");
     }
+    // innerHTML above wiped the wrap-up corner badge along with everything
+    // else - relocate the same node (not a clone) back in, so its listener
+    // and current on/off state survive an avatar swap.
+    this._wrap.appendChild(this._wrapUpBtn);
   }
 
   /**
@@ -216,20 +229,17 @@ export class SessionHeader {
 
     // Read-only (external/automated) sessions aren't driven by this app's own
     // turns, so the toggle has nothing to act on - same gate as auto-accept.
-    const wrapUpBtn = this.el.querySelector<HTMLButtonElement>(".wrap-up-btn");
-    if (wrapUpBtn) wrapUpBtn.hidden = opts.readOnly;
+    this._wrapUpBtn.hidden = opts.readOnly;
     this.setWrapUpOnDone(!!opts.wrapUpOnDoneOn);
   }
 
-  /** Reflects the current toggle state on the header's flag button - its own
+  /** Reflects the current toggle state on the header's flag badge - its own
    *  click handler calls this directly; the menu item and the keyboard
    *  shortcut go through `active-session.ts`'s `refreshWrapUpIndicator`
    *  instead, since they don't hold a `SessionHeader` reference. */
   setWrapUpOnDone(on: boolean): void {
-    const btn = this.el.querySelector<HTMLButtonElement>(".wrap-up-btn");
-    if (!btn) return;
-    btn.classList.toggle("is-on", on);
-    btn.title = wrapUpTooltip(on);
+    this._wrapUpBtn.classList.toggle("is-on", on);
+    this._wrapUpBtn.title = wrapUpTooltip(on);
   }
 
   /**
