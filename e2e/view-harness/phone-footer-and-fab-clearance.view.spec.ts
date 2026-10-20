@@ -2,7 +2,7 @@
 // Reviewed 2026-10-08: index.ts gained a `secret-requested` prompt route and queue (the request_secret MCP tool's masked-value card) alongside the existing permission/question routes - additive, no change to this spec's AUQ contract.
 // Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
 // Joe, 2026-09-04, from two phone screenshots: the AUQ footer split 2 + 1
 // (flex-wrap stranded Submit alone on line two), and the FAB parked on the
@@ -27,15 +27,7 @@ async function mountPhoneSession(page: Page): Promise<void> {
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
   await page.locator("#sessions-list li[data-session-id='s1']").click();
   await page.locator("#session-pane .session-composer").waitFor();
-  // The pane slides in over --motion-base; geometry sampled mid-slide is offset
-  // by the remaining translateX, so wait for the transform to settle.
-  await page.waitForFunction(() => {
-    const pane = document.querySelector(".session-pane");
-    if (!pane) return false;
-    const t = getComputedStyle(pane).transform;
-    // Settled is "none" or an identity matrix with zero translation.
-    return t === "none" || new DOMMatrix(t).m41 === 0;
-  });
+  await waitForPaneSettled(page);
 }
 
 const QUESTION = [{
