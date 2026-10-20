@@ -2,8 +2,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 
-const SHOT_DIR = ".for_bepy/screenshots/50576-134369897182669800";
-
 async function mount(page: Page) {
   await mountView(page, { invoke: { list_slash_commands: [] } });
   await page.evaluate(async () => {
@@ -26,5 +24,4 @@ test("the secret card shows only file and key, names the asker in the header, an
   await expect(card.locator(".secret-card__ledger")).toContainText("ANTHROPIC_API_KEY");
   await expect(card).not.toContainText("Re-authentication required");
   await expect(card.locator(".secret-card__input")).toBeVisible();
-  await card.screenshot({ path: `${SHOT_DIR}/secret-card-ai-attribution.png` });
 });

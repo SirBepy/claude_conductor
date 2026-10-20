@@ -2,7 +2,7 @@
 // Reviewed 2026-10-08: index.ts gained a `secret-requested` prompt route and queue (the request_secret MCP tool's masked-value card) alongside the existing permission/question routes - additive, no change to this spec's AUQ contract.
 // Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
 // Mobile bottom-sheet redesign (Joe's ask, 2026-08-14): full-bleed, taller,
 // guaranteed nav-bar clearance, drag-down-to-peek. Mounts a REAL sessions
@@ -27,14 +27,7 @@ async function mountPhoneSession(page: Page): Promise<void> {
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
   await page.locator("#sessions-list li[data-session-id='s1']").click();
   await page.locator("#session-pane .session-composer").waitFor();
-  // The pane slides in over --motion-base; a card measured mid-slide inherits
-  // the remaining translateX, so wait for the pane to settle first.
-  await page.waitForFunction(() => {
-    const pane = document.querySelector(".session-pane");
-    if (!pane) return false;
-    const t = getComputedStyle(pane).transform;
-    return t === "none" || new DOMMatrix(t).m41 === 0;
-  });
+  await waitForPaneSettled(page);
 }
 
 async function overrideSafeArea(page: Page, bottom: number): Promise<void> {

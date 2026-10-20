@@ -350,6 +350,18 @@ export async function capture(
   return file;
 }
 
+// The session pane slides in over --motion-base; geometry sampled mid-slide is
+// offset by the remaining translateX, so wait for the transform to settle
+// ("none", or an identity matrix with zero translation).
+export async function waitForPaneSettled(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const pane = document.querySelector(".session-pane");
+    if (!pane) return false;
+    const t = getComputedStyle(pane).transform;
+    return t === "none" || new DOMMatrix(t).m41 === 0;
+  });
+}
+
 // .oc-reset-pop fades/scales in over a 200ms CSS transition (overlay.css) - a
 // box read mid-transition gives a smaller, timing-dependent width, which is
 // the real cause of the reset-popup containment flake under parallel workers.
