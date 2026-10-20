@@ -1,6 +1,6 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { modelLabel as shortModelName } from "../../shared/model-name";
-import { projBadgeHtml } from "./sidebar-row-visuals";
+import { projBadgeHtml, wrapUpTooltip } from "./sidebar-row-visuals";
 
 export interface SessionHeaderBindOpts {
   sessionId: string;
@@ -14,18 +14,6 @@ export interface SessionHeaderBindOpts {
   machineId?: string | null;
   autoAcceptOn?: boolean;
   wrapUpOnDoneOn?: boolean;
-}
-
-/** Shared with sidebar-rows.ts's chip and chat-menu-items.ts's menu item so
- *  the same toggle reads the same explanation everywhere it surfaces. */
-export function wrapUpTooltip(on: boolean): string {
-  const base = on
-    ? "Wrap up when done: ON (Ctrl+Shift+W)"
-    : "Wrap up when done (Ctrl+Shift+W)";
-  const body = on
-    ? "once nothing more is needed from you, Claude self-verifies, commits, and closes this chat on its own - then it's off, since the chat is gone"
-    : "turn on to have Claude self-verify, commit, and close this chat on its own once nothing more is needed from you";
-  return `${base} - ${body}`;
 }
 
 /** Live-updates the mounted header's "Wrap up when done" button for

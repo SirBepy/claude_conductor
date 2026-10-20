@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect } from "vitest";
-import { wrapUpChipHtml } from "../src/views/sessions/sidebar-row-visuals.ts";
-import { wrapUpTooltip, refreshWrapUpIndicator, SessionHeader } from "../src/views/sessions/session-header.ts";
+import { wrapUpChipHtml, wrapUpTooltip } from "../src/views/sessions/sidebar-row-visuals.ts";
+import { refreshWrapUpIndicator, SessionHeader } from "../src/views/sessions/session-header.ts";
 
 describe("wrapUpChipHtml (sidebar row chip)", () => {
   it("renders nothing when off", () => {
