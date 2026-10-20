@@ -145,10 +145,7 @@ where
         state.registry.set_awaiting(target_session_id, None);
         state.registry.set_busy_from_wake(target_session_id);
         crate::sessions::chat_state::set_busy(target_session_id, true);
-        state.notifier.publish(
-            "instances_changed",
-            serde_json::json!({"instances": state.registry.list()}),
-        );
+        crate::daemon::machines::publish_instances_changed(&state);
     }
     if failed {
         let mut queues = state.repo_channel_wakes.lock().unwrap();

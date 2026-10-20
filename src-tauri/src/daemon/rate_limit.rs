@@ -115,10 +115,7 @@ pub(crate) fn handle_rate_limit_rejection(
     }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    state.notifier.publish(
-        "instances_changed",
-        serde_json::json!({"instances": state.registry.list()}),
-    );
+    crate::daemon::machines::publish_instances_changed(&state);
     state.notifier.publish(
         "scheduled_items_changed",
         serde_json::json!({"items": crate::sessions::scheduled_items::list()}),

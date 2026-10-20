@@ -32,10 +32,7 @@ async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaitin
         // record for `request_id` was already removed above, so this check
         // only sees genuine siblings, not itself.
         if state.clear_question_awaiting_if_no_others_pending(sid).await {
-            state.notifier.publish(
-                "instances_changed",
-                serde_json::json!({"instances": state.registry.list()}),
-            );
+            crate::daemon::machines::publish_instances_changed(&state);
         }
     }
 }

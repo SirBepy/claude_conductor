@@ -48,10 +48,7 @@ pub(super) async fn set_question_awaiting(state: &Arc<DaemonState>, session_id: 
         state.clear_question_awaiting_if_no_others_pending(sid).await
     };
     if changed {
-        state.notifier.publish(
-            "instances_changed",
-            json!({"instances": state.registry.list()}),
-        );
+        crate::daemon::machines::publish_instances_changed(&state);
     }
     changed
 }

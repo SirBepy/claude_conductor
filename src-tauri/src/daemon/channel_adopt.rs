@@ -180,10 +180,7 @@ pub fn adopt_running_channels(state: Arc<DaemonState>) {
                 let retagged = state_r.registry.retag_pid_as_automated(cp);
                 log::info!("adopt_running_channels: retag_pid_as_automated({cp}) -> {retagged}");
                 if retagged {
-                    state_r.notifier.publish(
-                        "instances_changed",
-                        serde_json::json!({"instances": state_r.registry.list()}),
-                    );
+                    crate::daemon::machines::publish_instances_changed(&state_r);
                 }
             });
         }
@@ -343,10 +340,7 @@ pub fn adopt_external_sessions(state: Arc<DaemonState>) {
     }
 
     if adopted_count > 0 {
-        state.notifier.publish(
-            "instances_changed",
-            serde_json::json!({"instances": state.registry.list()}),
-        );
+        crate::daemon::machines::publish_instances_changed(&state);
         log::info!("adopt_external_sessions: adopted {} session(s)", adopted_count);
     } else {
         log::debug!("adopt_external_sessions: no new external sessions found");
