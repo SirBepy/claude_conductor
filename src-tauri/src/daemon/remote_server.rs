@@ -271,6 +271,20 @@ pub(super) async fn authenticate_token(
     }
 }
 
+/// `authenticate_token` for `/ws/transcribe` alone: the desktop webview's own
+/// token also passes with Remote access off, because dictation must work on a
+/// default install. Every other token still gets 503.
+pub(super) async fn authenticate_voice_token(
+    ctx: &RemoteCtx,
+    token: String,
+) -> Result<(DeviceKind, Option<String>), Response> {
+    match DeviceRegistry::authenticate_desktop_voice_blocking_safe(token, ctx.app_data.clone()).await {
+        AuthOutcome::Ok(kind, machine_id) => Ok((kind, machine_id)),
+        AuthOutcome::Disabled => Err(StatusCode::SERVICE_UNAVAILABLE.into_response()),
+        AuthOutcome::Invalid => Err(StatusCode::UNAUTHORIZED.into_response()),
+    }
+}
+
 /// Auth middleware for the protected routes. Runs before request extractors.
 async fn auth_mw(State(ctx): State<Arc<RemoteCtx>>, req: Request, next: Next) -> Response {
     // A request with no bearer header still reads the registry so a switched-off
@@ -435,6 +449,48 @@ mod tests {
         let on = statuses(token.clone()).await;
         assert!(on.iter().all(|s| *s != 503 && *s != 401), "enabled behaviour unchanged: {on:?}");
         assert_eq!(statuses("wrong".into()).await, [401; 5]);
+
+        handle.kill();
+    }
+
+    /// Dictation over the real socket on a default install (switch off): the
+    /// desktop token reaches the voice handler, phone and peer tokens stay 503.
+    #[tokio::test]
+    async fn desktop_token_reaches_transcribe_with_the_switch_off() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::types::Settings;
+
+        async fn ws_status(url: &str) -> u16 {
+            match tokio_tungstenite::connect_async(url).await {
+                Err(tokio_tungstenite::tungstenite::Error::Http(r)) => r.status().as_u16(),
+                Ok(_) => 101,
+                Err(e) => panic!("unexpected ws error: {e}"),
+            }
+        }
+
+        let dir = tempdir().unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_stt, port, handle) =
+            spawn_on(state, dir.path().to_path_buf(), crate::daemon::rpc::Router::new(), 0);
+        let desktop: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("remote-access.json")).unwrap(),
+        )
+        .unwrap();
+        let desktop = desktop["token"].as_str().unwrap().to_string();
+        let phone = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let (peer, _) = DeviceRegistry::add_machine_device("Mac", "m-1", dir.path()).unwrap();
+        // spawn_on switches the fixture server on; a default install is off.
+        DeviceRegistry::set_enabled(false, dir.path()).unwrap();
+        let ws = format!("ws://127.0.0.1:{port}");
+
+        let voice = ws_status(&format!("{ws}/ws/transcribe?token={desktop}")).await;
+        assert!(voice != 503 && voice != 401, "desktop dictation must not be refused: {voice}");
+        assert_eq!(ws_status(&format!("{ws}/ws/transcribe?token={phone}")).await, 503);
+        assert_eq!(ws_status(&format!("{ws}/ws/transcribe?token={peer}")).await, 503);
+        // The bypass is voice-only.
+        assert_eq!(ws_status(&format!("{ws}/api/global/stream?token={desktop}")).await, 503);
 
         handle.kill();
     }

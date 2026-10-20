@@ -26,7 +26,7 @@ pub(super) async fn transcribe_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if let Err(resp) = super::remote_server::authenticate_token(&ctx, q.token).await {
+    if let Err(resp) = super::remote_server::authenticate_voice_token(&ctx, q.token).await {
         return resp;
     }
     if let Err(e) = ctx.stt.ensure_running().await {
