@@ -27,6 +27,16 @@ pub struct ChatConfig {
     /// `list_auto_accept` on launch). Written only via `set_auto_accept`.
     #[serde(default)]
     pub auto_accept: bool,
+    /// Per-chat "wrap up when done" toggle. While on, every turn's system
+    /// prompt carries a standing instruction to self-verify and `/close` once
+    /// the model believes the task is finished, unless it genuinely needs
+    /// something from Joe first. Persisted so flipping it mid-chat survives
+    /// a daemon restart; read fresh at every per-turn respawn (see
+    /// `WRAP_UP_ON_DONE_PROMPT`'s call site in `lifecycle::spawn`), so toggling
+    /// it mid-chat takes effect on the very next turn. Written only via
+    /// `set_wrap_up_on_done`.
+    #[serde(default)]
+    pub wrap_up_on_done: bool,
     /// The registry account this chat was spawned under. Mirrors model/effort:
     /// recorded alongside them at spawn time so a CLOSED chat's history view
     /// can still show which account ran it. Empty for chats that predate
@@ -217,6 +227,39 @@ fn list_auto_accept_at(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Set (or clear) a chat's wrap-up-on-done flag. Preserves any recorded
+/// model/effort/etc on the same entry. Best-effort, never panics.
+pub fn set_wrap_up_on_done(session_id: &str, value: bool) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_wrap_up_on_done_at(&path, session_id, value);
+}
+
+/// Session ids that currently have wrap-up-on-done enabled. The frontend
+/// menu toggle seeds its in-memory set from this on launch, same as
+/// `list_auto_accept`.
+pub fn list_wrap_up_on_done() -> Vec<String> {
+    let Some(path) = config_path() else { return Vec::new() };
+    list_wrap_up_on_done_at(&path)
+}
+
+fn set_wrap_up_on_done_at(path: &Path, session_id: &str, value: bool) {
+    if session_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    map.entry(session_id.to_string()).or_default().wrap_up_on_done = value;
+    write_atomic(path, &map);
+}
+
+fn list_wrap_up_on_done_at(path: &Path) -> Vec<String> {
+    load_map(path)
+        .into_iter()
+        .filter(|(_, c)| c.wrap_up_on_done)
+        .map(|(id, _)| id)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +309,47 @@ mod tests {
         let path = tmp.path().join("chat-config.json");
         set_auto_accept_at(&path, "", true);
         assert!(!path.exists(), "no file written for empty session id");
+    }
+
+    #[test]
+    fn wrap_up_on_done_round_trips_and_preserves_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        record_at(&path, "sess-1", "opus", "high");
+        set_wrap_up_on_done_at(&path, "sess-1", true);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert!(got.wrap_up_on_done, "wrap_up_on_done set");
+        assert_eq!(got.model, "opus", "model preserved across wrap-up-on-done write");
+        assert_eq!(list_wrap_up_on_done_at(&path), vec!["sess-1".to_string()]);
+        // Clearing drops it from the list but keeps the entry's model/effort.
+        set_wrap_up_on_done_at(&path, "sess-1", false);
+        assert!(list_wrap_up_on_done_at(&path).is_empty());
+        assert_eq!(get_at(&path, "sess-1").unwrap().model, "opus");
+    }
+
+    #[test]
+    fn set_wrap_up_on_done_empty_session_id_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        set_wrap_up_on_done_at(&path, "", true);
+        assert!(!path.exists(), "no file written for empty session id");
+    }
+
+    /// `auto_accept` and `wrap_up_on_done` are independent flags on the same
+    /// entry - flipping one must never clobber the other.
+    #[test]
+    fn auto_accept_and_wrap_up_on_done_do_not_clobber_each_other() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        set_auto_accept_at(&path, "sess-1", true);
+        set_wrap_up_on_done_at(&path, "sess-1", true);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert!(got.auto_accept);
+        assert!(got.wrap_up_on_done);
+        set_auto_accept_at(&path, "sess-1", false);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert!(!got.auto_accept);
+        assert!(got.wrap_up_on_done, "clearing auto_accept must not clear wrap_up_on_done");
     }
 
     #[test]

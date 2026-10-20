@@ -212,6 +212,11 @@ impl PersistentClient {
         Ok(())
     }
 
+    pub async fn set_wrap_up_on_done(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
+        self.call("set_wrap_up_on_done", json!({"session_id": session_id, "value": value})).await?;
+        Ok(())
+    }
+
     pub async fn register_historical(&self, session_id: &str, cwd: &str, account_id: &str) -> Result<(), ClientError> {
         self.call("register_historical", json!({"session_id": session_id, "cwd": cwd, "account_id": account_id})).await?;
         Ok(())

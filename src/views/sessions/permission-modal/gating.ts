@@ -51,6 +51,40 @@ export function setAutoAccept(sessionId: string, value: boolean): void {
   );
 }
 
+// ── Wrap-up-on-done (per-session) ───────────────────────────────────────────
+//
+// Mirrors auto-accept exactly, but the daemon side reads it to decide whether
+// to append a standing instruction to the model's own system prompt (see
+// `WRAP_UP_ON_DONE_PROMPT` in args.rs) rather than gating a permission event -
+// so unlike auto-accept, nothing here reads `_wrapUpOnDone` synchronously; the
+// in-memory set exists purely to answer "is it on?" when a menu renders.
+
+const _wrapUpOnDone = new Map<string, boolean>();
+
+/** Seed the in-memory set from the persisted store. Call once at startup. */
+export async function hydrateWrapUpOnDone(): Promise<void> {
+  try {
+    const ids = await invoke<string[]>("list_wrap_up_on_done");
+    _wrapUpOnDone.clear();
+    for (const id of ids ?? []) _wrapUpOnDone.set(id, true);
+  } catch (e) {
+    console.warn("[wrap-up-on-done] hydrate failed:", e);
+  }
+}
+
+export function isWrapUpOnDone(sessionId: string | undefined | null): boolean {
+  if (!sessionId) return false;
+  return _wrapUpOnDone.get(sessionId) === true;
+}
+
+export function setWrapUpOnDone(sessionId: string, value: boolean): void {
+  if (value) _wrapUpOnDone.set(sessionId, true);
+  else _wrapUpOnDone.delete(sessionId);
+  void invoke("set_wrap_up_on_done", { sessionId, value }).catch((e) =>
+    console.warn("[wrap-up-on-done] persist failed:", e),
+  );
+}
+
 // Stale-question guard: an id explicitly superseded by its own replacement
 // (todo 833's ghost-swap) must not inject its answer. A sibling merely
 // existing (todo 860) is NOT supersession - only markQuestionSuperseded is.

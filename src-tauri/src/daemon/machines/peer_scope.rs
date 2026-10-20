@@ -165,7 +165,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with_peer(dir.path(), true);
         let mine = MINE;
-        for method in ["send_message", "cancel_turn", "set_auto_accept", "end_session", "peer_channel_post"] {
+        for method in ["send_message", "cancel_turn", "set_auto_accept", "set_wrap_up_on_done", "end_session", "peer_channel_post"] {
             let desktop = json!({"session_id": "desktop-chat", "to_session_id": "desktop-chat"});
             assert!(check(&state, method, &desktop, "mac").await.is_err(), "{method} on a desktop chat");
             let own = json!({"session_id": mine, "to_session_id": mine});
