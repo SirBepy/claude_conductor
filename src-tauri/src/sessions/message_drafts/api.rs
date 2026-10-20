@@ -91,7 +91,6 @@ pub(crate) fn add_at(path: &Path, new: NewDraft<'_>) -> Option<MessageDraft> {
         current: 0,
         person: new.person.map(str::to_string),
         platform: new.platform.map(|p| clamp(p.trim(), MAX_SHORT_LEN)),
-        published: None,
     };
     push_version(&mut variant, new.body, DraftAuthor::Ai, "first pass");
     let draft = MessageDraft {
@@ -200,7 +199,6 @@ pub(crate) fn add_variant_at(
             current: 0,
             person: target.person.map(str::to_string),
             platform: target.platform.map(|p| clamp(p.trim(), MAX_SHORT_LEN)),
-            published: None,
         };
         push_version(&mut variant, body, DraftAuthor::Ai, "first pass");
         d.variants.push(variant);
@@ -274,31 +272,6 @@ pub fn set_state(project_id: &str, id: &str, state: DraftState) -> Result<Messag
 pub(crate) fn set_state_at(path: &Path, id: &str, state: DraftState) -> Result<MessageDraft, String> {
     mutate_at(path, id, |d, _| {
         d.state = state;
-        Ok(())
-    })
-}
-
-/// Records a variant's claude.ai link. Leaves `state` and `seen_by_origin`
-/// alone: publishing is not an edit, so the authoring chat is not told.
-pub fn set_published(
-    project_id: &str,
-    id: &str,
-    recipient: &str,
-    link: crate::claude_ai_publish::PublishedLink,
-) -> Result<MessageDraft, String> {
-    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
-    set_published_at(&path, id, recipient, link)
-}
-
-pub(crate) fn set_published_at(
-    path: &Path,
-    id: &str,
-    recipient: &str,
-    link: crate::claude_ai_publish::PublishedLink,
-) -> Result<MessageDraft, String> {
-    mutate_at(path, id, |d, _| {
-        let i = variant_index(d, recipient)?;
-        d.variants[i].published = Some(link);
         Ok(())
     })
 }
@@ -452,25 +425,6 @@ mod tests {
     }
 
     #[test]
-    fn set_published_records_the_link_without_marking_the_draft_edited() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("drafts.json");
-        let d = add_at(&path, new_draft("Handover", "Josip", "body")).unwrap();
-        set_state_at(&path, &d.id, DraftState::Ready).unwrap();
-        let link = crate::claude_ai_publish::PublishedLink {
-            url: "https://claude.ai/artifact/AB".into(),
-            version: 1,
-            account: "Joe".into(),
-            published_at: "now".into(),
-        };
-        let out = set_published_at(&path, &d.id, "Josip", link.clone()).unwrap();
-        assert_eq!(out.variants[0].published, Some(link));
-        assert_eq!(out.state, DraftState::Ready);
-        // Survives a reload, and an older store without the field still parses.
-        assert!(store_at(&path).drafts[0].variants[0].published.is_some());
-    }
-
-    #[test]
     fn list_on_missing_file_returns_empty() {
         assert_eq!(list("nonexistent-project-id-xyz"), Vec::new());
     }
@@ -553,7 +507,7 @@ mod tests {
             let key = norm_recipient("Ana");
             let n = handles.get(&key).copied().unwrap_or(0) + 1;
             handles.insert(key, n);
-            let mut v = DraftVariant { recipient: "Ana".into(), handle_n: n, versions: vec![], current: 0, person: None, platform: None, published: None };
+            let mut v = DraftVariant { recipient: "Ana".into(), handle_n: n, versions: vec![], current: 0, person: None, platform: None };
             push_version(&mut v, "plain", DraftAuthor::Ai, "first pass");
             d.variants.push(v);
             Ok(())
@@ -588,7 +542,6 @@ mod tests {
                 current: 0,
                 person: None,
                 platform: None,
-                published: None,
             });
         }
         assert!(variant_index(&d, "").is_err());
@@ -690,10 +643,9 @@ mod tests {
             current: 99,
             person: None,
             platform: None,
-            published: None,
         };
         assert_eq!(current_body(&v), "only");
-        let empty = DraftVariant { recipient: "X".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None, published: None };
+        let empty = DraftVariant { recipient: "X".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None };
         assert_eq!(current_body(&empty), "");
     }
 
@@ -721,7 +673,7 @@ mod tests {
     }
 
     fn variant_with_ai(body: &str) -> DraftVariant {
-        let mut v = DraftVariant { recipient: "Bruno".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None, published: None };
+        let mut v = DraftVariant { recipient: "Bruno".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None };
         push_version(&mut v, body, DraftAuthor::Ai, "first pass");
         v
     }

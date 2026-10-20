@@ -288,7 +288,7 @@ class PreviewTab implements RailTabHandle {
   private publish(): void {
     const snap = this.selected;
     if (!snap) return;
-    void publishToClaudeAi({ target: "preview", id: snap.id }, snap.published, snap.version, null).then((link) => {
+    void publishToClaudeAi(snap.id, snap.published, snap.version).then((link) => {
       if (!link || this.selected?.id !== snap.id) return;
       this.selected.published = link;
     });

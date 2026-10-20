@@ -20,16 +20,14 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use ts_rs::TS;
 
-/// A preview or draft's claude.ai link, kept so publishing again updates the
-/// same page instead of minting a new URL.
+/// A preview's claude.ai link, kept so publishing again updates the same page
+/// instead of minting a new URL.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct PublishedLink {
     pub url: String,
-    /// What was uploaded, so the UI can tell a current link from one the
-    /// content has since moved past: a preview's `version`, or for a draft a
-    /// hash of the published markdown, because a user edit amends the
-    /// current draft version in place without bumping its `n`.
+    /// The preview `version` that was uploaded, so the UI can tell a current
+    /// link from one a later push has moved past.
     pub version: u32,
     /// Which account owns the page, shown so Joe knows whose claude.ai to
     /// open when he goes to press Share.
@@ -72,7 +70,7 @@ This replaces that page's content and keeps its link."
     };
     format!(
         "The user pressed \"Publish to claude.ai\" in Conductor for the HTML page at {file}. \
-Conductor wrote that file from the user's own preview or draft, and the user wants it published \
+Conductor wrote that file from the user's own preview, and the user wants it published \
 exactly as it is.\n\n{steps}\n\n\
 Read the file first if your instructions require it. Do not load any skill, do not edit or rewrite \
 the file, and make no other tool calls. Reply with only the artifact URL."
