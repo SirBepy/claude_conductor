@@ -1,6 +1,7 @@
 // Settings > Appearance theme picker: a live preview of chat UI on top, a
-// Dark / Light switch, and one row of colour dots per palette group. Hovering
-// or focusing a dot repaints only the preview; clicking it applies the theme.
+// Dark / Light switch, and a two-column list of named palettes per group.
+// Hovering or focusing a palette repaints only the preview; clicking it
+// applies the theme.
 
 import { html, render } from "lit-html";
 import { SIRBEPY_PALETTES } from "../../../../../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default";
@@ -107,16 +108,19 @@ export function hydrateThemePicker(): void {
       </div>
       ${groups().map(([name, list]) => html`
         ${name ? html`<div class="tp-group">${name}</div>` : ""}
-        <div class="tp-dots">
+        <div class="tp-list">
           ${list.map((p) => {
             const s = committed.light ? p.lightSwatch : p.darkSwatch;
             const active = p.id === committed.id;
-            return html`<button type="button" class="tp-dot" data-palette=${p.id}
-              aria-label=${`${p.label} theme`} aria-pressed=${String(active)} title=${p.label}
-              style=${`--tp-bg:${s[0]};--tp-surface:${s[1]};--tp-accent:${s[2]}`}
+            // Background, primary, secondary: the three colours that tell palettes apart.
+            return html`<button type="button" class="tp-option" data-palette=${p.id}
+              aria-label=${`${p.label} theme`} aria-pressed=${String(active)}
               @mouseenter=${() => preview(p.id)} @mouseleave=${() => preview(null)}
               @focus=${() => preview(p.id)} @blur=${() => preview(null)}
-              @click=${() => commit({ ...committed, id: p.id })}></button>`;
+              @click=${() => commit({ ...committed, id: p.id })}>
+              <span class="tp-swatch">${[s[0], s[2], s[3]].map((c) => html`<span style=${`background:${c}`}></span>`)}</span>
+              ${p.label}
+            </button>`;
           })}
         </div>
       `)}
