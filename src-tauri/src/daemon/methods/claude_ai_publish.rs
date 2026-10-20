@@ -55,8 +55,17 @@ async fn publish_preview(state: &Arc<DaemonState>, id: &str) -> Result<Value, St
     .await
     .map_err(|e| format!("{e:#}"))?;
     let link = PublishedLink { url: out.url, version: snap.version, account: out.account, published_at: now() };
-    crate::daemon::preview::set_published_and_notify(state, id, link.clone());
-    Ok(json!({ "published": link }))
+    let stored = crate::daemon::preview::set_published_and_notify(state, id, link.clone()).is_some();
+    if !stored {
+        log::warn!("claude.ai link for preview {id} not stored: the preview was removed during the publish");
+    }
+    Ok(outcome(link, stored))
+}
+
+/// `stored: false` means the preview vanished mid-run (history cap), so the
+/// link exists on claude.ai but nothing here remembers it.
+fn outcome(link: PublishedLink, stored: bool) -> Value {
+    json!({ "published": link, "stored": stored })
 }
 
 pub fn register_claude_ai_publish(router: &mut Router, state: Arc<DaemonState>) {
@@ -81,6 +90,13 @@ mod tests {
         assert!(page.contains("<title>Q3 &lt;draft></title>"));
         assert!(page.contains("background:#15151e"));
         assert!(page.contains("<body><h1>Hi</h1></body>"));
+    }
+
+    #[test]
+    fn the_result_says_whether_the_link_was_stored() {
+        let link = PublishedLink { url: "https://claude.ai/artifact/AB".into(), version: 1, account: "Joe".into(), published_at: "now".into() };
+        assert_eq!(outcome(link.clone(), false)["stored"], false);
+        assert_eq!(outcome(link, true)["stored"], true);
     }
 
     #[test]

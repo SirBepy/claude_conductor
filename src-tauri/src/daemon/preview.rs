@@ -383,6 +383,16 @@ mod tests {
     }
 
     #[test]
+    fn setting_a_link_on_an_evicted_preview_stores_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        push_at(&path, "A".into(), Some("a".into()), "<p>a</p>".into(), "chat".into(), None).unwrap();
+        let link = PublishedLink { url: "https://claude.ai/artifact/AB".into(), version: 1, account: "Joe".into(), published_at: "now".into() };
+        assert!(set_published_at(&path, "no-such-id", link).is_none());
+        assert!(list_at(&path)[0].published.is_none());
+    }
+
+    #[test]
     fn a_history_file_written_before_published_existed_still_loads() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("preview-history.json");
