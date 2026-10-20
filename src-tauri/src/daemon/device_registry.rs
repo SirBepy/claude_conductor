@@ -110,6 +110,16 @@ fn save(reg: &RegistryFile, app_data: &Path) -> Result<(), String> {
     crate::util::write_json_atomic(&registry_path(app_data), &body).map_err(|e| e.to_string())
 }
 
+/// Result of checking a presented token against the registry and the
+/// remote-access switch.
+#[derive(Debug, PartialEq, Clone)]
+pub enum AuthOutcome {
+    Ok(DeviceKind, Option<String>),
+    /// Remote access is switched off: refuse everything, even a valid token.
+    Disabled,
+    Invalid,
+}
+
 pub struct DeviceRegistry;
 
 impl DeviceRegistry {
@@ -149,22 +159,49 @@ impl DeviceRegistry {
         load(app_data).enabled
     }
 
-    /// True when the presented bearer token matches any registered device.
-    /// Fail-closed: returns false when registry is missing or unreadable.
+    /// True when remote access is on AND the presented token matches a
+    /// registered device. Fail-closed: false when the registry is missing or
+    /// unreadable.
     pub fn validate_token(token: &str, app_data: &Path) -> bool {
         Self::resolve_token(token, app_data).is_some()
     }
 
     /// Resolve a bearer token to its device kind + machine id (Machine
     /// devices only). Fail-closed: `None` when the registry is missing,
-    /// unreadable, or no entry's token hash matches.
+    /// unreadable, remote access is switched off, or no entry's token hash
+    /// matches. The switch check lives here so a self-authenticating route
+    /// (query-token WS, preview GET) cannot forget it.
     pub fn resolve_token(token: &str, app_data: &Path) -> Option<(DeviceKind, Option<String>)> {
+        match Self::authenticate(token, app_data) {
+            AuthOutcome::Ok(kind, machine_id) => Some((kind, machine_id)),
+            AuthOutcome::Disabled | AuthOutcome::Invalid => None,
+        }
+    }
+
+    /// Switch and token check off ONE registry read, distinguishing "switched
+    /// off" (503) from "bad token" (401). Blocking file I/O: async callers
+    /// use `authenticate_blocking_safe`.
+    pub fn authenticate(token: &str, app_data: &Path) -> AuthOutcome {
+        let reg = load(app_data);
+        if !reg.enabled {
+            return AuthOutcome::Disabled;
+        }
         let hash = sha256_hex(token);
-        load(app_data)
-            .devices
-            .iter()
-            .find(|d| d.token_hash == hash)
-            .map(|d| (d.kind, d.machine_id.clone()))
+        match reg.devices.iter().find(|d| d.token_hash == hash) {
+            Some(d) => AuthOutcome::Ok(d.kind, d.machine_id.clone()),
+            None => AuthOutcome::Invalid,
+        }
+    }
+
+    /// `authenticate` on the blocking pool. The registry is re-read from disk
+    /// per call rather than cached because the app process (a different
+    /// process from the daemon) writes it on pair/revoke/toggle and those must
+    /// take effect immediately; the read just must not run on an async worker.
+    pub async fn authenticate_blocking_safe(token: String, app_data: PathBuf) -> AuthOutcome {
+        // A join error (panic in the closure) denies, never admits.
+        tokio::task::spawn_blocking(move || Self::authenticate(&token, &app_data))
+            .await
+            .unwrap_or(AuthOutcome::Invalid)
     }
 
     /// Mint a new device token, append to the registry, return plaintext token.
@@ -251,6 +288,7 @@ mod tests {
     #[test]
     fn add_and_validate_device() {
         let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let token = DeviceRegistry::add_device("My Phone", dir.path()).unwrap();
         assert_eq!(token.len(), 64);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
@@ -261,7 +299,9 @@ mod tests {
     #[test]
     fn revoke_removes_device() {
         let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let token = DeviceRegistry::add_device("Test", dir.path()).unwrap();
+        assert!(DeviceRegistry::validate_token(&token, dir.path()));
         let devices = DeviceRegistry::list_devices(dir.path());
         assert_eq!(devices.len(), 1);
         let id = devices[0].id.clone();
@@ -342,6 +382,7 @@ mod tests {
     fn ensure_desktop_writes_plaintext_for_ipc() {
         let dir = tempdir().unwrap();
         DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let raw = std::fs::read_to_string(dir.path().join("remote-access.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let token = v["token"].as_str().unwrap();
@@ -365,10 +406,38 @@ mod tests {
     #[test]
     fn machine_device_resolves_kind_and_machine_id() {
         let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let (token, id) = DeviceRegistry::add_machine_device("Mac Mini", "mach-123", dir.path()).unwrap();
         let (kind, machine_id) = DeviceRegistry::resolve_token(&token, dir.path()).unwrap();
         assert_eq!(kind, DeviceKind::Machine);
         assert_eq!(machine_id.as_deref(), Some("mach-123"));
         assert!(DeviceRegistry::revoke_device(&id, dir.path()).unwrap());
+    }
+
+    #[test]
+    fn switched_off_registry_refuses_a_valid_token() {
+        let dir = tempdir().unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        assert_eq!(DeviceRegistry::authenticate(&token, dir.path()), AuthOutcome::Disabled);
+        assert!(DeviceRegistry::resolve_token(&token, dir.path()).is_none());
+        assert!(!DeviceRegistry::validate_token(&token, dir.path()));
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        assert!(matches!(DeviceRegistry::authenticate(&token, dir.path()), AuthOutcome::Ok(DeviceKind::Phone, None)));
+        assert_eq!(DeviceRegistry::authenticate("wrong", dir.path()), AuthOutcome::Invalid);
+    }
+
+    #[tokio::test]
+    async fn blocking_safe_auth_sees_toggle_and_revoke_immediately() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let go = || DeviceRegistry::authenticate_blocking_safe(token.clone(), dir.path().to_path_buf());
+        assert!(matches!(go().await, AuthOutcome::Ok(..)));
+        DeviceRegistry::set_enabled(false, dir.path()).unwrap();
+        assert_eq!(go().await, AuthOutcome::Disabled);
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let id = DeviceRegistry::list_devices(dir.path())[0].id.clone();
+        DeviceRegistry::revoke_device(&id, dir.path()).unwrap();
+        assert_eq!(go().await, AuthOutcome::Invalid);
     }
 }

@@ -279,6 +279,7 @@ mod tests {
     async fn unpair_known_machine_revokes_its_reverse_device() {
         let dir = tempdir().unwrap();
         let state = state_with_machines(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let (token, device_id) = DeviceRegistry::add_machine_device("Mac Mini", "mach-1", dir.path()).unwrap();
         state.machines.get().unwrap().upsert_peer(PeerMachine {
             machine_id: "mach-1".into(),

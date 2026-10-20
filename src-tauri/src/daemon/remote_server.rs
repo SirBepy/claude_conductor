@@ -35,7 +35,7 @@ use axum::{
 use crate::util::sha256_hex;
 use tokio::net::TcpListener;
 
-use crate::daemon::device_registry::{DeviceKind, DeviceRegistry};
+use crate::daemon::device_registry::{AuthOutcome, DeviceKind, DeviceRegistry};
 use crate::daemon::rpc::Transport;
 use crate::daemon::state::DaemonState;
 
@@ -256,15 +256,29 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The single token gate for both the bearer middleware and the
+/// self-authenticating query-token routes: 503 when remote access is off,
+/// 401 for an unknown token. Registry I/O runs on the blocking pool so
+/// unauthenticated traffic cannot occupy the async workers.
+pub(super) async fn authenticate_token(
+    ctx: &RemoteCtx,
+    token: String,
+) -> Result<(DeviceKind, Option<String>), Response> {
+    match DeviceRegistry::authenticate_blocking_safe(token, ctx.app_data.clone()).await {
+        AuthOutcome::Ok(kind, machine_id) => Ok((kind, machine_id)),
+        AuthOutcome::Disabled => Err(StatusCode::SERVICE_UNAVAILABLE.into_response()),
+        AuthOutcome::Invalid => Err(StatusCode::UNAUTHORIZED.into_response()),
+    }
+}
+
 /// Auth middleware for the protected routes. Runs before request extractors.
 async fn auth_mw(State(ctx): State<Arc<RemoteCtx>>, req: Request, next: Next) -> Response {
-    if !DeviceRegistry::is_enabled(&ctx.app_data) {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    }
-    let resolved = bearer_token(req.headers())
-        .and_then(|t| DeviceRegistry::resolve_token(&t, &ctx.app_data));
-    let Some((kind, machine_id)) = resolved else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    // A request with no bearer header still reads the registry so a switched-off
+    // daemon answers 503 rather than 401 regardless of the header.
+    let token = bearer_token(req.headers()).unwrap_or_default();
+    let (kind, machine_id) = match authenticate_token(&ctx, token).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
     };
     let transport = match kind {
         DeviceKind::Phone => Transport::Phone,
@@ -358,6 +372,71 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["machine"]["machine_id"].as_str().unwrap(), mine.machine_id);
         assert_eq!(v["ok"], serde_json::json!(true));
+    }
+
+    /// Over real HTTP: with the switch off, a VALID token is refused with 503
+    /// on the bearer route and on all four query-token routes; flipping it
+    /// back on restores them (a bad token stays 401).
+    #[tokio::test]
+    async fn switch_off_refuses_valid_token_on_every_route() {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::daemon::state::DaemonState;
+        use crate::types::Settings;
+
+        async fn ws_status(url: &str) -> u16 {
+            match tokio_tungstenite::connect_async(url).await {
+                Err(tokio_tungstenite::tungstenite::Error::Http(r)) => r.status().as_u16(),
+                Ok(_) => 101,
+                Err(e) => panic!("unexpected ws error: {e}"),
+            }
+        }
+
+        let dir = tempdir().unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_stt, port, handle) =
+            spawn_on(state, dir.path().to_path_buf(), crate::daemon::rpc::Router::new(), 0);
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let http = reqwest::Client::new();
+        let base = format!("http://127.0.0.1:{port}");
+        let ws_base = format!("ws://127.0.0.1:{port}");
+
+        let statuses = |tok: String| {
+            let http = http.clone();
+            let base = base.clone();
+            let ws_base = ws_base.clone();
+            async move {
+                let bearer = http
+                    .get(format!("{base}/api/sessions"))
+                    .bearer_auth(&tok)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+                    .as_u16();
+                let preview = http
+                    .get(format!("{base}/api/preview-render/x?token={tok}"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+                    .as_u16();
+                let stream = ws_status(&format!("{ws_base}/api/sessions/s/stream?token={tok}")).await;
+                let global = ws_status(&format!("{ws_base}/api/global/stream?token={tok}")).await;
+                let transcribe = ws_status(&format!("{ws_base}/ws/transcribe?token={tok}")).await;
+                [bearer, preview, stream, global, transcribe]
+            }
+        };
+
+        DeviceRegistry::set_enabled(false, dir.path()).unwrap();
+        assert_eq!(statuses(token.clone()).await, [503; 5], "switch off must refuse a valid token everywhere");
+
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let on = statuses(token.clone()).await;
+        assert!(on.iter().all(|s| *s != 503 && *s != 401), "enabled behaviour unchanged: {on:?}");
+        assert_eq!(statuses("wrong".into()).await, [401; 5]);
+
+        handle.kill();
     }
 
     #[tokio::test]

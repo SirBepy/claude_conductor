@@ -53,8 +53,8 @@ pub(super) async fn on_preview_render_get(
     AxPath(id): AxPath<String>,
     Query(q): Query<RenderDocQuery>,
 ) -> Response {
-    if !DeviceRegistry::validate_token(&q.token, &ctx.app_data) {
-        return StatusCode::UNAUTHORIZED.into_response();
+    if let Err(resp) = super::remote_server::authenticate_token(&ctx, q.token).await {
+        return resp;
     }
     let html = {
         let cache = cell().lock().unwrap_or_else(|e| e.into_inner());
@@ -99,6 +99,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_id_with_valid_token_is_404_not_disk_read() {
         let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let token = DeviceRegistry::add_device("Test", dir.path()).unwrap();
         let ctx = test_ctx(dir.path().to_path_buf());
 
@@ -116,6 +117,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_token_is_401_before_any_lookup() {
         let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let ctx = test_ctx(dir.path().to_path_buf());
 
         let resp = on_preview_render_get(
@@ -130,6 +132,7 @@ mod tests {
     #[tokio::test]
     async fn staged_html_is_fetchable_by_its_returned_id() {
         let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         let token = DeviceRegistry::add_device("Test", dir.path()).unwrap();
         let ctx = test_ctx(dir.path().to_path_buf());
 

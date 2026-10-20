@@ -14,8 +14,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::daemon::device_registry::DeviceRegistry;
-
 use super::remote_handlers::StreamQuery;
 use super::remote_server::RemoteCtx;
 
@@ -28,8 +26,8 @@ pub(super) async fn transcribe_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !DeviceRegistry::validate_token(&q.token, &ctx.app_data) {
-        return StatusCode::UNAUTHORIZED.into_response();
+    if let Err(resp) = super::remote_server::authenticate_token(&ctx, q.token).await {
+        return resp;
     }
     if let Err(e) = ctx.stt.ensure_running().await {
         log::error!("stt ensure_running: {e}");
