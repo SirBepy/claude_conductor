@@ -151,7 +151,7 @@ function buildRowOptions(args: {
     statusTitle: args.statusTitle ?? "",
     avatarExtras: {
       badgeClass: "is-centred",
-      extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
+      extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount) + wrapUpChipHtml(args.wrapUpOnDone, tipAttr),
       dotClass: args.dotClass,
       machineId: args.machine?.id ?? null,
     },
@@ -159,7 +159,7 @@ function buildRowOptions(args: {
     projectLabel: escapeHtml(args.projectLabel),
     badges,
     machineBadge: machineBadgeHtml(args.machine, !!args.isLocalSession),
-    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${wrapUpChipHtml(args.wrapUpOnDone, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
+    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
   };
 }
 
