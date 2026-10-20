@@ -15,7 +15,6 @@ import { escapeHtml } from "../escape-html";
 import { asObj, strField } from "../obj-utils";
 import { currentVersion, handleOf, copyDualPayload } from "../message-draft-utils";
 import { renderMarkdown } from "./chat-transforms";
-import { buildDraftPage, canPublish, contentStamp, publishButtonHtml, publishToClaudeAi } from "../claude-ai-publish";
 import type { RenderedMessage } from "./chat-classifiers";
 import type { ContentBlock, MessageDraft, DraftVariant } from "../../types/ipc.generated";
 
@@ -28,10 +27,6 @@ export const DRAFT_OPEN_EVENT = "cc-draft-open";
  *  to markdown and losing whatever the round-trip cannot express. Keyed by
  *  element, so a row the renderer replaced drops out on its own. */
 const markdownOf = new WeakMap<HTMLElement, string>();
-
-/** What the live row's publish button uploads, set by `refreshCard` from the
- *  store's copy so the page matches the stamp the button was drawn with. */
-const publishOf = new WeakMap<HTMLElement, { topic: string; variant: DraftVariant; body: string }>();
 
 /** The `kind:"draft"` row's own fields, read off the tool_use input. Shared by
  *  the live and scrollback paths so the two can never drift.
@@ -117,8 +112,7 @@ export function renderDraftCardHtml(m: RenderedMessage): string {
     + `<span class="dc-ver"></span>`
     + (isDrop
       ? ""
-      : `<span class="dc-publish-slot"></span>`
-        + `<button type="button" class="dc-act" data-draft-copy title="Copy the message"><i class="ph ph-copy"></i><span>Copy</span></button>`
+      : `<button type="button" class="dc-act" data-draft-copy title="Copy the message"><i class="ph ph-copy"></i><span>Copy</span></button>`
         + `<button type="button" class="dc-act dc-pop" data-draft-pop title="Open in the Drafts panel"><i class="ph ph-arrows-out-simple"></i></button>`)
     + `<i class="ph ph-caret-down dc-chevron" data-draft-toggle title="Fold"></i>`
     + `</div>`
@@ -185,15 +179,6 @@ async function refreshCard(el: HTMLElement): Promise<void> {
     const who = version.author === "user" ? " · your edit" : "";
     ver.textContent = superseded ? `v${version.n} · superseded by v${variant?.current}` : `v${version.n}${who}`;
   }
-  const slot = el.querySelector<HTMLElement>(".dc-publish-slot");
-  if (slot) {
-    // Only the live row publishes: a superseded row shows old wording, and
-    // the link belongs to the variant, not to one row.
-    const live = !superseded && variant && version && canPublish();
-    slot.innerHTML = live ? publishButtonHtml(variant.published, contentStamp(version.body), "dc-act") : "";
-    if (live) publishOf.set(el, { topic: draft.topic, variant, body: version.body });
-    else publishOf.delete(el);
-  }
   // Folded, not hidden: the row stays clickable so the wording Claude tried
   // first is still reachable.
   el.classList.toggle("superseded", superseded);
@@ -248,30 +233,6 @@ export async function ensureDraftCardsLive(): Promise<void> {
     console.warn("[draft-card] listen(message-drafts-changed) failed", err);
     unlisten = null;
   }
-}
-
-/** Uploads the live row's current text to claude.ai. The store's
- *  change broadcast repaints the button once the link is saved. */
-export function publishDraftCard(el: HTMLElement, btn: HTMLButtonElement): void {
-  const info = publishOf.get(el);
-  const id = el.dataset.draftId;
-  const sessionId = el.dataset.draftSession;
-  if (!info || !id || !sessionId) return;
-  const stamp = contentStamp(info.body);
-  void publishToClaudeAi(
-    {
-      target: "draft",
-      session_id: sessionId,
-      id,
-      recipient: info.variant.recipient,
-      title: info.topic,
-      html: buildDraftPage(info.topic, info.body),
-      version: stamp,
-    },
-    info.variant.published,
-    stamp,
-    btn,
-  );
 }
 
 /** Flips the draft to `copied`, which is also what drops it out of the

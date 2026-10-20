@@ -48,7 +48,7 @@ test("the More options menu publishes the shown snapshot and toasts the link", a
   await item.click();
   await expect(page.locator(".toast-msg").last()).toContainText("claude.ai/artifact/RF7sSgiE3L4UG83rp6Q4GD");
   const call = (await invokeCalls(page)).find((c) => c.cmd === "publish_to_claude_ai");
-  expect(call?.args).toEqual({ params: { target: "preview", id: "snap-1" } });
+  expect(call?.args).toEqual({ id: "snap-1" });
 
   // Now current: the menu offers a copy, not another upload.
   await root.locator('.pv-head [data-act="more"]').click();
