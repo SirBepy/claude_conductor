@@ -23,6 +23,8 @@ export const PANEL_META: Record<PanelKey, PanelMeta> = {
 
 export interface PanelHandle {
   setSessionScope(sessionId: string | null, cwd: string | null): void;
+  /** Only Ask takes seed text. */
+  seed?(text: string): void;
   destroy(): void;
 }
 
@@ -48,6 +50,7 @@ export function mountPanel(key: PanelKey, root: HTMLElement, deps: PanelDeps, ou
           ask.setCwd(cwd);
           ask.setSessionScope(sid);
         },
+        seed: (text) => ask.seed(text),
         destroy: () => ask.destroy(),
       };
     }

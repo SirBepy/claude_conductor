@@ -4,6 +4,7 @@ import { invoke } from "../../shared/ipc";
 import type { PreviewMeta } from "../../types/ipc.generated";
 import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
 import { DRAFT_OPEN_EVENT } from "../../shared/chat/chat-draft-card";
+import { ASK_OPEN_EVENT } from "./ask-open-event";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
 import "./session-header.css";
@@ -160,6 +161,14 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   };
   window.addEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
 
+  // The question card's "Ask about this question": Ask opens prefilled with
+  // that question while the card stays pending.
+  const onAskOpen = (e: Event): void => {
+    const text = (e as CustomEvent<{ text?: string }>).detail?.text ?? "";
+    if (text) state.fabDial?.askAbout(text);
+  };
+  window.addEventListener(ASK_OPEN_EVENT, onAskOpen);
+
   const teardownUsageDials = wireRateLimitBanner(root, listEl, myMount);
 
   if (consumePendingOpenPicker()) {
@@ -222,6 +231,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     teardownHeaderSwipe();
     window.removeEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
     window.removeEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
+    window.removeEventListener(ASK_OPEN_EVENT, onAskOpen);
     previewController?.destroy();
     previewController = null;
     state.previewController = null;

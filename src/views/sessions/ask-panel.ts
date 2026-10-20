@@ -18,6 +18,8 @@ export interface AskPanelHandle {
   /** Project dir for the scoped chat; lets Ask read the repo, not just the chat. */
   setCwd(cwd: string | null): void;
   refresh(): void;
+  /** Prefills the input (unsent) and focuses it, e.g. with a question card's text. */
+  seed(text: string): void;
   destroy(): void;
 }
 
@@ -35,6 +37,9 @@ class AskPanel implements AskPanelHandle {
   private pendingQuestion: string | null = null;
   private error: string | null = null;
   private destroyed = false;
+  /** Text waiting to land in the input; render() rebuilds the field, so a
+   *  scope refresh landing after a seed would otherwise wipe it. */
+  private seeded: string | null = null;
 
   constructor(root: HTMLElement, deps: AskPanelDeps) {
     this.root = root;
@@ -71,6 +76,16 @@ class AskPanel implements AskPanelHandle {
         this.render();
       })
       .catch((err) => console.error("[ask-panel] ask_list_threads failed", err));
+  }
+
+  seed(text: string): void {
+    this.indexOpen = false;
+    this.seeded = text;
+    this.render();
+    const input = this.root.querySelector<HTMLInputElement>("[data-ask-input]");
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(text.length, text.length);
   }
 
   private active(): AskThread | null {
@@ -186,6 +201,8 @@ class AskPanel implements AskPanelHandle {
   }
 
   private render(): void {
+    // A refresh or thread update must not eat what the user is typing.
+    const keep = this.root.querySelector<HTMLInputElement>("[data-ask-input]")?.value ?? "";
     const t = this.active();
     const label = t?.title || "New thread";
     const count = this.threads.length;
@@ -203,6 +220,9 @@ class AskPanel implements AskPanelHandle {
         `<input type="text" data-ask-input placeholder="ask..."${this.busy ? " disabled" : ""}>` +
         `<button type="button" data-ask-send${this.busy ? " disabled" : ""}>Ask</button>` +
       `</div>`;
+    const restored = this.seeded ?? keep;
+    this.seeded = null;
+    if (restored) this.root.querySelector<HTMLInputElement>("[data-ask-input]")!.value = restored;
   }
 
   private indexMenuHtml(): string {
