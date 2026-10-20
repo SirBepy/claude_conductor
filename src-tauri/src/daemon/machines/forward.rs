@@ -110,6 +110,14 @@ async fn forward_one(
     if matches!(transport, Transport::PeerMachine(_)) {
         return None;
     }
+    // Connection-scoped streaming: the local `attach_session`/`detach_session`
+    // handlers already branch on `mirrored_owner` and open a relay to the peer
+    // on THIS connection. Forwarding them would instead ask the peer to attach
+    // our connection (which it can't, and `TRANSPORT_TABLE` rightly refuses),
+    // so a freshly spawned peer chat failed `start_session` at its first attach.
+    if matches!(method, "attach_session" | "detach_session") {
+        return None;
+    }
     let params_value = params.unwrap_or(Value::Null);
     let session_id = extract_session_id(method, &params_value)?;
     let machine_id = super::mirrored_owner(state, &session_id)?;
@@ -297,6 +305,22 @@ mod tests {
             )
             .await;
             assert!(result.is_none(), "{method} for a local chat must fall through to the local handler");
+        }
+    }
+
+    /// Regression: opening the stream on a chat spawned on a paired machine
+    /// failed with ERR_NOT_FORWARDABLE (the table rightly keeps the streaming
+    /// methods off the peer allowlist), aborting `start_session` before the
+    /// first prompt was sent and leaving an empty "Done" chat behind.
+    #[tokio::test]
+    async fn attach_and_detach_fall_through_to_the_local_mirrored_relay() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        mirror_owned_session(&state, "s1");
+        for method in ["attach_session", "detach_session"] {
+            let result = forward_one(&state, method, Some(json!({"session_id": "s1"})), &Transport::Local).await;
+            assert!(result.is_none(), "{method} must reach the local handler, not be forwarded");
         }
     }
 
