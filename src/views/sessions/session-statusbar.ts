@@ -17,6 +17,7 @@ import {
   wantsTimer,
   wantsDrain,
   wantsGit,
+  withForcedAccountChip,
   gitInfoCache,
   metaCache,
   countsCache,
@@ -25,6 +26,7 @@ import {
   type SessionCounts,
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
+import { listCachedAccounts } from "../../shared/accounts-cache";
 import { renderChip as renderChipHtml, type ChipRenderCtx } from "./statusbar-chips";
 import {
   refreshCounts as fetchCounts,
@@ -502,7 +504,8 @@ export class SessionStatusbar {
     // and resets scrollLeft, so snapshot by row index and restore after.
     const scrollLefts = Array.from(this.container.querySelectorAll<HTMLElement>(".sb-row"), (r) => r.scrollLeft);
     const ctx = this.chipRenderCtx();
-    const rowsHtml = this.rows.map((row) => {
+    const rows = withForcedAccountChip(this.rows, listCachedAccounts().length);
+    const rowsHtml = rows.map((row) => {
       const chips = row.map((t) => this.renderChip(t, ctx)).filter(Boolean).join("");
       return chips ? `<div class="sb-row">${chips}</div>` : "";
     }).filter(Boolean).join("");
