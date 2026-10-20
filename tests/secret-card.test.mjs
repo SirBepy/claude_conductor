@@ -41,6 +41,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
   invokeMock.mockReset();
   state.sessions = [{ session_id: "s1", cwd: "/repo/kinetic-panel", name: "Wire up billing" }];
+  window.__TAURI__ = {};
 });
 
 afterEach(() => {
@@ -58,6 +59,27 @@ describe("showSecretCard", () => {
     expect(text).toContain("KINETIC_API_KEY");
     expect(text).toContain("Wire up billing");
     expect(text).toContain("kinetic-panel");
+  });
+
+  it("titles the card as the AI's ask and marks the label as the AI's words", () => {
+    showSecretCard(payload());
+    expect(card().querySelector(".prompt-card__title").textContent).toContain("The AI in Wire up billing (kinetic-panel) is asking for a secret");
+    const quote = card().querySelector(".secret-card__quote");
+    expect(quote.textContent).toContain("The AI's words");
+    expect(quote.querySelector(".secret-card__label").textContent).toContain("Kinetic Panel API key");
+    expect(card().querySelector(".secret-card__warning").textContent.replace(/\s+/g, " ")).toContain(
+      "Only paste a key meant for C:\\repo\\.secrets.env:KINETIC_API_KEY. The app never asks for your passwords.");
+  });
+
+  it("on the phone the card has no input or Save and never calls respond_secret", () => {
+    window.__TAURI__ = undefined;
+    showSecretCard(payload());
+    expect(input()).toBeNull();
+    expect(card().querySelector('[data-act="save"]')).toBeNull();
+    expect(card().textContent).toContain("Enter this secret on the desktop");
+    card().querySelector('[data-act="dismiss"]').click();
+    expect(card()).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("falls back cleanly when the session isn't known locally", () => {
