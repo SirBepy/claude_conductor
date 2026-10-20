@@ -13,7 +13,8 @@ import { openEditAccountModal } from "./edit-account-modal";
 import { askConfirm } from "../../../../shared/confirm";
 import { showToast } from "../../../../shared/toast";
 import { wireKebabMenu, closeKebabMenu } from "../../../../shared/kebab-menu";
-import { buildIdentitySurface } from "./wizard-logic";
+import { buildIdentitySurface, LOGIN_POLL_INTERVAL_MS } from "./wizard-logic";
+import { visibleInterval } from "../../../../shared/visible-interval";
 import { settingsHeader } from "../../ui";
 import "../../../../shared/account-chip.css";
 import "../../../../shared/kebab-menu.css";
@@ -27,10 +28,26 @@ let kebabDisposers: (() => void)[] = [];
 // action) gets a toast on failure - the very first load shows the inline
 // error card instead, so a broken backend doesn't double-surface.
 let hasLoadedOnce = false;
+// Last-loaded account list, so refreshTerminalIdentity() can match the
+// terminal's observed email against a managed account without a second
+// listAccounts() round-trip.
+let lastAccounts: Account[] = [];
+let lastSurfaces: Record<string, ReturnType<typeof buildIdentitySurface>> = {};
+// Reauth spawns a detached /login terminal and returns immediately - nothing
+// tells this view when the user finishes typing into it, so without a
+// poller the list stays stale until the next manual refresh (the exact "I
+// had to leave and come back" bug). One timer per account id, keyed so a
+// second Reauth click on the same row replaces rather than stacks.
+const REAUTH_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+let reauthPollers: Map<string, () => void> = new Map();
+// Shared by refreshTerminalIdentity()'s two no-managed-account branches (not
+// logged in at all, and logged in but unmatched) - reuses the same badge
+// src/shared/account-chip.ts renders for every other account icon on this
+// page rather than a one-off terminal-row copy.
+const TERMINAL_FALLBACK_ICON_HTML = accountIconBadgeHtml({ icon: "terminal-window", colour: "var(--sb-muted)", label: "" });
 
-function accountRowHtml(account: Account, defaultAccountId: string | null, identity: AccountIdentity | null): string {
+function accountRowHtml(account: Account, defaultAccountId: string | null, surface: ReturnType<typeof buildIdentitySurface>): string {
   const isDefault = account.id === defaultAccountId;
-  const surface = buildIdentitySurface(account, identity);
   const loggedInLine = surface.loggedInAsEmail
     ? `Logged in as ${surface.loggedInAsEmail} &middot; ${escapeHtml(surface.tierLabel)}`
     : `Registered as ${escapeHtml(account.email)} &middot; ${escapeHtml(surface.tierLabel)}`;
@@ -113,10 +130,12 @@ async function refreshList(root: HTMLElement): Promise<void> {
     return;
   }
   hasLoadedOnce = true;
+  lastAccounts = accounts;
+  lastSurfaces = Object.fromEntries(accounts.map((a) => [a.id, buildIdentitySurface(a, identities[a.id] ?? null)]));
 
   list.innerHTML = accounts.length === 0
     ? emptyStateHtml()
-    : accounts.map((a) => accountRowHtml(a, defaultAccountId, identities[a.id] ?? null)).join("");
+    : accounts.map((a) => accountRowHtml(a, defaultAccountId, lastSurfaces[a.id]!)).join("");
 
   // Each row's kebab gets its own ARIA/Escape/arrow-key wiring; the capture
   // listener registered once in renderAccountsSettingsView enforces
@@ -155,8 +174,10 @@ async function refreshList(root: HTMLElement): Promise<void> {
       if (!id) return;
       void (async () => {
         try {
+          const before = await api.getAccountIdentity(id).catch(() => null);
           await api.reauthAccount(id);
-          showToast("A terminal opened for /login. Run it, then reopen this screen to see the refreshed identity.");
+          showToast("A terminal opened for /login - this screen will refresh itself once you finish.");
+          startReauthPoll(root, id, before?.tokenExpiresAt ?? null);
         } catch (e) {
           console.error("[settings-accounts] reauthAccount failed", e);
         }
@@ -210,15 +231,76 @@ async function refreshList(root: HTMLElement): Promise<void> {
   });
 }
 
+/** Polls an account's identity (whileHidden: true - the whole point is
+ * noticing while the user is over in the spawned /login terminal, not this
+ * window) until its token is refreshed, then auto-refreshes the list in
+ * place. Self-disposes on success, timeout, or a repeat Reauth click. */
+function startReauthPoll(root: HTMLElement, accountId: string, baselineTokenExpiresAt: bigint | null): void {
+  reauthPollers.get(accountId)?.();
+
+  const startedAt = Date.now();
+  const dispose = visibleInterval(
+    () => {
+      void (async () => {
+        if (Date.now() - startedAt > REAUTH_POLL_TIMEOUT_MS) {
+          dispose();
+          reauthPollers.delete(accountId);
+          return;
+        }
+        let identity: AccountIdentity | null = null;
+        try { identity = await api.getAccountIdentity(accountId); }
+        catch { return; }
+        if (!identity || identity.tokenExpiresAt == null || identity.tokenExpiresAt === baselineTokenExpiresAt) return;
+        dispose();
+        reauthPollers.delete(accountId);
+        await refreshList(root);
+        await refreshTerminalIdentity(root);
+        showToast("Logged in - identity refreshed.");
+      })();
+    },
+    LOGIN_POLL_INTERVAL_MS,
+    { whileHidden: true, reason: "detect /login completion in the spawned reauth terminal while this window is unfocused" },
+  );
+  reauthPollers.set(accountId, dispose);
+}
+
 async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
   const el = root.querySelector<HTMLElement>("#acc-terminal-identity");
   if (!el) return;
   let identity: OauthAccountInfo | null = null;
   try { identity = await api.getTerminalIdentity(); }
   catch (e) { console.error("[settings-accounts] getTerminalIdentity failed", e); }
-  el.textContent = identity
-    ? `Terminal: currently ${identity.emailAddress}`
-    : "Terminal: not logged in (or identity unreadable)";
+
+  if (!identity) {
+    el.style.removeProperty("--acc");
+    el.innerHTML = `
+      ${TERMINAL_FALLBACK_ICON_HTML}
+      <span class="acc-info">
+        <span class="acc-label">Not logged in</span>
+        <span class="acc-sub">Run <code>/login</code> in a terminal to connect it here.</span>
+      </span>
+    `;
+    return;
+  }
+
+  // Ties the raw oauthAccount email back to a managed account, if one
+  // shares the login, so this reads as "which profile is the terminal on"
+  // instead of a bare copy-pasted email string.
+  const match = lastAccounts.find((a) => lastSurfaces[a.id]?.loggedInAsEmail === identity!.emailAddress);
+  const badgeHtml = match ? accountIconBadgeHtml(match) : TERMINAL_FALLBACK_ICON_HTML;
+  const subLine = match
+    ? `Same login as <strong>${escapeHtml(match.label)}</strong> &middot; ${escapeHtml(identity.emailAddress)}`
+    : escapeHtml(identity.emailAddress) + (identity.organizationName ? ` &middot; ${escapeHtml(identity.organizationName)}` : "");
+
+  if (match) el.style.setProperty("--acc", match.colour);
+  else el.style.removeProperty("--acc");
+  el.innerHTML = `
+    ${badgeHtml}
+    <span class="acc-info">
+      <span class="acc-label">Terminal</span>
+      <span class="acc-sub">${subLine}</span>
+    </span>
+  `;
 }
 
 export async function renderAccountsSettingsView(root: HTMLElement): Promise<() => void> {
@@ -264,6 +346,8 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
     list?.removeEventListener("click", onKebabClickCapture, true);
     kebabDisposers.forEach((dispose) => dispose());
     kebabDisposers = [];
+    reauthPollers.forEach((dispose) => dispose());
+    reauthPollers = new Map();
   };
 }
 
@@ -289,8 +373,12 @@ function template() {
             Your plain terminal's <code>~/.claude</code> is never an app account - it's just
             observed here so you know who it's currently logged in as.
           </p>
-          <div class="kit-row">
-            <span id="acc-terminal-identity" class="acc-terminal-identity">Terminal: checking...</span>
+          <div id="acc-terminal-identity" class="acc-row acc-terminal-row">
+            <span class="account-icon-badge" style="--acc:var(--sb-muted)"><i class="ph ph-circle-notch"></i></span>
+            <span class="acc-info">
+              <span class="acc-label">Terminal</span>
+              <span class="acc-sub">Checking...</span>
+            </span>
           </div>
         </div>
 
