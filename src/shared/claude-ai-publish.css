@@ -1,0 +1,7 @@
+/* Reuses base.css's icon-btn-spin keyframe; the button classes differ per
+   surface (icon-btn in the preview header, icon-btn-sq on drafts), so this
+   keys on the shared data-publish hook instead. */
+[data-publish] .publish-spin {
+  display: inline-block;
+  animation: icon-btn-spin 0.8s linear infinite;
+}

@@ -14,6 +14,7 @@ const { invokeMock, listenMock } = vi.hoisted(() => ({
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 vi.mock("../src/shared/transport.ts", () => ({
   getTransport: () => ({ listen: listenMock }),
+  isRemote: () => false,
 }));
 
 const {
@@ -21,6 +22,7 @@ const {
   draftResultFieldsOf,
   renderDraftCardHtml,
   mountDraftCard,
+  publishDraftCard,
   DRAFT_OPEN_EVENT,
 } = await import("../src/shared/chat/chat-draft-card.ts");
 const { eventToRenderedMessage } = await import("../src/shared/chat/chat-event-to-message.ts");
@@ -250,6 +252,36 @@ describe("mount", () => {
     await vi.waitFor(() => expect(el.querySelector(".dc-ver").textContent).toBe("v2 · your edit"));
     expect(el.querySelector(".dc-body").textContent).toContain("his own wording");
     expect(el.classList.contains("superseded")).toBe(false);
+  });
+
+  it("offers publish on the live row only, and uploads the store's wording", async () => {
+    const edited = {
+      ...DRAFT,
+      variants: [{
+        ...DRAFT.variants[0],
+        current: 2,
+        versions: [
+          DRAFT.variants[0].versions[0],
+          { n: 2, body: "his own wording", author: "user", note: "", created_at: "x" },
+        ],
+      }],
+    };
+    invokeMock.mockResolvedValue({ drafts: [edited] });
+    const old = mounted({ ...draftFieldsOf(ADD.input), draftId: DRAFT.id, draftVersion: 1 });
+    const live = mounted({ ...draftFieldsOf(ADD.input), draftId: DRAFT.id, draftVersion: 2 });
+    await vi.waitFor(() => expect(live.querySelector("[data-publish]")).not.toBeNull());
+    await vi.waitFor(() => expect(old.classList.contains("superseded")).toBe(true));
+    expect(old.querySelector("[data-publish]")).toBeNull();
+
+    invokeMock.mockResolvedValueOnce({ url: "https://claude.ai/artifact/X", version: 1, account: "Joe", published_at: "n" });
+    publishDraftCard(live, live.querySelector("[data-publish]"));
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("publish_to_claude_ai", expect.objectContaining({
+        params: expect.objectContaining({ target: "draft", id: DRAFT.id, recipient: "Bruno", title: "Sprint slip" }),
+      })),
+    );
+    const sent = invokeMock.mock.calls.find((c) => c[0] === "publish_to_claude_ai")[1].params;
+    expect(sent.html).toContain("his own wording");
   });
 
   it("keeps a deleted draft's row readable rather than emptying it", async () => {

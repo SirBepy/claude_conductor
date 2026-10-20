@@ -11,6 +11,7 @@ use claude_conductor_lib::context_status::ContextStatus;
 use claude_conductor_lib::ipc::accounts::{
     AccountIdentity, AccountsSetupPromptState, AddAccountSession, LoginCheckOutcome,
 };
+use claude_conductor_lib::claude_ai_publish::PublishedLink;
 use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot};
 use claude_conductor_lib::ipc::ai_todos::AiTodoEntry;
 use claude_conductor_lib::ipc::hidden_chats::HiddenChatsView;
@@ -186,6 +187,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<ExternalScheduledJob>());
 
     // HTML preview window (ai_todo 138)
+    out.push_str(&decl::<PublishedLink>());
     out.push_str(&decl::<PreviewSnapshot>());
     out.push_str(&decl::<PreviewMeta>());
 

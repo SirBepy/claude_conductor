@@ -4,6 +4,7 @@ pub mod api_keys;
 pub mod ask;
 pub mod channels;
 pub mod characters;
+pub mod claude_ai_publish;
 pub mod context_status;
 pub mod daemon;
 pub mod daemon_client;
@@ -422,6 +423,7 @@ pub fn run() {
             ipc::ask_list_threads,
             ipc::ask_send,
             ipc::ask_delete_thread,
+            ipc::publish_to_claude_ai,
             ipc::voice_clean_transcript,
             ipc::list_user_todos,
             ipc::set_user_todo_state,

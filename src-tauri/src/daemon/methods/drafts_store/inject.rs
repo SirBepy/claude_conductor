@@ -140,7 +140,7 @@ mod tests {
             })
             .collect();
         let current = versions.len() as u32;
-        DraftVariant { recipient: recipient.to_string(), handle_n: n, versions, current, person: None, platform: None }
+        DraftVariant { recipient: recipient.to_string(), handle_n: n, versions, current, person: None, platform: None, published: None }
     }
 
     fn draft(variants: Vec<DraftVariant>) -> MessageDraft {

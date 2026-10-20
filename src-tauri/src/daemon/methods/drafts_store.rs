@@ -320,6 +320,31 @@ pub(crate) fn write_draft_in(
     Ok(json!({"ok": true, "draft": draft}))
 }
 
+/// The draft a caller is about to publish, resolved the same way every other
+/// draft RPC resolves it: project from the caller's own registry entry.
+pub(crate) fn find_draft(state: &Arc<DaemonState>, session_id: &str, id: &str) -> Result<(String, MessageDraft), String> {
+    let project_id = caller_project(state, session_id)?;
+    let full = resolve_id(None, &project_id, id)?;
+    let draft = store::list(&project_id)
+        .into_iter()
+        .find(|d| d.id == full)
+        .ok_or_else(|| format!("no such draft: {id}"))?;
+    Ok((project_id, draft))
+}
+
+/// Stores a variant's claude.ai link and tells open panels to refresh.
+pub(crate) fn set_draft_published(
+    state: &Arc<DaemonState>,
+    project_id: &str,
+    id: &str,
+    recipient: &str,
+    link: crate::claude_ai_publish::PublishedLink,
+) -> Result<MessageDraft, String> {
+    let draft = store::set_published(project_id, id, recipient, link)?;
+    publish_changed(state, project_id);
+    Ok(draft)
+}
+
 /// The user's own edit from the panel. Appends a version rather than
 /// overwriting, and clears `seen_by_origin` so the next turn is told.
 pub(crate) fn set_draft_body(state: &Arc<DaemonState>, session_id: &str, id: &str, recipient: &str, body: &str) -> Result<Value, String> {

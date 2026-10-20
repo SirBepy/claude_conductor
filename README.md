@@ -101,6 +101,15 @@ Chats can drive a browser of their own: a separate Chrome profile, signed in onl
 - **Requirements:** Chrome or Edge, and Node.js 20+ on PATH. The first browser call installs `@playwright/mcp` (pinned version, from a checked-in lockfile) into the app's data folder.
 - **Per chat:** each chat gets its own tab. The browser closes itself after 20 minutes unused, unless it is shown.
 
+## Publish to claude.ai
+
+Previews and drafts have a **Publish to claude.ai** button (the cloud-upload icon), which gives you a `claude.ai/artifact/...` link like the ones teammates share.
+
+- **Private until you share it.** The page uploads under the chat's account, the link is copied, and a toast shows it. Open the link and press **Share** on claude.ai to let others see it. Nothing is ever public without that click.
+- **One link per preview or draft.** Publishing again after a change updates the same page, and the icon turns into a link icon while the page is up to date (clicking it then just copies the link again).
+- **What gets published:** a preview exactly as the panel shows it; a draft as a clean, readable page made from its text.
+- **Cost and limits:** each publish runs one short background Claude turn on your subscription (under a minute). Desktop only. To unpublish, open the page and delete it on claude.ai.
+
 ## Channel management
 
 Beyond tracking Claude Code usage, this app manages Claude Code channels per project:
