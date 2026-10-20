@@ -244,6 +244,15 @@ pub(crate) fn assistant_text(v: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// The title carried by a `type:"ai-title"` record, if the line is one and its
+/// title isn't blank. Shared by `ai_milestone_title` and `scan_transcript` so
+/// the two title passes can't drift on what counts as an ai-title.
+pub(crate) fn ai_title_record(v: &serde_json::Value) -> Option<String> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("ai-title") { return None; }
+    let t = v.get("aiTitle").and_then(|s| s.as_str())?;
+    if t.trim().is_empty() { None } else { Some(t.to_string()) }
+}
+
 /// The chat's AI title: the newest candidate as of the end of the first user
 /// turn that produced one, then frozen for good - a chat keeps the title it
 /// was first given (Joe, 2026-10-18), so later turns never rename it. Within
@@ -265,10 +274,8 @@ pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
             continue;
         }
         if turn == 0 { continue; }
-        if v.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
-            if let Some(t) = v.get("aiTitle").and_then(|s| s.as_str()) {
-                if !t.trim().is_empty() { latest = Some(t.to_string()); }
-            }
+        if let Some(t) = ai_title_record(&v) {
+            latest = Some(t);
         } else if let Some(text) = assistant_text(&v) {
             if let Some(t) = extract_cc_title(&text) {
                 if !t.trim().is_empty() { latest = Some(t); }

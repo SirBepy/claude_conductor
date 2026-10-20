@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use super::title::{
-    assistant_text, extract_cc_title, is_real_user_turn, is_titleable_user_turn,
+    ai_title_record, assistant_text, extract_cc_title, is_real_user_turn, is_titleable_user_turn,
     normalise_and_truncate, user_prompt_label,
 };
 
@@ -75,6 +75,11 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
             turn += 1;
             continue;
         }
+        // Same turn>0 gate as ai_milestone_title: a record before the first
+        // user turn belongs to no turn and never titles the chat.
+        if turn > 0 && frozen_title.is_none() {
+            if let Some(t) = ai_title_record(&v) { latest_marker = Some(t); }
+        }
         if let Some(text) = assistant_text(&v) {
             if let Some(t) = extract_cc_title(&text) {
                 if !t.trim().is_empty() && frozen_title.is_none() { latest_marker = Some(t); }
@@ -96,4 +101,40 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
     }
     out.model = out.model.or(system_model);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scan(lines: &[&str]) -> TranscriptScan {
+        let dir = std::env::temp_dir().join(format!("scan-aititle-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("t.jsonl");
+        std::fs::write(&p, lines.join("
+")).unwrap();
+        let r = scan_transcript(&p, 80);
+        let _ = std::fs::remove_dir_all(&dir);
+        r
+    }
+
+    const USER1: &str = r#"{"type":"user","message":{"role":"user","content":"first prompt"}}"#;
+    const USER2: &str = r#"{"type":"user","message":{"role":"user","content":"second prompt"}}"#;
+
+    #[test]
+    fn ai_title_record_titles_the_chat_and_freezes() {
+        let r = scan(&[
+            USER1,
+            r#"{"type":"ai-title","aiTitle":"Fix the thing"}"#,
+            USER2,
+            r#"{"type":"ai-title","aiTitle":"Renamed later"}"#,
+        ]);
+        assert_eq!(r.title.as_deref(), Some("Fix the thing"));
+    }
+
+    #[test]
+    fn no_ai_title_falls_back_to_first_prompt() {
+        let r = scan(&[USER1]);
+        assert_eq!(r.title.as_deref(), Some("first prompt"));
+    }
 }
