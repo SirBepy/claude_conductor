@@ -132,6 +132,9 @@ function updateNode(kept: HTMLLIElement, html: string): void {
   for (const attr of fresh.attributes) {
     if (attr.name !== "class") kept.setAttribute(attr.name, attr.value);
   }
+  // Only the Ctrl+N badge is conditional (rows past the 9th have none); a stale
+  // one would show a duplicate number on a row that dropped out of the top 9.
+  if (!fresh.hasAttribute("data-kbd-hint")) kept.removeAttribute("data-kbd-hint");
   lastRowHtml.set(kept, html);
 }
 
