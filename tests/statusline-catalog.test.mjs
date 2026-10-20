@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_ROWS, MAX_ROWS, isToolChip, chipToolName, isKnownChip, STATIC_CHIPS,
 } from "../src/views/sessions/statusline-catalog.ts";
-import { migrateLegacyFields } from "../src/views/sessions/session-statusbar-helpers.ts";
+import { migrateLegacyFields, withForcedAccountChip } from "../src/views/sessions/session-statusbar-helpers.ts";
 
 describe("statusline catalog", () => {
   it("DEFAULT_ROWS is one row within the cap", () => {
@@ -37,5 +37,26 @@ describe("legacy migration", () => {
   it("drops unknown legacy fields", () => {
     const rows = migrateLegacyFields(["model", "bogus"], []);
     expect(rows[0]).toEqual(["model"]);
+  });
+});
+
+describe("withForcedAccountChip", () => {
+  it("leaves rows untouched with fewer than 2 accounts", () => {
+    const rows = [["git", "context_pct"]];
+    expect(withForcedAccountChip(rows, 1)).toBe(rows);
+    expect(withForcedAccountChip(rows, 0)).toBe(rows);
+  });
+  it("prepends account to the first row once 2+ accounts exist", () => {
+    const rows = [["git", "context_pct"], ["tool:Read"]];
+    expect(withForcedAccountChip(rows, 2)).toEqual([["account", "git", "context_pct"], ["tool:Read"]]);
+  });
+  it("doesn't duplicate an account chip already placed in the rows", () => {
+    const rows = [["account", "git"]];
+    expect(withForcedAccountChip(rows, 2)).toBe(rows);
+    const rows2 = [["git"], ["account"]];
+    expect(withForcedAccountChip(rows2, 3)).toBe(rows2);
+  });
+  it("handles an empty rows layout", () => {
+    expect(withForcedAccountChip([], 2)).toEqual([["account"]]);
   });
 });

@@ -221,6 +221,18 @@ export function stopRowFades(container: HTMLElement): void {
 export function hasChip(rows: ChipType[][], type: ChipType | string): boolean {
   return rows.some((r) => r.includes(type as ChipType));
 }
+
+/** Forces the account chip to the front of the first row whenever 2+ accounts
+ *  are cached, regardless of the user's saved layout - a past statuslineRows
+ *  v2 migration silently dropped "account" from everyone's saved rows, and
+ *  this doesn't rely on it being re-added to show back up. Leaves rows
+ *  untouched if the chip is already placed somewhere, or there's only one
+ *  account (the chip itself still renders "" in that case, same as before). */
+export function withForcedAccountChip(rows: ChipType[][], accountCount: number): ChipType[][] {
+  if (accountCount < 2 || hasChip(rows, "account")) return rows;
+  const [first, ...rest] = rows;
+  return [["account", ...(first ?? [])], ...rest];
+}
 export function wantsCounts(rows: ChipType[][]): boolean {
   return hasChip(rows, "messages") || hasChip(rows, "turns") || hasChip(rows, "overflow");
 }
