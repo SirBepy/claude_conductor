@@ -79,10 +79,7 @@ pub async fn drain(state: &Arc<DaemonState>, jarvis_session_id: &str) {
             state.registry.set_awaiting(jarvis_session_id, None);
             state.registry.set_busy_from_wake(jarvis_session_id);
             crate::sessions::chat_state::set_busy(jarvis_session_id, true);
-            state.notifier.publish(
-                "instances_changed",
-                serde_json::json!({"instances": state.registry.list()}),
-            );
+            crate::daemon::machines::publish_instances_changed(&state);
         }
         Err(e) => {
             log::warn!("jarvis_wake: failed to deliver wake to {jarvis_session_id}: {e}");

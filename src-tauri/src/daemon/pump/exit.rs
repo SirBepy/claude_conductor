@@ -101,10 +101,7 @@ pub(crate) async fn run_pump_exit(
         let now = chrono::Utc::now().to_rfc3339();
         state_for_pump.registry.mark_ended(&pump_session.session_id, crate::types::EndReason::ProcessGone, &now);
     }
-    state_for_pump.notifier.publish(
-        "instances_changed",
-        serde_json::json!({"instances": state_for_pump.registry.list()}),
-    );
+    crate::daemon::machines::publish_instances_changed(&state_for_pump);
     log::info!(
         "daemon: session {} pump task exited",
         pump_session.session_id

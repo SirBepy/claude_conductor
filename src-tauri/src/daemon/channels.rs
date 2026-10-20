@@ -124,10 +124,7 @@ pub fn start_channel(state: Arc<DaemonState>, project_id: String) -> Result<(), 
                 let retagged = state_c.registry.retag_pid_as_automated(cp);
                 log::info!("channel {proj_c}: retag_pid_as_automated({cp}) -> {retagged}");
                 if retagged {
-                    state_c.notifier.publish(
-                        "instances_changed",
-                        serde_json::json!({"instances": state_c.registry.list()}),
-                    );
+                    crate::daemon::machines::publish_instances_changed(&state_c);
                 }
                 emit_changed(&state_c);
             } else {

@@ -146,4 +146,59 @@ mod merged_tests {
         let ids: Vec<_> = mirrored_prompts(&state).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, vec!["real".to_string()]);
     }
+
+    #[tokio::test]
+    async fn publish_instances_changed_carries_mirrored_rows_with_local_ones() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("local-1", std::path::Path::new("C:/x"), "proj", "2026-10-18T00:00:00Z");
+        let mut mirrored = state.registry.get("local-1").unwrap();
+        mirrored.session_id = "remote-1".into();
+        state.mirror.set_instances("mach-b", "Mac Mini", vec![mirrored]);
+        let mut rx = state.notifier.subscribe();
+
+        publish_instances_changed(&state);
+
+        let frame = rx.recv().await.expect("instances_changed published");
+        let ids: Vec<&str> = frame["params"]["instances"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["session_id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&"local-1") && ids.contains(&"remote-1"), "got {ids:?}");
+    }
+
+    /// A frame built from `registry.list()` alone replaces the app's whole
+    /// instance cache with local rows only, so every paired machine's chats
+    /// vanish from the sidebar until the next peer frame. Every
+    /// `instances_changed` publish must go through `publish_instances_changed`.
+    #[test]
+    fn no_daemon_site_publishes_instances_changed_from_the_local_registry_alone() {
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&root, &mut files);
+        let publish = ["notifier", ".publish("].concat();
+        let event = ["\"instances", "_changed\""].concat();
+        let mut offenders = Vec::new();
+        for path in files {
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (at, _) in text.match_indices(&publish) {
+                let window: String = text[at..].chars().take(200).collect();
+                if window.contains(&event) && window.contains("registry.list()") {
+                    offenders.push(path.display().to_string());
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "publish via publish_instances_changed instead: {offenders:?}");
+    }
 }

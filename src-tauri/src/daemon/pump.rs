@@ -181,10 +181,7 @@ pub(crate) async fn run_stdout_pump(
                                 dirty |= state_for_pump.registry.set_closing(&pump_session.session_id, true);
                             }
                             if dirty {
-                                state_for_pump.notifier.publish(
-                                    "instances_changed",
-                                    serde_json::json!({"instances": state_for_pump.registry.list()}),
-                                );
+                                crate::daemon::machines::publish_instances_changed(&state_for_pump);
                             }
                         }
                         for ev in feed_events {
@@ -477,10 +474,7 @@ pub(crate) async fn run_stdout_pump(
                                 if live_turn || close_confirmed {
                                     crate::sessions::persistence::save_snapshot_default(&state_for_pump.registry);
                                 }
-                                state_for_pump.notifier.publish(
-                                    "instances_changed",
-                                    serde_json::json!({"instances": state_for_pump.registry.list()}),
-                                );
+                                crate::daemon::machines::publish_instances_changed(&state_for_pump);
                             }
                         }
                         line_buf.clear();
