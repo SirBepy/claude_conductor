@@ -30,8 +30,11 @@ pub(super) async fn push_subscribe(
 ) -> StatusCode {
     match ctx.state.push.get() {
         Some(pm) => {
-            pm.subscribe(sub);
-            StatusCode::NO_CONTENT
+            if pm.subscribe(sub) {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::BAD_REQUEST
+            }
         }
         None => StatusCode::SERVICE_UNAVAILABLE,
     }

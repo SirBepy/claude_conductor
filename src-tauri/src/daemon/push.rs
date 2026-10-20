@@ -30,6 +30,16 @@ const IDLE_THRESHOLD_SECS: u64 = 180;
 /// owner about abuse. Joe is the sole user.
 const VAPID_CONTACT: &str = "mailto:tecnomon99@gmail.com";
 
+/// Oldest subscriptions are evicted past this. The handler cannot tell which
+/// device token enrolled a subscription, so the bound is global rather than
+/// per device; one person's phones and browsers fit well inside it.
+const MAX_SUBSCRIPTIONS: usize = 20;
+
+/// Real push endpoints and keys are far shorter; the cap stops a token holder
+/// from stuffing megabytes into a file that is rewritten on every insert.
+const MAX_ENDPOINT_LEN: usize = 2048;
+const MAX_KEY_LEN: usize = 256;
+
 /// A browser PushSubscription as the Push API serializes it (`subscription.toJSON()`).
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PushSubscription {
@@ -78,15 +88,30 @@ impl PushManager {
         &self.vapid_public_b64
     }
 
-    /// Register a subscription (dedup by endpoint) and persist.
-    pub fn subscribe(&self, sub: PushSubscription) {
+    /// Register a subscription (dedup by endpoint) and persist. `false` when
+    /// the subscription is oversized and was refused. Past `MAX_SUBSCRIPTIONS`
+    /// the oldest entries are dropped.
+    pub fn subscribe(&self, sub: PushSubscription) -> bool {
+        if sub.endpoint.len() > MAX_ENDPOINT_LEN
+            || sub.keys.p256dh.len() > MAX_KEY_LEN
+            || sub.keys.auth.len() > MAX_KEY_LEN
+        {
+            log::warn!("[push] refused an oversized subscription");
+            return false;
+        }
         let snapshot = {
             let mut subs = self.subs.lock().unwrap();
             subs.retain(|s| s.endpoint != sub.endpoint);
             subs.push(sub);
+            if subs.len() > MAX_SUBSCRIPTIONS {
+                let excess = subs.len() - MAX_SUBSCRIPTIONS;
+                subs.drain(..excess);
+                log::warn!("[push] subscription cap hit, evicted {excess} oldest");
+            }
             subs.clone()
         };
         self.persist(&snapshot);
+        true
     }
 
     /// Drop a subscription by endpoint and persist.
@@ -262,6 +287,33 @@ mod tests {
         // Persisted and reloaded identically.
         let pm2 = PushManager::load(dir.path().to_path_buf());
         assert_eq!(pm2.subs.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn subscribe_caps_the_store_and_evicts_the_oldest() {
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load(dir.path().to_path_buf());
+        for i in 0..(MAX_SUBSCRIPTIONS + 5) {
+            assert!(pm.subscribe(sub(&format!("https://fcm/{i}"))));
+        }
+        let subs = pm.subs.lock().unwrap();
+        assert_eq!(subs.len(), MAX_SUBSCRIPTIONS);
+        assert_eq!(subs[0].endpoint, "https://fcm/5", "oldest five evicted");
+        assert_eq!(subs.last().unwrap().endpoint, format!("https://fcm/{}", MAX_SUBSCRIPTIONS + 4));
+        drop(subs);
+        let reloaded = PushManager::load(dir.path().to_path_buf());
+        assert_eq!(reloaded.subs.lock().unwrap().len(), MAX_SUBSCRIPTIONS, "cap holds on disk too");
+    }
+
+    #[test]
+    fn subscribe_refuses_oversized_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load(dir.path().to_path_buf());
+        assert!(!pm.subscribe(sub(&"e".repeat(MAX_ENDPOINT_LEN + 1))));
+        let mut big_key = sub("https://fcm/a");
+        big_key.keys.p256dh = "k".repeat(MAX_KEY_LEN + 1);
+        assert!(!pm.subscribe(big_key));
+        assert!(pm.subs.lock().unwrap().is_empty());
     }
 
     #[test]

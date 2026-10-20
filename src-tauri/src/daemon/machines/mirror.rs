@@ -15,6 +15,11 @@ use crate::types::{Instance, MachineRef};
 /// id was never real) must not pin a phantom owner indefinitely.
 const PENDING_TTL: Duration = Duration::from_secs(120);
 
+/// Most rows (and prompts) kept per peer. A paired peer is trusted to pair,
+/// not to size our memory: an unbounded snapshot would be cloned on every
+/// `instances()` call.
+const MAX_ROWS_PER_PEER: usize = 500;
+
 struct MirroredPeer {
     label: String,
     online: bool,
@@ -116,7 +121,11 @@ impl MirrorState {
     /// B's unchanged frame, which reaches B's link and makes B republish,
     /// forever, bounded only by round-trip latency.
     pub fn set_instances(&self, machine_id: &str, label: &str, rows: Vec<Instance>) -> bool {
-        let rows: Vec<Instance> = rows.into_iter().filter(|i| i.machine.is_none()).collect();
+        let mut rows: Vec<Instance> = rows.into_iter().filter(|i| i.machine.is_none()).collect();
+        if rows.len() > MAX_ROWS_PER_PEER {
+            log::warn!("mirror: peer {machine_id} sent {} rows, keeping {MAX_ROWS_PER_PEER}", rows.len());
+            rows.truncate(MAX_ROWS_PER_PEER);
+        }
         // A real row for an id just superseded any pending-owner guess for
         // it - whether that guess named this machine or (in theory) a stale
         // one, the freshly-reported row is ground truth now.
@@ -176,7 +185,8 @@ impl MirrorState {
     /// fetch is always a full `list_pending_prompts` snapshot, same contract
     /// as `set_instances`. A no-op if the peer isn't a known mirror entry
     /// (e.g. it went offline between the fetch starting and finishing).
-    pub fn set_prompts(&self, machine_id: &str, prompts: Vec<serde_json::Value>) {
+    pub fn set_prompts(&self, machine_id: &str, mut prompts: Vec<serde_json::Value>) {
+        prompts.truncate(MAX_ROWS_PER_PEER);
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(peer) = guard.get_mut(machine_id) {
             peer.prompts = prompts;
@@ -265,6 +275,20 @@ mod tests {
             successor_of: None,
             machine,
         }
+    }
+
+    #[test]
+    fn set_instances_and_prompts_are_capped_per_peer() {
+        let m = MirrorState::new();
+        let rows: Vec<Instance> = (0..MAX_ROWS_PER_PEER + 50).map(|i| fixture(&format!("s{i}"), None)).collect();
+        m.set_instances("peer-a", "A", rows);
+        assert_eq!(m.instances().len(), MAX_ROWS_PER_PEER);
+        assert!(m.owner_of(&format!("s{}", MAX_ROWS_PER_PEER + 1)).is_none(), "rows past the cap are dropped");
+        m.set_prompts("peer-a", vec![serde_json::json!({}); MAX_ROWS_PER_PEER + 10]);
+        assert_eq!(m.prompts().len(), MAX_ROWS_PER_PEER);
+        // The cap is per peer, not shared.
+        m.set_instances("peer-b", "B", vec![fixture("b0", None)]);
+        assert_eq!(m.instances().len(), MAX_ROWS_PER_PEER + 1);
     }
 
     #[test]
