@@ -123,6 +123,52 @@ $freeSpecs = @(
 $chatSpecs = @('chat-flow', 'reload-dup')
 $billedOnlySpec = 'question-card-live'
 
+# First entry of `git worktree list` is always the main checkout. Specs that name the project
+# after process.cwd() (chat-flow, reload-dup) only match the project the app has registered
+# when run from there, so a sweep in any other worktree has to hop back (project_wdio_suite_traps #5).
+$mainWorktree = ((git -C $repoRoot worktree list --porcelain | Where-Object { $_ -like 'worktree *' } | Select-Object -First 1) -replace '^worktree ', '') -replace '/', '\'
+$inScratchWorktree = $mainWorktree -and ($mainWorktree.TrimEnd('\') -ne $repoRoot.TrimEnd('\'))
+
+# e2e/drivers/ is gitignored, so a fresh worktree has no msedgedriver and every spec would die
+# with "Unable to connect to localhost:4444". Fetch it from the main checkout, and refuse to run
+# a whole sweep against no driver (wdio.conf.js's own check only reports the path per spec).
+function Assert-WdioDriver {
+    $driver = Join-Path $repoRoot 'e2e\drivers\msedgedriver.exe'
+    if (Test-Path $driver) { return }
+    $source = Join-Path $mainWorktree 'e2e\drivers'
+    if ($inScratchWorktree -and (Test-Path (Join-Path $source 'msedgedriver.exe'))) {
+        if ($PSCmdlet.ShouldProcess($source, 'copy e2e/drivers into this worktree')) {
+            New-Item -ItemType Directory -Path (Split-Path $driver) -Force | Out-Null
+            Copy-Item -Path (Join-Path $source '*') -Destination (Split-Path $driver) -Recurse -Force
+            Write-Host "Copied e2e/drivers from $source"
+        } else {
+            Write-Host "[WhatIf] would copy e2e/drivers from $source"
+        }
+        return
+    }
+    $msg = "No msedgedriver.exe at $driver (and none in the main worktree to copy). Every spec would fail with 'Unable to connect to localhost:4444'; place a version-matched driver there first (see e2e/wdio.conf.js)."
+    if ($WhatIfPreference) { Write-Warning $msg } else { throw $msg }
+}
+
+# The wdio invocation for one spec, as a cmd.exe line. A scratch worktree's chat specs run with the
+# main checkout as cwd but this worktree's own wdio.js, config and spec, so they still test this tree.
+function Get-WdioCommandLine {
+    param([string]$SpecName, [string]$LogPath)
+    if ($inScratchWorktree -and $chatSpecs -contains $SpecName) {
+        $wdioJs = Join-Path $repoRoot 'node_modules\@wdio\cli\bin\wdio.js'
+        $conf = Join-Path $repoRoot 'e2e\wdio.conf.js'
+        $spec = Join-Path $repoRoot "e2e\specs\$SpecName.e2e.js"
+        return [PSCustomObject]@{
+            CommandLine = "node `"$wdioJs`" run `"$conf`" --spec `"$spec`" > `"$LogPath`" 2>&1"
+            WorkingDirectory = $mainWorktree
+        }
+    }
+    [PSCustomObject]@{
+        CommandLine = "pnpm exec wdio run e2e/wdio.conf.js --spec e2e/specs/$SpecName.e2e.js > `"$LogPath`" 2>&1"
+        WorkingDirectory = $repoRoot
+    }
+}
+
 function Write-Verdict {
     param([string]$Spec, [string]$Tag)
     Write-Host "${Spec}: $Tag"
@@ -260,8 +306,8 @@ function Invoke-WdioSpec {
         # would make every spec look like it errored before the verdict parse even runs. pnpm
         # also resolves to a .cmd shim, not a PE exe, so it needs cmd.exe to launch it anyway
         # (same reasoning as live-verify.ps1's vite spawn).
-        $cmdLine = "pnpm exec wdio run e2e/wdio.conf.js --spec $specPath > `"$logPath`" 2>&1"
-        $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $cmdLine) -WorkingDirectory $repoRoot -NoNewWindow -PassThru -Wait
+        $invocation = Get-WdioCommandLine -SpecName $SpecName -LogPath $logPath
+        $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $invocation.CommandLine) -WorkingDirectory $invocation.WorkingDirectory -NoNewWindow -PassThru -Wait
         $exitCode = $proc.ExitCode
     } finally {
         foreach ($k in $ExtraEnv.Keys) {
@@ -297,6 +343,7 @@ if ($MyInvocation.InvocationName -ne '.') {
 
     Test-DebugExeFreshness
     Assert-PortsFree
+    Assert-WdioDriver
     Backup-WdioSessionRegistry
 
     $useFakeForChat = -not $RealClaude
