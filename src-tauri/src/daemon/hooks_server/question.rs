@@ -109,6 +109,22 @@ async fn post_fire_and_forget_question(
     if let Value::Object(map) = &mut payload {
         map.insert("seq".to_string(), json!(ctx.state.next_prompt_seq()));
     }
+    // Checked BEFORE add_prompt below records THIS card, so it reflects an
+    // OLDER question left open, not this one. Without this, an unanswered
+    // question just sits silently while the model moves on to a new one; when
+    // the model eventually circles back to it, it resurfaces with no hint
+    // that it isn't new, and reads as a duplicate (confirmed live in a real
+    // transcript: two near-identical "should I push?" asks 42 minutes apart,
+    // with an unrelated reply from the user in between).
+    let has_older_pending = match session_id {
+        Some(sid) => ctx.state.session_has_pending_question(sid).await,
+        None => false,
+    };
+    if has_older_pending {
+        if let Value::Object(map) = &mut payload {
+            map.insert("has_older_pending".to_string(), json!(true));
+        }
+    }
     ctx.state.add_prompt(id, "question-requested", payload.clone(), true).await;
     ctx.state.fire_blocked_prompt(session_id, id);
     crate::daemon::jarvis_wake::wake_on_worker_blocked(&ctx.state, session_id, id, Some(wake_label)).await;
@@ -375,6 +391,54 @@ mod tests {
         let prompts = state.list_prompts().await;
         assert_eq!(prompts.len(), 1);
         assert_eq!(prompts[0]["payload"]["degraded_builtin"], true);
+    }
+
+    /// A session's first open question must not carry `has_older_pending`; a
+    /// SECOND one asked while the first is still unanswered must. This is the
+    /// signal the frontend badges so an old unanswered question, left open
+    /// while the model moves on and later circles back to it, doesn't read as
+    /// a duplicate of whatever was just answered.
+    #[tokio::test]
+    async fn second_open_question_for_a_session_is_stamped_has_older_pending() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        state.registry.record_builtin_ask_attempt("s1");
+        state.registry.record_builtin_ask_attempt("s1");
+
+        ask_question_decision(&ctx, ask_body("s1")).await;
+        ask_question_decision(&ctx, ask_body("s1")).await;
+
+        let prompts = state.list_prompts().await;
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(
+            prompts[0]["payload"]["has_older_pending"], serde_json::Value::Null,
+            "the session's first open question must not carry the flag"
+        );
+        assert_eq!(
+            prompts[1]["payload"]["has_older_pending"], true,
+            "asked while the first is still open, this one must carry it"
+        );
+    }
+
+    /// Once the first question resolves, a later ask for the same session has
+    /// no sibling open - must not carry the flag just because an earlier one
+    /// existed and was already answered.
+    #[tokio::test]
+    async fn a_question_asked_after_the_prior_one_resolved_is_not_stamped() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        state.registry.record_builtin_ask_attempt("s1");
+        state.registry.record_builtin_ask_attempt("s1");
+
+        ask_question_decision(&ctx, ask_body("s1")).await;
+        let first_id = state.list_prompts().await[0]["id"].as_str().unwrap().to_string();
+        state.remove_prompt(&first_id).await;
+
+        ask_question_decision(&ctx, ask_body("s1")).await;
+
+        let prompts = state.list_prompts().await;
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0]["payload"]["has_older_pending"], serde_json::Value::Null);
     }
 
     /// Piece 1: two sessions must not share an attempt budget.

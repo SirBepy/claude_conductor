@@ -82,6 +82,7 @@ export async function showQuestionCard(
     // Lives on the PROMPT PAYLOAD (question.rs), never the model's tool_use
     // input - the one place this is actually readable.
     degradedBuiltin: payload.degraded_builtin === true,
+    hasOlderPending: payload.has_older_pending === true,
     onDraftChange: (draft) => {
       saveQuestionDraft(payload.id, draft);
       scheduleAuqPush(payload.session_id, payload.id, draft);
