@@ -218,6 +218,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     charUrl: headerIconUrl,
     charStatus: headerStatus,
     cwd: sess.cwd ? String(sess.cwd) : null,
+    machineId: sess.machine?.id ?? null,
     autoAcceptOn: !readOnly && isAutoAccept(sess.session_id),
   });
   // Jarvis has no in-app view (it only lives at #detached?session=<id>), so

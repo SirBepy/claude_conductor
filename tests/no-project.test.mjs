@@ -59,3 +59,16 @@ describe("renderAvatar image branch", () => {
     expect(html).toContain('src="file:///C:/Users/tecno/avatar.png"');
   });
 });
+
+describe("renderAvatar machine-aware project face", () => {
+  it("stamps data-proj-face-machine when a machineId is given, so hydrateProjectTechIcons knows which peer's filesystem to ask", () => {
+    const html = renderAvatar(null, "/Users/joe/repo", "mac-mini-id");
+    expect(html).toContain('data-proj-face-machine="mac-mini-id"');
+    expect(html).toContain('data-proj-face="/Users/joe/repo"');
+  });
+
+  it("omits the attribute entirely for a local path (no machineId), unchanged from before the param existed", () => {
+    const html = renderAvatar(null, "C:\\Users\\tecno\\Desktop\\Projects\\countoff");
+    expect(html).not.toContain("data-proj-face-machine");
+  });
+});

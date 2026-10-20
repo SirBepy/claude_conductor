@@ -421,9 +421,12 @@ export const api = {
   listProjectGroups: (): Promise<ProjectGroup[]> => invoke("list_project_groups"),
   // Project-face fallback detection (ai_todo 99): a project's own icon file, or
   // its detected tech-stack key. Both fail soft (null) so the list never breaks.
-  getProjectTech: (root: string): Promise<string | null> => invoke("get_project_tech", { root }),
-  getProjectIcon: (root: string): Promise<{ mime: string; base64: string } | null> =>
-    invoke("get_project_icon", { root }),
+  // `machineId` names a paired peer to ask instead of this daemon's own
+  // filesystem (multi-machine federation) - omitted/null means local, unchanged.
+  getProjectTech: (root: string, machineId?: string | null): Promise<string | null> =>
+    invoke("get_project_tech", { root, machineId: machineId ?? null }),
+  getProjectIcon: (root: string, machineId?: string | null): Promise<{ mime: string; base64: string } | null> =>
+    invoke("get_project_icon", { root, machineId: machineId ?? null }),
   getProject: (id: string): Promise<ProjectConfig | null> =>
     invoke("get_project", { id }),
   // Backend-normalized account binding for `cwd` (repo-root + worktree-aware,

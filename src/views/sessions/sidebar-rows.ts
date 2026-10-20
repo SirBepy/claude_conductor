@@ -150,6 +150,7 @@ function buildRowOptions(args: {
       badgeClass: "is-centred",
       extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
       dotClass: args.dotClass,
+      machineId: args.machine?.id ?? null,
     },
     title: escapeHtml(args.title),
     projectLabel: escapeHtml(args.projectLabel),

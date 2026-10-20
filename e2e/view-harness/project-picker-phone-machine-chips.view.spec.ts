@@ -17,6 +17,14 @@ import { mountViewPhone, capture } from "./harness";
 //
 // Reviewed against project-picker.ts's new cold-load skeleton + row entrance
 // animation - re-ran this file after that change, all tests still pass.
+//
+// Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's
+// row render now passes machineField.machineId as renderAvatar's 3rd arg,
+// stamping a data-proj-face-machine attribute so the icon fetch asks the
+// right peer's filesystem. This spec's second test DOES select the peer chip
+// and render its project row, but only asserts row text (.toHaveText), never
+// the avatar markup or icon fetch - unaffected. The capture() screenshot runs
+// with self selected (the default), where machineId stays null - unaffected.
 
 const PHONE = { width: 390, height: 800 };
 

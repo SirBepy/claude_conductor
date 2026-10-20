@@ -63,10 +63,13 @@ export function drainChipHtml(pct: number | undefined): string {
 }
 
 /** Renders the project tech-icon badge (bottom-right corner of the character portrait).
- *  Shared by the sidebar rows and the session-header badge (active-session.ts). */
-export function projBadgeHtml(cwd: string | null, cls: string): string {
+ *  Shared by the sidebar rows and the session-header badge (active-session.ts).
+ *  `machineId` names the paired peer `cwd` lives on, for a session mirrored
+ *  in from a paired peer machine - omitted for every locally-hosted row. */
+export function projBadgeHtml(cwd: string | null, cls: string, machineId?: string | null): string {
   if (!cwd) return "";
-  return `<span class="${cls}"><span class="proj-face" data-proj-face="${escapeHtml(cwd)}"><i class="ph ph-folder"></i></span></span>`;
+  const machineAttr = machineId ? ` data-proj-face-machine="${escapeHtml(machineId)}"` : "";
+  return `<span class="${cls}"><span class="proj-face" data-proj-face="${escapeHtml(cwd)}"${machineAttr}><i class="ph ph-folder"></i></span></span>`;
 }
 
 /** Frozen-chat marker: a bare snowflake in the chips slot (same slot as
@@ -101,6 +104,9 @@ export interface LeadingExtras {
   extra?: string;
   /** Portrait-only status dot class (`st-*`), rendered bottom-left on the circle. */
   dotClass?: string;
+  /** Set only for a session mirrored in from a paired peer machine (multi-
+   *  machine federation); undefined/null for every locally-hosted row. */
+  machineId?: string | null;
 }
 
 /** Leading visual for ANY sidebar row - live session, draft, or parked draft.
@@ -117,7 +123,7 @@ export function leadingVisual(
   extras: LeadingExtras = {},
   statusTitle = "",
 ): string {
-  const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`);
+  const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`, extras.machineId);
   // close_failed shares its orange with st-rate-limited (sessions.css), so the
   // dot alone can't read as distinct - a glyph is the only spare channel left.
   const dotGlyph = extras.dotClass === "st-close-failed" ? `<i class="ph-bold ph-warning"></i>` : "";

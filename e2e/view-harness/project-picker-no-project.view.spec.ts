@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/new-session-cache.ts, src/shared/no-project.ts
+// Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's row render now passes a machineId to renderAvatar - this spec never selects a peer machine, so it stays null and the markup is unchanged.
 //
 // G8 touched project-picker.ts's listMachines() gate (now unconditional, not
 // desktop-only) - a no-op here: this spec mounts via mountView (isTauri true,

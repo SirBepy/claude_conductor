@@ -57,18 +57,29 @@ const TECH_DEVICON: Record<string, string> = {
 };
 
 // Lazy per-project-path caches so a re-render never re-hits IPC. undefined =
-// not fetched; null = fetched, none found; string = the resolved value.
+// not fetched; null = fetched, none found; string = the resolved value. Keyed
+// by `machineId|path` so an identical-looking path on two different machines
+// (unlikely, but possible) never shares a cache entry.
 const projectIconUrlCache = new Map<string, string | null>();
 const projectTechCache = new Map<string, string | null>();
+const cacheKey = (path: string, machineId: string | null): string => `${machineId ?? ""}|${path}`;
 
-export function renderAvatar(avatar: Avatar | undefined | null, projectPath?: string): string {
+export function renderAvatar(
+  avatar: Avatar | undefined | null,
+  projectPath?: string,
+  machineId?: string | null,
+): string {
   if (isNoProjectPath(projectPath)) return NO_PROJECT_ICON_HTML;
   if (!avatar || avatar.kind === "none") {
     // No user-set avatar: render a hydratable project-face placeholder (a
     // generic folder until hydrateProjectTechIcons fills the real icon / tech
     // logo). Falls back to "?" when no path is available to detect against.
     if (projectPath) {
-      return `<span class="proj-face" data-proj-face="${escapeHtml(projectPath)}"><i class="ph ph-folder"></i></span>`;
+      // `machineId` names the paired peer whose filesystem `projectPath`
+      // lives on (multi-machine federation) - omitted for every local path,
+      // same as before this attribute existed.
+      const machineAttr = machineId ? ` data-proj-face-machine="${escapeHtml(machineId)}"` : "";
+      return `<span class="proj-face" data-proj-face="${escapeHtml(projectPath)}"${machineAttr}><i class="ph ph-folder"></i></span>`;
     }
     return "?";
   }
@@ -119,25 +130,27 @@ export async function hydrateProjectTechIcons(root: HTMLElement | Document = doc
   for (const el of Array.from(faces)) {
     const path = el.dataset.projFace;
     if (!path) continue;
-    if (el.dataset.hydrated === path) continue;
-    el.dataset.hydrated = path; // mark before await so a rapid re-call won't double-fetch
+    const machineId = el.dataset.projFaceMachine ?? null;
+    const key = cacheKey(path, machineId);
+    if (el.dataset.hydrated === key) continue;
+    el.dataset.hydrated = key; // mark before await so a rapid re-call won't double-fetch
     try {
       // Tier 1: the project's own icon file.
-      let iconUrl = projectIconUrlCache.get(path);
+      let iconUrl = projectIconUrlCache.get(key);
       if (iconUrl === undefined) {
-        const icon = await api.getProjectIcon(path);
+        const icon = await api.getProjectIcon(path, machineId);
         iconUrl = icon ? `data:${icon.mime};base64,${icon.base64}` : null;
-        projectIconUrlCache.set(path, iconUrl);
+        projectIconUrlCache.set(key, iconUrl);
       }
       if (iconUrl) {
         el.innerHTML = `<img src="${iconUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:7px">`;
         continue;
       }
       // Tier 2: detected tech-stack logo.
-      let tech = projectTechCache.get(path);
+      let tech = projectTechCache.get(key);
       if (tech === undefined) {
-        tech = (await api.getProjectTech(path)) ?? null;
-        projectTechCache.set(path, tech);
+        tech = (await api.getProjectTech(path, machineId)) ?? null;
+        projectTechCache.set(key, tech);
       }
       const cls = tech ? TECH_DEVICON[tech] : undefined;
       if (cls) {
