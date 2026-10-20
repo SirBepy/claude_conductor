@@ -38,6 +38,12 @@ pub struct ChatConfig {
     /// `set_wrap_up_on_done`.
     #[serde(default)]
     pub wrap_up_on_done: bool,
+    /// What the chat's model was last told about the toggle (system prompt at
+    /// spawn or a note on a message). Persisted so a child that dies after the
+    /// toggle went OFF still retracts the ON note its resumed history holds;
+    /// an in-memory flag would reset to the config value and skip the retraction.
+    #[serde(default)]
+    pub wrap_up_told: bool,
     /// The registry account this chat was spawned under. Mirrors model/effort:
     /// recorded alongside them at spawn time so a CLOSED chat's history view
     /// can still show which account ran it. Empty for chats that predate
@@ -100,6 +106,14 @@ pub fn record(session_id: &str, model: &str, effort: &str) {
     let Some(path) = config_path() else { return };
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     record_at(&path, session_id, model, effort);
+}
+
+impl ChatConfig {
+    /// The told-state a freshly spawned child starts from: the toggle's current
+    /// value (baked into argv) or an earlier told ON that was never retracted.
+    pub fn wrap_up_told_at_spawn(&self) -> bool {
+        self.wrap_up_on_done || self.wrap_up_told
+    }
 }
 
 /// Look up a chat's recorded model/effort, or None if it was never recorded
@@ -236,6 +250,26 @@ pub fn set_wrap_up_on_done(session_id: &str, value: bool) {
     set_wrap_up_on_done_at(&path, session_id, value);
 }
 
+/// Record what the chat's model was last told about the wrap-up toggle.
+pub fn set_wrap_up_told(session_id: &str, value: bool) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_wrap_up_told_at(&path, session_id, value);
+}
+
+fn set_wrap_up_told_at(path: &Path, session_id: &str, value: bool) {
+    if session_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    let entry = map.entry(session_id.to_string()).or_default();
+    if entry.wrap_up_told == value {
+        return;
+    }
+    entry.wrap_up_told = value;
+    write_atomic(path, &map);
+}
+
 /// Session ids that currently have wrap-up-on-done enabled. The frontend
 /// menu toggle seeds its in-memory set from this on launch, same as
 /// `list_auto_accept`.
@@ -326,6 +360,18 @@ mod tests {
         set_wrap_up_on_done_at(&path, "sess-1", false);
         assert!(list_wrap_up_on_done_at(&path).is_empty());
         assert_eq!(get_at(&path, "sess-1").unwrap().model, "opus");
+    }
+
+    #[test]
+    fn wrap_up_told_persists_and_old_files_default_to_false() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        std::fs::write(&path, r#"{"sess-1":{"model":"opus","wrap_up_on_done":false}}"#).unwrap();
+        assert!(!get_at(&path, "sess-1").unwrap().wrap_up_told, "missing field defaults to false");
+        set_wrap_up_told_at(&path, "sess-1", true);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert!(got.wrap_up_told && got.wrap_up_told_at_spawn());
+        assert_eq!(got.model, "opus");
     }
 
     #[test]
