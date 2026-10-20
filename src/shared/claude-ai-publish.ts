@@ -52,10 +52,23 @@ export function publishTitle(link: PublishedLink | null | undefined, version: nu
   }
 }
 
+export function publishIcon(link: PublishedLink | null | undefined, version: number): string {
+  return publishState(link, version) === "current" ? "ph-link" : "ph-cloud-arrow-up";
+}
+
+/** Menu-item wording, for surfaces that list publish as a text row. */
+export function publishLabel(link: PublishedLink | null | undefined, version: number): string {
+  switch (publishState(link, version)) {
+    case "none": return "Publish to claude.ai";
+    case "current": return "Copy claude.ai link";
+    case "stale": return "Update on claude.ai";
+  }
+}
+
 /** The publish icon button's markup. `data-publish` is the click hook. */
 export function publishButtonHtml(link: PublishedLink | null | undefined, version: number, cls: string): string {
   const state = publishState(link, version);
-  const icon = state === "current" ? "ph-link" : "ph-cloud-arrow-up";
+  const icon = publishIcon(link, version);
   const title = publishTitle(link, version).replace(/"/g, "&quot;");
   return `<button type="button" class="${cls}" data-publish data-publish-state="${state}" title="${title}"><i class="ph ${icon}"></i></button>`;
 }
@@ -91,6 +104,9 @@ export async function publishToClaudeAi(
   }
   const icon = btn?.querySelector("i");
   const prevIcon = icon?.className;
+  // A menu item closes on click, so with no button left to spin the run
+  // (up to a minute) would otherwise give no sign it started.
+  if (!btn) showToast("Publishing to claude.ai...", { ttlMs: 4000 });
   if (btn) btn.disabled = true;
   if (icon) icon.className = "ph ph-circle-notch publish-spin";
   try {

@@ -11,7 +11,7 @@ import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { buildPreviewDocumentHtml } from "./preview-panel-document";
-import { canPublish, publishButtonHtml, publishToClaudeAi } from "../../shared/claude-ai-publish";
+import { canPublish, publishIcon, publishLabel, publishTitle, publishToClaudeAi } from "../../shared/claude-ai-publish";
 import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
 import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
@@ -212,7 +212,6 @@ class PreviewTab implements RailTabHandle {
     // changed, which selectSnapshot skips as already on screen.
     if (this.selected?.id === meta.id && this.selected.version === meta.version) {
       this.selected.published = meta.published;
-      this.renderPublishButton();
       return;
     }
 
@@ -267,6 +266,14 @@ class PreviewTab implements RailTabHandle {
       onOpenBrowser: () => this.openInBrowser(),
       onSetDeviceWidth: (w) => this.setDeviceWidth(w),
       getDeviceWidth: () => this.deviceWidth,
+      publish: this.selected && canPublish()
+        ? {
+            label: publishLabel(this.selected.published, this.selected.version),
+            icon: publishIcon(this.selected.published, this.selected.version),
+            title: publishTitle(this.selected.published, this.selected.version),
+            onClick: () => this.publish(),
+          }
+        : undefined,
     };
   }
 
@@ -278,22 +285,16 @@ class PreviewTab implements RailTabHandle {
     };
   }
 
-  private publish(btn: HTMLButtonElement): void {
+  private publish(): void {
     const snap = this.selected;
     if (!snap) return;
-    void publishToClaudeAi({ target: "preview", id: snap.id }, snap.published, snap.version, btn).then((link) => {
+    void publishToClaudeAi({ target: "preview", id: snap.id }, snap.published, snap.version, null).then((link) => {
       if (!link || this.selected?.id !== snap.id) return;
       this.selected.published = link;
-      this.renderPublishButton();
     });
   }
 
   private onClick(e: MouseEvent): void {
-    const publishBtn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-publish]");
-    if (publishBtn) {
-      this.publish(publishBtn);
-      return;
-    }
     const actBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
     if (!actBtn) return;
     switch (actBtn.dataset.act) {
@@ -311,7 +312,6 @@ class PreviewTab implements RailTabHandle {
         <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span></span>
         <button type="button" class="pv-ver" data-act="history" title="Version history"></button>
         <span class="pv-grow"></span>
-        <span class="pv-publish-slot"></span>
         <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
       </header>
       <div class="pv-body">
@@ -339,24 +339,11 @@ class PreviewTab implements RailTabHandle {
       verEl.textContent = `· v${this.selected.version}`;
       verEl.hidden = false;
     }
-    this.renderPublishButton();
-  }
-
-  /** Re-rendered on its own when only the link changed (a publish finishing,
-   *  or another window's broadcast), so the iframe never rebuilds for it. */
-  private renderPublishButton(): void {
-    const slot = this.root.querySelector<HTMLElement>(".pv-publish-slot");
-    if (!slot) return;
-    slot.innerHTML = this.selected && canPublish()
-      ? publishButtonHtml(this.selected.published, this.selected.version, "icon-btn")
-      : "";
   }
 
   private renderHeaderEmpty(): void {
     const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
     const verEl = this.root.querySelector<HTMLElement>(".pv-ver");
-    const slot = this.root.querySelector<HTMLElement>(".pv-publish-slot");
-    if (slot) slot.innerHTML = "";
     if (nameEl) nameEl.textContent = "No previews yet";
     if (verEl) {
       verEl.textContent = "";
