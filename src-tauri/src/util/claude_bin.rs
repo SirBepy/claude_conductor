@@ -203,37 +203,39 @@ pub fn resolve() -> Result<OsString, NotFound> {
     if let Some(hit) = FOUND.get() {
         return Ok(hit.clone());
     }
+    let found = search(true)?.into_os_string();
+    let _ = FOUND.set(found.clone());
+    Ok(found)
+}
 
+/// The one lookup order behind both public resolvers: override env, PATH,
+/// fixed install locations, then the login-shell probe. `bare_name_ok` decides
+/// whether a PATH hit may be returned as the literal `"claude"` (see
+/// [`resolve_absolute`] for why some callers cannot accept that).
+fn search(bare_name_ok: bool) -> Result<PathBuf, NotFound> {
     if let Some(over) = std::env::var_os(BIN_ENV) {
         let p = PathBuf::from(&over);
         if p.is_file() {
-            let _ = FOUND.set(over.clone());
-            return Ok(over);
+            return Ok(p);
         }
         log::warn!("claude_bin: {BIN_ENV} is set to {} but that is not a file", p.display());
     }
 
     // PATH already works: keep the bare name so nothing about the current
     // spawn behavior changes on platforms that were never broken.
-    if which::which("claude").is_ok() {
-        let bare = OsString::from("claude");
-        let _ = FOUND.set(bare.clone());
-        return Ok(bare);
+    if let Ok(on_path) = which::which("claude") {
+        return Ok(if bare_name_ok { PathBuf::from("claude") } else { on_path });
     }
 
     let home = dirs::home_dir();
     let candidates = fixed_candidates(home.as_deref());
     if let Some(p) = first_existing(&candidates) {
         log::info!("claude_bin: PATH lookup failed, using {}", p.display());
-        let found: OsString = p.into_os_string();
-        let _ = FOUND.set(found.clone());
-        return Ok(found);
+        return Ok(p);
     }
 
     if let Some(p) = login_shell_probe() {
-        let found: OsString = p.into_os_string();
-        let _ = FOUND.set(found.clone());
-        return Ok(found);
+        return Ok(p);
     }
 
     Err(NotFound { searched: candidates, shell_probed: cfg!(not(windows)) })
@@ -256,35 +258,9 @@ pub fn resolve_absolute() -> Result<PathBuf, NotFound> {
     if let Some(hit) = FOUND.get() {
         return Ok(hit.clone());
     }
-
-    if let Some(over) = std::env::var_os(BIN_ENV) {
-        let p = PathBuf::from(&over);
-        if p.is_file() {
-            let _ = FOUND.set(p.clone());
-            return Ok(p);
-        }
-        log::warn!("claude_bin: {BIN_ENV} is set to {} but that is not a file", p.display());
-    }
-
-    if let Ok(p) = which::which("claude") {
-        let _ = FOUND.set(p.clone());
-        return Ok(p);
-    }
-
-    let home = dirs::home_dir();
-    let candidates = fixed_candidates(home.as_deref());
-    if let Some(p) = first_existing(&candidates) {
-        log::info!("claude_bin: PATH lookup failed, using {}", p.display());
-        let _ = FOUND.set(p.clone());
-        return Ok(p);
-    }
-
-    if let Some(p) = login_shell_probe() {
-        let _ = FOUND.set(p.clone());
-        return Ok(p);
-    }
-
-    Err(NotFound { searched: candidates, shell_probed: cfg!(not(windows)) })
+    let found = search(false)?;
+    let _ = FOUND.set(found.clone());
+    Ok(found)
 }
 
 /// Lenient variant for spawn sites that already treat a failure to launch as a
