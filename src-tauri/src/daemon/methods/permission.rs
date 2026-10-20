@@ -169,7 +169,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 if !matches!(ctx.transport, crate::daemon::rpc::Transport::PeerMachine(_)) {
                     // Exclude `secret-requested` prompts from the mirrored
                     // merge: `respond_secret` is
-                    // phone-only in `remote_transport_table.rs`, so a secret
+                    // desktop-pipe-only in `remote_transport_table.rs`, so a secret
                     // card mirrored onto a peer machine would render there
                     // with no way to ever answer it. Joe answers it on the
                     // machine (or phone) where the chat actually runs.
@@ -317,8 +317,8 @@ mod list_pending_prompts_tests {
     }
 
     /// A mirrored `secret-requested` prompt must never reach a
-    /// local (desktop) caller either - `respond_secret` is phone-only in
-    /// `remote_transport_table.rs`, so a secret card mirrored in from a peer
+    /// local (desktop) caller either - `respond_secret` is desktop-pipe-only
+    /// in `remote_transport_table.rs`, so a secret card mirrored in from a peer
     /// would render on this machine with no transport able to answer it.
     #[tokio::test]
     async fn excludes_mirrored_secret_requested_prompts() {
