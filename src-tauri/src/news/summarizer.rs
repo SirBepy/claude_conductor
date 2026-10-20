@@ -42,6 +42,31 @@ tight chunks total.\n\nTitle: {title}\n\nArticle: {article_text}"
     )
 }
 
+/// Tools the summarizer must never hold. The article text is scraped web
+/// content fed into the prompt, and a headless `claude -p` has no prompt UI, so
+/// an account-level `permissions.allow` rule could otherwise pre-approve Bash
+/// for an injected instruction. The summary needs text output only.
+const DENIED_TOOLS: &str = "Bash Edit Write NotebookEdit WebFetch WebSearch Task";
+
+fn cli_args(prompt: &str) -> Vec<String> {
+    [
+        "-p",
+        prompt,
+        "--model",
+        SUMMARY_MODEL,
+        "--effort",
+        SUMMARY_EFFORT,
+        "--disallowedTools",
+        DENIED_TOOLS,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
 
 /// Spawns claude in the app-data dir (never the repo, so it can't ingest a stray
 /// CLAUDE.md), streams its stdout, invokes `on_delta` for each text chunk as it
@@ -77,16 +102,7 @@ pub async fn generate_summary_streaming<F: FnMut(&str)>(
     let prompt = build_prompt(title, article_text);
 
     let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
-    cmd.arg("-p")
-        .arg(&prompt)
-        .arg("--model")
-        .arg(SUMMARY_MODEL)
-        .arg("--effort")
-        .arg(SUMMARY_EFFORT)
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--verbose")
-        .arg("--include-partial-messages")
+    cmd.args(cli_args(&prompt))
         .current_dir(&cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -271,6 +287,18 @@ mod tests {
         // calls check_metered_billing before spawning. Lock the wiring here.
         assert_eq!(SUMMARY_MODEL, "sonnet");
         assert_eq!(SUMMARY_EFFORT, "low");
+    }
+
+    #[test]
+    fn built_args_deny_every_side_effecting_tool() {
+        let args = cli_args("p");
+        let i = args.iter().position(|a| a == "--disallowedTools").expect("deny flag");
+        let denied: Vec<&str> = args[i + 1].split(' ').collect();
+        for t in ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task"] {
+            assert!(denied.contains(&t), "missing {t}: {denied:?}");
+        }
+        assert_eq!(args[0], "-p");
+        assert_eq!(args[1], "p");
     }
 
     #[test]
