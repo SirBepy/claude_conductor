@@ -20,6 +20,7 @@ import {
   peekPendingPrompt,
   selectionGuard,
 } from "./gating";
+import { getActiveCardId } from "./question-state";
 import type { PendingPrompt } from "./gating";
 import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
@@ -302,6 +303,12 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
     // track: the answer already went out via respond_question.
     if (!displaced.answered) queueSiblingQuestion(sessionId, displaced.payload);
   }
+  // `pending` resolved to the exact prompt already live on screen (the usual
+  // case for an MCP-tool_use_id click: `cardId` never equals the daemon's own
+  // prompt uuid, so it always falls through to "newest open question" above,
+  // which IS this card when only one question is open) - dismissing and
+  // remounting it would just flicker it shut then open again for nothing.
+  if (pending.kind === "question" && getActiveCardId() === pending.payload.id) return true;
   // Only safe to drop what's on screen now we hold a replacement.
   dismissQuestionCard();
   rerenderSidebar();
