@@ -2,6 +2,7 @@
 // import each other, and both need this - a third edge would close the cycle.
 
 import { blocksToText } from "./content-blocks";
+import { detectPrPreviewToken } from "./chat-classifiers";
 import { isRawViewEnabled } from "./message-filter-pref";
 import type { ChatRenderer } from "./chat-renderer";
 
@@ -14,6 +15,10 @@ export function turnProducedVisibleContent(r: ChatRenderer): boolean {
     const m = r.messages[i]!;
     switch (m.kind) {
       case "assistant":
+        // A finalized row carrying the PR markers renders its preview card
+        // outside the narration wrapper (buildMessageEl), so it is on screen
+        // even with raw view off.
+        if (!m.streaming && (m.content ?? []).some((b) => b.type === "text" && detectPrPreviewToken(b.text))) return true;
         // Raw narration is hidden by default (chat-narration CSS, see
         // message-filter-pref.ts) - only counts as visible when the user has
         // the raw-chat toggle on for this session, else it wrongly blocks
