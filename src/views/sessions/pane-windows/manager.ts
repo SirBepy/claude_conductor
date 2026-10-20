@@ -116,6 +116,12 @@ export class PaneWindows {
     this.mgr.openPanel(panel);
   }
 
+  /** Brings Ask up with its input prefilled. */
+  askAbout(text: string): void {
+    this.openPanel("ask");
+    this.handles.get("ask")?.seed?.(text);
+  }
+
   togglePanel(panel: PanelKey): void {
     this.mgr.togglePanel(panel);
   }

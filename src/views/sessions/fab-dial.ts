@@ -23,6 +23,8 @@ export interface FabDialHandle {
   reattach(): void;
   /** Open straight onto one draft - the ⤢ on an inline draft card. */
   openDraft(id: string): void;
+  /** Open Ask with its input prefilled, e.g. from a question card. */
+  askAbout(text: string): void;
   /** What the rest of the view drives Preview through. */
   previewController(): PreviewController;
   close(): void;
@@ -127,6 +129,10 @@ class FabDial implements FabDialHandle {
 
   openDraft(id: string): void {
     this.windows.openDraft(id);
+  }
+
+  askAbout(text: string): void {
+    this.windows.askAbout(text);
   }
 
   previewController(): PreviewController {
