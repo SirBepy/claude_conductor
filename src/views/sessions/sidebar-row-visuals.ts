@@ -82,6 +82,14 @@ export function frozenChipHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "t
   return `<span class="frozen-chip${autoFrozen ? " frozen-chip--auto" : ""}" ${tipAttr}="${title}"><i class="ph-bold ph-snowflake"></i></span>`;
 }
 
+/** "Wrap up when done" marker - same slot/sizing as the frozen chip above.
+ *  Same tooltip wording as the header button and chat menu item. */
+export function wrapUpChipHtml(on: boolean, tipAttr: "title" | "data-tip"): string {
+  if (!on) return "";
+  const title = "Wrap up when done: ON - once nothing more is needed from you, Claude self-verifies, commits, and closes this chat on its own";
+  return `<span class="wrap-up-chip" ${tipAttr}="${title}"><i class="ph-bold ph-flag-checkered"></i></span>`;
+}
+
 /** Row-level tint class for a frozen chat - `""` when not frozen. Auto-frozen
  *  reuses the "waiting" hue (same bind as `frozen-chip--auto` above) since a
  *  rate-limit auto-freeze IS a waiting state. */

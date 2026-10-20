@@ -14,10 +14,12 @@ import {
   scheduledCornerHtml,
   heldCornerHtml,
   modelBatteryHtml,
+  wrapUpChipHtml,
 } from "./sidebar-row-visuals";
 import type { LeadingExtras } from "./sidebar-row-visuals";
 import { chainRowKey } from "./successor-follow";
 import { GENERIC_MACHINE_ICON, hasPairedMachines, machineIcon, selfMachineLabel } from "./machine-icons";
+import { isWrapUpOnDone } from "./permission-modal";
 
 /** Every sidebar row - live session, draft, or parked draft - is built from
  *  this ONE bag of slot values and rendered by the ONE template below, so a
@@ -124,6 +126,7 @@ function buildRowOptions(args: {
   needsAttention: boolean;
   frozen: boolean;
   autoFrozen: boolean;
+  wrapUpOnDone: boolean;
   scheduledCount: number | undefined;
   heldCount: number | undefined;
   model: string;
@@ -156,7 +159,7 @@ function buildRowOptions(args: {
     projectLabel: escapeHtml(args.projectLabel),
     badges,
     machineBadge: machineBadgeHtml(args.machine, !!args.isLocalSession),
-    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
+    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${wrapUpChipHtml(args.wrapUpOnDone, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
   };
 }
 
@@ -209,6 +212,7 @@ export function sessionRowOptions(
     needsAttention,
     frozen: !!s.frozen,
     autoFrozen: !!s.auto_frozen,
+    wrapUpOnDone: isWrapUpOnDone(s.session_id),
     scheduledCount: ctx.scheduledCountMap.get(s.session_id),
     heldCount: s.held_count || undefined,
     model: s.model,
@@ -246,6 +250,7 @@ export function draftRowOptions(
     needsAttention: false,
     frozen: false,
     autoFrozen: false,
+    wrapUpOnDone: false,
     scheduledCount: undefined,
     heldCount: undefined,
     model: pending.config.model,
@@ -273,6 +278,7 @@ export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptio
     needsAttention: false,
     frozen: false,
     autoFrozen: false,
+    wrapUpOnDone: false,
     scheduledCount: undefined,
     heldCount: undefined,
     model: d.config.model,

@@ -154,6 +154,15 @@
 .frozen-chip--auto { color: var(--chat-state-waiting); }
 .sessions-list li.active .frozen-chip { color: var(--color-background); opacity: 0.85; }
 
+/* "Wrap up when done" marker: same slot/sizing as the chips above. */
+.wrap-up-chip {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-accent, #7c6af7);
+}
+.wrap-up-chip i { font-size: 0.85rem; line-height: 1; }
+.sessions-list li.active .wrap-up-chip { color: var(--color-background); opacity: 0.85; }
+
 /* Portrait row: the devicon moves from the bottom corner to the middle of the
    portrait's right border, so it lines up with the project name. It straddles
    the strip edge; the row's 15px flex gap is what keeps it from touching the

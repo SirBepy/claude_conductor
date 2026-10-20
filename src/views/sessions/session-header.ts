@@ -13,6 +13,39 @@ export interface SessionHeaderBindOpts {
    *  machine federation); undefined/null for every locally-hosted session. */
   machineId?: string | null;
   autoAcceptOn?: boolean;
+  wrapUpOnDoneOn?: boolean;
+}
+
+/** Shared with sidebar-rows.ts's chip and chat-menu-items.ts's menu item so
+ *  the same toggle reads the same explanation everywhere it surfaces. */
+export function wrapUpTooltip(on: boolean): string {
+  const base = on
+    ? "Wrap up when done: ON (Ctrl+Shift+W)"
+    : "Wrap up when done (Ctrl+Shift+W)";
+  const body = on
+    ? "once nothing more is needed from you, Claude self-verifies, commits, and closes this chat on its own - then it's off, since the chat is gone"
+    : "turn on to have Claude self-verify, commit, and close this chat on its own once nothing more is needed from you";
+  return `${base} - ${body}`;
+}
+
+/** Live-updates the mounted header's "Wrap up when done" button for
+ *  `sessionId`, if `selectedId` (the caller's own `state.selectedId`) says
+ *  that session's pane is the one currently on screen - no-op otherwise
+ *  (toggled from the menu/shortcut on a backgrounded chat). Takes
+ *  `selectedId` as a plain argument rather than reading `state` itself, so
+ *  this file - otherwise a dependency-free presentational module - doesn't
+ *  pull every caller into importing the much heavier `active-session.ts`
+ *  just to reach one DOM update. The header button's OWN click handler
+ *  updates itself directly via `setWrapUpOnDone` instead of going through
+ *  this; this is for the other two trigger paths (chat-menu-items.ts's menu
+ *  item, session-controls.ts's keyboard shortcut), neither of which holds a
+ *  `SessionHeader` instance. */
+export function refreshWrapUpIndicator(selectedId: string | null, sessionId: string, on: boolean): void {
+  if (selectedId !== sessionId) return;
+  const btn = document.querySelector<HTMLButtonElement>(".session-pane .wrap-up-btn");
+  if (!btn) return;
+  btn.classList.toggle("is-on", on);
+  btn.title = wrapUpTooltip(on);
 }
 
 /**
@@ -34,6 +67,8 @@ export class SessionHeader {
 
   /** The `</>` button: enter Code mode for this chat. */
   onCodeModeClick: (() => void) | null = null;
+  /** The flag button: toggle "Wrap up when done" for this chat. */
+  onWrapUpToggleClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
   /** Opens the statusbar's model / effort slider popover on the header's own
    *  text. The statusbar owns both popovers and the commit path, so the header
@@ -64,6 +99,9 @@ export class SessionHeader {
       `    </span>`,
       `  </span>`,
       `</div>`,
+      `<button class="icon-btn wrap-up-btn" title="${escapeHtml(wrapUpTooltip(false))}" aria-label="Wrap up when done">`,
+      `  <i class="ph-bold ph-flag-checkered"></i>`,
+      `</button>`,
       `<button class="icon-btn code-mode-btn" title="Code mode (Ctrl+Shift+E)" aria-label="Code mode">`,
       `  <i class="ph ph-code"></i>`,
       `</button>`,
@@ -84,6 +122,11 @@ export class SessionHeader {
     el.querySelector<HTMLButtonElement>(".code-mode-btn")!.addEventListener("click", (e) => {
       e.stopPropagation();
       this.onCodeModeClick?.();
+    });
+
+    el.querySelector<HTMLButtonElement>(".wrap-up-btn")!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.onWrapUpToggleClick?.();
     });
 
     el.querySelector<HTMLButtonElement>(".discard-btn")?.addEventListener("click", () => {
@@ -170,6 +213,23 @@ export class SessionHeader {
     if (opts.charId !== undefined && opts.charStatus !== undefined) {
       this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd, opts.machineId);
     }
+
+    // Read-only (external/automated) sessions aren't driven by this app's own
+    // turns, so the toggle has nothing to act on - same gate as auto-accept.
+    const wrapUpBtn = this.el.querySelector<HTMLButtonElement>(".wrap-up-btn");
+    if (wrapUpBtn) wrapUpBtn.hidden = opts.readOnly;
+    this.setWrapUpOnDone(!!opts.wrapUpOnDoneOn);
+  }
+
+  /** Reflects the current toggle state on the header's flag button - its own
+   *  click handler calls this directly; the menu item and the keyboard
+   *  shortcut go through `active-session.ts`'s `refreshWrapUpIndicator`
+   *  instead, since they don't hold a `SessionHeader` reference. */
+  setWrapUpOnDone(on: boolean): void {
+    const btn = this.el.querySelector<HTMLButtonElement>(".wrap-up-btn");
+    if (!btn) return;
+    btn.classList.toggle("is-on", on);
+    btn.title = wrapUpTooltip(on);
   }
 
   /**

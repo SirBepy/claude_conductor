@@ -3,7 +3,7 @@ import { sessionSubtitle, projectName } from "./sessions-helpers";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import type { SessionConfig } from "./model-effort-modal";
-import { isAutoAccept } from "./permission-modal";
+import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
 import { SessionHeader } from "./session-header";
 import { wireRenderer } from "./active-session-mount";
 import { retainChat } from "./chat-pane-cache";
@@ -69,6 +69,12 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
   // we actually have an id, so a not-yet-loaded char map can't clobber the
   // portrait already shown for a user-picked character.
   const realCharId = sess ? characterForSession(sess) : null;
+  h.onWrapUpToggleClick = () => {
+    const next = !isWrapUpOnDone(sessionId);
+    setWrapUpOnDone(sessionId, next);
+    h.setWrapUpOnDone(next);
+    rerenderSidebar();
+  };
   h.bindSession({
     sessionId,
     readOnly: false,
@@ -79,6 +85,7 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
         }
       : {}),
     autoAcceptOn: isAutoAccept(sessionId),
+    wrapUpOnDoneOn: isWrapUpOnDone(sessionId),
   });
   if (realCharId) void hydrateCharacterAvatars(pane);
   void hydrateProjectTechIcons(pane);

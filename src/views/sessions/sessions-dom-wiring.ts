@@ -26,6 +26,7 @@ import {
 import {
   selectSessionByIndex,
   closeFocusedChat,
+  toggleWrapUpOnDoneForFocusedChat,
   triggerNewSessionFavoriteGlobal,
 } from "./session-controls";
 
@@ -128,6 +129,7 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
     shortcuts.register(`open-chat-${slot}`, () => selectSessionByIndex(i));
   }
   shortcuts.register("close-chat", closeFocusedChat);
+  shortcuts.register("toggle-wrap-up-on-done", toggleWrapUpOnDoneForFocusedChat);
 
   let enterTimer: ReturnType<typeof setTimeout> | undefined;
   const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
