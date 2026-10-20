@@ -155,15 +155,13 @@
 .sessions-list li.active .frozen-chip { color: var(--color-background); opacity: 0.85; }
 
 /* "Wrap up when done" marker: a corner badge on the avatar instead of a chip
-   in the text line (Joe, 2026-10-20 - disliked the chips-row flag). Bottom
-   right is the one corner none of the other three badges use: the status
-   dot sits bottom-left, the held/scheduled corners sit along the top edge,
-   and the project badge sits vertically centred on the right edge
-   (.session-proj-badge.is-centred), not in a true corner. */
+   in the text line (Joe, 2026-10-20 - disliked the chips-row flag). Top left
+   is where .session-sched-corner also sits, so a chat that is both scheduled
+   and wrapping up stacks the two on the same spot. */
 .wrap-up-chip {
   position: absolute;
-  bottom: 3px;
-  right: 3px;
+  top: 3px;
+  left: 3px;
   z-index: 11;
   display: inline-flex;
   align-items: center;
