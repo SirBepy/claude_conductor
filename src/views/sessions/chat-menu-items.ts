@@ -37,9 +37,10 @@ export interface ChatMenuCtx {
   /** "Wrap up when done" (per-session): while on, every turn's system prompt
    *  carries a standing instruction to self-verify and `/close` once the
    *  model believes the task is finished, unless it still needs something
-   *  from Joe. Unlike auto-accept, nothing in THIS app reads it - it only
-   *  matters to the model, so there is no draft-time equivalent of
-   *  `autoAcceptParked`. */
+   *  from Joe. Also drives the header/row badges and the menu's own
+   *  checkDot (sidebar-rows.ts, session-header.ts) - unlike auto-accept there
+   *  is no draft-time parking equivalent of `autoAcceptParked`, since nothing
+   *  here gates a live permission event. */
   wrapUpOnDoneOn: boolean;
   isHidden: boolean;
   /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is

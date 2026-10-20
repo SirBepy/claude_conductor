@@ -82,12 +82,25 @@ export function frozenChipHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "t
   return `<span class="frozen-chip${autoFrozen ? " frozen-chip--auto" : ""}" ${tipAttr}="${title}"><i class="ph-bold ph-snowflake"></i></span>`;
 }
 
-/** "Wrap up when done" marker - same slot/sizing as the frozen chip above.
- *  Same tooltip wording as the header button and chat menu item. */
+/** Shared by this chip, the header's corner badge (session-header.ts), and the
+ *  chat menu item, so the same toggle reads the same explanation everywhere
+ *  it surfaces. Lives here rather than in session-header.ts because that file
+ *  already imports `projBadgeHtml` from this one - the reverse import would
+ *  be a cycle. */
+export function wrapUpTooltip(on: boolean): string {
+  const base = on
+    ? "Wrap up when done: ON (Ctrl+Shift+W)"
+    : "Wrap up when done (Ctrl+Shift+W)";
+  const body = on
+    ? "once nothing more is needed from you, Claude self-verifies, commits, and closes this chat on its own - then it's off, since the chat is gone"
+    : "turn on to have Claude self-verify, commit, and close this chat on its own once nothing more is needed from you";
+  return `${base} - ${body}`;
+}
+
+/** "Wrap up when done" marker - same slot/sizing as the frozen chip above. */
 export function wrapUpChipHtml(on: boolean, tipAttr: "title" | "data-tip"): string {
   if (!on) return "";
-  const title = "Wrap up when done: ON - once nothing more is needed from you, Claude self-verifies, commits, and closes this chat on its own";
-  return `<span class="wrap-up-chip" ${tipAttr}="${title}"><i class="ph-bold ph-flag-checkered"></i></span>`;
+  return `<span class="wrap-up-chip" ${tipAttr}="${wrapUpTooltip(true)}"><i class="ph-bold ph-flag-checkered"></i></span>`;
 }
 
 /** Row-level tint class for a frozen chat - `""` when not frozen. Auto-frozen

@@ -20,6 +20,7 @@ const SEE_ONLY: &[&str] = &[
     "list_pending_prompts",
     "get_skipped_question_marks",
     "list_auto_accept",
+    "list_wrap_up_on_done",
     "load_history_page",
     "load_event_detail",
     "load_history",
@@ -177,7 +178,7 @@ mod tests {
     async fn a_view_only_peer_still_sees_and_starts_chats() {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with_peer(dir.path(), true);
-        for method in ["list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat"] {
+        for method in ["list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_wrap_up_on_done"] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");
         }
     }
