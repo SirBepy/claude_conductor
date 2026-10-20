@@ -10,29 +10,31 @@ const bgOf = (sel: string) => (page: import("@playwright/test").Page) =>
 // Joe's real Settings window width, where the picker has to fit.
 test.use({ viewport: { width: 474, height: 900 } });
 
-test("hovering a dot previews it without applying; clicking applies it", async ({ page }) => {
+test("hovering a palette previews it without applying; clicking applies it", async ({ page }) => {
   await mountView(page, { view: "settings-appearance" });
 
-  const dots = page.locator("#themePicker .tp-dot");
-  await expect(dots).toHaveCount(SIRBEPY_PALETTES.length);
+  const options = page.locator("#themePicker .tp-option");
+  await expect(options).toHaveCount(SIRBEPY_PALETTES.length);
+  // Every palette is labelled by name, not just by colour.
+  await expect(options).toHaveText(SIRBEPY_PALETTES.map((p) => p.label));
   await expect(page.locator("#themePicker .tp-group")).toHaveText(["SirBepy", "Editor classics"]);
 
   // Hover: only the preview repaints, to Gruvbox's dark background.
-  await page.locator('.tp-dot[data-palette="gruvbox"]').hover();
+  await page.locator('.tp-option[data-palette="gruvbox"]').hover();
   await expect(page.locator(".tp-preview")).toHaveAttribute("data-theme", "gruvbox");
   await expect(page.locator("#themeName")).toHaveText("Gruvbox");
   // Polled: the preview cross-fades its background.
   await expect.poll(() => bgOf(".tp-preview")(page)).toBe("rgb(29, 32, 33)");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "void");
 
-  // Leaving the dot puts the preview back on the applied theme.
+  // Leaving the palette puts the preview back on the applied theme.
   await page.mouse.move(2, 2);
   await expect(page.locator(".tp-preview")).toHaveAttribute("data-theme", "void");
 
-  // Click applies to the whole window and marks the dot.
-  await page.locator('.tp-dot[data-palette="nord"]').click();
+  // Click applies to the whole window and marks the row.
+  await page.locator('.tp-option[data-palette="nord"]').click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "nord");
-  await expect(page.locator('.tp-dot[data-palette="nord"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('.tp-option[data-palette="nord"]')).toHaveAttribute("aria-pressed", "true");
   const bg = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue("--color-background").trim(),
   );

@@ -168,43 +168,49 @@
   text-transform: uppercase;
   color: var(--sb-muted);
 }
-.tp-dots {
+.tp-list {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 8px;
-  justify-items: center;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 6px;
 }
-/* Background / surface split diagonally, the palette's accent in the middle. */
-.tp-dot {
-  position: relative;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  border-radius: 50%;
-  border: 2px solid var(--tp-surface);
-  background: linear-gradient(135deg, var(--tp-bg) 50%, var(--tp-surface) 50%);
+.tp-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--fs-body);
+  text-align: left;
   cursor: pointer;
-  transition: transform 0.12s var(--motion-ease);
 }
-.tp-dot::after {
-  content: "";
-  position: absolute;
-  inset: 50% auto auto 50%;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--tp-accent);
-  transform: translate(-50%, -50%);
+.tp-option:hover {
+  background: var(--color-surface-alt);
 }
-.tp-dot:hover,
-.tp-dot:focus-visible {
-  transform: scale(1.08);
-}
-.tp-dot:focus-visible {
+.tp-option:focus-visible {
   outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
-.tp-dot[aria-pressed="true"] {
-  border-color: var(--color-text);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 45%, transparent);
+.tp-option[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+/* Three overlapping dots; the ring in the row background keeps a dark dot
+ * readable against a dark page. */
+.tp-swatch {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.tp-swatch > span {
+  width: 14px;
+  height: 14px;
+  margin-left: -5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-surface);
+}
+.tp-swatch > span:first-child {
+  margin-left: 0;
 }
