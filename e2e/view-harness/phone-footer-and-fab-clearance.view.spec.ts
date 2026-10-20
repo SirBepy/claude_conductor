@@ -27,6 +27,15 @@ async function mountPhoneSession(page: Page): Promise<void> {
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
   await page.locator("#sessions-list li[data-session-id='s1']").click();
   await page.locator("#session-pane .session-composer").waitFor();
+  // The pane slides in over --motion-base; geometry sampled mid-slide is offset
+  // by the remaining translateX, so wait for the transform to settle.
+  await page.waitForFunction(() => {
+    const pane = document.querySelector(".session-pane");
+    if (!pane) return false;
+    const t = getComputedStyle(pane).transform;
+    // Settled is "none" or an identity matrix with zero translation.
+    return t === "none" || new DOMMatrix(t).m41 === 0;
+  });
 }
 
 const QUESTION = [{
