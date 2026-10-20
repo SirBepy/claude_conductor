@@ -108,13 +108,13 @@
 
 /* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which
    read as clutter) - same geometry as .session-header-proj-badge (bottom
-   right), mirrored to the free top-right corner so the two never collide.
+   right), mirrored to the free top-left corner so the two never collide.
    Unlike the project badge this one IS interactive, so pointer-events stays
    default and it gets its own hover/focus state. */
 .session-header-avatar-wrap .wrap-up-btn {
   position: absolute;
   top: -2px;
-  right: -5px;
+  left: -5px;
   width: 16px;
   height: 16px;
   border-radius: 50%;
