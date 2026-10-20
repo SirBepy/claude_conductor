@@ -4,9 +4,11 @@
 //! One card is one TOPIC; recipients are variants inside it.
 
 mod api;
+mod display;
 mod persistence;
 mod types;
 
 pub use api::*;
+pub use display::*;
 pub use types::*;
 pub(crate) use persistence::draft_path;
