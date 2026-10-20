@@ -165,6 +165,7 @@ export interface RemoteDevice {
   id: string;
   name: string;
   created_at: number; // unix timestamp seconds
+  last_used?: number | null; // unix seconds; null until the first auth after upgrade
 }
 
 // Machine federation (Settings > Remote access > Paired machines). Loose local
