@@ -187,10 +187,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("count_ai_todos", P),
     ("list_ai_todos", P),
     // Read-only, gated by reject_unknown(root) in registry.rs (todo 656).
-    ("get_project_tech", P),
+    // PM (was P): an optional `machine_id` param now lets a caller ask for a
+    // peer's own project icon/tech instead of this daemon's filesystem
+    // (project_meta.rs's `forward_project_read_if_peer`) - the peer's own
+    // copy of this method, reached that way, must accept a PeerMachine
+    // caller too, same as the method itself being forwarded.
+    ("get_project_tech", PM),
     // Read-only fs read + base64 return; gated by reject_unknown(root) in
     // registry.rs - was the worst of the four todo-656 findings (unguarded).
-    ("get_project_icon", P),
+    // PM (was P): same machine_id-forward reasoning as get_project_tech above.
+    ("get_project_icon", PM),
     // Read-only usage/token history for the remote homescreen + statistics.
     ("get_history", P),
     ("get_token_history", P),
@@ -211,7 +217,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // phone had no daemon RPC for it at all - it silently fell back to a
     // frontend heuristic using a possibly-stale cached model, which could
     // show a wildly different % than desktop for the same session.
-    ("context_status", P),
+    // PM (was P): missed in the G10 git/file-read remask sweep, so the
+    // context chip never reached a session mirrored from a paired peer
+    // machine - `resolve_cwd` doesn't apply here since this reads the
+    // OWNING daemon's own transcript/registry by session_id, same as
+    // load_history_page above.
+    ("context_status", PM),
     // Read-only account registry so the phone's new-chat picker lists the same
     // accounts as desktop (ai_todo 241). Read-only: no add/remove/logout/default
     // mutators are exposed - the phone can pick an account to spawn under, not
@@ -575,7 +586,7 @@ mod tests {
             "list_pending_prompts", "confirm_question_rendered", "get_skipped_question_marks",
             "set_session_effort", "set_session_model", "set_auto_accept", "list_auto_accept",
             "freeze_session", "unfreeze_session", "paste_attachment", "read_attachment",
-            "transcript_stats", "load_history",
+            "transcript_stats", "load_history", "context_status",
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
         }
@@ -598,6 +609,21 @@ mod tests {
             "list_branch_files", "list_project_files",
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
+        }
+    }
+
+    /// `get_project_icon`/`get_project_tech` are a DIFFERENT forward shape
+    /// than the git/file reads above - no `session_id` to route by, so
+    /// `project_meta.rs::forward_project_read_if_peer` forwards by an
+    /// explicit `machine_id` param instead (same idea as
+    /// `list_machine_projects`). The forwarding daemon's own call still lands
+    /// on the peer's `/api/rpc`, so the peer must accept it from a
+    /// `PeerMachine` caller too - each was phone-only (`P`) and is now `PM`.
+    #[test]
+    fn project_icon_and_tech_are_machine_callable() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in ["get_project_icon", "get_project_tech"] {
+            assert!(allowed(m, &peer), "{m} must be callable by a peer machine for the machine_id forward");
         }
     }
 

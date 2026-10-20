@@ -40,6 +40,16 @@ pub const ERR_REPAIR_REQUIRED: i32 = -32013;
 /// could send instead.
 const ID_PARAM_METHODS: &[&str] = &[];
 
+/// Methods whose successful forward resolves (removes) a prompt on the owning
+/// peer - `respond_permission`/`respond_question` both call `settle_prompt`,
+/// which drops the record there. Our own `MirrorState` cache of that peer's
+/// prompts only learns about the removal on `peer_link`'s next refresh (the
+/// next `instances_changed` frame, or its 2s tick) - a caller polling
+/// `list_pending_prompts` here in that window would see the just-answered
+/// card resurface. Evicting it from our cache the instant the forward
+/// succeeds, rather than waiting, closes that window.
+const PROMPT_RESOLVING_METHODS: &[&str] = &["respond_permission", "respond_question"];
+
 /// Extracts the session id a request targets, if any: `params.session_id`,
 /// or `params.id` for the small allowlist above. Any other shape (no
 /// identifying param, e.g. `start_session`'s `cwd`, or `respond_permission`'s
@@ -115,7 +125,18 @@ async fn forward_one(
         Ok(c) => c,
         Err(e) => return Some(Err(e)),
     };
-    Some(client.call(method, params_value).await.map_err(map_peer_err))
+    let request_id = if PROMPT_RESOLVING_METHODS.contains(&method) {
+        params_value.get("request_id").and_then(Value::as_str).map(str::to_string)
+    } else {
+        None
+    };
+    let result = client.call(method, params_value).await.map_err(map_peer_err);
+    if result.is_ok() {
+        if let Some(rid) = request_id {
+            state.mirror.drop_prompt(&machine_id, &rid);
+        }
+    }
+    Some(result)
 }
 
 /// Registry lookup, online check, and `client_for`, the three steps every
@@ -532,6 +553,55 @@ mod tests {
         b_serve.kill();
     }
 
+    /// Same round trip as the test above, but asserting the OTHER half of
+    /// the fix: A's own mirrored-prompt cache for B must drop "req-1" the
+    /// instant the forward succeeds, not wait for B's next
+    /// `instances_changed` frame or `peer_link`'s 2s tick - a client polling
+    /// `list_pending_prompts` on A right after answering must never see the
+    /// already-answered card again.
+    #[tokio::test]
+    async fn respond_question_forward_evicts_the_prompt_from_as_own_mirror_cache() {
+        use crate::daemon::methods::register_responders;
+        use tokio::sync::oneshot;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (tx, _rx) = oneshot::channel();
+        b_state.pending.lock().await.insert("req-1".to_string(), tx);
+
+        let mut b_router = Router::new();
+        register_responders(&mut b_router, b_state.clone());
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "b-session-1");
+        // Seed A's own mirror cache the way `peer_link` would have, as if a
+        // prior fetch had already picked up this still-open prompt.
+        state.mirror.set_prompts(
+            "mach-b",
+            vec![json!({"id": "req-1", "event": "question-requested", "payload": {"session_id": "b-session-1"}, "durable": true})],
+        );
+
+        let result = forward_one(
+            &state,
+            "respond_question",
+            Some(json!({"request_id": "req-1", "session_id": "b-session-1", "answers": {"color": "blue"}, "skipped": false})),
+            &Transport::Local,
+        )
+        .await;
+        assert!(matches!(result, Some(Ok(_))), "expected the forward to succeed, got {result:?}");
+        assert!(
+            state.mirror.prompts().is_empty(),
+            "req-1 must be evicted from A's mirror cache immediately, not left for the next peer_link refresh: {:?}",
+            state.mirror.prompts()
+        );
+
+        b_serve.kill();
+    }
+
     /// `set_session_model` on A for a session mirrored from B is forwarded
     /// over real loopback HTTP, landing on B's stub with our params intact -
     /// before the remask this method hit `ERR_NOT_FORWARDABLE`.
@@ -734,6 +804,57 @@ mod tests {
             other => panic!("expected the forwarded call to succeed, got {other:?}"),
         };
         assert_eq!(info["branch"], json!("main"), "must reflect B's own registered repo: {info:?}");
+
+        b_serve.kill();
+    }
+
+    /// `context_status` dispatched on A for a session mirrored from B is
+    /// forwarded over real loopback HTTP to B's REAL `context_status` RPC
+    /// handler (`register_context`, not a stub) - proving the PM remask
+    /// (`remote_transport_table.rs`) actually unblocks the context chip for a
+    /// session hosted on a paired peer machine, which previously always hit
+    /// `ERR_NOT_FORWARDABLE` since this method was missed in the G10 remask
+    /// sweep that covered the git/file-read methods above.
+    #[tokio::test]
+    async fn mirrored_context_status_reaches_bs_own_handler() {
+        use crate::daemon::methods::register_context;
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        b_state.registry.register(
+            RegisterInput {
+                session_id: "b-session-1".into(),
+                cwd: std::path::PathBuf::from("C:/b-repo"),
+                pid: 4242,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: None,
+                started_at: "2026-09-05T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-09-05T00:00:00Z",
+        );
+
+        let mut b_router = Router::new();
+        register_context(&mut b_router, b_state.clone());
+        let (_b_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "b-session-1");
+
+        let result =
+            forward_one(&state, "context_status", Some(json!({"session_id": "b-session-1"})), &Transport::Local).await;
+        // No real transcript exists for this fixture session, so B's handler
+        // resolves to `None` - the point here is that the call reaches B's
+        // handler at all (`Some(Ok(_))`), not what it finds, which is what
+        // `ERR_NOT_FORWARDABLE` (a `Some(Err(_))` with that code) used to block.
+        assert!(matches!(result, Some(Ok(_))), "expected the forward to reach B's handler, got {result:?}");
 
         b_serve.kill();
     }

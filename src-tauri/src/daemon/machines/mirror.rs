@@ -190,6 +190,18 @@ impl MirrorState {
         guard.values().flat_map(|p| p.prompts.clone()).collect()
     }
 
+    /// Evicts one prompt from `machine_id`'s cached list right after a
+    /// successfully forwarded answer (`forward.rs::forward_one`), instead of
+    /// waiting for `peer_link`'s next refresh (the next `instances_changed`
+    /// frame, or its 2s tick) - a caller polling `list_pending_prompts` in
+    /// that window would otherwise see the already-answered prompt resurface.
+    pub fn drop_prompt(&self, machine_id: &str, request_id: &str) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(peer) = guard.get_mut(machine_id) {
+            peer.prompts.retain(|p| p["id"].as_str() != Some(request_id));
+        }
+    }
+
     /// Whether `machine_id`'s prompt cache currently holds anything - the
     /// "still non-empty, keep polling even without a fresh frame" half of
     /// `peer_link`'s refresh trigger.
@@ -377,6 +389,25 @@ mod tests {
         m.set_online("mach-b", false);
         assert!(!m.has_cached_prompts("mach-b"));
         assert!(m.prompts().is_empty());
+    }
+
+    #[test]
+    fn drop_prompt_evicts_only_the_matching_id() {
+        let m = MirrorState::new();
+        m.set_instances("mach-b", "Mac Mini", vec![]);
+        m.set_prompts("mach-b", vec![serde_json::json!({"id": "p1"}), serde_json::json!({"id": "p2"})]);
+        m.drop_prompt("mach-b", "p1");
+        assert_eq!(m.prompts(), vec![serde_json::json!({"id": "p2"})]);
+    }
+
+    #[test]
+    fn drop_prompt_on_an_unknown_machine_or_id_is_a_no_op() {
+        let m = MirrorState::new();
+        m.drop_prompt("mach-nonexistent", "p1"); // no entry at all - must not panic
+        m.set_instances("mach-b", "Mac Mini", vec![]);
+        m.set_prompts("mach-b", vec![serde_json::json!({"id": "p1"})]);
+        m.drop_prompt("mach-b", "no-such-id");
+        assert_eq!(m.prompts(), vec![serde_json::json!({"id": "p1"})]);
     }
 
     #[test]
