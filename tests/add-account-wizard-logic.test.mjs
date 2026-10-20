@@ -242,11 +242,10 @@ describe("buildIdentitySurface", () => {
     expect(view.tokenExpiryLabel).toBe("Token expiry unknown");
     expect(view.refreshExpiryLabel).toBe("Re-login window unknown");
     expect(view.hasCookie).toBe(false);
-    expect(view.showConnectUsage).toBe(true);
     expect(view.warningMessage).toBeNull();
   });
 
-  it("offers Connect usage and warns when a cookie is on disk but get_auth_state_map says it's expired", () => {
+  it("warns when a cookie is on disk but get_auth_state_map says it's expired", () => {
     const identity = {
       oauthAccount: { emailAddress: "live@x.com", organizationUuid: "org-1", organizationType: "claude_max" },
       tokenExpiresAt: null,
@@ -257,7 +256,6 @@ describe("buildIdentitySurface", () => {
     const view = buildIdentitySurface(account, identity, "needslogin");
     expect(view.hasCookie).toBe(true);
     expect(view.usageNeedsLogin).toBe(true);
-    expect(view.showConnectUsage).toBe(true);
     expect(view.warningMessage).toBe("Usage tracking login expired - click Connect usage to reconnect.");
   });
 
@@ -270,7 +268,7 @@ describe("buildIdentitySurface", () => {
       driftMessage: null,
     };
     const view = buildIdentitySurface(account, identity, "loggedin");
-    expect(view.showConnectUsage).toBe(false);
+    expect(view.usageNeedsLogin).toBe(false);
     expect(view.warningMessage).toBeNull();
   });
 
