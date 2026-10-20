@@ -2,7 +2,7 @@
 
 // The masked secret card for the `request_secret` MCP tool. Pins
 // the acceptance items the Rust half doesn't cover: the card shows what's
-// asked (label/file/key) and which session asked, Save invokes
+// asked (file/key) and which session asked, Save invokes
 // respond_secret with exactly the typed value then clears the input
 // regardless of outcome, Cancel sends no value, a durable prompt-resolved
 // tears the card down, and the typed value never reaches console output or
@@ -51,24 +51,41 @@ afterEach(() => {
 });
 
 describe("showSecretCard", () => {
-  it("shows the label, file, key and the asking session's display name", () => {
+  it("shows the file, key and the asking session's name, but never the AI-written label", () => {
     showSecretCard(payload());
     const text = card().textContent;
-    expect(text).toContain("Kinetic Panel API key");
     expect(text).toContain("C:\\repo\\.secrets.env");
     expect(text).toContain("KINETIC_API_KEY");
     expect(text).toContain("Wire up billing");
-    expect(text).toContain("kinetic-panel");
+    expect(card().querySelector(".secret-card__from").title).toBe("kinetic-panel");
+    // Model-written free text could pass for the app's own prompt.
+    expect(text).not.toContain("Kinetic Panel API key");
   });
 
-  it("titles the card as the AI's ask and marks the label as the AI's words", () => {
+  it("titles the card plainly and names the asking chat in the header", () => {
     showSecretCard(payload());
-    expect(card().querySelector(".prompt-card__title").textContent).toContain("The AI in Wire up billing (kinetic-panel) is asking for a secret");
-    const quote = card().querySelector(".secret-card__quote");
-    expect(quote.textContent).toContain("The AI's words");
-    expect(quote.querySelector(".secret-card__label").textContent).toContain("Kinetic Panel API key");
-    expect(card().querySelector(".secret-card__warning").textContent.replace(/\s+/g, " ")).toContain(
-      "Only paste a key meant for C:\\repo\\.secrets.env:KINETIC_API_KEY. The app never asks for your passwords.");
+    expect(card().querySelector(".prompt-card__title").textContent).toContain("Secret requested");
+    expect(card().querySelector(".prompt-card__header .secret-card__from").textContent.replace(/\s+/g, " ")).toContain("from Wire up billing");
+  });
+
+  it("hides the Windows verbatim prefix the daemon canonicalizes paths with", () => {
+    invokeMock.mockResolvedValue(undefined);
+    showSecretCard(payload({ file: "\\\\?\\C:\\repo\\.secrets.env" }));
+    expect(card().querySelector(".secret-card__path").textContent).toBe("C:\\repo\\.secrets.env");
+    card().querySelector('[data-act="reveal"]').click();
+    // The reveal still gets the daemon's own path untouched.
+    expect(invokeMock).toHaveBeenCalledWith("reveal_file_in_explorer", { path: "\\\\?\\C:\\repo\\.secrets.env" });
+  });
+
+  it("the eye toggles the input between masked and plain without touching the value", () => {
+    showSecretCard(payload());
+    const field = input();
+    field.value = SECRET_VALUE;
+    card().querySelector('[data-act="peek"]').click();
+    expect(field.type).toBe("text");
+    expect(field.value).toBe(SECRET_VALUE);
+    card().querySelector('[data-act="peek"]').click();
+    expect(field.type).toBe("password");
   });
 
   it("on the phone the card has no input or Save and never calls respond_secret", () => {
