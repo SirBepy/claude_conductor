@@ -1,7 +1,7 @@
 //! `Router` wiring for the draft-message RPCs. Handler logic lives in the
 //! parent `drafts_store` module; this file only parses params and dispatches.
 
-use super::{delete_draft, list_message_drafts, set_draft_body, set_draft_state, set_draft_version};
+use super::{list_message_drafts, set_draft_body, set_draft_state, set_draft_version};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde_json::Value;
@@ -79,17 +79,4 @@ pub fn register_drafts_store(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    router.register("delete_draft", move |params, _ctx| {
-        let state = state.clone();
-        async move {
-            #[derive(serde::Deserialize)]
-            struct P {
-                session_id: String,
-                id: String,
-            }
-            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            delete_draft(&state, &p.session_id, &p.id).map_err(RpcError::internal)
-        }
-    });
 }

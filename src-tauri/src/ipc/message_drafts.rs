@@ -63,10 +63,3 @@ pub async fn set_draft_state(
     client.set_draft_state(&session_id, &id, &next).await.map_err(|e| e.to_string())?;
     Ok(())
 }
-
-#[tauri::command]
-pub async fn delete_draft(session_id: String, id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-    client.delete_draft(&session_id, &id).await.map_err(|e| e.to_string())?;
-    Ok(())
-}

@@ -6,17 +6,18 @@
 //! injection block in the sibling `inject` module.
 
 mod inject;
+mod people_resolve;
 mod routes;
 
 pub(crate) use inject::{mark_drafts_seen, render_for_injection};
+use people_resolve::{annotate, person_for_write, platform_for, recipient_label};
 pub use routes::register_drafts_store;
 
 use super::channel::{caller_project, display_name};
 use crate::daemon::state::DaemonState;
-use crate::people::{self, Person, Resolved};
+use crate::people;
 use crate::sessions::message_drafts::{self as store, DraftReceipt, DraftState, MessageDraft, VariantTarget};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -27,10 +28,9 @@ pub(super) fn publish_changed(state: &Arc<DaemonState>, project_id: &str) {
 fn parse_state(s: &str) -> Result<DraftState, String> {
     match s {
         "needs-you" => Ok(DraftState::NeedsYou),
-        "ready" => Ok(DraftState::Ready),
         "copied" => Ok(DraftState::Copied),
         "archived" => Ok(DraftState::Archived),
-        other => Err(format!("unknown draft state: {other} (want needs-you|ready|copied|archived)")),
+        other => Err(format!("unknown draft state: {other} (want needs-you|copied|archived)")),
     }
 }
 
@@ -121,96 +121,6 @@ pub(crate) fn list_message_drafts_in(
     let everyone = vault.map(people::list_at).unwrap_or_default();
     let used = annotate(&mut drafts, &everyone);
     Ok(json!({"drafts": drafts, "people": used}))
-}
-
-/// Fills `person`/`platform` on variants written before those fields existed,
-/// from the free-text `recipient` (else the body, for a Shortcut comment), for
-/// this response only - the store keeps what was written. A stored `person` is
-/// never second-guessed; a stored platform only gets its current name.
-fn annotate(drafts: &mut [MessageDraft], everyone: &[Person]) -> Vec<Person> {
-    let mut used: BTreeMap<String, Person> = BTreeMap::new();
-    for draft in drafts.iter_mut() {
-        for variant in draft.variants.iter_mut() {
-            variant.platform = match variant.platform.take() {
-                Some(p) => Some(store::canonical_platform(&p).to_string()),
-                None => store::infer_platform(&variant.recipient)
-                    .or_else(|| store::infer_platform_from_body(&draft.topic, store::current_body(variant)))
-                    .map(str::to_string),
-            };
-        }
-    }
-    for variant in drafts.iter_mut().flat_map(|d| d.variants.iter_mut()) {
-        if variant.person.is_none() {
-            if let Resolved::One(p) = people::resolve(everyone, &variant.recipient) {
-                variant.person = Some(p.id.clone());
-            }
-        }
-        if let Some(p) = variant.person.as_ref().and_then(|id| everyone.iter().find(|p| &p.id == id)) {
-            used.entry(p.id.clone()).or_insert_with(|| p.clone());
-        }
-    }
-    used.into_values().collect()
-}
-
-/// The `person` a write names, checked against the vault. An unknown name is
-/// an error on purpose: a draft is the one place a wrong person costs
-/// something, so this refuses rather than guessing. With no vault on this
-/// machine the name is trusted as given. Inside a client's repo, the names
-/// people go by there ("backend") resolve too, and a new person joins that
-/// client.
-fn person_for_write(vault: Option<&Path>, client: Option<&str>, args: &Value) -> Result<Option<Person>, String> {
-    let wanted = args.get("person").and_then(|v| v.as_str()).unwrap_or("").trim();
-    if wanted.is_empty() {
-        return Ok(None);
-    }
-    let Some(vault) = vault else {
-        return Ok(Some(Person { id: wanted.into(), name: wanted.into(), ..Default::default() }));
-    };
-    let everyone = people::list_at(vault);
-    match people::resolve_in(&everyone, wanted, client) {
-        Resolved::One(p) => Ok(Some(p.clone())),
-        Resolved::Ambiguous(hits) => {
-            let names: Vec<&str> = hits.iter().map(|p| p.id.as_str()).collect();
-            Err(format!(
-                "\"{wanted}\" matches more than one person in the user's vault: {}. Ask the user which one, then pass that exact name as `person`.",
-                names.join(", ")
-            ))
-        }
-        Resolved::None if args.get("new_person").and_then(|v| v.as_bool()).unwrap_or(false) => {
-            let aliases: Vec<String> = args
-                .get("aliases")
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
-                .unwrap_or_default();
-            let relationship = args.get("relationship").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let projects = client.map(|c| vec![c.to_string()]).unwrap_or_default();
-            people::create_at(vault, wanted, &people::NewPerson { aliases, relationship, projects, ..Default::default() }).map(Some)
-        }
-        Resolved::None => Err(format!(
-            "No one called \"{wanted}\" in the user's vault (People/). If you are not certain who the user means, ask them first with ask_user_question, suggesting likely matches. Once you know: pass their exact vault name as `person`, or, for someone genuinely new, the full name with `new_person: true` plus `aliases`/`relationship` to create their People note."
-        )),
-    }
-}
-
-/// `recipient` is optional on a write: the person's name, else the platform,
-/// labels the variant and keys its `Bruno #2` handle.
-fn recipient_label(given: &str, person: Option<&Person>, platform: &str) -> Result<String, String> {
-    [given, person.map(|p| p.name.as_str()).unwrap_or(""), platform]
-        .into_iter()
-        .map(str::trim)
-        .find(|s| !s.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| "recipient, person or platform is required".to_string())
-}
-
-/// The platform Claude named, else one read off the recipient text.
-fn platform_for(given: &str, recipient: &str) -> Option<String> {
-    let given = given.trim();
-    if given.is_empty() {
-        store::infer_platform(recipient).map(str::to_string)
-    } else {
-        Some(given.to_string())
-    }
 }
 
 /// The single `write_draft` MCP tool's four actions.
@@ -397,26 +307,6 @@ pub(crate) fn set_draft_state_at(
     Ok(json!({"ok": true, "draft": draft}))
 }
 
-pub(crate) fn delete_draft(state: &Arc<DaemonState>, session_id: &str, id: &str) -> Result<Value, String> {
-    delete_draft_at(None, state, session_id, id)
-}
-
-/// `root: Some(path)` substitutes a tempdir for the real app-data root
-/// `delete_draft` above resolves through `store::remove` - the seam hermetic
-/// tests use, same shape as `repo_channel::post_at`.
-pub(crate) fn delete_draft_at(root: Option<&Path>, state: &Arc<DaemonState>, session_id: &str, id: &str) -> Result<Value, String> {
-    let project_id = caller_project(state, session_id)?;
-    let full = resolve_id(root, &project_id, id)?;
-    let removed = match root {
-        Some(r) => store::remove_at(&store::draft_path(r, &project_id), &full)?,
-        None => store::remove(&project_id, &full)?,
-    };
-    if removed {
-        publish_changed(state, &project_id);
-    }
-    Ok(json!({"ok": true, "removed": removed}))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,8 +331,7 @@ mod tests {
         assert!(write_draft(&state, "ghost", "add", &json!({})).is_err());
         assert!(set_draft_body(&state, "ghost", "id", "", "x").is_err());
         assert!(set_draft_version(&state, "ghost", "id", "", 1).is_err());
-        assert!(set_draft_state(&state, "ghost", "id", "ready").is_err());
-        assert!(delete_draft(&state, "ghost", "id").is_err());
+        assert!(set_draft_state(&state, "ghost", "id", "archived").is_err());
     }
 
     #[test]
@@ -468,7 +357,7 @@ mod tests {
     #[test]
     fn parse_state_covers_every_variant() {
         assert_eq!(parse_state("needs-you").unwrap(), DraftState::NeedsYou);
-        assert_eq!(parse_state("ready").unwrap(), DraftState::Ready);
+        assert!(parse_state("ready").is_err(), "ready is no longer a settable state");
         assert_eq!(parse_state("copied").unwrap(), DraftState::Copied);
         assert_eq!(parse_state("archived").unwrap(), DraftState::Archived);
         assert!(parse_state("").is_err());

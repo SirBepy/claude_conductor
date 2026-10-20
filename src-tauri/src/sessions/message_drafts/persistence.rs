@@ -52,14 +52,14 @@ pub(super) fn write_atomic(path: &Path, store: &Store) {
     }
 }
 
-/// Drops Copied and Archived first, then Ready - never a card still marked
+/// Drops Copied and Archived first - never a card still marked
 /// NeedsYou, which is the one outcome this store must not silently produce.
 pub(super) fn prune(drafts: &mut Vec<MessageDraft>) {
     if drafts.len() <= MAX_DRAFTS {
         return;
     }
     let mut excess = drafts.len() - MAX_DRAFTS;
-    for state in [DraftState::Copied, DraftState::Archived, DraftState::Ready, DraftState::NeedsYou] {
+    for state in [DraftState::Copied, DraftState::Archived, DraftState::NeedsYou] {
         if excess == 0 {
             break;
         }
@@ -141,5 +141,29 @@ mod tests {
         assert_eq!(versions.len(), MAX_VERSIONS);
         assert_eq!(versions[0].n, 1, "the origin version survives");
         assert_eq!(versions.last().unwrap().n, MAX_VERSIONS as u32 + 5);
+    }
+
+    #[test]
+    fn a_draft_stored_with_the_retired_ready_state_loads_as_needs_you() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("drafts.json");
+        let new = super::super::api::NewDraft {
+            topic: "t",
+            recipient: "Bruno",
+            body: "hi",
+            brief: "",
+            receipts: Vec::new(),
+            origin_session_id: "s1",
+            origin_label: "",
+            person: None,
+            platform: None,
+        };
+        super::super::api::add_at(&path, new).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("\"state\": \"needs-you\""), "fixture must carry the state it rewrites");
+        std::fs::write(&path, on_disk.replace("\"state\": \"needs-you\"", "\"state\": \"ready\"")).unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.drafts.len(), 1, "an old ready draft must not make the whole store fail to load");
+        assert_eq!(loaded.drafts[0].state, DraftState::NeedsYou);
     }
 }

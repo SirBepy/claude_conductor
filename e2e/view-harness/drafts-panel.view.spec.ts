@@ -65,7 +65,7 @@ const SEED = [
         versions: [version(1, "Hi Marko, following up on invoice 2026-03-14.", "ai", "first pass")],
       },
     ],
-    state: "ready",
+    state: "needs-you",
     origin_session_id: VIEWER,
     origin_label: "auth-work",
     created_at: HOUR_AGO_ISO,
@@ -143,9 +143,6 @@ async function mountPanel(page: Page, hostCss?: string) {
             if (d) d.state = args.next;
             return Promise.resolve(null);
           }
-          case "delete_draft":
-            store.drafts = store.drafts.filter((d: any) => d.id !== args.id);
-            return Promise.resolve(null);
           default:
             return passthrough(cmd, args);
         }
