@@ -33,15 +33,21 @@ export function dismissSecretCard(id?: string): void {
   _active.teardown();
 }
 
-/** The session's display label the way the sidebar/header already resolve it
- *  (sessionSubtitle + projectName), so the card says the same thing the rest
- *  of the app would call this chat. Falls back for a session not (or no
+/** The asking chat's name the way the sidebar/header already resolve it
+ *  (sessionSubtitle), so the card calls it what the rest of the app does.
+ *  `title` carries the project too. Falls back for a session not (or no
  *  longer) in `state.sessions`. */
-function sessionLabel(sessionId: string | undefined): string {
-  if (!sessionId) return "Unknown chat";
-  const inst = state.sessions.find((s) => s.session_id === sessionId);
-  if (!inst) return "Unknown chat";
-  return `${sessionSubtitle(inst)} (${projectName(inst)})`;
+function sessionLabel(sessionId: string | undefined): { name: string; project: string } {
+  const inst = sessionId ? state.sessions.find((s) => s.session_id === sessionId) : undefined;
+  if (!inst) return { name: "Unknown chat", project: "" };
+  return { name: sessionSubtitle(inst), project: projectName(inst) };
+}
+
+/** The daemon canonicalizes the target on Windows, which prefixes it with the
+ *  verbatim `\\?\` marker. That is plumbing, not part of the path the user
+ *  would recognise. */
+function displayPath(file: string): string {
+  return file.replace(/^\\\\\?\\/, "");
 }
 
 export function showSecretCard(payload: SecretRequestedPayload): void {
@@ -84,13 +90,18 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   setActivePermissionCard(teardownEsc);
   _active = { id: payload.id, teardown: teardownEsc };
 
-  // Titled as the AI's ask, not the app's: the label is model-written free
-  // text, so a tricked agent could otherwise pass for the app's own
-  // re-authentication prompt.
+  // The AI-written `label` is deliberately not rendered: model-written free
+  // text could pass for the app's own re-authentication prompt, and the key
+  // name plus target file already say what is being asked. The header names
+  // the asking chat instead.
+  const asker = sessionLabel(payload.session_id);
   const title = `
     <span class="prompt-card__title">
       <i class="ph ph-lock-key"></i>
-      The AI in ${escapeHtml(sessionLabel(payload.session_id))} is asking for a secret
+      Secret requested
+    </span>
+    <span class="secret-card__from"${asker.project ? ` title="${escapeHtml(asker.project)}"` : ""}>
+      <i class="ph ph-chat-circle-text"></i> from <b>${escapeHtml(asker.name)}</b>
     </span>
   `;
 
@@ -98,40 +109,31 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
     // reveal_file_in_explorer acts on the desktop's own disk - the phone has
     // none, so the path renders as inert text there instead of a dead button
     // (same gate file-surface.ts uses for its own desktop-only reveal action).
+    const shown = escapeHtml(displayPath(payload.file));
+    const path = `<span class="secret-card__path"><bdi>${shown}</bdi></span>`;
     const fileRow = isRemote()
-      ? `<code>${escapeHtml(payload.file)}</code>`
+      ? path
       : `<button type="button" class="secret-card__file" data-act="reveal" title="Show in File Explorer">
-          <code>${escapeHtml(payload.file)}</code>
+          ${path}
           <i class="ph ph-arrow-square-out"></i>
         </button>`;
     return `
-      <figure class="secret-card__quote">
-        <figcaption class="secret-card__quote-k">The AI's words</figcaption>
-        <blockquote class="secret-card__label">&ldquo;${escapeHtml(payload.label)}&rdquo;</blockquote>
-      </figure>
-      <div class="secret-card__meta">
-        <div class="secret-card__meta-row">
-          <i class="ph ph-file-text"></i>
-          <div class="secret-card__meta-text">
-            <span class="secret-card__meta-k">Saves to</span>
-            ${fileRow}
-            <span class="secret-card__meta-key">as <code>${escapeHtml(payload.key)}</code></span>
-          </div>
-        </div>
-      </div>
-      <p class="secret-card__warning">
-        <i class="ph ph-warning"></i>
-        <span>Only paste a key meant for <code>${escapeHtml(payload.file)}:${escapeHtml(payload.key)}</code>. The app never asks for your passwords.</span>
-      </p>
+      <dl class="secret-card__ledger">
+        <dt>File</dt><dd>${fileRow}</dd>
+        <dt>Key</dt><dd><span class="secret-card__key">${escapeHtml(payload.key)}</span></dd>
+      </dl>
       ${isRemote()
         ? `<p class="secret-card__desktop-only"><i class="ph ph-desktop"></i> Enter this secret on the desktop. A phone can't submit it.</p>`
-        : `<input
-        type="password"
-        class="secret-card__input"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="Paste the secret value"
-      >`}
+        : `<div class="secret-card__input-wrap">
+        <input
+          type="password"
+          class="secret-card__input"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Paste the secret value"
+        >
+        <button type="button" class="secret-card__eye" data-act="peek" aria-label="Show value" title="Show value"><i class="ph ph-eye"></i></button>
+      </div>`}
       ${error ? `<div class="secret-card__error"><i class="ph ph-warning-circle"></i> ${escapeHtml(error)}</div>` : ""}
     `;
   }
@@ -217,6 +219,16 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
     });
     saveBtn.addEventListener("click", () => void save());
     host.querySelector<HTMLButtonElement>('[data-act="cancel"]')!.addEventListener("click", () => void cancel());
+    // Reveal toggles the input type only; the value never leaves the element.
+    const peek = host.querySelector<HTMLButtonElement>('[data-act="peek"]');
+    peek?.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      peek.setAttribute("aria-label", show ? "Hide value" : "Show value");
+      peek.title = show ? "Hide value" : "Show value";
+      peek.innerHTML = `<i class="ph ph-${show ? "eye-slash" : "eye"}"></i>`;
+      input.focus();
+    });
     host.querySelector<HTMLButtonElement>('[data-act="reveal"]')?.addEventListener("click", () => {
       void invoke<void>("reveal_file_in_explorer", { path: payload.file })
         .catch((err) => console.warn("[secret-card] reveal failed:", err));

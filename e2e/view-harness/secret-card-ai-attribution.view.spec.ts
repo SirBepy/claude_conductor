@@ -2,7 +2,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 
-const SHOT_DIR = ".for_bepy/screenshots/45936-134369823088871704";
+const SHOT_DIR = ".for_bepy/screenshots/50576-134369897182669800";
 
 async function mount(page: Page) {
   await mountView(page, { invoke: { list_slash_commands: [] } });
@@ -19,12 +19,12 @@ async function mount(page: Page) {
   return page.locator(".prompt-card");
 }
 
-test("the secret card marks its text as the AI's and carries the fixed warning", async ({ page }) => {
+test("the secret card shows only file and key, names the asker in the header, and drops the AI's label", async ({ page }) => {
   const card = await mount(page);
-  await expect(card.locator(".prompt-card__title")).toContainText("The AI in");
-  await expect(card.locator(".prompt-card__title")).toContainText("is asking for a secret");
-  await expect(card.locator(".secret-card__quote-k")).toHaveText("The AI's words");
-  await expect(card.locator(".secret-card__warning")).toContainText("The app never asks for your passwords.");
+  await expect(card.locator(".prompt-card__title")).toHaveText(/Secret requested/);
+  await expect(card.locator(".prompt-card__header .secret-card__from")).toContainText("from");
+  await expect(card.locator(".secret-card__ledger")).toContainText("ANTHROPIC_API_KEY");
+  await expect(card).not.toContainText("Re-authentication required");
   await expect(card.locator(".secret-card__input")).toBeVisible();
   await card.screenshot({ path: `${SHOT_DIR}/secret-card-ai-attribution.png` });
 });
