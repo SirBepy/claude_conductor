@@ -123,6 +123,12 @@ pub struct Session {
     /// `TerminateProcess` stamps exit code 1, indistinguishable from a crash, so
     /// without this every intentional teardown reports itself as one.
     pub expected_exit: std::sync::atomic::AtomicBool,
+    /// Whether this live child currently believes "Wrap up when done" is on:
+    /// seeded at spawn from the argv-baked system prompt, then flipped by
+    /// `lifecycle::send_message` when it notices the persisted toggle differs.
+    /// A running process's argv can't change, so a mid-chat flip reaches the
+    /// model only as a note appended to the next message.
+    pub wrap_up_told: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
@@ -155,6 +161,7 @@ impl Session {
             stderr_tail: std::sync::Mutex::new(Vec::new()),
             stderr_drain: tokio::sync::Mutex::new(None),
             expected_exit: std::sync::atomic::AtomicBool::new(false),
+            wrap_up_told: std::sync::atomic::AtomicBool::new(false),
         })
     }
 }

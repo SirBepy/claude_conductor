@@ -43,6 +43,26 @@ pub async fn send_message_meta_with_author(
     send_message_inner(session, text, true, Some(author_session_id)).await
 }
 
+/// The text to append to the next message so the live child learns that Joe
+/// flipped "Wrap up when done" since it last heard (`told` is what it was last
+/// told, seeded at spawn). `None` when nothing changed. Wrapped in the slash
+/// context tags because the transcript, title and bubble code already strip
+/// exactly that block (`slash::mentions::strip_block`, `SLASH_CONTEXT_RE`).
+/// `told` is updated here, so a flip is delivered once, not on every message.
+fn wrap_up_note(now: bool, told: &std::sync::atomic::AtomicBool) -> Option<String> {
+    use crate::slash::mentions::{MENTION_BLOCK_CLOSE, MENTION_BLOCK_OPEN};
+    use std::sync::atomic::Ordering;
+    if told.swap(now, Ordering::SeqCst) == now {
+        return None;
+    }
+    let body = if now {
+        crate::daemon::claude_config::WRAP_UP_ON_DONE_PROMPT
+    } else {
+        crate::daemon::claude_config::WRAP_UP_ON_DONE_OFF_NOTE
+    };
+    Some(format!("\n\n{MENTION_BLOCK_OPEN}\n{body}\n{MENTION_BLOCK_CLOSE}"))
+}
+
 async fn send_message_inner(
     session: &Arc<Session>,
     text: &str,
@@ -79,6 +99,12 @@ async fn send_message_inner(
         wire_text.push_str(text);
     } else {
         wire_text.push_str(&crate::slash::mentions::augment(text, Some(&session.cwd)).await);
+    }
+    let wrap_up_now = crate::sessions::chat_config::get(&session.session_id)
+        .map(|c| c.wrap_up_on_done)
+        .unwrap_or(false);
+    if let Some(note) = wrap_up_note(wrap_up_now, &session.wrap_up_told) {
+        wire_text.push_str(&note);
     }
     let msg = serde_json::json!({
         "type": "user",
@@ -262,6 +288,31 @@ mod tests {
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
+
+    // A running child's argv is fixed, so a mid-chat flip of "Wrap up when
+    // done" only reaches it through this note.
+    #[test]
+    fn wrap_up_note_is_sent_once_per_flip_and_not_when_unchanged() {
+        use std::sync::atomic::AtomicBool;
+        let told = AtomicBool::new(false);
+        assert_eq!(wrap_up_note(false, &told), None, "off and told-off: nothing to say");
+
+        let on = wrap_up_note(true, &told).expect("flip to on is announced");
+        assert!(on.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_PROMPT));
+        assert!(on.contains(crate::slash::mentions::MENTION_BLOCK_OPEN), "wrapped so transcript stripping hides it");
+        assert_eq!(wrap_up_note(true, &told), None, "already told: not repeated every message");
+
+        let off = wrap_up_note(false, &told).expect("flip to off is retracted");
+        assert!(off.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_OFF_NOTE));
+        assert_eq!(wrap_up_note(false, &told), None);
+    }
+
+    #[test]
+    fn wrap_up_note_is_removed_by_the_slash_block_stripper() {
+        let told = std::sync::atomic::AtomicBool::new(false);
+        let wire = format!("do the thing{}", wrap_up_note(true, &told).unwrap());
+        assert_eq!(crate::slash::mentions::strip_block(&wire), "do the thing");
+    }
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
