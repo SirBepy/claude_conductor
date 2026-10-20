@@ -42,7 +42,10 @@ export async function closeChatWithConfirm(sessionId: string): Promise<void> {
   const busy = closeNeedsConfirm(sessionId);
   const ok = await askConfirm(
     busy ? "A turn is in progress. Close and discard it?" : "Close this chat?",
-    { confirmLabel: busy ? "Discard" : "Close" },
+    // The keyboard shortcut that opened this dialog WAS the close intent;
+    // focus the confirm button so Enter follows through instead of landing
+    // on cancel by default (which just reopens the shortcut's own prompt).
+    { confirmLabel: busy ? "Discard" : "Close", focusConfirm: true },
   );
   if (!ok) return;
   if (busy) {

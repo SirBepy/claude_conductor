@@ -112,7 +112,9 @@ async function openApiKeyModal(page: Page): Promise<void> {
 
 /** Isolated, not chained through the picker flow - askConfirm's own guard is
  * the thing under test, and its `cancelBtn.focus()` is what surfaces the
- * finding below regardless of what's underneath it. */
+ * finding below regardless of what's underneath it. (confirm.ts gained an
+ * opt-in `focusConfirm` option for the Ctrl+W close-chat dialog; this call
+ * site passes no options, so cancel is still focused here, unaffected.) */
 async function openConfirm(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const mod = await import("/shared/confirm.ts");

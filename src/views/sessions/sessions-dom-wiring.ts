@@ -15,7 +15,7 @@ import { selectSession } from "./active-session";
 import { state, setActiveSession, clearLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { paneEmptyStateHtml } from "./sessions-helpers";
-import { renderSidebar, openCtxMenu, openDraftCtxMenu } from "./sidebar";
+import { renderSidebar, refreshSessions, openCtxMenu, openDraftCtxMenu } from "./sidebar";
 import { initWhenDone, subscribeWhenDone } from "./when-done";
 import {
   closeViewMoreMenu,
@@ -283,6 +283,7 @@ export function wireStaticListeners(
  * dispose function that removes all three. */
 export function wireDocumentListeners(pane: HTMLElement, listEl: HTMLElement, myMount: number): () => void {
   const onSessionClosed = (e: Event) => {
+    if (state.mountId !== myMount) return;
     const { sessionId } = (e as CustomEvent<{ sessionId: string }>).detail;
     if (state.selectedId !== sessionId) return;
     if (state.renderer) state.renderer.detach();
@@ -297,6 +298,15 @@ export function wireDocumentListeners(pane: HTMLElement, listEl: HTMLElement, my
     // instances-changed from the daemon (which takes a few seconds).
     state.sessions = state.sessions.filter(s => s.session_id !== sessionId);
     renderSidebar(listEl);
+    // Backstop: by the time clear_session resolved (performClose awaits it),
+    // the daemon's cached_instances already excludes this session - re-pull
+    // from that source of truth too, so the row can't survive the optimistic
+    // removal above if anything (a stale concurrent render, a missed filter)
+    // undid it.
+    void refreshSessions().then(() => {
+      if (state.mountId !== myMount) return;
+      renderSidebar(listEl);
+    });
   };
   document.addEventListener("cc:session-closed", onSessionClosed);
 
