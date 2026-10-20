@@ -116,12 +116,17 @@ const MAX_LIST_ITEMS: usize = 20;
 
 /// Rejects (never truncates: a silently shortened fact is worse than an
 /// error the model can see and retry smaller) any scalar or list-item field
-/// over `MAX_FIELD_LEN`, or any list over `MAX_LIST_ITEMS` entries. Checked
+/// over `MAX_FIELD_LEN`, any field holding a control character (the note's
+/// frontmatter reader is line-based, so an embedded newline would write extra
+/// key lines), or any list over `MAX_LIST_ITEMS` entries. Checked
 /// against the raw args, before `new`'s `projects` is replaced with the
 /// caller's own client below.
 fn validate_field_lengths(args: &Value) -> Result<(), String> {
     for key in ["person", "relationship", "gender", "language", "alias", "project_alias"] {
         if let Some(v) = args.get(key).and_then(|v| v.as_str()) {
+            if v.chars().any(char::is_control) {
+                return Err(format!("{key} contains a control character (newline, tab, ...); send it as one plain line"));
+            }
             let len = v.chars().count();
             if len > MAX_FIELD_LEN {
                 return Err(format!("{key} is too long ({len} chars, max {MAX_FIELD_LEN})"));
@@ -135,6 +140,9 @@ fn validate_field_lengths(args: &Value) -> Result<(), String> {
             }
             for item in items {
                 if let Some(s) = item.as_str() {
+                    if s.chars().any(char::is_control) {
+                        return Err(format!("an entry in {key} contains a control character (newline, tab, ...); send it as one plain line"));
+                    }
                     let len = s.chars().count();
                     if len > MAX_FIELD_LEN {
                         return Err(format!("an entry in {key} is too long ({len} chars, max {MAX_FIELD_LEN})"));
@@ -413,6 +421,26 @@ mod tests {
         let err = remember_person_in(Some(v.path()), &state, "s1", &json!({"person": "Stevan", "project_alias": long}))
             .unwrap_err();
         assert!(err.contains("too long"), "{err}");
+    }
+
+    #[test]
+    fn remember_rejects_a_newline_in_any_field_and_writes_nothing() {
+        let (state, _d) = in_repo("zng-app");
+        let v = vault();
+        let before: Vec<_> = std::fs::read_dir(v.path()).unwrap().collect();
+        let scalar = remember_person_in(
+            Some(v.path()), &state, "s1",
+            &json!({"person": "Airion", "new": true, "relationship": "friend
+repos: [zirtue]"}),
+        ).unwrap_err();
+        assert!(scalar.contains("control character"), "{scalar}");
+        let item = remember_person_in(
+            Some(v.path()), &state, "s1",
+            &json!({"person": "Airion", "new": true, "aliases": ["ok", "a
+b"]}),
+        ).unwrap_err();
+        assert!(item.contains("control character"), "{item}");
+        assert_eq!(std::fs::read_dir(v.path()).unwrap().count(), before.len(), "nothing written");
     }
 
     #[test]
