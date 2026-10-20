@@ -9,6 +9,14 @@ use crate::files;
 use crate::ipc::mirror::mirrored_client;
 use crate::state::AppState;
 
+mod open_external_guard;
+mod temp_files;
+mod write_guard;
+
+use open_external_guard::is_allowed_external_url;
+pub use temp_files::*;
+use write_guard::{write_text_file_impl, write_text_file_roots};
+
 /// `pub(crate)` pure local read, reused directly by the daemon's own
 /// `list_project_files` RPC handler (`daemon/methods/files.rs`) - see
 /// `ipc::git::get_git_dirty_local`'s doc for why the Tauri-facing wrapper
@@ -107,74 +115,6 @@ pub async fn pick_folder(app: AppHandle) -> Option<String> {
 #[tauri::command]
 pub async fn create_folder(path: String) -> Result<(), String> {
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())
-}
-
-/// True if `url` is one Conductor's own shell opener may receive. Scoped to
-/// what the app's callers actually pass (grepped `src/`): an `http(s)://`
-/// link (news items, the update-available link, waiting-on chips, the
-/// dev-server popover) or a `mailto:` link, or a local file on a drive path
-/// (a bare path, or a `file:` URL from a chat link) - the preview panel's
-/// "Open in browser" passes the temp file `write_temp_file` just wrote. A
-/// local file must exist and must not be an executable or script type, and
-/// every other scheme and any UNC share is refused, so an XSS bug or an
-/// AI-authored link that reaches this command can't launch a program.
-fn is_allowed_external_url(url: &str) -> bool {
-    // Checked on the untrimmed string: `trim()` itself strips a trailing
-    // control char like `\n`, which would otherwise let one slip through
-    // the check below unnoticed.
-    if url.is_empty() || url.chars().any(|c| c.is_control()) {
-        return false;
-    }
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:") {
-        // Embedded whitespace is an argument-injection / scheme-confusion
-        // surface that a well-formed URL never needs.
-        return !trimmed.chars().any(|c| c.is_whitespace());
-    }
-    // Chat links to local files (`file:///C:/.../shot.png`) are a working
-    // affordance, so a file: URL is judged as the path it names.
-    // `file:///C:/x` keeps its leading slash after the `file://` strip, which
-    // is the real root on macOS/Linux but has to go on a Windows drive path.
-    let mut local = if lower.starts_with("file://") { &trimmed[7..] } else { trimmed };
-    let is_drive = |s: &str| {
-        let b = s.as_bytes();
-        b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/')
-    };
-    if local.starts_with('/') && is_drive(&local[1..]) {
-        local = &local[1..];
-    }
-    let accepted = if is_drive(local) {
-        // A second ':' after the drive is an NTFS stream suffix
-        // (`x.exe::$DATA`) that would hide the real extension.
-        !local[2..].contains(':')
-    } else {
-        // A POSIX absolute path; `//` is a network path and stays refused,
-        // like a Windows UNC share, a relative path or any other scheme.
-        cfg!(not(windows)) && local.starts_with('/') && !local.starts_with("//")
-    };
-    accepted && is_openable_local_file(std::path::Path::new(local))
-}
-
-/// The shell opener runs a program for an executable or script, so a link
-/// (AI-authored chat text included) may only open an existing file of a
-/// type that the OS hands to a viewer, never one it executes.
-fn is_openable_local_file(path: &std::path::Path) -> bool {
-    const EXECUTABLE: &[&str] = &[
-        "exe", "com", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi",
-        "msp", "scr", "pif", "cpl", "hta", "lnk", "url", "reg", "jar", "appref-ms", "application",
-        "gadget", "msc", "inf", "sys", "dll", "command", "sh", "tool", "scpt", "pkg", "workflow",
-        "terminal", "desktop",
-    ];
-    let Ok(target) = path.canonicalize() else { return false };
-    if !target.is_file() {
-        return false;
-    }
-    let ext = target.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    !ext.is_empty() && !EXECUTABLE.contains(&ext.as_str())
 }
 
 #[tauri::command]
@@ -291,53 +231,6 @@ pub async fn read_text_file(path: String) -> Result<TextFileData, String> {
     .map_err(|e| format!("read_text_file join error: {e}"))?
 }
 
-/// Shared scaffolding for `write_temp_image`/`write_temp_html`: pick a
-/// `claude-conductor-<uuid>.<ext>` path in the OS temp dir and write `bytes`
-/// to it off the async runtime thread.
-fn write_temp_file(ext: &str, bytes: Vec<u8>) -> Result<String, String> {
-    let path = std::env::temp_dir().join(format!("claude-conductor-{}.{ext}", uuid::Uuid::new_v4()));
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
-/// Write base64 image bytes to a temp file so it can be revealed in the OS
-/// file manager. Used by the lightbox "Show in File Explorer" menu item for
-/// images that have no known source path (inline chat-block images from an
-/// MCP tool result, e.g. a chrome-devtools screenshot) - the temp copy is a
-/// synthesized stand-in, not the original file.
-#[tauri::command]
-pub async fn write_temp_image(mime: String, base64: String) -> Result<String, String> {
-    use base64::Engine;
-    tauri::async_runtime::spawn_blocking(move || {
-        let ext = match mime.as_str() {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/gif" => "gif",
-            "image/webp" => "webp",
-            "image/bmp" => "bmp",
-            "image/svg+xml" => "svg",
-            _ => "bin",
-        };
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&base64)
-            .map_err(|e| e.to_string())?;
-        write_temp_file(ext, bytes)
-    })
-    .await
-    .map_err(|e| format!("write_temp_image join error: {e}"))?
-}
-
-/// Write HTML to a temp `.html` file so "Open in browser" can hand the OS a
-/// real file path instead of a `data:` URL - Windows' `ShellExecuteW` has no
-/// protocol handler for `data:` and fails trying to treat the whole URI as a
-/// filename.
-#[tauri::command]
-pub async fn write_temp_html(html: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || write_temp_file("html", html.into_bytes()))
-        .await
-        .map_err(|e| format!("write_temp_html join error: {e}"))?
-}
-
 /// Reveal (and select, where the OS supports it) a specific FILE in the OS
 /// file manager. Unlike `open_in_explorer` (which opens a directory), this
 /// takes a file path and highlights it in its parent folder.
@@ -379,46 +272,6 @@ pub async fn reveal_file_in_explorer(path: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Roots `write_text_file` may write under: every registered project's
-/// directory, plus the app data dir (for the app's own files, e.g. a
-/// settings/export doc opened through the same editor). Canonicalized so a
-/// `..` or a symlink/junction can't walk the write outside either (todo
-/// 1212). A root that no longer exists on disk (deleted project folder,
-/// data dir not yet created) is silently skipped rather than failing the
-/// whole write.
-fn write_text_file_roots(state: &AppState) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Ok(dir) = crate::settings::paths::ensure_data_dir() {
-        if let Ok(c) = dir.canonicalize() {
-            roots.push(c);
-        }
-    }
-    if let Ok(settings) = state.settings.lock() {
-        for p in &settings.projects {
-            if let Ok(c) = p.path.canonicalize() {
-                roots.push(c);
-            }
-        }
-    }
-    roots
-}
-
-/// Pure core of `write_text_file`: canonicalizes `path` and requires it land
-/// under one of `roots` (already-canonicalized), so the Tauri command can be
-/// tested without spinning up a Tauri `AppState`/DB.
-fn write_text_file_impl(path: &str, content: &str, roots: &[PathBuf]) -> Result<(), String> {
-    let target = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|e| format!("file not found: {e}"))?;
-    if !roots.iter().any(|root| crate::util::path::confine_absolute(root, &target).is_ok()) {
-        return Err(
-            "write_text_file: path is outside every registered project root and the app data dir"
-                .to_string(),
-        );
-    }
-    std::fs::write(&target, content).map_err(|e| e.to_string())
-}
-
 /// Overwrite a local text file from the in-app file editor (ai_todo 95 slice 3).
 /// The counterpart to `read_text_file`: writes an absolute path, but one
 /// confined to a registered project root or the app data dir -
@@ -438,7 +291,7 @@ pub async fn write_text_file(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_allowed_external_url, read_log_contents, write_text_file_impl};
+    use super::read_log_contents;
     use tempfile::tempdir;
 
     #[test]
@@ -455,146 +308,5 @@ mod tests {
         let path = dir.path().join("app.log");
         std::fs::write(&path, "line 1\nline 2\n").unwrap();
         assert_eq!(read_log_contents(&path).unwrap(), "line 1\nline 2\n");
-    }
-
-    // ── open_external scheme/path allowlist ─────────────────────────────
-
-    #[test]
-    fn accepts_https_and_http_and_mailto() {
-        assert!(is_allowed_external_url("https://example.com/releases"));
-        assert!(is_allowed_external_url("http://localhost:4173"));
-        assert!(is_allowed_external_url("mailto:joe@example.com"));
-    }
-
-    #[test]
-    fn rejects_an_exe_path() {
-        // The exact case named in the todo's acceptance criteria.
-        assert!(!is_allowed_external_url("C:\\x.exe"));
-    }
-
-    fn temp_file_with_ext(ext: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("open-external-test-{}.{ext}", uuid::Uuid::new_v4()));
-        std::fs::write(&path, "x").unwrap();
-        path
-    }
-
-    #[test]
-    fn rejects_an_existing_executable_or_script_by_path_or_file_url() {
-        for ext in ["exe", "bat", "cmd", "ps1", "lnk", "hta"] {
-            let path = temp_file_with_ext(ext);
-            let raw = path.to_str().unwrap().to_string();
-            let url = format!("file:///{}", raw.replace('\\', "/"));
-            let (as_path, as_url) = (is_allowed_external_url(&raw), is_allowed_external_url(&url));
-            let _ = std::fs::remove_file(&path);
-            assert!(!as_path && !as_url, "{ext} must never be handed to the shell opener");
-        }
-    }
-
-    #[test]
-    fn accepts_an_existing_viewable_file_by_path_or_file_url() {
-        let path = temp_file_with_ext("png");
-        let raw = path.to_str().unwrap().to_string();
-        let url = format!("file:///{}", raw.replace('\\', "/"));
-        let (as_path, as_url) = (is_allowed_external_url(&raw), is_allowed_external_url(&url));
-        let _ = std::fs::remove_file(&path);
-        assert!(as_path && as_url, "a chat link to a screenshot keeps opening");
-    }
-
-    #[test]
-    fn rejects_an_ntfs_stream_suffix_that_hides_the_extension() {
-        let path = temp_file_with_ext("exe");
-        let raw = format!("{}::$DATA", path.to_str().unwrap());
-        let ok = is_allowed_external_url(&raw);
-        let _ = std::fs::remove_file(&path);
-        assert!(!ok);
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn accepts_a_posix_absolute_path_and_its_file_url() {
-        let path = temp_file_with_ext("html");
-        let raw = path.to_str().unwrap().to_string();
-        let (as_path, as_url) = (is_allowed_external_url(&raw), is_allowed_external_url(&format!("file://{raw}")));
-        let _ = std::fs::remove_file(&path);
-        assert!(as_path && as_url, "the macOS preview Open in browser path must keep working");
-    }
-
-    #[test]
-    fn rejects_a_missing_file_and_a_non_drive_file_url() {
-        assert!(!is_allowed_external_url("file:///C:/definitely-missing-file.png"));
-        assert!(!is_allowed_external_url("file:///etc/passwd"));
-    }
-
-    #[test]
-    fn rejects_javascript_and_data_schemes() {
-        assert!(!is_allowed_external_url("javascript:alert(1)"));
-        assert!(!is_allowed_external_url("data:text/html,<script>1</script>"));
-    }
-
-    #[test]
-    fn rejects_a_unc_share() {
-        assert!(!is_allowed_external_url("\\\\attacker\\share\\payload.exe"));
-    }
-
-    #[test]
-    fn rejects_whitespace_and_control_chars_in_an_http_url() {
-        assert!(!is_allowed_external_url("http://example.com/ x"));
-        assert!(!is_allowed_external_url("http://example.com/\n"));
-        assert!(!is_allowed_external_url(""));
-    }
-
-    #[test]
-    fn accepts_this_apps_own_temp_preview_file() {
-        // Mirrors exactly what write_temp_file() produces and what
-        // preview-panel.ts's "Open in browser" then passes to open_external.
-        let path = std::env::temp_dir().join(format!("claude-conductor-{}.html", uuid::Uuid::new_v4()));
-        std::fs::write(&path, "<html></html>").unwrap();
-        let ok = is_allowed_external_url(path.to_str().unwrap());
-        let _ = std::fs::remove_file(&path);
-        assert!(ok, "temp preview file should be allowed");
-    }
-
-    // ── write_text_file project-root/app-data confinement ───────────────────
-
-    #[test]
-    fn accepts_a_write_inside_a_registered_root() {
-        let root = tempdir().unwrap();
-        let file = root.path().join("notes.txt");
-        std::fs::write(&file, "old").unwrap();
-        let roots = vec![root.path().canonicalize().unwrap()];
-        write_text_file_impl(file.to_str().unwrap(), "new", &roots).unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
-    }
-
-    #[test]
-    fn accepts_a_write_in_a_subdirectory_of_a_registered_root() {
-        let root = tempdir().unwrap();
-        let sub = root.path().join("src");
-        std::fs::create_dir_all(&sub).unwrap();
-        let file = sub.join("main.rs");
-        std::fs::write(&file, "old").unwrap();
-        let roots = vec![root.path().canonicalize().unwrap()];
-        write_text_file_impl(file.to_str().unwrap(), "new", &roots).unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new");
-    }
-
-    #[test]
-    fn rejects_a_write_outside_every_registered_root() {
-        let root = tempdir().unwrap();
-        let outside = tempdir().unwrap();
-        let file = outside.path().join("secret.txt");
-        std::fs::write(&file, "old").unwrap();
-        let roots = vec![root.path().canonicalize().unwrap()];
-        let err = write_text_file_impl(file.to_str().unwrap(), "pwned", &roots).unwrap_err();
-        assert!(err.contains("outside"), "got: {err}");
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "old", "file must be untouched");
-    }
-
-    #[test]
-    fn rejects_a_target_that_does_not_exist() {
-        let root = tempdir().unwrap();
-        let missing = root.path().join("does-not-exist.txt");
-        let roots = vec![root.path().canonicalize().unwrap()];
-        assert!(write_text_file_impl(missing.to_str().unwrap(), "x", &roots).is_err());
     }
 }
