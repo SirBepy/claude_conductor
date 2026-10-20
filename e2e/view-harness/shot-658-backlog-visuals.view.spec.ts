@@ -1,6 +1,7 @@
 // Reviewed 2026-10-08: question-ui.ts's confirmQuestionRendered now also threads the prompt's sessionId to confirm_question_rendered (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
 // Reviewed 2026-10-08: types.ts gained a SecretRequestedPayload interface and http-transport.ts gained a respond_secret case for the request_secret MCP tool's masked-value card - additive, no change to this spec's contract.
 // Reviewed 2026-10-17: QuestionOption gained an optional `preview` (option-previews.ts) - options without one render exactly as before, so this spec's contract holds.
+// Reviewed 2026-10-20 (Mac-mirrored project icon fix): http-transport.ts's get_project_tech/get_project_icon cases now also send a `machine_id` param (null unless a peer machine was explicitly picked) - this is the mocked-invoke harness, not HttpTransport, so this change never executes here at all.
 import { createHash } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountSessionsList, mountView, sessionInstance } from "./harness";

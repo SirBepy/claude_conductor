@@ -640,10 +640,12 @@ export class HttpTransport implements Transport {
       case "get_project_tech":
         return this.rpc<T>("get_project_tech", {
           root: args.root,
+          machine_id: args.machineId ?? args.machine_id ?? null,
         });
       case "get_project_icon":
         return this.rpc<T>("get_project_icon", {
           root: args.root,
+          machine_id: args.machineId ?? args.machine_id ?? null,
         });
       // Usage + token history: served from the daemon's shared companion.db so
       // the phone homescreen + statistics populate (the daemon is the writer).

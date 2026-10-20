@@ -73,7 +73,10 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     sessionId,
     readOnly: false,
     ...(realCharId
-      ? { charId: realCharId, charUrl: characterIconUrl(realCharId), charStatus: "", cwd: sess?.cwd ? String(sess.cwd) : null }
+      ? {
+          charId: realCharId, charUrl: characterIconUrl(realCharId), charStatus: "",
+          cwd: sess?.cwd ? String(sess.cwd) : null, machineId: sess?.machine?.id ?? null,
+        }
       : {}),
     autoAcceptOn: isAutoAccept(sessionId),
   });

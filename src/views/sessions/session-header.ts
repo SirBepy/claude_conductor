@@ -9,6 +9,9 @@ export interface SessionHeaderBindOpts {
   charUrl?: string | null;
   charStatus?: string;
   cwd?: string | null;
+  /** Set only for a session mirrored in from a paired peer machine (multi-
+   *  machine federation); undefined/null for every locally-hosted session. */
+  machineId?: string | null;
   autoAcceptOn?: boolean;
 }
 
@@ -138,8 +141,8 @@ export class SessionHeader {
     }
   }
 
-  setAvatar(charId: string | null, url: string | null, status: string, cwd?: string | null): void {
-    const badge = projBadgeHtml(cwd ?? null, "session-header-proj-badge");
+  setAvatar(charId: string | null, url: string | null, status: string, cwd?: string | null, machineId?: string | null): void {
+    const badge = projBadgeHtml(cwd ?? null, "session-header-proj-badge", machineId);
     if (charId) {
       const preload = url ? ` src="${escapeHtml(url)}" data-hydrated="${escapeHtml(charId)}"` : "";
       this._wrap.innerHTML = [
@@ -165,7 +168,7 @@ export class SessionHeader {
     this.el.querySelector(".discard-btn")?.remove();
 
     if (opts.charId !== undefined && opts.charStatus !== undefined) {
-      this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd);
+      this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd, opts.machineId);
     }
   }
 

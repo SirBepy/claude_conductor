@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/project-picker.ts
+// Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's row render now passes a machineId to renderAvatar - this spec never selects a peer machine, so it stays null and the markup is unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 

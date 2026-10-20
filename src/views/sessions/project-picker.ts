@@ -524,7 +524,7 @@ export function openProjectPickerModal(
                         }}
                         @click=${() => void selectProjectRow(p)}
                       >
-                        <div class="project-picker-avatar">${unsafeHTML(renderAvatar(p.avatar, p.path))}</div>
+                        <div class="project-picker-avatar">${unsafeHTML(renderAvatar(p.avatar, p.path, machineField.machineId))}</div>
                         <div class="project-picker-info">
                           <span class="project-picker-name">${p.name}${(() => {
                             // Only marks that the row is a favourite. Which key
