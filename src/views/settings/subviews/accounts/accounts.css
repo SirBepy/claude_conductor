@@ -108,8 +108,14 @@
   margin: 4px 2px;
 }
 
-.acc-terminal-identity {
-  font-size: var(--fs-title);
-  color: var(--color-text, #e8e8ee);
+/* Terminal row reuses .acc-row's card look (border tints to the matched
+ * account's colour via --acc), just without the kebab actions - it's
+ * read-only, never spawnable. */
+.acc-terminal-row {
+  --acc: var(--sb-muted);
+}
+
+.acc-terminal-row .acc-sub code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--fs-micro);
 }
