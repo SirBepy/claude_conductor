@@ -5,15 +5,15 @@
 // keeps only the stateful render/event-wiring orchestration.
 
 import { escapeHtml } from "../../../shared/escape-html";
-import { isElNearBottom } from "../../../shared/chat/chat-dom-renderer";
 import { handleTicketHover, handleTicketHoverOut, linkifyTickets } from "../../../shared/chat/ticket-refs";
 import { renderCardShell } from "./host";
 import {
-  collapsedHtml, extraMessageZoneHtml, nextArrowDisabled, ownZoneHtml, pagerHtml,
-  panelHtml, summaryPanelHtml,
+  collapsedHtml, nextArrowDisabled, pagerHtml, panelHtml, summaryPanelHtml,
 } from "./question-ui-templates";
 import type { QuestionRenderState } from "./question-ui-templates";
 import { focusActivePanel } from "./question-keyboard";
+import { createAnswerBarSync } from "./question-ui-answer-bar";
+import { createQuestionCardLayout } from "./question-ui-layout";
 import { attachQuestionSwipe } from "./question-swipe";
 import { attachOptionPreviews } from "./option-previews";
 import type { AuqAttachmentsController } from "./attachments";
@@ -71,78 +71,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   const previews = attachOptionPreviews({
     host, questions, selections, choose: (qi, label) => applyPick(qi, label, true, true),
   });
-  let hintTimer: number | undefined;
-
-  // Brief feedback for a paste that couldn't attach (see attachments.ts's
-  // handleAttachmentPaste) - one reused node per card, auto-clears itself.
-  function showPasteHint(bar: HTMLElement, message: string): void {
-    bar.querySelector(".prompt-paste-hint")?.remove();
-    window.clearTimeout(hintTimer);
-    const hint = document.createElement("div");
-    hint.className = "prompt-paste-hint";
-    hint.textContent = message;
-    bar.appendChild(hint);
-    hintTimer = window.setTimeout(() => hint.remove(), 2500);
-  }
-
-  // Each strip renders only the panel it belongs to (data-attach-panel), so a
-  // pasted image stays on the step it was pasted into.
-  function paintAttachmentStrips(): void {
-    host.querySelectorAll<HTMLElement>(".prompt-attachments").forEach((el) => {
-      const panel = Number(el.dataset.attachPanel);
-      if (Number.isFinite(panel)) auqAttachments.renderAttachmentsStrip(el, panel);
-    });
-  }
-
-  const syncMessagesPadding = (): void => {
-    if (!messagesEl) return;
-    // Broadened to the minimized bar too - it replaces .prompt-card wholesale
-    // rather than living inside it, so the old ".prompt-card"-only selector
-    // would stop measuring anything once minimized.
-    const card = host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed");
-    if (!card) return;
-    // Only re-pin to bottom if the user was already there - otherwise typing
-    // in the free-text box (which grows the card via ResizeObserver) yanks
-    // someone who scrolled up to reread earlier messages back down every
-    // keystroke.
-    const wasNearBottom = isElNearBottom(messagesEl);
-    messagesEl.style.paddingBottom = `${card.offsetHeight + 12}px`;
-    if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
-  };
-
-  // Moves the persistent track to the current activeTab. `instant` skips the
-  // transition (full rebuild - a fresh node has no prior position to slide
-  // from); the animated path is only for step-only nav on the SAME node.
-  function positionTrack(instant: boolean): void {
-    const track = host.querySelector<HTMLElement>(".prompt-track");
-    if (!track) return;
-    if (instant) {
-      track.style.transition = "none";
-      track.style.transform = `translateX(-${state.activeTab * 100}%)`;
-      void track.offsetHeight;
-      track.style.transition = "";
-    } else {
-      track.style.transform = `translateX(-${state.activeTab * 100}%)`;
-    }
-    const activePanel = track.querySelector<HTMLElement>(`.prompt-panel[data-panel="${state.activeTab}"]`);
-    // getBoundingClientRect(), not offsetHeight: offsetHeight rounds to the
-    // nearest integer pixel, and at a fractional DPI scale that rounding can
-    // land under the panel's real height, clipping the last option's
-    // bottom border against the viewport's overflow:clip.
-    if (activePanel) track.style.height = `${activePanel.getBoundingClientRect().height}px`;
-
-    // .prompt-track-viewport clips rather than scrolls vertically (see its CSS
-    // doc comment), so a height snapshot going stale after this tick (webfont
-    // swap-in, markdown reflow) cuts the last option's text off mid-line.
-    // Keep it live while this panel stays active.
-    state.panelResizeObs?.disconnect();
-    if (activePanel && typeof ResizeObserver !== "undefined") {
-      state.panelResizeObs = new ResizeObserver(() => {
-        track.style.height = `${activePanel.getBoundingClientRect().height}px`;
-      });
-      state.panelResizeObs.observe(activePanel);
-    }
-  }
+  const { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack } =
+    createQuestionCardLayout(host, state, messagesEl, auqAttachments);
 
   // Single source for the footer's primary button: Next on any question
   // panel, Submit only on review (or on the lone question when there's no
@@ -161,63 +91,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     btn.onclick = isSubmitMode ? submit : advance;
   }
 
-  // Fills + wires the inline answer bar (footer, next to Skip/Next) for the
-  // active tab: one shared textarea swapped on every tab change instead of
-  // one per panel. Called by both render() and the no-rebuild stepTab() path.
-  function syncAnswerBar(): void {
-    const bar = host.querySelector<HTMLElement>(".prompt-card__answer-bar");
-    if (!bar) return;
-    // Old textarea's popup/auto-resize core is about to be discarded along
-    // with the DOM node below - drop its document-level listeners first.
-    slashPopup.destroyAll();
-    const isSummary = hasSummary && state.activeTab === questions.length;
-    // Exactly one text box on screen, always (ai_todo 850). A one-question
-    // card has no review panel, so it shows only its own answer field - typed
-    // prose there already rides along with the picked option (computeAnswer).
-    bar.innerHTML = isSummary
-      ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
-      : ownZoneHtml(state.activeTab, freeText);
-
-    const wireField = (el: HTMLTextAreaElement, isExtraField: boolean): void => {
-      const highlightEl = el.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
-      slashPopup.attach(el, highlightEl);
-      if (isExtraField) {
-        el.addEventListener("input", () => {
-          state.additionalMessage = el.value;
-          syncMessagesPadding();
-          notifyDraftChange();
-        });
-      } else {
-        const qi = state.activeTab;
-        el.addEventListener("input", () => {
-          freeText.set(qi, el.value);
-          host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${qi}"]`)
-            ?.classList.toggle("is-answered", answeredAt(qi));
-          if (hasSummary) {
-            const allAnsweredNow = questions.every((_, i) => answeredAt(i));
-            host.querySelector<HTMLElement>(`.prompt-dot[data-dot="${questions.length}"]`)
-              ?.classList.toggle("is-answered", allAnsweredNow);
-          }
-          const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
-          if (nextArrow) nextArrow.disabled = nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt);
-          updatePrimaryButton();
-          syncMessagesPadding();
-          notifyDraftChange();
-        });
-      }
-      // Always wired - handleAttachmentPaste itself decides and reports back.
-      el.addEventListener("paste", (e) => {
-        void auqAttachments.handleAttachmentPaste(e).then((msg) => {
-          if (msg) showPasteHint(bar, msg);
-        });
-      });
-    };
-
-    const ownEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input");
-    const extraEl = bar.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
-    if (ownEl) wireField(ownEl, false);
-    if (extraEl) wireField(extraEl, true);
-  }
+  const syncAnswerBar = createAnswerBarSync({
+    host, opts, questions, hasSummary, totalPanels, freeText, state, auqAttachments,
+    slashPopup, answeredAt, notifyDraftChange, syncMessagesPadding, showPasteHint,
+    updatePrimaryButton,
+  });
 
   // Step-only nav: patches the track/dots/arrows/footer in place instead of
   // rebuilding host.innerHTML, so .prompt-track's transition has a real "from"
