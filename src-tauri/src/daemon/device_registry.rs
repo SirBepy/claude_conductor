@@ -213,15 +213,30 @@ impl DeviceRegistry {
         Self::authenticate_at(token, app_data, now_secs())
     }
 
+    /// `authenticate` for the local voice socket only: the desktop device's own
+    /// token passes even with Remote access off (that is the default, and
+    /// dictation must work there), while every other token, and the desktop
+    /// token on any other route, still gets `Disabled`.
+    pub fn authenticate_desktop_voice(token: &str, app_data: &Path) -> AuthOutcome {
+        Self::authenticate_with(token, app_data, now_secs(), true)
+    }
+
     /// `authenticate` with an injected clock so expiry and the write throttle
     /// are testable without sleeping.
     fn authenticate_at(token: &str, app_data: &Path, now: u64) -> AuthOutcome {
+        Self::authenticate_with(token, app_data, now, false)
+    }
+
+    fn authenticate_with(token: &str, app_data: &Path, now: u64, desktop_bypasses_switch: bool) -> AuthOutcome {
         let mut reg = load(app_data);
+        let hash = sha256_hex(token);
         if !reg.enabled {
-            return AuthOutcome::Disabled;
+            let is_desktop = reg.devices.iter().any(|d| d.id == DESKTOP_ID && d.token_hash == hash);
+            if !(desktop_bypasses_switch && is_desktop) {
+                return AuthOutcome::Disabled;
+            }
         }
         let mut dirty = stamp_missing_last_used(&mut reg, now);
-        let hash = sha256_hex(token);
         let outcome = match reg.devices.iter_mut().find(|d| d.token_hash == hash) {
             // The desktop token backs the local voice socket and is never
             // re-presented by a device that could go idle.
@@ -254,6 +269,13 @@ impl DeviceRegistry {
     pub async fn authenticate_blocking_safe(token: String, app_data: PathBuf) -> AuthOutcome {
         // A join error (panic in the closure) denies, never admits.
         tokio::task::spawn_blocking(move || Self::authenticate(&token, &app_data))
+            .await
+            .unwrap_or(AuthOutcome::Invalid)
+    }
+
+    /// `authenticate_desktop_voice` on the blocking pool.
+    pub async fn authenticate_desktop_voice_blocking_safe(token: String, app_data: PathBuf) -> AuthOutcome {
+        tokio::task::spawn_blocking(move || Self::authenticate_desktop_voice(&token, &app_data))
             .await
             .unwrap_or(AuthOutcome::Invalid)
     }
@@ -481,6 +503,26 @@ mod tests {
         DeviceRegistry::set_enabled(true, dir.path()).unwrap();
         assert!(matches!(DeviceRegistry::authenticate(&token, dir.path()), AuthOutcome::Ok(DeviceKind::Phone, None)));
         assert_eq!(DeviceRegistry::authenticate("wrong", dir.path()), AuthOutcome::Invalid);
+    }
+
+    #[test]
+    fn desktop_token_passes_the_voice_gate_with_the_switch_off_and_nothing_else_does() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::ensure_desktop_device(dir.path());
+        let desktop = std::fs::read_to_string(desktop_token_path(dir.path())).unwrap();
+        let desktop: serde_json::Value = serde_json::from_str(&desktop).unwrap();
+        let desktop = desktop["token"].as_str().unwrap().to_string();
+        let phone = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let (machine, _) = DeviceRegistry::add_machine_device("Mac", "m-1", dir.path()).unwrap();
+        assert!(!DeviceRegistry::is_enabled(dir.path()), "default install is off");
+
+        assert!(matches!(DeviceRegistry::authenticate_desktop_voice(&desktop, dir.path()), AuthOutcome::Ok(..)));
+        // The switch stays fully effective for everything else.
+        assert_eq!(DeviceRegistry::authenticate_desktop_voice(&phone, dir.path()), AuthOutcome::Disabled);
+        assert_eq!(DeviceRegistry::authenticate_desktop_voice(&machine, dir.path()), AuthOutcome::Disabled);
+        assert_eq!(DeviceRegistry::authenticate_desktop_voice("wrong", dir.path()), AuthOutcome::Disabled);
+        // And the desktop token is still refused on every non-voice route.
+        assert_eq!(DeviceRegistry::authenticate(&desktop, dir.path()), AuthOutcome::Disabled);
     }
 
     #[tokio::test]
