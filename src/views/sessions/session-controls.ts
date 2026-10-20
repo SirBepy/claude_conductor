@@ -138,8 +138,22 @@ export function selectSessionByIndex(index: number): void {
   void selectSession(id, pane);
 }
 
+/** Ctrl+Shift+W: flips "Wrap up when done" for the focused chat. A no-op on
+ *  a not-yet-sent draft (no `session_id` to persist against yet) - same gate
+ *  as the chat menu's own item. */
+export function toggleWrapUpOnDoneForFocusedChat(): void {
+  const id = state.selectedId;
+  if (!id || state.pendingNewSession?.placeholderId === id) return;
+  const next = !isWrapUpOnDone(id);
+  setWrapUpOnDone(id, next);
+  refreshWrapUpIndicator(state.selectedId, id, next);
+  rerenderSidebar();
+}
+
 export function closeFocusedChat(): void {
   const id = state.selectedId;
   if (!id) return;
   void closeChatWithConfirm(id);
 }
+import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
+import { refreshWrapUpIndicator } from "./session-header";

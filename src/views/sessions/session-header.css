@@ -105,3 +105,18 @@
 .session-header .code-mode-btn:focus-visible {
   color: var(--color-text);
 }
+
+/* Quiet like the code-mode button above; accent-coloured only while on, so
+   the one piece of state this button carries doesn't need a separate badge. */
+.session-header .wrap-up-btn {
+  color: var(--color-text-muted);
+}
+
+.session-header .wrap-up-btn:hover,
+.session-header .wrap-up-btn:focus-visible {
+  color: var(--color-text);
+}
+
+.session-header .wrap-up-btn.is-on {
+  color: var(--color-accent, #7c6af7);
+}

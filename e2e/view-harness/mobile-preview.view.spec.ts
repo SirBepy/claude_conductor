@@ -2,6 +2,7 @@
 // Reviewed 2026-10-13 (G10 follow-up, docs/multi-machine.md): setMirrored() was removed again - Code mode's reads now proxy to a mirrored chat's owning peer instead of being hidden, so the `</>` button is never hidden. Never called by this spec either way. Re-ran this spec file directly (`npx playwright test e2e/view-harness/mobile-preview.view.spec.ts`): 16/16 pass.
 // Reviewed 2026-10-18: session-header.ts's setRemote() (the "Started from phone" badge) was removed outright - this spec never asserted that badge, so its contract is unaffected.
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): session-header.ts's SessionHeaderBindOpts/setAvatar gained an optional `machineId` so the project-face badge can ask a peer's filesystem instead of this one's; never set by this spec's fixtures, so output is unchanged.
+// Reviewed 2026-10-20 ("Wrap up when done" visibility): session-header.ts gained a `.wrap-up-btn` between the header text and `.code-mode-btn`, and a `wrapUpOnDoneOn` bind option - this spec's positional selectors (`.session-header-lead > #sessionsBackBtn`, `.session-header-trail > #viewMoreBtn`) target the lead/trail slots, not the new button's position, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";
 import { mountSessionsLayout, mountView } from "./harness";
 

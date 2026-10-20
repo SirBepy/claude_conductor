@@ -13,7 +13,9 @@ import {
   autoAcceptParked,
   isWrapUpOnDone,
   setWrapUpOnDone,
+  rerenderSidebar,
 } from "./permission-modal";
+import { refreshWrapUpIndicator } from "./session-header";
 import {
   loadHiddenSessions,
   saveHiddenSessions,
@@ -228,7 +230,12 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
       checkDot: ctx.wrapUpOnDoneOn,
       run: isDraft || !sessionId
         ? undefined
-        : () => setWrapUpOnDone(sessionId, !isWrapUpOnDone(sessionId)),
+        : () => {
+            const next = !isWrapUpOnDone(sessionId);
+            setWrapUpOnDone(sessionId, next);
+            refreshWrapUpIndicator(state.selectedId, sessionId, next);
+            rerenderSidebar();
+          },
       disabledReason: isDraft
         ? "Available once the chat starts"
         : (!sessionId ? "No session" : undefined),
