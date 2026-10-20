@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Workflow actions are pinned by commit sha, which never moves on its own, so
+  # without this the pins would silently go stale and miss security fixes.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
