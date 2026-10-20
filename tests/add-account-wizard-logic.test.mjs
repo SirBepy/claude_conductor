@@ -242,6 +242,35 @@ describe("buildIdentitySurface", () => {
     expect(view.tokenExpiryLabel).toBe("Token expiry unknown");
     expect(view.refreshExpiryLabel).toBe("Re-login window unknown");
     expect(view.hasCookie).toBe(false);
+    expect(view.showConnectUsage).toBe(true);
+    expect(view.warningMessage).toBeNull();
+  });
+
+  it("offers Connect usage and warns when a cookie is on disk but get_auth_state_map says it's expired", () => {
+    const identity = {
+      oauthAccount: { emailAddress: "live@x.com", organizationUuid: "org-1", organizationType: "claude_max" },
+      tokenExpiresAt: null,
+      hasCookie: true,
+      drift: false,
+      driftMessage: null,
+    };
+    const view = buildIdentitySurface(account, identity, "needslogin");
+    expect(view.hasCookie).toBe(true);
+    expect(view.usageNeedsLogin).toBe(true);
+    expect(view.showConnectUsage).toBe(true);
+    expect(view.warningMessage).toBe("Usage tracking login expired - click Connect usage to reconnect.");
+  });
+
+  it("stays quiet when the cookie is present and get_auth_state_map reports it logged in", () => {
+    const identity = {
+      oauthAccount: { emailAddress: "live@x.com", organizationUuid: "org-1", organizationType: "claude_max" },
+      tokenExpiresAt: null,
+      hasCookie: true,
+      drift: false,
+      driftMessage: null,
+    };
+    const view = buildIdentitySurface(account, identity, "loggedin");
+    expect(view.showConnectUsage).toBe(false);
     expect(view.warningMessage).toBeNull();
   });
 

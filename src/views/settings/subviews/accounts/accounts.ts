@@ -6,7 +6,7 @@
 import { html, render } from "lit-html";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { api } from "../../../../shared/api";
-import type { Account, AccountIdentity, OauthAccountInfo } from "../../../../shared/api";
+import type { Account, AccountIdentity, AuthState, OauthAccountInfo } from "../../../../shared/api";
 import { accountIconBadgeHtml } from "../../../../shared/account-chip";
 import { openAddAccountWizard } from "./add-account-wizard";
 import { openEditAccountModal } from "./edit-account-modal";
@@ -70,7 +70,7 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, surfa
             ${!isDefault ? `<button class="menu-item acc-menu-default" data-id="${id}"><i class="ph ph-star"></i> Set as default</button>` : ""}
             <button class="menu-item acc-menu-reauth" data-id="${id}"><i class="ph ph-arrow-clockwise"></i> Reauth</button>
             <div class="menu-sep"></div>
-            ${!surface.hasCookie ? `<button class="menu-item acc-menu-add-cookie" data-id="${id}"><i class="ph ph-link"></i> Connect usage</button>` : ""}
+            ${surface.showConnectUsage ? `<button class="menu-item acc-menu-add-cookie" data-id="${id}"><i class="ph ph-link"></i> Connect usage</button>` : ""}
             <button class="menu-item acc-menu-logout" data-id="${id}"><i class="ph ph-sign-out"></i> Log out</button>
             <button class="menu-item danger acc-menu-remove" data-id="${id}"><i class="ph ph-trash"></i> Remove</button>
           </div>
@@ -111,13 +111,18 @@ async function refreshList(root: HTMLElement): Promise<void> {
   let accounts: Account[] = [];
   let defaultAccountId: string | null = null;
   let identities: Record<string, AccountIdentity | null> = {};
+  let authStates: Record<string, AuthState> = {};
   let loadError = false;
   try {
     accounts = await api.listAccounts();
     const settings = await api.getSettings();
     defaultAccountId = (settings?.["default_account_id"] as string | null | undefined) ?? null;
-    const fetched = await Promise.all(accounts.map((a) => api.getAccountIdentity(a.id)));
+    const [fetched, authStateMap] = await Promise.all([
+      Promise.all(accounts.map((a) => api.getAccountIdentity(a.id))),
+      api.getAuthStateMap(),
+    ]);
     identities = Object.fromEntries(accounts.map((a, i) => [a.id, fetched[i] ?? null]));
+    authStates = authStateMap;
   } catch (e) {
     console.error("[settings-accounts] refreshList failed", e);
     loadError = true;
@@ -131,7 +136,9 @@ async function refreshList(root: HTMLElement): Promise<void> {
   }
   hasLoadedOnce = true;
   lastAccounts = accounts;
-  lastSurfaces = Object.fromEntries(accounts.map((a) => [a.id, buildIdentitySurface(a, identities[a.id] ?? null)]));
+  lastSurfaces = Object.fromEntries(
+    accounts.map((a) => [a.id, buildIdentitySurface(a, identities[a.id] ?? null, authStates[a.id])]),
+  );
 
   list.innerHTML = accounts.length === 0
     ? emptyStateHtml()

@@ -93,7 +93,7 @@ pub async fn recapture_account_cookie(account_id: String, app: AppHandle) -> Res
         (account.chrome_profile_dir.clone(), account.org_uuid.clone())
     };
 
-    let session_key = crate::auth::login_flow::run_for_account(app, chrome_profile_dir)
+    let session_key = crate::auth::login_flow::run_for_account(app.clone(), chrome_profile_dir)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -108,5 +108,23 @@ pub async fn recapture_account_cookie(account_id: String, app: AppHandle) -> Res
     }
 
     let session_file = paths::account_session_file(&account_id).map_err(|e| e.to_string())?;
-    crate::auth::session::save(&session_file, &session_key).map_err(|e| e.to_string())
+    crate::auth::session::save(&session_file, &session_key).map_err(|e| e.to_string())?;
+
+    // Without this, `AppState.auth_state_by_account` (and the Dashboard's
+    // "Needs login" badge it feeds - see `get_auth_state_map`) stays stuck on
+    // whatever the last scheduled poll tick recorded, possibly still
+    // `NeedsLogin`, until the next tick happens to land. The cookie just
+    // captured here is known-good (the org-list check above already used it),
+    // so poll with it now instead of leaving the badge stale.
+    if let Err(e) = crate::scheduler::poll_once_scoped(
+        &app,
+        crate::scheduler::PollTrigger::Manual,
+        Some(account_id.as_str()),
+    )
+    .await
+    {
+        log::warn!("recapture_account_cookie: post-capture poll failed for {account_id}: {e:?}");
+    }
+
+    Ok(())
 }
