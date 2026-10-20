@@ -1,5 +1,7 @@
 use crate::chat::billing::check_metered_billing;
-use crate::daemon::claude_config::{append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config};
+use crate::daemon::claude_config::{
+    append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config, WRAP_UP_ON_DONE_PROMPT,
+};
 use crate::daemon::pump::run_stdout_pump;
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
@@ -133,6 +135,13 @@ pub async fn spawn_session(
         .flatten();
     if let Some(line) = tracker.and_then(|(t, _)| crate::tickets::prompt_line(&t)) {
         append_system_prompt(&mut args, &line);
+    }
+    // Read fresh on every per-turn respawn (not cached from the first turn),
+    // so flipping the "Wrap up when done" toggle mid-chat takes effect on the
+    // very next turn - the whole point of making it a menu toggle rather than
+    // a spawn-time-only option.
+    if crate::sessions::chat_config::get(&session_id).map(|c| c.wrap_up_on_done).unwrap_or(false) {
+        append_system_prompt(&mut args, WRAP_UP_ON_DONE_PROMPT);
     }
     cmd.args(args);
     if let Some(ref mcp_path) = mcp_config_path {

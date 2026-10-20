@@ -27,6 +27,24 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     router.register("list_auto_accept", move |_params, _ctx| {
         async move { Ok(json!(crate::sessions::chat_config::list_auto_accept())) }
     });
+    // Persist a chat's "wrap up when done" toggle. Same sole-writer shape as
+    // set_auto_accept above - read fresh at every per-turn respawn
+    // (`lifecycle::spawn`), so no restart is needed for a mid-chat flip.
+    router.register("set_wrap_up_on_done", move |params, _ctx| {
+        async move {
+            #[derive(serde::Deserialize)]
+            struct P { session_id: String, value: bool }
+            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            crate::sessions::chat_config::set_wrap_up_on_done(&p.session_id, p.value);
+            Ok(json!({"ok": true}))
+        }
+    });
+    // Session ids with wrap-up-on-done enabled, so a freshly-launched client
+    // seeds its menu-toggle state. Read-only; mirrors `list_auto_accept`.
+    router.register("list_wrap_up_on_done", move |_params, _ctx| {
+        async move { Ok(json!(crate::sessions::chat_config::list_wrap_up_on_done())) }
+    });
     // Read-only; mirrors the desktop `get_chat_state` Tauri command so a
     // remote/phone client can seed the same unread-vs-stale judgement a
     // freshly-opened desktop window would.

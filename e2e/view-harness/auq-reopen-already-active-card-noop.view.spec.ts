@@ -1,3 +1,4 @@
+// Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 

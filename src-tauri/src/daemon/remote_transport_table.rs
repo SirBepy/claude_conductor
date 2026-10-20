@@ -103,6 +103,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("set_session_model", PM),
     ("set_auto_accept", PM),
     ("list_auto_accept", PM),
+    // Same reasoning as set_auto_accept/list_auto_accept just above: this
+    // only steers the model's own system prompt on its NEXT turn, strictly
+    // weaker than start_session.
+    ("set_wrap_up_on_done", PM),
+    ("list_wrap_up_on_done", PM),
     // Read-only transcript paging - the chat pane's own render path, so a
     // peer machine mirroring a session needs it too.
     ("load_history_page", PM),
@@ -585,6 +590,7 @@ mod tests {
         for m in [
             "list_pending_prompts", "confirm_question_rendered", "get_skipped_question_marks",
             "set_session_effort", "set_session_model", "set_auto_accept", "list_auto_accept",
+            "set_wrap_up_on_done", "list_wrap_up_on_done",
             "freeze_session", "unfreeze_session", "paste_attachment", "read_attachment",
             "transcript_stats", "load_history", "context_status",
         ] {

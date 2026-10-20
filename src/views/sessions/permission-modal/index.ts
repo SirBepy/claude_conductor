@@ -29,6 +29,7 @@ import {
   allowPermission,
   autoAllowIfRemembered,
   hydrateAutoAccept,
+  hydrateWrapUpOnDone,
   isAutoAccept,
   isForSelectedSession,
   markLatestQuestion,
@@ -47,6 +48,8 @@ export type { ShowQuestionCardOpts } from "./question-submit";
 export {
   isAutoAccept,
   setAutoAccept,
+  isWrapUpOnDone,
+  setWrapUpOnDone,
   setSelectedSessionId,
   getSelectedSessionId,
   clearPendingPrompt,
@@ -365,6 +368,7 @@ export function installPermissionModalListener(): void {
   // restart. Done before the transport split below so the phone (which has no
   // Tauri event bus) still hydrates its gate.
   void hydrateAutoAccept();
+  void hydrateWrapUpOnDone();
 
   // Registered on both transports below - catches a stale card the same way
   // on desktop, phone, and a detached window (own module realm, own listener).

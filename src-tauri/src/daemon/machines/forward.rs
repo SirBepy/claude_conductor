@@ -288,7 +288,7 @@ mod tests {
         let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
         state.registry.upsert_interactive("local-claimed", std::path::Path::new("C:/x"), "proj", "2026-10-18T00:00:00Z");
         mirror_owned_session(&state, "local-claimed");
-        for method in ["send_message", "respond_permission", "respond_question", "set_auto_accept"] {
+        for method in ["send_message", "respond_permission", "respond_question", "set_auto_accept", "set_wrap_up_on_done"] {
             let result = forward_one(
                 &state,
                 method,

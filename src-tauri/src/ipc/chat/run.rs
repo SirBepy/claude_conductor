@@ -246,6 +246,20 @@ pub async fn set_auto_accept(
     Ok(())
 }
 
+/// Persist a chat's "wrap up when done" toggle. Forwarded to the daemon so it
+/// stays the sole writer of chat-config.json (the read side is the local
+/// `list_wrap_up_on_done` command in misc.rs, which reads the same shared file).
+#[tauri::command]
+pub async fn set_wrap_up_on_done(
+    session_id: String,
+    value: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.set_wrap_up_on_done(&session_id, value).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cancel_turn(
     session_id: String,
