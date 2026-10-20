@@ -70,7 +70,7 @@ function accountRowHtml(account: Account, defaultAccountId: string | null, surfa
             ${!isDefault ? `<button class="menu-item acc-menu-default" data-id="${id}"><i class="ph ph-star"></i> Set as default</button>` : ""}
             <button class="menu-item acc-menu-reauth" data-id="${id}"><i class="ph ph-arrow-clockwise"></i> Reauth</button>
             <div class="menu-sep"></div>
-            ${surface.showConnectUsage ? `<button class="menu-item acc-menu-add-cookie" data-id="${id}"><i class="ph ph-link"></i> Connect usage</button>` : ""}
+            <button class="menu-item acc-menu-add-cookie" data-id="${id}"><i class="ph ph-link"></i> Connect usage</button>
             <button class="menu-item acc-menu-logout" data-id="${id}"><i class="ph ph-sign-out"></i> Log out</button>
             <button class="menu-item danger acc-menu-remove" data-id="${id}"><i class="ph ph-trash"></i> Remove</button>
           </div>

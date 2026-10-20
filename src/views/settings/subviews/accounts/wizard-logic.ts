@@ -194,14 +194,11 @@ export interface IdentitySurfaceView {
   hasCookie: boolean;
   /** True when a cookie file is on disk but `get_auth_state_map` says usage
    * polling is failing with it (expired/revoked) - distinct from `!hasCookie`
-   * (never connected). Both cases need the same fix (recapture the cookie),
-   * so `showConnectUsage` folds them together for the button, but the row's
-   * warning text only fires for this one - "never connected" isn't a
-   * regression worth alarming about. */
+   * (never connected). Drives the row's warning text; "Connect usage" itself
+   * is always offered regardless (see accounts.ts), since this state only
+   * updates on the next scheduled poll tick and can lag a freshly-invalid
+   * cookie (ai_todo: dane 2026-10-20). */
   usageNeedsLogin: boolean;
-  /** Union of `!hasCookie` and `usageNeedsLogin` - whether the "Connect
-   * usage" action should be offered at all. */
-  showConnectUsage: boolean;
   /** Non-null (drift, or usage tracking login expired) = show the red warning row. */
   warningMessage: string | null;
 }
@@ -230,7 +227,6 @@ export function buildIdentitySurface(
     refreshExpiryLabel: formatRefreshExpiry(identity?.refreshTokenExpiresAt ?? null, now),
     hasCookie,
     usageNeedsLogin,
-    showConnectUsage: !hasCookie || usageNeedsLogin,
     warningMessage: identity?.drift
       ? (identity.driftMessage ?? "Identity mismatch - re-verify this account.")
       : (hasCookie && usageNeedsLogin ? "Usage tracking login expired - click Connect usage to reconnect." : null),
