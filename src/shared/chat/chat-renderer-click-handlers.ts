@@ -9,7 +9,7 @@ import { openLightbox } from "./lightbox";
 import { onWaitingChipClick } from "./turn-chips";
 import { getCta } from "./cta-registry";
 import { PREVIEW_OPEN_EVENT } from "./chat-preview-card";
-import { DRAFT_OPEN_EVENT, copyDraftCard } from "./chat-draft-card";
+import { DRAFT_OPEN_EVENT, copyDraftCard, publishDraftCard } from "./chat-draft-card";
 import type { ChatRenderer } from "./chat-renderer";
 
 /** Delegated `click` handlers for `ChatRenderer`'s container. Each factory
@@ -172,6 +172,12 @@ export function createHandleDraftCardClick(_renderer: ChatRenderer): (e: MouseEv
     if (copy) {
       e.stopPropagation();
       copyDraftCard(card, copy);
+      return;
+    }
+    const publish = target.closest<HTMLButtonElement>("[data-publish]");
+    if (publish) {
+      e.stopPropagation();
+      publishDraftCard(card, publish);
       return;
     }
     if (target.closest("[data-draft-pop]")) {

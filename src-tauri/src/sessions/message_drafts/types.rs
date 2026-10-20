@@ -67,6 +67,10 @@ pub struct DraftVariant {
     /// new platform needs no code; the panel groups case-insensitively.
     #[serde(default)]
     pub platform: Option<String>,
+    /// This variant's claude.ai link once published. `version` behind
+    /// `current` means a revise has moved past what the link shows.
+    #[serde(default)]
+    pub published: Option<crate::claude_ai_publish::PublishedLink>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

@@ -8,6 +8,7 @@
 pub(crate) mod channel;
 mod ask;
 mod channels;
+mod claude_ai_publish;
 mod context;
 // pub(crate): `hooks_server::nudge` (the PostToolBatch route that drains held
 // messages into a running turn) calls this module's `sync_held_count` after
@@ -78,6 +79,7 @@ pub(crate) mod user_todos;
 mod voice;
 
 pub use channels::register_channels;
+pub use claude_ai_publish::register_claude_ai_publish;
 pub use context::register_context;
 pub use drafts::register_drafts;
 pub use drafts_store::register_drafts_store;

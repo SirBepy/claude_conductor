@@ -14,7 +14,7 @@ const { invokeMock, listenMock } = vi.hoisted(() => ({
   listenMock: vi.fn().mockResolvedValue(() => {}),
 }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
-vi.mock("../src/shared/transport.ts", () => ({ getTransport: () => ({ listen: listenMock }) }));
+vi.mock("../src/shared/transport.ts", () => ({ getTransport: () => ({ listen: listenMock }), isRemote: () => false }));
 
 const DRAFT_TOOL = "mcp__cc_conductor__write_draft";
 const DRAFT_ID = "abcdef12-3456";

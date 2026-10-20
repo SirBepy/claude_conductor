@@ -24,6 +24,7 @@
 //! - History caps at [`MAX_HISTORY`]; evicting the oldest entry logs a note
 //!   (never a silent drop).
 
+pub use crate::claude_ai_publish::PublishedLink;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -66,6 +67,11 @@ pub struct PreviewSnapshot {
     /// Refreshed on every replace so newest-first ordering always surfaces
     /// the most-recently-pushed entry as "live".
     pub created_at: String,
+    /// Its claude.ai link once published. Kept across a same-slug replace so
+    /// the next publish updates the same page; `published.version` falling
+    /// behind `version` is how the UI tells the link is out of date.
+    #[serde(default)]
+    pub published: Option<PublishedLink>,
 }
 
 /// Metadata-only projection for the history rail (`list_previews`) - omits
@@ -81,6 +87,8 @@ pub struct PreviewMeta {
     pub session_id: Option<String>,
     pub version: u32,
     pub created_at: String,
+    #[serde(default)]
+    pub published: Option<PublishedLink>,
 }
 
 impl From<&PreviewSnapshot> for PreviewMeta {
@@ -93,6 +101,7 @@ impl From<&PreviewSnapshot> for PreviewMeta {
             session_id: s.session_id.clone(),
             version: s.version,
             created_at: s.created_at.clone(),
+            published: s.published.clone(),
         }
     }
 }
@@ -204,6 +213,7 @@ fn push_at(
             session_id,
             version: 1,
             created_at: now_rfc3339(),
+            published: None,
         });
         write_atomic(path, &list);
         return Ok(id);
@@ -222,6 +232,7 @@ fn push_at(
         session_id,
         version: 1,
         created_at: now_rfc3339(),
+        published: None,
     });
     write_atomic(path, &list);
     Ok(id)
@@ -291,6 +302,31 @@ fn get_at(path: &Path, id: &str) -> Option<PreviewSnapshot> {
     load_list(path).into_iter().find(|s| s.id == id)
 }
 
+/// Records `id`'s claude.ai link and broadcasts the refreshed metadata on the
+/// same `preview` channel a push uses, so open panels pick it up.
+pub fn set_published_and_notify(
+    state: &crate::daemon::state::DaemonState,
+    id: &str,
+    link: PublishedLink,
+) -> Option<PreviewMeta> {
+    let path = store_path()?;
+    let meta = {
+        let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_published_at(&path, id, link)?
+    };
+    state.notifier.publish("preview", serde_json::json!({ "snapshot": meta }));
+    Some(meta)
+}
+
+fn set_published_at(path: &Path, id: &str, link: PublishedLink) -> Option<PreviewMeta> {
+    let mut list = load_list(path);
+    let snap = list.iter_mut().find(|s| s.id == id)?;
+    snap.published = Some(link);
+    let meta = PreviewMeta::from(&*snap);
+    write_atomic(path, &list);
+    Some(meta)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,6 +358,40 @@ mod tests {
 
         let full = get_at(&path, &id1).unwrap();
         assert_eq!(full.html, "<p>2</p>", "get must return the replaced html");
+    }
+
+    #[test]
+    fn published_link_survives_a_same_slug_replace_and_shows_it_is_behind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = push_at(&path, "v1".into(), Some("report".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
+        let link = PublishedLink {
+            url: "https://claude.ai/artifact/AB".into(),
+            version: 1,
+            account: "Joe".into(),
+            published_at: "now".into(),
+        };
+        let meta = set_published_at(&path, &id, link.clone()).unwrap();
+        assert_eq!(meta.published, Some(link.clone()));
+
+        push_at(&path, "v2".into(), Some("report".into()), "<p>2</p>".into(), "chat".into(), None).unwrap();
+        let after = &list_at(&path)[0];
+        // Kept so the next publish updates the same page; version 2 vs 1 is
+        // what tells the panel the link is out of date.
+        assert_eq!(after.published, Some(link));
+        assert_eq!(after.version, 2);
+    }
+
+    #[test]
+    fn a_history_file_written_before_published_existed_still_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        std::fs::write(
+            &path,
+            r#"[{"id":"a","slug":"s","title":"t","html":"<p></p>","source":"chat","session_id":null,"version":1,"created_at":"2026-01-01T00:00:00.000Z"}]"#,
+        )
+        .unwrap();
+        assert_eq!(list_at(&path).len(), 1);
     }
 
     #[test]

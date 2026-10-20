@@ -9,6 +9,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
 import { currentVersion, copyDualPayload, handleOf } from "../../shared/message-draft-utils";
+import { buildDraftPage, canPublish, contentStamp, publishButtonHtml, publishToClaudeAi } from "../../shared/claude-ai-publish";
 import type { MessageDraft, DraftVariant } from "../../types/ipc.generated";
 import { ReviseMenuController, buildLearnPrompt, sendRevision } from "./drafts-revise";
 
@@ -197,6 +198,9 @@ export class DraftsEditor {
                   `title="Ask Claude to fact-check your edit and learn how you like messages written">` +
                   `<i class="ph ph-graduation-cap"></i>Check &amp; learn</button>`) +
           `<span class="dr-grow"></span>` +
+          (variant && canPublish()
+            ? publishButtonHtml(variant.published, contentStamp(version?.body ?? ""), "icon-btn-sq dr-icon")
+            : "") +
           `<button type="button" class="icon-btn-sq dr-icon dr-copy" data-copy title="Copy - marks it sent"><i class="ph ph-copy"></i></button>` +
           (archived
             ? `<button type="button" class="icon-btn-sq dr-icon" data-archive title="Unarchive"><i class="ph ph-box-arrow-up"></i></button>`
@@ -318,6 +322,11 @@ export class DraftsEditor {
       this.copy(el.closest("[data-copy]") as HTMLElement);
       return;
     }
+    const publishBtn = el.closest<HTMLButtonElement>("[data-publish]");
+    if (publishBtn) {
+      this.publish(publishBtn);
+      return;
+    }
     if (this.reviseMenu.handleClick(el)) return;
     const code = el.closest("[data-code]");
     if (code) {
@@ -395,6 +404,32 @@ export class DraftsEditor {
     const html = body.innerHTML;
     const plain = htmlToMarkdown(body);
     copyDualPayload(html, plain, btn, () => this.setState("copied"));
+  }
+
+  /** Publishes what the editor shows right now, unsaved keystrokes included,
+   *  so the page never lags the screen behind an autosave. */
+  private publish(btn: HTMLButtonElement): void {
+    const variant = this.variant();
+    const body = this.bodyEl();
+    if (!variant || !body) return;
+    // flush() saves exactly this markdown whenever it differs from the
+    // store, so the stamp below always matches the stored body the
+    // button's state and the in-chat card are computed from.
+    this.flush();
+    const markdown = htmlToMarkdown(body);
+    const stamp = contentStamp(markdown);
+    const params = {
+      target: "draft" as const,
+      session_id: this.deps.sessionId,
+      id: this.draft.id,
+      recipient: variant.recipient,
+      title: this.draft.topic,
+      html: buildDraftPage(this.draft.topic, markdown),
+      version: stamp,
+    };
+    void publishToClaudeAi(params, variant.published, stamp, btn).then((link) => {
+      if (link) this.deps.onChanged();
+    });
   }
 
   private setState(next: string): void {
