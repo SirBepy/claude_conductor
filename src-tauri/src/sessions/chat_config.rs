@@ -31,9 +31,10 @@ pub struct ChatConfig {
     /// prompt carries a standing instruction to self-verify and `/close` once
     /// the model believes the task is finished, unless it genuinely needs
     /// something from Joe first. Persisted so flipping it mid-chat survives
-    /// a daemon restart; read fresh at every per-turn respawn (see
-    /// `WRAP_UP_ON_DONE_PROMPT`'s call site in `lifecycle::spawn`), so toggling
-    /// it mid-chat takes effect on the very next turn. Written only via
+    /// a daemon restart. Read at spawn (argv system prompt, `lifecycle::spawn`)
+    /// and again on every send (`lifecycle::send_message`), which appends a
+    /// note to the first message after a flip, so a mid-chat toggle reaches
+    /// the already-running child on its next turn. Written only via
     /// `set_wrap_up_on_done`.
     #[serde(default)]
     pub wrap_up_on_done: bool,

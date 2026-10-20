@@ -28,8 +28,8 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
         async move { Ok(json!(crate::sessions::chat_config::list_auto_accept())) }
     });
     // Persist a chat's "wrap up when done" toggle. Same sole-writer shape as
-    // set_auto_accept above - read fresh at every per-turn respawn
-    // (`lifecycle::spawn`), so no restart is needed for a mid-chat flip.
+    // set_auto_accept above. A mid-chat flip needs no restart:
+    // `lifecycle::send_message` reads it on every send.
     router.register("set_wrap_up_on_done", move |params, _ctx| {
         async move {
             #[derive(serde::Deserialize)]

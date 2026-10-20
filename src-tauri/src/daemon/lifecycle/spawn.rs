@@ -136,11 +136,12 @@ pub async fn spawn_session(
     if let Some(line) = tracker.and_then(|(t, _)| crate::tickets::prompt_line(&t)) {
         append_system_prompt(&mut args, &line);
     }
-    // Read fresh on every per-turn respawn (not cached from the first turn),
-    // so flipping the "Wrap up when done" toggle mid-chat takes effect on the
-    // very next turn - the whole point of making it a menu toggle rather than
-    // a spawn-time-only option.
-    if crate::sessions::chat_config::get(&session_id).map(|c| c.wrap_up_on_done).unwrap_or(false) {
+    // Baked into argv, so it only describes the toggle at spawn time. A flip
+    // while this child lives is delivered by `lifecycle::send_message` as a
+    // note on the next message, tracked through `Session::wrap_up_told`.
+    let wrap_up_at_spawn =
+        crate::sessions::chat_config::get(&session_id).map(|c| c.wrap_up_on_done).unwrap_or(false);
+    if wrap_up_at_spawn {
         append_system_prompt(&mut args, WRAP_UP_ON_DONE_PROMPT);
     }
     cmd.args(args);
@@ -202,6 +203,7 @@ pub async fn spawn_session(
         hook_settings_path,
         account.id.clone(),
     );
+    session.wrap_up_told.store(wrap_up_at_spawn, std::sync::atomic::Ordering::SeqCst);
     map.insert(session_id.clone(), Arc::clone(&session));
     let drain = tokio::spawn(drain_stderr(stderr, Arc::clone(&session)));
     *session.stderr_drain.lock().await = Some(drain);
