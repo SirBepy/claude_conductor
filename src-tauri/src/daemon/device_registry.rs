@@ -44,6 +44,12 @@ struct DeviceEntry {
     kind: DeviceKind,
     #[serde(default)]
     machine_id: Option<String>,
+    /// Unix seconds of the last successful auth, written at most once per
+    /// `LAST_USED_WRITE_INTERVAL_SECS`. `None` only in a registry written
+    /// before this field existed; `stamp_missing_last_used` fills it on the
+    /// first auth so an upgrade never starts the idle clock at `created_at`.
+    #[serde(default)]
+    last_used: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -61,6 +67,14 @@ struct RegistryFile {
 }
 
 const SCHEMA: u32 = 1;
+
+/// A token unused this long stops authenticating, so a leaked phone or peer
+/// token retires itself without outliving a forgotten device by years.
+const IDLE_EXPIRY_SECS: u64 = 90 * 24 * 60 * 60;
+
+/// Auth runs on every request; writing the registry each time would hammer
+/// the disk, and a one-hour grain is far below the 90-day window.
+const LAST_USED_WRITE_INTERVAL_SECS: u64 = 60 * 60;
 
 fn bool_true() -> bool { true }
 
@@ -87,6 +101,8 @@ pub struct RemoteDevice {
     pub name: String,
     pub created_at: u64,
     pub kind: DeviceKind,
+    /// `None` until the device's first auth after the field was introduced.
+    pub last_used: Option<u64>,
 }
 
 fn registry_path(app_data: &Path) -> PathBuf {
@@ -103,6 +119,17 @@ fn load(app_data: &Path) -> RegistryFile {
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .map(migrate)
         .unwrap_or(RegistryFile { schema: SCHEMA, ..Default::default() })
+}
+
+/// Gives every pre-field entry `last_used = now`, so the upgrade itself never
+/// locks a device out. Returns whether anything changed (caller persists).
+fn stamp_missing_last_used(reg: &mut RegistryFile, now: u64) -> bool {
+    let mut changed = false;
+    for d in reg.devices.iter_mut().filter(|d| d.last_used.is_none()) {
+        d.last_used = Some(now);
+        changed = true;
+    }
+    changed
 }
 
 fn save(reg: &RegistryFile, app_data: &Path) -> Result<(), String> {
@@ -139,6 +166,7 @@ impl DeviceRegistry {
             created_at: now_secs(),
             kind: DeviceKind::Phone,
             machine_id: None,
+            last_used: Some(now_secs()),
         });
         if let Err(e) = save(&reg, app_data) {
             log::error!("device_registry: failed to save desktop device: {e}");
@@ -182,15 +210,41 @@ impl DeviceRegistry {
     /// off" (503) from "bad token" (401). Blocking file I/O: async callers
     /// use `authenticate_blocking_safe`.
     pub fn authenticate(token: &str, app_data: &Path) -> AuthOutcome {
-        let reg = load(app_data);
+        Self::authenticate_at(token, app_data, now_secs())
+    }
+
+    /// `authenticate` with an injected clock so expiry and the write throttle
+    /// are testable without sleeping.
+    fn authenticate_at(token: &str, app_data: &Path, now: u64) -> AuthOutcome {
+        let mut reg = load(app_data);
         if !reg.enabled {
             return AuthOutcome::Disabled;
         }
+        let mut dirty = stamp_missing_last_used(&mut reg, now);
         let hash = sha256_hex(token);
-        match reg.devices.iter().find(|d| d.token_hash == hash) {
-            Some(d) => AuthOutcome::Ok(d.kind, d.machine_id.clone()),
+        let outcome = match reg.devices.iter_mut().find(|d| d.token_hash == hash) {
+            // The desktop token backs the local voice socket and is never
+            // re-presented by a device that could go idle.
+            Some(d) if d.id != DESKTOP_ID
+                && now.saturating_sub(d.last_used.unwrap_or(now)) > IDLE_EXPIRY_SECS =>
+            {
+                AuthOutcome::Invalid
+            }
+            Some(d) => {
+                if now.saturating_sub(d.last_used.unwrap_or(0)) >= LAST_USED_WRITE_INTERVAL_SECS {
+                    d.last_used = Some(now);
+                    dirty = true;
+                }
+                AuthOutcome::Ok(d.kind, d.machine_id.clone())
+            }
             None => AuthOutcome::Invalid,
+        };
+        if dirty {
+            if let Err(e) = save(&reg, app_data) {
+                log::warn!("device_registry: failed to record last_used: {e}");
+            }
         }
+        outcome
     }
 
     /// `authenticate` on the blocking pool. The registry is re-read from disk
@@ -215,6 +269,7 @@ impl DeviceRegistry {
             created_at: now_secs(),
             kind: DeviceKind::Phone,
             machine_id: None,
+            last_used: Some(now_secs()),
         });
         save(&reg, app_data)?;
         Ok(token)
@@ -237,6 +292,7 @@ impl DeviceRegistry {
             created_at: now_secs(),
             kind: DeviceKind::Machine,
             machine_id: Some(machine_id.to_string()),
+            last_used: Some(now_secs()),
         });
         save(&reg, app_data)?;
         Ok((token, id))
@@ -270,6 +326,7 @@ impl DeviceRegistry {
             name: d.name.clone(),
             created_at: d.created_at,
             kind: d.kind,
+            last_used: d.last_used,
         }).collect()
     }
 }
@@ -439,5 +496,75 @@ mod tests {
         let id = DeviceRegistry::list_devices(dir.path())[0].id.clone();
         DeviceRegistry::revoke_device(&id, dir.path()).unwrap();
         assert_eq!(go().await, AuthOutcome::Invalid);
+    }
+
+    const DAY: u64 = 24 * 60 * 60;
+
+    fn last_used_of(dir: &Path) -> Option<u64> {
+        DeviceRegistry::list_devices(dir)[0].last_used
+    }
+
+    #[test]
+    fn token_unused_for_over_90_days_stops_authenticating() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let t0 = last_used_of(dir.path()).unwrap();
+        assert!(matches!(DeviceRegistry::authenticate_at(&token, dir.path(), t0 + 89 * DAY), AuthOutcome::Ok(..)));
+        // The success above refreshed last_used, so measure from there.
+        let t1 = last_used_of(dir.path()).unwrap();
+        assert_eq!(DeviceRegistry::authenticate_at(&token, dir.path(), t1 + 91 * DAY), AuthOutcome::Invalid);
+    }
+
+    #[test]
+    fn an_active_device_never_expires() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let t0 = last_used_of(dir.path()).unwrap();
+        for day in (30..=400).step_by(30) {
+            let out = DeviceRegistry::authenticate_at(&token, dir.path(), t0 + day * DAY);
+            assert!(matches!(out, AuthOutcome::Ok(..)), "day {day}");
+        }
+    }
+
+    #[test]
+    fn last_used_write_is_throttled_to_once_an_hour() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let t0 = last_used_of(dir.path()).unwrap();
+        DeviceRegistry::authenticate_at(&token, dir.path(), t0 + 600);
+        assert_eq!(last_used_of(dir.path()), Some(t0), "10 min later: no write");
+        DeviceRegistry::authenticate_at(&token, dir.path(), t0 + 3600);
+        assert_eq!(last_used_of(dir.path()), Some(t0 + 3600));
+    }
+
+    #[test]
+    fn registry_without_last_used_loads_and_counts_first_auth_as_now() {
+        let dir = tempdir().unwrap();
+        let body = serde_json::json!({
+            "devices": [{"id": "d1", "name": "Old", "token_hash": sha256_hex("tok"), "created_at": 0}],
+            "enabled": true, "schema": 1
+        });
+        std::fs::write(registry_path(dir.path()), body.to_string()).unwrap();
+        assert_eq!(last_used_of(dir.path()), None);
+        // created_at = 0 is far past 90 days: must still admit on upgrade.
+        let now = 1_800_000_000;
+        assert!(matches!(DeviceRegistry::authenticate_at("tok", dir.path(), now), AuthOutcome::Ok(..)));
+        assert_eq!(last_used_of(dir.path()), Some(now));
+        assert_eq!(DeviceRegistry::authenticate_at("tok", dir.path(), now + 91 * DAY), AuthOutcome::Invalid);
+    }
+
+    #[test]
+    fn the_desktop_token_never_idles_out() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::ensure_desktop_device(dir.path());
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join("remote-access.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let token = v["token"].as_str().unwrap();
+        let t0 = last_used_of(dir.path()).unwrap();
+        assert!(matches!(DeviceRegistry::authenticate_at(token, dir.path(), t0 + 500 * DAY), AuthOutcome::Ok(..)));
     }
 }

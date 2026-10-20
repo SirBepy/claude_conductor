@@ -39,6 +39,13 @@ async function refreshQr(root: HTMLElement): Promise<void> {
   }
 }
 
+/** A device that has not authed since the field was introduced reads "not yet"
+ *  rather than a wrong date; the first request stamps it. */
+export function lastUsedLabel(lastUsed: number | null | undefined): string {
+  if (!lastUsed) return "not yet";
+  return new Date(lastUsed * 1000).toLocaleDateString();
+}
+
 async function renderDeviceList(root: HTMLElement): Promise<void> {
   if (!$(root, "#ra-device-list")) return;
   try {
@@ -54,7 +61,7 @@ async function renderDeviceList(root: HTMLElement): Promise<void> {
         <div class="ra-device-row" data-id="${escapeHtml(d.id)}">
           <div class="ra-device-info">
             <span class="ra-device-name">${escapeHtml(d.name)}</span>
-            <span class="ra-device-date">Paired ${new Date(d.created_at * 1000).toLocaleDateString()}</span>
+            <span class="ra-device-date">Paired ${new Date(d.created_at * 1000).toLocaleDateString()} - last used ${lastUsedLabel(d.last_used)}</span>
           </div>
           <button class="btn-danger-sm ra-revoke-btn" data-id="${escapeHtml(d.id)}">Revoke</button>
         </div>
