@@ -63,6 +63,21 @@ fn wrap_up_note(now: bool, told: &std::sync::atomic::AtomicBool) -> Option<Strin
     Some(format!("\n\n{MENTION_BLOCK_OPEN}\n{body}\n{MENTION_BLOCK_CLOSE}"))
 }
 
+/// `wrap_up_note` for a message about to go out. A message that opens with a
+/// slash command gets no note and leaves `told` untouched: the CLI expands a
+/// LEADING slash command itself, and trailing text could be handed to the skill
+/// as its arguments, so the note waits for the next ordinary message.
+fn wrap_up_note_for_message(
+    text: &str,
+    now: bool,
+    told: &std::sync::atomic::AtomicBool,
+) -> Option<String> {
+    if text.trim_start().starts_with('/') {
+        return None;
+    }
+    wrap_up_note(now, told)
+}
+
 async fn send_message_inner(
     session: &Arc<Session>,
     text: &str,
@@ -71,10 +86,9 @@ async fn send_message_inner(
 ) -> Result<(), LifecycleError> {
     // Remember the prompt: if this turn is rejected by a rate limit before
     // producing any output, the scheduled resume replays exactly this text.
-    // Deliberately the CLEAN text, not `wire_text` below - every caller that
-    // can hit a rate-limit replay (`schedule_fire::fire_message`) always
-    // passes `is_meta: false`, so `wire_text` is byte-identical to `text` on
-    // every path that ever reads `last_prompt` back.
+    // Deliberately the CLEAN text, not `wire_text` below: a replay re-enters
+    // `send_message`, which recomputes the sentinels, mention block and
+    // wrap-up note itself, so storing the decorated text would double them.
     if let Ok(mut lp) = session.last_prompt.lock() {
         *lp = text.to_string();
     }
@@ -103,8 +117,11 @@ async fn send_message_inner(
     let wrap_up_now = crate::sessions::chat_config::get(&session.session_id)
         .map(|c| c.wrap_up_on_done)
         .unwrap_or(false);
-    if let Some(note) = wrap_up_note(wrap_up_now, &session.wrap_up_told) {
+    if let Some(note) = wrap_up_note_for_message(text, wrap_up_now, &session.wrap_up_told) {
         wire_text.push_str(&note);
+        // A respawned child resumes a history that already holds this note, so
+        // what it was last told has to outlive the process.
+        crate::sessions::chat_config::set_wrap_up_told(&session.session_id, wrap_up_now);
     }
     let msg = serde_json::json!({
         "type": "user",
@@ -305,6 +322,40 @@ mod tests {
         let off = wrap_up_note(false, &told).expect("flip to off is retracted");
         assert!(off.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_OFF_NOTE));
         assert_eq!(wrap_up_note(false, &told), None);
+    }
+
+    #[test]
+    fn leading_slash_message_gets_no_wrap_up_note_and_keeps_the_flip_pending() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let told = AtomicBool::new(false);
+        assert_eq!(wrap_up_note_for_message("/close", true, &told), None);
+        assert_eq!(wrap_up_note_for_message("  /commit v", true, &told), None, "leading whitespace still counts");
+        assert!(!told.load(Ordering::SeqCst), "flip must not be consumed by a slash message");
+        let next = wrap_up_note_for_message("carry on", true, &told).expect("note rides the next plain message");
+        assert!(next.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_PROMPT));
+        assert!(told.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn mid_sentence_slash_still_gets_the_wrap_up_note() {
+        let told = std::sync::atomic::AtomicBool::new(false);
+        assert!(wrap_up_note_for_message("please run /close after", true, &told).is_some());
+    }
+
+    // The ON note lives in the resumed history; a respawn after the toggle went
+    // OFF must still retract it.
+    #[test]
+    fn respawn_after_on_then_off_still_retracts_exactly_once() {
+        use std::sync::atomic::AtomicBool;
+        let cfg = crate::sessions::chat_config::ChatConfig {
+            wrap_up_on_done: false,
+            wrap_up_told: true,
+            ..Default::default()
+        };
+        let told = AtomicBool::new(cfg.wrap_up_told_at_spawn());
+        let off = wrap_up_note_for_message("next", cfg.wrap_up_on_done, &told).expect("retraction sent");
+        assert!(off.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_OFF_NOTE));
+        assert_eq!(wrap_up_note_for_message("again", cfg.wrap_up_on_done, &told), None, "only once");
     }
 
     #[test]

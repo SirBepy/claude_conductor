@@ -139,11 +139,14 @@ pub async fn spawn_session(
     // Baked into argv, so it only describes the toggle at spawn time. A flip
     // while this child lives is delivered by `lifecycle::send_message` as a
     // note on the next message, tracked through `Session::wrap_up_told`.
-    let wrap_up_at_spawn =
-        crate::sessions::chat_config::get(&session_id).map(|c| c.wrap_up_on_done).unwrap_or(false);
-    if wrap_up_at_spawn {
+    let wrap_up_cfg = crate::sessions::chat_config::get(&session_id).unwrap_or_default();
+    if wrap_up_cfg.wrap_up_on_done {
         append_system_prompt(&mut args, WRAP_UP_ON_DONE_PROMPT);
+        crate::sessions::chat_config::set_wrap_up_told(&session_id, true);
     }
+    // Also true when the toggle is now off but a resumed history still holds
+    // the ON note, so the next message retracts it.
+    let wrap_up_at_spawn = wrap_up_cfg.wrap_up_told_at_spawn();
     cmd.args(args);
     if let Some(ref mcp_path) = mcp_config_path {
         cmd.arg("--permission-prompt-tool")
