@@ -3,7 +3,8 @@
 use super::{err_to_rpc, SessionIdOnly};
 use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
 use crate::daemon::machines::forward::map_peer_err;
-use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::methods::pr_review::is_known_cwd;
+use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 use crate::types::EndReason;
 use serde::Deserialize;
@@ -96,6 +97,16 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     .map(str::to_string);
                 let p: StartSessionParams = serde_json::from_value(params_value)
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // A phone or peer may only start agents inside a registered
+                // project (or one of its worktrees), not in `C:\` or the home
+                // folder; `create_project_folder` is their way to add one. The
+                // desktop and daemon-internal spawns (Local) are unrestricted.
+                // Checked before the idempotency claim so a refusal records nothing.
+                if !matches!(ctx.transport, Transport::Local)
+                    && !is_known_cwd(&state, &p.cwd.to_string_lossy())
+                {
+                    return Err(RpcError::invalid_params("unknown cwd".to_string()));
+                }
                 let cwd = p.cwd.clone();
                 let model = p.model.clone();
                 let effort = p.effort.clone();
@@ -322,6 +333,44 @@ mod machine_target_tests {
             }
         }
         base
+    }
+
+    async fn start_session_as(state: &Arc<DaemonState>, transport: Transport, cwd: &str) -> crate::daemon::rpc::Response {
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "start_session".into(),
+            params: Some(start_session_params(json!({"cwd": cwd}))),
+        };
+        // The ctx must be built INSIDE the scope: `ConnectionContext::new`
+        // reads the task-local when it runs, not when the future is polled.
+        crate::daemon::rpc::TRANSPORT
+            .scope(transport, async { router.dispatch(req, dummy_ctx()).await })
+            .await
+    }
+
+    #[tokio::test]
+    async fn remote_start_session_is_limited_to_registered_projects() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let project = "Z:\\does\\not\\exist";
+        state.settings.upsert_project_for_cwd(std::path::Path::new(project), "2026-10-20T00:00:00Z");
+
+        for transport in [Transport::Phone, Transport::PeerMachine("m".into())] {
+            let refused = start_session_as(&state, transport.clone(), "C:\\").await;
+            let err = refused.error.expect("unknown cwd must be refused remotely");
+            assert_eq!(err.message, "unknown cwd", "{transport:?}");
+
+            // Known project: passes the gate and fails later (cwd does not
+            // exist on disk, so nothing is spawned).
+            let known = start_session_as(&state, transport.clone(), project).await;
+            assert_ne!(known.error.expect("cwd is absent on disk").message, "unknown cwd", "{transport:?}");
+        }
+
+        // Desktop is unchanged: no project gate.
+        let local = start_session_as(&state, Transport::Local, "C:\\does\\not\\exist\\either").await;
+        assert_ne!(local.error.expect("cwd absent").message, "unknown cwd");
     }
 
     #[tokio::test]
