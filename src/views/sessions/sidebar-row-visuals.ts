@@ -92,8 +92,8 @@ export function wrapUpTooltip(on: boolean): string {
     ? "Wrap up when done: ON (Ctrl+Shift+W)"
     : "Wrap up when done (Ctrl+Shift+W)";
   const body = on
-    ? "once nothing more is needed from you, Claude self-verifies, commits, and closes this chat on its own - then it's off, since the chat is gone"
-    : "turn on to have Claude self-verify, commit, and close this chat on its own once nothing more is needed from you";
+    ? "Claude verifies, commits, and closes this chat when you're done"
+    : "turn on to have Claude verify, commit, and close this chat when you're done";
   return `${base} - ${body}`;
 }
 
