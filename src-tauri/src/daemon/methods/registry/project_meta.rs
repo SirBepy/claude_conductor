@@ -32,23 +32,7 @@ async fn forward_project_read_if_peer(
     if self_id.as_deref() == Some(machine_id) {
         return Ok(None);
     }
-    let registry = state
-        .machines
-        .get()
-        .ok_or_else(|| RpcError::invalid_params("machine registry not initialised"))?;
-    let peer = registry
-        .peer(machine_id)
-        .ok_or_else(|| RpcError::invalid_params(format!("unknown machine: {machine_id}")))?;
-    if !state.mirror.is_online(machine_id) {
-        return Err(RpcError {
-            code: crate::daemon::machines::forward::ERR_MACHINE_OFFLINE,
-            message: format!("{} is offline", peer.label),
-            data: None,
-        });
-    }
-    let client = crate::daemon::machines::client_for(state, &peer)
-        .await
-        .map_err(crate::daemon::machines::forward::map_peer_err)?;
+    let client = crate::daemon::machines::forward::resolve_peer_client(state, machine_id).await?;
     client
         .call(method, json!({"root": root}))
         .await
