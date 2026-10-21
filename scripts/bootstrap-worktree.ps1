@@ -5,7 +5,11 @@
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (git rev-parse --show-toplevel) -replace "/", "\"
+# Resolved from the script's own location, never the caller's cwd: run as
+# `powershell -File <wt>\scripts\bootstrap-worktree.ps1` from the main checkout,
+# a cwd-based lookup bootstraps the main checkout instead and reports success
+# while the worktree stays empty.
+$repoRoot = (git -C $PSScriptRoot rev-parse --show-toplevel) -replace "/", "\"
 Set-Location $repoRoot
 
 . (Join-Path $PSScriptRoot "resolve-android-java-home.ps1")
