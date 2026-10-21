@@ -43,8 +43,9 @@ const EFFORT: &str = "low";
 /// `Read` because the tool's own rules make Claude read a file it did not
 /// write before publishing it. Not path-scoped: whether this CLI accepts
 /// `Read(<dir>/**)` is unverified, and a rule that never matches would prompt
-/// and so be denied inside `-p`. `PublishWatch` is the guard instead: a publish
-/// of any other file is refused and its link never stored.
+/// and so be denied inside `-p`. `PublishWatch` is the guard instead, and it
+/// reads stdout after the CLI already ran the call: it cannot stop another
+/// file's upload, only fail the run and never store that link.
 const ALLOWED_TOOLS: &str = "Artifact Read";
 /// `--allowedTools` only pre-approves, and no permission mode is set, so
 /// anything not denied here would still run silently. Skills are denied too:
@@ -184,7 +185,18 @@ impl PublishWatch {
         if let Ok(v) = serde_json::from_str::<Value>(line) {
             if v["type"] == "assistant" {
                 for b in v["message"]["content"].as_array().into_iter().flatten() {
-                    if b["type"] == "tool_use" && b["name"] == "Artifact" && b["input"]["action"] == "publish" {
+                    if b["type"] != "tool_use" || b["name"] != "Artifact" {
+                        continue;
+                    }
+                    // Any action naming a file is checked, not only publish:
+                    // another action carrying a foreign path is the same
+                    // redirect wearing a different verb.
+                    if let Some(file) = b["input"]["file_path"].as_str() {
+                        if !same_path(file, &self.expected_file) {
+                            return Err(anyhow!("refused: an Artifact call targeted a file Conductor did not write"));
+                        }
+                    }
+                    if b["input"]["action"] == "publish" {
                         let file = b["input"]["file_path"].as_str().unwrap_or_default();
                         if !same_path(file, &self.expected_file) {
                             return Err(anyhow!("refused: the publish call targeted a file Conductor did not write"));
@@ -354,6 +366,19 @@ mod tests {
         let mut w = PublishWatch::new("C:\\d\\a.html");
         w.feed(&tool_use("p1", "C:/d/a.html")).unwrap();
         assert!(w.feed(&tool_result("p1", "Published C:\\other.html at https://claude.ai/artifact/X (Version 1)")).is_err());
+    }
+
+    #[test]
+    fn a_non_publish_artifact_call_on_another_file_errors_the_run() {
+        let line = |file: &str| {
+            serde_json::json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"u1","name":"Artifact",
+                "input":{"action":"update","file_path":file}}]}})
+            .to_string()
+        };
+        let mut w = PublishWatch::new("C:\\d\\a.html");
+        assert!(w.feed(&line("C:\\Users\\x\\.ssh\\id_rsa")).is_err());
+        let mut w = PublishWatch::new("C:\\d\\a.html");
+        assert_eq!(w.feed(&line("C:/d/a.html")).unwrap(), None);
     }
 
     #[test]
