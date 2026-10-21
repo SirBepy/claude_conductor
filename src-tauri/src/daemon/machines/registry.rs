@@ -8,6 +8,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::util::secret_store;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SelfMachine {
     pub machine_id: String,
@@ -132,15 +134,42 @@ pub struct MachineRegistry {
 
 impl MachineRegistry {
     pub fn load(app_data: &Path) -> Self {
-        let inner = std::fs::read_to_string(registry_path(app_data))
+        let mut inner: MachinesFile = std::fs::read_to_string(registry_path(app_data))
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
-        Self { app_data: app_data.to_path_buf(), inner: Mutex::new(inner) }
+        let mut legacy_plaintext = false;
+        for peer in inner.peers.iter_mut().filter(|p| !p.token.is_empty()) {
+            legacy_plaintext |= secret_store::needs_migration(&peer.token);
+            match secret_store::unprotect(&peer.token) {
+                Ok(plain) => peer.token = plain,
+                // Left in its wrapped form: it authenticates nothing, the peer
+                // just needs re-pairing, and `save` will not wrap it twice.
+                Err(e) => log::warn!("machines: token for peer {} unreadable: {e}", peer.machine_id),
+            }
+        }
+        let reg = Self { app_data: app_data.to_path_buf(), inner: Mutex::new(inner) };
+        if legacy_plaintext {
+            let guard = reg.inner.lock().unwrap_or_else(|e| e.into_inner());
+            reg.save(&guard);
+        }
+        reg
     }
 
+    /// Peer tokens are wrapped on the way to disk (`util::secret_store`); the
+    /// in-memory file always holds them plain.
     fn save(&self, file: &MachinesFile) {
-        let Ok(body) = serde_json::to_string_pretty(file) else { return };
+        let mut on_disk = file.clone();
+        for peer in on_disk.peers.iter_mut().filter(|p| !p.token.is_empty()) {
+            match secret_store::protect(&peer.token) {
+                Ok(wrapped) => peer.token = wrapped,
+                Err(e) => {
+                    log::error!("machines: not persisting registry, could not protect a peer token: {e}");
+                    return;
+                }
+            }
+        }
+        let Ok(body) = serde_json::to_string_pretty(&on_disk) else { return };
         if let Err(e) = crate::util::write_json_atomic(&registry_path(&self.app_data), &body) {
             log::warn!("machines: failed to persist registry: {e}");
         }
@@ -274,6 +303,47 @@ mod tests {
             reverse_device_id: None,
             added_at: now_secs(),
         }
+    }
+
+    fn raw_file(dir: &Path) -> String {
+        std::fs::read_to_string(registry_path(dir)).unwrap()
+    }
+
+    #[test]
+    fn peer_token_is_not_plaintext_on_disk_where_wrapping_exists() {
+        let dir = tempdir().unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        let mut peer = mk_peer("peer1", "Mac Mini");
+        peer.token = "dummy-bearer-value".into();
+        reg.upsert_peer(peer);
+        assert_eq!(raw_file(dir.path()).contains("dummy-bearer-value"), !secret_store::WRAPS_AT_REST);
+        let reloaded = MachineRegistry::load(dir.path());
+        assert_eq!(reloaded.peer("peer1").unwrap().token, "dummy-bearer-value");
+    }
+
+    #[test]
+    fn legacy_plaintext_peer_token_loads_and_is_rewritten_wrapped() {
+        let dir = tempdir().unwrap();
+        let legacy = serde_json::json!({
+            "peers": [{ "machine_id": "p1", "label": "Old", "token": "legacy-bearer" }]
+        });
+        std::fs::write(registry_path(dir.path()), legacy.to_string()).unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        assert_eq!(reg.peer("p1").unwrap().token, "legacy-bearer");
+        assert_eq!(raw_file(dir.path()).contains("legacy-bearer"), !secret_store::WRAPS_AT_REST);
+        assert_eq!(MachineRegistry::load(dir.path()).peer("p1").unwrap().token, "legacy-bearer");
+    }
+
+    #[test]
+    fn undecryptable_peer_token_does_not_panic_or_get_double_wrapped() {
+        let dir = tempdir().unwrap();
+        let broken = format!("{}AAAAAAAAAAAAAAAA", secret_store::PREFIX);
+        let file = serde_json::json!({ "peers": [{ "machine_id": "p1", "label": "X", "token": broken }] });
+        std::fs::write(registry_path(dir.path()), file.to_string()).unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        assert_eq!(reg.peer("p1").unwrap().token, broken, "kept verbatim so a later save cannot destroy it");
+        reg.set_can_drive("p1", false);
+        assert!(raw_file(dir.path()).contains(&broken));
     }
 
     #[test]
