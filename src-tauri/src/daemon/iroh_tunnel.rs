@@ -70,7 +70,16 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
         return key;
     }
     if path.exists() {
-        log::warn!("iroh tunnel: unreadable key at {}; minting a new one", path.display());
+        // A wrapped key that will not unwrap (another Windows user, a copied
+        // profile) may still be recoverable, so it is set aside, never
+        // overwritten: restoring the .unreadable file restores the old id.
+        let aside = path.with_extension("unreadable");
+        let kept = std::fs::rename(&path, &aside).is_ok();
+        log::warn!(
+            "iroh tunnel: unreadable key at {}; minting a new one (old file {})",
+            path.display(),
+            if kept { format!("kept as {}", aside.display()) } else { "could not be set aside".to_string() },
+        );
     }
     let key = SecretKey::generate();
     if let Some(parent) = path.parent() {
@@ -357,6 +366,17 @@ mod tests {
         let key = load_or_create_secret(dir.path());
         let reloaded = load_or_create_secret(dir.path());
         assert_eq!(key.public(), reloaded.public(), "the replacement key must persist");
+    }
+
+    #[test]
+    fn a_wrapped_key_that_will_not_unwrap_is_set_aside_not_overwritten() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = key_file(dir.path());
+        let foreign = format!("{}not-decryptable-here", secret_store::PREFIX);
+        std::fs::write(&path, &foreign).expect("write");
+        load_or_create_secret(dir.path());
+        let aside = std::fs::read_to_string(path.with_extension("unreadable")).expect("old file kept");
+        assert_eq!(aside, foreign, "the unreadable key must survive for recovery");
     }
 
     #[test]
