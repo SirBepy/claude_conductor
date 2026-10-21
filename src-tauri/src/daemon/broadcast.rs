@@ -9,7 +9,19 @@ use tokio::sync::broadcast;
 /// Publish an event to all subscribers of this session. Silently no-ops if
 /// there are no subscribers (broadcast::send returns Err when receiver
 /// count is 0 - that's expected, not an error).
+#[track_caller]
 pub fn publish(session: &Session, event: ChatEvent) {
+    // A user bubble that re-renders after the reply is a re-published echo
+    // whose source is unknown; the caller location and timestamp name it the
+    // next time it happens.
+    if let ChatEvent::UserMessage { remote_echo: true, timestamp, content, .. } = &event {
+        log::info!(
+            "broadcast: user_message echo session={} ts={timestamp} blocks={} from {}",
+            session.session_id,
+            content.len(),
+            std::panic::Location::caller(),
+        );
+    }
     let _ = session.events.send(event);
 }
 
