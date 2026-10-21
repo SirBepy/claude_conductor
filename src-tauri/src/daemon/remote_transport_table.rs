@@ -61,8 +61,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // same chats hidden as the desktop. Reads/writes only lists of opaque
     // session ids and project cwds in its own file (sessions/hidden_chats.rs);
     // hides nothing from any other surface.
-    ("get_hidden_chats", P),
-    ("update_hidden_chats", P),
+    // PM (was P): the machine hosting a chat owns its hidden flag, so a paired
+    // peer reads our list and forwards a hide/unhide for a chat we host. The
+    // handler clamps a peer-origin write to our own session ids and drops its
+    // project fields, so a peer cannot hide anything but chats we host and
+    // gains nothing a phone token lacks.
+    ("get_hidden_chats", PM),
+    ("update_hidden_chats", PM),
     ("respond_permission", PM),
     ("respond_question", PM),
     // `respond_secret` is deliberately ABSENT: a secret is typed on the
@@ -516,6 +521,16 @@ mod tests {
                     "{m} is machine-only but not in MACHINE_ONLY_EXCEPTIONS"
                 );
             }
+        }
+    }
+
+    /// Hiding a mirrored chat is forwarded to the machine hosting it, so that
+    /// machine must accept both hidden-chat methods from a peer.
+    #[test]
+    fn hidden_chat_methods_are_callable_by_a_peer_machine() {
+        for m in ["get_hidden_chats", "update_hidden_chats"] {
+            assert!(allowed(m, &Transport::PeerMachine("x".into())), "{m} must be callable by a peer machine");
+            assert!(allowed(m, &Transport::Phone), "{m} must stay callable by a phone");
         }
     }
 

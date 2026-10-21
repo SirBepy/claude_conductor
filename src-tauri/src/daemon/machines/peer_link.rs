@@ -117,6 +117,7 @@ type WsStream = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsSt
 async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut stream: WsStream) {
     let mut deadline = tokio::time::Instant::now() + FRAME_DEAD_AFTER;
     let mut prompt_tick = tokio::time::interval(PROMPT_REFRESH_INTERVAL);
+    super::hidden::fetch_peer(state, peer).await;
     loop {
         tokio::select! {
             frame = stream.next() => {
@@ -131,7 +132,14 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
                         // by `prompt_tick` below, so skipping the refresh on a
                         // no-op frame costs nothing but saves the per-frame RPC
                         // round trip that amplified the hot loop.
-                        if handle_frame(state, &peer.machine_id, &peer.label, &txt) {
+                        let hidden_before = state.mirror.hidden_sessions();
+                        super::hidden::apply_peer_frame(state, &peer.machine_id, &txt);
+                        let changed = handle_frame(state, &peer.machine_id, &peer.label, &txt);
+                        // After the rows: a hidden id only counts once the
+                        // peer's row for that chat is known, so an
+                        // instances frame can be what makes it appear.
+                        super::hidden::publish_if_changed(state, &hidden_before);
+                        if changed {
                             maybe_refresh_prompts_after_frame(state, peer).await;
                         }
                     }

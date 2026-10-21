@@ -11,6 +11,7 @@
 //! dials its iroh id and exposes the tunnel as a local loopback proxy port.
 
 pub mod forward;
+pub mod hidden;
 pub mod hub;
 pub mod iroh_dial;
 pub mod mirror;

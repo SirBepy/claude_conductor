@@ -41,11 +41,55 @@ pub struct MirrorState {
     /// empty, and `set_instances` retires an entry the moment a real row for
     /// that id arrives.
     pending: Mutex<HashMap<String, (String, Instant)>>,
+    /// Each peer's own hidden-chat session ids, as that peer last reported
+    /// them. Kept apart from `inner` because the hidden list can arrive
+    /// before the peer's first `instances_changed` frame creates its entry.
+    /// Raw on purpose: `hidden_sessions` is where ownership filters it.
+    hidden: Mutex<HashMap<String, Vec<String>>>,
 }
 
 impl MirrorState {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(HashMap::new()), pending: Mutex::new(HashMap::new()) }
+        Self { inner: Mutex::new(HashMap::new()), pending: Mutex::new(HashMap::new()), hidden: Mutex::new(HashMap::new()) }
+    }
+
+    /// Replaces `machine_id`'s reported hidden session ids. Capped like the
+    /// row cache, since a paired peer is trusted to pair, not to size our memory.
+    pub fn set_hidden_sessions(&self, machine_id: &str, mut ids: Vec<String>) {
+        ids.truncate(MAX_ROWS_PER_PEER);
+        let mut guard = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(machine_id.to_string(), ids);
+    }
+
+    /// Applies a hide/unhide we just forwarded to the owner, so the sidebar
+    /// reflects it before the owner's own `hidden_chats_changed` frame comes
+    /// back over the link.
+    pub fn apply_hidden_delta(&self, machine_id: &str, add: &[String], remove: &[String]) {
+        let mut guard = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+        let ids = guard.entry(machine_id.to_string()).or_default();
+        ids.retain(|id| !remove.contains(id));
+        for id in add {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+    }
+
+    /// Hidden session ids that a peer reports AND hosts (a mirrored row of
+    /// that same peer exists), sorted. The ownership test is what stops two
+    /// daemons that mirror each other from keeping a chat hidden forever on
+    /// the strength of each other's echo after the owner unhid it.
+    pub fn hidden_sessions(&self) -> Vec<String> {
+        let hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<String> = hidden
+            .iter()
+            .filter_map(|(machine_id, ids)| inner.get(machine_id).map(|peer| (ids, peer)))
+            .flat_map(|(ids, peer)| ids.iter().filter(|id| peer.instances.iter().any(|i| &i.session_id == *id)).cloned())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// Every mirrored row across every peer, each stamped with the owning
@@ -177,6 +221,7 @@ impl MirrorState {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(machine_id);
         drop(guard);
+        self.hidden.lock().unwrap_or_else(|e| e.into_inner()).remove(machine_id);
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         pending.retain(|_, (owner, _)| owner != machine_id);
     }
@@ -289,6 +334,31 @@ mod tests {
         // The cap is per peer, not shared.
         m.set_instances("peer-b", "B", vec![fixture("b0", None)]);
         assert_eq!(m.instances().len(), MAX_ROWS_PER_PEER + 1);
+    }
+
+    #[test]
+    fn hidden_sessions_keep_only_ids_the_reporting_peer_hosts() {
+        let m = MirrorState::new();
+        m.set_instances("peer-a", "A", vec![fixture("a1", None)]);
+        m.set_instances("peer-b", "B", vec![fixture("b1", None)]);
+        // B reports an id of A's chat (an echo of a hide made via A) and A an
+        // id it does not host: neither may hold a chat hidden on its own say.
+        m.set_hidden_sessions("peer-a", vec!["a1".into(), "ghost".into()]);
+        m.set_hidden_sessions("peer-b", vec!["a1".into(), "b1".into()]);
+        assert_eq!(m.hidden_sessions(), vec!["a1".to_string(), "b1".to_string()]);
+        m.set_hidden_sessions("peer-a", Vec::new());
+        m.set_hidden_sessions("peer-b", vec!["b1".into()]);
+        assert_eq!(m.hidden_sessions(), vec!["b1".to_string()], "unhiding on the host clears it despite a stale echo");
+    }
+
+    #[test]
+    fn removing_a_peer_drops_its_hidden_ids() {
+        let m = MirrorState::new();
+        m.set_instances("peer-a", "A", vec![fixture("a1", None)]);
+        m.set_hidden_sessions("peer-a", vec!["a1".into()]);
+        m.remove("peer-a");
+        m.set_instances("peer-a", "A", vec![fixture("a1", None)]);
+        assert!(m.hidden_sessions().is_empty());
     }
 
     #[test]
