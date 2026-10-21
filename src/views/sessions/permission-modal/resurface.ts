@@ -13,6 +13,7 @@ import {
   allowPermission,
   autoAllowIfRemembered,
   isAutoAccept,
+  isQuestionSettled,
   markLatestQuestion,
   markQuestionSuperseded,
   storePendingPrompt,
@@ -122,6 +123,7 @@ async function applyRehydration(
   recs: ReturnType<typeof findPendingPromptsForSession> | null,
 ): Promise<boolean> {
   if (!recs) return false;
+  recs = recs.filter((r) => r.kind !== "question" || !isQuestionSettled(r.id));
   // One park per session, so take the longest-waiting (state/prompts.rs
   // sorts by seq, oldest first) - but queue any still-open siblings instead
   // of silently dropping them (todo 897: they'd otherwise keep the daemon's
@@ -174,6 +176,9 @@ async function applyRehydration(
 export async function rehydratePendingPrompts(sessionId: string): Promise<boolean> {
   if (!sessionId || peekPendingPrompt(sessionId)) return false;
   const recs = await fetchPendingPromptsForSession(sessionId);
+  // A card surfaced (live event) while the fetch was in flight: its snapshot is
+  // older than that slot, so parking from it would overwrite or duplicate it.
+  if (peekPendingPrompt(sessionId)) return false;
   return applyRehydration(sessionId, recs);
 }
 

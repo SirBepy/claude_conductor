@@ -185,6 +185,16 @@ export function storePendingPrompt(sessionId: string, prompt: PendingPrompt): vo
   _pendingPrompts.set(sessionId, prompt);
 }
 
+// Prompt ids the user already answered or skipped, kept even after the slot
+// is cleared. A `list_pending_prompts` fetch that started before the answer
+// (slow on a daemon that was just offline) lands with the pre-answer snapshot
+// and would re-park the settled question; prompt ids are uuids, never reused.
+const _settledQuestionIds = new Set<string>();
+
+export function isQuestionSettled(id: string): boolean {
+  return _settledQuestionIds.has(id);
+}
+
 /** Mark the slot's own question as answered (todo 971), IF it still holds
  *  `id` - a no-op otherwise (e.g. the slot was already reused). Called from
  *  question-submit.ts's onSubmit/onCancel, at the moment the user settles the
@@ -195,6 +205,7 @@ export function storePendingPrompt(sessionId: string, prompt: PendingPrompt): vo
  *  surfaces the flag directly, so index.ts's arrival gate can tell a real open
  *  sibling (queue it) from a merely-stale slot (let the next arrival show). */
 export function markPendingPromptAnswered(sessionId: string, id: string): void {
+  _settledQuestionIds.add(id);
   const p = _pendingPrompts.get(sessionId);
   if (p?.kind === "question" && p.payload.id === id) _pendingPrompts.set(sessionId, { ...p, answered: true });
 }
