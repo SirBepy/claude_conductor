@@ -34,7 +34,7 @@ pub(super) async fn transcribe_ws(
         return (StatusCode::SERVICE_UNAVAILABLE, "voice engine unavailable").into_response();
     }
     let stt = ctx.stt.clone();
-    ws.on_upgrade(move |socket| relay_transcribe(socket, stt))
+    super::remote_server::limited_ws(ws).on_upgrade(move |socket| relay_transcribe(socket, stt))
 }
 
 /// Dumb bidirectional relay between the browser axum WebSocket and a

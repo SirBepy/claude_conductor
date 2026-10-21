@@ -65,6 +65,48 @@ pub(super) fn resolve_port() -> u16 {
 /// stock Android cameras; 30 MiB covers a ~22 MiB raw file.
 const MAX_RPC_BODY_BYTES: usize = 30 * 1024 * 1024;
 
+/// Body cap for every other route. Matches axum's implicit extractor default
+/// but pins it explicitly so it also covers a handler that reads the raw body,
+/// and so a future axum default change cannot silently loosen it.
+const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+
+/// Largest inbound WebSocket message/frame. axum's default is 64 MiB; the
+/// phone only sends small control frames and voice PCM chunks upstream.
+pub(super) const WS_MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Requests allowed in flight at once. Counts handlers still running, not
+/// connections: an upgraded WebSocket has already returned its 101 by then, so
+/// long-lived streams never hold a slot. Excess requests are shed with 503
+/// rather than queued, so a flood cannot pile up behind the chat pumps that
+/// share this runtime.
+const MAX_INFLIGHT_REQUESTS: usize = 256;
+
+/// Every WebSocket upgrade goes through this so no stream keeps axum's 64 MiB
+/// default; a source-contract test pins that no handler calls `on_upgrade` bare.
+pub(super) fn limited_ws(ws: axum::extract::ws::WebSocketUpgrade) -> axum::extract::ws::WebSocketUpgrade {
+    ws.max_message_size(WS_MAX_MESSAGE_BYTES).max_frame_size(WS_MAX_MESSAGE_BYTES)
+}
+
+async fn shed_when_saturated(
+    State(slots): State<Arc<tokio::sync::Semaphore>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let Ok(_slot) = slots.try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    next.run(req).await
+}
+
+/// Global limits layered over the whole router; `/api/rpc`'s larger body
+/// limit sits closer to its handler and still wins for that route.
+fn apply_limits(router: Router, max_inflight: usize, max_body: usize) -> Router {
+    let slots = Arc::new(tokio::sync::Semaphore::new(max_inflight));
+    router
+        .layer(DefaultBodyLimit::max(max_body))
+        .layer(middleware::from_fn_with_state(slots, shed_when_saturated))
+}
+
 pub(super) struct RemoteCtx {
     pub(super) state: Arc<DaemonState>,
     pub(super) app_data: PathBuf,
@@ -230,10 +272,11 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
         .route("/api/global/stream", get(global_stream_ws))
         .route("/ws/transcribe", get(transcribe_ws));
 
-    protected
+    let app = protected
         .merge(public)
         .fallback(spa_fallback)
-        .with_state(ctx)
+        .with_state(ctx);
+    apply_limits(app, MAX_INFLIGHT_REQUESTS, MAX_BODY_BYTES)
 }
 
 /// Connectivity probe, unauthenticated. Advertises this daemon's machine
@@ -344,6 +387,101 @@ pub(super) fn consume_pairing_code(app_data: &Path) {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// Source-contract: a bare `ws.on_upgrade(` would skip the message-size cap.
+    #[test]
+    fn every_websocket_upgrade_is_size_limited() {
+        let needle = ["ws.on_", "upgrade("].concat();
+        for (name, src) in [
+            ("remote_handlers.rs", include_str!("remote_handlers.rs")),
+            ("remote_voice.rs", include_str!("remote_voice.rs")),
+        ] {
+            assert!(!src.contains(&needle), "{name} upgrades a WebSocket without limited_ws");
+        }
+    }
+
+    async fn serve_limited(router: Router) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let base = format!("http://{}", listener.local_addr().expect("addr"));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        base
+    }
+
+    /// With every slot held by a parked handler, the next request is shed with
+    /// 503, and a slot frees as soon as a handler returns.
+    #[tokio::test]
+    async fn sheds_requests_past_the_inflight_cap() {
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let g = gate.clone();
+        let app = Router::new()
+            .route("/hold", get(move || {
+                let g = g.clone();
+                async move {
+                    g.notified().await;
+                    "released"
+                }
+            }))
+            .route("/quick", get(|| async { "ok" }));
+        let base = serve_limited(apply_limits(app, 2, MAX_BODY_BYTES)).await;
+        let client = reqwest::Client::new();
+
+        let held: Vec<_> = (0..2)
+            .map(|_| {
+                let (c, url) = (client.clone(), format!("{base}/hold"));
+                tokio::spawn(async move { c.get(url).send().await.map(|r| r.status()) })
+            })
+            .collect();
+        // Both parked handlers must own a slot before the probe is meaningful.
+        let mut shed = None;
+        for _ in 0..100 {
+            let status = client.get(format!("{base}/quick")).send().await.expect("probe").status();
+            if status == StatusCode::SERVICE_UNAVAILABLE {
+                shed = Some(status);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(shed, Some(StatusCode::SERVICE_UNAVAILABLE), "the request past the cap must be shed");
+
+        gate.notify_waiters();
+        for h in held {
+            assert_eq!(h.await.expect("join").expect("held request"), StatusCode::OK);
+        }
+        let after = client.get(format!("{base}/quick")).send().await.expect("after").status();
+        assert_eq!(after, StatusCode::OK, "slots must free when handlers return");
+    }
+
+    #[tokio::test]
+    async fn global_body_limit_rejects_an_oversized_body() {
+        let app = Router::new().route("/echo", post(|body: axum::body::Bytes| async move { body.len().to_string() }));
+        let base = serve_limited(apply_limits(app, 8, 1024)).await;
+        let client = reqwest::Client::new();
+        let small = client.post(format!("{base}/echo")).body(vec![0u8; 512]).send().await.expect("small");
+        assert_eq!(small.status(), StatusCode::OK);
+        let big = client.post(format!("{base}/echo")).body(vec![0u8; 4096]).send().await.expect("big");
+        assert_eq!(big.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// The `/api/rpc` carve-out (phone photos) must survive the stricter
+    /// global limit layered over it.
+    #[tokio::test]
+    async fn rpc_body_limit_overrides_the_global_one() {
+        let app = Router::new().route(
+            "/rpc",
+            post(|body: axum::body::Bytes| async move { body.len().to_string() })
+                .layer(DefaultBodyLimit::max(64 * 1024)),
+        );
+        let base = serve_limited(apply_limits(app, 8, 1024)).await;
+        let res = reqwest::Client::new()
+            .post(format!("{base}/rpc"))
+            .body(vec![0u8; 8192])
+            .send()
+            .await
+            .expect("send");
+        assert_eq!(res.status(), StatusCode::OK);
+    }
 
     /// Route-registration smoke test: `build_router` must not panic when the
     /// new `/api/global/stream` route is wired into the public router
