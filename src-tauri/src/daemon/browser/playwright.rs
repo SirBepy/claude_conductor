@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
+use super::tabs;
+
 const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// A tool call can legitimately wait (`browser_wait_for`, a slow page load),
 /// but a wedged child must not hold the chat's turn forever.
@@ -29,6 +31,9 @@ pub struct PlaywrightClient {
     pub cdp_port: u16,
     pub last_used: Instant,
     output_dir: PathBuf,
+    /// DevTools target id of the tab this driver opened, when it could be
+    /// told apart from others; closed when the driver is retired.
+    tab_id: Option<String>,
 }
 
 impl PlaywrightClient {
@@ -69,6 +74,7 @@ impl PlaywrightClient {
             cdp_port,
             last_used: Instant::now(),
             output_dir: output_dir.to_path_buf(),
+            tab_id: None,
         };
         client
             .request(
@@ -82,7 +88,11 @@ impl PlaywrightClient {
             )
             .await?;
         client.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await?;
-        client.call_tool("browser_tabs", json!({ "action": "new" }), INIT_TIMEOUT).await?;
+        let base = tabs::base_url(cdp_port);
+        client.tab_id = tabs::open_and_find(&base, || async {
+            client.call_tool("browser_tabs", json!({ "action": "new" }), INIT_TIMEOUT).await.map(|_| ())
+        })
+        .await?;
         Ok(client)
     }
 
@@ -92,6 +102,15 @@ impl PlaywrightClient {
 
     pub async fn kill(&mut self) {
         let _ = self.child.kill().await;
+    }
+
+    /// `kill` plus closing the tab this driver opened: a replacement driver
+    /// opens its own, so leaving this one would pile a tab up per restart.
+    pub async fn retire(&mut self) {
+        self.kill().await;
+        if let Some(id) = self.tab_id.take() {
+            tabs::close_page(&tabs::base_url(self.cdp_port), &id).await;
+        }
     }
 
     /// The MCP `result` object (`content` plus `isError`), with file links

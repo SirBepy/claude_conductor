@@ -13,6 +13,7 @@ pub mod chrome;
 mod playwright;
 pub mod rpc;
 pub mod runtime;
+mod tabs;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -107,7 +108,7 @@ impl ClaudeBrowser {
         };
         if stale {
             if let Some(mut old) = client.take() {
-                old.kill().await;
+                old.retire().await;
             }
             let node = runtime::node_bin()?;
             let started =
@@ -133,7 +134,7 @@ impl ClaudeBrowser {
             let idle = client.as_ref().is_some_and(|c| c.last_used.elapsed() >= SESSION_IDLE);
             if idle || client.is_none() {
                 if let Some(mut c) = client.take() {
-                    c.kill().await;
+                    c.retire().await;
                 }
                 drop(client);
                 self.sessions.lock().await.remove(&id);
