@@ -87,6 +87,8 @@ windows = { version = "0.58", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_Security",
+    # CryptProtectData/CryptUnprotectData (util::secret_store)
+    "Win32_Security_Cryptography",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Pipes",
     # Job object that reaps daemon-spawned claude trees (see util::process)

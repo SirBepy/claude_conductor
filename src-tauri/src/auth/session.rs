@@ -3,11 +3,31 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// Returns the current sessionKey, or `None` if no session has been saved.
+use crate::util::secret_store;
+
+/// Returns the current sessionKey, or `None` if no session has been saved or
+/// the stored value cannot be decrypted (treated like logged out, so the
+/// re-login flow runs instead of polling with a garbage cookie). A legacy
+/// plaintext file still reads and is rewritten wrapped on the spot.
 pub fn load(path: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    if trimmed.is_empty() {
+        return None;
+    }
+    let key = match secret_store::unprotect(trimmed) {
+        Ok(k) => k,
+        Err(e) => {
+            log::warn!("session: {path:?} unreadable: {e}");
+            return None;
+        }
+    };
+    if secret_store::needs_migration(trimmed) {
+        if let Err(e) = save(path, &key) {
+            log::warn!("session: could not wrap legacy plaintext at {path:?}: {e}");
+        }
+    }
+    Some(key)
 }
 
 /// Saves the sessionKey, creating parent dirs as needed. Write-temp-then-
@@ -19,7 +39,9 @@ pub fn save(path: &Path, session_key: &str) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating parent dir {parent:?}"))?;
     }
-    crate::util::write_json_atomic(path, session_key.trim())
+    let stored = secret_store::protect(session_key.trim())
+        .with_context(|| format!("protecting session for {path:?}"))?;
+    crate::util::write_json_atomic(path, &stored)
         .with_context(|| format!("writing session to {path:?}"))?;
     Ok(())
 }
@@ -58,6 +80,35 @@ mod tests {
         let p = dir.path().join("s.txt");
         save(&p, "sk-ant-abc123").unwrap();
         assert_eq!(load(&p).as_deref(), Some("sk-ant-abc123"));
+    }
+
+    #[test]
+    fn saved_file_does_not_hold_the_raw_key_where_wrapping_exists() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("s.txt");
+        save(&p, "sk-ant-abc123").unwrap();
+        let on_disk = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(on_disk.contains("sk-ant-abc123"), !secret_store::WRAPS_AT_REST);
+    }
+
+    #[test]
+    fn legacy_plaintext_file_loads_and_is_rewritten_wrapped() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("s.txt");
+        std::fs::write(&p, "sk-ant-legacy\n").unwrap();
+        assert_eq!(load(&p).as_deref(), Some("sk-ant-legacy"));
+        let after = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(secret_store::is_protected(after.trim()), secret_store::WRAPS_AT_REST);
+        // The rewritten file must still load to the same key.
+        assert_eq!(load(&p).as_deref(), Some("sk-ant-legacy"));
+    }
+
+    #[test]
+    fn corrupt_wrapped_file_loads_as_logged_out() {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("s.txt");
+        std::fs::write(&p, format!("{}AAAAAAAAAAAAAAAA", secret_store::PREFIX)).unwrap();
+        assert_eq!(load(&p), None);
     }
 
     #[test]

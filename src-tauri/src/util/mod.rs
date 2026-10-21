@@ -1,6 +1,7 @@
 pub mod claude_bin;
 pub mod path;
 pub mod process;
+pub mod secret_store;
 pub mod supervisor_client;
 
 /// Shared lock for any test in this crate that mutates a process-global env
