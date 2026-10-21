@@ -12,7 +12,7 @@ use iroh::{Endpoint, EndpointId, SecretKey};
 
 use crate::daemon::device_registry::DeviceRegistry;
 use crate::daemon::remote_server::resolve_port;
-use crate::util::to_hex;
+use crate::util::{secret_store, to_hex};
 
 /// ALPN for the forwarded remote-access stream. Bump the suffix on any wire
 /// change so an old phone build fails the handshake instead of misparsing.
@@ -35,7 +35,16 @@ fn key_file(app_data: &Path) -> PathBuf {
 /// (the app process) must never race the daemon's key creation.
 fn read_secret(path: &Path) -> Option<SecretKey> {
     let text = std::fs::read_to_string(path).ok()?;
-    text.trim().parse::<SecretKey>().ok()
+    secret_store::unprotect(text.trim()).ok()?.parse::<SecretKey>().ok()
+}
+
+/// Whoever reads this file can impersonate the daemon's endpoint id, so it
+/// goes through `secret_store` like every other stored secret.
+fn write_secret(path: &Path, key: &SecretKey) -> anyhow::Result<()> {
+    // `SecretKey` has no `Display`, and `FromStr` requires 64 lowercase hex chars.
+    let stored = secret_store::protect(&to_hex(&key.to_bytes()))?;
+    crate::util::write_json_atomic(path, &stored)?;
+    Ok(())
 }
 
 /// The public id of the daemon's persisted endpoint key, or `None` if the key
@@ -52,6 +61,12 @@ pub fn endpoint_id_from_disk(app_data: &Path) -> Option<EndpointId> {
 pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
     let path = key_file(app_data);
     if let Some(key) = read_secret(&path) {
+        let legacy = std::fs::read_to_string(&path).is_ok_and(|t| secret_store::needs_migration(t.trim()));
+        if legacy {
+            if let Err(e) = write_secret(&path, &key) {
+                log::warn!("iroh tunnel: could not wrap legacy plaintext key at {}: {e}", path.display());
+            }
+        }
         return key;
     }
     if path.exists() {
@@ -61,8 +76,7 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    // `SecretKey` has no `Display`, and `FromStr` requires 64 lowercase hex chars.
-    if let Err(e) = std::fs::write(&path, to_hex(&key.to_bytes())) {
+    if let Err(e) = write_secret(&path, &key) {
         log::warn!("iroh tunnel: could not persist key to {}: {e}; the endpoint id will change on restart", path.display());
     }
     key
@@ -315,6 +329,25 @@ mod tests {
             second.public(),
             "endpoint id must survive a restart, else paired phones are stranded"
         );
+    }
+
+    #[test]
+    fn key_is_wrapped_on_disk_and_legacy_plaintext_migrates_in_place() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = key_file(dir.path());
+        let fresh = load_or_create_secret(dir.path());
+        let on_disk = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(secret_store::is_protected(&on_disk), secret_store::WRAPS_AT_REST);
+        if secret_store::WRAPS_AT_REST {
+            assert!(!on_disk.contains(&to_hex(&fresh.to_bytes())), "the raw key must not sit on disk");
+        }
+
+        std::fs::write(&path, to_hex(&fresh.to_bytes())).expect("write legacy");
+        let migrated = load_or_create_secret(dir.path());
+        assert_eq!(migrated.public(), fresh.public(), "migration must keep the endpoint id");
+        let on_disk = std::fs::read_to_string(&path).expect("read");
+        assert_eq!(secret_store::is_protected(&on_disk), secret_store::WRAPS_AT_REST);
+        assert_eq!(endpoint_id_from_disk(dir.path()), Some(fresh.public()));
     }
 
     #[test]
