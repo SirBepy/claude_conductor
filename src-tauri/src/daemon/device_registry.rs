@@ -44,10 +44,11 @@ struct DeviceEntry {
     kind: DeviceKind,
     #[serde(default)]
     machine_id: Option<String>,
-    /// Unix seconds of the last successful auth, written at most once per
-    /// `LAST_USED_WRITE_INTERVAL_SECS`. `None` only in a registry written
-    /// before this field existed; `stamp_missing_last_used` fills it on the
-    /// first auth so an upgrade never starts the idle clock at `created_at`.
+    /// Baseline stamped when the entry is created. Later auths land in the
+    /// activity file (`record_use`), never here, so the daemon never rewrites
+    /// this registry. `None` only in a registry written before this field
+    /// existed; the first auth then counts as use, so an upgrade never starts
+    /// the idle clock at `created_at`.
     #[serde(default)]
     last_used: Option<u64>,
 }
@@ -121,20 +122,56 @@ fn load(app_data: &Path) -> RegistryFile {
         .unwrap_or(RegistryFile { schema: SCHEMA, ..Default::default() })
 }
 
-/// Gives every pre-field entry `last_used = now`, so the upgrade itself never
-/// locks a device out. Returns whether anything changed (caller persists).
-fn stamp_missing_last_used(reg: &mut RegistryFile, now: u64) -> bool {
-    let mut changed = false;
-    for d in reg.devices.iter_mut().filter(|d| d.last_used.is_none()) {
-        d.last_used = Some(now);
-        changed = true;
-    }
-    changed
+/// Per-device last-auth times, kept apart from `remote-devices.json`. The
+/// daemon rewrites this on auth while the app process rewrites the registry on
+/// pair/revoke/toggle; if both wrote one file, a load-modify-save in the daemon
+/// could land after a revoke or a switch-off and put the old state back. With
+/// separate files the daemon never writes the registry, so it cannot undo a
+/// security decision, and a lost activity update only delays a timestamp.
+#[derive(Serialize, Deserialize, Default)]
+struct ActivityFile {
+    #[serde(default)]
+    last_used: std::collections::HashMap<String, u64>,
+}
+
+/// Serialises the daemon's own read-modify-write of the activity file across
+/// concurrent auth calls (the blocking pool runs several at once).
+static ACTIVITY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn activity_path(app_data: &Path) -> PathBuf {
+    app_data.join("remote-device-activity.json")
+}
+
+fn load_activity(app_data: &Path) -> ActivityFile {
+    std::fs::read_to_string(activity_path(app_data))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Newest of the registry's creation-time stamp and the daemon's recorded auth.
+fn effective_last_used(entry: &DeviceEntry, activity: &ActivityFile) -> Option<u64> {
+    entry.last_used.max(activity.last_used.get(&entry.id).copied())
 }
 
 fn save(reg: &RegistryFile, app_data: &Path) -> Result<(), String> {
     let body = serde_json::to_string_pretty(reg).map_err(|e| e.to_string())?;
     crate::util::write_json_atomic(&registry_path(app_data), &body).map_err(|e| e.to_string())
+}
+
+/// Stamps `id` as used at `now` in the activity file, dropping entries for
+/// devices no longer in the registry so revoked ids don't accumulate.
+fn record_use(reg: &RegistryFile, id: &str, now: u64, app_data: &Path) {
+    let _guard = ACTIVITY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut activity = load_activity(app_data);
+    activity.last_used.insert(id.to_string(), now);
+    activity.last_used.retain(|k, _| reg.devices.iter().any(|d| &d.id == k));
+    let result = serde_json::to_string(&activity)
+        .map_err(|e| e.to_string())
+        .and_then(|body| crate::util::write_json_atomic(&activity_path(app_data), &body).map_err(|e| e.to_string()));
+    if let Err(e) = result {
+        log::warn!("device_registry: failed to record last_used: {e}");
+    }
 }
 
 /// Result of checking a presented token against the registry and the
@@ -228,7 +265,7 @@ impl DeviceRegistry {
     }
 
     fn authenticate_with(token: &str, app_data: &Path, now: u64, desktop_bypasses_switch: bool) -> AuthOutcome {
-        let mut reg = load(app_data);
+        let reg = load(app_data);
         let hash = sha256_hex(token);
         if !reg.enabled {
             let is_desktop = reg.devices.iter().any(|d| d.id == DESKTOP_ID && d.token_hash == hash);
@@ -236,30 +273,21 @@ impl DeviceRegistry {
                 return AuthOutcome::Disabled;
             }
         }
-        let mut dirty = stamp_missing_last_used(&mut reg, now);
-        let outcome = match reg.devices.iter_mut().find(|d| d.token_hash == hash) {
-            // The desktop token backs the local voice socket and is never
-            // re-presented by a device that could go idle.
-            Some(d) if d.id != DESKTOP_ID
-                && now.saturating_sub(d.last_used.unwrap_or(now)) > IDLE_EXPIRY_SECS =>
-            {
-                AuthOutcome::Invalid
-            }
-            Some(d) => {
-                if now.saturating_sub(d.last_used.unwrap_or(0)) >= LAST_USED_WRITE_INTERVAL_SECS {
-                    d.last_used = Some(now);
-                    dirty = true;
-                }
-                AuthOutcome::Ok(d.kind, d.machine_id.clone())
-            }
-            None => AuthOutcome::Invalid,
+        let Some(d) = reg.devices.iter().find(|d| d.token_hash == hash) else {
+            return AuthOutcome::Invalid;
         };
-        if dirty {
-            if let Err(e) = save(&reg, app_data) {
-                log::warn!("device_registry: failed to record last_used: {e}");
-            }
+        let last = effective_last_used(d, &load_activity(app_data));
+        // The desktop token backs the local voice socket and is never
+        // re-presented by a device that could go idle. A device with no
+        // recorded use at all predates the field: it counts as used now, so
+        // the upgrade itself never locks anyone out.
+        if d.id != DESKTOP_ID && last.is_some_and(|l| now.saturating_sub(l) > IDLE_EXPIRY_SECS) {
+            return AuthOutcome::Invalid;
         }
-        outcome
+        if last.map_or(true, |l| now.saturating_sub(l) >= LAST_USED_WRITE_INTERVAL_SECS) {
+            record_use(&reg, &d.id, now, app_data);
+        }
+        AuthOutcome::Ok(d.kind, d.machine_id.clone())
     }
 
     /// `authenticate` on the blocking pool. The registry is re-read from disk
@@ -343,12 +371,13 @@ impl DeviceRegistry {
 
     /// List devices without token hashes (IPC-safe).
     pub fn list_devices(app_data: &Path) -> Vec<RemoteDevice> {
+        let activity = load_activity(app_data);
         load(app_data).devices.iter().map(|d| RemoteDevice {
             id: d.id.clone(),
             name: d.name.clone(),
             created_at: d.created_at,
             kind: d.kind,
-            last_used: d.last_used,
+            last_used: effective_last_used(d, &activity),
         }).collect()
     }
 }
@@ -596,6 +625,70 @@ mod tests {
         assert!(matches!(DeviceRegistry::authenticate_at("tok", dir.path(), now), AuthOutcome::Ok(..)));
         assert_eq!(last_used_of(dir.path()), Some(now));
         assert_eq!(DeviceRegistry::authenticate_at("tok", dir.path(), now + 91 * DAY), AuthOutcome::Invalid);
+    }
+
+    /// The daemon must never rewrite the registry the app process owns: that
+    /// load-modify-save is what could resurrect a revoked device.
+    #[test]
+    fn authenticating_never_rewrites_the_registry_file() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let before = std::fs::read(registry_path(dir.path())).unwrap();
+        let t0 = last_used_of(dir.path()).unwrap();
+        assert!(matches!(DeviceRegistry::authenticate_at(&token, dir.path(), t0 + 2 * DAY), AuthOutcome::Ok(..)));
+        assert_eq!(std::fs::read(registry_path(dir.path())).unwrap(), before, "registry bytes changed on auth");
+        assert_eq!(last_used_of(dir.path()), Some(t0 + 2 * DAY), "the stamp must land in the activity file");
+        assert!(activity_path(dir.path()).exists());
+    }
+
+    /// Revokes and switch-offs racing a stream of authenticating requests must
+    /// stick. Before the activity file was separate, an auth that loaded the
+    /// registry just before a revoke could save it back and undo the revoke.
+    #[test]
+    fn revoke_and_switch_off_survive_concurrent_auth() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let keep = DeviceRegistry::add_device("Keep", dir.path()).unwrap();
+        let doomed = DeviceRegistry::add_device("Doomed", dir.path()).unwrap();
+        let doomed_id = DeviceRegistry::list_devices(dir.path())
+            .into_iter()
+            .find(|d| d.name == "Doomed")
+            .unwrap()
+            .id;
+        let t0 = last_used_of(dir.path()).unwrap();
+        let path = dir.path().to_path_buf();
+        let hammer = std::thread::spawn(move || {
+            // Each call is an hour past the last, so every one writes.
+            for i in 1..=300u64 {
+                DeviceRegistry::authenticate_at(&keep, &path, t0 + i * 3600);
+                DeviceRegistry::authenticate_at(&doomed, &path, t0 + i * 3600);
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        DeviceRegistry::revoke_device(&doomed_id, dir.path()).unwrap();
+        DeviceRegistry::set_enabled(false, dir.path()).unwrap();
+        hammer.join().unwrap();
+        assert!(
+            DeviceRegistry::list_devices(dir.path()).iter().all(|d| d.id != doomed_id),
+            "a revoked device was resurrected"
+        );
+        assert!(!DeviceRegistry::is_enabled(dir.path()), "the switch-off was reverted");
+    }
+
+    #[test]
+    fn activity_entries_for_revoked_devices_are_pruned() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let a = DeviceRegistry::add_device("A", dir.path()).unwrap();
+        let b = DeviceRegistry::add_device("B", dir.path()).unwrap();
+        let t0 = last_used_of(dir.path()).unwrap();
+        DeviceRegistry::authenticate_at(&a, dir.path(), t0 + DAY);
+        DeviceRegistry::authenticate_at(&b, dir.path(), t0 + DAY);
+        let a_id = DeviceRegistry::list_devices(dir.path()).into_iter().find(|d| d.name == "A").unwrap().id;
+        DeviceRegistry::revoke_device(&a_id, dir.path()).unwrap();
+        DeviceRegistry::authenticate_at(&b, dir.path(), t0 + 2 * DAY);
+        assert!(!load_activity(dir.path()).last_used.contains_key(&a_id));
     }
 
     #[test]
