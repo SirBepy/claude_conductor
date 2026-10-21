@@ -498,7 +498,10 @@ export class ChatRenderer {
     // and a single combined phase would not say which.
     const timed = <T>(label: string, p: Promise<T>): Promise<T> => {
       const done = perfPhase(`chat-open ${label}`, () => `session=${sid}`);
-      return p.finally(done);
+      // Side branch, not `p.finally(...)`: returning a derived promise adds
+      // microtask hops to the load, which races-sensitive callers count.
+      p.then(done, done);
+      return p;
     };
     const [events, marks, channelMessages] = await Promise.all([
       timed("history-page", sessionEvents.loadInitial(sid, cwd)),
