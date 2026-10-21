@@ -81,6 +81,11 @@ function rootChildOf(container: HTMLElement, el: HTMLElement): HTMLElement {
   return n;
 }
 
+/** Back-to-back page loads allowed while the sentinel stays in view. */
+const MAX_CHAINED_PAGES = 3;
+/** scrollTop under this after a prepend = the sentinel is still on screen. */
+const STILL_AT_TOP_PX = 50;
+
 export class ChatPaginator {
   cwdHint: string | undefined;
   /** Durable Skip marks, from the non-paginated
@@ -94,6 +99,11 @@ export class ChatPaginator {
   private carryUsage: TurnUsageTotals | null = null;
   private carryFirstTs = 0;
   private carryLastTs = 0;
+  // Pages fetched back-to-back with the sentinel still in view. A tool-heavy
+  // chat folds to almost no height, so the sentinel never leaves the viewport
+  // and an unbounded chain walks the whole transcript (a 7.5MB, 362-turn chat
+  // took ~20s to open). Past the cap the sentinel waits for a click instead.
+  private chainedPages = 0;
 
   constructor(private container: HTMLElement, private cb: PaginatorCallbacks) {}
 
@@ -106,6 +116,14 @@ export class ChatPaginator {
     sentinel.innerHTML = '<div class="chat-top-spinner" hidden></div>';
     this.container.prepend(sentinel);
     this.topSentinel = sentinel;
+    if (this.chainedPages >= MAX_CHAINED_PAGES) {
+      sentinel.innerHTML = '<button type="button" class="chat-top-load-older">Load older messages</button>';
+      sentinel.querySelector("button")?.addEventListener("click", () => {
+        this.chainedPages = 0;
+        void this.fetchOlder();
+      });
+      return;
+    }
     this.topObserver = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (entry.isIntersecting) void this.fetchOlder();
@@ -134,6 +152,7 @@ export class ChatPaginator {
     this.carryUsage = null;
     this.carryFirstTs = 0;
     this.carryLastTs = 0;
+    this.chainedPages = 0;
   }
 
   async fetchOlder(): Promise<void> {
@@ -165,6 +184,10 @@ export class ChatPaginator {
       const newScrollHeight = scroller.scrollHeight;
       scroller.scrollTop = oldScrollTop + (newScrollHeight - oldScrollHeight);
     }
+
+    // Scrolled away from the top means the user is reading, not chaining.
+    if (scroller && scroller.scrollTop >= STILL_AT_TOP_PX) this.chainedPages = 0;
+    else this.chainedPages++;
 
     if (sessionEvents.hasMore(sid)) {
       this.install();
