@@ -2,6 +2,7 @@ import type { ChatEvent } from "../../types/ipc.generated";
 import { handleCommitRefClick, handleCommitRefKeydown } from "./commit-refs";
 import { handleTicketHover, handleTicketHoverOut } from "./ticket-refs";
 import { invoke } from "../ipc";
+import { perfPhase } from "../perf";
 import { sessionEvents } from "./event-store";
 import { RenderedMessage } from "./chat-transforms";
 import { armLazyDiffEnhance } from "./diff-enhancer";
@@ -493,10 +494,16 @@ export class ChatRenderer {
     this.paginator.cwdHint = cwd;
     // Skip marks (todo 661) and the real repo-channel backlog (todo 893)
     // both fetched once per hydrate, alongside the history page.
+    // Timed apart: they run in parallel, so the slowest one gates first paint
+    // and a single combined phase would not say which.
+    const timed = <T>(label: string, p: Promise<T>): Promise<T> => {
+      const done = perfPhase(`chat-open ${label}`, () => `session=${sid}`);
+      return p.finally(done);
+    };
     const [events, marks, channelMessages] = await Promise.all([
-      sessionEvents.loadInitial(sid, cwd),
-      fetchSkipMarks(sid),
-      fetchChannelMessages(sid),
+      timed("history-page", sessionEvents.loadInitial(sid, cwd)),
+      timed("skip-marks", fetchSkipMarks(sid)),
+      timed("channel-messages", fetchChannelMessages(sid)),
     ]);
     if (this.sessionId !== sid) return;
     this.paginator.skipMarks = marks;

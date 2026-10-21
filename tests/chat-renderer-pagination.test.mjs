@@ -96,3 +96,35 @@ describe("ChatRenderer.fetchOlder prepends instead of rebuilding", () => {
     expect(renderer.messages[2].kind).toBe("assistant"); // the most-recent one
   });
 });
+
+describe("ChatRenderer chained auto-pagination cap", () => {
+  it("swaps the sentinel for a Load older button after 3 back-to-back pages", async () => {
+    const page = (n, hasMore) => ({
+      events: [assistantEvent(`m-${n}`, n)],
+      oldest_seq: n,
+      newest_seq: n,
+      has_more: hasMore,
+    });
+    for (let n = 10; n >= 6; n--) invokeRouter.queueOnce("load_history_page", page(n, true));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const renderer = new ChatRenderer(container);
+    await renderer.attach("sess-chain-cap");
+    await renderer.loadFromStore();
+
+    // jsdom computes no layout, so the scroller is null: every page counts as
+    // "sentinel still in view", the tool-heavy-chat case.
+    await renderer.fetchOlder();
+    await renderer.fetchOlder();
+    expect(container.querySelector(".chat-top-load-older")).toBeNull();
+    await renderer.fetchOlder();
+    const btn = container.querySelector(".chat-top-load-older");
+    expect(btn).not.toBeNull();
+
+    // A click resumes loading instead of the chain running on its own.
+    btn.click();
+    await vi.waitFor(() => expect(renderer.messages.length).toBe(5));
+  });
+});
+

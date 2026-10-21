@@ -767,6 +767,28 @@
   pointer-events: none;
 }
 
+.chat-top-sentinel:has(.chat-top-load-older) {
+  height: auto;
+  text-align: center;
+}
+
+.chat-top-load-older {
+  margin: 8px auto;
+  padding: 4px 12px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.chat-top-load-older:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .chat-top-spinner {
   margin: 8px auto;
   width: 16px;
