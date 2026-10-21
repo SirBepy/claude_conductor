@@ -270,7 +270,7 @@ pub(super) async fn stream_ws(
     };
     if let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) {
         let state = ctx.state.clone();
-        return ws.on_upgrade(move |socket| pump_events(socket, state, id, session));
+        return super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_events(socket, state, id, session));
     }
     // Not a daemon-hosted session - maybe an EXTERNAL (terminal) one this
     // daemon's own registry knows about: no `claude` child/pump of ours, so
@@ -293,7 +293,7 @@ pub(super) async fn stream_ws(
                 crate::chat::history::locate_transcript(&id, Some(&inst.cwd.to_string_lossy())).ok()
             });
             return match path {
-                Some(p) => ws.on_upgrade(move |socket| pump_external_session_events(socket, p)),
+                Some(p) => super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_external_session_events(socket, p)),
                 None => (StatusCode::NOT_FOUND, "no transcript for external session").into_response(),
             };
         }
@@ -316,7 +316,7 @@ pub(super) async fn stream_ws(
         return (StatusCode::NOT_FOUND, "no such session").into_response();
     };
     let state = ctx.state.clone();
-    ws.on_upgrade(move |socket| pump_relayed_session_events(socket, state, peer, id))
+    super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_relayed_session_events(socket, state, peer, id))
 }
 
 /// Not session-scoped: the remote (browser) equivalent of the internal
@@ -337,7 +337,7 @@ pub(super) async fn global_stream_ws(
     };
     let keep_jarvis = matches!(kind, DeviceKind::Phone);
     let state = ctx.state.clone();
-    ws.on_upgrade(move |socket| pump_global_events(socket, state, keep_jarvis))
+    super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_global_events(socket, state, keep_jarvis))
 }
 
 #[cfg(test)]

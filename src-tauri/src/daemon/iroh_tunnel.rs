@@ -130,7 +130,7 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
                                 *slot = Some(endpoint.clone());
                             }
                             log::info!("iroh tunnel: listening as {} -> 127.0.0.1:{target_port}", endpoint.id());
-                            tokio::spawn(accept_loop(endpoint, target_port));
+                            tokio::spawn(accept_loop(endpoint, target_port, Limits::default()));
                         }
                         Err(e) => {
                             log::warn!("iroh tunnel: bind failed: {e}; retrying in {}s", BIND_RETRY.as_secs());
@@ -168,38 +168,110 @@ async fn bind(secret: SecretKey) -> Result<Endpoint, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Caps on what one iroh endpoint will carry. Anyone holding the endpoint id
+/// can dial in, and every stream becomes a TCP connection plus a task on the
+/// same four-worker runtime as the chat pumps, so an unbounded flood would
+/// starve running chats. The caps count connections and open streams, never
+/// request rate: a phone legitimately holds a few long-lived WebSocket streams
+/// (global feed, a chat) for hours.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    pub max_connections: usize,
+    pub max_streams_per_connection: usize,
+    /// A connection with no open stream for this long is closed. QUIC's own
+    /// idle timeout never fires on a peer that keeps answering keep-alives.
+    pub idle_without_streams: std::time::Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_connections: 32,
+            max_streams_per_connection: 64,
+            idle_without_streams: std::time::Duration::from_secs(30 * 60),
+        }
+    }
+}
+
+/// Bounds a handshake that never completes, which would otherwise hold a
+/// connection permit forever.
+const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// QUIC application error code sent when a stream is refused for being over the cap.
+const STREAM_REFUSED: u32 = 1;
+
 /// `target_port` is always `REMOTE_PORT` in production; tests pass an ephemeral
 /// port because 27183 belongs to the live daemon on a dev machine.
-async fn accept_loop(endpoint: Endpoint, target_port: u16) {
+async fn accept_loop(endpoint: Endpoint, target_port: u16, limits: Limits) {
+    let connections = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
     while let Some(incoming) = endpoint.accept().await {
+        // Taken before the handshake so half-open attempts count too.
+        let Ok(permit) = connections.clone().try_acquire_owned() else {
+            log::warn!("iroh tunnel: connection cap ({}) reached; refusing a dial", limits.max_connections);
+            incoming.refuse();
+            continue;
+        };
         tokio::spawn(async move {
-            let conn = match incoming.await {
-                Ok(c) => c,
-                Err(e) => {
+            let _permit = permit;
+            let conn = match tokio::time::timeout(HANDSHAKE_TIMEOUT, incoming).await {
+                Ok(Ok(c)) => c,
+                Ok(Err(e)) => {
                     log::debug!("iroh tunnel: handshake failed: {e}");
+                    return;
+                }
+                Err(_) => {
+                    log::debug!("iroh tunnel: handshake timed out");
                     return;
                 }
             };
             let remote = conn.remote_id();
             log::info!("iroh tunnel: connection from {remote}");
-            loop {
-                match conn.accept_bi().await {
-                    Ok((send, recv)) => {
-                        tokio::spawn(async move {
-                            if let Err(e) = forward(send, recv, target_port).await {
-                                log::debug!("iroh tunnel: stream ended: {e}");
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        log::debug!("iroh tunnel: connection from {remote} closed: {e}");
-                        return;
-                    }
-                }
-            }
+            serve_connection(conn, target_port, limits).await;
+            log::debug!("iroh tunnel: connection from {remote} done");
         });
     }
     log::info!("iroh tunnel: accept loop ended");
+}
+
+async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, limits: Limits) {
+    let streams = Arc::new(tokio::sync::Semaphore::new(limits.max_streams_per_connection));
+    loop {
+        // The idle clock only runs while no stream is open: a live WebSocket
+        // stream keeps the connection, a bare connection does not.
+        let idle = streams.available_permits() == limits.max_streams_per_connection;
+        let accepted = if idle {
+            match tokio::time::timeout(limits.idle_without_streams, conn.accept_bi()).await {
+                Ok(r) => r,
+                Err(_) => {
+                    log::info!("iroh tunnel: closing a connection with no streams");
+                    conn.close(iroh::endpoint::VarInt::from_u32(0), b"idle");
+                    return;
+                }
+            }
+        } else {
+            conn.accept_bi().await
+        };
+        let (mut send, mut recv) = match accepted {
+            Ok(pair) => pair,
+            Err(e) => {
+                log::debug!("iroh tunnel: connection closed: {e}");
+                return;
+            }
+        };
+        let Ok(permit) = streams.clone().try_acquire_owned() else {
+            log::warn!("iroh tunnel: stream cap ({}) reached; refusing a stream", limits.max_streams_per_connection);
+            let code = iroh::endpoint::VarInt::from_u32(STREAM_REFUSED);
+            let _ = send.reset(code);
+            let _ = recv.stop(code);
+            continue;
+        };
+        tokio::spawn(async move {
+            let _permit = permit;
+            if let Err(e) = forward(send, recv, target_port).await {
+                log::debug!("iroh tunnel: stream ended: {e}");
+            }
+        });
+    }
 }
 
 /// Splice one QUIC bi-stream onto a fresh loopback TCP connection.
@@ -300,7 +372,7 @@ mod tests {
             .await
             .expect("server bind");
         let server_addr = server.addr();
-        tokio::spawn(accept_loop(server, port));
+        tokio::spawn(accept_loop(server, port, Limits::default()));
 
         let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
         let conn = client.connect(server_addr, ALPN).await.expect("connect");
@@ -310,5 +382,104 @@ mod tests {
 
         let reply = recv.read_to_end(1024).await.expect("read reply");
         assert_eq!(&reply, b"PONG", "the loopback server's response must reach the iroh peer");
+    }
+
+    /// Loopback TCP server that echoes 4-byte chunks and holds each socket open,
+    /// so a forwarded stream stays live (and keeps its permit) until the test
+    /// drops the client side.
+    async fn holding_echo_server() -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4];
+                    while sock.read_exact(&mut buf).await.is_ok() {
+                        if sock.write_all(&buf).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    async fn tunnel_pair(limits: Limits) -> (Endpoint, iroh::EndpointAddr) {
+        let port = holding_echo_server().await;
+        let server = Endpoint::builder(presets::Minimal)
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .expect("server bind");
+        let addr = server.addr();
+        tokio::spawn(accept_loop(server, port, limits));
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        (client, addr)
+    }
+
+    /// Opens a stream and proves it is forwarded by echoing 4 bytes. Returns
+    /// the halves so the caller keeps the stream (and its server-side permit) alive.
+    async fn open_live_stream(
+        conn: &iroh::endpoint::Connection,
+    ) -> Result<(iroh::endpoint::SendStream, iroh::endpoint::RecvStream), String> {
+        let (mut send, mut recv) = conn.open_bi().await.map_err(|e| e.to_string())?;
+        send.write_all(b"PING").await.map_err(|e| e.to_string())?;
+        let mut got = [0u8; 4];
+        recv.read_exact(&mut got).await.map_err(|e| e.to_string())?;
+        assert_eq!(&got, b"PING");
+        Ok((send, recv))
+    }
+
+    /// The N+1th concurrent stream on one connection is reset, a freed slot is
+    /// reusable, and the earlier streams are unaffected.
+    #[tokio::test]
+    async fn refuses_the_stream_past_the_per_connection_cap() {
+        let limits = Limits { max_streams_per_connection: 2, ..Limits::default() };
+        let (client, addr) = tunnel_pair(limits).await;
+        let conn = client.connect(addr, ALPN).await.expect("connect");
+
+        let first = open_live_stream(&conn).await.expect("stream 1");
+        let second = open_live_stream(&conn).await.expect("stream 2");
+        assert!(open_live_stream(&conn).await.is_err(), "the 3rd concurrent stream must be refused");
+
+        drop(first);
+        // The server frees the permit once the dropped stream's forward ends;
+        // poll instead of sleeping a fixed time.
+        let mut reopened = None;
+        for _ in 0..50 {
+            if let Ok(s) = open_live_stream(&conn).await {
+                reopened = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(reopened.is_some(), "a freed slot must be reusable");
+        drop(second);
+    }
+
+    #[tokio::test]
+    async fn refuses_the_connection_past_the_connection_cap() {
+        let limits = Limits { max_connections: 1, ..Limits::default() };
+        let (client, addr) = tunnel_pair(limits).await;
+        let first = client.connect(addr.clone(), ALPN).await.expect("connect 1");
+        let _live = open_live_stream(&first).await.expect("first connection is served");
+
+        let second = tokio::time::timeout(std::time::Duration::from_secs(10), client.connect(addr, ALPN)).await;
+        assert!(
+            matches!(second, Ok(Err(_))),
+            "the 2nd concurrent connection must be refused, got ok={}",
+            matches!(second, Ok(Ok(_)))
+        );
+    }
+
+    #[tokio::test]
+    async fn closes_a_connection_that_never_opens_a_stream() {
+        let limits = Limits { idle_without_streams: std::time::Duration::from_millis(300), ..Limits::default() };
+        let (client, addr) = tunnel_pair(limits).await;
+        let conn = client.connect(addr, ALPN).await.expect("connect");
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(10), conn.closed()).await;
+        assert!(closed.is_ok(), "an idle, stream-less connection must be closed by the server");
     }
 }
