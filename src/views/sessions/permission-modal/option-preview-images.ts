@@ -18,7 +18,9 @@ const IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const WIN_PATH = /^[A-Za-z]:[\\/]/;
 
-// Resolved data: URL per source path; null = tried and failed (never retried).
+// Resolved data: URL per source path; null = read in flight. A failed read is
+// dropped again, so a later card naming the same path (often a file Claude was
+// still writing the first time) tries once more.
 const cache = new Map<string, string | null>();
 
 export function clearLocalImageCache(): void {
@@ -68,10 +70,14 @@ export async function prefetchLocalImages(fragments: string[]): Promise<boolean>
   const loaded = await Promise.all(todo.map(async (p) => {
     try {
       const data = await invoke<{ mime: string; base64: string }>("read_image_file", { path: p });
-      if (!data?.mime?.startsWith("image/") || data.mime.includes("svg")) return false;
+      if (!data?.mime?.startsWith("image/") || data.mime.includes("svg")) {
+        cache.delete(p);
+        return false;
+      }
       cache.set(p, `data:${data.mime};base64,${data.base64}`);
       return true;
     } catch {
+      cache.delete(p);
       return false;
     }
   }));
