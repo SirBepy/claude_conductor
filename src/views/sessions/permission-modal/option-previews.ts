@@ -10,6 +10,7 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
 import { previewDocument } from "./option-preview-doc";
+import { inlineLocalImages, prefetchLocalImages } from "./option-preview-images";
 import { attachSwipe } from "./swipe-detector";
 import type { Question, QuestionOption, Selection } from "./types";
 
@@ -29,7 +30,7 @@ export function previewLayout(q: Question): PreviewLayout | null {
 
 // tabindex -1: the card's keyboard nav walks the option inputs, never frames.
 function frameHtml(fragment: string, cls: string): string {
-  return `<iframe class="${cls}" sandbox="" tabindex="-1" aria-hidden="true" srcdoc="${escapeHtml(previewDocument(fragment))}"></iframe>`;
+  return `<iframe class="${cls}" sandbox="" tabindex="-1" aria-hidden="true" srcdoc="${escapeHtml(previewDocument(inlineLocalImages(fragment)))}"></iframe>`;
 }
 
 /** The picture on top of a tile row. Rows without a preview (the synthetic
@@ -115,7 +116,7 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
     const frame = stage.querySelector<HTMLIFrameElement>(".prompt-stage__frame");
     if (frame && frame.dataset.label !== label) {
       frame.dataset.label = label;
-      frame.srcdoc = previewDocument(opts[idx]!.preview!);
+      frame.srcdoc = previewDocument(inlineLocalImages(opts[idx]!.preview!));
     }
     const setText = (sel: string, text: string) => {
       const el = stage.querySelector<HTMLElement>(sel);
@@ -138,6 +139,30 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
   function sync(): void {
     host.querySelectorAll<HTMLElement>(".prompt-stage").forEach(syncStage);
   }
+
+  // The frames were built before local images were read, so once they land
+  // each frame is re-pointed in place (a full card render would drop focus in
+  // the free-text field).
+  function refreshFrames(): void {
+    questions.forEach((q, qi) => {
+      const opts = previewedOptions(q);
+      host.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${qi}"] .prompt-opt > input`).forEach((input) => {
+        const opt = opts.find((o) => o.label === input.dataset.label);
+        const frame = input.closest(".prompt-opt")?.querySelector<HTMLIFrameElement>(".prompt-opt__frame");
+        if (opt && frame) frame.srcdoc = previewDocument(inlineLocalImages(opt.preview!));
+      });
+      host.querySelectorAll<HTMLIFrameElement>(`.prompt-stage[data-stage="${qi}"] .prompt-stage__thumb`).forEach((t) => {
+        const opt = opts[Number(t.dataset.stageI)];
+        const frame = t.querySelector<HTMLIFrameElement>(".prompt-stage__thumb-frame");
+        if (opt && frame) frame.srcdoc = previewDocument(inlineLocalImages(opt.preview!));
+      });
+    });
+    host.querySelectorAll<HTMLIFrameElement>(".prompt-stage__frame").forEach((f) => { delete f.dataset.label; });
+    sync();
+  }
+
+  const fragments = questions.flatMap((q) => previewedOptions(q).map((o) => o.preview!));
+  void prefetchLocalImages(fragments).then((landed) => { if (landed) refreshFrames(); });
 
   function stageFor(qi: number): HTMLElement | null {
     return host.querySelector<HTMLElement>(`.prompt-stage[data-stage="${qi}"]`);
