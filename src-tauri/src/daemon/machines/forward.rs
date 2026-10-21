@@ -147,25 +147,25 @@ async fn forward_one(
     Some(result)
 }
 
-/// Registry lookup, online check, and `client_for`, the three steps every
+/// Registry lookup, online check, and `client_for`, the steps every
 /// forwarding path needs before actually calling a peer - shared by
-/// `forward_one` above and `forward_send_message` below (the REST send route
-/// isn't routed through the shared RPC router's forwarder seam, so it can't
-/// reuse `forward_one` itself, only this common tail).
-async fn resolve_peer_client(
+/// `forward_one` and `forward_send_message` here, plus
+/// `list_machine_projects` and the project icon/tech reads (the REST send
+/// route isn't routed through the shared RPC router's forwarder seam, so it
+/// can't reuse `forward_one` itself, only this common tail). A machine id the
+/// registry does not know is a caller error (`invalid_params` naming it), not
+/// an offline peer: a retry can never succeed, unlike a real offline one.
+pub(crate) async fn resolve_peer_client(
     state: &Arc<DaemonState>,
     machine_id: &str,
 ) -> Result<super::peer_client::PeerClient, RpcError> {
-    let Some(registry) = state.machines.get() else {
-        return Err(RpcError {
-            code: ERR_MACHINE_OFFLINE,
-            message: "machine registry not initialised".into(),
-            data: None,
-        });
-    };
-    let Some(peer) = registry.peer(machine_id) else {
-        return Err(RpcError { code: ERR_MACHINE_OFFLINE, message: "paired machine no longer known".into(), data: None });
-    };
+    let registry = state
+        .machines
+        .get()
+        .ok_or_else(|| RpcError::invalid_params("machine registry not initialised"))?;
+    let peer = registry
+        .peer(machine_id)
+        .ok_or_else(|| RpcError::invalid_params(format!("unknown machine: {machine_id}")))?;
     if !state.mirror.is_online(machine_id) {
         return Err(RpcError { code: ERR_MACHINE_OFFLINE, message: format!("{} is offline", peer.label), data: None });
     }
@@ -207,6 +207,23 @@ mod tests {
     fn dummy_ctx() -> ConnectionContext {
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         ConnectionContext::new(tx)
+    }
+
+    /// An id the registry has never paired is a caller error that names the id,
+    /// not an "offline" peer a retry could ever bring back; a known-but-offline
+    /// peer keeps `ERR_MACHINE_OFFLINE`.
+    #[tokio::test]
+    async fn resolve_peer_client_separates_unknown_from_offline() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 1, false).await;
+
+        let unknown = resolve_peer_client(&state, "mach-nobody").await.err().expect("unknown id errors");
+        assert_eq!(unknown.code, RpcError::invalid_params("x").code);
+        assert!(unknown.message.contains("mach-nobody"), "{}", unknown.message);
+
+        let offline = resolve_peer_client(&state, "mach-b").await.err().expect("offline peer errors");
+        assert_eq!(offline.code, ERR_MACHINE_OFFLINE);
     }
 
     async fn state_with_machines_and_peer(

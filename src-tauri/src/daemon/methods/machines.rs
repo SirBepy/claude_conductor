@@ -20,7 +20,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::daemon::machines::forward::map_peer_err;
-use crate::daemon::machines::{peer_client, PeerMachineView};
+use crate::daemon::machines::PeerMachineView;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 
@@ -121,19 +121,7 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
                 if self_id.as_deref() == Some(req.machine_id.as_str()) {
                     return Ok(json!(state.settings.snapshot().projects));
                 }
-                let registry =
-                    state.machines.get().ok_or_else(|| RpcError::invalid_params("machine registry not initialised"))?;
-                let peer = registry
-                    .peer(&req.machine_id)
-                    .ok_or_else(|| RpcError::invalid_params(format!("unknown machine: {}", req.machine_id)))?;
-                if !state.mirror.is_online(&req.machine_id) {
-                    return Err(RpcError {
-                        code: crate::daemon::machines::forward::ERR_MACHINE_OFFLINE,
-                        message: format!("{} is offline", peer.label),
-                        data: None,
-                    });
-                }
-                let client = peer_client::client_for(&state, &peer).await.map_err(map_peer_err)?;
+                let client = crate::daemon::machines::forward::resolve_peer_client(&state, &req.machine_id).await?;
                 client.call("list_projects", Value::Null).await.map_err(map_peer_err)
             }
         }
