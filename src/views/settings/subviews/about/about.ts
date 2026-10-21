@@ -61,7 +61,7 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
       : "onStartup";
 
   const deps: AboutPageDeps = {
-    appName: "Claude Companion",
+    appName: "Claude Conductor",
     version: versionInfo.version,
     buildDate: versionInfo.build_date !== "unknown" ? versionInfo.build_date : undefined,
     installedAt: versionInfo.installed_at ?? undefined,
