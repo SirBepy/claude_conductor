@@ -87,11 +87,19 @@ pub(super) fn limited_ws(ws: axum::extract::ws::WebSocketUpgrade) -> axum::extra
     ws.max_message_size(WS_MAX_MESSAGE_BYTES).max_frame_size(WS_MAX_MESSAGE_BYTES)
 }
 
+/// Paired machines probe this to decide whether a peer is online.
+const HEALTH_PATH: &str = "/api/health";
+
 async fn shed_when_saturated(
     State(slots): State<Arc<tokio::sync::Semaphore>>,
     req: Request,
     next: Next,
 ) -> Response {
+    // The probe skips the cap: it is a cheap static reply, and shedding it
+    // would make every paired machine show this one as offline during a flood.
+    if req.uri().path() == HEALTH_PATH {
+        return next.run(req).await;
+    }
     let Ok(_slot) = slots.try_acquire_owned() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
@@ -261,7 +269,7 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
     // The fallback only fires when no named route matches, so /api/* and the
     // WS routes above are never shadowed by it.
     let public = Router::new()
-        .route("/api/health", get(health))
+        .route(HEALTH_PATH, get(health))
         .route("/api/pair", post(pair_device))
         .route("/api/sessions/:id/stream", get(stream_ws))
         .route("/api/preview-render/:id", get(on_preview_render_get))
@@ -307,7 +315,11 @@ pub(super) async fn authenticate_token(
     ctx: &RemoteCtx,
     token: String,
 ) -> Result<(DeviceKind, Option<String>), Response> {
-    match DeviceRegistry::authenticate_blocking_safe(token, ctx.app_data.clone()).await {
+    auth_result(DeviceRegistry::authenticate_blocking_safe(token, ctx.app_data.clone()).await)
+}
+
+fn auth_result(outcome: AuthOutcome) -> Result<(DeviceKind, Option<String>), Response> {
+    match outcome {
         AuthOutcome::Ok(kind, machine_id) => Ok((kind, machine_id)),
         AuthOutcome::Disabled => Err(StatusCode::SERVICE_UNAVAILABLE.into_response()),
         AuthOutcome::Invalid => Err(StatusCode::UNAUTHORIZED.into_response()),
@@ -321,11 +333,7 @@ pub(super) async fn authenticate_voice_token(
     ctx: &RemoteCtx,
     token: String,
 ) -> Result<(DeviceKind, Option<String>), Response> {
-    match DeviceRegistry::authenticate_desktop_voice_blocking_safe(token, ctx.app_data.clone()).await {
-        AuthOutcome::Ok(kind, machine_id) => Ok((kind, machine_id)),
-        AuthOutcome::Disabled => Err(StatusCode::SERVICE_UNAVAILABLE.into_response()),
-        AuthOutcome::Invalid => Err(StatusCode::UNAUTHORIZED.into_response()),
-    }
+    auth_result(DeviceRegistry::authenticate_desktop_voice_blocking_safe(token, ctx.app_data.clone()).await)
 }
 
 /// Auth middleware for the protected routes. Runs before request extractors.
@@ -410,7 +418,8 @@ mod tests {
     }
 
     /// With every slot held by a parked handler, the next request is shed with
-    /// 503, and a slot frees as soon as a handler returns.
+    /// 503 (except the health probe), and a slot frees as soon as a handler
+    /// returns.
     #[tokio::test]
     async fn sheds_requests_past_the_inflight_cap() {
         let gate = Arc::new(tokio::sync::Notify::new());
@@ -423,7 +432,8 @@ mod tests {
                     "released"
                 }
             }))
-            .route("/quick", get(|| async { "ok" }));
+            .route("/quick", get(|| async { "ok" }))
+            .route(HEALTH_PATH, get(|| async { "ok" }));
         let base = serve_limited(apply_limits(app, 2, MAX_BODY_BYTES)).await;
         let client = reqwest::Client::new();
 
@@ -444,6 +454,8 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         assert_eq!(shed, Some(StatusCode::SERVICE_UNAVAILABLE), "the request past the cap must be shed");
+        let health = client.get(format!("{base}{HEALTH_PATH}")).send().await.expect("health").status();
+        assert_eq!(health, StatusCode::OK, "a saturated server must still answer peers' health probe");
 
         gate.notify_waiters();
         for h in held {
