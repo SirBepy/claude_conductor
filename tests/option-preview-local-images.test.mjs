@@ -54,6 +54,15 @@ describe("option preview local images", () => {
     expect(mod.inlineLocalImages(frag)).toBe(frag);
   });
 
+  it("retries a path whose earlier read failed", async () => {
+    const frag = `<img src="file:///C:/x/late.png">`;
+    impl = async () => { throw new Error("not written yet"); };
+    expect(await mod.prefetchLocalImages([frag])).toBe(false);
+    impl = async () => ({ mime: "image/png", base64: "QUJD" });
+    expect(await mod.prefetchLocalImages([frag])).toBe(true);
+    expect(mod.inlineLocalImages(frag)).toContain("data:image/png;base64,QUJD");
+  });
+
   it("leaves HTML-only previews byte-identical with no invoke", async () => {
     const frag = `<div class="btn">Go</div><img src="/icons/a.png">`;
     expect(await mod.prefetchLocalImages([frag])).toBe(false);
