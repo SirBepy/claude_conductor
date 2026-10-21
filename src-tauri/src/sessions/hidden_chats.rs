@@ -2,7 +2,9 @@
 //! projects (by cwd) the project-rail filter hides from the sidebar entirely.
 //! File `<app-data>/hidden-chats.json`, daemon is sole writer, so the desktop
 //! app and the phone (both clients of this one daemon) show the same chats
-//! hidden.
+//! hidden. A chat mirrored from a paired machine is flagged on the machine
+//! that hosts it (`daemon::machines::hidden`), so this file only ever decides
+//! for this daemon's own sessions.
 //!
 //! Neither list is pruned against the live session list: a client's list can
 //! be partial (a peer machine's mirrored rows not linked yet, an external
@@ -12,6 +14,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+const FILE_NAME: &str = "hidden-chats.json";
 
 /// A hidden id outlives its chat, so the list only ever grows by one per hide.
 /// Oldest ids go first once past this; they belong to long-ended chats.
@@ -45,7 +49,7 @@ pub struct HiddenDelta {
 }
 
 fn store_path() -> Option<PathBuf> {
-    crate::settings::paths::data_dir().ok().map(|d| d.join("hidden-chats.json"))
+    crate::settings::paths::data_dir().ok().map(|d| d.join(FILE_NAME))
 }
 
 fn load(path: &Path) -> HiddenLists {
@@ -100,6 +104,17 @@ pub fn update(delta: &HiddenDelta) -> (HiddenLists, bool) {
         Some(path) => update_at(&path, delta),
         None => apply(HiddenLists::default(), delta),
     }
+}
+
+/// `list`/`update` against an explicit app-data dir instead of the process
+/// global one: a daemon whose registry names its own dir (every daemon, and a
+/// second in-process daemon in a federation test) must not share one file.
+pub(crate) fn list_in(dir: &Path) -> HiddenLists {
+    load(&dir.join(FILE_NAME))
+}
+
+pub(crate) fn update_in(dir: &Path, delta: &HiddenDelta) -> (HiddenLists, bool) {
+    update_at(&dir.join(FILE_NAME), delta)
 }
 
 fn update_at(path: &Path, delta: &HiddenDelta) -> (HiddenLists, bool) {

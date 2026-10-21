@@ -38,6 +38,7 @@ const SEE_ONLY: &[&str] = &[
     "get_commit_history",
     "list_project_files",
     "get_session_drafts",
+    "get_hidden_chats",
     "peer_unpaired",
 ];
 
