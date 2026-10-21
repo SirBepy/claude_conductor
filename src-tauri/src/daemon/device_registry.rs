@@ -295,15 +295,17 @@ impl DeviceRegistry {
     /// process from the daemon) writes it on pair/revoke/toggle and those must
     /// take effect immediately; the read just must not run on an async worker.
     pub async fn authenticate_blocking_safe(token: String, app_data: PathBuf) -> AuthOutcome {
-        // A join error (panic in the closure) denies, never admits.
-        tokio::task::spawn_blocking(move || Self::authenticate(&token, &app_data))
-            .await
-            .unwrap_or(AuthOutcome::Invalid)
+        Self::on_blocking_pool(token, app_data, Self::authenticate).await
     }
 
     /// `authenticate_desktop_voice` on the blocking pool.
     pub async fn authenticate_desktop_voice_blocking_safe(token: String, app_data: PathBuf) -> AuthOutcome {
-        tokio::task::spawn_blocking(move || Self::authenticate_desktop_voice(&token, &app_data))
+        Self::on_blocking_pool(token, app_data, Self::authenticate_desktop_voice).await
+    }
+
+    async fn on_blocking_pool(token: String, app_data: PathBuf, check: fn(&str, &Path) -> AuthOutcome) -> AuthOutcome {
+        // A join error (panic in the closure) denies, never admits.
+        tokio::task::spawn_blocking(move || check(&token, &app_data))
             .await
             .unwrap_or(AuthOutcome::Invalid)
     }
