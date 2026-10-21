@@ -165,6 +165,9 @@ fn record_use(reg: &RegistryFile, id: &str, now: u64, app_data: &Path) {
     let _guard = ACTIVITY_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut activity = load_activity(app_data);
     activity.last_used.insert(id.to_string(), now);
+    // `reg` was loaded before this write, so a device paired in between loses
+    // its entry; benign, since the registry's creation baseline still stands
+    // in for last_used until the device's next auth.
     activity.last_used.retain(|k, _| reg.devices.iter().any(|d| &d.id == k));
     let result = serde_json::to_string(&activity)
         .map_err(|e| e.to_string())

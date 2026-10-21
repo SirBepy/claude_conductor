@@ -32,10 +32,6 @@ pub fn parse_entries(raw: &str) -> Result<Vec<Vault>> {
     Ok(out)
 }
 
-pub fn parse(raw: &str) -> Result<Vec<PathBuf>> {
-    Ok(parse_entries(raw)?.into_iter().map(|v| v.path).collect())
-}
-
 pub fn detect_entries() -> Result<Vec<Vault>> {
     let Some(cfg) = dirs::config_dir() else { return Ok(vec![]) };
     detect_entries_in(&cfg)
@@ -69,8 +65,8 @@ mod tests {
     #[test]
     fn parses_vaults_with_unix_style_paths() {
         let raw = r#"{"vaults":{"a":{"path":"/Users/joe/Vault A"},"b":{"path":"/Users/joe/Vault B"}}}"#;
-        let out = parse(raw).unwrap();
-        let paths: Vec<String> = out.iter().map(|p| p.display().to_string()).collect();
+        let out = parse_entries(raw).unwrap();
+        let paths: Vec<String> = out.iter().map(|v| v.path.display().to_string()).collect();
         assert!(paths.contains(&"/Users/joe/Vault A".to_string()));
         assert!(paths.contains(&"/Users/joe/Vault B".to_string()));
     }
@@ -78,14 +74,14 @@ mod tests {
     #[test]
     fn parses_vaults_with_windows_style_paths() {
         let raw = r#"{"vaults":{"a":{"path":"C:\\Users\\joe\\Vault"}}}"#;
-        let out = parse(raw).unwrap();
+        let out = parse_entries(raw).unwrap();
         assert_eq!(out.len(), 1);
     }
 
     #[test]
     fn empty_object_returns_empty_vec() {
-        assert_eq!(parse(r#"{}"#).unwrap().len(), 0);
-        assert_eq!(parse(r#"{"vaults":{}}"#).unwrap().len(), 0);
+        assert_eq!(parse_entries(r#"{}"#).unwrap().len(), 0);
+        assert_eq!(parse_entries(r#"{"vaults":{}}"#).unwrap().len(), 0);
     }
 
     #[test]
