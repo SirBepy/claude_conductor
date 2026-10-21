@@ -18,7 +18,11 @@ pub fn load(path: &Path) -> Option<String> {
     let key = match secret_store::unprotect(trimmed) {
         Ok(k) => k,
         Err(e) => {
-            log::warn!("session: {path:?} unreadable: {e}");
+            // Set aside, never left for the next login to overwrite: a blob
+            // wrapped by another Windows user may still be recoverable.
+            let aside = path.with_extension("unreadable");
+            let kept = std::fs::rename(path, &aside).is_ok();
+            log::warn!("session: {path:?} unreadable: {e} (old file {})", if kept { "kept as .unreadable" } else { "could not be set aside" });
             return None;
         }
     };
@@ -59,6 +63,21 @@ pub fn clear(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn undecryptable_blob_is_kept_beside_the_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session.txt");
+        std::fs::write(&path, "ccsec1:garbage-not-a-real-blob").unwrap();
+        if load(&path).is_some() {
+            return; // platform treats this text as plaintext; nothing to set aside
+        }
+        assert!(!path.exists());
+        assert_eq!(
+            std::fs::read_to_string(path.with_extension("unreadable")).unwrap(),
+            "ccsec1:garbage-not-a-real-blob"
+        );
+    }
 
     #[test]
     fn missing_session_file_returns_none() {
