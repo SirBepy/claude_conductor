@@ -80,6 +80,7 @@ async function mountFab(page: Page, seed: unknown[], layout?: unknown): Promise<
       const mod = await import("/views/sessions/fab-dial.ts");
       w.__fabHandle = mod.mountFabDial(pane, {
         onDraft: (text: string) => w.__drafts.push(text),
+        onCode: () => {},
         mountPreview: () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} }),
       });
       w.__fabHandle.setSessionScope(viewer, "/proj");

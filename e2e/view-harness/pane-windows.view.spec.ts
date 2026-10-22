@@ -69,7 +69,7 @@ async function mountPane(page: Page, invoke: Record<string, unknown> = {}): Prom
       document.body.appendChild(pane);
       const pv = await import("/views/sessions/preview-panel.ts");
       const mod = await import("/views/sessions/fab-dial.ts");
-      const fab = mod.mountFabDial(pane, { onDraft: () => {}, mountPreview: pv.mountPreviewTab });
+      const fab = mod.mountFabDial(pane, { onDraft: () => {}, onCode: () => {}, mountPreview: pv.mountPreviewTab });
       fab.setSessionScope(viewer, "/proj");
       (window as any).__fab = fab;
     },
