@@ -112,9 +112,6 @@
     max-height: var(--prompt-card-max-h, min(80dvh, 720px));
     transition: transform 0.22s ease-out, opacity 0.22s ease-out;
   }
-  .prompt-card--peeked {
-    opacity: 0.92;
-  }
   .prompt-card__handle {
     display: flex;
   }
@@ -128,16 +125,21 @@
    * aware `bottom` offset that fullscreen would need to duplicate. */
   #prompt-card-host:not(.prompt-card-host--viewport):has(.prompt-card__header .prompt-pager) {
     position: fixed;
-    /* Fixed escapes body's system-bar padding, so it keeps the same two
-       bands itself (base.css). */
-    inset: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    /* Inset 0, not the safe-area bands: the chat pane's slide-in transform
+       (sessions-mobile.css) makes it this box's containing block, and the
+       pane already sits inside body's system-bar padding (base.css). The
+       bands here counted the nav bar twice, leaving a strip of composer
+       showing under the sheet. */
+    inset: 0;
     width: 100%;
     height: auto;
     transform: none;
     padding: 0;
   }
-  .view-sessions[data-mobile-keyboard] #prompt-card-host:not(.prompt-card-host--viewport):has(.prompt-card__header .prompt-pager) {
-    bottom: 0;
+  /* The sheet replaces the composer it is mounted in: hide the composer's own
+     controls so they neither show under a peeked card nor stay tabbable. */
+  .session-composer:has(> #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header .prompt-pager) > :not(#prompt-card-host) {
+    visibility: hidden;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) {
     width: 100%;

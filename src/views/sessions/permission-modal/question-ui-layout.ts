@@ -5,6 +5,7 @@
 
 import { isElNearBottom } from "../../../shared/chat/chat-dom-renderer";
 import type { AuqAttachmentsController } from "./attachments";
+import { PEEK_SETTLED_EVENT, peekOffset } from "./drag-handle";
 import type { QuestionRenderState } from "./question-ui-templates";
 
 export interface QuestionCardLayout {
@@ -55,9 +56,15 @@ export function createQuestionCardLayout(
     // someone who scrolled up to reread earlier messages back down every
     // keystroke.
     const wasNearBottom = isElNearBottom(messagesEl);
-    messagesEl.style.paddingBottom = `${card.offsetHeight + 12}px`;
+    // Only the part of a peeked card still on screen covers the chat. Without
+    // this the phone's fullscreen sheet reserved its whole height, so peeking
+    // uncovered an empty band instead of the latest messages.
+    const covered = Math.max(0, card.offsetHeight - peekOffset(card));
+    messagesEl.style.paddingBottom = `${covered + 12}px`;
     if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
   };
+  // A peek moves the card by transform, which no ResizeObserver sees.
+  host.addEventListener(PEEK_SETTLED_EVENT, syncMessagesPadding);
 
   // Moves the persistent track to the current activeTab. `instant` skips the
   // transition (full rebuild - a fresh node has no prior position to slide

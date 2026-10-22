@@ -2,7 +2,7 @@
 // Reviewed 2026-10-08: index.ts gained a `secret-requested` prompt route and queue (the request_secret MCP tool's masked-value card) alongside the existing permission/question routes - additive, no change to this spec's AUQ contract.
 // Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
+import { assistantMsg, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg, waitForPaneSettled } from "./harness";
 
 // Mobile bottom-sheet redesign (Joe's ask, 2026-08-14): full-bleed, taller,
 // guaranteed nav-bar clearance, drag-down-to-peek. Mounts a REAL sessions
@@ -13,7 +13,7 @@ const PHONE = { width: 393, height: 852 };
 
 const SESSION = sessionInstance();
 
-async function mountPhoneSession(page: Page): Promise<void> {
+async function mountPhoneSession(page: Page, events: unknown[] = []): Promise<void> {
   await page.setViewportSize(PHONE);
   await mountView(page, {
     view: "sessions",
@@ -21,7 +21,7 @@ async function mountPhoneSession(page: Page): Promise<void> {
       ...SESSIONS_BASE_INVOKE,
       list_instances: [SESSION],
       get_active_sessions: [SESSION],
-      load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+      load_history_page: { events, oldest_seq: 0, newest_seq: events.length, has_more: false },
     },
   });
   await page.locator("#sessions-list li[data-session-id]").first().waitFor();
@@ -115,6 +115,48 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     expect(cardBox.height).toBe(PHONE.height);
     await expect(page.locator(".session-header")).toBeHidden();
     await expect(page.locator(".session-statusbar")).toBeHidden();
+  });
+
+  // The chat pane's slide-in transform is the fixed sheet's containing block,
+  // and the pane already sits inside body's nav-bar band - adding the inset
+  // again left a strip of composer showing under the sheet on the phone.
+  test("fullscreen: sheet reaches the pane bottom under a safe-area inset, no composer strip", async ({ page }) => {
+    await mountPhoneSession(page);
+    await overrideSafeArea(page, 48);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+
+    const cardBox = await settledBox(page.locator(".prompt-card"));
+    const paneBox = (await page.locator("#session-pane").boundingBox())!;
+    expect(cardBox.y + cardBox.height).toBeCloseTo(paneBox.y + paneBox.height, 0);
+  });
+
+  test("fullscreen: the composer's own input is hidden while the sheet is up", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+    await expect(page.locator(".session-composer textarea").first()).toBeHidden();
+  });
+
+  test("peeking the fullscreen sheet uncovers the latest messages, not an empty band", async ({ page }) => {
+    const events = Array.from({ length: 12 }, (_, i) => [userMsg(`question ${i}`), assistantMsg(`answer ${i}`)]).flat();
+    await mountPhoneSession(page, events);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+
+    const card = page.locator(".prompt-card");
+    const openBox = await settledBox(card);
+    const handleBox = await settledBox(card.locator(".prompt-card__handle"));
+    const hx = handleBox.x + handleBox.width / 2;
+    const hy = handleBox.y + handleBox.height / 2;
+    await page.mouse.move(hx, hy);
+    await page.mouse.down();
+    await page.mouse.move(hx, hy + openBox.height * 0.6, { steps: 8 });
+    await page.mouse.up();
+    await expect(card).toHaveClass(/prompt-card--peeked/);
+
+    const peekedBox = await settledBox(card);
+    const last = page.locator(".session-messages .msg.user", { hasText: "question 11" });
+    const lastBox = (await last.boundingBox())!;
+    expect(lastBox.y).toBeGreaterThanOrEqual(0);
+    expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(peekedBox.y);
   });
 
   // Permission cards have no `.prompt-pager` and keep the pre-fullscreen,
