@@ -1,16 +1,10 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { modelLabel as shortModelName } from "../../shared/model-name";
+import { modelRankIcon } from "./sidebar-row-visuals";
 import { projBadgeHtml, wrapUpTooltip } from "./sidebar-row-visuals";
 
-// Fuller battery = more effort; "max" gets the charging bolt so it still reads
-// as the top step beside "xhigh" (full).
-const EFFORT_BATTERY: Record<string, string> = {
-  low: "ph-battery-low",
-  medium: "ph-battery-medium",
-  high: "ph-battery-high",
-  xhigh: "ph-battery-full",
-  max: "ph-battery-charging",
-};
+// Phone effort label: 3-4 letters because the header row has no room for the word.
+const EFFORT_SHORT: Record<string, string> = { low: "low", medium: "mid", high: "high", xhigh: "xhi", max: "max" };
 
 export interface SessionHeaderBindOpts {
   sessionId: string;
@@ -59,7 +53,10 @@ export class SessionHeader {
   private readonly _projEl: HTMLElement;
   private readonly _cfgModelEl: HTMLElement;
   private readonly _cfgModelTextEl: HTMLElement;
-  private readonly _cfgEffortIconEl: HTMLElement;
+  private readonly _cfgModelBatteryEl: HTMLElement;
+  private readonly _cfgSepEl: HTMLElement;
+  private readonly _cfgEffortFullEl: HTMLElement;
+  private readonly _cfgEffortShortEl: HTMLElement;
   private readonly _cfgEffortEl: HTMLElement;
   private readonly _wrapUpBtn: HTMLButtonElement;
 
@@ -91,8 +88,9 @@ export class SessionHeader {
       `  <span class="meta">`,
       `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
       `    <span class="meta-cfg">`,
-      `      <span class="meta-cfg-model"><i class="ph ph-robot"></i><span class="meta-cfg-model-text"></span></span>`,
-      `      <span class="meta-cfg-effort"><i class="ph"></i></span>`,
+      `      <span class="meta-cfg-model"><span class="meta-cfg-model-text"></span><i class="ph-bold meta-cfg-model-battery"></i></span>`,
+      `      <span class="meta-cfg-sep" hidden>·</span>`,
+      `      <span class="meta-cfg-effort"><span class="meta-cfg-effort-full"></span><span class="meta-cfg-effort-short"></span></span>`,
       `    </span>`,
       `  </span>`,
       `</div>`,
@@ -111,7 +109,10 @@ export class SessionHeader {
     this._projEl = el.querySelector(".meta-proj")!;
     this._cfgModelEl = el.querySelector(".meta-cfg-model")!;
     this._cfgModelTextEl = el.querySelector(".meta-cfg-model-text")!;
-    this._cfgEffortIconEl = el.querySelector(".meta-cfg-effort i")!;
+    this._cfgModelBatteryEl = el.querySelector(".meta-cfg-model-battery")!;
+    this._cfgSepEl = el.querySelector(".meta-cfg-sep")!;
+    this._cfgEffortFullEl = el.querySelector(".meta-cfg-effort-full")!;
+    this._cfgEffortShortEl = el.querySelector(".meta-cfg-effort-short")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
     this._wrapUpBtn = el.querySelector(".wrap-up-btn")!;
     // Corner badge on the avatar, not a separate icon in the button row
@@ -157,23 +158,25 @@ export class SessionHeader {
   setTitle(text: string): void { this._titleEl.textContent = text; }
   setMeta(text: string): void { this._projEl.textContent = text; }
 
-  /** Model as a robot icon plus its short name, effort as a battery icon
-   *  colour-coded by level (the word lives in the tooltip, where a phone header
-   *  has no room for it). Each is its own hit target opening the statusbar's
-   *  slider popover. The spans are built once in the constructor and only ever
-   *  have their text/icon swapped: the statusbar re-emits config on every
-   *  render, and replacing the nodes would detach a popover the user still has
-   *  open. */
+  /** Model and effort at the far right of the meta line, each its own hit
+   *  target opening the statusbar's slider popover. Desktop shows both as words;
+   *  the phone shows the model as the chat list's rank battery and effort as a
+   *  3-4 letter word (CSS picks which half of each is visible). The spans are
+   *  built once in the constructor and only ever have their text/icon swapped:
+   *  the statusbar re-emits config on every render, and replacing the nodes
+   *  would detach a popover the user still has open. */
   setConfig(model: string | null, effort: string, effortEditable = true): void {
     const modelText = model ? shortModelName(model) : "";
     this._cfgModelTextEl.textContent = modelText;
+    this._cfgModelBatteryEl.className = `ph-bold meta-cfg-model-battery ${modelRankIcon(model ?? "")}`;
     this._cfgModelEl.hidden = !modelText;
-    this.setConfigPart(this._cfgModelEl, !!modelText, `Model: ${modelText}. Click to change`);
-    this._cfgEffortIconEl.className = `ph ${EFFORT_BATTERY[effort] ?? "ph-battery-medium"}`;
+    this.setConfigPart(this._cfgModelEl, !!modelText, "Change model");
+    this._cfgEffortFullEl.textContent = effort;
+    this._cfgEffortShortEl.textContent = EFFORT_SHORT[effort] ?? effort;
     this._cfgEffortEl.hidden = !effort;
     this._cfgEffortEl.dataset.effort = effort;
-    this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, `Effort: ${effort}. Click to change`);
-    if (effort && !effortEditable) this._cfgEffortEl.title = `Effort: ${effort}`;
+    this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, "Change effort");
+    this._cfgSepEl.hidden = !(modelText && effort);
   }
 
   private setConfigPart(el: HTMLElement, clickable: boolean, title: string): void {
