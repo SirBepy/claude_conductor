@@ -320,6 +320,7 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
 
     const fab = mountFabDial(view.querySelector<HTMLElement>("#session-pane")!, {
       onDraft: () => {},
+      onCode: () => {},
       mountPreview: pv.mountPreviewTab,
     });
     fab.setSessionScope("sess-1", "/proj");
