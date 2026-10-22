@@ -28,6 +28,7 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   characters_changed: "characters-changed",
   message_drafts_changed: "message-drafts-changed",
   user_todos_changed: "user-todos-changed",
+  dashboard_changed: "dashboard-changed",
   hidden_chats_changed: "hidden-chats-changed",
   machines_changed: "machines-changed",
   // Same snake/kebab spelling, so this one is easy to mistake for already

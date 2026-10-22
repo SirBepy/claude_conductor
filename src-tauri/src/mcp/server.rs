@@ -200,7 +200,7 @@ mod tests {
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
-        TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
+        TOOL_DASHBOARD_CARD, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
     };
 
     thread_local! {
@@ -311,14 +311,15 @@ mod tests {
         // respawn replaces it) plus write_user_todo (the Your Todos panel,
         // todo 692) plus schedule (write access to the Schedule panel) plus
         // create_project (registers a project folder with the app) plus
-        // person (who the user means by a name, from the vault).
+        // person (who the user means by a name, from the vault) plus
+        // dashboard_card (custom cards on the project dashboard).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 19);
+        assert_eq!(tools.len(), 20);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -341,6 +342,7 @@ mod tests {
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"create_project"));
         assert!(names.contains(&"person"));
+        assert!(names.contains(&"dashboard_card"));
     }
 
     /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
@@ -377,7 +379,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 23, "19 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 24, "20 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -478,6 +480,7 @@ mod tests {
             (TOOL_SEND_MESSAGE, "/messages/send"),
             (TOOL_UPDATE_MESSAGE, "/messages/update"),
             (TOOL_WRITE_USER_TODO, "/todos/write"),
+            (TOOL_DASHBOARD_CARD, "/dashboard/card"),
             (TOOL_WRITE_PLAN, "/plan/write"),
             (TOOL_SCHEDULE, "/schedule/write"),
             (TOOL_CREATE_PROJECT, "/projects/create"),

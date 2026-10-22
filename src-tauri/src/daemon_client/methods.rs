@@ -17,6 +17,7 @@ mod message_drafts;
 mod misc;
 mod permission;
 mod preview;
+mod project_dashboard;
 mod user_todos;
 mod schedule;
 mod sessions;

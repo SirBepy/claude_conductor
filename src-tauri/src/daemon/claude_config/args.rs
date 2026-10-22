@@ -245,6 +245,17 @@ mod tests {
         assert!(!tools.contains(&"mcp__cc_conductor__person"), "person must not be pre-trusted: {tools:?}");
     }
 
+    /// A dashboard card is a stored command or URL, so writing one must go
+    /// through the permission prompt, never skip it like the app-local writers.
+    #[test]
+    fn pretrusted_tools_excludes_dashboard_card() {
+        let tools: Vec<&str> = PRETRUSTED_TOOLS.split(' ').collect();
+        assert!(
+            !tools.contains(&"mcp__cc_conductor__dashboard_card"),
+            "dashboard_card must not be pre-trusted: {tools:?}"
+        );
+    }
+
     /// Todo 1122: a turn ending on thinking alone gets the CLI's "no visible
     /// output" re-prompt, measured in 92 of 964 local chats.
     #[test]

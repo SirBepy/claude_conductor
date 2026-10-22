@@ -15,7 +15,7 @@ use super::dispatch_jarvis::jarvis_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, tool_result, waiting_target};
 use super::tool_schemas::{
-    TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
+    TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
     TOOL_PERSON, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
@@ -304,6 +304,12 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
         TOOL_WRITE_DRAFT => {
             Some(ctx.relay("/drafts/write", forward_all_args(ctx.args, ctx.session_id), Some("invalid draft write"), None))
         }
+        TOOL_DASHBOARD_CARD => Some(ctx.relay(
+            "/dashboard/card",
+            forward_all_args(ctx.args, ctx.session_id),
+            Some("invalid dashboard card call"),
+            None,
+        )),
         TOOL_PERSON => {
             let route = match ctx.args["action"].as_str() {
                 Some("find") => "/people/find",
@@ -375,6 +381,24 @@ mod tests {
         }
         assert_eq!(body["session_id"], json!("s1"));
         assert!(forward_all_args(&json!({"action": "add"}), "s1").get("person").is_none(), "absent stays absent");
+    }
+
+    /// Every property `dashboard_card` declares reaches the daemon route, and
+    /// the call lands on `/dashboard/card`.
+    #[test]
+    fn dashboard_card_forwards_every_schema_property() {
+        let tools = super::super::tool_schemas_workflow::workflow_schemas();
+        let schema = tools
+            .iter()
+            .find(|t| t["name"] == TOOL_DASHBOARD_CARD)
+            .expect("dashboard_card is registered");
+        let props = schema["inputSchema"]["properties"].as_object().unwrap();
+        let args: serde_json::Map<String, Value> = props.keys().map(|k| (k.clone(), json!("x"))).collect();
+        let body = forward_all_args(&Value::Object(args), "s1");
+        for key in props.keys() {
+            assert_eq!(body[key.as_str()], json!("x"), "{key} was dropped on the way to the daemon");
+        }
+        assert_eq!(body["session_id"], json!("s1"));
     }
 
     /// An `ok:false` daemon reply (refused target, write failure, or the

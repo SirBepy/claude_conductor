@@ -35,6 +35,12 @@ use claude_conductor_lib::sessions::message_drafts::{
     DraftAuthor, DraftReceipt, DraftState, DraftVariant, DraftVersion, MessageDraft,
 };
 use claude_conductor_lib::people::Person;
+use claude_conductor_lib::project_dashboard::{
+    CardConfig, CardDisplay, CardResult, CardSource, CardView, ChannelNote, CommitRow, DashChatRow, DashTodo,
+    DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTarget, DashboardTargetRef, FileRow, GalleryItem,
+    GroupDef, LabelValue, NeedsYouItem, OutcomeRow, PlanItem, QuickAction, RepoRef, RepoShip, RowValue, Scope,
+    ScheduledRow, ServerRow, StatSpec,
+};
 use claude_conductor_lib::sessions::user_todos::{TodoState, UserTodo};
 use claude_conductor_lib::sessions::scheduled_items::{
     Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus,
@@ -204,6 +210,37 @@ fn emit_ipc_types() {
 
     // repo-channel peer chip inline panel (todo 893)
     out.push_str(&decl::<ChannelMessage>());
+
+    // project dashboard: groups and custom cards
+    out.push_str(&decl::<Scope>());
+    out.push_str(&decl::<GroupDef>());
+    out.push_str(&decl::<CardSource>());
+    out.push_str(&decl::<StatSpec>());
+    out.push_str(&decl::<CardDisplay>());
+    out.push_str(&decl::<CardConfig>());
+    out.push_str(&decl::<LabelValue>());
+    out.push_str(&decl::<RowValue>());
+    out.push_str(&decl::<CardResult>());
+    out.push_str(&decl::<CardView>());
+    out.push_str(&decl::<DashboardTargetRef>());
+    out.push_str(&decl::<RepoRef>());
+    out.push_str(&decl::<DashboardTarget>());
+    out.push_str(&decl::<DashboardListRow>());
+    out.push_str(&decl::<NeedsYouItem>());
+    out.push_str(&decl::<DashTodo>());
+    out.push_str(&decl::<DashChatRow>());
+    out.push_str(&decl::<PlanItem>());
+    out.push_str(&decl::<ScheduledRow>());
+    out.push_str(&decl::<CommitRow>());
+    out.push_str(&decl::<RepoShip>());
+    out.push_str(&decl::<ServerRow>());
+    out.push_str(&decl::<ChannelNote>());
+    out.push_str(&decl::<DashboardSnapshot>());
+    out.push_str(&decl::<QuickAction>());
+    out.push_str(&decl::<OutcomeRow>());
+    out.push_str(&decl::<GalleryItem>());
+    out.push_str(&decl::<FileRow>());
+    out.push_str(&decl::<DashboardHistory>());
 
     // ask
     out.push_str(&decl::<AskMessage>());

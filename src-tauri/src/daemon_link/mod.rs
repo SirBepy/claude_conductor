@@ -315,6 +315,11 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "user_todos_changed" => {
             let _ = app.emit("user-todos-changed", params);
         }
+        // Project dashboard config changed (`methods::project_dashboard`): a
+        // card, group or hidden builtin. Pure forward; the dashboard refetches.
+        "dashboard_changed" => {
+            let _ = app.emit("dashboard-changed", params);
+        }
         // Sidebar Hide/Unhide from another client (`methods::hidden_chats`).
         // Payload is the full `{sessions, projects}` lists, so the sidebar just
         // adopts them.
