@@ -10,7 +10,11 @@ const MIN_KEEP_VISIBLE = 56; // px of the card (handle + a sliver) that must sta
 const FLICK_VELOCITY = 0.5; // px/ms - a fast flick wins over raw drag distance
 const TAP_SLOP = 6; // px - drags shorter than this are treated as a tap
 
-function currentOffset(card: HTMLElement): number {
+export const PEEK_SETTLED_EVENT = "prompt-card-peek-settled";
+
+/** The card's settled (or in-flight drag) peek distance, read from its inline
+ *  transform - the target value, not the mid-transition painted position. */
+export function peekOffset(card: HTMLElement): number {
   const m = /translateY\(([-\d.]+)px\)/.exec(card.style.transform);
   return m?.[1] ? parseFloat(m[1]) : 0;
 }
@@ -19,6 +23,9 @@ function settle(card: HTMLElement, offset: number, peeked: boolean): void {
   card.style.transition = "";
   card.style.transform = peeked ? `translateY(${offset}px)` : "";
   card.classList.toggle("prompt-card--peeked", peeked);
+  // Bubbles to the host so the question card can re-reserve chat padding for
+  // the part of the card still on screen (question-ui-layout.ts).
+  card.dispatchEvent(new CustomEvent(PEEK_SETTLED_EVENT, { bubbles: true }));
 }
 
 /** Wires the drag gesture on `host`; returns a detach function. */
@@ -63,7 +70,7 @@ export function attachDragHandle(host: HTMLElement): () => void {
 
     const fastDown = velocity > FLICK_VELOCITY;
     const fastUp = velocity < -FLICK_VELOCITY;
-    const peekNow = fastDown || (!fastUp && currentOffset(c) > peekMax / 2);
+    const peekNow = fastDown || (!fastUp && peekOffset(c) > peekMax / 2);
     settle(c, peekMax, peekNow);
   }
 
@@ -78,7 +85,7 @@ export function attachDragHandle(host: HTMLElement): () => void {
     lastY = e.clientY;
     lastT = e.timeStamp;
     velocity = 0;
-    baseOffset = currentOffset(c);
+    baseOffset = peekOffset(c);
 
     // Clamp the peek distance so the card's bottom edge can never pass the
     // viewport's bottom edge (.session-pane clips overflow - see host.ts's
