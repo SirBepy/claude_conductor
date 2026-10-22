@@ -43,6 +43,12 @@ pub const TOOL_CREATE_PROJECT: &str = "create_project";
 // client (`methods::people`). One tool with an `action` enum, not two, for the
 // same per-turn schema cost reason as `write_user_todo`.
 pub const TOOL_PERSON: &str = "person";
+// Custom cards on the project dashboard (Shortcut stories, Clockify hours, a
+// `gh run list`). One tool with an `action` enum and a short description for
+// the same per-turn schema cost reason as `write_user_todo`. NOT pretrusted:
+// a card is a stored command or URL, so each write goes through the
+// permission prompt.
+pub const TOOL_DASHBOARD_CARD: &str = "dashboard_card";
 
 pub fn workflow_schemas() -> Vec<Value> {
     vec![
@@ -209,6 +215,19 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "language": {"type": "string", "description": "new: language and tone the user writes to them in."},
                     "messaged_on": {"type": "array", "items": {"type": "string"}, "description": "new: Slack, Shortcut, Google Chat..."},
                     "projects": {"type": "array", "items": {"type": "string"}, "description": "new: client slugs. Defaults to this repo's client."}
+                },
+                "required": ["action"]
+            }
+        }),
+        json!({
+            "name": TOOL_DASHBOARD_CARD,
+            "description": "Add your own stat or list card to this project's dashboard (Shortcut stories, Clockify hours, `gh run list`), each showing labels and values from an HTTP call or a local command. `test` a card first to see what it would show, then `upsert` it; `list` shows existing cards.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "upsert", "delete", "test"]},
+                    "card": {"type": "object", "description": "upsert/test. {id?, title, scope?: {kind:project,cwd}|{kind:group,id} (default: this project), source: {kind:http,method,url,headers?,body?} | {kind:command,program,args,cwd?}, display: {kind:stats,items:[{label,path,format}]} | {kind:list,items_path,label_path,value_path,link_path?,limit?}, refresh_secs?}. url/headers/body/args may use {{secret:NAME}} (read from ~/.claude/.env; never write a secret value), {{cwd}}, {{repo}}, {{today}}, {{week_start}}, {{now_iso}}. Paths: dotted, with [n] and [] (map), sum(...). format: number|text|count|duration_s|duration_ms|duration_iso|relative_time. Omit id to create."},
+                    "id": {"type": "string", "description": "delete: which card."}
                 },
                 "required": ["action"]
             }

@@ -1,0 +1,249 @@
+//! Project dashboard RPCs: groups, custom cards, per-scope hidden builtins, and
+//! the project-keyed todo tick. Desktop pipe only: none of these names is in
+//! `remote_transport_table::TRANSPORT_TABLE`, so a phone or a paired machine is
+//! refused (card configs hold commands and URLs, and may only be written from
+//! this PC). `pub(crate)` because `hooks_server::dashboard_card` calls
+//! `cards::dashboard_card_tool` directly, with no Router in scope.
+
+pub(crate) mod cards;
+mod gather;
+mod history;
+mod read;
+mod seed;
+mod snapshot;
+
+pub(crate) use seed::ensure_seeded;
+
+use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::state::DaemonState;
+use crate::project_dashboard::{store, CardResult, CardView, Scope};
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+/// Every dashboard mutation says the same thing: re-read. The dashboard also
+/// refetches on open and on focus, per `project_daemon_notifier_broadcast_lossy`,
+/// so a dropped frame costs freshness, never correctness.
+pub(super) fn publish_changed(state: &DaemonState) {
+    state.notifier.publish("dashboard_changed", json!({}));
+}
+
+fn parse<T: DeserializeOwned>(params: Option<Value>) -> Result<T, RpcError> {
+    serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))
+}
+
+fn to_json<T: serde::Serialize>(v: &T) -> Result<Value, RpcError> {
+    serde_json::to_value(v).map_err(|e| RpcError::internal(e.to_string()))
+}
+
+fn storage_unavailable() -> RpcError {
+    RpcError::internal("dashboard storage unavailable")
+}
+
+#[derive(serde::Deserialize)]
+struct IdOnly {
+    id: String,
+}
+
+pub fn register_project_dashboard(router: &mut Router, state: Arc<DaemonState>) {
+    read::register_read(router, state.clone());
+    {
+        let state = state.clone();
+        router.register("dashboard_groups_list", move |_params, _ctx| {
+            let state = state.clone();
+            async move {
+                ensure_seeded(&state);
+                to_json(&store::load().groups)
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("dashboard_group_upsert", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    #[serde(default)]
+                    id: Option<String>,
+                    name: String,
+                    #[serde(default)]
+                    repos: Vec<String>,
+                }
+                let p: P = parse(params)?;
+                if p.name.trim().is_empty() {
+                    return Err(RpcError::invalid_params("name is required"));
+                }
+                let group = store::update(|s| {
+                    let id = s.upsert_group(p.id.as_deref(), p.name.trim(), p.repos);
+                    s.groups.iter().find(|g| g.id == id).cloned()
+                })
+                .flatten()
+                .ok_or_else(storage_unavailable)?;
+                publish_changed(&state);
+                to_json(&group)
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("dashboard_group_delete", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: IdOnly = parse(params)?;
+                let removed = store::update(|s| s.delete_group(&p.id)).ok_or_else(storage_unavailable)?;
+                if removed {
+                    // The group's cards went with it, so their cached results are orphans.
+                    cards::prune_cache_to_live_cards();
+                    publish_changed(&state);
+                }
+                Ok(json!({"ok": true, "removed": removed}))
+            }
+        });
+    }
+    router.register("dashboard_cards_list", move |params, _ctx| async move {
+        #[derive(serde::Deserialize)]
+        struct P {
+            scope: Scope,
+        }
+        let p: P = parse(params)?;
+        let st = store::load();
+        let list: Vec<CardView> = cards::views(st.cards_for(&p.scope), &store::all_results());
+        to_json(&list)
+    });
+    {
+        let state = state.clone();
+        router.register("dashboard_card_refresh", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: IdOnly = parse(params)?;
+                let st = store::load();
+                let card = st
+                    .cards
+                    .iter()
+                    .find(|c| c.id == p.id)
+                    .ok_or_else(|| RpcError::invalid_params(format!("no such card: {}", p.id)))?;
+                let result: CardResult = cards::run_and_cache(card, &st.groups).await;
+                publish_changed(&state);
+                to_json(&result)
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("dashboard_card_set_enabled", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    id: String,
+                    enabled: bool,
+                }
+                let p: P = parse(params)?;
+                let found = store::update(|s| s.set_card_enabled(&p.id, p.enabled)).ok_or_else(storage_unavailable)?;
+                if !found {
+                    return Err(RpcError::invalid_params(format!("no such card: {}", p.id)));
+                }
+                publish_changed(&state);
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("dashboard_card_delete", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: IdOnly = parse(params)?;
+                let removed = store::update(|s| s.delete_card(&p.id)).ok_or_else(storage_unavailable)?;
+                if removed {
+                    cards::prune_cache_to_live_cards();
+                    publish_changed(&state);
+                }
+                Ok(json!({"ok": true, "removed": removed}))
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("dashboard_builtin_set_hidden", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    scope: Scope,
+                    builtin: String,
+                    hidden: bool,
+                }
+                let p: P = parse(params)?;
+                let known = store::update(|s| s.set_builtin_hidden(&p.scope.scope_key(), &p.builtin, p.hidden))
+                    .ok_or_else(storage_unavailable)?;
+                if !known {
+                    return Err(RpcError::invalid_params(format!("unknown builtin card: {}", p.builtin)));
+                }
+                publish_changed(&state);
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    router.register("dashboard_todo_set_state", move |params, _ctx| {
+        let state = state.clone();
+        async move {
+            #[derive(serde::Deserialize)]
+            struct P {
+                project_id: String,
+                id: String,
+                next: String,
+            }
+            let p: P = parse(params)?;
+            super::user_todos::set_user_todo_state_for_project(&state, &p.project_id, &p.id, &p.next)
+                .map_err(RpcError::internal)
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::daemon::remote_transport_table::allowed;
+    use crate::daemon::rpc::Transport;
+
+    /// Every method this module registers. Kept next to the registration so a
+    /// new method added there is one grep from this list.
+    const METHODS: &[&str] = &[
+        "dashboard_groups_list",
+        "dashboard_group_upsert",
+        "dashboard_group_delete",
+        "dashboard_cards_list",
+        "dashboard_card_refresh",
+        "dashboard_card_set_enabled",
+        "dashboard_card_delete",
+        "dashboard_builtin_set_hidden",
+        "dashboard_todo_set_state",
+        "dashboard_list_targets",
+        "dashboard_snapshot",
+        "dashboard_history",
+        "dashboard_gallery_image",
+    ];
+
+    #[test]
+    fn no_dashboard_method_is_reachable_from_a_phone_or_a_paired_machine() {
+        for m in METHODS {
+            assert!(!allowed(m, &Transport::Phone), "{m} must be desktop-pipe only (phone)");
+            assert!(
+                !allowed(m, &Transport::PeerMachine("peer-1".to_string())),
+                "{m} must be desktop-pipe only (peer machine)"
+            );
+            assert!(allowed(m, &Transport::Local), "{m} must stay callable from the desktop pipe");
+        }
+    }
+
+    #[test]
+    fn the_method_list_matches_what_the_router_registers() {
+        let src = format!("{}{}", include_str!("mod.rs"), include_str!("read.rs"));
+        let registered = src.matches("router.register(\"dashboard_").count();
+        assert_eq!(registered, METHODS.len(), "METHODS and register_project_dashboard drifted");
+        for m in METHODS {
+            assert!(src.contains(&format!("router.register(\"{m}\"")), "{m} is not registered");
+        }
+    }
+}

@@ -17,6 +17,7 @@ pub mod hooks;
 pub mod mcp;
 pub mod news;
 pub mod people;
+pub mod project_dashboard;
 pub mod notifications;
 pub mod history;
 pub mod ipc;
@@ -430,6 +431,19 @@ pub fn run() {
             ipc::mark_todos_seen,
             ipc::set_todo_columns,
             ipc::clear_archived_todos,
+            ipc::dashboard_groups_list,
+            ipc::dashboard_group_upsert,
+            ipc::dashboard_group_delete,
+            ipc::dashboard_cards_list,
+            ipc::dashboard_card_refresh,
+            ipc::dashboard_card_set_enabled,
+            ipc::dashboard_card_delete,
+            ipc::dashboard_builtin_set_hidden,
+            ipc::dashboard_todo_set_state,
+            ipc::dashboard_list_targets,
+            ipc::dashboard_snapshot,
+            ipc::dashboard_history,
+            ipc::dashboard_gallery_image,
             ipc::get_hidden_chats,
             ipc::update_hidden_chats,
             ipc::get_gaming_mode,

@@ -114,11 +114,23 @@ pub(crate) fn set_user_todo_state(
     next: &str,
 ) -> Result<Value, String> {
     let project_id = caller_project(state, session_id)?;
+    set_user_todo_state_for_project(state, &project_id, id, next)
+}
+
+/// Same tick/untick with the project named outright, for the dashboard, which
+/// has no session to resolve one from. Only the desktop pipe reaches it (see
+/// `project_dashboard`), so the caller-supplied `project_id` is trusted.
+pub(crate) fn set_user_todo_state_for_project(
+    state: &Arc<DaemonState>,
+    project_id: &str,
+    id: &str,
+    next: &str,
+) -> Result<Value, String> {
     let next = parse_state(next)?;
-    let full = resolve_id(&project_id, id)?;
-    let todo = user_todos::set_state(&project_id, &full, next, false)
+    let full = resolve_id(project_id, id)?;
+    let todo = user_todos::set_state(project_id, &full, next, false)
         .ok_or_else(|| format!("no such todo: {id}"))?;
-    publish_changed(state, &project_id);
+    publish_changed(state, project_id);
     Ok(json!({"ok": true, "todo": todo}))
 }
 
@@ -322,6 +334,15 @@ mod tests {
         assert!(err.contains("unknown action"), "got {err}");
         let err = set_user_todo_state(&state, "s1", "any", "sideways").unwrap_err();
         assert!(err.contains("unknown todo state"), "got {err}");
+    }
+
+    #[test]
+    fn project_keyed_state_change_rejects_a_bad_state_and_an_unknown_todo() {
+        let state = test_state();
+        let err = set_user_todo_state_for_project(&state, "proj-none", "any", "sideways").unwrap_err();
+        assert!(err.contains("unknown todo state"), "got {err}");
+        let err = set_user_todo_state_for_project(&state, "proj-none", "no-such-id", "done").unwrap_err();
+        assert!(err.contains("no such todo"), "got {err}");
     }
 
     #[test]

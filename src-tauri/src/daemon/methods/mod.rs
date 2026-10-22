@@ -49,6 +49,9 @@ pub(crate) mod people;
 mod permission;
 mod pr_review;
 mod preview;
+// pub(crate): `hooks_server::dashboard_card` (the `dashboard_card` MCP tool route)
+// calls `cards::dashboard_card_tool` directly - same non-RPC shape as `channel`.
+pub(crate) mod project_dashboard;
 // pub(crate): `methods::lifecycle`'s account move reuses
 // `registry::lifecycle::restart_live_session` - account is a launch-only
 // property, same as the model/effort swaps that helper was written for.
@@ -96,6 +99,7 @@ pub use ask::register_ask;
 pub use permission::register_responders;
 pub use pr_review::register_pr_review;
 pub use preview::register_preview;
+pub use project_dashboard::register_project_dashboard;
 pub use registry::register_chat_registry;
 pub use schedule::register_schedule;
 pub use secret::register_secret;
