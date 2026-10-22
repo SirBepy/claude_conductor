@@ -56,9 +56,10 @@ export function createQuestionCardLayout(
     // someone who scrolled up to reread earlier messages back down every
     // keystroke.
     const wasNearBottom = isElNearBottom(messagesEl);
-    // Only the part of a peeked card still on screen covers the chat. Without
-    // this the phone's fullscreen sheet reserved its whole height, so peeking
-    // uncovered an empty band instead of the latest messages.
+    // Only the part of a peeked card still on screen covers the chat, so a
+    // peek uncovers the latest messages instead of an empty band. Peeking is
+    // the permission card's, and a question card's on the --viewport fallback
+    // host; the phone's fullscreen question page has no handle.
     const covered = Math.max(0, card.offsetHeight - peekOffset(card));
     messagesEl.style.paddingBottom = `${covered + 12}px`;
     if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
