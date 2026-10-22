@@ -63,6 +63,18 @@ describe("option preview local images", () => {
     expect(mod.inlineLocalImages(frag)).toContain("data:image/png;base64,QUJD");
   });
 
+  it("a second caller naming a path with a read in flight also resolves true", async () => {
+    const frag = `<img src="file:///C:/x/shared.png">`;
+    let release;
+    impl = () => new Promise((r) => { release = () => r({ mime: "image/png", base64: "QUJD" }); });
+    const a = mod.prefetchLocalImages([frag]);
+    const b = mod.prefetchLocalImages([frag]);
+    release();
+    expect([await a, await b]).toEqual([true, true]);
+    expect(calls).toHaveLength(1);
+    expect(mod.inlineLocalImages(frag)).toContain("data:image/png;base64,QUJD");
+  });
+
   it("leaves HTML-only previews byte-identical with no invoke", async () => {
     const frag = `<div class="btn">Go</div><img src="/icons/a.png">`;
     expect(await mod.prefetchLocalImages([frag])).toBe(false);

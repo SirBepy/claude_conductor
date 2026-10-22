@@ -22,9 +22,13 @@ const WIN_PATH = /^[A-Za-z]:[\\/]/;
 // dropped again, so a later card naming the same path (often a file Claude was
 // still writing the first time) tries once more.
 const cache = new Map<string, string | null>();
+// The read behind each null cache entry, shared so a second card naming the
+// same path awaits it instead of seeing "already handled" and never refreshing.
+const inflight = new Map<string, Promise<boolean>>();
 
 export function clearLocalImageCache(): void {
   cache.clear();
+  inflight.clear();
 }
 
 /** The filesystem path a src points at, or null when it is not a local image. */
@@ -62,12 +66,24 @@ export function inlineLocalImages(fragment: string): string {
 }
 
 /** Loads every uncached local image in `fragments`. Resolves true when at least
- *  one new image landed, so the caller knows to re-point its frames. */
+ *  one image landed that this caller's frames do not show yet, so it knows to
+ *  re-point them. A path another caller is already reading is awaited too:
+ *  every caller refreshes its own frames, not only the one that started the read. */
 export async function prefetchLocalImages(fragments: string[]): Promise<boolean> {
-  const todo = [...new Set(fragments.flatMap(localPaths))].filter((p) => !cache.has(p));
-  if (!todo.length) return false;
-  for (const p of todo) cache.set(p, null);
-  const loaded = await Promise.all(todo.map(async (p) => {
+  const paths = [...new Set(fragments.flatMap(localPaths))];
+  const pending: Promise<boolean>[] = [];
+  for (const p of paths) {
+    const shared = inflight.get(p);
+    if (shared) pending.push(shared);
+    else if (!cache.has(p)) pending.push(startRead(p));
+  }
+  if (!pending.length) return false;
+  return (await Promise.all(pending)).some(Boolean);
+}
+
+function startRead(p: string): Promise<boolean> {
+  cache.set(p, null);
+  const read = (async () => {
     try {
       const data = await invoke<{ mime: string; base64: string }>("read_image_file", { path: p });
       if (!data?.mime?.startsWith("image/") || data.mime.includes("svg")) {
@@ -79,7 +95,10 @@ export async function prefetchLocalImages(fragments: string[]): Promise<boolean>
     } catch {
       cache.delete(p);
       return false;
+    } finally {
+      inflight.delete(p);
     }
-  }));
-  return loaded.some(Boolean);
+  })();
+  inflight.set(p, read);
+  return read;
 }
