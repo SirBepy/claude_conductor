@@ -8,6 +8,49 @@ use crate::daemon::state::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// The phone's project-picker list, shared by `list_project_groups` and
+/// `new_session_bundle` so the two can never disagree on which rows exist.
+pub(super) async fn project_groups(
+    state: &Arc<DaemonState>,
+) -> Result<Vec<crate::types::ProjectGroup>, RpcError> {
+    let projects = state.settings.snapshot().projects;
+    let instances = state.registry.list();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let db = state.db.clone();
+    let groups = tokio::task::spawn_blocking(move || {
+        let token_history = db
+            .as_ref()
+            .map(|db| {
+                let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
+                crate::storage::token_store::get_token_records(mgr.conn(), 0)
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let mut groups = crate::ipc::project_groups::groups_test_helpers::build_groups(
+            &projects, &token_history, &instances, now_ms,
+        );
+        for g in &mut groups {
+            g.path_exists = std::path::Path::new(&g.path).exists();
+        }
+        // Keep the phone's project picker / Projects view free of
+        // the "jarvis-home" pseudo-project and temp-dir scratch
+        // sessions, mirroring the desktop Tauri command - see
+        // `filter_out_jarvis_home`/`filter_out_ephemeral_projects`.
+        // `fold_worktrees` also mirrors desktop, collapsing worktree
+        // rows into their main repo instead of listing them flat.
+        let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(
+            crate::ipc::project_groups::fold_worktrees(groups),
+        );
+        let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_ephemeral_projects(groups);
+        // Dead token-history-only rows (the `wf_*` worktree scratch
+        // pile) - same prune the desktop command applies.
+        crate::ipc::project_groups::groups_test_helpers::filter_out_history_only_ghosts(groups)
+    })
+    .await
+    .map_err(|e| RpcError::internal(format!("join: {e}")))?;
+    Ok(groups)
+}
+
 pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     // Persist a chat's auto-accept-permissions toggle. The daemon is the sole
     // writer of chat-config.json, so both the desktop app (forwarding via the
@@ -141,44 +184,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
         let state = state.clone();
         router.register("list_project_groups", move |_params, _ctx| {
             let state = state.clone();
-            async move {
-                let projects = state.settings.snapshot().projects;
-                let instances = state.registry.list();
-                let now_ms = chrono::Utc::now().timestamp_millis();
-                let db = state.db.clone();
-                let groups = tokio::task::spawn_blocking(move || {
-                    let token_history = db
-                        .as_ref()
-                        .map(|db| {
-                            let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
-                            crate::storage::token_store::get_token_records(mgr.conn(), 0)
-                                .unwrap_or_default()
-                        })
-                        .unwrap_or_default();
-                    let mut groups = crate::ipc::project_groups::groups_test_helpers::build_groups(
-                        &projects, &token_history, &instances, now_ms,
-                    );
-                    for g in &mut groups {
-                        g.path_exists = std::path::Path::new(&g.path).exists();
-                    }
-                    // Keep the phone's project picker / Projects view free of
-                    // the "jarvis-home" pseudo-project and temp-dir scratch
-                    // sessions, mirroring the desktop Tauri command - see
-                    // `filter_out_jarvis_home`/`filter_out_ephemeral_projects`.
-                    // `fold_worktrees` also mirrors desktop, collapsing worktree
-                    // rows into their main repo instead of listing them flat.
-                    let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_jarvis_home(
-                        crate::ipc::project_groups::fold_worktrees(groups),
-                    );
-                    let groups = crate::ipc::project_groups::groups_test_helpers::filter_out_ephemeral_projects(groups);
-                    // Dead token-history-only rows (the `wf_*` worktree scratch
-                    // pile) - same prune the desktop command applies.
-                    crate::ipc::project_groups::groups_test_helpers::filter_out_history_only_ghosts(groups)
-                })
-                .await
-                .map_err(|e| RpcError::internal(format!("join: {e}")))?;
-                Ok(json!(groups))
-            }
+            async move { Ok(json!(project_groups(&state).await?)) }
         });
     }
     // Paginated transcript reader exposed over the remote-access API so that the

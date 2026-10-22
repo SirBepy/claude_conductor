@@ -330,10 +330,9 @@ export function initBoot(): void {
   }).catch(() => {});
 
   // Warm the new-session popup's data cache so the first "+ New session" tap
-  // of the session is already instant (see new-session-cache.ts).
-  // Desktop only: it fans out 76 requests here, which over the phone's tunnel
-  // queue behind HTTP/1.1's 6-connection cap and delay the Chats list.
-  if (!isRemote()) warmNewSessionCache();
+  // of the session is already instant (see new-session-cache.ts). The phone
+  // warms with one bundled request, not the desktop's per-project fan-out.
+  warmNewSessionCache();
 
   // Modal + banner wiring (idempotent; safe to call on boot).
   wireHookModal();

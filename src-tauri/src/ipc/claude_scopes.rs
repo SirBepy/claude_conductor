@@ -44,7 +44,7 @@ pub async fn list_claude_md_scopes(worktree_path: String) -> Result<Vec<ClaudeMd
         .map_err(|e| format!("list_claude_md_scopes join error: {e}"))?
 }
 
-fn list_claude_md_scopes_sync(worktree_path: &str) -> Vec<ClaudeMdScope> {
+pub(crate) fn list_claude_md_scopes_sync(worktree_path: &str) -> Vec<ClaudeMdScope> {
     let root = Path::new(worktree_path);
     let mut rel_paths: Vec<String> = Vec::new();
     walk(root, "", 0, &mut rel_paths);

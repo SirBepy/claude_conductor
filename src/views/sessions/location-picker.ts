@@ -3,6 +3,7 @@ import { invoke } from "../../shared/ipc";
 import { RemoteUnavailableError } from "../../shared/http-transport";
 import { modalCardSlot, presentHostCard, setBackdropCancel } from "../../shared/modal";
 import { openWorktreePickerModal } from "./worktree-picker";
+import { claudeMdScopesData } from "./new-session-cache";
 import { restoreFocus } from "./restore-focus";
 import type { ProjectGroup, ClaudeMdScope } from "../../types/ipc.generated";
 import "./location-picker.css";
@@ -94,8 +95,10 @@ export function openLocationModal(
 
     const loadScopes = async () => {
       try {
-        const result = await invoke<ClaudeMdScope[]>("list_claude_md_scopes", { worktreePath: currentWt.path });
-        applyScopeResult(result);
+        // A cached scan decides the step with no round trip; the read still
+        // revalidates in the background for the next open.
+        const read = claudeMdScopesData(currentWt.path);
+        applyScopeResult(read.cached ?? await read.ready);
       } catch (e) {
         // Never render a raw exception string into the UI (past incident:
         // an unwired remote command showed its message verbatim here).
