@@ -307,13 +307,12 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     if (document.querySelector(`.${LIGHTBOX_OVERLAY_CLASS}`)) return true;
     // Back must never skip the question: a skipped card sends NO answer, and
     // Android's back is far too easy to hit by accident to spend a prompt on.
-    // Fall through (false) to main.ts's mobile-pane handler, which returns to
-    // the session list. The keyboard needs no press of its own here: the IME
-    // eats the one that hides it, and handleBack blurs any lingering focus.
-    // The card stays live in the hidden pane; switching to another chat tears
-    // it down display-only (active-session.ts), and selectSession's
-    // rehydratePendingPrompts refetches it from the daemon on the way back.
-    return false;
+    // It collapses the card to its bar instead, back to the chat with the
+    // question still waiting. Once collapsed it falls through (false) to
+    // main.ts's mobile-pane handler, which returns to the session list. The
+    // keyboard needs no press of its own here: the IME eats the one that
+    // hides it, and handleBack blurs any lingering focus.
+    return renderer.minimize();
   });
 
   const answeredAt = (qi: number): boolean =>

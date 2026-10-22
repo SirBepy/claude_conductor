@@ -136,8 +136,8 @@
     transform: none;
     padding: 0;
   }
-  /* The sheet replaces the composer it is mounted in: hide the composer's own
-     controls so they neither show under a peeked card nor stay tabbable. */
+  /* The page replaces the composer it is mounted in: hide the composer's own
+     controls so they stay out of the tab order behind it. */
   .session-composer:has(> #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header .prompt-pager) > :not(#prompt-card-host) {
     visibility: hidden;
   }
@@ -150,9 +150,6 @@
     border-radius: 0;
     border-left: none;
     border-right: none;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
-    padding-bottom: max(10px, var(--keyboard-inset, 0px));
   }
   /* Short questions no longer float above a blank void: body claims whatever
    * height the fullscreen card isn't spending on header/footer. */
@@ -302,6 +299,108 @@
   .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) .btn-primary {
     flex: 1 1 0;
     min-width: 0;
+  }
+}
+
+/* Phone-only pieces of the fullscreen question page, hidden everywhere else:
+ * the back arrow, the "Question" label and the answer box's send arrow. */
+.prompt-card__back,
+.prompt-card__title-text,
+.prompt-answer-send {
+  display: none;
+}
+
+/* ── Phone question page (Joe, 2026-10-22) ────────────────────────────────
+ * A question card on the phone is a fullscreen page, like the Preview
+ * panel: raised header and footer bars around a darker content area, no
+ * drag handle (back, the arrow or the system gesture, collapses it to its
+ * bar instead), and the answer box styled exactly like the Preview panel's
+ * composer (composer.css's .composer-textarea box, send arrow beside it).
+ * Same scope as the fullscreen block above; placed after the footer rules
+ * so equal-specificity ties go this way. */
+@media (max-width: 768px) {
+  /* The status and nav bar bands take the bars' color (base.css paints them
+     with body's background). */
+  html body:has(#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header .prompt-pager) {
+    background: var(--color-surface-alt);
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) {
+    background: var(--color-background);
+    border: none;
+    box-shadow: none;
+    animation: none;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__handle,
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="minimize"],
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title i {
+    display: none;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) {
+    height: 52px;
+    padding: 0 6px;
+    gap: 4px;
+    background: var(--color-surface-alt);
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__back {
+    display: inline-flex;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title-text {
+    display: inline;
+    margin-right: 6px;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+  /* 44px touch targets: the desktop 26px squares are too small for a thumb. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) > .prompt-icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) > .prompt-icon-btn i {
+    font-size: 1.25rem;
+  }
+
+  /* Footer: Skip + Next/Submit on top, the Preview-style input below them. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
+    padding: 8px 8px max(8px, var(--keyboard-inset, 0px));
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar {
+    order: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar:empty {
+    display: none;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar > :not(.prompt-answer-send) {
+    flex: 1;
+    min-width: 0;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-answer-send {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+  /* composer.css's .composer-input-wrap/.composer-textarea box, verbatim:
+     surface fill on the wrap, 1px border and 4px radius on the field, the
+     same padding and 16px phone type. The highlight backdrop MUST match the
+     field's box and type metrics or the caret drifts. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-wrap {
+    background: var(--color-surface);
+    border-radius: 4px;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-input,
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-highlight {
+    min-height: 32px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 16px;
+    line-height: 1.4;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-input {
+    border: 1px solid var(--color-border);
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-input:focus {
+    border-color: var(--color-primary);
   }
 }
 

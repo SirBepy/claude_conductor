@@ -232,8 +232,9 @@ export function pagerHtml(
   // A single panel has nothing to page between, so a dot here would just be
   // a ring glyph with no meaning (there's no sibling panel to contrast
   // against) - keep the (invisible, zero-size) .prompt-pager wrapper itself,
-  // since drag-handle.ts's isFullscreenSheet check keys off its presence to
-  // tell a question card apart from other sheet types.
+  // since the phone's fullscreen-page CSS (permission-modal-shell.css,
+  // sessions-mobile.css) keys off its presence to tell a question card apart
+  // from a permission card.
   if (totalPanels < 2) return `<span class="prompt-pager"></span>`;
   const dots = Array.from({ length: totalPanels }, (_, i) => {
     const isSummaryDot = hasSummary && i === questions.length;

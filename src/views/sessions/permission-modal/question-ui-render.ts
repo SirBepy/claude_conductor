@@ -51,6 +51,9 @@ export interface QuestionCardRenderer {
    *  while the free-text field is focused, where a full render() would
    *  recreate that (still-focused) textarea and drop focus/cursor mid-paste. */
   refreshAttachments: () => void;
+  /** Collapses the card to its bar. Returns false when it already was one,
+   *  so a back press can fall through to the next handler. */
+  minimize: () => boolean;
 }
 
 export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCardRenderer {
@@ -213,7 +216,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
       const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
-      const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
+      // The back arrow and the "Question" label only show on the phone's
+      // fullscreen page (permission-modal-shell.css); desktop keeps the icon.
+      const titleHtml = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-card__back" data-act="back" title="Back to chat"><i class="ph ph-arrow-left"></i></button><span class="prompt-card__title"><i class="ph ${titleIcon}"></i><span class="prompt-card__title-text">Question</span></span>`;
       const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
@@ -251,8 +256,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         const q = questions[Math.min(state.activeTab, questions.length - 1)];
         if (q) window.dispatchEvent(new CustomEvent(ASK_OPEN_EVENT, { detail: { text: askContextText(q) } }));
       });
-      host.querySelector<HTMLButtonElement>('[data-act="minimize"]')
-        ?.addEventListener("click", () => { minimized = true; render(); });
+      host.querySelectorAll<HTMLButtonElement>('[data-act="minimize"], [data-act="back"]')
+        .forEach((btn) => btn.addEventListener("click", () => { minimize(); }));
 
       host.querySelectorAll<HTMLInputElement>(".prompt-q__opts input").forEach((input) => {
         input.addEventListener("change", () => {
@@ -316,5 +321,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     syncMessagesPadding();
   };
 
-  return { render, goToTab, togglePick, refreshAttachments };
+  function minimize(): boolean {
+    if (minimized) return false;
+    minimized = true;
+    render();
+    return true;
+  }
+
+  return { render, goToTab, togglePick, refreshAttachments, minimize };
 }

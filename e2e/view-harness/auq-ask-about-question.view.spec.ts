@@ -1,3 +1,4 @@
+// Reviewed 2026-10-22: the phone question card became a fullscreen page (header back arrow + "Question" label and an answer-box send arrow, all hidden on desktop; back collapses the card to its bar instead of falling through) - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/ask-panel.ts, src/views/sessions/sessions.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
