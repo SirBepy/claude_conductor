@@ -226,6 +226,23 @@ mod tests {
         assert_eq!(offline.code, ERR_MACHINE_OFFLINE);
     }
 
+    /// A mirrored session whose peer was just unpaired (or whose registry never
+    /// initialised) is a caller error: `invalid_params`, not `ERR_MACHINE_OFFLINE`
+    /// (HTTP 503), since no retry can bring an unpaired peer back.
+    #[tokio::test]
+    async fn forward_send_message_to_an_unpaired_peer_is_invalid_params() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        let err = forward_send_message(&state, "mach-unpaired", "s1", "hi").await.expect_err("unpaired peer");
+        assert_eq!(err.code, RpcError::invalid_params("x").code);
+        assert_ne!(err.code, ERR_MACHINE_OFFLINE);
+
+        let bare = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let err = forward_send_message(&bare, "mach-b", "s1", "hi").await.expect_err("no registry");
+        assert_eq!(err.code, RpcError::invalid_params("x").code);
+    }
+
     async fn state_with_machines_and_peer(
         dir: &std::path::Path,
         peer_dir: &std::path::Path,
