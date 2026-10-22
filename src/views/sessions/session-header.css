@@ -104,14 +104,13 @@
 
 .session-header .meta-cfg-model[hidden] { display: none; }
 
-/* Effort is colour-only (cool to hot as it climbs); hex because no palette
-   token spans five steps. */
+/* Effort is colour-only (cool to hot as it climbs); see --effort-* in tokens.css. */
 .session-header .meta-cfg-effort { font-size: 1rem; line-height: 1; }
-.session-header .meta-cfg-effort[data-effort="low"] { color: #6b9bd1; }
-.session-header .meta-cfg-effort[data-effort="medium"] { color: #5fbf8a; }
-.session-header .meta-cfg-effort[data-effort="high"] { color: #e0c060; }
-.session-header .meta-cfg-effort[data-effort="xhigh"] { color: #e8914f; }
-.session-header .meta-cfg-effort[data-effort="max"] { color: #e5605f; }
+.session-header .meta-cfg-effort[data-effort="low"] { color: var(--effort-low); }
+.session-header .meta-cfg-effort[data-effort="medium"] { color: var(--effort-medium); }
+.session-header .meta-cfg-effort[data-effort="high"] { color: var(--effort-high); }
+.session-header .meta-cfg-effort[data-effort="xhigh"] { color: var(--effort-xhigh); }
+.session-header .meta-cfg-effort[data-effort="max"] { color: var(--effort-max); }
 
 /* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which
    read as clutter) - same geometry as .session-header-proj-badge (bottom
