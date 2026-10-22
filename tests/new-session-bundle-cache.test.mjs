@@ -72,6 +72,12 @@ describe("phone new-session bundle", () => {
     expect(methods()).toEqual(["new_session_bundle"]);
   });
 
+  it("a read right after a bundle lands reuses it instead of re-scanning", async () => {
+    await cache.refreshNewSessionBundle();
+    await cache.projectStatData("C:\\p\\one").ready;
+    expect(methods().filter((m) => m === "new_session_bundle")).toHaveLength(1);
+  });
+
   it("never fans out per-project stat requests, even cold", async () => {
     await cache.projectStatData("C:\\p\\one").ready;
     expect(methods()).not.toContain("count_ai_todos");

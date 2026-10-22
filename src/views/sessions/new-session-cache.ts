@@ -194,7 +194,13 @@ export interface NewSessionBundle {
 export const BUNDLE_STORAGE_KEY = "cc_new_session_bundle_v1";
 
 let bundleInflight: Promise<void> | null = null;
+let bundleLandedAt = 0;
 let hydrated = false;
+
+/** A bundle this fresh answers every read on its own. Without it the picker
+ *  re-fired the whole daemon scan as soon as the first bundle landed, since
+ *  its stat warm-up runs right after the list arrives. */
+const BUNDLE_FRESH_MS = 5_000;
 
 /** Seeds every entry from one bundle. Per-path maps are replaced wholesale,
  *  except entries the bundle doesn't cover (another worktree's scopes, a
@@ -223,10 +229,12 @@ function hydrateFromDisk(): void {
 
 /** One deduped bundle request; resolves once every entry is patched. */
 export function refreshNewSessionBundle(): Promise<void> {
+  if (!bundleInflight && Date.now() - bundleLandedAt < BUNDLE_FRESH_MS) return Promise.resolve();
   if (!bundleInflight) {
     bundleInflight = invoke<NewSessionBundle>("new_session_bundle")
       .then((b) => {
         applyNewSessionBundle(b);
+        bundleLandedAt = Date.now();
         try { localStorage.setItem(BUNDLE_STORAGE_KEY, JSON.stringify(b)); }
         catch { /* quota/private mode: in-memory still works */ }
       })
@@ -263,5 +271,6 @@ export function resetNewSessionCacheForTests(): void {
   }
   for (const m of [projectStatEntries, scopeEntries, projectAccountEntries, whitelistEntries]) m.clear();
   bundleInflight = null;
+  bundleLandedAt = 0;
   hydrated = false;
 }
