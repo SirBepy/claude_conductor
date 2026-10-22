@@ -179,8 +179,11 @@
 }
 /* .prompt-extra-input is the review step's "add a message" box - same widget,
  * different class, so it must be listed here or it renders browser-default. */
-.prompt-q__other-input,
-.prompt-extra-input {
+/* :not(.composer-textarea): the phone question page renders these hooks on
+ * the Preview composer's own field (question-ui-templates.ts), which keeps
+ * composer.css's look untouched. */
+.prompt-q__other-input:not(.composer-textarea),
+.prompt-extra-input:not(.composer-textarea) {
   resize: none;
   min-height: 32px;
   max-height: 160px;
@@ -195,13 +198,13 @@
   outline: none;
   transition: border-color 0.12s, background 0.12s;
 }
-.prompt-q__other-input:focus,
-.prompt-extra-input:focus {
+.prompt-q__other-input:not(.composer-textarea):focus,
+.prompt-extra-input:not(.composer-textarea):focus {
   border-color: var(--color-primary);
   background: var(--color-surface);
 }
-.prompt-q__other-input::placeholder,
-.prompt-extra-input::placeholder {
+.prompt-q__other-input:not(.composer-textarea)::placeholder,
+.prompt-extra-input:not(.composer-textarea)::placeholder {
   color: var(--color-text-muted);
 }
 

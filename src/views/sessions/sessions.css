@@ -729,12 +729,15 @@
 /* Shell draws the single outer boundary now - the pair's own is redundant.
  * Dropped through composer.css's shared var so the highlight backdrop loses
  * the same 1px the textarea does and keeps wrapping at the same column. */
-.composer-shell .composer-input-wrap {
+.composer-shell .composer-input-wrap:not(#prompt-card-host *) {
   background: transparent;
   --composer-input-border: 0px;
 }
 
-.composer-shell .composer-textarea {
+/* :not(#prompt-card-host *): the phone question page mounts inside this
+ * shell and renders the Preview panel's reply bar, which keeps its own
+ * border, fill and radius. */
+.composer-shell .composer-textarea:not(#prompt-card-host *) {
   border-radius: 0;
 }
 
@@ -746,7 +749,7 @@
   box-shadow: 0 0 0 3px rgba(157, 125, 252, 0.12);
 }
 
-.composer-shell .composer-textarea:focus {
+.composer-shell .composer-textarea:not(#prompt-card-host *):focus {
   outline: none;
 }
 

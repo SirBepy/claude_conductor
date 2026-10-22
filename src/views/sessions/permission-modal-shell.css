@@ -247,13 +247,15 @@
   border-top: 1px solid var(--color-border);
   background: var(--color-surface-alt);
 }
-.prompt-card__footer button:disabled {
+/* :not(.pv-composer-send): the phone page's Preview reply bar keeps its own
+ * send button exactly as the Preview panel draws it. */
+.prompt-card__footer button:not(.pv-composer-send):disabled {
   opacity: 0.45;
   cursor: not-allowed;
   filter: none;
   transform: none;
 }
-.prompt-card__footer button {
+.prompt-card__footer button:not(.pv-composer-send) {
   /* Matches the answer-bar textarea's rendered height (padding 8px + 1px
    * border + 1.4 line-height at 0.88rem ≈ 38px) so Skip/Next sit level with
    * it instead of looking squashed against a taller field. */
@@ -303,10 +305,9 @@
 }
 
 /* Phone-only pieces of the fullscreen question page, hidden everywhere else:
- * the back arrow, the "Question" label and the answer box's send arrow. */
+ * the back arrow and the "Question" label. */
 .prompt-card__back,
-.prompt-card__title-text,
-.prompt-answer-send {
+.prompt-card__title-text {
   display: none;
 }
 
@@ -314,8 +315,7 @@
  * A question card on the phone is a fullscreen page, like the Preview
  * panel: raised header and footer bars around a darker content area, no
  * drag handle (back, the arrow or the system gesture, collapses it to its
- * bar instead), and the answer box styled exactly like the Preview panel's
- * composer (composer.css's .composer-textarea box, send arrow beside it).
+ * bar instead), and the Preview panel's own reply bar as the answer box.
  * Same scope as the fullscreen block above; placed after the footer rules
  * so equal-specificity ties go this way. */
 @media (max-width: 768px) {
@@ -359,48 +359,19 @@
     font-size: 1.25rem;
   }
 
-  /* Footer: Skip + Next/Submit on top, the Preview-style input below them. */
+  /* Footer: Skip + Next/Submit on top, then the Preview panel's own reply
+     bar (.pv-composer, question-ui-templates.ts) edge to edge below them,
+     with its own padding and top divider. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
-    padding: 8px 8px max(8px, var(--keyboard-inset, 0px));
+    padding: 8px 8px var(--keyboard-inset, 0px);
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer:has(.prompt-card__answer-bar:empty) {
+    padding-bottom: max(8px, var(--keyboard-inset, 0px));
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar {
     order: 1;
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar:empty {
-    display: none;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar > :not(.prompt-answer-send) {
-    flex: 1;
-    min-width: 0;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-answer-send {
-    display: inline-flex;
-    flex-shrink: 0;
-  }
-  /* composer.css's .composer-input-wrap/.composer-textarea box, verbatim:
-     surface fill on the wrap, 1px border and 4px radius on the field, the
-     same padding and 16px phone type. The highlight backdrop MUST match the
-     field's box and type metrics or the caret drifts. */
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-wrap {
-    background: var(--color-surface);
-    border-radius: 4px;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-input,
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-highlight {
-    min-height: 32px;
-    padding: 6px 8px;
-    border-radius: 4px;
-    font-size: 16px;
-    line-height: 1.4;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-input {
-    border: 1px solid var(--color-border);
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__answer-bar .cc-typing-input:focus {
-    border-color: var(--color-primary);
+    flex: 1 1 calc(100% + 16px);
+    margin: 0 -8px;
   }
 }
 

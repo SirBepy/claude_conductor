@@ -96,7 +96,29 @@ export function optsRowsHtml(
   }).join("");
 }
 
-export function extraMessageZoneHtml(additionalMessage: string): string {
+// The phone's fullscreen question page uses the Preview panel's reply
+// composer markup verbatim (preview-panel.ts's .pv-composer row), so the
+// answer box IS that bar rather than a restyled copy of it. The AUQ hook
+// classes (.prompt-q__other-input/.prompt-extra-input) ride along on the
+// textarea for the wiring that looks them up; permission-modal-question.css
+// skips its own field styling when .composer-textarea is present. With no
+// .prompt-q__other label around it, slash-popup.ts anchors on the wrap.
+function pageComposerHtml(hookClass: string, placeholder: string, value: string): string {
+  return `
+    <div class="pv-composer">
+      <div class="composer-input-wrap">
+        <div class="composer-highlight cc-typing-highlight" aria-hidden="true"></div>
+        <textarea class="composer-textarea ${hookClass}" rows="1" placeholder="${placeholder}">${escapeHtml(value)}</textarea>
+      </div>
+      <button type="button" class="pv-composer-send icon-btn prompt-answer-send" title="Send" disabled>
+        <i class="ph ph-paper-plane-right"></i>
+      </button>
+    </div>
+  `;
+}
+
+export function extraMessageZoneHtml(additionalMessage: string, page = false): string {
+  if (page) return pageComposerHtml("prompt-extra-input", "Add a message (optional)...", additionalMessage);
   return `
     <label class="prompt-q__other prompt-extra-message">
       <span class="prompt-q__other-label">Add a message (optional):</span>
@@ -113,8 +135,9 @@ export function extraMessageZoneHtml(additionalMessage: string): string {
 // `ta.closest(".prompt-q__other")` and is not this task's file to touch.
 // Only ever rendered into `.prompt-card__answer-bar` now (via syncAnswerBar),
 // which sits inline in the footer row next to Skip/Next - see its doc comment.
-export function ownZoneHtml(qi: number, freeText: Map<number, string>): string {
+export function ownZoneHtml(qi: number, freeText: Map<number, string>, page = false): string {
   const typedValue = freeText.get(qi) ?? "";
+  if (page) return pageComposerHtml("prompt-q__other-input", "Type your own answer...", typedValue);
   return `
     <div class="prompt-own">
       <label class="prompt-q__other">
