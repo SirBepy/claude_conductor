@@ -34,7 +34,7 @@ export class AiTodosPopover {
     }
     const n = this.files.length;
     if (n === 0) return "";
-    return `<span class="sb-chip sb-ai-todos sb-ai-todos-btn${animClass("ai_todos")}" role="button" tabindex="0" title="${n} AI todo${n === 1 ? "" : "s"} in .claude/todos"><i class="ph ph-check-square"></i>${n}</span>`;
+    return `<span class="sb-chip sb-ai-todos sb-ai-todos-btn${animClass("ai_todos")}" role="button" tabindex="0" title="${n} AI todo${n === 1 ? "" : "s"} in .claude/todos"><i class="ph ph-check-square"></i>${n}<span class="sb-chip-label"> todo${n === 1 ? "" : "s"}</span></span>`;
   }
 
   /** Rebuilds in-place when called while open (re-anchor after a chip re-render

@@ -37,6 +37,12 @@ describe("account chip - single-option skip (todo 883)", () => {
     expect(html).toContain("Personal");
   });
 
+  it("keeps the account name in a label span that the phone media query hides", () => {
+    setCachedAccounts([personal, work]);
+    const html = renderChip("account", ctx(personal.id));
+    expect(html).toContain('<span class="sb-chip-label">Personal</span>');
+  });
+
   it("goes quiet again if the second account is later removed", () => {
     setCachedAccounts([personal, work]);
     expect(renderChip("account", ctx(personal.id))).not.toBe("");
