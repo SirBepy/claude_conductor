@@ -68,13 +68,56 @@ fn outcome(link: PublishedLink, stored: bool) -> Value {
     json!({ "published": link, "stored": stored })
 }
 
+/// Returned when a publish of the same preview is already running. Distinct
+/// from a failure so a client can tell "wait" from "retry".
+pub const ERR_ALREADY_PUBLISHING: i32 = -32014;
+
+/// Preview ids with a publish running. The frontend guard only covers one JS
+/// realm; the phone and desktop, or two windows, would otherwise each mint an
+/// artifact for the same preview.
+static IN_FLIGHT: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+struct InFlightGuard(String);
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).retain(|id| id != &self.0);
+    }
+}
+
+fn begin(id: &str) -> Option<InFlightGuard> {
+    let mut ids = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+    if ids.iter().any(|i| i == id) {
+        return None;
+    }
+    ids.push(id.to_string());
+    Some(InFlightGuard(id.to_string()))
+}
+
+/// Runs `publish` unless one is already running for `id`; the guard is held
+/// across the await and released on completion, error or cancellation.
+async fn publish_once<F, Fut>(id: &str, publish: F) -> Result<Value, RpcError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    let Some(_guard) = begin(id) else {
+        return Err(RpcError {
+            code: ERR_ALREADY_PUBLISHING,
+            message: "this preview is already being published".into(),
+            data: None,
+        });
+    };
+    publish().await.map_err(RpcError::internal)
+}
+
 pub fn register_claude_ai_publish(router: &mut Router, state: Arc<DaemonState>) {
     router.register("publish_to_claude_ai", move |params, _ctx| {
         let state = state.clone();
         async move {
             let p: Params = serde_json::from_value(params.unwrap_or(Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            publish_preview(&state, &p.id).await.map_err(RpcError::internal)
+            publish_once(&p.id, || publish_preview(&state, &p.id)).await
         }
     });
 }
@@ -97,6 +140,33 @@ mod tests {
         let link = PublishedLink { url: "https://claude.ai/artifact/AB".into(), version: 1, account: "Joe".into(), published_at: "now".into() };
         assert_eq!(outcome(link.clone(), false)["stored"], false);
         assert_eq!(outcome(link, true)["stored"], true);
+    }
+
+    #[tokio::test]
+    async fn two_concurrent_publishes_of_one_preview_spawn_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let run = |spawns: Arc<AtomicUsize>, gate: Arc<tokio::sync::Notify>| async move {
+            spawns.fetch_add(1, Ordering::SeqCst);
+            gate.notified().await;
+            Ok(json!({}))
+        };
+        let first = tokio::spawn({
+            let fut = run(spawns.clone(), gate.clone());
+            async move { publish_once("dup-preview", || fut).await }
+        });
+        while spawns.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        let second = publish_once("dup-preview", || run(spawns.clone(), gate.clone())).await;
+        assert_eq!(second.expect_err("second publish is refused").code, ERR_ALREADY_PUBLISHING);
+        assert_eq!(spawns.load(Ordering::SeqCst), 1, "only one publish may spawn");
+
+        gate.notify_one();
+        first.await.unwrap().expect("first publish completes");
+        // The slot is free again once the first finished.
+        assert!(begin("dup-preview").is_some());
     }
 
     #[test]
