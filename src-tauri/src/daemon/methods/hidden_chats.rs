@@ -51,8 +51,15 @@ async fn update_hidden_chats(state: &Arc<DaemonState>, transport: &Transport, de
     // A call that already came from a peer is about this daemon's own chats
     // (CLAUDE.md mirroring loop guards), so it is never forwarded again.
     if !from_peer {
+        // Every host is resolved (known and online) before the first call, so
+        // an offline host fails the whole delta with nothing applied anywhere
+        // rather than leaving earlier hosts changed and local state untouched.
+        let mut targets = Vec::new();
         for (owner, (add, remove)) in split_by_owner(state, &delta) {
             let client = resolve_peer_client(state, &owner).await?;
+            targets.push((owner, add, remove, client));
+        }
+        for (owner, add, remove, client) in targets {
             client
                 .call("update_hidden_chats", json!({"add": add, "remove": remove}))
                 .await
