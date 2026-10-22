@@ -1,3 +1,4 @@
+// Reviewed 2026-10-22: sessions-dom-wiring.ts passes the FAB a Code-mode opener; this spec asserts keyboard hints only, so its contract is unaffected.
 // Reviewed 2026-10-20: shortcuts.ts gained a new "toggle-wrap-up-on-done" entry (ctrl+shift+w), registered in sessions-dom-wiring.ts alongside close-chat - both additive, no change to this spec's Ctrl-held chat-number hint/stagger behavior.
 import { test, expect } from "@playwright/test";
 import { mountSessionsList, sessionInstance, fireEvent } from "./harness";

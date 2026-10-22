@@ -148,7 +148,6 @@ export function wireRenderer(
   // markers mid-turn. The registry's `awaiting` (set by the daemon from the
   // result line, gen-guarded) is the single source of truth now - see
   // deriveQuestionSet in sessions-helpers.ts.
-  header.onCodeModeClick = () => void enterCodeMode();
   // view-more-menu and sidebar-ctx-menu offer "View changes" for the active
   // session: Code mode on this chat's own edits.
   state.activeChatActions = { viewChanges: () => void enterCodeMode({ kind: "scope", scope: "chat" }) };

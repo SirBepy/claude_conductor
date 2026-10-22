@@ -18,7 +18,7 @@ describe("fab dial survives a pane rebuild", () => {
   });
 
   it("mounts a host once a session is scoped", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     expect(pane.querySelector(".fab-dial-host")).not.toBeNull();
     expect(pane.querySelector("[data-fab-toggle]")).not.toBeNull();
@@ -28,7 +28,7 @@ describe("fab dial survives a pane rebuild", () => {
   // setSessionScope has run, which orphans the host - the reason the dial was
   // invisible in the shipped app despite being mounted.
   it("reattaches after pane.innerHTML wipes it", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
 
     pane.innerHTML = `<div class="session-messages"></div>`;
@@ -36,11 +36,11 @@ describe("fab dial survives a pane rebuild", () => {
 
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).not.toBeNull();
-    expect(pane.querySelectorAll("[data-dial]").length).toBe(4);
+    expect(pane.querySelectorAll("[data-dial]").length).toBe(5);
   });
 
   it("stays gone when no session is scoped", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope(null, null);
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).toBeNull();

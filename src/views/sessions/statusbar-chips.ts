@@ -104,7 +104,7 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       const acc = getCachedAccount(ctx.accountId);
       if (!acc) return "";
       const clickable = ctx.hasAccountClick ? " sb-account-btn" : "";
-      return `<span class="sb-chip sb-account${clickable}${ac("account")}" style="--acc:${escapeHtml(acc.colour)}" role="button" tabindex="0" title="Click to move this chat to a different account"><i class="ph ph-${escapeHtml(acc.icon)}"></i>${escapeHtml(capitalize(acc.label))}</span>`;
+      return `<span class="sb-chip sb-account${clickable}${ac("account")}" style="--acc:${escapeHtml(acc.colour)}" role="button" tabindex="0" title="${escapeHtml(capitalize(acc.label))}${ctx.hasAccountClick ? " - click to move this chat to a different account" : ""}" aria-label="${escapeHtml(capitalize(acc.label))}"><i class="ph ph-${escapeHtml(acc.icon)}"></i></span>`;
     }
     case "effort": {
       if (!ctx.effort) return "";

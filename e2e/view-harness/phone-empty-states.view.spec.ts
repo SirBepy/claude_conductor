@@ -1,3 +1,4 @@
+// Reviewed 2026-10-22: pending-pane-mount.ts no longer wires a header Code button (it moved to the FAB menu); this spec asserts empty-state copy only, so its contract is unaffected.
 // asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/pending-pane-mount.ts
 //
 // Reviewed against pending-pane-mount.ts's new skeleton placeholders

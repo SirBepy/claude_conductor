@@ -7,7 +7,7 @@ import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
-import { setCodeModeChatProvider, enterCodeMode } from "./code-mode/entry";
+import { setCodeModeChatProvider } from "./code-mode/entry";
 import { sessionCodeModeChat } from "./code-mode/session-chat";
 import { state } from "./state";
 import { syncThinkingBar } from "./session-thinking-bar";
@@ -176,7 +176,6 @@ export async function attachPendingRenderer(
   setCodeModeChatProvider(project.path && headerEl
     ? () => sessionCodeModeChat({ pane, sessionId: renderer.sessionId, cwd: project.path, headerEl, renderer })
     : null);
-  if (header) header.onCodeModeClick = () => void enterCodeMode();
   const sbForRenderer = state.statusbar;
   if (sbForRenderer) {
     renderer.onMetaUpdate = (meta) => {

@@ -95,7 +95,7 @@ test("FAB rests closed, fans out to four, and opens Ask in a floating card", asy
   await expect(fab).toBeVisible();
   // The three DIAL card panels plus the Preview toggle, which is a dial item
   // but never a panel.
-  await expect(page.locator(".fab-dial-item")).toHaveCount(4);
+  await expect(page.locator(".fab-dial-item")).toHaveCount(5);
   // Dial exists in the DOM but is hidden until the FAB is tapped.
   await expect(page.locator(".fab-dial-item").first()).toBeHidden();
   await expect(page.locator(".pw-window:visible")).toHaveCount(0);

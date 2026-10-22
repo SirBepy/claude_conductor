@@ -2,6 +2,16 @@ import { escapeHtml } from "../../shared/escape-html";
 import { modelLabel as shortModelName } from "../../shared/model-name";
 import { projBadgeHtml, wrapUpTooltip } from "./sidebar-row-visuals";
 
+// Fuller battery = more effort; "max" gets the charging bolt so it still reads
+// as the top step beside "xhigh" (full).
+const EFFORT_BATTERY: Record<string, string> = {
+  low: "ph-battery-low",
+  medium: "ph-battery-medium",
+  high: "ph-battery-high",
+  xhigh: "ph-battery-full",
+  max: "ph-battery-charging",
+};
+
 export interface SessionHeaderBindOpts {
   sessionId: string;
   readOnly: boolean;
@@ -37,8 +47,8 @@ export function refreshWrapUpIndicator(selectedId: string | null, sessionId: str
 }
 
 /**
- * The session pane header - avatar, title/meta, the `</>` Code mode button, and
- * the discard button (drafts). The per-session more-btn moved to the top-right
+ * The session pane header - avatar, title/meta and the discard button (drafts).
+ * Code mode lives in the chat FAB menu. The per-session more-btn moved to the top-right
  * view-more menu ("This chat" section).
  */
 export class SessionHeader {
@@ -48,14 +58,13 @@ export class SessionHeader {
   private readonly _titleEl: HTMLElement;
   private readonly _projEl: HTMLElement;
   private readonly _cfgModelEl: HTMLElement;
-  private readonly _cfgSepEl: HTMLElement;
+  private readonly _cfgModelTextEl: HTMLElement;
+  private readonly _cfgEffortIconEl: HTMLElement;
   private readonly _cfgEffortEl: HTMLElement;
   private readonly _wrapUpBtn: HTMLButtonElement;
 
   private readonly _onDiscard: (() => void) | undefined;
 
-  /** The `</>` button: enter Code mode for this chat. */
-  onCodeModeClick: (() => void) | null = null;
   /** The flag button: toggle "Wrap up when done" for this chat. */
   onWrapUpToggleClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
@@ -82,17 +91,13 @@ export class SessionHeader {
       `  <span class="meta">`,
       `    <span class="meta-proj">${escapeHtml(opts.meta)}</span>`,
       `    <span class="meta-cfg">`,
-      `      <span class="meta-cfg-model"></span>`,
-      `      <span class="meta-cfg-sep" hidden>·</span>`,
-      `      <span class="meta-cfg-effort"></span>`,
+      `      <span class="meta-cfg-model"><i class="ph ph-robot"></i><span class="meta-cfg-model-text"></span></span>`,
+      `      <span class="meta-cfg-effort"><i class="ph"></i></span>`,
       `    </span>`,
       `  </span>`,
       `</div>`,
       `<button class="wrap-up-btn" title="${escapeHtml(wrapUpTooltip(false))}" aria-label="Wrap up when done">`,
       `  <i class="ph-bold ph-flag-checkered"></i>`,
-      `</button>`,
-      `<button class="icon-btn code-mode-btn" title="Code mode (Ctrl+Shift+E)" aria-label="Code mode">`,
-      `  <i class="ph ph-code"></i>`,
       `</button>`,
       `<button class="icon-btn discard-btn" title="Discard draft">`,
       `  <i class="ph ph-x-circle"></i>`,
@@ -105,7 +110,8 @@ export class SessionHeader {
     this._titleEl = el.querySelector(".title")!;
     this._projEl = el.querySelector(".meta-proj")!;
     this._cfgModelEl = el.querySelector(".meta-cfg-model")!;
-    this._cfgSepEl = el.querySelector(".meta-cfg-sep")!;
+    this._cfgModelTextEl = el.querySelector(".meta-cfg-model-text")!;
+    this._cfgEffortIconEl = el.querySelector(".meta-cfg-effort i")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
     this._wrapUpBtn = el.querySelector(".wrap-up-btn")!;
     // Corner badge on the avatar, not a separate icon in the button row
@@ -115,11 +121,6 @@ export class SessionHeader {
     // RELOCATES the existing node (same element, same listener), it never
     // clones, so this survives repeated avatar swaps without re-binding.
     this._wrap.appendChild(this._wrapUpBtn);
-
-    el.querySelector<HTMLButtonElement>(".code-mode-btn")!.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.onCodeModeClick?.();
-    });
 
     this._wrapUpBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -156,20 +157,26 @@ export class SessionHeader {
   setTitle(text: string): void { this._titleEl.textContent = text; }
   setMeta(text: string): void { this._projEl.textContent = text; }
 
-  /** Model and effort as text at the far right of the meta line, each its own
-   *  hit target opening the statusbar's slider popover. The three spans are
-   *  built once in the constructor and only ever have their text swapped: the
-   *  statusbar re-emits config on every render, and replacing the nodes would
-   *  detach a popover the user still has open. */
+  /** Model as a robot icon plus its short name, effort as a battery icon
+   *  colour-coded by level (the word lives in the tooltip, where a phone header
+   *  has no room for it). Each is its own hit target opening the statusbar's
+   *  slider popover. The spans are built once in the constructor and only ever
+   *  have their text/icon swapped: the statusbar re-emits config on every
+   *  render, and replacing the nodes would detach a popover the user still has
+   *  open. */
   setConfig(model: string | null, effort: string, effortEditable = true): void {
     const modelText = model ? shortModelName(model) : "";
-    this.setConfigPart(this._cfgModelEl, modelText, !!modelText, "Change model");
-    this.setConfigPart(this._cfgEffortEl, effort, !!effort && effortEditable, "Change effort");
-    this._cfgSepEl.hidden = !(modelText && effort);
+    this._cfgModelTextEl.textContent = modelText;
+    this._cfgModelEl.hidden = !modelText;
+    this.setConfigPart(this._cfgModelEl, !!modelText, `Model: ${modelText}. Click to change`);
+    this._cfgEffortIconEl.className = `ph ${EFFORT_BATTERY[effort] ?? "ph-battery-medium"}`;
+    this._cfgEffortEl.hidden = !effort;
+    this._cfgEffortEl.dataset.effort = effort;
+    this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, `Effort: ${effort}. Click to change`);
+    if (effort && !effortEditable) this._cfgEffortEl.title = `Effort: ${effort}`;
   }
 
-  private setConfigPart(el: HTMLElement, text: string, clickable: boolean, title: string): void {
-    el.textContent = text;
+  private setConfigPart(el: HTMLElement, clickable: boolean, title: string): void {
     el.classList.toggle("meta-cfg-btn", clickable);
     el.title = clickable ? title : "";
     if (clickable) {

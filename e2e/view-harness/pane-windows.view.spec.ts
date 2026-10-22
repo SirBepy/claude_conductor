@@ -1,3 +1,4 @@
+// Reviewed 2026-10-22: fab-dial.ts gained a `data-dial="code"` item; this spec opens windows by their own `data-dial` key, never by position or count, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";

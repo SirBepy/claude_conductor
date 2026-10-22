@@ -6,6 +6,7 @@ import { invoke } from "../../shared/ipc";
 import * as shortcuts from "../../shared/shortcuts";
 import { mountPreviewTab, type PreviewController } from "./preview-panel";
 import { mountFabDial } from "./fab-dial";
+import { enterCodeMode } from "./code-mode/entry";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumeParkedDraft } from "./pending-flow";
 import { showFavoritesStrip, hideFavoritesStrip } from "./favorites-strip";
@@ -57,6 +58,7 @@ export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewC
       state.composer?.setDraftText(text, false);
     },
     mountPreview: mountPreviewTab,
+    onCode: () => void enterCodeMode(),
   });
   const previewController = state.fabDial.previewController();
   state.previewController = previewController;
