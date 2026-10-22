@@ -82,6 +82,18 @@ fn refuse_peer_hosted(state: &DaemonState, p: &StartSessionParams) -> Option<Rpc
     None
 }
 
+/// A peer resuming one of our chats arrives with `account_id` stripped
+/// (`forward_start_session`), so our own registry's binding wins; otherwise the
+/// resume would silently rebind the chat to this daemon's default account.
+fn bind_remote_resume_account(state: &DaemonState, transport: &Transport, p: &mut StartSessionParams) {
+    if matches!(transport, Transport::Local) {
+        return;
+    }
+    if let Some(inst) = p.resume_id.as_deref().and_then(|id| state.registry.get(id)) {
+        p.account_id = inst.account_id;
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct SendMessageParams {
     session_id: String,
@@ -121,7 +133,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     .get("placeholder_id")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                let p: StartSessionParams = serde_json::from_value(params_value)
+                let mut p: StartSessionParams = serde_json::from_value(params_value)
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 // After the `machine_id` forward above, so a start aimed at the
                 // host still reaches it; this only stops a LOCAL spawn.
@@ -138,6 +150,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 {
                     return Err(RpcError::invalid_params("unknown cwd".to_string()));
                 }
+                bind_remote_resume_account(&state, &ctx.transport, &mut p);
                 let cwd = p.cwd.clone();
                 let model = p.model.clone();
                 let effort = p.effort.clone();
@@ -419,6 +432,38 @@ mod machine_target_tests {
         // Desktop is unchanged: no project gate.
         let local = start_session_as(&state, Transport::Local, "C:\\does\\not\\exist\\either").await;
         assert_ne!(local.error.expect("cwd absent").message, "unknown cwd");
+    }
+
+    #[test]
+    fn a_remote_resume_keeps_the_registry_account_and_a_local_one_keeps_its_own() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.registry.upsert_interactive("chat-1", std::path::Path::new("C:/x"), "proj", "2026-10-22T00:00:00Z");
+        assert!(state.registry.set_account("chat-1", "acct-home"));
+        let params = |resume: &str, account: Option<&str>| StartSessionParams {
+            cwd: "C:/x".into(),
+            model: "opus".into(),
+            effort: "high".into(),
+            resume_id: Some(resume.into()),
+            account_id: account.map(str::to_string),
+            fork: false,
+            new_session_id: None,
+        };
+
+        let mut peer = params("chat-1", None);
+        bind_remote_resume_account(&state, &Transport::PeerMachine("m".into()), &mut peer);
+        assert_eq!(peer.account_id.as_deref(), Some("acct-home"));
+
+        let mut phone = params("chat-1", Some("acct-other"));
+        bind_remote_resume_account(&state, &Transport::Phone, &mut phone);
+        assert_eq!(phone.account_id.as_deref(), Some("acct-home"));
+
+        let mut local = params("chat-1", Some("acct-other"));
+        bind_remote_resume_account(&state, &Transport::Local, &mut local);
+        assert_eq!(local.account_id.as_deref(), Some("acct-other"));
+
+        let mut unknown = params("chat-unknown", None);
+        bind_remote_resume_account(&state, &Transport::PeerMachine("m".into()), &mut unknown);
+        assert_eq!(unknown.account_id, None);
     }
 
     #[tokio::test]
