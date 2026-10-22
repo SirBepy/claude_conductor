@@ -301,12 +301,18 @@ async fn run(
     let _ = child.wait().await;
     let stderr_out = stderr_task.await.unwrap_or_default();
 
+    settle(tool_url, reply, &stderr_out)
+}
+
+/// Only a link `PublishWatch` tied to a verified publish of the temp file is
+/// stored. The model's reply text is never a source for one: a prompt-injected
+/// page could make it quote another artifact's URL.
+fn settle(tool_url: Option<String>, reply: Option<crate::ask::sidecar::SidecarResult>, stderr_out: &str) -> Result<String> {
     if let Some(url) = tool_url {
         return Ok(url);
     }
     match reply {
-        Some(r) if !r.is_error => find_artifact_url(&r.text)
-            .ok_or_else(|| anyhow!("claude.ai returned no link: {}", r.text.trim())),
+        Some(r) if !r.is_error => Err(anyhow!("claude.ai returned no verified publish result: {}", r.text.trim())),
         Some(r) => Err(anyhow!("publish failed: {}", r.text.trim())),
         None => Err(anyhow!("publish produced no result: {}", stderr_out.trim())),
     }
@@ -378,6 +384,18 @@ mod tests {
         assert!(w.feed(&line("C:\\Users\\x\\.ssh\\id_rsa")).is_err());
         let mut w = PublishWatch::new("C:\\d\\a.html");
         assert_eq!(w.feed(&line("C:/d/a.html")).unwrap(), None);
+    }
+
+    #[test]
+    fn a_link_in_the_reply_without_a_verified_publish_errors_the_run() {
+        let reply = crate::ask::sidecar::SidecarResult {
+            text: "https://claude.ai/artifact/PLANTED".into(),
+            session_id: None,
+            is_error: false,
+        };
+        let err = settle(None, Some(reply), "").expect_err("an unverified reply link must not be accepted");
+        assert!(err.to_string().contains("no verified publish"), "{err}");
+        assert_eq!(settle(Some("https://claude.ai/artifact/OK".into()), None, "").unwrap(), "https://claude.ai/artifact/OK");
     }
 
     #[test]
