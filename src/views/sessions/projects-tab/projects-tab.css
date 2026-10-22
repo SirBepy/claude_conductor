@@ -1,0 +1,44 @@
+/* Sidebar half of the Projects tab: the Chats | Projects strip and the swap
+   between the chat list and the projects list. */
+
+.pd-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  margin: 8px 10px 0;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+}
+
+.pd-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: 600 12.5px var(--font-body, inherit);
+  cursor: pointer;
+}
+.pd-tab:hover { color: var(--color-text); }
+.pd-tab.on { background: var(--color-surface-alt); color: var(--color-text); }
+.pd-tab .ph { font-size: 14px; }
+
+/* #projects-list only exists to be shown on the Projects tab; the chats list,
+   the project rail and the new-chat FAB (it would float over the project rows)
+   step aside for it. !important because #project-rail also toggles `hidden`
+   and `display` from its own script. */
+#projects-list { display: none; }
+.sessions-sidebar.is-projects-tab #projects-list { display: flex; margin-top: 6px; }
+.sessions-sidebar.is-projects-tab #project-rail,
+.sessions-sidebar.is-projects-tab #sessions-list,
+.sessions-sidebar.is-projects-tab .sessions-fab { display: none !important; }
+
+#projects-list li.row-portrait { cursor: pointer; }
+#projects-list .pd-list-empty { text-transform: none; letter-spacing: 0; font-weight: 400; }

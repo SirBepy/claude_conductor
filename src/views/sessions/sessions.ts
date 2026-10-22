@@ -61,6 +61,7 @@ import {
 } from "./sessions-dom-wiring";
 import { armSetupStallTimer, disarmSetupStallTimer, initialLoadAndRestore } from "./sessions-initial-load";
 import { setInstancesPollTimer, setChatHeartbeatDispose, teardownState } from "./sessions-teardown";
+import { mountProjectsTab } from "./projects-tab/projects-tab";
 export {
   queueHistoryResume,
   queueSessionSelect,
@@ -185,6 +186,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   // registrations after it are several IPC round trips, and a row painted
   // before its click handler silently drops a click on a slow boot (todo 926).
   wireStaticListeners(root, view, pane, listEl, newBtn);
+  const projectsTab = mountProjectsTab(view, pane, listEl);
 
   await initialLoadAndRestore(pane, listEl, myMount);
 
@@ -217,6 +219,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   const teardownDocumentListeners = wireDocumentListeners(pane, listEl, myMount);
 
   return () => {
+    projectsTab?.destroy();
     teardownDocumentListeners();
     if (unlistenDragEnter) { try { unlistenDragEnter(); } catch { /* ignore */ } unlistenDragEnter = null; }
     if (unlistenDragLeave) { try { unlistenDragLeave(); } catch { /* ignore */ } unlistenDragLeave = null; }

@@ -106,6 +106,15 @@ export interface SessionsState {
    *  global instances-changed listener (sessions-wiring.ts) skips ids in
    *  this set so the two don't race to both rebuild the pane. */
   takeoverInFlightIds: Set<string>;
+  /** True while the Projects tab's dashboard owns the pane. `selectedId` stays
+   *  null then, so the chat restore paths (loadLastSelectedSession) must stand
+   *  down or the next instances-changed would drag the user back into a chat. */
+  dashboardOpen: boolean;
+  /** Registered by the Projects tab. setActiveSession calls it when a chat is
+   *  activated while the dashboard is open, so every entry point (row click,
+   *  Ctrl+1..9, notification, new chat) flips the tab back without each caller
+   *  knowing the tab exists. */
+  onChatActivated: (() => void) | null;
 }
 
 export function createInitialState(mountId: number): SessionsState {
@@ -134,6 +143,8 @@ export function createInitialState(mountId: number): SessionsState {
     previewController: null,
     fabDial: null,
     takeoverInFlightIds: new Set(),
+    dashboardOpen: false,
+    onChatActivated: null,
   };
 }
 
@@ -187,6 +198,7 @@ function cwdForSession(id: string | null): string | null {
 
 export function setActiveSession(id: string | null): void {
   state.selectedId = id;
+  if (id && state.dashboardOpen) state.onChatActivated?.();
   setSelectedSessionId(id);
   state.previewController?.setSessionScope(id);
   state.fabDial?.setSessionScope(id, cwdForSession(id));
@@ -211,7 +223,7 @@ export function loadLastSelectedSession(): string | null {
   // daemon restart or view remount re-opens the chat the user was already in,
   // while a cold launch lands on the empty pane and waits to be told what to
   // open. Opening a huge transcript unasked froze the window on boot.
-  if (!selectedThisRun) return null;
+  if (!selectedThisRun || state.dashboardOpen) return null;
   try {
     return localStorage.getItem(LS_LAST_SELECTED);
   } catch {

@@ -104,6 +104,15 @@ Some sites, Google sign-in among them, refuse to sign in to a browser that is dr
 - **Per chat:** each chat gets its own tab. The browser closes itself after 20 minutes unused, unless it is shown.
 - **My browser:** instead of Claude's own Chrome, a chat can drive one of yours (Chrome, Edge or Brave) through the [Playwright extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm), which you install once in that browser. Each chat opens a connect page there and nothing is driven until you approve it, so sign in to whatever you like by hand first. Leave **Profile folder** blank to use the profile you used last, or name one (such as `Profile 1`) to point Claude at a dedicated profile. The tools then act with that profile's real sign-ins, so a dedicated profile is the safer choice.
 
+## Projects tab
+
+The Chats window sidebar has a **Chats | Projects** switch. **Projects** lists your projects by most recent use; picking one shows its dashboard in place of the chat:
+
+- **Built-in sections:** what needs you (open questions, unsent drafts), your todos, running and recent chats, next up (the project's `.claude/todos/PLAN.md` plus scheduled items), ship state (branch, unpushed commits, working tree, recent commits), what is running (dev servers, other chats in the repo), and reports (each finished chat's last message to you, images from past chats, and files chats wrote in the repo). Quick-action chips start a new chat with your most-used slash commands here.
+- **Multi-repo projects:** a client note in your Obsidian vault with a `repos:` list (e.g. `repos: [zng-app, zng-admin]`) becomes one group row covering all those repos, with a chip per repo to filter. Edit a group's repos from its dashboard menu.
+- **Custom cards:** ask Claude in a chat to add one, e.g. "add a Shortcut card of my stories". A card calls an HTTP API or a local command, pulls values out of the JSON, and shows them as labels and numbers with a refresh button. Card configs live in the app's data folder, never in a repo; API tokens are read from `~/.claude/.env` by name, never stored in the card. Each card write asks for your permission, and cards can only be added from this PC.
+- **Dashboard cards...** in the dashboard menu turns sections and cards on or off per project. Desktop only for now.
+
 ## Publish to claude.ai
 
 Any preview can be published to claude.ai from the preview panel's **More options** menu, which gives you a `claude.ai/artifact/...` link like the ones teammates share.
