@@ -73,7 +73,14 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
         // A wrapped key that will not unwrap (another Windows user, a copied
         // profile) may still be recoverable, so it is set aside, never
         // overwritten: restoring the .unreadable file restores the old id.
-        let aside = path.with_extension("unreadable");
+        // rename replaces an existing target on Windows, so a second failure
+        // takes a numbered name instead of destroying the first blob.
+        let mut aside = path.with_extension("unreadable");
+        let mut n = 1u32;
+        while aside.exists() {
+            aside = path.with_extension(format!("unreadable.{n}"));
+            n += 1;
+        }
         let kept = std::fs::rename(&path, &aside).is_ok();
         log::warn!(
             "iroh tunnel: unreadable key at {}; minting a new one (old file {})",
@@ -258,21 +265,32 @@ async fn accept_loop(endpoint: Endpoint, target_port: u16, limits: Limits) {
 
 async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, limits: Limits) {
     let streams = Arc::new(tokio::sync::Semaphore::new(limits.max_streams_per_connection));
+    // Woken when a forwarded stream ends, so the idle clock re-arms even though
+    // the loop is parked in `accept_bi`.
+    let stream_ended = Arc::new(tokio::sync::Notify::new());
+    let mut idle_since = Some(tokio::time::Instant::now());
     loop {
         // The idle clock only runs while no stream is open: a live WebSocket
         // stream keeps the connection, a bare connection does not.
-        let idle = streams.available_permits() == limits.max_streams_per_connection;
-        let accepted = if idle {
-            match tokio::time::timeout(limits.idle_without_streams, conn.accept_bi()).await {
-                Ok(r) => r,
-                Err(_) => {
-                    log::info!("iroh tunnel: closing a connection with no streams");
-                    conn.close(iroh::endpoint::VarInt::from_u32(0), b"idle");
-                    return;
-                }
-            }
+        if streams.available_permits() == limits.max_streams_per_connection {
+            idle_since.get_or_insert_with(tokio::time::Instant::now);
         } else {
-            conn.accept_bi().await
+            idle_since = None;
+        }
+        let deadline = async {
+            match idle_since {
+                Some(t) => tokio::time::sleep_until(t + limits.idle_without_streams).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        let accepted = tokio::select! {
+            r = conn.accept_bi() => r,
+            _ = stream_ended.notified() => continue,
+            _ = deadline => {
+                log::info!("iroh tunnel: closing a connection with no streams");
+                conn.close(iroh::endpoint::VarInt::from_u32(0), b"idle");
+                return;
+            }
         };
         let (mut send, mut recv) = match accepted {
             Ok(pair) => pair,
@@ -288,11 +306,14 @@ async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, li
             let _ = recv.stop(code);
             continue;
         };
+        let stream_ended = stream_ended.clone();
         tokio::spawn(async move {
-            let _permit = permit;
             if let Err(e) = forward(send, recv, target_port).await {
                 log::debug!("iroh tunnel: stream ended: {e}");
             }
+            // Released before the wake so the loop sees the freed slot.
+            drop(permit);
+            stream_ended.notify_one();
         });
     }
 }
@@ -377,6 +398,25 @@ mod tests {
         load_or_create_secret(dir.path());
         let aside = std::fs::read_to_string(path.with_extension("unreadable")).expect("old file kept");
         assert_eq!(aside, foreign, "the unreadable key must survive for recovery");
+    }
+
+    #[test]
+    fn a_second_unreadable_key_does_not_overwrite_the_first_aside() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = key_file(dir.path());
+        let first = format!("{}first-blob", secret_store::PREFIX);
+        let second = format!("{}second-blob", secret_store::PREFIX);
+        std::fs::write(&path, &first).expect("write");
+        load_or_create_secret(dir.path());
+        std::fs::write(&path, &second).expect("write");
+        load_or_create_secret(dir.path());
+        let blobs: Vec<String> = std::fs::read_dir(dir.path())
+            .expect("read_dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains("unreadable"))
+            .map(|e| std::fs::read_to_string(e.path()).expect("read"))
+            .collect();
+        assert!(blobs.contains(&first) && blobs.contains(&second), "both set-aside blobs must survive: {blobs:?}");
     }
 
     #[test]
@@ -534,5 +574,17 @@ mod tests {
         let conn = client.connect(addr, ALPN).await.expect("connect");
         let closed = tokio::time::timeout(std::time::Duration::from_secs(10), conn.closed()).await;
         assert!(closed.is_ok(), "an idle, stream-less connection must be closed by the server");
+    }
+
+    /// The idle clock re-arms when the last stream ends, not only at connect.
+    #[tokio::test]
+    async fn closes_a_connection_idle_after_its_last_stream_ends() {
+        let limits = Limits { idle_without_streams: std::time::Duration::from_millis(500), ..Limits::default() };
+        let (client, addr) = tunnel_pair(limits).await;
+        let conn = client.connect(addr, ALPN).await.expect("connect");
+        let (send, recv) = open_live_stream(&conn).await.expect("stream");
+        drop((send, recv));
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(10), conn.closed()).await;
+        assert!(closed.is_ok(), "a connection whose last stream ended must still hit the idle timeout");
     }
 }
