@@ -50,7 +50,9 @@ async function openQuestionCard(page: Page): Promise<void> {
 }
 
 test.describe("view-harness / phone footer + FAB clearance", () => {
-  test("answer bar owns its own row and both buttons share the next one", async ({ page }) => {
+  // Joe, 2026-10-22: the question page puts Skip/Submit on row one and the
+  // Preview-style answer box on its own row under them.
+  test("both buttons share row one and the answer bar owns the row below", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page);
 
@@ -59,10 +61,10 @@ test.describe("view-harness / phone footer + FAB clearance", () => {
     const skip = (await footer.locator('[data-act="cancel"]').boundingBox())!;
     const submit = (await footer.locator('[data-act="primary"]').boundingBox())!;
 
-    // Row one is the bar alone: neither button starts before it ends.
-    expect(skip.y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
-    expect(submit.y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
-    // Row two holds both, level with each other.
+    // The bar starts only after both buttons end.
+    expect(bar.y).toBeGreaterThanOrEqual(skip.y + skip.height - 1);
+    expect(bar.y).toBeGreaterThanOrEqual(submit.y + submit.height - 1);
+    // Row one holds both, level with each other.
     expect(Math.abs(skip.y - submit.y)).toBeLessThanOrEqual(1);
     // 1:2, Joe's pick over 50/50: a chosen proportion rather than the rendered
     // width of the word "Skip", with Submit still visibly the primary.
@@ -79,7 +81,7 @@ test.describe("view-harness / phone footer + FAB clearance", () => {
     const skip = (await page.locator('.prompt-card__footer [data-act="cancel"]').boundingBox())!;
     const submit = (await page.locator('.prompt-card__footer [data-act="primary"]').boundingBox())!;
 
-    // 14px of footer padding each side, so the bar is the row, not a column of it.
+    // 8px of footer padding each side, so the bar is the row, not a column of it.
     expect(bar.width).toBeGreaterThan(footer.width - 32);
     // The button row fills the same span, which is what stops Submit floating
     // in an otherwise empty line.

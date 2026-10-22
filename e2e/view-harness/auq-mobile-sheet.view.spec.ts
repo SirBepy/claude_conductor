@@ -65,6 +65,15 @@ const TALL_QUESTIONS = [
   { question: "Which approach, given all the constraints in play here?", header: "Approach", options: MANY_OPTIONS },
 ];
 
+// The phone question page has no drag handle; the permission card still peeks.
+async function openPermissionCard(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const pc = await import("/views/sessions/permission-modal/permission-card.ts");
+    pc.showPermissionCard({ id: "p-1", session_id: "s1", tool_name: "Bash", input: { command: "echo hi" } } as never);
+  });
+  await page.locator(".prompt-card").waitFor();
+}
+
 async function openQuestionCard(page: Page, questions: unknown): Promise<void> {
   await page.evaluate(async (q) => {
     const qm = await import("/views/sessions/permission-modal/index.ts");
@@ -136,27 +145,58 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(page.locator(".session-composer textarea").first()).toBeHidden();
   });
 
-  test("peeking the fullscreen sheet uncovers the latest messages, not an empty band", async ({ page }) => {
+  test("phone page: back arrow returns to the chat, latest messages showing above the collapsed bar", async ({ page }) => {
     const events = Array.from({ length: 12 }, (_, i) => [userMsg(`question ${i}`), assistantMsg(`answer ${i}`)]).flat();
     await mountPhoneSession(page, events);
     await openQuestionCard(page, SHORT_QUESTIONS);
+    await expect(page.locator(".prompt-card__handle")).toBeHidden();
+    await expect(page.locator('.prompt-card [data-act="minimize"]')).toBeHidden();
 
-    const card = page.locator(".prompt-card");
-    const openBox = await settledBox(card);
-    const handleBox = await settledBox(card.locator(".prompt-card__handle"));
-    const hx = handleBox.x + handleBox.width / 2;
-    const hy = handleBox.y + handleBox.height / 2;
-    await page.mouse.move(hx, hy);
-    await page.mouse.down();
-    await page.mouse.move(hx, hy + openBox.height * 0.6, { steps: 8 });
-    await page.mouse.up();
-    await expect(card).toHaveClass(/prompt-card--peeked/);
+    await page.locator('.prompt-card [data-act="back"]').click();
 
-    const peekedBox = await settledBox(card);
-    const last = page.locator(".session-messages .msg.user", { hasText: "question 11" });
-    const lastBox = (await last.boundingBox())!;
+    const bar = page.locator(".prompt-collapsed");
+    await expect(bar).toBeVisible();
+    await expect(page.locator(".session-composer textarea").first()).toBeVisible();
+    const barBox = await settledBox(bar);
+    const lastBox = (await page.locator(".session-messages .msg.user", { hasText: "question 11" }).boundingBox())!;
     expect(lastBox.y).toBeGreaterThanOrEqual(0);
-    expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(peekedBox.y);
+    expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(barBox.y);
+  });
+
+  // Joe, 2026-10-22: raised header/footer bars around the content, Skip +
+  // Submit above an answer box styled exactly like the Preview composer.
+  test("phone page: Skip/Submit sit above a Preview-style answer box with a send arrow", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+
+    const primary = await settledBox(page.locator('.prompt-card__footer [data-act="primary"]'));
+    const field = page.locator(".prompt-card__answer-bar .prompt-q__other-input");
+    const fieldBox = (await field.boundingBox())!;
+    expect(fieldBox.y).toBeGreaterThanOrEqual(primary.y + primary.height);
+    const fieldStyle = await field.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { radius: cs.borderTopLeftRadius, border: cs.borderTopWidth, font: cs.fontSize };
+    });
+    expect(fieldStyle).toEqual({ radius: "4px", border: "1px", font: "16px" });
+
+    const send = page.locator(".prompt-answer-send");
+    await expect(send).toBeVisible();
+    await expect(send).toBeDisabled();
+    await field.fill("my own answer");
+    await expect(send).toBeEnabled();
+  });
+
+  test("phone page: header and footer bars are a different color from the content", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+    const colors = await page.evaluate(() => {
+      const bg = (sel: string) => getComputedStyle(document.querySelector(sel)!).backgroundColor;
+      return { head: bg(".prompt-card__header"), foot: bg(".prompt-card__footer"), card: bg(".prompt-card"), body: bg("body") };
+    });
+    expect(colors.head).toBe(colors.foot);
+    expect(colors.head).not.toBe(colors.card);
+    // The system-bar bands (body's padding) match the bars, not the content.
+    expect(colors.body).toBe(colors.head);
   });
 
   // Permission cards have no `.prompt-pager` and keep the pre-fullscreen,
@@ -207,7 +247,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
 
   test("drag handle: dragging down past the halfway point peeks the card", async ({ page }) => {
     await mountPhoneSession(page);
-    await openQuestionCard(page, TALL_QUESTIONS);
+    await openPermissionCard(page);
 
     const card = page.locator(".prompt-card");
     const openBox = await settledBox(card);
@@ -228,7 +268,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
 
   test("drag handle: dragging back up past halfway restores the open card", async ({ page }) => {
     await mountPhoneSession(page);
-    await openQuestionCard(page, TALL_QUESTIONS);
+    await openPermissionCard(page);
 
     const card = page.locator(".prompt-card");
     const openBox = await settledBox(card);
@@ -255,7 +295,7 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
 
   test("a tap on the handle restores a peeked card - reachability guarantee", async ({ page }) => {
     await mountPhoneSession(page);
-    await openQuestionCard(page, TALL_QUESTIONS);
+    await openPermissionCard(page);
 
     const card = page.locator(".prompt-card");
     const openBox = await settledBox(card);

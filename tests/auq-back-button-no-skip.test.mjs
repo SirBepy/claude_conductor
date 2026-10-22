@@ -2,9 +2,10 @@
 //
 // Regression: Android's hardware back used to SKIP the open AUQ card - it ran
 // the same cancel() the Skip button does, sending no answer at all, from a
-// button that is trivially easy to hit by accident. Back now falls through to
-// main.ts's mobile-pane handler (back to the session list) with the card left
-// pending. It also used to spend a whole press silently blurring a field whose
+// button that is trivially easy to hit by accident. Back now collapses the
+// card to its bar (back to the chat, question still pending); a second press
+// falls through to main.ts's mobile-pane handler (back to the session list).
+// It also used to spend a whole press silently blurring a field whose
 // keyboard the IME had already hidden, which read as "back does nothing".
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -50,7 +51,7 @@ beforeEach(() => {
 });
 
 describe("AUQ card vs the phone back button", () => {
-  it("with a focused text field, back blurs it AND leaves the chat in the same press", () => {
+  it("with a focused text field, back blurs it AND collapses the card in the same press", () => {
     const fallback = registerPaneFallback();
     const opts = baseOpts();
     renderQuestionUI(opts);
@@ -63,21 +64,36 @@ describe("AUQ card vs the phone back button", () => {
     handleBack();
 
     expect(document.activeElement).not.toBe(field);
+    expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
     expect(opts.onCancel).not.toHaveBeenCalled();
     expect(opts.onSubmit).not.toHaveBeenCalled();
-    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(fallback).not.toHaveBeenCalled();
   });
 
-  it("with nothing focused, back leaves the chat instead of skipping the question", () => {
+  it("back collapses the card to its bar first, then a second press leaves the chat", () => {
     const fallback = registerPaneFallback();
     const opts = baseOpts();
     renderQuestionUI(opts);
 
     handleBack();
+    expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
+    expect(document.querySelector(".prompt-card")).toBeNull();
+    expect(fallback).not.toHaveBeenCalled();
 
+    handleBack();
     expect(fallback).toHaveBeenCalledTimes(1);
     expect(opts.onCancel).not.toHaveBeenCalled();
     expect(opts.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("the header's back arrow collapses the card without skipping", () => {
+    const opts = baseOpts();
+    renderQuestionUI(opts);
+
+    document.querySelector('[data-act="back"]').click();
+
+    expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
+    expect(opts.onCancel).not.toHaveBeenCalled();
   });
 
   it("an open lightbox still swallows the press entirely", () => {

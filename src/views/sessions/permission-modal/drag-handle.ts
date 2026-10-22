@@ -2,8 +2,8 @@
 // behind the card, flick or tap back up to restore. Delegated on the stable
 // host element so it survives renderCardShell()'s innerHTML re-renders. Inert
 // on desktop: the handle is display:none there, so pointerdown never fires.
-
-import { isMobileViewport } from "../../../shared/mobile-viewport";
+// The phone's fullscreen question page hides its handle too (back collapses
+// it instead), so only the permission card still peeks.
 
 const PEEK_RATIO = 0.72; // preferred fraction of the card's own height to reveal
 const MIN_KEEP_VISIBLE = 56; // px of the card (handle + a sliver) that must stay reachable
@@ -92,10 +92,7 @@ export function attachDragHandle(host: HTMLElement): () => void {
     // mobile height-cap comment) and its top always keeps MIN_KEEP_VISIBLE
     // reachable, on top of the PEEK_RATIO the gesture prefers.
     const rect = c.getBoundingClientRect();
-    // Fullscreen question sheets have no composer below to protect - roomBelow
-    // would compute to ~0 and kill the gesture, so they peek unclamped instead.
-    const isFullscreenSheet = isMobileViewport() && !!c.querySelector(".prompt-card__header .prompt-pager");
-    const roomBelow = isFullscreenSheet ? Infinity : window.innerHeight - rect.bottom;
+    const roomBelow = window.innerHeight - rect.bottom;
     peekMax = Math.max(0, Math.min(
       rect.height * PEEK_RATIO,
       rect.height - MIN_KEEP_VISIBLE,

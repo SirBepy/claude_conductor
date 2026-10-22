@@ -49,8 +49,26 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     bar.innerHTML = isSummary
       ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
       : ownZoneHtml(state.activeTab, freeText);
+    // The phone page's Preview-style send arrow (hidden on desktop by CSS):
+    // a shortcut for the footer's primary button once something is typed.
+    const sendBtn = bar.innerHTML ? document.createElement("button") : null;
+    if (sendBtn) {
+      sendBtn.type = "button";
+      sendBtn.className = "icon-btn prompt-answer-send";
+      sendBtn.title = "Send";
+      sendBtn.innerHTML = `<i class="ph ph-paper-plane-right"></i>`;
+      sendBtn.addEventListener("click", () => {
+        host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]')?.click();
+      });
+      bar.appendChild(sendBtn);
+    }
+    const syncSend = (el: HTMLTextAreaElement): void => {
+      if (sendBtn) sendBtn.disabled = el.value.trim() === "";
+    };
 
     const wireField = (el: HTMLTextAreaElement, isExtraField: boolean): void => {
+      syncSend(el);
+      el.addEventListener("input", () => syncSend(el));
       const highlightEl = el.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
       slashPopup.attach(el, highlightEl);
       if (isExtraField) {
