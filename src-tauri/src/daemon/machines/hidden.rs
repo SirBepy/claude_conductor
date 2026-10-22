@@ -217,6 +217,71 @@ mod tests {
         a_serve.kill();
     }
 
+    /// A delta naming chats on two hosts where the second is offline applies
+    /// on neither: the live host's file stays empty and the call errors.
+    #[tokio::test]
+    async fn a_delta_with_an_offline_owner_applies_nowhere() {
+        let a_dir = tempdir().unwrap();
+        let b_dir = tempdir().unwrap();
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        register_chat(&b_state, "b-chat-1");
+
+        let (_b_stt, b_port, b_serve) = crate::daemon::remote_server::spawn_on(
+            b_state.clone(), b_dir.path().to_path_buf(), router_for(&b_state), 0,
+        );
+        let (_a_stt, _a_port, a_serve) = crate::daemon::remote_server::spawn_on(
+            a_state.clone(), a_dir.path().to_path_buf(), Router::new(), 0,
+        );
+        let a_router = router_for(&a_state);
+        let a_id = a_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let (token, _) = DeviceRegistry::add_machine_device("A", &a_id, b_dir.path()).unwrap();
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: b_id,
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token,
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        // Sorts after B's id, so a first-failure loop would already have forwarded to B.
+        let offline_id = "mach-zzz-offline";
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: offline_id.into(),
+            label: "C".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some("http://127.0.0.1:1".into()),
+            token: "dummy-unused".into(),
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        MachineHub::sync_links(&a_state);
+        wait_until("B's chat in A's mirror", || a_state.mirror.instances().len() == 1).await;
+        let mut c_row = a_state.mirror.instances()[0].clone();
+        c_row.session_id = "c-chat".into();
+        c_row.machine = None;
+        a_state.mirror.set_instances(offline_id, "C", vec![c_row]);
+        a_state.mirror.set_online(offline_id, false);
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "update_hidden_chats".into(),
+            params: Some(json!({"add": ["b-chat-1", "c-chat"]})),
+        };
+        let resp = a_router.dispatch(req, ConnectionContext::new(tx)).await;
+        assert!(resp.error.is_some(), "an offline owner must fail the delta");
+        assert!(hidden_chats::list_in(b_dir.path()).sessions.is_empty(), "the live host must not be half-applied");
+
+        b_serve.kill();
+        a_serve.kill();
+    }
+
     #[tokio::test]
     async fn a_peer_can_only_hide_chats_this_daemon_hosts() {
         let dir = tempdir().unwrap();
