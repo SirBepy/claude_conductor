@@ -165,22 +165,29 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
 
   // Joe, 2026-10-22: raised header/footer bars around the content, Skip +
   // Submit above an answer box styled exactly like the Preview composer.
-  test("phone page: Skip/Submit sit above a Preview-style answer box with a send arrow", async ({ page }) => {
+  test("phone page: Skip/Submit sit above the Preview panel's own reply bar, input and send arrow on one row", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, SHORT_QUESTIONS);
 
     const primary = await settledBox(page.locator('.prompt-card__footer [data-act="primary"]'));
-    const field = page.locator(".prompt-card__answer-bar .prompt-q__other-input");
-    const fieldBox = (await field.boundingBox())!;
-    expect(fieldBox.y).toBeGreaterThanOrEqual(primary.y + primary.height);
-    const fieldStyle = await field.evaluate((el) => {
-      const cs = getComputedStyle(el);
-      return { radius: cs.borderTopLeftRadius, border: cs.borderTopWidth, font: cs.fontSize };
-    });
-    expect(fieldStyle).toEqual({ radius: "4px", border: "1px", font: "16px" });
+    // The Preview reply bar's own markup, not a restyled AUQ field.
+    const bar = page.locator(".prompt-card__answer-bar > .pv-composer");
+    const field = bar.locator(".composer-input-wrap > textarea.composer-textarea.prompt-q__other-input");
+    const send = bar.locator(".pv-composer-send");
+    await expect(field).toBeVisible();
+    const barBox = (await bar.boundingBox())!;
+    expect(barBox.y).toBeGreaterThanOrEqual(primary.y + primary.height);
 
-    const send = page.locator(".prompt-answer-send");
-    await expect(send).toBeVisible();
+    // Inline: the arrow sits beside the field, inside its vertical span.
+    const fieldBox = (await field.boundingBox())!;
+    const sendBox = (await send.boundingBox())!;
+    expect(sendBox.x).toBeGreaterThanOrEqual(fieldBox.x + fieldBox.width);
+    expect(sendBox.y).toBeGreaterThanOrEqual(fieldBox.y - 1);
+    expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(fieldBox.y + fieldBox.height + 1);
+    // Full-bleed like the Preview panel's, edge to edge of the screen.
+    expect(barBox.x).toBe(0);
+    expect(barBox.width).toBe(PHONE.width);
+
     await expect(send).toBeDisabled();
     await field.fill("my own answer");
     await expect(send).toBeEnabled();

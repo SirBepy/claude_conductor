@@ -8,6 +8,7 @@ import type { QuestionRenderState } from "./question-ui-templates";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import type { Question, QuestionUIOpts } from "./types";
+import { isMobileViewport } from "../../../shared/mobile-viewport";
 
 export interface AnswerBarDeps {
   host: HTMLElement;
@@ -46,22 +47,18 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     // Exactly one text box on screen, always. A one-question
     // card has no review panel, so it shows only its own answer field - typed
     // prose there already rides along with the picked option (computeAnswer).
+    // The phone's fullscreen question page (permission-modal-shell.css's
+    // :has(.prompt-pager) scope, never the --viewport fallback host).
+    const page = isMobileViewport() && !host.classList.contains("prompt-card-host--viewport");
     bar.innerHTML = isSummary
-      ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage) : "")
-      : ownZoneHtml(state.activeTab, freeText);
-    // The phone page's Preview-style send arrow (hidden on desktop by CSS):
-    // a shortcut for the footer's primary button once something is typed.
-    const sendBtn = bar.innerHTML ? document.createElement("button") : null;
-    if (sendBtn) {
-      sendBtn.type = "button";
-      sendBtn.className = "icon-btn prompt-answer-send";
-      sendBtn.title = "Send";
-      sendBtn.innerHTML = `<i class="ph ph-paper-plane-right"></i>`;
-      sendBtn.addEventListener("click", () => {
-        host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]')?.click();
-      });
-      bar.appendChild(sendBtn);
-    }
+      ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage, page) : "")
+      : ownZoneHtml(state.activeTab, freeText, page);
+    // The page composer's send arrow: a shortcut for the footer's primary
+    // button once something is typed.
+    const sendBtn = bar.querySelector<HTMLButtonElement>(".prompt-answer-send");
+    sendBtn?.addEventListener("click", () => {
+      host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]')?.click();
+    });
     const syncSend = (el: HTMLTextAreaElement): void => {
       if (sendBtn) sendBtn.disabled = el.value.trim() === "";
     };

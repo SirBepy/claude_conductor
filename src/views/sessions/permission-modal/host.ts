@@ -5,6 +5,10 @@ import "../permission-modal-badges.css";
 import "../permission-modal-zones.css";
 import "../permission-modal-track.css";
 import "../permission-modal-previews.css";
+// The phone question page renders the Preview panel's reply bar (.pv-composer)
+// as its answer box, so that bar's styles must load with the card even when
+// the Preview panel itself never has.
+import "../preview-panel.css";
 import { attachDragHandle } from "./drag-handle";
 import { dismissPermissionCard, dismissQuestionCard } from "./question-state";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
