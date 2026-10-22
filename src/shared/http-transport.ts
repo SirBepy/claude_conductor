@@ -236,6 +236,10 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_ai_todos", { cwd: args.cwd });
       case "count_ai_todos":
         return this.rpc<T>("count_ai_todos", { cwd: args.cwd });
+      // Phone-only: the whole new-chat flow's data in one request (see
+      // new-session-cache.ts). Desktop has no Tauri twin; it reads locally.
+      case "new_session_bundle":
+        return this.rpc<T>("new_session_bundle", {});
       case "resolve_commit_refs":
         return this.rpc<T>("resolve_commit_refs", { cwd: args.cwd, candidates: args.candidates });
       // Session-statusbar git/servers chips + location-picker scan (mirrors

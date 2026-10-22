@@ -147,6 +147,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("paste_attachment", PM),
     ("list_characters", P),
     ("list_project_groups", P),
+    // Read-only: list_project_groups + per-project stats, CLAUDE.md scopes and
+    // account bindings, plus settings/accounts/projects, all of which are
+    // already P individually. Every path it touches comes from the daemon's
+    // own project list, never from params (it takes none).
+    ("new_session_bundle", P),
     // Read-only: `file` is canonicalized and prefix-checked against the
     // character's own dir via Character::asset_path_checked (todo 656).
     ("character_asset_url", P),
@@ -470,7 +475,7 @@ mod tests {
             "respond_permission", "load_history_page", "load_event_detail", "list_history", "load_history",
             "transcript_stats",
             "register_historical", "read_attachment",
-            "paste_attachment", "list_characters", "list_project_groups",
+            "paste_attachment", "list_characters", "list_project_groups", "new_session_bundle",
             "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
             "project_last_activity_at", "get_project_tech", "get_project_icon",
             "count_ai_todos", "list_ai_todos",

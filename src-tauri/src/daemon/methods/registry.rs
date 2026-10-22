@@ -7,6 +7,7 @@ mod attachments;
 mod characters;
 pub(super) mod lifecycle;
 mod listings;
+mod new_session_bundle;
 mod project_meta;
 mod waiting_tail;
 
@@ -20,6 +21,7 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     attachments::register_attachments(router, state.clone());
     project_meta::register_project_meta(router, state.clone());
     waiting_tail::register_waiting_tail(router, state.clone());
+    new_session_bundle::register_new_session_bundle(router, state.clone());
     listings::register_listings(router, state);
 }
 
@@ -104,6 +106,36 @@ mod reject_unknown_tests {
     async fn list_slash_commands_rejects_unknown_project_dir() {
         let resp = call(dummy_state(), "list_slash_commands", json!({"project_dir": "C:\\nope\\not\\registered"})).await;
         assert!(resp.error.is_some(), "unknown project_dir must be rejected");
+    }
+
+    // The phone's whole new-chat flow reads this one response, so a project's
+    // row, todo badge and CLAUDE.md scopes must all be in it. Not under the
+    // OS temp dir: list_project_groups drops temp-dir projects as ephemeral.
+    #[tokio::test]
+    async fn new_session_bundle_carries_a_projects_stats_and_scopes() {
+        let dir = tempfile::Builder::new().prefix("bundle-test-").tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude/todos")).unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "").unwrap();
+        std::fs::write(dir.path().join("apps/web/CLAUDE.md"), "").unwrap();
+        std::fs::write(dir.path().join(".claude/todos/01-a.md"), "a").unwrap();
+        let path = dir.path().to_string_lossy().into_owned();
+        let mut settings = Settings::default();
+        settings.projects.push(
+            serde_json::from_value(json!({
+                "id": "p1", "path": path, "name": "bundle", "created_at": "2026-10-22T00:00:00Z",
+            }))
+            .unwrap(),
+        );
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+
+        let resp = call(state, "new_session_bundle", json!({})).await;
+        let b = resp.result.unwrap_or_else(|| panic!("bundle errored: {:?}", resp.error));
+        assert!(b["groups"].as_array().unwrap().iter().any(|g| g["path"] == json!(path)));
+        assert_eq!(b["stats"][&path]["todoCount"], json!(1));
+        assert_eq!(b["scopes"][&path].as_array().unwrap().len(), 2);
+        assert!(b["projectAccounts"].as_object().unwrap().contains_key(&path));
+        assert!(b["settings"].is_object() && b["accounts"].is_array() && b["projects"].is_array());
     }
 
     #[tokio::test]

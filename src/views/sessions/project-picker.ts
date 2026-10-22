@@ -1,6 +1,5 @@
 import { html, render } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
-import { invoke } from "../../shared/ipc";
 import { ensureModalHost, modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel } from "../../shared/modal";
 import type { ProjectGroup } from "../../types/ipc.generated";
 import { openLocationModal, resolveRememberedLocation } from "./location-picker";
@@ -17,7 +16,7 @@ import { isNoProjectPath } from "../../shared/no-project";
 import { fuzzyScore } from "../../shared/chat/caret-popup/fuzzy-score";
 import { isMobileViewport } from "../../shared/mobile-viewport";
 import { renderAvatar, hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
-import { projectGroupsData, projectStatData, cachedProjectStat } from "./new-session-cache";
+import { projectGroupsData, projectStatData, cachedProjectStat, settingsData } from "./new-session-cache";
 import { api } from "../../shared/api";
 import {
   renderMachineFieldHtml,
@@ -169,13 +168,15 @@ export function openProjectPickerModal(
     // (todo 1058): the daemon resolves this SAME setting server-side when
     // Create actually runs, so this is only for the row's enabled/disabled
     // state and hint text to agree with what the RPC will do.
-    void invoke<Record<string, unknown>>("get_settings").then((s) => {
-      if (resolved) return;
+    const applyStoredRoot = (s: Record<string, unknown> | undefined): boolean => {
       const v = s?.[PROJECTS_ROOT_SETTINGS_KEY];
-      if (typeof v === "string" && v.length > 0) {
-        addProjectState.projectsRootStored = v;
-        renderModal();
-      }
+      if (typeof v !== "string" || v.length === 0) return false;
+      addProjectState.projectsRootStored = v;
+      return true;
+    };
+    const settingsRead = settingsData();
+    void settingsRead.ready.then((s) => {
+      if (!resolved && applyStoredRoot(s)) renderModal();
     }).catch(() => { /* inference covers it */ });
 
     let sort: SortChoice = readStoredSort();
@@ -199,6 +200,7 @@ export function openProjectPickerModal(
     // open, refreshed when the user repoints it. Shared with add-project.ts
     // the same way (object, see its AddProjectState doc).
     const addProjectState: AddProjectState = { projectsRootStored: null };
+    applyStoredRoot(settingsRead.cached);
 
     const persistFavorites = (next: FavoriteSlots): void => {
       favorites = next;

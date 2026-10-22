@@ -12,9 +12,10 @@ import { visibleInterval } from "./visible-interval";
 
 const TICK_MS = 500;
 
-/** A WS that drops and reopens within this window never shows the strip, so
- *  routine reconnects do not flicker it. */
-const SHOW_AFTER_MS = 800;
+/** A link that drops and recovers within this window never shows the strip.
+ *  Phone signal blips for a second or two all the time, and the strip for
+ *  those was more noise than signal (Joe, 2026-10-22). */
+export const SHOW_AFTER_MS = 5_000;
 
 /** Surfaces that already paint the same load with the full dial. */
 const DIAL_OVERLAYS = ".chat-loading-overlay, .boot-progress";
