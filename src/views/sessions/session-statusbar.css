@@ -116,6 +116,11 @@
   /* Keep natural width so the row overflows (and scrolls) rather than squeezing
      each chip until its text clips mid-glyph. */
   flex-shrink: 0;
+  /* One height for every chip: an icon-only or bare-number chip is shorter than
+     a text chip, because its line box comes from the icon, not the 0.73rem text. */
+  box-sizing: border-box;
+  min-height: 22px;
+  line-height: 1.2;
 }
 
 .sb-chip i {
@@ -141,6 +146,11 @@
   }
   .sb-chip i {
     font-size: 0.95rem;
+  }
+  /* The account name and the "todos" word are desktop-only; the icon and count
+     carry them on a phone. */
+  .sb-chip-label {
+    display: none;
   }
 }
 
