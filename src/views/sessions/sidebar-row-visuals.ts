@@ -12,11 +12,17 @@ const RANK_ICON: Record<number, string> = {
   1: "ph-battery-low", 2: "ph-battery-medium", 3: "ph-battery-high", 4: "ph-battery-full",
 };
 
+/** Phosphor battery class for a model's family rank, or "" when unrecognised. */
+export function modelRankIcon(model: string): string {
+  const rank = MODEL_RANK[modelFamilyFromId(String(model ?? ""))];
+  return rank ? RANK_ICON[rank]! : "";
+}
+
 /** Battery glyph for a session's model, or "" for an unrecognised family. */
 export function modelBatteryHtml(model: string): string {
-  const rank = MODEL_RANK[modelFamilyFromId(String(model ?? ""))];
-  if (!rank) return "";
-  return `<span class="session-model-battery" data-tip="${escapeHtml(modelLabel(model))}"><i class="ph-bold ${RANK_ICON[rank]}"></i></span>`;
+  const icon = modelRankIcon(model);
+  if (!icon) return "";
+  return `<span class="session-model-battery" data-tip="${escapeHtml(modelLabel(model))}"><i class="ph-bold ${icon}"></i></span>`;
 }
 
 /** Shared shape for scheduled/held markers: an icon + optional count span,

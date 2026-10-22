@@ -19,37 +19,39 @@ beforeEach(() => {
 
 const modelEl = () => header.el.querySelector(".meta-cfg-model");
 const effortEl = () => header.el.querySelector(".meta-cfg-effort");
-const effortIcon = () => effortEl().querySelector("i");
+const battery = () => modelEl().querySelector(".meta-cfg-model-battery");
+const shortEffort = () => effortEl().querySelector(".meta-cfg-effort-short");
 
 describe("session header config", () => {
-  it("prints the short model name beside a robot icon, and effort as a coloured battery", () => {
+  it("prints the model name and effort word (desktop), with a rank battery and short effort for the phone", () => {
     header.setConfig("claude-opus-5", "high");
-    expect(modelEl().textContent).toBe("Opus 5");
-    expect(modelEl().querySelector("i").classList.contains("ph-robot")).toBe(true);
-    expect(effortEl().textContent).toBe("");
+    expect(modelEl().querySelector(".meta-cfg-model-text").textContent).toBe("Opus 5");
+    expect(battery().classList.contains("ph-battery-high")).toBe(true);
+    expect(effortEl().querySelector(".meta-cfg-effort-full").textContent).toBe("high");
+    expect(shortEffort().textContent).toBe("high");
     expect(effortEl().dataset.effort).toBe("high");
-    expect(effortIcon().classList.contains("ph-battery-high")).toBe(true);
-    expect(effortEl().title).toContain("high");
   });
 
-  it("maps every effort step to its own battery", () => {
-    const seen = ["low", "medium", "high", "xhigh", "max"].map((e) => {
-      header.setConfig("claude-opus-5", e);
-      return [...effortIcon().classList].find((c) => c.startsWith("ph-battery"));
-    });
-    expect(new Set(seen).size).toBe(5);
+  it("battery follows the model family and the phone effort word is 3-4 letters", () => {
+    const rows = [["claude-haiku-5", "low", "ph-battery-low", "low"], ["claude-sonnet-5", "medium", "ph-battery-medium", "mid"],
+      ["claude-opus-5", "xhigh", "ph-battery-high", "xhi"], ["claude-fable-5", "max", "ph-battery-full", "max"]];
+    for (const [m, e, icon, word] of rows) {
+      header.setConfig(m, e);
+      expect(battery().classList.contains(icon)).toBe(true);
+      expect(shortEffort().textContent).toBe(word);
+    }
   });
 
   it("keeps the same nodes across repeated setConfig calls", () => {
     header.setConfig("claude-opus-5", "high");
     const model = modelEl();
     const effort = effortEl();
-    const icon = effortIcon();
+    const short = shortEffort();
     header.setConfig("claude-sonnet-5", "max");
     expect(modelEl()).toBe(model);
     expect(effortEl()).toBe(effort);
-    expect(effortIcon()).toBe(icon);
-    expect(model.textContent).toBe("Sonnet 5");
+    expect(shortEffort()).toBe(short);
+    expect(model.textContent).toContain("Sonnet 5");
     expect(effort.dataset.effort).toBe("max");
   });
 
@@ -59,7 +61,7 @@ describe("session header config", () => {
     header.onConfigClick = (which, anchor) => seen.push([which, anchor]);
 
     modelEl().dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    effortIcon().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    shortEffort().dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(seen).toEqual([["model", modelEl()], ["effort", effortEl()]]);
   });
@@ -74,8 +76,7 @@ describe("session header config", () => {
     expect(effortEl().classList.contains("meta-cfg-btn")).toBe(false);
     expect(effortEl().hasAttribute("tabindex")).toBe(false);
     expect(fired).toBe(0);
-    // Still readable: the tooltip names the level the icon colour encodes.
-    expect(effortEl().title).toBe("Effort: high");
+    expect(effortEl().title).toBe("");
     // The model half stays clickable - only effort is locked on an external session.
     expect(modelEl().classList.contains("meta-cfg-btn")).toBe(true);
   });

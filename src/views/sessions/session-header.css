@@ -96,21 +96,27 @@
   position: relative;
 }
 
-.session-header .meta-cfg-model {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.session-header .meta-cfg-model[hidden],
+.session-header .meta-cfg-effort[hidden],
+.session-header .meta-cfg-sep[hidden] { display: none; }
+
+/* Desktop reads words; the phone swaps in the rank battery and a 3-4 letter
+   effort (colour from --effort-* in tokens.css, cool to hot as it climbs). */
+.session-header .meta-cfg-model-battery,
+.session-header .meta-cfg-effort-short { display: none; }
+
+@media (max-width: 768px) {
+  .session-header .meta-cfg-model-text,
+  .session-header .meta-cfg-effort-full,
+  .session-header .meta-cfg-sep { display: none; }
+  .session-header .meta-cfg-model-battery { display: inline; font-size: 1rem; line-height: 1; }
+  .session-header .meta-cfg-effort-short { display: inline; }
+  .session-header .meta-cfg-effort[data-effort="low"] { color: var(--effort-low); }
+  .session-header .meta-cfg-effort[data-effort="medium"] { color: var(--effort-medium); }
+  .session-header .meta-cfg-effort[data-effort="high"] { color: var(--effort-high); }
+  .session-header .meta-cfg-effort[data-effort="xhigh"] { color: var(--effort-xhigh); }
+  .session-header .meta-cfg-effort[data-effort="max"] { color: var(--effort-max); }
 }
-
-.session-header .meta-cfg-model[hidden] { display: none; }
-
-/* Effort is colour-only (cool to hot as it climbs); see --effort-* in tokens.css. */
-.session-header .meta-cfg-effort { font-size: 1rem; line-height: 1; }
-.session-header .meta-cfg-effort[data-effort="low"] { color: var(--effort-low); }
-.session-header .meta-cfg-effort[data-effort="medium"] { color: var(--effort-medium); }
-.session-header .meta-cfg-effort[data-effort="high"] { color: var(--effort-high); }
-.session-header .meta-cfg-effort[data-effort="xhigh"] { color: var(--effort-xhigh); }
-.session-header .meta-cfg-effort[data-effort="max"] { color: var(--effort-max); }
 
 /* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which
    read as clutter) - same geometry as .session-header-proj-badge (bottom
