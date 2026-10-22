@@ -3,7 +3,8 @@
 // host element so it survives renderCardShell()'s innerHTML re-renders. Inert
 // on desktop: the handle is display:none there, so pointerdown never fires.
 // The phone's fullscreen question page hides its handle too (back collapses
-// it instead), so only the permission card still peeks.
+// it instead); the permission card and a question card on the --viewport
+// fallback host still peek.
 
 const PEEK_RATIO = 0.72; // preferred fraction of the card's own height to reveal
 const MIN_KEEP_VISIBLE = 56; // px of the card (handle + a sliver) that must stay reachable
