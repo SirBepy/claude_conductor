@@ -48,6 +48,12 @@ export function positionSubmenu(sub: HTMLElement, parent: HTMLElement): void {
   if (left + subRect.width > window.innerWidth - 4) {
     left = itemRect.left - subRect.width - 4;
   }
+  // Neither side has room on a phone: cap the width to the viewport and let
+  // the submenu overlap its parent menu instead of clipping off-screen.
+  sub.style.maxWidth = `${window.innerWidth - 8}px`;
+  const width = Math.min(subRect.width, window.innerWidth - 8);
+  if (left < 4) left = 4;
+  if (left + width > window.innerWidth - 4) left = window.innerWidth - width - 4;
   let top = itemRect.top;
   if (top + subRect.height > window.innerHeight - 4) {
     top = window.innerHeight - subRect.height - 4;
