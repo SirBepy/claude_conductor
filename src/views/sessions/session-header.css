@@ -96,15 +96,22 @@
   position: relative;
 }
 
-/* Quiet: muted like the model/effort text it sits beside, until hovered. */
-.session-header .code-mode-btn {
-  color: var(--color-text-muted);
+.session-header .meta-cfg-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.session-header .code-mode-btn:hover,
-.session-header .code-mode-btn:focus-visible {
-  color: var(--color-text);
-}
+.session-header .meta-cfg-model[hidden] { display: none; }
+
+/* Effort is colour-only (cool to hot as it climbs); hex because no palette
+   token spans five steps. */
+.session-header .meta-cfg-effort { font-size: 1rem; line-height: 1; }
+.session-header .meta-cfg-effort[data-effort="low"] { color: #6b9bd1; }
+.session-header .meta-cfg-effort[data-effort="medium"] { color: #5fbf8a; }
+.session-header .meta-cfg-effort[data-effort="high"] { color: #e0c060; }
+.session-header .meta-cfg-effort[data-effort="xhigh"] { color: #e8914f; }
+.session-header .meta-cfg-effort[data-effort="max"] { color: #e5605f; }
 
 /* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which
    read as clutter) - same geometry as .session-header-proj-badge (bottom

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-// The header's model/effort text is the only surface left for changing either
+// The header's model/effort are the only surface left for changing either
 // mid-run (the Sep 4 statusline rebuild dropped both chips from the default
 // rows). The statusbar re-emits its config on EVERY render, so the two spans
-// must be text-swapped, never rebuilt - a replaced node silently detaches the
-// slider popover anchored to it.
+// must be text/icon-swapped, never rebuilt - a replaced node silently detaches
+// the slider popover anchored to it.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionHeader } from "../src/views/sessions/session-header.ts";
@@ -19,24 +19,38 @@ beforeEach(() => {
 
 const modelEl = () => header.el.querySelector(".meta-cfg-model");
 const effortEl = () => header.el.querySelector(".meta-cfg-effort");
+const effortIcon = () => effortEl().querySelector("i");
 
-describe("session header config text", () => {
-  it("prints the short model name and effort, separated", () => {
+describe("session header config", () => {
+  it("prints the short model name beside a robot icon, and effort as a coloured battery", () => {
     header.setConfig("claude-opus-5", "high");
     expect(modelEl().textContent).toBe("Opus 5");
-    expect(effortEl().textContent).toBe("high");
-    expect(header.el.querySelector(".meta-cfg-sep").hidden).toBe(false);
+    expect(modelEl().querySelector("i").classList.contains("ph-robot")).toBe(true);
+    expect(effortEl().textContent).toBe("");
+    expect(effortEl().dataset.effort).toBe("high");
+    expect(effortIcon().classList.contains("ph-battery-high")).toBe(true);
+    expect(effortEl().title).toContain("high");
+  });
+
+  it("maps every effort step to its own battery", () => {
+    const seen = ["low", "medium", "high", "xhigh", "max"].map((e) => {
+      header.setConfig("claude-opus-5", e);
+      return [...effortIcon().classList].find((c) => c.startsWith("ph-battery"));
+    });
+    expect(new Set(seen).size).toBe(5);
   });
 
   it("keeps the same nodes across repeated setConfig calls", () => {
     header.setConfig("claude-opus-5", "high");
     const model = modelEl();
     const effort = effortEl();
+    const icon = effortIcon();
     header.setConfig("claude-sonnet-5", "max");
     expect(modelEl()).toBe(model);
     expect(effortEl()).toBe(effort);
+    expect(effortIcon()).toBe(icon);
     expect(model.textContent).toBe("Sonnet 5");
-    expect(effort.textContent).toBe("max");
+    expect(effort.dataset.effort).toBe("max");
   });
 
   it("routes a click on either to onConfigClick with that element as anchor", () => {
@@ -45,7 +59,7 @@ describe("session header config text", () => {
     header.onConfigClick = (which, anchor) => seen.push([which, anchor]);
 
     modelEl().dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    effortEl().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    effortIcon().dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(seen).toEqual([["model", modelEl()], ["effort", effortEl()]]);
   });
@@ -60,30 +74,26 @@ describe("session header config text", () => {
     expect(effortEl().classList.contains("meta-cfg-btn")).toBe(false);
     expect(effortEl().hasAttribute("tabindex")).toBe(false);
     expect(fired).toBe(0);
+    // Still readable: the tooltip names the level the icon colour encodes.
+    expect(effortEl().title).toBe("Effort: high");
     // The model half stays clickable - only effort is locked on an external session.
     expect(modelEl().classList.contains("meta-cfg-btn")).toBe(true);
   });
 
-  it("hides the separator and the affordance when a half is empty", () => {
+  it("hides a half that has no value", () => {
     header.setConfig(null, "high");
-    expect(header.el.querySelector(".meta-cfg-sep").hidden).toBe(true);
+    expect(modelEl().hidden).toBe(true);
     expect(modelEl().classList.contains("meta-cfg-btn")).toBe(false);
+    header.setConfig("claude-opus-5", "");
+    expect(effortEl().hidden).toBe(true);
   });
 });
 
-// Multi-machine federation (G10 in docs/multi-machine.md): Code
-// mode's reads now proxy to a mirrored chat's owning peer machine, so the
-// `</>` button is never hidden for one (unlike the 2026-10-08 build, which
-// hid it via a since-removed `setMirrored`) - see
-// tests/chat-menu-items-mirrored.test.mjs for the "View changes" menu item's
-// matching un-hide, and session-statusbar.ts's `mirrored` flag for why the
-// folder-explorer button (a different, still-local-only affordance) stays
-// gated.
-describe("session header Code mode button (multi-machine)", () => {
-  const codeModeBtn = () => header.el.querySelector(".code-mode-btn");
-
-  it("is visible, with no mirrored-gating mechanism on the header at all", () => {
-    expect(codeModeBtn().hidden).toBe(false);
-    expect(header.setMirrored).toBeUndefined();
+// Code mode moved into the chat FAB menu (fab-dial.ts), so the header carries
+// no `</>` button on any screen size.
+describe("session header Code mode button", () => {
+  it("is gone from the header", () => {
+    expect(header.el.querySelector(".code-mode-btn")).toBeNull();
+    expect(header.onCodeModeClick).toBeUndefined();
   });
 });

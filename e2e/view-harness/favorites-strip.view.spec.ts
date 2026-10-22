@@ -1,3 +1,4 @@
+// Reviewed 2026-10-22: sessions-dom-wiring.ts passes the FAB a Code-mode opener; this spec asserts the favorites strip only, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./harness";
 

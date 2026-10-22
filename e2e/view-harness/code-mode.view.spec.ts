@@ -3,7 +3,7 @@
 // Reviewed 2026-10-08: tick() now also reloads the "all" scope on an edit-count change, not just "chat" - a timing-only addition this spec never asserted against (no test here drives the chat's edit count or waits out the 1s tick), so its contract is unaffected.
 // Reviewed 2026-10-13 (G10 follow-up, docs/multi-machine.md): Code mode's reads now thread an optional `sessionId` through every invoke call (data.ts, git-fold.ts, branch-switcher.ts) so a session mirrored from a paired peer machine proxies through the daemon instead of reading local disk; every fixture here is a locally-hosted session (`sessionInstance`'s default has no `machine`), so `sessionId` is always sent alongside the same `cwd` this spec already asserts against - no call shape this spec checks changed. Re-ran this spec file directly (`npx playwright test e2e/view-harness/code-mode.view.spec.ts`): 11/11 pass.
 // Reviewed 2026-10-18: session-header.ts's setRemote() (the "Started from phone" badge) was removed outright - this spec never asserted that badge, so its contract is unaffected.
-// Reviewed 2026-10-20: session-header.ts gained a new `.wrap-up-btn` sibling before `.code-mode-btn` - this spec always targets `.code-mode-btn` by its own class, never positionally, so the new sibling doesn't affect it.
+// Reviewed 2026-10-20: session-header.ts gained a new `.wrap-up-btn` sibling before `.code-mode-btn` - this spec drives Code mode through the FAB menu now (the header `.code-mode-btn` is gone), never positionally, so the new sibling doesn't affect it.
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): session-header.ts's SessionHeaderBindOpts/setAvatar gained an optional `machineId` so the project-face badge can ask a peer's filesystem instead of this one's; every fixture here is a locally-hosted session, so machineId is always undefined/null and the badge markup is byte-identical to before.
 import { expect, test, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
@@ -68,8 +68,14 @@ async function mount(page: Page): Promise<void> {
     },
   });
   await page.locator(`#sessions-list li[data-session-id="s1"]`).click();
-  await page.locator("#session-pane .session-header .code-mode-btn").waitFor();
+  await page.locator("#session-pane .fab-dial-fab").waitFor();
   await page.mouse.move(1300, 800);
+}
+
+/** Code mode's entry is the FAB menu's Code item. */
+async function openCodeMode(page: Page): Promise<void> {
+  await page.locator("#session-pane .fab-dial-fab").click();
+  await page.locator('#session-pane [data-dial="code"]').click();
 }
 
 async function shot(target: Parameters<typeof capture>[0], label: string): Promise<void> {
@@ -79,7 +85,7 @@ async function shot(target: Parameters<typeof capture>[0], label: string): Promi
 test.describe("view-harness / Code mode", () => {
   test("the header button covers the chat list and the chat; Esc returns", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .code-mode-btn").click();
+    await openCodeMode(page);
 
     const code = page.locator(".code-mode");
     await expect(code).toBeVisible();
@@ -210,7 +216,7 @@ test.describe("view-harness / Code mode", () => {
 
   test("the scope menu switches to All files, unchanged files included", async ({ page }) => {
     await mount(page);
-    await page.locator("#session-pane .code-mode-btn").click();
+    await openCodeMode(page);
     const code = page.locator(".code-mode");
     await code.locator(".cm-qtitle").click();
     await expect(code.locator(".cm-scope-menu .cm-mi")).toHaveCount(4);
@@ -225,7 +231,7 @@ test.describe("view-harness / Code mode", () => {
     await mount(page);
     const composer = page.locator("#session-pane .session-composer .composer-textarea");
     await composer.fill("MARKER");
-    await page.locator("#session-pane .code-mode-btn").click();
+    await openCodeMode(page);
     await page.locator(".code-mode").waitFor();
     await page.keyboard.press("2");
     await page.keyboard.press("Escape");
@@ -288,7 +294,7 @@ test.describe("view-harness / Code mode", () => {
           ? Promise.resolve({ content: "line one\nline two\nline three\n", truncated: false })
           : orig(cmd, args);
     });
-    await page.locator("#session-pane .code-mode-btn").click();
+    await openCodeMode(page);
     const code = page.locator(".code-mode");
     await code.locator('[data-file="README.md"]').click();
     const lines = code.locator(".fs-code-view .line");

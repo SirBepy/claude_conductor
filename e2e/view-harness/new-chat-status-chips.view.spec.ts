@@ -57,8 +57,8 @@ test.describe("view-harness / new-chat status chips", () => {
 
     const accountChip = page.locator("#session-pane .sb-account");
     await expect(accountChip).toBeVisible();
-    await expect(accountChip).toContainText("Personal");
-    await expect(accountChip).not.toContainText("Work"); // not defaulting to the first account
+    await expect(accountChip).toHaveAttribute("aria-label", "Personal");
+    await expect(accountChip).not.toHaveAttribute("aria-label", "Work"); // not defaulting to the first account
 
     const contextChip = page.locator("#session-pane .sb-context");
     await expect(contextChip).toHaveText("0%");

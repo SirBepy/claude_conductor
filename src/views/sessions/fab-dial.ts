@@ -15,6 +15,8 @@ export interface FabDialDeps {
   onDraft(text: string): void;
   /** Mounts the Preview tab; null where this pane has no preview. */
   mountPreview: PanelDeps["mountPreview"];
+  /** Enters Code mode for this chat. */
+  onCode(): void;
 }
 
 export interface FabDialHandle {
@@ -40,12 +42,14 @@ class FabDial implements FabDialHandle {
   private windows: PaneWindows;
   private dialOpen = false;
   private hasPreview: boolean;
+  private onCode: () => void;
   private sessionId: string | null = null;
   private liftObs: ResizeObserver | null = null;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
     this.pane = pane;
     this.hasPreview = !!deps.mountPreview;
+    this.onCode = deps.onCode;
     this.host = document.createElement("div");
     this.host.className = "fab-dial-host";
     const layer = document.createElement("div");
@@ -161,6 +165,7 @@ class FabDial implements FabDialHandle {
     this.dialOpen = false;
     // Preview is a state toggle in the dial; the rest always bring theirs up.
     if (target === "preview") this.previewController().toggle();
+    else if ((item.dataset.dial as string) === "code") this.onCode();
     else this.windows.openPanel(target);
     this.renderChrome();
   };
@@ -183,6 +188,12 @@ class FabDial implements FabDialHandle {
           `<span class="fab-dial-ic"><i class="ph ${PANEL_META[d].icon}"></i></span>` +
         `</button>`,
     ).join("");
+    // Not a PanelKey window: it hands the whole pane over to Code mode.
+    const code =
+      `<button type="button" class="fab-dial-item" data-dial="code" title="Code mode (Ctrl+Shift+E)">` +
+        `<span class="fab-dial-lb">Code</span>` +
+        `<span class="fab-dial-ic"><i class="ph ph-code"></i></span>` +
+      `</button>`;
     const preview = this.hasPreview
       ? `<button type="button" class="fab-dial-item is-toggle${previewOn ? " is-on" : ""}" data-dial="preview">` +
           `<span class="fab-dial-lb">Preview</span>` +
@@ -190,9 +201,9 @@ class FabDial implements FabDialHandle {
         `</button>`
       : "";
     this.chrome.innerHTML =
-      `<div class="fab-dial">${items}${preview}</div>` +
-      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Drafts, Preview" ` +
-        `aria-label="Ask, Todos, Drafts, Preview"><i class="ph ph-list"></i></button>`;
+      `<div class="fab-dial">${items}${code}${preview}</div>` +
+      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Drafts, Code, Preview" ` +
+        `aria-label="Ask, Todos, Drafts, Code, Preview"><i class="ph ph-list"></i></button>`;
     this.syncLift();
   }
 
