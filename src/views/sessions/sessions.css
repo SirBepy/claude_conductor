@@ -498,6 +498,7 @@
   max-height: 60vh;
   overflow-y: auto;
   min-width: 220px;
+  max-width: 100%;
 }
 
 .smore-item.smore-danger {
