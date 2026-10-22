@@ -89,8 +89,8 @@ fn bind_remote_resume_account(state: &DaemonState, transport: &Transport, p: &mu
     if matches!(transport, Transport::Local) {
         return;
     }
-    if let Some(inst) = p.resume_id.as_deref().and_then(|id| state.registry.get(id)) {
-        p.account_id = inst.account_id;
+    if let Some(account) = p.resume_id.as_deref().and_then(|id| state.registry.get(id)).and_then(|i| i.account_id) {
+        p.account_id = Some(account);
     }
 }
 
@@ -464,6 +464,11 @@ mod machine_target_tests {
         let mut unknown = params("chat-unknown", None);
         bind_remote_resume_account(&state, &Transport::PeerMachine("m".into()), &mut unknown);
         assert_eq!(unknown.account_id, None);
+
+        state.registry.upsert_interactive("chat-unbound", std::path::Path::new("C:/x"), "proj", "2026-10-22T00:00:00Z");
+        let mut unbound = params("chat-unbound", Some("acct-picked"));
+        bind_remote_resume_account(&state, &Transport::Phone, &mut unbound);
+        assert_eq!(unbound.account_id.as_deref(), Some("acct-picked"));
     }
 
     #[tokio::test]
