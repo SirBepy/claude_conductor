@@ -45,8 +45,8 @@ const HISTORY_MIN_INTERVAL_MS = 15_000;
 export function dashboardTemplate(c: DashCtx): TemplateResult {
   return html`${header(c)}${quickActions(c)}
     <div class="pd-grid">
-      ${needsYou(c)}${yourTodos(c)}${chats(c)}${nextUp(c)}${shipState(c)}${running(c)}${customCards(c)}${reports(c)}
-    </div>`;
+      ${needsYou(c)}${yourTodos(c)}${chats(c)}${nextUp(c)}${shipState(c)}${running(c)}${customCards(c)}
+    </div>${reports(c)}`;
 }
 
 export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): DashboardHandle {

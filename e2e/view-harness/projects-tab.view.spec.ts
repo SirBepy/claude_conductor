@@ -133,7 +133,11 @@ test.describe("view-harness / Projects tab", () => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     await card(page, "reports").locator(".pd-rtab", { hasText: "Gallery" }).click();
-    await expect(card(page, "reports").locator(".pd-shot img")).toHaveCount(4);
+    // 1340px leaves the card tall enough for its 3 x 2 gallery, so all six thumbnails show.
+    await expect(card(page, "reports").locator(".pd-shot img")).toHaveCount(6);
+    await expect(card(page, "reports").locator(".pd-shot").nth(5)).toBeVisible();
+    await page.waitForTimeout(250);
+    await capture(page, "r3-reports-gallery-fill");
     await expect(card(page, "reports").locator(".pd-rtab.on")).toHaveText("Gallery");
 
     await card(page, "reports").locator("[data-pd-see-more]").click();
@@ -148,6 +152,28 @@ test.describe("view-harness / Projects tab", () => {
     await expect(page.locator(".pd-lightbox img")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.locator(".pd-lightbox")).toHaveCount(0);
+  });
+
+  test("Reports fills the pane's leftover height, and a short window keeps it a compact peek", async ({ page }) => {
+    await mountWithDashboard(page);
+    await page.locator('[data-pd-tab="projects"]').click();
+    const reports = card(page, "reports");
+    await expect(reports.locator(".pd-tiles .pd-out").first()).toBeVisible();
+    await expect(reports.locator(".pd-fit")).toBeHidden();
+    // The card's bottom edge lands on the pane's padding, not above a blank band.
+    const gap = await page.evaluate(() => {
+      const root = document.querySelector(".pd-root")!.getBoundingClientRect();
+      const r = document.querySelector('[data-pd-card="reports"]')!.getBoundingClientRect();
+      return root.bottom - r.bottom;
+    });
+    expect(gap).toBeLessThan(30);
+
+    await page.setViewportSize({ width: 1032, height: 820 });
+    await expect(reports.locator(".pd-tiles")).toBeHidden();
+    await expect(reports.locator(".pd-fit .pd-row").first()).toBeVisible();
+    await reports.locator(".pd-rtab", { hasText: "Gallery" }).click();
+    await expect(reports.locator(".pd-shot").nth(3)).toBeVisible();
+    await expect(reports.locator(".pd-shot").nth(4)).toBeHidden();
   });
 
   test("the kebab opens the Dashboard cards modal with switches for every section", async ({ page }) => {

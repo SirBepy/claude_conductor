@@ -94,11 +94,13 @@ export const sub = (text: string): TemplateResult => html`<div class="pd-sub">${
 export interface CardOpts {
   full?: boolean;
   id: string;
+  /** Extra class on the section. */
+  cls?: string;
   trailing?: TemplateResult | typeof nothing;
 }
 
 export function card(title: string, body: TemplateResult | TemplateResult[], o: CardOpts): TemplateResult {
-  return html`<section class="pd-card ${o.full ? "full" : ""}" data-pd-card=${o.id}>
+  return html`<section class="pd-card ${o.full ? "full" : ""} ${o.cls ?? ""}" data-pd-card=${o.id}>
     <div class="pd-h"><span>${title}</span><span class="grow"></span>${o.trailing ?? nothing}</div>
     ${body}
   </section>`;
