@@ -3,14 +3,15 @@
 //! a fresh daemon starts with an empty mirror and repopulates within one
 //! `instances_changed` frame of each link reconnecting.
 
+mod ownership;
+
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
-
 use crate::types::{Instance, MachineRef};
+use ownership::Ownership;
 
 /// A pending-owner entry older than this is treated as stale and dropped on
 /// next lookup rather than trusted forever - a peer that silently failed to
@@ -49,53 +50,8 @@ pub struct MirrorState {
     /// before the peer's first `instances_changed` frame creates its entry.
     /// Raw on purpose: `hidden_sessions` is where ownership filters it.
     hidden: Mutex<HashMap<String, Vec<String>>>,
-    /// Last-known `machine_id -> hosted session ids`, kept on disk. The row
-    /// cache above is memory only, so right after a daemon restart (before a
-    /// peer's link reconnects) a mirrored chat's id resolves to nobody and a
-    /// send falls through to the LOCAL handler, which then tries to resume a
-    /// chat whose transcript and folder live on the peer. This is what keeps
-    /// such a send routed at the peer (and failing "offline" until its link is up).
+    /// Persisted `machine_id -> hosted session ids`; see `ownership.rs`.
     ownership: Mutex<Ownership>,
-}
-
-#[derive(Default)]
-struct Ownership {
-    /// `None` until `attach_ownership_store`: a bare `MirrorState` (tests, a
-    /// daemon before `init_machines`) records in memory only.
-    path: Option<PathBuf>,
-    hosted: HashMap<String, HashSet<String>>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct OwnershipFile {
-    #[serde(default)]
-    hosted: HashMap<String, Vec<String>>,
-}
-
-fn ownership_path(app_data: &Path) -> PathBuf {
-    let suffix = crate::daemon::instance::instance_suffix();
-    app_data.join(format!("mirror-owners{suffix}.json"))
-}
-
-impl Ownership {
-    fn persist(&self) {
-        let Some(path) = &self.path else { return };
-        let file = OwnershipFile {
-            hosted: self
-                .hosted
-                .iter()
-                .map(|(machine, ids)| {
-                    let mut ids: Vec<String> = ids.iter().cloned().collect();
-                    ids.sort();
-                    (machine.clone(), ids)
-                })
-                .collect(),
-        };
-        let Ok(body) = serde_json::to_string(&file) else { return };
-        if let Err(e) = crate::util::write_json_atomic(path, &body) {
-            log::warn!("mirror: failed to persist session ownership: {e}");
-        }
-    }
 }
 
 impl MirrorState {
@@ -113,36 +69,14 @@ impl MirrorState {
     /// rejects (unpaired while the daemon was down) are dropped, and each
     /// machine is capped like its live row cache.
     pub fn attach_ownership_store(&self, app_data: &Path, is_paired: impl Fn(&str) -> bool) {
-        let path = ownership_path(app_data);
-        let file: OwnershipFile = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
-        let mut guard = self.ownership.lock().unwrap_or_else(|e| e.into_inner());
-        guard.hosted = file
-            .hosted
-            .into_iter()
-            .filter(|(machine, _)| is_paired(machine))
-            .map(|(machine, ids)| (machine, ids.into_iter().take(MAX_ROWS_PER_PEER).collect()))
-            .collect();
-        guard.path = Some(path);
+        *self.ownership.lock().unwrap_or_else(|e| e.into_inner()) = Ownership::load(app_data, is_paired, MAX_ROWS_PER_PEER);
     }
 
     /// The machine the persisted record says hosts `session_id`. Only a
     /// fallback for `machines::mirrored_owner` once the live rows and the
     /// pending map have nothing: it can lag a peer's real state by a restart.
     pub fn recorded_owner(&self, session_id: &str) -> Option<String> {
-        let guard = self.ownership.lock().unwrap_or_else(|e| e.into_inner());
-        guard.hosted.iter().find(|(_, ids)| ids.contains(session_id)).map(|(machine, _)| machine.clone())
-    }
-
-    fn record_hosted(&self, machine_id: &str, ids: HashSet<String>) {
-        let mut guard = self.ownership.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.hosted.get(machine_id) == Some(&ids) {
-            return;
-        }
-        guard.hosted.insert(machine_id.to_string(), ids);
-        guard.persist();
+        self.ownership.lock().unwrap_or_else(|e| e.into_inner()).owner_of(session_id)
     }
 
     /// Replaces `machine_id`'s reported hidden session ids. Capped like the
@@ -284,7 +218,7 @@ impl MirrorState {
         let prompts = prev.map(|p| p.prompts.clone()).unwrap_or_default();
         guard.insert(machine_id.to_string(), MirroredPeer { label: label.to_string(), online: true, instances: rows, prompts });
         drop(guard);
-        self.record_hosted(machine_id, hosted);
+        self.ownership.lock().unwrap_or_else(|e| e.into_inner()).record(machine_id, hosted);
         changed
     }
 
@@ -320,12 +254,7 @@ impl MirrorState {
         guard.remove(machine_id);
         drop(guard);
         self.hidden.lock().unwrap_or_else(|e| e.into_inner()).remove(machine_id);
-        {
-            let mut owners = self.ownership.lock().unwrap_or_else(|e| e.into_inner());
-            if owners.hosted.remove(machine_id).is_some() {
-                owners.persist();
-            }
-        }
+        self.ownership.lock().unwrap_or_else(|e| e.into_inner()).forget(machine_id);
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         pending.retain(|_, (owner, _)| owner != machine_id);
     }
@@ -384,6 +313,7 @@ impl Default for MirrorState {
 
 #[cfg(test)]
 mod tests {
+    use super::ownership::{ownership_path, OwnershipFile};
     use super::*;
     use crate::sessions::kinds::InstanceKind;
 
