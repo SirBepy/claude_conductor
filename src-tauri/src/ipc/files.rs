@@ -174,6 +174,9 @@ pub async fn open_in_editor(app: AppHandle, path: String) -> Result<(), String> 
 /// a paired machine the file is on THAT machine's disk, so the read goes to
 /// the daemon, which forwards it to the host (confined there to raster images
 /// under its project roots); a local chat keeps this unrestricted local read.
+/// A chat started on a peer seconds ago is not tagged in the cache yet, so a
+/// local miss for a chat's image retries once through the daemon, whose
+/// pending-owner map already routes that id to its host.
 #[tauri::command]
 pub async fn read_image_file(
     path: String,
@@ -187,9 +190,20 @@ pub async fn read_image_file(
             .await
             .map_err(|e| e.to_string());
     }
-    let target = std::path::PathBuf::from(&path)
-        .canonicalize()
-        .map_err(|e| format!("file not found: {e}"))?;
+    let target = match std::path::PathBuf::from(&path).canonicalize() {
+        Ok(t) => t,
+        Err(e) => {
+            let local_err = format!("file not found: {e}");
+            let tagged = session_id
+                .as_deref()
+                .is_some_and(|sid| crate::ipc::chat::history::is_mirrored(&state.cached_instances.lock().unwrap(), sid));
+            let Some(sid) = session_id.as_deref().filter(|_| image_retry_via_daemon(true, tagged)) else {
+                return Err(local_err);
+            };
+            let client = state.client().await.ok_or(local_err)?;
+            return client.read_image_file(&path, sid).await.map_err(|e| e.to_string());
+        }
+    };
     let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
     let ext = target.extension().and_then(|e| e.to_str()).unwrap_or("");
     // Shared map; unknown extension keeps this caller's own fallback rather
@@ -199,6 +213,13 @@ pub async fn read_image_file(
         .to_string();
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(crate::ipc::chat::attachments::AttachmentData { mime, base64 })
+}
+
+/// Whether a local not-found image read retries through the daemon: only for
+/// an image that names its chat, and never for one already routed there as
+/// mirrored (same rule as the history reads' `should_retry_via_daemon`).
+fn image_retry_via_daemon(has_session: bool, tagged_mirrored: bool) -> bool {
+    has_session && crate::ipc::chat::history::should_retry_via_daemon(true, tagged_mirrored)
 }
 
 /// Max bytes `read_text_file` returns. Files larger than this are returned
@@ -304,6 +325,13 @@ pub async fn write_text_file(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_missing_chat_image_retries_through_the_daemon_unless_already_routed_there() {
+        assert!(super::image_retry_via_daemon(true, false), "a chat not tagged mirrored yet");
+        assert!(!super::image_retry_via_daemon(true, true), "already went to the daemon");
+        assert!(!super::image_retry_via_daemon(false, false), "no chat to route by");
+    }
+
     use super::read_log_contents;
     use tempfile::tempdir;
 
