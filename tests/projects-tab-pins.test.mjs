@@ -160,4 +160,17 @@ describe("custom cards in the cards modal", () => {
     expect(rowOf("Clockify").textContent).toContain("group card");
     expect(rowOf("Own card").textContent).not.toContain("group card");
   });
+
+  it("a disabled card offers no Refresh, and switching it back on brings Refresh back", async () => {
+    const off = cardView("off", "Paused", { kind: "stats", items: [] }, null, false);
+    modalCards = [off];
+    await open(groupSnapshot({ cards: [off] }));
+    const row = () => [...slot().querySelectorAll(".pd-mrow")].find((r) => r.querySelector(".pd-mt")?.textContent === "Paused");
+    await vi.waitFor(() => expect(row()).toBeTruthy());
+    expect(row().querySelector('[title="Refresh"]')).toBeNull();
+    const sw = row().querySelector(".switch input");
+    sw.checked = true;
+    sw.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(row().querySelector('[title="Refresh"]')).not.toBeNull());
+  });
 });

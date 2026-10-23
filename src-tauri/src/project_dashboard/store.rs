@@ -148,8 +148,9 @@ impl DashboardStore {
         g.id.clone()
     }
 
-    /// Removes a group along with its cards and hidden-builtin entry. Deleting
-    /// a vault group records its slug so seeding does not resurrect it.
+    /// Removes a group along with everything keyed to it: cards, hidden
+    /// builtins, pinned actions and its closed flag. Deleting a vault group
+    /// records its slug so seeding does not resurrect it.
     pub fn delete_group(&mut self, id: &str) -> bool {
         let Some(pos) = self.groups.iter().position(|g| g.id == id) else { return false };
         let g = self.groups.remove(pos);
@@ -162,7 +163,10 @@ impl DashboardStore {
         }
         let scope = Scope::Group { id: id.to_string() };
         self.cards.retain(|c| c.scope != scope);
-        self.hidden_builtins.remove(&scope.scope_key());
+        let key = scope.scope_key();
+        self.hidden_builtins.remove(&key);
+        self.pinned_actions.remove(&key);
+        self.closed_targets.remove(&key);
         true
     }
 
@@ -301,11 +305,17 @@ mod tests {
         s.upsert_card(card("gc", Scope::Group { id: "vault-zirtue".into() }));
         s.upsert_card(card("keep", proj("C:/x")));
         s.set_builtin_hidden("group:vault-zirtue", "ship", true);
+        s.set_pinned_actions("group:vault-zirtue", vec!["/ship".into()]).unwrap();
+        s.set_pinned_actions("project:c:/x", vec!["/keep".into()]).unwrap();
+        s.closed_targets.insert("group:vault-zirtue".into(), 5);
+        s.closed_targets.insert("project:c:/x".into(), 6);
         assert!(s.delete_group("vault-zirtue"));
         assert_eq!(s.deleted_vault_slugs, vec!["zirtue"]);
         assert!(s.groups.is_empty());
         assert_eq!(s.cards.len(), 1);
         assert!(s.hidden_builtins.is_empty());
+        assert_eq!(s.pinned_actions.keys().collect::<Vec<_>>(), vec!["project:c:/x"], "only the group's pins go");
+        assert_eq!(s.closed_targets.keys().collect::<Vec<_>>(), vec!["project:c:/x"], "only the group's closed flag goes");
         assert!(!s.delete_group("vault-zirtue"));
     }
 
