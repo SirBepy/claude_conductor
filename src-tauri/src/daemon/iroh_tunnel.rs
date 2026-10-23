@@ -323,6 +323,10 @@ async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, li
             let _ = recv.stop(code);
             continue;
         };
+        // Accepting a stream is activity: without this, a stream that ends
+        // before the loop runs again finds the pre-accept timestamp still set
+        // and the connection idle-closes early.
+        idle_since = None;
         let stream_ended = stream_ended.clone();
         tokio::spawn(async move {
             if let Err(e) = forward(send, recv, target_port).await {
