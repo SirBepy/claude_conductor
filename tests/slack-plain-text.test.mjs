@@ -21,6 +21,13 @@ describe("slackPlainText", () => {
       .toBe("Foo (https://en.wikipedia.org/wiki/Foo_(bar)) ok");
   });
 
+  it("an unterminated link with a long URL returns at once (no regex backtracking blow-up)", () => {
+    const text = "[t](https://" + "a".repeat(5000);
+    const t0 = performance.now();
+    expect(slackPlainText(text)).toBe(text);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+
   it("leaves code spans and fences untouched", () => {
     expect(slackPlainText("run `a **b** c` then **go**")).toBe("run `a **b** c` then *go*");
     const fence = "```\n**x** [l](https://a.io)\n```";
