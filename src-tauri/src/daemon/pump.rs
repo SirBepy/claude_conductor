@@ -44,6 +44,16 @@ fn flush_pending_delta(
     });
 }
 
+/// The gen a fresh pump assumes before any turn hands it one. A respawned
+/// child can start its turn without a `set_busy` bump (`mark_turn_live` on
+/// its first live line, after the previous pump already took the pending
+/// gen), so starting from 0 left that turn's end unable to clear `busy`
+/// until the 20-minute watchdog did. The registry's current gen is the turn
+/// in flight; a real `set_busy` still overrides it on the first line.
+fn initial_pump_turn_gen(registry: &crate::sessions::registry::Registry, session_id: &str) -> u64 {
+    registry.current_turn_gen(session_id)
+}
+
 /// The stdout-pump task for one session's `claude` subprocess: reads and
 /// parses stdout line by line, coalesces streamed text deltas (see the
 /// `pending_delta`/`flush_deadline` comment below) into the broadcast
@@ -71,7 +81,7 @@ pub(crate) async fn run_stdout_pump(
     // Generation of the turn being watched, HANDED over by whoever opened it
     // (`Registry::set_busy(true)` stamps it, this consumes it once). Inferring
     // it from stdout timing latched `busy` on for a whole session (todo 525).
-    let mut pump_turn_gen: u64 = 0;
+    let mut pump_turn_gen = initial_pump_turn_gen(&state_for_pump.registry, &pump_session.session_id);
     let mut pump_turn_gen_captured = false;
     // True while the daemon-authoritative `closing` registry flag is set for
     // the current turn: armed at the turn's first live output when the user
@@ -694,6 +704,31 @@ mod tests {
         }
         assert_eq!(pump_turn_gen, 1, "a no-bump wake hands over nothing, so gen 1 is retained");
         assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "no-bump turn must still clear");
+    }
+
+    /// The same no-bump turn on a RESPAWNED child: the dead pump took the
+    /// pending gen with it, so the new pump must start from the registry's.
+    /// Seen 2026-10-23: a fresh spawn died after 4s, its `--resume` respawn
+    /// ran an ask-only turn, and busy stayed latched until the watchdog.
+    #[test]
+    fn a_respawned_pump_clears_busy_for_a_turn_it_was_never_handed() {
+        use crate::sessions::registry::Registry;
+        use crate::types::Settings;
+
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-19T00:00:00Z");
+
+        registry.set_busy("s", true); // gen 1
+        let dead_pump_gen = registry.take_pending_turn_gen("s").expect("first pump takes gen 1");
+        assert!(registry.set_busy_false_if_gen("s", dead_pump_gen), "its EOF clears busy");
+
+        let mut pump_turn_gen = super::initial_pump_turn_gen(&registry, "s");
+        registry.mark_turn_live("s"); // the respawned child's live turn
+        if let Some(gen) = registry.take_pending_turn_gen("s") {
+            pump_turn_gen = gen;
+        }
+        assert!(registry.set_busy_false_if_gen("s", pump_turn_gen), "the respawned turn's end must clear busy");
     }
 
     /// Todo 885: `remote_handlers::send_message` (the phone's send path) used
