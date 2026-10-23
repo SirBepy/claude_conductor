@@ -81,9 +81,30 @@ pub(super) async fn run_uncached(card: &CardConfig, groups: &[GroupDef]) -> Card
 
 /// Runs a card and stores the result, so the dashboard paints it after a restart.
 pub(super) async fn run_and_cache(card: &CardConfig, groups: &[GroupDef]) -> CardResult {
+    run_and_save(card, groups, store::save_result).await
+}
+
+/// `save` is a seam so a test can capture the result instead of writing the
+/// real cache file.
+async fn run_and_save(card: &CardConfig, groups: &[GroupDef], save: impl FnOnce(&str, CardResult)) -> CardResult {
     let result = run_uncached(card, groups).await;
-    store::save_result(&card.id, result.clone());
+    save(&card.id, result.clone());
     result
+}
+
+/// The first run of a card a chat just saved, so it paints without waiting for
+/// the dashboard's next refresh. A disabled card stays idle, same as every
+/// other refresh path. A failing source is an error on the stored result,
+/// never a failure of the upsert.
+async fn first_run(
+    saved: &CardConfig,
+    groups: &[GroupDef],
+    save: impl FnOnce(&str, CardResult),
+) -> Option<CardResult> {
+    if !saved.enabled {
+        return None;
+    }
+    Some(run_and_save(saved, groups, save).await)
 }
 
 pub(super) fn views(cards: Vec<&CardConfig>, results: &BTreeMap<String, CardResult>) -> Vec<CardView> {
@@ -201,8 +222,15 @@ pub(crate) async fn dashboard_card_tool(
         "upsert" => {
             let card = parse_card(card.ok_or("card is required")?, &own_cwd)?;
             let saved = store::update(|s| apply_upsert(s, card, &own_cwd)).ok_or("dashboard storage unavailable")??;
+            // Published before the run so the card appears at once; again
+            // after, so its first result replaces the placeholder.
             publish_changed(state);
-            Ok(json!({"ok": true, "card": saved}))
+            let groups = store::load().groups;
+            let result = first_run(&saved, &groups, store::save_result).await;
+            if result.is_some() {
+                publish_changed(state);
+            }
+            Ok(json!({"ok": true, "card": saved, "result": result}))
         }
         "delete" => {
             let id = id.filter(|i| !i.trim().is_empty()).ok_or("id is required")?;
@@ -451,6 +479,57 @@ mod tests {
         assert_eq!(scope_repos(&proj(ME), &groups), [ME]);
         assert_eq!(scope_repos(&Scope::Group { id: "g1".into() }, &groups), ["C:/work/api", "C:/work/app"]);
         assert!(scope_repos(&Scope::Group { id: "x".into() }, &groups).is_empty());
+    }
+
+    fn shell_command_card(script: &str, cwd: &str) -> CardConfig {
+        #[cfg(windows)]
+        let (program, args) =
+            ("powershell", vec!["-NoProfile".to_string(), "-NonInteractive".to_string(), "-Command".to_string(), script.to_string()]);
+        #[cfg(not(windows))]
+        let (program, args) = ("sh", vec!["-c".to_string(), script.to_string()]);
+        let mut c = card("c1", proj(cwd));
+        c.source = CardSource::Command { program: program.into(), args, cwd: None, env: BTreeMap::new() };
+        c.display = CardDisplay::Stats {
+            items: vec![crate::project_dashboard::StatSpec { label: "a".into(), path: "a".into(), format: "number".into() }],
+        };
+        c
+    }
+
+    #[tokio::test]
+    async fn a_saved_enabled_card_runs_once_and_its_result_is_saved() {
+        #[cfg(windows)]
+        let script = "'{\"a\":1}'";
+        #[cfg(not(windows))]
+        let script = "echo '{\"a\":1}'";
+        // The run dir is the scope's cwd, so it has to exist.
+        let dir = tempfile::tempdir().unwrap();
+        let c = shell_command_card(script, &dir.path().to_string_lossy());
+        let mut saved: Vec<(String, CardResult)> = Vec::new();
+        let result = first_run(&c, &[], |id, r| saved.push((id.to_string(), r))).await.expect("an enabled card runs");
+        assert_eq!(result.error, None);
+        assert_eq!(result.stats[0].value, "1");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].0, "c1");
+        assert_eq!(saved[0].1, result);
+    }
+
+    #[tokio::test]
+    async fn a_failing_first_run_is_an_error_on_the_result_not_a_failure() {
+        let mut c = card("c2", proj(ME));
+        c.source = CardSource::Command { program: "definitely-not-a-real-binary-xyz".into(), args: vec![], cwd: None, env: BTreeMap::new() };
+        let mut saved: Vec<(String, CardResult)> = Vec::new();
+        let result = first_run(&c, &[], |id, r| saved.push((id.to_string(), r))).await.expect("runs even if it fails");
+        assert!(result.error.is_some());
+        assert_eq!(saved.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_disabled_card_is_not_run_on_save() {
+        let mut c = card("c3", proj(ME));
+        c.enabled = false;
+        let mut saved = 0;
+        assert!(first_run(&c, &[], |_, _| saved += 1).await.is_none());
+        assert_eq!(saved, 0);
     }
 
     #[tokio::test]
