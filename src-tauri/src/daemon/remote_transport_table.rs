@@ -408,6 +408,31 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // phone PWA and the desktop webview. Registered by
     // `methods::channel::register_channel_rpc`.
     ("list_channel_messages", P),
+    // Projects tab on the phone: the dashboards' reads (methods/project_dashboard/).
+    // A snapshot/history only summarises this PC's own chats, todos, git state
+    // and transcripts, which the phone already reaches piecemeal through the
+    // list_* methods above. Every card, group and pin WRITE stays absent: a
+    // card config can run a local command, so configs are written only from
+    // this PC (the desktop UI or a local chat's MCP tool).
+    ("dashboard_list_targets", P),
+    ("dashboard_snapshot", P),
+    ("dashboard_history", P),
+    // Lazy data URL of one image listed by dashboard_history. The id encodes a
+    // transcript path and offset; `history_scan::read_image` canonicalises it,
+    // refuses anything but a .jsonl inside the Claude projects folder, and
+    // returns only an image block - transcripts the phone already reads.
+    ("dashboard_gallery_image", P),
+    // Runs a card's STORED config by id; the caller cannot supply or change
+    // what it runs, only when, the same as tapping its refresh on the desktop.
+    ("dashboard_card_refresh", P),
+    // The dashboard's todo checkbox: the same user-todo write as
+    // set_user_todo_state above, keyed by project instead of session.
+    ("dashboard_todo_set_state", P),
+    // Which projects the Projects list shows: a per-target open flag, the
+    // same kind of list-visibility state as update_hidden_chats. Without open,
+    // a project closed on the PC (or by the idle sweep) is unreachable here.
+    ("dashboard_open_target", P),
+    ("dashboard_close_target", P),
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),

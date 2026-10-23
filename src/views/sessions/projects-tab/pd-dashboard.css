@@ -34,7 +34,7 @@
 /* Repo filter: plain words, the chosen one underlined like the tab strips. */
 .pd-repos { display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .pd-repo-chip {
-  padding: 1px 0; border: 0; border-bottom: 1px solid transparent; background: transparent; cursor: pointer;
+  padding: 1px 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; cursor: pointer;
   color: var(--sb-muted, var(--color-text-muted)); font: 11.5px var(--font-mono, monospace);
   transition: color 0.15s ease, border-color 0.15s ease;
 }
@@ -64,6 +64,8 @@
 /* Quick actions: one line. The track clips the strip and the strip slides by
    whole pages (quick-track.ts); the arrows drop out when every chip fits. */
 .pd-qa { display: flex; align-items: center; gap: 4px; margin: 14px 0 18px; }
+/* With no quick-action row (none pinned or used yet, or hidden) the header still keeps the same air above the cards. */
+.pd-head + .pd-grid { margin-top: 18px; }
 .pd-qa.is-fit .pd-qa-btn { display: none; }
 .pd-qa-btn:disabled { opacity: 0.3; cursor: default; }
 .pd-qa-track { flex: 1; min-width: 0; overflow: hidden; }
@@ -145,3 +147,17 @@
 .pd-pg:hover:not(:disabled) { background: var(--color-surface-alt); color: var(--color-text); }
 .pd-pg:disabled { opacity: 0.3; cursor: default; }
 .pd-pg-n { min-width: 26px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+
+/* Phone: one column (the 900px rule above), tighter gutters, and touch-sized
+   small controls (the pagers, card refresh, chip arrows). */
+@media (max-width: 768px) {
+  .pd-root { padding: 14px 12px 18px; }
+  .pd-head { gap: 10px; }
+  .pd-face { width: 34px; height: 34px; font-size: 18px; }
+  .pd-titles h3 { font-size: 16px; }
+  .pd-grid { gap: 12px; }
+  .pd-card { padding: 12px 14px; }
+  .pd-ib.sm, .pd-pg { width: 32px; height: 32px; }
+  .pd-row { padding-top: 7px; padding-bottom: 7px; }
+  .pd-m { max-width: 38%; }
+}

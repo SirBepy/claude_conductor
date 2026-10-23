@@ -38,9 +38,8 @@ export interface ProjectsTabHandle {
 const LIST_EVENTS = ["instances-changed", "dashboard-changed"];
 const LIST_DEBOUNCE_MS = 400;
 
-/** Mounts the strip + list into the sidebar. Null on the phone, which has no Projects tab yet. */
+/** Mounts the strip + list into the sidebar. Null when the view has no sidebar. */
 export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: HTMLElement): ProjectsTabHandle | null {
-  if (isRemote()) return null;
   const found = view.querySelector<HTMLElement>(".sessions-sidebar");
   if (!found) return null;
   const aside: HTMLElement = found;
@@ -72,8 +71,12 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
   const openRows = (): ListRow[] => rows.filter(isOpen);
   const refOf = (r: ListRow): DashboardTargetRef => ({ kind: r.target.kind, id: r.target.id });
 
+  // The phone shows one pane at a time: picking a project slides its dashboard
+  // in, the way opening a chat does; the header's back button returns to the list.
+  const revealPaneOnPhone = (): void => { if (isRemote()) view.setAttribute("data-mobile-pane", "chat"); };
+
   const drawList = (): void => renderProjectsList(listUl, rows, target, {
-    pick: (ref) => selectTarget(ref),
+    pick: (ref) => { selectTarget(ref); revealPaneOnPhone(); },
     close: (ref) => { void closeTarget(ref); },
     add: () => openClosedProjectsPicker(rows.filter((r) => !isOpen(r)), (ref) => { void openTarget(ref); }),
   });
@@ -149,6 +152,7 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
     const row = rows.find((r) => sameRef(ref, refOf(r)));
     if (row) row.open = true;
     showTarget(ref);
+    revealPaneOnPhone();
     void loadList();
   }
 
@@ -199,9 +203,12 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
     const id = resumeId;
     resumeId = null;
     if (!restore) return;
-    if (id && state.pendingNewSession?.placeholderId === id && isPendingSessionId(id)) {
+    // The phone is looking at the list when it switches tabs, and both restore
+    // paths below slide their chat over it, so there the pane just goes back to
+    // empty and the next tapped chat fills it.
+    if (!isRemote() && id && state.pendingNewSession?.placeholderId === id && isPendingSessionId(id)) {
       void resumeDraft(pane).then(updateThinkingBar);
-    } else if (id && state.sessions.some((s) => s.session_id === id)) {
+    } else if (!isRemote() && id && state.sessions.some((s) => s.session_id === id)) {
       void selectSession(id, pane).then(updateThinkingBar);
     } else {
       pane.innerHTML = paneEmptyStateHtml(state.daemonConnected, state.daemonSetupStalled);

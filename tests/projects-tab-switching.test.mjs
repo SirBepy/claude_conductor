@@ -113,11 +113,54 @@ describe("Projects tab", () => {
     expect(tab.tab()).toBe("chats");
   });
 
-  it("is absent on the phone", () => {
-    remote = true;
-    const d = mountDom();
-    expect(mountProjectsTab(d.view, d.pane, d.listEl)).toBeNull();
-    expect(d.view.querySelector(".pd-tabs")).toBeNull();
+  describe("on the phone", () => {
+    let d;
+    beforeEach(() => {
+      tab.destroy();
+      remote = true;
+      d = mountDom();
+      d.view.setAttribute("data-mobile-pane", "list");
+      tab = mountProjectsTab(d.view, d.pane, d.listEl);
+    });
+
+    it("has the strip, and a project list with + but no hover-only close button", async () => {
+      expect(d.view.querySelectorAll(".pd-tab")).toHaveLength(2);
+      clickTab("projects");
+      await vi.waitFor(() => expect(rows()).toHaveLength(2));
+      expect(document.querySelector("#projects-list .pd-row-x")).toBeNull();
+      expect(document.querySelector("#projects-list .pd-list-add")).not.toBeNull();
+    });
+
+    it("tapping a project slides its dashboard in, and the header has no PC-only tools", async () => {
+      clickTab("projects");
+      await vi.waitFor(() => expect(rows()).toHaveLength(2));
+      // Listing paints the first dashboard behind the list without leaving it.
+      expect(d.view.getAttribute("data-mobile-pane")).toBe("list");
+      rows()[1].click();
+      expect(d.view.getAttribute("data-mobile-pane")).toBe("chat");
+      await vi.waitFor(() => expect(d.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-head')).not.toBeNull());
+      expect(d.pane.querySelector(".pd-head [data-pd-open]")).toBeNull();
+      expect(d.pane.querySelector('.pd-head [title="More"]')).toBeNull();
+      expect(d.pane.querySelector(".pd-head .pd-btn.primary")).not.toBeNull();
+    });
+
+    it("opening a closed project from + slides its dashboard in", async () => {
+      clickTab("projects");
+      await vi.waitFor(() => expect(rows()).toHaveLength(2));
+      d.view.querySelector(".pd-list-add").click();
+      document.querySelector("#test-modal-slot .pd-pick").click();
+      await vi.waitFor(() => expect(d.view.getAttribute("data-mobile-pane")).toBe("chat"));
+      await vi.waitFor(() => expect(d.pane.querySelector('.pd-root[data-pd-target="project:p9"]')).not.toBeNull());
+    });
+
+    it("going back to Chats leaves the list showing instead of sliding the old chat over it", async () => {
+      state.selectedId = "s1";
+      clickTab("projects");
+      await vi.waitFor(() => expect(rows()).toHaveLength(2));
+      clickTab("chats");
+      expect(active.selectSession).not.toHaveBeenCalled();
+      expect(d.view.getAttribute("data-mobile-pane")).toBe("list");
+    });
   });
 
   it("Projects: swaps the lists, dismounts the open chat, and lists targets by recency", async () => {

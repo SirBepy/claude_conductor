@@ -5,6 +5,7 @@
 // (the rows that fit, four thumbnails); tall, outcomes become tiles and the
 // gallery grows to 3 x 2 (pd-cards.css). "See more" opens the full tab in a modal.
 import { html, nothing, render, type TemplateResult } from "lit-html";
+import { isRemote } from "../../../shared/transport";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
 import { agoLabel, fileIcon, fileName, firstSentence, plainPreview, shortAgo, type ReportsTab } from "./format";
 import type { ActionHost } from "./dash-actions";
@@ -72,7 +73,8 @@ function fileRows(c: DashCtx): TemplateResult[] {
     dim: !f.exists, tag: repoTag(c, f.repo_cwd),
     meta: `${f.chat_title} · ${shortAgo(f.at_ms, c.nowMs)}`,
     title: f.exists ? f.path : `${f.path} (no longer on disk)`,
-    onClick: f.exists ? () => c.act.openFile(f.path) : undefined,
+    // Files open in VS Code on the PC, which the phone cannot reach.
+    onClick: f.exists && !isRemote() ? () => c.act.openFile(f.path) : undefined,
   }));
 }
 

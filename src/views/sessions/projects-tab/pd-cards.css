@@ -8,7 +8,7 @@
 .pd-rtabs { display: flex; gap: 12px; }
 .pd-h .pd-rtabs { margin-right: 4px; }
 .pd-rtab {
-  border: 0; border-bottom: 1px solid transparent; padding: 2px 0 1px; background: transparent; cursor: pointer;
+  border: 0; border-bottom: 1px solid transparent; border-radius: 0; padding: 2px 0 1px; background: transparent; cursor: pointer;
   color: var(--color-text-muted); font: 500 12px inherit; font-family: inherit; text-transform: none; letter-spacing: 0;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
