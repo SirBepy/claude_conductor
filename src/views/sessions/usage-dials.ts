@@ -103,7 +103,9 @@ export function mountUsageDials(host: HTMLElement): () => void {
     try {
       [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
     } catch {
-      host.hidden = true;
+      // A failed fetch keeps whatever is painted (cached or last live): a
+      // tunnel blip should not blank the dials.
+      if (!lastAccounts.length) host.hidden = true;
       return;
     }
     if (!accounts.length) {
