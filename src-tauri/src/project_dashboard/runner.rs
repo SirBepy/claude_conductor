@@ -45,13 +45,30 @@ async fn run_card_with(
     };
     let fetched_at_ms = chrono::Utc::now().timestamp_millis();
     match fetched {
-        Ok(json) => {
+        Ok(mut json) => {
+            // A source can echo a secret it was given (an env var a script
+            // prints, an API that reflects a header), so every string is
+            // scrubbed before anything reaches the cache, the dashboard or a
+            // chat's `test` call.
+            redact_value(&mut json, &used);
             let (stats, rows) = apply_display(&json, &card.display);
             let mut result = CardResult { fetched_at_ms, stats, rows, ..Default::default() };
             apply_card_extras(&json, &mut result);
             result
         }
         Err(e) => CardResult { fetched_at_ms, error: Some(redact(&e, &used)), ..Default::default() },
+    }
+}
+
+fn redact_value(v: &mut Value, used: &[String]) {
+    if used.iter().all(|s| s.is_empty()) {
+        return;
+    }
+    match v {
+        Value::String(s) => *s = redact(s, used),
+        Value::Array(items) => items.iter_mut().for_each(|i| redact_value(i, used)),
+        Value::Object(map) => map.values_mut().for_each(|i| redact_value(i, used)),
+        _ => {}
     }
 }
 
@@ -197,8 +214,26 @@ fn parse_output(bytes: &[u8]) -> Value {
     })
 }
 
+/// A bare program name resolved on PATH the way a shell would, PATHEXT
+/// included, so `pnpm` finds `pnpm.cmd`; std only tries `.exe`. A `.cmd` path
+/// then runs through std's batch-file launcher, which escapes the args for
+/// cmd.exe and refuses one it cannot escape safely. A name with a path in it,
+/// or one PATH does not hold, is passed through unchanged.
+fn resolve_program(program: &str) -> std::path::PathBuf {
+    resolve_program_in(program, std::env::var_os("PATH"))
+}
+
+fn resolve_program_in(program: &str, path: Option<std::ffi::OsString>) -> std::path::PathBuf {
+    let bare = !program.contains(['/', '\\']);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    match bare.then(|| which::which_in(program, path, cwd).ok()).flatten() {
+        Some(found) => found,
+        None => program.into(),
+    }
+}
+
 async fn run_command(plan: CommandPlan, timeout: Duration, used: &[String]) -> Result<Value, String> {
-    let mut cmd = tokio::process::Command::new(&plan.program);
+    let mut cmd = tokio::process::Command::new(resolve_program(&plan.program));
     cmd.args(&plan.args)
         .envs(&plan.env)
         .current_dir(&plan.cwd)
@@ -213,16 +248,20 @@ async fn run_command(plan: CommandPlan, timeout: Duration, used: &[String]) -> R
         crate::util::process::guard_orphan_tree(&child);
         let mut stdout = child.stdout.take().ok_or("no stdout")?;
         let mut stderr = child.stderr.take().ok_or("no stderr")?;
-        // Read one byte past the cap to tell "exactly full" from "overflowed";
-        // stderr is bounded the same way and drained concurrently so a chatty
-        // child cannot block on a full pipe.
+        // Read one byte past the cap to tell "exactly full" from "overflowed".
+        // stderr is kept up to the same cap and the rest is drained to nowhere,
+        // concurrently: a reader that stopped at the cap would leave a chatty
+        // child blocked on a full pipe, and the run would end as a timeout
+        // instead of its real error.
         let read_out = async {
             let mut buf = Vec::new();
             (&mut stdout).take(MAX_OUTPUT_BYTES as u64 + 1).read_to_end(&mut buf).await.map(|_| buf)
         };
         let read_err = async {
             let mut buf = Vec::new();
-            (&mut stderr).take(MAX_OUTPUT_BYTES as u64).read_to_end(&mut buf).await.map(|_| buf)
+            (&mut stderr).take(MAX_OUTPUT_BYTES as u64).read_to_end(&mut buf).await?;
+            tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await?;
+            Ok::<_, std::io::Error>(buf)
         };
         let (out, err) = tokio::join!(read_out, read_err);
         let out = out.map_err(|e| format!("reading output: {e}"))?;
@@ -567,7 +606,71 @@ mod tests {
         let card = with_env(shell_card(script, stat_display("v", "text")), &[("CC_TOKEN", "{{secret:API_KEY}}")]);
         let res = run_card(&card, &ctx(), &secrets).await;
         assert_eq!(res.error, None);
-        assert_eq!(res.stats[0].value, "sk-dummy-key-123");
+        assert_eq!(res.stats[0].value, "***", "the secret reaches the script but never the card");
+    }
+
+    #[tokio::test]
+    async fn a_secret_echoed_on_success_is_redacted_from_rows_headline_and_progress() {
+        #[cfg(windows)]
+        let script = r#"@{rows=@(@{t="key $env:CC_TOKEN"}); _card=@{headline=$env:CC_TOKEN; progress=@{value=1; max=2; label=$env:CC_TOKEN}}} | ConvertTo-Json -Depth 5 -Compress"#;
+        #[cfg(not(windows))]
+        let script = r#"printf '{"rows":[{"t":"key %s"}],"_card":{"headline":"%s","progress":{"value":1,"max":2,"label":"%s"}}}' "$CC_TOKEN" "$CC_TOKEN" "$CC_TOKEN""#;
+        let display = CardDisplay::List {
+            items_path: "rows".into(),
+            label_path: "t".into(),
+            value_path: "t".into(),
+            link_path: None,
+            limit: None,
+        };
+        let card = with_env(shell_card(script, display), &[("CC_TOKEN", "{{secret:API_KEY}}")]);
+        let res = run_card(&card, &ctx(), &secrets).await;
+        assert_eq!(res.error, None);
+        let shown = serde_json::to_string(&res).unwrap();
+        assert!(!shown.contains("sk-dummy-key-123"), "{shown}");
+        assert_eq!(res.rows[0].label, "key ***");
+        assert_eq!(res.headline.as_deref(), Some("***"));
+        assert_eq!(res.progress.as_ref().map(|p| p.label.as_str()), Some("***"));
+    }
+
+    #[tokio::test]
+    async fn stderr_past_the_cap_still_reports_the_real_exit_before_the_timeout() {
+        #[cfg(windows)]
+        let script = "[Console]::Error.Write('e' * 1500000); exit 1";
+        #[cfg(not(windows))]
+        let script = r"head -c 1500000 /dev/zero | tr '\0' e >&2; exit 1";
+        let card = shell_card(script, stat_display("a", "text"));
+        let res = run_card_with(&card, &ctx(), &secrets, HTTP_TIMEOUT, Duration::from_secs(15)).await;
+        let err = res.error.expect("error");
+        assert!(err.contains("code 1"), "{err}");
+    }
+
+    #[test]
+    fn a_bare_name_resolves_to_its_shim_on_path_and_a_path_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join(if cfg!(windows) { "greet.cmd" } else { "greet" });
+        std::fs::write(&shim, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = Some(dir.path().as_os_str().to_owned());
+        assert_eq!(resolve_program_in("greet", path.clone()), shim);
+        assert_eq!(resolve_program_in("no-such-tool-xyz", path.clone()), std::path::PathBuf::from("no-such-tool-xyz"));
+        let explicit = format!("{}{}greet", dir.path().display(), std::path::MAIN_SEPARATOR);
+        assert_eq!(resolve_program_in(&explicit, path), std::path::PathBuf::from(&explicit));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_cmd_shim_runs_with_its_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("greet.cmd");
+        std::fs::write(&shim, "@echo {\"v\":\"%1\"}\r\n").unwrap();
+        let card = command_card(&shim.to_string_lossy(), &["hi"], stat_display("v", "text"));
+        let res = run_card(&card, &ctx(), &secrets).await;
+        assert_eq!(res.error, None);
+        assert_eq!(res.stats[0].value, "hi");
     }
 
     #[tokio::test]
