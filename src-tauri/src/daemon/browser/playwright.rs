@@ -2,7 +2,8 @@
 //! stdio. Every child attaches to the same Chrome over CDP, so they share the
 //! profile's sign-ins, but each opens its own tab on start: Playwright MCP
 //! tracks a "current tab" per connection, and two chats steering one tab
-//! would trample each other.
+//! would trample each other. A child can instead attach to one of Joe's own
+//! browsers through the Playwright extension (`Attach::Extension`).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -12,6 +13,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
+use super::target::Mine;
 use super::tabs;
 
 const INIT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -21,14 +23,30 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(300);
 /// Output files (snapshots, screenshots) evict oldest-first past this.
 const OUTPUT_MAX_BYTES: u64 = 200 * 1024 * 1024;
 
+/// What a child drives. A relaunched daemon Chrome means a new port, and a
+/// changed Settings choice means a different browser; either way the old
+/// child is stale.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Attach {
+    /// The daemon's own Chrome, over its DevTools port.
+    Cdp(u16),
+    /// One of Joe's browsers, through the Playwright extension.
+    Extension(Mine),
+}
+
+fn attach_args(attach: &Attach) -> Result<Vec<String>, String> {
+    match attach {
+        Attach::Cdp(port) => Ok(vec!["--cdp-endpoint".to_string(), format!("http://127.0.0.1:{port}")]),
+        Attach::Extension(mine) => mine.playwright_args(),
+    }
+}
+
 pub struct PlaywrightClient {
     child: Child,
     stdin: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
     next_id: u64,
-    /// The Chrome this child is attached to; a relaunched Chrome means a new
-    /// port, and this child's CDP connection is dead.
-    pub cdp_port: u16,
+    pub attach: Attach,
     pub last_used: Instant,
     output_dir: PathBuf,
     /// DevTools target id of the tab this driver opened, when it could be
@@ -37,12 +55,11 @@ pub struct PlaywrightClient {
 }
 
 impl PlaywrightClient {
-    pub async fn start(node: &Path, cli: &Path, cdp_port: u16, output_dir: &Path) -> Result<Self, String> {
+    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(output_dir).map_err(|e| format!("create {}: {e}", output_dir.display()))?;
         let mut cmd = Command::new(node);
         cmd.arg(cli)
-            .arg("--cdp-endpoint")
-            .arg(format!("http://127.0.0.1:{cdp_port}"))
+            .args(attach_args(attach)?)
             .arg("--output-dir")
             .arg(output_dir)
             .arg("--output-max-size")
@@ -71,7 +88,7 @@ impl PlaywrightClient {
             stdin,
             lines: BufReader::new(stdout).lines(),
             next_id: 0,
-            cdp_port,
+            attach: attach.clone(),
             last_used: Instant::now(),
             output_dir: output_dir.to_path_buf(),
             tab_id: None,
@@ -88,11 +105,15 @@ impl PlaywrightClient {
             )
             .await?;
         client.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await?;
-        let base = tabs::base_url(cdp_port);
-        client.tab_id = tabs::open_and_find(&base, || async {
-            client.call_tool("browser_tabs", json!({ "action": "new" }), INIT_TIMEOUT).await.map(|_| ())
-        })
-        .await?;
+        // Tab bookkeeping reads the daemon Chrome's DevTools HTTP endpoint,
+        // which Joe's own browser does not expose.
+        if let Attach::Cdp(port) = attach {
+            let base = tabs::base_url(*port);
+            client.tab_id = tabs::open_and_find(&base, || async {
+                client.call_tool("browser_tabs", json!({ "action": "new" }), INIT_TIMEOUT).await.map(|_| ())
+            })
+            .await?;
+        }
         Ok(client)
     }
 
@@ -108,8 +129,8 @@ impl PlaywrightClient {
     /// opens its own, so leaving this one would pile a tab up per restart.
     pub async fn retire(&mut self) {
         self.kill().await;
-        if let Some(id) = self.tab_id.take() {
-            tabs::close_page(&tabs::base_url(self.cdp_port), &id).await;
+        if let (Some(id), Attach::Cdp(port)) = (self.tab_id.take(), &self.attach) {
+            tabs::close_page(&tabs::base_url(*port), &id).await;
         }
     }
 
@@ -189,6 +210,19 @@ fn absolutize_links(text: &str, dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_daemon_chrome_is_attached_over_its_devtools_port() {
+        assert_eq!(attach_args(&Attach::Cdp(9222)).unwrap(), ["--cdp-endpoint", "http://127.0.0.1:9222"]);
+    }
+
+    #[test]
+    fn joes_browser_is_attached_through_the_extension_not_a_port() {
+        use super::super::target::{App, Mine};
+        let args = attach_args(&Attach::Extension(Mine { app: App::Chrome, profile: None })).unwrap();
+        assert!(args.contains(&"--extension".to_string()));
+        assert!(!args.iter().any(|a| a == "--cdp-endpoint"), "{args:?}");
+    }
 
     #[test]
     fn relative_links_to_existing_output_files_become_absolute() {

@@ -94,12 +94,15 @@ The app can drive more than one Claude account (e.g. Personal, Work) side by sid
 
 ## Claude's own browser
 
-Chats can drive a browser of their own: a separate Chrome profile, signed in only to accounts you set up for Claude, never your own. Turn it on in Settings > Chat defaults > **Let chats use Claude's own browser**.
+Chats can drive a browser of their own: a separate Chrome profile, signed in only to accounts you set up for Claude, never your own. Turn it on in Settings > Chat defaults > **Let chats use a browser**.
+
+Some sites, Google sign-in among them, refuse to sign in to a browser that is driven this way. For those, switch **Which browser** to **My browser** (below).
 
 - **What chats get:** Microsoft's Playwright MCP tools (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_take_screenshot`, ...), listed only while the switch is on. New chats get them at once; an open chat gets them after a respawn.
 - **Off your screen:** the browser runs as a normal Chrome window parked off-screen, so it never takes your focus. **Show** in the same settings section brings it onto the screen, to sign in to Claude's accounts or finish a CAPTCHA or verification code a chat says it is stuck on. Chats are told to stop and message you at any such check, never to work around it.
 - **Requirements:** Chrome or Edge, and Node.js 20+ on PATH. The first browser call installs `@playwright/mcp` (pinned version, from a checked-in lockfile) into the app's data folder.
 - **Per chat:** each chat gets its own tab. The browser closes itself after 20 minutes unused, unless it is shown.
+- **My browser:** instead of Claude's own Chrome, a chat can drive one of yours (Chrome, Edge or Brave) through the [Playwright extension](https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm), which you install once in that browser. Each chat opens a connect page there and nothing is driven until you approve it, so sign in to whatever you like by hand first. Leave **Profile folder** blank to use the profile you used last, or name one (such as `Profile 1`) to point Claude at a dedicated profile. The tools then act with that profile's real sign-ins, so a dedicated profile is the safer choice.
 
 ## Publish to claude.ai
 

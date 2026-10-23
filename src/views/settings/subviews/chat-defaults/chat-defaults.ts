@@ -6,7 +6,14 @@ import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
 import type { SessionSort } from "../../../sessions/sessions-helpers";
 import { readModels, readDefaultFlags } from "../../../../shared/effort-presets";
 import { settingsHeader, toggleRow } from "../../ui";
-import { browserSectionTemplate, readBrowserEnabled, wireBrowserSection, BROWSER_SETTING_KEY } from "./browser-section";
+import {
+  browserSectionTemplate,
+  browserSettingsPatch,
+  readBrowserChoice,
+  readBrowserFields,
+  wireBrowserSection,
+  type BrowserChoice,
+} from "./browser-section";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -33,7 +40,7 @@ function template(
   flags: { autoAccept: boolean },
   spawn: { inherit: boolean; workers: boolean },
   sort: SessionSort,
-  browser: boolean,
+  browser: BrowserChoice,
 ) {
   return html`
     <div class="view view-settings-chat-defaults">
@@ -92,7 +99,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   let models = readModels(settings);
   let flags = readDefaultFlags(settings);
   let spawn = readSpawnFlags(settings);
-  let browser = readBrowserEnabled(settings);
+  let browser = readBrowserChoice(settings);
   const sort = loadSort();
 
   render(template(models, flags, spawn, sort, browser), root);
@@ -124,7 +131,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
       inherit: root.querySelector<HTMLInputElement>("#chatDefaultsInheritAutoAllow")?.checked ?? spawn.inherit,
       workers: root.querySelector<HTMLInputElement>("#chatDefaultsWorkersAutoAllow")?.checked ?? spawn.workers,
     };
-    browser = root.querySelector<HTMLInputElement>("#chatDefaultsBrowser")?.checked ?? browser;
+    browser = readBrowserFields(root, browser);
     // Fresh-read + retry (todo 1004): building from the frontend's own
     // settings cache could revert a concurrent daemon-owned write.
     await updateSettings((fresh) => ({
@@ -133,9 +140,22 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
       defaultAutoAllow: autoAllow,
       spawnedChatsInheritAutoAccept: spawn.inherit,
       jarvisWorkersAutoAccept: spawn.workers,
-      [BROWSER_SETTING_KEY]: browser,
+      ...browserSettingsPatch(browser),
     }));
   }
+
+  // The app and profile rows exist only in My browser mode, so the section
+  // is delegated from root and redrawn when the mode flips.
+  root.addEventListener("change", (e) => {
+    const id = (e.target as HTMLElement | null)?.id ?? "";
+    if (!id.startsWith("chatDefaultsBrowser") || id === "chatDefaultsBrowser") return;
+    const modeChanged = id === "chatDefaultsBrowserMode";
+    void persist().then(() => {
+      if (!modeChanged || isRemote()) return;
+      render(template(models, flags, spawn, sort, browser), root);
+      wireBrowserSection(root);
+    });
+  });
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   function persistDebounced(): void {

@@ -20,6 +20,7 @@ vi.mock("../src/shared/api.ts", () => ({
   api: {
     browserStatus: vi.fn(async () => ({ running: false, shown: false })),
     browserSetShown: vi.fn(async (shown) => ({ ok: true, shown })),
+    openExternal: vi.fn(async () => ({})),
   },
 }));
 
@@ -101,7 +102,93 @@ describe("Claude's browser section", () => {
     const { root, dispose } = await mount();
     expect(root.querySelector("#chatDefaultsBrowser")).toBeNull();
     expect(root.querySelector("#chatDefaultsBrowserShow")).toBeNull();
+    expect(root.querySelector("#chatDefaultsBrowserMode")).toBeNull();
     expect(api.browserStatus).not.toHaveBeenCalled();
+    dispose();
+  });
+});
+
+describe("My browser mode", () => {
+  it("defaults to Claude's own browser, with the Show button and no app or profile rows", async () => {
+    const { root, dispose } = await mount();
+    expect(root.querySelector("#chatDefaultsBrowserMode").value).toBe("own");
+    expect(root.querySelector("#chatDefaultsBrowserShow")).not.toBeNull();
+    expect(root.querySelector("#chatDefaultsBrowserApp")).toBeNull();
+    expect(root.querySelector("#chatDefaultsBrowserProfile")).toBeNull();
+    dispose();
+  });
+
+  it("shows the app and profile rows instead of Show when the settings say mine", async () => {
+    settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "brave", claudeBrowserMineProfile: "Profile 2" };
+    const { root, dispose } = await mount();
+    expect(root.querySelector("#chatDefaultsBrowserMode").value).toBe("mine");
+    expect(root.querySelector("#chatDefaultsBrowserApp").value).toBe("brave");
+    expect(root.querySelector("#chatDefaultsBrowserProfile").value).toBe("Profile 2");
+    expect(root.querySelector("#chatDefaultsBrowserShow")).toBeNull();
+    dispose();
+  });
+
+  it("an unknown app in the settings reads as Chrome", async () => {
+    settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "firefox" };
+    const { root, dispose } = await mount();
+    expect(root.querySelector("#chatDefaultsBrowserApp").value).toBe("chrome");
+    dispose();
+  });
+
+  it("switching to My browser persists the mode and redraws the rows", async () => {
+    const { root, dispose } = await mount();
+    const mode = root.querySelector("#chatDefaultsBrowserMode");
+    mode.value = "mine";
+    mode.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    await flush();
+    const saved = await updateSettings.mock.results.at(-1).value;
+    expect(saved.claudeBrowserMode).toBe("mine");
+    expect(root.querySelector("#chatDefaultsBrowserApp")).not.toBeNull();
+    expect(root.querySelector("#chatDefaultsBrowserShow")).toBeNull();
+    dispose();
+  });
+
+  it("switching back to Claude's own brings the Show button back, wired", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    const { root, dispose } = await mount();
+    const mode = root.querySelector("#chatDefaultsBrowserMode");
+    mode.value = "own";
+    mode.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    await flush();
+    const btn = root.querySelector("#chatDefaultsBrowserShow");
+    expect(btn).not.toBeNull();
+    btn.click();
+    await flush();
+    expect(api.browserSetShown).toHaveBeenCalledWith(true);
+    dispose();
+  });
+
+  it("persists the app and a trimmed profile folder name", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    const { root, dispose } = await mount();
+    const app = root.querySelector("#chatDefaultsBrowserApp");
+    app.value = "edge";
+    app.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    const profile = root.querySelector("#chatDefaultsBrowserProfile");
+    profile.value = "  Profile 1 ";
+    profile.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    const saved = await updateSettings.mock.results.at(-1).value;
+    expect(saved.claudeBrowserMineApp).toBe("edge");
+    expect(saved.claudeBrowserMineProfile).toBe("Profile 1");
+    dispose();
+  });
+
+  it("the install button opens the Playwright extension's store page", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    const { root, dispose } = await mount();
+    root.querySelector("#chatDefaultsBrowserInstall").click();
+    expect(api.openExternal).toHaveBeenCalledWith(
+      "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm",
+    );
     dispose();
   });
 });
