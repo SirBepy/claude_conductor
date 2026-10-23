@@ -54,18 +54,23 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
       ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage, page) : "")
       : ownZoneHtml(state.activeTab, freeText, page);
     // The page composer's send arrow: a shortcut for the footer's primary
-    // button once something is typed.
+    // button once something is typed. It mirrors that button's label (Next
+    // or Submit) and its disabled state, so it never looks live while the
+    // click it forwards would do nothing.
     const sendBtn = bar.querySelector<HTMLButtonElement>(".prompt-answer-send");
-    sendBtn?.addEventListener("click", () => {
-      host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]')?.click();
-    });
+    const primary = (): HTMLButtonElement | null =>
+      host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]');
+    sendBtn?.addEventListener("click", () => primary()?.click());
     const syncSend = (el: HTMLTextAreaElement): void => {
-      if (sendBtn) sendBtn.disabled = el.value.trim() === "";
+      if (!sendBtn) return;
+      const p = primary();
+      sendBtn.disabled = el.value.trim() === "" || !!p?.disabled;
+      const label = p?.textContent?.trim();
+      if (label) sendBtn.title = label;
     };
 
     const wireField = (el: HTMLTextAreaElement, isExtraField: boolean): void => {
       syncSend(el);
-      el.addEventListener("input", () => syncSend(el));
       const highlightEl = el.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
       slashPopup.attach(el, highlightEl);
       if (isExtraField) {
@@ -92,6 +97,9 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
           notifyDraftChange();
         });
       }
+      // After the handlers above, so it reads the primary button's state
+      // updatePrimaryButton just set for this keystroke.
+      el.addEventListener("input", () => syncSend(el));
       // Always wired - handleAttachmentPaste itself decides and reports back.
       el.addEventListener("paste", (e) => {
         void auqAttachments.handleAttachmentPaste(e).then((msg) => {
