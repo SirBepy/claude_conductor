@@ -4,3 +4,5 @@
 /tauri.build.gradle.kts
 /proguard-tauri.pro
 /tauri.properties
+# Firebase config is injected in CI from a GitHub secret, never committed
+/google-services.json
