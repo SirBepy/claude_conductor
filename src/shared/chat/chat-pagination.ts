@@ -473,7 +473,9 @@ export class ChatPaginator {
       return;
     }
 
-    const firstExisting = messageEls[0] ?? null;
+    // A folded row can be detached (a tool_result absorbed into its chip), and
+    // inserting before a detached node throws.
+    const firstExisting = messageEls.find((el) => this.container.contains(el)) ?? null;
     if (firstExisting) {
       this.container.insertBefore(frag, rootChildOf(this.container, firstExisting));
     } else if (this.topSentinel && this.topSentinel.parentNode === this.container) {
@@ -497,6 +499,15 @@ export class ChatPaginator {
       this.carryUsage = mergeTotals(acc, this.carryUsage);
       if (accFirstTs > 0 && (this.carryFirstTs === 0 || accFirstTs < this.carryFirstTs)) this.carryFirstTs = accFirstTs;
       if (accLastTs > this.carryLastTs) this.carryLastTs = accLastTs;
+      // Fold the batch into that turn's footer now, the same heal
+      // foldLeadingPartialTurn does at load: left flat, quiet mode hides every
+      // row and a long tool-only turn shows nothing new per page. No usage
+      // yet; the opening batch settles the meta row through the same footer.
+      let end = merged.length;
+      for (let j = shift; j < merged.length; j++) {
+        if (isBoundaryMessage(merged[j]!)) { end = j; break; }
+      }
+      this.cb.foldClosedRange(0, end, null, 0);
     } else {
       for (let i = 0; i < boundaries.length; i++) {
         const start = boundaries[i]!.index + 1;
