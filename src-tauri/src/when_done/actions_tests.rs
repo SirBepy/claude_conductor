@@ -48,3 +48,12 @@ fn handles_missing_options_and_blank_questions() {
     assert_eq!(default_question_answers(None), json!({}));
     assert_eq!(default_question_answers(Some(&json!("not-an-array"))), json!({}));
 }
+
+#[test]
+fn only_a_chat_busy_at_arm_time_gets_its_prompt_auto_resolved() {
+    let armed: std::collections::HashSet<String> = ["a".to_string()].into_iter().collect();
+    assert!(prompt_in_armed_scope(&armed, &json!({ "id": "r1", "session_id": "a", "tool_name": "Bash" })));
+    assert!(!prompt_in_armed_scope(&armed, &json!({ "id": "r2", "session_id": "b", "tool_name": "Bash" })));
+    assert!(!prompt_in_armed_scope(&armed, &json!({ "id": "r3" })));
+    assert!(!prompt_in_armed_scope(&std::collections::HashSet::new(), &json!({ "id": "r4", "session_id": "a" })));
+}
