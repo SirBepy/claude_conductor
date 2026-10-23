@@ -20,6 +20,12 @@ pub(super) struct DashboardCardBody {
     card: Option<Value>,
     #[serde(default)]
     id: Option<String>,
+    /// `pin`: the quick-action commands to pin.
+    #[serde(default)]
+    actions: Option<Vec<String>>,
+    /// `pin`: which dashboard (default: this project).
+    #[serde(default)]
+    scope: Option<Value>,
 }
 
 pub(super) async fn on_dashboard_card(
@@ -27,7 +33,8 @@ pub(super) async fn on_dashboard_card(
     ValidatedJson(body): ValidatedJson<DashboardCardBody>,
 ) -> impl IntoResponse {
     super::mark_mcp_tool_used(&ctx, &body.session_id);
-    match cards::dashboard_card_tool(&ctx.state, &body.session_id, &body.action, body.card, body.id).await {
+    match cards::dashboard_card_tool(&ctx.state, &body.session_id, &body.action, body.card, body.id, body.actions, body.scope)
+        .await {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
     }
@@ -52,6 +59,8 @@ mod tests {
             action: "list".to_string(),
             card: None,
             id: None,
+            actions: None,
+            scope: None,
         };
         let resp = on_dashboard_card(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -63,8 +72,10 @@ mod tests {
 
     #[test]
     fn body_accepts_explicit_nulls_for_card_and_id() {
-        let b: DashboardCardBody =
-            serde_json::from_str(r#"{"session_id":"s","action":"list","card":null,"id":null}"#).unwrap();
-        assert!(b.card.is_none() && b.id.is_none());
+        let b: DashboardCardBody = serde_json::from_str(
+            r#"{"session_id":"s","action":"list","card":null,"id":null,"actions":null,"scope":null}"#,
+        )
+        .unwrap();
+        assert!(b.card.is_none() && b.id.is_none() && b.actions.is_none() && b.scope.is_none());
     }
 }

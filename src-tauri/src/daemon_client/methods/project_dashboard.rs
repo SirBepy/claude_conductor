@@ -65,4 +65,16 @@ impl PersistentClient {
     pub async fn dashboard_gallery_image(&self, id: &str) -> Result<Value, ClientError> {
         self.call("dashboard_gallery_image", json!({"id": id})).await
     }
+
+    pub async fn dashboard_close_target(&self, target: Value) -> Result<Value, ClientError> {
+        self.call("dashboard_close_target", json!({"target": target})).await
+    }
+
+    pub async fn dashboard_open_target(&self, target: Value) -> Result<Value, ClientError> {
+        self.call("dashboard_open_target", json!({"target": target})).await
+    }
+
+    pub async fn dashboard_set_pinned_actions(&self, scope: Value, actions: Vec<String>) -> Result<Value, ClientError> {
+        self.call("dashboard_set_pinned_actions", json!({"scope": scope, "actions": actions})).await
+    }
 }

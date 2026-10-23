@@ -2,6 +2,7 @@
 //! the response into a `CardResult`. Never returns an error: every failure
 //! lands in `CardResult.error`, already scrubbed of resolved secret values.
 
+use super::card_extras::apply_card_extras;
 use super::extract::apply_display;
 use super::template::{redact, render_collect, SecretLookup, TemplateCtx};
 use super::types::{CardConfig, CardResult, CardSource};
@@ -46,9 +47,11 @@ async fn run_card_with(
     match fetched {
         Ok(json) => {
             let (stats, rows) = apply_display(&json, &card.display);
-            CardResult { fetched_at_ms, stats, rows, error: None }
+            let mut result = CardResult { fetched_at_ms, stats, rows, ..Default::default() };
+            apply_card_extras(&json, &mut result);
+            result
         }
-        Err(e) => CardResult { fetched_at_ms, stats: Vec::new(), rows: Vec::new(), error: Some(redact(&e, &used)) },
+        Err(e) => CardResult { fetched_at_ms, error: Some(redact(&e, &used)), ..Default::default() },
     }
 }
 
@@ -65,6 +68,7 @@ struct CommandPlan {
     program: String,
     args: Vec<String>,
     cwd: String,
+    env: BTreeMap<String, String>,
 }
 
 fn build_http(
@@ -95,7 +99,7 @@ fn build_command(
     secrets: SecretLookup,
     used: &mut Vec<String>,
 ) -> Result<CommandPlan, String> {
-    let CardSource::Command { program, args, cwd } = source else {
+    let CardSource::Command { program, args, cwd, env } = source else {
         return Err("not a command source".to_string());
     };
     if program.trim().is_empty() {
@@ -106,9 +110,13 @@ fn build_command(
         Some(c) => render_collect(c, ctx, secrets, used)?,
         None => ctx.cwd.clone(),
     };
+    let mut rendered_env = BTreeMap::new();
+    for (name, value) in env {
+        rendered_env.insert(name.clone(), render_collect(value, ctx, secrets, used)?);
+    }
     // The program is deliberately not templated: a placeholder there would let
     // a secret or a repo name pick which binary runs.
-    Ok(CommandPlan { program: program.trim().to_string(), args, cwd })
+    Ok(CommandPlan { program: program.trim().to_string(), args, cwd, env: rendered_env })
 }
 
 fn http_client(timeout: Duration) -> Result<reqwest::Client, String> {
@@ -192,6 +200,7 @@ fn parse_output(bytes: &[u8]) -> Value {
 async fn run_command(plan: CommandPlan, timeout: Duration, used: &[String]) -> Result<Value, String> {
     let mut cmd = tokio::process::Command::new(&plan.program);
     cmd.args(&plan.args)
+        .envs(&plan.env)
         .current_dir(&plan.cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -276,6 +285,7 @@ mod tests {
             source: CardSource::Http { method: "get".into(), url: url.into(), headers, body: None },
             display,
             refresh_secs: None,
+            action: None,
         }
     }
 
@@ -285,6 +295,7 @@ mod tests {
                 program: program.into(),
                 args: args.iter().map(|s| s.to_string()).collect(),
                 cwd: None,
+                env: BTreeMap::new(),
             },
             display,
             ..Default::default()
@@ -352,15 +363,21 @@ mod tests {
             program: "gh".into(),
             args: vec!["run".into(), "--repo".into(), "{{repo}}".into()],
             cwd: None,
+            env: BTreeMap::new(),
         };
         let c = TemplateCtx::at("C:/w/zng-app", chrono::Local::now());
         let plan = build_command(&src, &c, &secrets, &mut Vec::new()).unwrap();
-        assert_eq!(plan, CommandPlan { program: "gh".into(), args: vec!["run".into(), "--repo".into(), "zng-app".into()], cwd: "C:/w/zng-app".into() });
-        let templated = CardSource::Command { program: "{{secret:API_KEY}}".into(), args: vec![], cwd: Some("/x".into()) };
+        assert_eq!(plan, CommandPlan {
+                program: "gh".into(),
+                args: vec!["run".into(), "--repo".into(), "zng-app".into()],
+                cwd: "C:/w/zng-app".into(),
+                env: BTreeMap::new()
+            });
+        let templated = CardSource::Command { program: "{{secret:API_KEY}}".into(), args: vec![], cwd: Some("/x".into()), env: BTreeMap::new() };
         let plan = build_command(&templated, &c, &secrets, &mut Vec::new()).unwrap();
         assert_eq!(plan.program, "{{secret:API_KEY}}");
         assert_eq!(plan.cwd, "/x");
-        let empty = CardSource::Command { program: " ".into(), args: vec![], cwd: None };
+        let empty = CardSource::Command { program: " ".into(), args: vec![], cwd: None, env: BTreeMap::new() };
         assert!(build_command(&empty, &c, &secrets, &mut Vec::new()).is_err());
     }
 
@@ -532,6 +549,93 @@ mod tests {
         assert!(err.contains("code 3"), "{err}");
         assert!(err.contains("bad token ***"), "{err}");
         assert!(!err.contains("sk-dummy-key-123"), "{err}");
+    }
+
+    fn with_env(mut card: CardConfig, pairs: &[(&str, &str)]) -> CardConfig {
+        if let CardSource::Command { env, .. } = &mut card.source {
+            env.extend(pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        }
+        card
+    }
+
+    #[tokio::test]
+    async fn command_env_reaches_the_script_rendered_through_the_templates() {
+        #[cfg(windows)]
+        let script = "'{\"v\":\"' + $env:CC_TOKEN + '\"}'";
+        #[cfg(not(windows))]
+        let script = "echo \"{\\\"v\\\":\\\"$CC_TOKEN\\\"}\"";
+        let card = with_env(shell_card(script, stat_display("v", "text")), &[("CC_TOKEN", "{{secret:API_KEY}}")]);
+        let res = run_card(&card, &ctx(), &secrets).await;
+        assert_eq!(res.error, None);
+        assert_eq!(res.stats[0].value, "sk-dummy-key-123");
+    }
+
+    #[tokio::test]
+    async fn an_env_secret_a_script_echoes_into_stderr_is_redacted_from_the_error() {
+        #[cfg(windows)]
+        let script = "[Console]::Error.WriteLine('rejected ' + $env:CC_TOKEN); exit 4";
+        #[cfg(not(windows))]
+        let script = "echo \"rejected $CC_TOKEN\" >&2; exit 4";
+        let card = with_env(shell_card(script, stat_display("a", "text")), &[("CC_TOKEN", "{{secret:API_KEY}}")]);
+        let res = run_card(&card, &ctx(), &secrets).await;
+        let err = res.error.expect("error");
+        assert!(err.contains("code 4") && err.contains("rejected ***"), "{err}");
+        assert!(!err.contains("sk-dummy-key-123"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_missing_env_secret_names_the_secret_and_never_a_value() {
+        let card = with_env(shell_card("exit 0", stat_display("a", "text")), &[("CC_TOKEN", "{{secret:NOPE}}")]);
+        let err = run_card(&card, &ctx(), &secrets).await.error.expect("error");
+        assert!(err.contains("NOPE"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn last_run_in_an_env_value_renders_the_callers_resolved_time() {
+        #[cfg(windows)]
+        let script = "'{\"v\":\"' + $env:SINCE + '\"}'";
+        #[cfg(not(windows))]
+        let script = "echo \"{\\\"v\\\":\\\"$SINCE\\\"}\"";
+        let card = with_env(shell_card(script, stat_display("v", "text")), &[("SINCE", "{{last_run:/sync}}")]);
+        let c = ctx().with_last_runs(std::collections::HashMap::from([("/sync".to_string(), 1_700_000_000_000)]));
+        let res = run_card(&card, &c, &secrets).await;
+        assert_eq!(res.error, None);
+        assert_eq!(res.stats[0].value, "1700000000000");
+    }
+
+    #[tokio::test]
+    async fn a_card_that_only_uses_the_card_object_fills_headline_and_progress() {
+        #[cfg(windows)]
+        let script = "'{\"_card\":{\"headline\":\"3 workdays not logged\",\"headline_tone\":\"warn\",\"progress\":{\"value\":5,\"max\":8,\"label\":\"5h of 8h\",\"behind\":true}}}'";
+        #[cfg(not(windows))]
+        let script = "echo '{\"_card\":{\"headline\":\"3 workdays not logged\",\"headline_tone\":\"warn\",\"progress\":{\"value\":5,\"max\":8,\"label\":\"5h of 8h\",\"behind\":true}}}'";
+        let display = CardDisplay::Stats { items: vec![] };
+        let res = run_card(&shell_card(script, display), &ctx(), &secrets).await;
+        assert_eq!(res.error, None);
+        assert!(res.stats.is_empty() && res.rows.is_empty());
+        assert_eq!(res.headline.as_deref(), Some("3 workdays not logged"));
+        assert_eq!(res.headline_tone.as_deref(), Some("warn"));
+        let p = res.progress.expect("progress");
+        assert_eq!((p.value, p.max, p.label.as_str(), p.behind), (5.0, 8.0, "5h of 8h", true));
+    }
+
+    #[tokio::test]
+    async fn a_card_object_beside_a_normal_display_leaves_the_stats_alone() {
+        #[cfg(windows)]
+        let script = "'{\"n\":4,\"_card\":{\"headline\":\"hi\"}}'";
+        #[cfg(not(windows))]
+        let script = "echo '{\"n\":4,\"_card\":{\"headline\":\"hi\"}}'";
+        let res = run_card(&shell_card(script, stat_display("n", "number")), &ctx(), &secrets).await;
+        assert_eq!(res.stats[0].value, "4");
+        assert_eq!(res.headline.as_deref(), Some("hi"));
+        assert_eq!(res.headline_tone, None);
+        assert_eq!(res.progress, None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_run_carries_no_card_extras() {
+        let res = run_card(&command_card("definitely-not-a-real-binary-xyz", &[], stat_display("a", "text")), &ctx(), &secrets).await;
+        assert!(res.error.is_some() && res.headline.is_none() && res.progress.is_none());
     }
 
     #[tokio::test]

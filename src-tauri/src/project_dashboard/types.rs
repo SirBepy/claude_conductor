@@ -95,12 +95,17 @@ pub enum CardSource {
         args: Vec<String>,
         #[serde(default)]
         cwd: Option<String>,
+        /// Extra environment for the child, each value rendered through the
+        /// same templates as `args`. A secret belongs here rather than in
+        /// `args`: other processes can read a command line, not this env.
+        #[serde(default)]
+        env: BTreeMap<String, String>,
     },
 }
 
 impl Default for CardSource {
     fn default() -> Self {
-        CardSource::Command { program: String::new(), args: Vec::new(), cwd: None }
+        CardSource::Command { program: String::new(), args: Vec::new(), cwd: None, env: BTreeMap::new() }
     }
 }
 
@@ -164,6 +169,34 @@ pub struct CardConfig {
     pub display: CardDisplay,
     #[serde(default)]
     pub refresh_secs: Option<u32>,
+    /// A button on the card that starts a new chat with `command` as its first message.
+    #[serde(default)]
+    pub action: Option<CardAction>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct CardAction {
+    #[serde(default)]
+    pub label: String,
+    /// A slash command, leading slash included.
+    #[serde(default)]
+    pub command: String,
+}
+
+/// A progress bar a source computes itself (hours logged against hours due).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct CardProgress {
+    #[serde(default)]
+    pub value: f64,
+    #[serde(default)]
+    pub max: f64,
+    #[serde(default)]
+    pub label: String,
+    /// Paints the bar as running late.
+    #[serde(default)]
+    pub behind: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
@@ -200,6 +233,14 @@ pub struct CardResult {
     pub rows: Vec<RowValue>,
     #[serde(default)]
     pub error: Option<String>,
+    /// One line the source computed for itself (`_card.headline`), shown above the stats.
+    #[serde(default)]
+    pub headline: Option<String>,
+    /// `"warn"` or `"good"`; any other value from a source is dropped.
+    #[serde(default)]
+    pub headline_tone: Option<String>,
+    #[serde(default)]
+    pub progress: Option<CardProgress>,
 }
 
 /// A card's stored config next to its last cached result, so one call paints
