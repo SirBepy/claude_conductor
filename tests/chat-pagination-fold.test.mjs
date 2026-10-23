@@ -198,6 +198,37 @@ describe("pagination folds prepended turns", () => {
     expect(container.style.transform).toBe("translateY(0)");
   });
 
+  it("folds a tool-only older page of the same open turn on arrival, before its opening message loads", async () => {
+    invokeRouter.queueOnce("load_history_page", {
+      // Initial window cut mid-turn: tool rows only, no user message yet.
+      events: [toolUseEvent("Bash", { command: "newest" }, "n1", 1_090_000), toolResultEvent("n1", 1_091_000)],
+      oldest_seq: 20,
+      newest_seq: 22,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      // Older page of that SAME turn: still no boundary.
+      events: [
+        toolUseEvent("Bash", { command: "older-a" }, "o1", 1_050_000),
+        toolResultEvent("o1", 1_051_000),
+        toolUseEvent("Bash", { command: "older-b" }, "o2", 1_052_000),
+        toolResultEvent("o2", 1_053_000),
+      ],
+      oldest_seq: 10,
+      newest_seq: 19,
+      has_more: true,
+    });
+
+    const { renderer, container } = await makeRenderer();
+    await renderer.fetchOlder();
+
+    // Left flat, quiet mode hides every one of these rows and the page looks
+    // like it loaded nothing.
+    const flat = [...container.querySelectorAll(".tool-row")].filter((el) => el.dataset.toolGrouped !== "1");
+    expect(flat.length).toBe(0);
+    expect(container.querySelectorAll(".turn-footer").length).toBe(1);
+  });
+
   it("carries usage across batches for a turn that straddles them", async () => {
     invokeRouter.queueOnce("load_history_page", {
       // Initial window: only the NEXT turn's user message onward.
