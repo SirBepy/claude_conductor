@@ -17,7 +17,7 @@ pub(crate) use seed::ensure_seeded;
 
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
-use crate::project_dashboard::{store, CardResult, CardView, Scope};
+use crate::project_dashboard::{store, CardResult, Scope};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -49,16 +49,6 @@ struct IdOnly {
 pub fn register_project_dashboard(router: &mut Router, state: Arc<DaemonState>) {
     read::register_read(router, state.clone());
     layout::register_layout(router, state.clone());
-    {
-        let state = state.clone();
-        router.register("dashboard_groups_list", move |_params, _ctx| {
-            let state = state.clone();
-            async move {
-                ensure_seeded(&state);
-                to_json(&store::load().groups)
-            }
-        });
-    }
     {
         let state = state.clone();
         router.register("dashboard_group_upsert", move |params, _ctx| {
@@ -103,16 +93,6 @@ pub fn register_project_dashboard(router: &mut Router, state: Arc<DaemonState>) 
             }
         });
     }
-    router.register("dashboard_cards_list", move |params, _ctx| async move {
-        #[derive(serde::Deserialize)]
-        struct P {
-            scope: Scope,
-        }
-        let p: P = parse(params)?;
-        let st = store::load();
-        let list: Vec<CardView> = cards::views(st.cards_for(&p.scope), &store::all_results());
-        to_json(&list)
-    });
     {
         let state = state.clone();
         router.register("dashboard_card_refresh", move |params, _ctx| {
@@ -211,33 +191,60 @@ mod tests {
 
     /// Every method this module registers. Kept next to the registration so a
     /// new method added there is one grep from this list.
-    const METHODS: &[&str] = &[
-        "dashboard_groups_list",
+    /// Every method this module registers that only the desktop pipe may call:
+    /// all card, group and pin writes.
+    const DESKTOP_ONLY: &[&str] = &[
         "dashboard_group_upsert",
         "dashboard_group_delete",
-        "dashboard_cards_list",
-        "dashboard_card_refresh",
         "dashboard_card_set_enabled",
         "dashboard_card_delete",
         "dashboard_builtin_set_hidden",
+        "dashboard_set_pinned_actions",
+    ];
+
+    /// The phone's Projects tab: reads, running a stored card, the todo
+    /// checkbox and opening or closing a project in the list. Never a paired
+    /// machine, which mirrors chats, not dashboards.
+    const PHONE: &[&str] = &[
+        "dashboard_open_target",
+        "dashboard_close_target",
+        "dashboard_card_refresh",
         "dashboard_todo_set_state",
         "dashboard_list_targets",
         "dashboard_snapshot",
         "dashboard_history",
         "dashboard_gallery_image",
-        "dashboard_close_target",
-        "dashboard_open_target",
-        "dashboard_set_pinned_actions",
     ];
 
+    fn methods() -> Vec<&'static str> {
+        DESKTOP_ONLY.iter().chain(PHONE).copied().collect()
+    }
+
     #[test]
-    fn no_dashboard_method_is_reachable_from_a_phone_or_a_paired_machine() {
-        for m in METHODS {
+    fn dashboard_writes_are_desktop_only() {
+        for m in DESKTOP_ONLY {
             assert!(!allowed(m, &Transport::Phone), "{m} must be desktop-pipe only (phone)");
             assert!(
                 !allowed(m, &Transport::PeerMachine("peer-1".to_string())),
                 "{m} must be desktop-pipe only (peer machine)"
             );
+        }
+    }
+
+    #[test]
+    fn the_phone_reads_dashboards_and_a_paired_machine_never_does() {
+        for m in PHONE {
+            assert!(allowed(m, &Transport::Phone), "{m} must be reachable from the phone");
+            assert!(
+                !allowed(m, &Transport::PeerMachine("peer-1".to_string())),
+                "{m} must not be reachable from a peer machine"
+            );
+        }
+    }
+
+    #[test]
+    fn every_dashboard_method_stays_callable_from_the_desktop_pipe() {
+        for m in methods() {
             assert!(allowed(m, &Transport::Local), "{m} must stay callable from the desktop pipe");
         }
     }
@@ -246,8 +253,8 @@ mod tests {
     fn the_method_list_matches_what_the_router_registers() {
         let src = format!("{}{}{}", include_str!("mod.rs"), include_str!("read.rs"), include_str!("layout.rs"));
         let registered = src.matches("router.register(\"dashboard_").count();
-        assert_eq!(registered, METHODS.len(), "METHODS and register_project_dashboard drifted");
-        for m in METHODS {
+        assert_eq!(registered, methods().len(), "the method lists and register_project_dashboard drifted");
+        for m in methods() {
             assert!(src.contains(&format!("router.register(\"{m}\"")), "{m} is not registered");
         }
     }

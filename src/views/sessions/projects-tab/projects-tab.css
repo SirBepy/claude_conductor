@@ -19,6 +19,8 @@
   padding: 8px 0 7px;
   border: 0;
   border-bottom: 1px solid transparent;
+  /* Square, or the global button radius bends the underline's ends upward. */
+  border-radius: 0;
   background: transparent;
   color: var(--sb-muted, var(--color-text-muted));
   font: 500 12.5px var(--font-body, inherit);
@@ -28,6 +30,10 @@
 .pd-tab:hover { color: var(--color-text); }
 .pd-tab.on { color: var(--color-text); border-bottom-color: color-mix(in srgb, var(--color-text) 55%, transparent); }
 .pd-tab .ph { font-size: 14px; opacity: 0.8; }
+@media (max-width: 768px) {
+  .pd-tabs { gap: 24px; margin: 4px 16px 0; }
+  .pd-tab { padding: 12px 0 10px; font-size: 14px; }
+}
 
 /* #projects-list only exists to be shown on the Projects tab; the chats list,
    the project rail and the new-chat FAB (it would float over the project rows)

@@ -4,6 +4,7 @@ import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { renderAvatar } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
+import { isRemote } from "../../../shared/transport";
 import { offerableCommands, sameCwd } from "./format";
 import { moveTrack } from "./quick-track";
 import { hidden, isGroup, type DashCtx } from "./dash-parts";
@@ -45,11 +46,17 @@ export function header(c: DashCtx): TemplateResult {
     <span class="grow"></span>
     <button type="button" class="pd-btn primary" @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement)}>
       <i class="ph ph-plus"></i>New chat</button>
-    ${OPEN_IN.map((o) => html`<button type="button" class="pd-ib" title=${o.label} data-pd-open=${o.kind}
+    ${isRemote() ? nothing : desktopTools(c)}
+  </div>`;
+}
+
+/** VS Code, Terminal, Explorer and the kebab: they open apps on the PC or edit
+ *  the dashboard's configuration, so the phone has none of them. */
+function desktopTools(c: DashCtx): TemplateResult {
+  return html`${OPEN_IN.map((o) => html`<button type="button" class="pd-ib" title=${o.label} data-pd-open=${o.kind}
       @click=${(e: Event) => c.act.openIn(e.currentTarget as HTMLElement, o.kind)}><i class="ph ph-${o.icon}"></i></button>`)}
     <button type="button" class="pd-ib" title="More" @click=${(e: Event) => c.act.openKebab(e.currentTarget as HTMLElement)}>
-      <i class="ph ph-dots-three-vertical"></i></button>
-  </div>`;
+      <i class="ph ph-dots-three-vertical"></i></button>`;
 }
 
 /** The pinned slash commands when the project has a list; until it does, the commands used most.

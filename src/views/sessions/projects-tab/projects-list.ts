@@ -5,6 +5,7 @@ import { html, nothing, render, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { hydrateProjectTechIcons, renderAvatar } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
+import { isRemote } from "../../../shared/transport";
 import { listDotClass, listSubline, sameCwd, sameRef } from "./format";
 import type { DashboardTargetRef, ListRow } from "./types";
 
@@ -30,8 +31,8 @@ function rowTemplate(row: ListRow, active: boolean, nowMs: number, h: ListHandle
       <span class="session-row-title"><span class="session-row-title-text">${row.target.name}</span></span>
       <span class="session-row-project"><span class="proj-name">${listSubline(row, nowMs)}</span></span>
     </div>
-    <button type="button" class="pd-row-x" title="Close project" aria-label="Close project"
-      @click=${(e: Event) => { e.stopPropagation(); h.close(ref); }}><i class="ph ph-x"></i></button>
+    ${/* The x only shows on row hover, which a touch screen never has. */ isRemote() ? nothing : html`<button type="button" class="pd-row-x" title="Close project" aria-label="Close project"
+      @click=${(e: Event) => { e.stopPropagation(); h.close(ref); }}><i class="ph ph-x"></i></button>`}
   </li>`;
 }
 
