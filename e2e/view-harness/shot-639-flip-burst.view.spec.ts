@@ -1,3 +1,4 @@
+// Reviewed 2026-10-23: sidebar.ts's refreshSessions now caches the list and keeps it through a failed fetch on the phone (isRemote) only - this desktop-path spec's contract is unchanged.
 import { expect, test, type Page } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, capture, mountView, sessionInstance } from "./harness";
 
