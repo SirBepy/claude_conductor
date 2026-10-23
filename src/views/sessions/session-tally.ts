@@ -32,8 +32,14 @@ export class ToolTallyRow {
   // target list. Null until the renderer is wired (e.g. pending-pane previews).
   private getCustomView: ((tool: string) => string | null) | null = null;
 
-  constructor(container: HTMLElement) {
+  // The chat whose tool targets are listed. An image the agent surfaced lives
+  // on the machine hosting the chat, so the read is routed by this id (a chat
+  // mirrored from a paired machine is read off that machine's disk).
+  private getSessionId: () => string | null;
+
+  constructor(container: HTMLElement, getSessionId: () => string | null = () => null) {
     this.container = container;
+    this.getSessionId = getSessionId;
   }
 
   /** Register a callback fired right before a tool popover opens (used to close
@@ -137,14 +143,15 @@ export class ToolTallyRow {
       const path = row.dataset.path;
       const filename = row.dataset.filename ?? "";
       const imgEl = row.querySelector<HTMLImageElement>("img");
+      const sessionId = this.getSessionId();
       if (path && imgEl) {
-        void invoke<{ mime: string; base64: string }>("read_image_file", { path })
+        void invoke<{ mime: string; base64: string }>("read_image_file", { path, sessionId })
           .then((res) => { imgEl.src = `data:${res.mime};base64,${res.base64}`; })
           .catch(() => { row.classList.add("sb-tally-media-error"); });
       }
       row.addEventListener("click", () => {
         if (!path) return;
-        void invoke<{ mime: string; base64: string }>("read_image_file", { path })
+        void invoke<{ mime: string; base64: string }>("read_image_file", { path, sessionId })
           .then((res) => openLightbox({ type: "image", mime: res.mime, base64: res.base64, filename }))
           .catch((err) => console.error("[statusbar] read_image_file failed", err));
       });

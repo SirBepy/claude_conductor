@@ -1,4 +1,5 @@
 use super::super::{ClientError, PersistentClient};
+use crate::ipc::chat::attachments::AttachmentData;
 use serde_json::{json, Value};
 
 impl PersistentClient {
@@ -27,13 +28,54 @@ impl PersistentClient {
             .ok_or_else(|| ClientError::Rpc { code: -32000, message: "push_preview: no id".into() })
     }
 
-    /// Preview history metadata (no html), newest-first.
-    pub async fn list_previews(&self) -> Result<Value, ClientError> {
-        self.call("list_previews", Value::Null).await
+    /// Preview history metadata (no html), newest-first. A `session_id` of a
+    /// chat mirrored from a paired machine makes the daemon read that
+    /// machine's store; any session id also narrows the list to that chat.
+    pub async fn list_previews(&self, session_id: Option<&str>) -> Result<Value, ClientError> {
+        self.call("list_previews", list_previews_params(session_id)).await
     }
 
-    /// Full preview snapshot (html included) by id.
-    pub async fn get_preview(&self, id: &str) -> Result<Value, ClientError> {
-        self.call("get_preview", json!({"id": id})).await
+    /// Full preview snapshot (html included) by id. `session_id` is the chat
+    /// the panel is showing: it routes the call to the host for a mirrored chat.
+    pub async fn get_preview(&self, id: &str, session_id: Option<&str>) -> Result<Value, ClientError> {
+        self.call("get_preview", get_preview_params(id, session_id)).await
+    }
+
+    /// One raster image off the HOST's disk for a chat mirrored from a paired
+    /// machine (option-preview pictures, agent-surfaced images). The host
+    /// confines the path; see `daemon/methods/registry/image_read.rs`.
+    pub async fn read_image_file(&self, path: &str, session_id: &str) -> Result<AttachmentData, ClientError> {
+        let res = self.call("read_image_file", json!({"path": path, "session_id": session_id})).await?;
+        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
+            code: -32000,
+            message: format!("read_image_file: bad result shape: {e}"),
+        })
+    }
+}
+
+fn list_previews_params(session_id: Option<&str>) -> Value {
+    match session_id {
+        Some(sid) => json!({"session_id": sid}),
+        None => Value::Null,
+    }
+}
+
+fn get_preview_params(id: &str, session_id: Option<&str>) -> Value {
+    match session_id {
+        Some(sid) => json!({"id": id, "session_id": sid}),
+        None => json!({"id": id}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_params_carry_the_session_id_the_daemon_routes_on() {
+        assert_eq!(list_previews_params(Some("s1")), json!({"session_id": "s1"}));
+        assert_eq!(list_previews_params(None), Value::Null);
+        assert_eq!(get_preview_params("p1", Some("s1")), json!({"id": "p1", "session_id": "s1"}));
+        assert_eq!(get_preview_params("p1", None), json!({"id": "p1"}));
     }
 }

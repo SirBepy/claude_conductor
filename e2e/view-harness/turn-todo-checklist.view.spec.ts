@@ -122,3 +122,4 @@ test("a step patches pending -> active -> done in place, then collapses on settl
   await expect(rows).toHaveCount(0);
   await expect(host.locator(".todo-checklist-collapsed .turn-chip")).toHaveText(/3 steps/);
 });
+// Reviewed 2026-10-23: the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.

@@ -29,19 +29,28 @@ pub async fn push_preview(
 }
 
 /// Preview history metadata (no html), newest (most-recently-pushed/replaced)
-/// first, for the history rail.
+/// first, for the history rail. `session_id` is the chat in view: the daemon
+/// narrows to it and, for a chat mirrored from a paired machine, reads that
+/// machine's store (the daemon's mirror owns that routing, not this command).
 #[tauri::command]
-pub async fn list_previews(state: State<'_, AppState>) -> Result<Vec<PreviewMeta>, String> {
+pub async fn list_previews(
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<PreviewMeta>, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-    let v = client.list_previews().await.map_err(|e| e.to_string())?;
+    let v = client.list_previews(session_id.as_deref()).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
 /// Full preview snapshot (html included) by id, for the iframe render.
 #[tauri::command]
-pub async fn get_preview(id: String, state: State<'_, AppState>) -> Result<PreviewSnapshot, String> {
+pub async fn get_preview(
+    id: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<PreviewSnapshot, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-    let v = client.get_preview(&id).await.map_err(|e| e.to_string())?;
+    let v = client.get_preview(&id, session_id.as_deref()).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 

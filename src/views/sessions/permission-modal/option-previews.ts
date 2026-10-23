@@ -29,23 +29,23 @@ export function previewLayout(q: Question): PreviewLayout | null {
 }
 
 // tabindex -1: the card's keyboard nav walks the option inputs, never frames.
-function frameHtml(fragment: string, cls: string): string {
-  return `<iframe class="${cls}" sandbox="" tabindex="-1" aria-hidden="true" srcdoc="${escapeHtml(previewDocument(inlineLocalImages(fragment)))}"></iframe>`;
+function frameHtml(fragment: string, cls: string, sessionId?: string): string {
+  return `<iframe class="${cls}" sandbox="" tabindex="-1" aria-hidden="true" srcdoc="${escapeHtml(previewDocument(inlineLocalImages(fragment, sessionId)))}"></iframe>`;
 }
 
 /** The picture on top of a tile row. Rows without a preview (the synthetic
  *  "None of the above") get nothing, and their CSS spans the full row. */
-export function tilePictureHtml(opt: QuestionOption): string {
-  return opt.preview ? `<span class="prompt-opt__pic">${frameHtml(opt.preview, "prompt-opt__frame")}</span>` : "";
+export function tilePictureHtml(opt: QuestionOption, sessionId?: string): string {
+  return opt.preview ? `<span class="prompt-opt__pic">${frameHtml(opt.preview, "prompt-opt__frame", sessionId)}</span>` : "";
 }
 
 /** The stage's picture is filled by sync(), not here, so a rebuild loads it
  *  once with the right option instead of loading a placeholder first. */
-export function stageHtml(q: Question, qi: number): string {
+export function stageHtml(q: Question, qi: number, sessionId?: string): string {
   const opts = previewedOptions(q);
   const strip = isMobileViewport()
     ? `<div class="prompt-stage__strip">${opts.map((o, i) =>
-        `<button type="button" class="prompt-stage__thumb" data-stage-i="${i}" aria-label="Preview ${escapeHtml(o.label)}" tabindex="-1">${frameHtml(o.preview!, "prompt-stage__thumb-frame")}</button>`,
+        `<button type="button" class="prompt-stage__thumb" data-stage-i="${i}" aria-label="Preview ${escapeHtml(o.label)}" tabindex="-1">${frameHtml(o.preview!, "prompt-stage__thumb-frame", sessionId)}</button>`,
       ).join("")}</div>`
     : "";
   return `
@@ -77,6 +77,9 @@ export interface OptionPreviewsDeps {
   questions: Question[];
   selections: Map<number, Selection>;
   choose: (qi: number, label: string) => void;
+  /** The chat the question belongs to: routes local-image reads to the machine
+   *  hosting it and keys the image cache. */
+  sessionId?: string;
 }
 
 export interface OptionPreviews {
@@ -85,7 +88,7 @@ export interface OptionPreviews {
 }
 
 export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
-  const { host, questions, selections, choose } = deps;
+  const { host, questions, selections, choose, sessionId } = deps;
   const viewing = new Map<number, string>();
   const lastPick = new Map<number, string>();
   let hover: { qi: number; label: string } | null = null;
@@ -116,7 +119,7 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
     const frame = stage.querySelector<HTMLIFrameElement>(".prompt-stage__frame");
     if (frame && frame.dataset.label !== label) {
       frame.dataset.label = label;
-      frame.srcdoc = previewDocument(inlineLocalImages(opts[idx]!.preview!));
+      frame.srcdoc = previewDocument(inlineLocalImages(opts[idx]!.preview!, sessionId));
     }
     const setText = (sel: string, text: string) => {
       const el = stage.querySelector<HTMLElement>(sel);
@@ -149,12 +152,12 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
       host.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${qi}"] .prompt-opt > input`).forEach((input) => {
         const opt = opts.find((o) => o.label === input.dataset.label);
         const frame = input.closest(".prompt-opt")?.querySelector<HTMLIFrameElement>(".prompt-opt__frame");
-        if (opt && frame) frame.srcdoc = previewDocument(inlineLocalImages(opt.preview!));
+        if (opt && frame) frame.srcdoc = previewDocument(inlineLocalImages(opt.preview!, sessionId));
       });
       host.querySelectorAll<HTMLIFrameElement>(`.prompt-stage[data-stage="${qi}"] .prompt-stage__thumb`).forEach((t) => {
         const opt = opts[Number(t.dataset.stageI)];
         const frame = t.querySelector<HTMLIFrameElement>(".prompt-stage__thumb-frame");
-        if (opt && frame) frame.srcdoc = previewDocument(inlineLocalImages(opt.preview!));
+        if (opt && frame) frame.srcdoc = previewDocument(inlineLocalImages(opt.preview!, sessionId));
       });
     });
     host.querySelectorAll<HTMLIFrameElement>(".prompt-stage__frame").forEach((f) => { delete f.dataset.label; });
@@ -162,7 +165,7 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
   }
 
   const fragments = questions.flatMap((q) => previewedOptions(q).map((o) => o.preview!));
-  void prefetchLocalImages(fragments).then((landed) => { if (landed) refreshFrames(); });
+  void prefetchLocalImages(fragments, sessionId).then((landed) => { if (landed) refreshFrames(); });
 
   function stageFor(qi: number): HTMLElement | null {
     return host.querySelector<HTMLElement>(`.prompt-stage[data-stage="${qi}"]`);

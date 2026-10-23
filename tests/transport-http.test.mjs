@@ -320,6 +320,27 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "get_preview", params: { id: "prev-1" } });
   });
 
+  it("routes list_previews by session id so a mirrored chat reaches its host", async () => {
+    await new HttpTransport().call("list_previews", { sessionId: "s1" });
+    expect(body()).toEqual({ method: "list_previews", params: { session_id: "s1" } });
+  });
+
+  it("routes get_preview by session id too", async () => {
+    await new HttpTransport().call("get_preview", { id: "prev-1", sessionId: "s1" });
+    expect(body()).toEqual({ method: "get_preview", params: { id: "prev-1", session_id: "s1" } });
+  });
+
+  it("forwards read_image_file with the chat's session id", async () => {
+    await new HttpTransport().call("read_image_file", { path: "C:/p/a.png", sessionId: "s1" });
+    expect(url()).toBe("/api/rpc");
+    expect(body()).toEqual({ method: "read_image_file", params: { path: "C:/p/a.png", session_id: "s1" } });
+  });
+
+  it("sends a null session id for a read_image_file with no chat", async () => {
+    await new HttpTransport().call("read_image_file", { path: "C:/p/a.png" });
+    expect(body()).toEqual({ method: "read_image_file", params: { path: "C:/p/a.png", session_id: null } });
+  });
+
   it("throws on a non-ok HTTP response", async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
     await expect(new HttpTransport().call("list_instances")).rejects.toThrow("403");

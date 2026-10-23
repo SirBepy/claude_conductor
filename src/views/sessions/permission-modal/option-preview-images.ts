@@ -5,8 +5,11 @@
 //
 // `read_attachment`, which chat attachments use, is confined to the
 // chat-attachments dir and so can never read a file Claude just made elsewhere.
-// `read_image_file` is desktop-only (not an RPC, see registry/attachments.rs),
-// so on the phone the invoke throws and the src is left as-is.
+// The question's session id rides along: for a chat hosted on a paired machine
+// the file is on THAT machine's disk, so the read is routed to it (and the host
+// only serves raster images under its project folders, see
+// registry/image_read.rs). It also keys the cache, since the same path names
+// different files on different machines.
 //
 // Raster types only: svg is excluded because it can carry script and external
 // references, and anything but an image extension is never read at all, so a
@@ -18,13 +21,17 @@ const IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const WIN_PATH = /^[A-Za-z]:[\\/]/;
 
-// Resolved data: URL per source path; null = read in flight. A failed read is
+// Resolved data: URL per (session, source path); null = read in flight. A failed read is
 // dropped again, so a later card naming the same path (often a file Claude was
 // still writing the first time) tries once more.
 const cache = new Map<string, string | null>();
 // The read behind each null cache entry, shared so a second card naming the
 // same path awaits it instead of seeing "already handled" and never refreshing.
 const inflight = new Map<string, Promise<boolean>>();
+
+function cacheKey(path: string, sessionId?: string): string {
+  return `${sessionId ?? ""}|${path}`;
+}
 
 export function clearLocalImageCache(): void {
   cache.clear();
@@ -57,10 +64,10 @@ function localPaths(fragment: string): string[] {
 
 /** Sync swap of every already-loaded local image; the fragment is returned
  *  untouched (same string) when there is nothing to swap. */
-export function inlineLocalImages(fragment: string): string {
+export function inlineLocalImages(fragment: string, sessionId?: string): string {
   return fragment.replace(IMG_SRC, (whole, pre: string, q: string, src: string) => {
     const p = localImagePath(src);
-    const data = p ? cache.get(p) : null;
+    const data = p ? cache.get(cacheKey(p, sessionId)) : null;
     return data ? `${pre}${q}${data}${q}` : whole;
   });
 }
@@ -69,36 +76,37 @@ export function inlineLocalImages(fragment: string): string {
  *  one image landed that this caller's frames do not show yet, so it knows to
  *  re-point them. A path another caller is already reading is awaited too:
  *  every caller refreshes its own frames, not only the one that started the read. */
-export async function prefetchLocalImages(fragments: string[]): Promise<boolean> {
+export async function prefetchLocalImages(fragments: string[], sessionId?: string): Promise<boolean> {
   const paths = [...new Set(fragments.flatMap(localPaths))];
   const pending: Promise<boolean>[] = [];
   for (const p of paths) {
-    const shared = inflight.get(p);
+    const key = cacheKey(p, sessionId);
+    const shared = inflight.get(key);
     if (shared) pending.push(shared);
-    else if (!cache.has(p)) pending.push(startRead(p));
+    else if (!cache.has(key)) pending.push(startRead(p, key, sessionId));
   }
   if (!pending.length) return false;
   return (await Promise.all(pending)).some(Boolean);
 }
 
-function startRead(p: string): Promise<boolean> {
-  cache.set(p, null);
+function startRead(p: string, key: string, sessionId?: string): Promise<boolean> {
+  cache.set(key, null);
   const read = (async () => {
     try {
-      const data = await invoke<{ mime: string; base64: string }>("read_image_file", { path: p });
+      const data = await invoke<{ mime: string; base64: string }>("read_image_file", { path: p, sessionId });
       if (!data?.mime?.startsWith("image/") || data.mime.includes("svg")) {
-        cache.delete(p);
+        cache.delete(key);
         return false;
       }
-      cache.set(p, `data:${data.mime};base64,${data.base64}`);
+      cache.set(key, `data:${data.mime};base64,${data.base64}`);
       return true;
     } catch {
-      cache.delete(p);
+      cache.delete(key);
       return false;
     } finally {
-      inflight.delete(p);
+      inflight.delete(key);
     }
   })();
-  inflight.set(p, read);
+  inflight.set(key, read);
   return read;
 }

@@ -702,10 +702,25 @@ export class HttpTransport implements Transport {
       // Read-only HTML preview store (ai_todo 138), phone-ready by design: same
       // allowlisted RPCs the desktop panel already calls, just routed through
       // /api/rpc instead of Tauri invoke.
-      case "list_previews":
-        return this.rpc<T>("list_previews", null);
-      case "get_preview":
-        return this.rpc<T>("get_preview", { id: args.id });
+      // session_id narrows to one chat and, for a chat mirrored from a paired
+      // machine, routes the read to the machine holding that chat's store.
+      case "list_previews": {
+        const sid = args?.sessionId ?? args?.session_id;
+        return this.rpc<T>("list_previews", sid ? { session_id: sid } : null);
+      }
+      case "get_preview": {
+        const sid = args.sessionId ?? args.session_id;
+        return this.rpc<T>("get_preview", sid ? { id: args.id, session_id: sid } : { id: args.id });
+      }
+      // One raster image off the daemon host's disk (ask_user_question option
+      // pictures, status-bar images). The daemon confines the path to project
+      // roots and raster extensions; session_id also routes a mirrored chat's
+      // read to its host.
+      case "read_image_file":
+        return this.rpc<T>("read_image_file", {
+          path: args.path,
+          session_id: args.sessionId ?? args.session_id ?? null,
+        });
       // Iframe render (todo 715): same-origin URL, no CSP change needed -
       // see remote_preview_render.rs.
       case "render_preview_doc":

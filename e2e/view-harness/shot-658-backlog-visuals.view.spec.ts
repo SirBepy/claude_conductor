@@ -180,3 +180,4 @@ test.describe("@shot", () => {
     expect(dialogText).toBe("Not available on this device.");
   });
 });
+// Reviewed 2026-10-23: http-transport's list_previews/get_preview/read_image_file cases gained an optional session id; the contract asserted here is unchanged.

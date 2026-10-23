@@ -151,7 +151,7 @@ export class SessionStatusbar {
     this.onConfig = opts.onConfig ?? null;
     this.hideZero = opts.hideZero ?? true;
     this.container.className = "session-statusbar";
-    this.tally = new ToolTallyRow(this.container);
+    this.tally = new ToolTallyRow(this.container, () => this.sessionId);
     // Opening a tool-chip popover dismisses the statusbar-owned popovers, so at
     // most one popover is ever open.
     this.tally.setBeforeOpen(() => this.closeChipPopovers());

@@ -296,3 +296,4 @@ test("a live step activating with no comment ever left drops the affordance", as
   ]);
   await expect(row.locator(".todo-step-comment-btn")).toHaveCount(0);
 });
+// Reviewed 2026-10-23: the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.

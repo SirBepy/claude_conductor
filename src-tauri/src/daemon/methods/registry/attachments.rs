@@ -10,7 +10,9 @@ pub fn register_attachments(router: &mut Router, _state: Arc<DaemonState>) {
     // phone render pasted chat-image attachments. The underlying fn canonicalizes
     // the path and rejects anything outside <app-data>/chat-attachments/, so this
     // is NOT an arbitrary-file-read primitive despite taking a path. (Distinct
-    // from `read_image_file`, deliberately NOT exposed: it reads arbitrary paths.)
+    // from the desktop `read_image_file` command, which reads arbitrary paths:
+    // the remote `read_image_file` RPC is `image_read.rs`, confined to project
+    // roots and raster extensions.)
     // `session_id` is optional and unused for local routing - this handler
     // always validates `path` against ITS OWN <app-data>/chat-attachments/
     // regardless - it exists purely so `machines/forward.rs::extract_session_id`
