@@ -159,11 +159,12 @@ pub(crate) fn gate_refusal(run: &str, tool: &str, input: &Value) -> Option<&'sta
 }
 
 /// The run's `--settings` body: one PreToolUse hook on Artifact and Read that
-/// asks the daemon's gate. A curl failure is a non-blocking hook error, so the
-/// call would then run unchecked; `PublishWatch` still fails such a run.
+/// asks the daemon's gate. It fails closed: the gate always answers 200, so an
+/// unreachable daemon or a non-2xx reply (`curl -f`) exits 2, which blocks the
+/// call instead of letting it run unchecked.
 fn gate_settings(run: &str, port: u16) -> Value {
     let command = format!(
-        "curl -s --connect-timeout 5 --max-time 15 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{port}/hooks/publish-gate?run={run}\""
+        "curl -sf --connect-timeout 5 --max-time 15 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{port}/hooks/publish-gate?run={run}\" || exit 2"
     );
     serde_json::json!({
         "hooks": {
@@ -325,7 +326,10 @@ pub async fn publish(
     let gate = GateGuard::open(Gate { file: file_str.clone(), url: existing_url.map(str::to_string) });
     let settings = dir.join(format!("{}.settings.json", gate.0));
     let settings_body = gate_settings(&gate.0, crate::daemon::claude_config::daemon_hook_port()).to_string();
-    crate::util::write_json_atomic(&settings, &settings_body).context("write publish settings")?;
+    if let Err(e) = crate::util::write_json_atomic(&settings, &settings_body) {
+        let _ = std::fs::remove_file(&file);
+        return Err(anyhow::Error::from(e).context("write publish settings"));
+    }
     let settings_str = settings.to_string_lossy().into_owned();
     let outcome = run(&run_dir, &spawn_env, &build_prompt(&file_str, title, existing_url), &file_str, &settings_str).await;
     drop(gate);
@@ -561,6 +565,8 @@ mod tests {
         assert!(gate_refusal(&run, "Read", &input).is_some(), "a finished run's id must be refused");
         let settings = gate_settings(&run, 27182).to_string();
         assert!(settings.contains("Artifact|Read") && settings.contains(&format!("publish-gate?run={run}")));
+        // Fails closed: curl -f turns a non-2xx into an error, and exit 2 blocks the tool.
+        assert!(settings.contains("curl -sf ") && settings.contains("|| exit 2"));
     }
 
     #[test]
