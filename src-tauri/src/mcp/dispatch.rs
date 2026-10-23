@@ -17,7 +17,7 @@ use super::server::{mcp_error, question_args, tool_error_result, tool_result, wa
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
-    TOOL_PERSON, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
+    TOOL_PERSON, TOOL_PR_PREVIEW, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
 };
 
@@ -318,6 +318,10 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             };
             Some(ctx.relay(route, forward_all_args(ctx.args, ctx.session_id), Some("invalid person call"), None))
         }
+        TOOL_PR_PREVIEW => Some(match ctx.args["title"].as_str().map(str::trim) {
+            Some(t) if !t.is_empty() => tool_result(ctx.id, "PR preview card shown in chat"),
+            _ => tool_error_result(ctx.id, "title is required"),
+        }),
         TOOL_SHOW_PREVIEW => {
             // Same endpoint terminal Claude curls. `session_id` scopes the
             // snapshot to this chat's rail; the source value is what tells the

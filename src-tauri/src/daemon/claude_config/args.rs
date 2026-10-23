@@ -107,6 +107,7 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question \
      mcp__cc_conductor__request_secret \
      mcp__cc_conductor__show_preview \
+     mcp__cc_conductor__pr_preview \
      mcp__cc_conductor__write_plan \
      mcp__cc_conductor__send_message \
      mcp__cc_conductor__report_turn_status \
@@ -223,6 +224,7 @@ mod tests {
             "mcp__cc_conductor__ask_user_question",
             "mcp__cc_conductor__request_secret",
             "mcp__cc_conductor__show_preview",
+            "mcp__cc_conductor__pr_preview",
             "mcp__cc_conductor__write_plan",
             "mcp__cc_conductor__send_message",
             "mcp__cc_conductor__report_turn_status",
@@ -233,7 +235,7 @@ mod tests {
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 10, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 11, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary
