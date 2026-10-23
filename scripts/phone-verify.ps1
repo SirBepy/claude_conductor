@@ -69,33 +69,8 @@ function Test-ProcAlive($procId) {
     return [bool](Get-Process -Id $procId -ErrorAction SilentlyContinue)
 }
 
-# Same identity-snapshot approach as live-verify.ps1 (todo 1047): records PID + creation time +
-# exe path at `up` so `down` can tell "still ours" from "PID got reused by something else".
-function Get-ProcIdentity([int]$procId) {
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-    if (-not $cim) { return $null }
-    return [PSCustomObject]@{
-        CreationTime = $cim.CreationDate.ToString('o')
-        ExePath      = $cim.ExecutablePath
-    }
-}
-
-function Test-ProcIdentity {
-    param(
-        [Parameter(Mandatory = $true)][int]$ProcId,
-        [string]$RecordedCreationTime,
-        [string]$RecordedExePath
-    )
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
-    if (-not $cim) { return 'gone' }
-    if (-not $RecordedCreationTime) { return 'unverifiable' }
-    $liveCreationTime = $cim.CreationDate.ToString('o')
-    if ($liveCreationTime -ne $RecordedCreationTime) { return 'mismatch' }
-    if ($RecordedExePath -and $cim.ExecutablePath -and ($RecordedExePath -ne $cim.ExecutablePath)) {
-        return 'mismatch'
-    }
-    return 'match'
-}
+# Same PID-reuse guard as live-verify.ps1: Get-ProcIdentity at `up`, Test-ProcIdentity at `down`.
+. (Join-Path $PSScriptRoot 'proc-identity.ps1')
 
 # Binds loopback port 0 to let the OS assign a free ephemeral port, then releases it
 # immediately. A small TOCTOU window exists (same as any "pick a free port" trick) but this rig

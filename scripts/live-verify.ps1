@@ -151,39 +151,9 @@ function Test-ProcAlive($procId) {
     return [bool](Get-Process -Id $procId -ErrorAction SilentlyContinue)
 }
 
-# Best-effort identity snapshot for a just-started process, saved alongside its PID so `down`
-# can tell "still ours" from "PID got reused" (todo 1047). Null fields are expected when the
-# CIM lookup races a process that exits immediately after Start-Process.
-function Get-ProcIdentity([int]$procId) {
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-    if (-not $cim) { return $null }
-    return [PSCustomObject]@{
-        CreationTime = $cim.CreationDate.ToString('o')
-        ExePath      = $cim.ExecutablePath
-    }
-}
-
-# Compares a live PID against the identity recorded at `up`. 'gone' = no such process anymore
-# (nothing to kill). 'unverifiable' = state predates this field (old state file) - never kill
-# blindly. 'mismatch' = PID is alive but is not the process we started (reused PID). 'match' =
-# safe to kill. Exe path is a secondary check: only enforced when BOTH sides have it, since a
-# locked-down live process can legitimately report a null ExecutablePath.
-function Test-ProcIdentity {
-    param(
-        [Parameter(Mandatory = $true)][int]$ProcId,
-        [string]$RecordedCreationTime,
-        [string]$RecordedExePath
-    )
-    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcId" -ErrorAction SilentlyContinue
-    if (-not $cim) { return 'gone' }
-    if (-not $RecordedCreationTime) { return 'unverifiable' }
-    $liveCreationTime = $cim.CreationDate.ToString('o')
-    if ($liveCreationTime -ne $RecordedCreationTime) { return 'mismatch' }
-    if ($RecordedExePath -and $cim.ExecutablePath -and ($RecordedExePath -ne $cim.ExecutablePath)) {
-        return 'mismatch'
-    }
-    return 'match'
-}
+# Get-ProcIdentity / Test-ProcIdentity: identity snapshot at `up`, PID-reuse check at `down`.
+# Null fields are expected when the CIM lookup races a process that exits right after Start-Process.
+. (Join-Path $PSScriptRoot 'proc-identity.ps1')
 
 # Single choke point for every teardown kill: resolves identity first, taskkills only on
 # 'match', and prints a clear reason on every other outcome instead of killing blindly.
@@ -191,7 +161,7 @@ function Stop-RigTrackedProcess {
     param(
         [string]$Role,
         [int]$ProcId,
-        [string]$RecordedCreationTime,
+        $RecordedCreationTime,
         [string]$RecordedExePath
     )
     if (-not $ProcId) { return }
