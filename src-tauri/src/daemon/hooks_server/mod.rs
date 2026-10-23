@@ -31,6 +31,7 @@ mod permission;
 mod plan;
 mod preview;
 pub(crate) mod preview_render;
+mod publish_gate;
 mod question;
 mod relay;
 mod schedule;
@@ -203,6 +204,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/browser/call", post(browser::on_browser_call))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))
+        .route("/hooks/publish-gate", post(publish_gate::on_publish_gate))
         .route("/hooks/subagent-start", post(subagents::on_subagent_start))
         .route("/hooks/subagent-stop", post(subagents::on_subagent_stop))
         .layer(axum::middleware::from_fn(origin_guard::guard))

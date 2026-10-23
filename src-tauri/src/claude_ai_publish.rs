@@ -43,9 +43,9 @@ const EFFORT: &str = "low";
 /// `Read` because the tool's own rules make Claude read a file it did not
 /// write before publishing it. Not path-scoped: whether this CLI accepts
 /// `Read(<dir>/**)` is unverified, and a rule that never matches would prompt
-/// and so be denied inside `-p`. `PublishWatch` is the guard instead, and it
-/// reads stdout after the CLI already ran the call: it cannot stop another
-/// file's upload, only fail the run and never store that link.
+/// and so be denied inside `-p`. Scoping happens in the run's own PreToolUse
+/// hook instead (`gate_refusal`), which refuses a foreign path before the call
+/// runs; `PublishWatch` re-checks stdout after the fact.
 const ALLOWED_TOOLS: &str = "Artifact Read";
 /// `--allowedTools` only pre-approves, and no permission mode is set, so
 /// anything not denied here would still run silently. Skills are denied too:
@@ -88,15 +88,93 @@ the file, and make no other tool calls. Reply with only the artifact URL."
     )
 }
 
-fn cli_args(prompt: &str) -> Vec<String> {
+fn cli_args(prompt: &str, settings: &str) -> Vec<String> {
     [
         "-p", prompt, "--model", MODEL, "--effort", EFFORT,
         "--allowedTools", ALLOWED_TOOLS, "--disallowedTools", DENIED_TOOLS,
+        "--settings", settings,
         "--strict-mcp-config", "--output-format", "stream-json", "--verbose",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect()
+}
+
+/// What one publish run may touch: the temp file Conductor wrote, and on a
+/// republish the preview's own existing page.
+#[derive(Clone)]
+struct Gate {
+    file: String,
+    url: Option<String>,
+}
+
+impl Gate {
+    fn refusal(&self, tool: &str, input: &Value) -> Option<&'static str> {
+        if tool != "Artifact" && tool != "Read" {
+            return None;
+        }
+        match input["file_path"].as_str() {
+            Some(f) if !same_path(f, &self.file) => return Some("only the page Conductor wrote may be read or published"),
+            None if tool == "Read" || input["action"] == "publish" => return Some("the call named no file"),
+            _ => {}
+        }
+        if let Some(u) = input["url"].as_str() {
+            if self.url.as_deref() != Some(u) {
+                return Some("only this preview's own claude.ai page may be read or updated");
+            }
+        }
+        None
+    }
+}
+
+/// In-flight publish runs by run id, read by the `/hooks/publish-gate`
+/// endpoint the run's PreToolUse hook curls.
+static GATES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Gate>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Holds a run's gate open for exactly the run's lifetime.
+struct GateGuard(String);
+
+impl GateGuard {
+    fn open(gate: Gate) -> Self {
+        let run = uuid::Uuid::new_v4().to_string();
+        GATES.lock().unwrap().insert(run.clone(), gate);
+        Self(run)
+    }
+}
+
+impl Drop for GateGuard {
+    fn drop(&mut self) {
+        GATES.lock().unwrap().remove(&self.0);
+    }
+}
+
+/// Why the publish gate refuses this tool call before it runs, or `None` to
+/// let it through. An unknown run id is refused: no live publish owns it.
+pub(crate) fn gate_refusal(run: &str, tool: &str, input: &Value) -> Option<&'static str> {
+    match GATES.lock().unwrap().get(run) {
+        Some(gate) => gate.refusal(tool, input),
+        None => Some("no publish run is in flight under this id"),
+    }
+}
+
+/// The run's `--settings` body: one PreToolUse hook on Artifact and Read that
+/// asks the daemon's gate. A curl failure is a non-blocking hook error, so the
+/// call would then run unchecked; `PublishWatch` still fails such a run.
+fn gate_settings(run: &str, port: u16) -> Value {
+    let command = format!(
+        "curl -s --connect-timeout 5 --max-time 15 -X POST -H \"Content-Type: application/json\" --data-binary @- \"http://127.0.0.1:{port}/hooks/publish-gate?run={run}\""
+    );
+    serde_json::json!({
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Artifact|Read",
+                    "hooks": [ { "type": "command", "command": command, "timeout": 20 } ]
+                }
+            ]
+        }
+    })
 }
 
 /// The first claude.ai artifact URL in `text`. The tool's result reads
@@ -244,8 +322,15 @@ pub async fn publish(
     let file = dir.join(format!("{}.html", uuid::Uuid::new_v4()));
     std::fs::write(&file, html).context("write page")?;
     let file_str = file.to_string_lossy().into_owned();
-    let outcome = run(&run_dir, &spawn_env, &build_prompt(&file_str, title, existing_url), &file_str).await;
+    let gate = GateGuard::open(Gate { file: file_str.clone(), url: existing_url.map(str::to_string) });
+    let settings = dir.join(format!("{}.settings.json", gate.0));
+    let settings_body = gate_settings(&gate.0, crate::daemon::claude_config::daemon_hook_port()).to_string();
+    crate::util::write_json_atomic(&settings, &settings_body).context("write publish settings")?;
+    let settings_str = settings.to_string_lossy().into_owned();
+    let outcome = run(&run_dir, &spawn_env, &build_prompt(&file_str, title, existing_url), &file_str, &settings_str).await;
+    drop(gate);
     let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(&settings);
     let url = outcome?;
     let account_name = if account.label.trim().is_empty() { account.email.clone() } else { account.label.clone() };
     Ok(Published { url, account: account_name })
@@ -256,9 +341,10 @@ async fn run(
     spawn_env: &crate::accounts::env::SpawnEnv,
     prompt: &str,
     expected_file: &str,
+    settings: &str,
 ) -> Result<String> {
     let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
-    cmd.args(cli_args(prompt));
+    cmd.args(cli_args(prompt, settings));
     cmd.current_dir(run_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -450,8 +536,37 @@ mod tests {
     }
 
     #[test]
+    fn the_gate_refuses_a_foreign_file_or_page_before_the_call_runs() {
+        let gate = Gate { file: "C:\\d\\a.html".into(), url: None };
+        let input = |v: Value| v;
+        assert_eq!(gate.refusal("Artifact", &input(serde_json::json!({"action":"publish","file_path":"C:/d/a.html"}))), None);
+        assert_eq!(gate.refusal("Read", &input(serde_json::json!({"file_path":"c:\\D\\a.html"}))), None);
+        assert!(gate.refusal("Artifact", &input(serde_json::json!({"action":"publish","file_path":"C:\\Users\\x\\.ssh\\id_rsa"}))).is_some());
+        assert!(gate.refusal("Read", &input(serde_json::json!({"file_path":"C:\\Users\\x\\.ssh\\id_rsa"}))).is_some());
+        assert!(gate.refusal("Artifact", &input(serde_json::json!({"action":"publish"}))).is_some());
+        assert!(gate.refusal("Artifact", &input(serde_json::json!({"action":"read","url":"https://claude.ai/artifact/OTHER"}))).is_some());
+
+        let again = Gate { file: "C:\\d\\a.html".into(), url: Some("https://claude.ai/artifact/AB".into()) };
+        assert_eq!(again.refusal("Artifact", &input(serde_json::json!({"action":"read","url":"https://claude.ai/artifact/AB"}))), None);
+        assert!(again.refusal("Artifact", &input(serde_json::json!({"action":"publish","url":"https://claude.ai/artifact/CD","file_path":"C:/d/a.html"}))).is_some());
+    }
+
+    #[test]
+    fn the_gate_lives_exactly_as_long_as_its_run() {
+        let input = serde_json::json!({"file_path":"C:/d/z.html"});
+        let guard = GateGuard::open(Gate { file: "C:/d/z.html".into(), url: None });
+        let run = guard.0.clone();
+        assert_eq!(gate_refusal(&run, "Read", &input), None);
+        drop(guard);
+        assert!(gate_refusal(&run, "Read", &input).is_some(), "a finished run's id must be refused");
+        let settings = gate_settings(&run, 27182).to_string();
+        assert!(settings.contains("Artifact|Read") && settings.contains(&format!("publish-gate?run={run}")));
+    }
+
+    #[test]
     fn only_the_artifact_tool_and_read_are_pre_approved() {
-        let args = cli_args("p");
+        let args = cli_args("p", "s.json");
+        assert_eq!(args[args.iter().position(|a| a == "--settings").unwrap() + 1], "s.json");
         let allowed = &args[args.iter().position(|a| a == "--allowedTools").unwrap() + 1];
         assert_eq!(allowed, "Artifact Read");
         let denied = &args[args.iter().position(|a| a == "--disallowedTools").unwrap() + 1];
