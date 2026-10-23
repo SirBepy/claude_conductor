@@ -97,14 +97,22 @@ pub fn is_browser_tool(name: &str) -> bool {
     name.starts_with("browser_") && tool_schemas().iter().any(|t| t["name"] == name)
 }
 
+/// `session_id`'s browser, pinning Settings' starting one on first use.
+fn pinned_target(targets: &mut HashMap<String, Target>, session_id: &str, settings: &Settings) -> Target {
+    targets.entry(session_id.to_string()).or_insert_with(|| Target::from_settings(settings)).clone()
+}
+
 pub struct ClaudeBrowser {
     root: PathBuf,
     chrome: Chrome,
     install: Mutex<()>,
     sessions: Mutex<HashMap<String, Arc<Mutex<Option<PlaywrightClient>>>>>,
-    /// Chats that asked for a browser other than Settings' starting one. Kept
-    /// apart from `sessions`, whose entries the idle sweep drops: a chat that
-    /// goes quiet for ten minutes must not slide back to the default.
+    /// Each chat's browser: its own `browser_target` choice, else Settings'
+    /// starting one as read at its first browser call. Pinned so a Settings
+    /// change mid-chat cannot move a chat that is already browsing from
+    /// Claude's profile onto Joe's real browser (or back) between two calls.
+    /// Kept apart from `sessions`, whose entries the idle sweep drops: a chat
+    /// that goes quiet for ten minutes must not slide back to the default.
     targets: Mutex<HashMap<String, Target>>,
 }
 
@@ -169,10 +177,7 @@ impl ClaudeBrowser {
         if name == TARGET_TOOL {
             return self.choose_target(session_id, &args, settings).await;
         }
-        let target = match self.targets.lock().await.get(session_id) {
-            Some(own_choice) => own_choice.clone(),
-            None => Target::from_settings(settings),
-        };
+        let target = pinned_target(&mut *self.targets.lock().await, session_id, settings);
         let runtime_dir = self.root.join("runtime");
         {
             let _guard = self.install.lock().await;
@@ -244,6 +249,18 @@ impl ClaudeBrowser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_flip_mid_chat_never_moves_a_chat_that_already_browsed() {
+        let mut own = Settings::default();
+        own.extra.insert("claudeBrowserMode".into(), json!("own"));
+        let mut mine = Settings::default();
+        mine.extra.insert("claudeBrowserMode".into(), json!("mine"));
+        let mut targets = HashMap::new();
+        assert_eq!(pinned_target(&mut targets, "chat", &own), Target::Own);
+        assert_eq!(pinned_target(&mut targets, "chat", &mine), Target::Own, "pinned at its first call");
+        assert!(matches!(pinned_target(&mut targets, "new-chat", &mine), Target::Mine(_)), "a new chat starts on the new setting");
+    }
 
     #[test]
     fn the_unsafe_code_tool_is_never_offered() {
