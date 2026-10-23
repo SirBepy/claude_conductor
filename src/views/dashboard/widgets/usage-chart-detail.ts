@@ -23,6 +23,8 @@ export interface GraphCardOpts {
   pageLabel: string;
   legends: string[];
   maxItems: number | null;
+  /** Pixel width the chart is drawn at; omitted, it scales from 420. */
+  chartWidth?: number;
 }
 
 // Keyed by projectListId, per selected account (a listId embeds startMs, so
@@ -43,7 +45,7 @@ export function buildGraphCard(opts: GraphCardOpts, accountId: string | null): s
 
   const content = kind === "chart"
     ? `<div class="chart-legend">${legends.join("")}</div>
-       ${buildChart(history, startMs, endMs, lineKey, svgId)}
+       ${buildChart(history, startMs, endMs, lineKey, svgId, opts.chartWidth)}
        ${buildWindowProjectsHTML(startMs, endMs, history, pctKey, maxItems, projectListId)}`
     : buildProjectBarsView(startMs, endMs, history, pctKey, maxItems, projectListId);
 

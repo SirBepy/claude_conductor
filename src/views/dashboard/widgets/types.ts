@@ -22,6 +22,9 @@ export interface Widget {
    * without opening it. */
   icon: string;
   scope: WidgetScope;
+  /** Takes half the width: adjacent half widgets share a two-column block
+   * balanced by height (dashboard.ts `rebalanceWidgets`); a lone one spans. */
+  half?: boolean;
   /** Documents what live-data events should trigger a re-render; dashboard.ts
    * currently just re-renders every mounted widget on history/token-history
    * updates (matching the pre-milestone dashboard's full-rebuild behaviour),

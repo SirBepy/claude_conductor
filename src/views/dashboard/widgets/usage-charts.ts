@@ -144,7 +144,9 @@ function mountUsageWidget(
       return;
     }
     const win = metric === "session" ? sessionWindow(history) : weeklyWindow(history);
-    const config: GraphCardOpts = { ...win, metric, kind, history, maxItems: 5 };
+    // 0 while the view is hidden; the chart then scales from its default width.
+    const chartWidth = root.clientWidth || undefined;
+    const config: GraphCardOpts = { ...win, metric, kind, history, maxItems: 5, chartWidth };
     root.innerHTML = buildGraphCard(config, ctx.accountId);
     setupLegendToggles(root, () => void draw());
     applyLineVisibility(root);
@@ -164,6 +166,7 @@ export const sessionChartWidget: Widget = {
   title: "Session usage",
   icon: "ph-chart-line",
   scope: "account",
+  half: true,
   dataDeps: ["usageHistory", "tokenHistory"],
   render: (root, ctx) => mountUsageWidget("session", "chart", root, ctx),
 };
@@ -173,6 +176,7 @@ export const sessionBarsWidget: Widget = {
   title: "Session by project",
   icon: "ph-chart-bar",
   scope: "account",
+  half: true,
   dataDeps: ["usageHistory", "tokenHistory"],
   render: (root, ctx) => mountUsageWidget("session", "bars", root, ctx),
 };
@@ -182,6 +186,7 @@ export const weeklyChartWidget: Widget = {
   title: "Weekly session usage",
   icon: "ph-chart-line-up",
   scope: "account",
+  half: true,
   dataDeps: ["usageHistory", "tokenHistory"],
   render: (root, ctx) => mountUsageWidget("weekly", "chart", root, ctx),
 };
@@ -191,6 +196,7 @@ export const weeklyBarsWidget: Widget = {
   title: "Weekly by project",
   icon: "ph-chart-bar-horizontal",
   scope: "account",
+  half: true,
   dataDeps: ["usageHistory", "tokenHistory"],
   render: (root, ctx) => mountUsageWidget("weekly", "bars", root, ctx),
 };

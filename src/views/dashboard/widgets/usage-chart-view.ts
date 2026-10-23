@@ -103,13 +103,18 @@ export function buildWindowProjectsHTML(
 
 // ── Chart SVG ─────────────────────────────────────────────────────────────
 
+const DEFAULT_CHART_W = 420;
+
 export function buildChart(
   history: UsageRecord[],
   startMs: number, endMs: number,
   lineKey: "s" | "w",
   svgId: string,
+  width = DEFAULT_CHART_W,
 ): string {
-  const W = 420, H = 172;
+  // The viewBox matches the drawn width so axis text stays at its pixel size
+  // in a half-width column instead of scaling down with the SVG.
+  const W = Math.round(width), H = 172;
   const ML = 30, MR = 8, MT = 8, MB = 42;
   const PW = W - ML - MR;
   const PH = H - MT - MB;
@@ -204,7 +209,7 @@ export function buildChart(
 
   return (
     `<svg id="${svgId}" viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible"` +
-    ` data-hover-pts="${hoverPts}" data-min-t="${minT}" data-max-t="${maxT}" data-window-type="${windowType}" data-line-color="${lineColor}">` +
+    ` data-w="${W}" data-hover-pts="${hoverPts}" data-min-t="${minT}" data-max-t="${maxT}" data-window-type="${windowType}" data-line-color="${lineColor}">` +
     gridLines +
     `<line x1="${ML}" x2="${ML}" y1="${MT}" y2="${MT + PH}" stroke="var(--color-border)" stroke-width="1"/>` +
     tickItems.join("") +
@@ -275,12 +280,13 @@ function formatHoverLabel(t: number, windowType: string): string {
 }
 
 export function setupChartHover(root: ParentNode): void {
-  const W = 420, H = 172;
+  const H = 172;
   const ML = 30, MR = 8, MT = 8, MB = 42;
-  const PW = W - ML - MR;
   const PH = H - MT - MB;
 
   root.querySelectorAll<SVGElement>("svg[data-hover-pts]").forEach((svg) => {
+    const W = Number(svg.dataset["w"]) || DEFAULT_CHART_W;
+    const PW = W - ML - MR;
     const w = wired(svg as unknown as Element);
     if (w._hoverWired) return;
     w._hoverWired = true;
