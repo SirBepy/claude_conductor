@@ -49,13 +49,14 @@ export interface BuildListOpts {
   sortable?: boolean;
   defaultSort?: string;
   id?: string;
-  style?: string;
+  /** Extra class on the wrapper, for CSS that needs to find one list. */
+  className?: string;
 }
 
 export function buildProjectListHTML(opts: BuildListOpts): string {
   const {
     title, projects, maxItems, showTime = true, showPct = false,
-    sortable = false, defaultSort = "lastActiveAt", id, style,
+    sortable = false, defaultSort = "lastActiveAt", id, className,
   } = opts;
   if (!projects || !projects.length) return "";
 
@@ -115,8 +116,8 @@ export function buildProjectListHTML(opts: BuildListOpts): string {
        </div>`
     : "";
 
-  return `<div class="today-section" ${style ? `style="${style}"` : ""}>
-    ${title ? `<div style="font-size: var(--fs-title);font-weight:700;margin-bottom:10px">${title}</div>` : ""}
+  return `<div class="today-section${className ? ` ${className}` : ""}">
+    ${title ? `<div class="project-list-title">${title}</div>` : ""}
     <table class="stats-table">
       ${headerRow}
       <tbody>${visibleRows}</tbody>

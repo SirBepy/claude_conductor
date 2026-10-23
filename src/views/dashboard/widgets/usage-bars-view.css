@@ -9,7 +9,7 @@
   margin-bottom: 6px;
 }
 .project-bar-label {
-  font-size: var(--fs-micro);
+  font-size: 12px;
   color: var(--color-text);
   min-width: 80px;
   max-width: 100px;
@@ -33,21 +33,23 @@
   min-width: 2px;
 }
 .project-bar-value {
-  font-size: var(--fs-micro);
+  font-size: 12px;
   font-family: "Fira Code", monospace;
   color: var(--color-text-muted);
   min-width: 32px;
   flex-shrink: 0;
 }
 .project-bars-total {
-  font-size: var(--fs-micro);
+  font-size: 12px;
   color: var(--color-text-muted);
   text-align: right;
-  margin-top: 4px;
+  border-top: var(--dv-line, 1px solid var(--color-border));
+  margin-top: 12px;
+  padding-top: 10px;
   font-family: "Fira Code", monospace;
 }
 .project-bars-more {
-  font-size: var(--fs-micro);
+  font-size: 12px;
   color: var(--color-primary);
   cursor: pointer;
   text-align: center;

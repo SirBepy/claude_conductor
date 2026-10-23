@@ -4,22 +4,26 @@
 
 .skill-usage-body {
   display: flex;
-  gap: 24px;
-  align-items: flex-start;
+  gap: 0;
+  align-items: stretch;
   flex-wrap: wrap;
 }
-.pie-wrap {
+/* .pie-wrap is also styled by session-detail, hence the .skill-usage-body scope. */
+.skill-usage-body .pie-wrap {
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: center;
+  justify-content: center;
+  padding-right: var(--dv-pad-x, 28px);
+  border-right: var(--dv-line, 1px solid var(--color-border));
 }
-.pie-empty { opacity: 0.6; font-size: var(--fs-micro); }
+.pie-empty { opacity: 0.6; font-size: 12px; }
 .pie-legend {
   list-style: none;
   padding: 0;
   margin: 0;
-  font-size: var(--fs-micro);
+  font-size: 12px;
   max-width: 220px;
 }
 .pie-legend li {
@@ -39,22 +43,28 @@
 
 .skill-usage-table {
   flex: 1;
-  min-width: 360px;
+  min-width: 0;
   border-collapse: collapse;
-  font-size: var(--fs-micro);
+  font-size: 13px;
 }
 .skill-usage-table th,
 .skill-usage-table td {
-  padding: 6px 10px;
+  padding: 9px 8px 9px 0;
   text-align: left;
-  border-bottom: 1px solid #1f1f1f;
+  border-bottom: var(--dv-line, 1px solid var(--color-border));
 }
 .skill-usage-table th {
-  opacity: 0.7;
-  font-weight: normal;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dv-meta, var(--color-text-muted));
+  padding-top: 0;
+  padding-bottom: 10px;
   cursor: pointer;
   user-select: none;
 }
-.skill-usage-table th.sort-active { opacity: 1; color: #5b8def; }
+.skill-usage-table th.sort-active { color: var(--color-primary); }
+.skill-usage-table th:first-child,
+.skill-usage-table td:first-child { padding-left: var(--dv-pad-x, 28px); }
+.skill-usage-table tbody tr:last-child td { border-bottom: 0; }
 .skill-usage-table tbody tr { cursor: pointer; }
-.skill-usage-table tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
+.skill-usage-table tbody tr:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
