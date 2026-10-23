@@ -51,7 +51,7 @@ describe("chat groups and quick actions", () => {
   });
 
   it("never offers /close, with or without arguments, but keeps similarly named commands", () => {
-    expect(offerableCommands(["/close", "/pickup", "/close now", "/closeout"])).toEqual(["/pickup", "/closeout"]);
+    expect(offerableCommands(["/close", "/pickup", "/close now", "/closeout", "/Close"])).toEqual(["/pickup", "/closeout"]);
   });
 });
 

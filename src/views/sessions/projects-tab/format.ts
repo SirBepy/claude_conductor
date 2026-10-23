@@ -156,5 +156,5 @@ export function chatGroupOf(status: "question" | "working" | "your_turn" | "wait
 
 /** Slash chips, minus the ones a dashboard must never offer: closing a chat is not a quick action. */
 export function offerableCommands(cmds: string[]): string[] {
-  return cmds.filter((c) => !/^\/close(\s|$)/.test(c));
+  return cmds.filter((c) => !/^\/close(\s|$)/i.test(c));
 }
