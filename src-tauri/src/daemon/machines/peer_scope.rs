@@ -27,6 +27,11 @@ const SEE_ONLY: &[&str] = &[
     "transcript_stats",
     "read_attachment",
     "list_projects",
+    // The new-chat picker's project list and its row icons: a view-only peer
+    // still starts chats here, so it must be able to choose a project.
+    "new_session_bundle",
+    "get_project_icon",
+    "get_project_tech",
     "get_recent_branches",
     "get_range_files",
     "get_file_diff",
@@ -179,7 +184,10 @@ mod tests {
     async fn a_view_only_peer_still_sees_and_starts_chats() {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with_peer(dir.path(), true);
-        for method in ["list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_wrap_up_on_done"] {
+        for method in [
+            "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_wrap_up_on_done",
+            "new_session_bundle", "get_project_icon", "get_project_tech",
+        ] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");
         }
     }

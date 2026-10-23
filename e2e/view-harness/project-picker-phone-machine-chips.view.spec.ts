@@ -10,6 +10,8 @@ import { mountViewPhone, capture } from "./harness";
 // them is lifted, so the phone's new-chat picker must grow the same machine
 // chip row desktop already had (H4) - self + one chip per peer - and it must
 // fit the 390px-wide phone sheet without spilling past the viewport edge.
+// Updated 2026-10-23 for the {groups, stats} list_machine_projects shape: the
+// peer chip's rows now carry the peer's todo badge (asserted in test 2).
 // The machineId-selection flow itself (picking the peer chip, then one of its
 // projects, resolves with that peer's id) is pinned in
 // tests/project-picker-machine-flow.test.mjs - project-picker.ts exposes no
@@ -39,7 +41,12 @@ function proj(id: string, name: string, path: string) {
 }
 
 const LOCAL_PROJECTS = [proj("proj-a", "countoff", "C:/Projects/countoff")];
-const PEER_PROJECTS = [{ id: "peer-proj-1", path: "C:/PeerProjects/widget", name: "widget" }];
+// list_machine_projects now answers {groups, stats} (the picker's own two
+// pieces), not a bare ProjectConfig[].
+const PEER_PROJECTS = {
+  groups: [proj("peer-proj-1", "widget", "C:/PeerProjects/widget")],
+  stats: { "C:/PeerProjects/widget": { mtime: 0, todoCount: 2 } },
+};
 
 const SELF_LABEL = "Joe-PC";
 const PEER_LABEL = "Mac Mini";
@@ -103,6 +110,8 @@ test.describe("view-harness / phone project picker machine chips (G8)", () => {
 
     await expect(page.locator(".machine-field-chips .machine-chip", { hasText: PEER_LABEL })).toHaveClass(/sel/);
     await expect(page.locator(".project-picker-row")).toHaveText(/widget/);
+    // The peer's own stats ride along with its list.
+    await expect(page.locator(".project-picker-row .project-picker-todo-badge")).toHaveText("2");
   });
 
   test("older daemon (list_machines unmocked/failing): picker still opens, no chip row, no crash", async ({ page }) => {

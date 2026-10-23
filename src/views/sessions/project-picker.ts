@@ -26,6 +26,7 @@ import {
 import {
   createMachineProjectsState,
   fetchMachineProjects,
+  machineProjectStat,
 } from "./components/machine-projects";
 import {
   type FavoritesRailState,
@@ -136,6 +137,13 @@ export function openProjectPickerModal(
 
     const currentProjects = (): ProjectGroup[] | undefined =>
       machineField.machineId === null ? localProjects : remoteProjectsState.projects;
+
+    // A peer's rows read the stats that came with its list; the local stat
+    // cache is keyed by path alone, so a peer's path must never reach it.
+    const statFor = (p: ProjectGroup) =>
+      machineField.machineId === null
+        ? cachedProjectStat(p.path)
+        : machineProjectStat(remoteProjectsState, machineField.machineId, p.path);
 
     const pickMachine = (machineId: string | null): void => {
       if (machineId === null) {
@@ -282,15 +290,15 @@ export function openProjectPickerModal(
         rows = rows.slice().sort((a, b) => a.name.localeCompare(b.name));
       } else if (sort === "todos") {
         rows = rows.slice().sort((a, b) => {
-          const ac = cachedProjectStat(a.path)?.todoCount ?? 0;
-          const bc = cachedProjectStat(b.path)?.todoCount ?? 0;
+          const ac = statFor(a)?.todoCount ?? 0;
+          const bc = statFor(b)?.todoCount ?? 0;
           return bc - ac; // descending: most todos first
         });
       } else {
         // "recent": items with no cached mtime yet (or genuinely 0) sort last.
         rows = rows.slice().sort((a, b) => {
-          const am = cachedProjectStat(a.path)?.mtime ?? 0;
-          const bm = cachedProjectStat(b.path)?.mtime ?? 0;
+          const am = statFor(a)?.mtime ?? 0;
+          const bm = statFor(b)?.mtime ?? 0;
           return bm - am;
         });
       }
@@ -315,9 +323,10 @@ export function openProjectPickerModal(
     const selectProjectRow = async (p: ProjectGroup): Promise<void> => {
       if (p.path_exists === false) return;
       if (machineField.machineId !== null) {
-        // A peer machine's project has no worktree/CLAUDE.md-scope data
-        // (list_machine_projects returns a bare ProjectConfig) - resolve
-        // directly instead of opening the location sub-modal.
+        // The location step reads this machine's worktrees and CLAUDE.md
+        // scopes and can create worktrees here, none of which is routed to a
+        // peer yet - resolve directly instead of opening it. For the same
+        // reason a peer row shows no worktree badge: it would lead nowhere.
         finish({ path: p.path, name: p.name, machineId: machineField.machineId });
         return;
       }
@@ -500,7 +509,7 @@ export function openProjectPickerModal(
                 }
                 if (rows.length === 0) return renderNoMatches(filter, addProjectState, addProjectDeps);
                 return rows.map((p, i) => {
-                  const todoCount = cachedProjectStat(p.path)?.todoCount ?? 0;
+                  const todoCount = statFor(p)?.todoCount ?? 0;
                   const missing = p.path_exists === false;
                   // Capped at 10 rows' worth of delay - past that, further
                   // rows are mostly below the fold anyway, and an unbounded
@@ -539,7 +548,7 @@ export function openProjectPickerModal(
                           <span class="project-picker-path">${isNoProjectPath(p.path) ? "Not tied to any project" : p.path}</span>
                           ${missing ? html`<span class="project-picker-missing-msg">This folder doesn't exist</span>` : ""}
                         </div>
-                        ${p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}
+                        ${machineField.machineId === null && p.worktrees && p.worktrees.length > 0 ? html`<span class="project-picker-wt-badge"><i class="ph ph-git-branch"></i> ${p.worktrees.length}</span>` : ""}
                         ${showTodos && todoCount > 0 ? html`<span class="project-picker-todo-badge">${todoCount}</span>` : ""}
                       </li>
                     `;

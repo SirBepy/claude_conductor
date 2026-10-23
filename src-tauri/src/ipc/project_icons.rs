@@ -4,7 +4,9 @@
 //! commands fail soft (None) so a missing/odd project never breaks the list.
 
 use crate::ipc::chat::attachments::AttachmentData;
+use crate::state::AppState;
 use std::path::{Path, PathBuf};
+use tauri::State;
 
 /// Max icon file size we'll inline as base64 (larger = skip, keeps the payload
 /// sane). Matches server_supervisor.
@@ -119,12 +121,45 @@ fn detect_tech_at(root: &Path) -> Option<&'static str> {
 /// subfolder with no markers of its own inherits the repo's stack instead of
 /// reading as undetected. Cheap (a handful of file-existence checks per
 /// level); the frontend caches per path.
-#[tauri::command]
-pub async fn get_project_tech(root: String) -> Option<String> {
+pub(crate) async fn get_project_tech_local(root: String) -> Option<String> {
     ancestors_upto_repo_root(Path::new(&root), 8)
         .iter()
         .find_map(|dir| detect_tech_at(dir))
         .map(|s| s.to_string())
+}
+
+/// `machine_id` naming a paired peer means `root` is a path on THAT machine's
+/// disk, so reading it here would answer from the wrong filesystem (or none).
+/// Null and empty both mean this machine.
+fn peer_machine(machine_id: Option<String>) -> Option<String> {
+    machine_id.filter(|m| !m.is_empty())
+}
+
+/// Asks the daemon to read `root` on `machine_id` (its `get_project_icon` /
+/// `get_project_tech` RPCs forward by `machine_id`). Fails soft to None like
+/// the local read: a peer going offline mid-render must leave the generic
+/// folder glyph, not break the list.
+async fn read_on_peer<T: serde::de::DeserializeOwned>(
+    state: &AppState,
+    method: &str,
+    root: &str,
+    machine_id: &str,
+) -> Option<T> {
+    let client = state.client().await?;
+    let reply = client.call(method, serde_json::json!({ "root": root, "machine_id": machine_id })).await.ok()?;
+    serde_json::from_value::<Option<T>>(reply).ok().flatten()
+}
+
+#[tauri::command]
+pub async fn get_project_tech(
+    root: String,
+    machine_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, ()> {
+    match peer_machine(machine_id) {
+        Some(machine) => Ok(read_on_peer(&state, "get_project_tech", &root, &machine).await),
+        None => Ok(get_project_tech_local(root).await),
+    }
 }
 
 /// ICON_CANDIDATES lookup against a single dir. Shared by the direct
@@ -168,8 +203,7 @@ fn find_icon_in_workspace_containers(dir: &Path) -> Option<AttachmentData> {
 /// checked before any ancestor, then falls back to a one-level workspace-
 /// container scan. Runs on the blocking pool (file IO) so it never stalls
 /// the webview, mirroring `read_image_file`.
-#[tauri::command]
-pub async fn get_project_icon(root: String) -> Option<AttachmentData> {
+pub(crate) async fn get_project_icon_local(root: String) -> Option<AttachmentData> {
     tauri::async_runtime::spawn_blocking(move || {
         for dir in ancestors_upto_repo_root(Path::new(&root), 8) {
             if let Some(icon) = find_icon_in_dir(&dir) {
@@ -184,6 +218,18 @@ pub async fn get_project_icon(root: String) -> Option<AttachmentData> {
     .await
     .ok()
     .flatten()
+}
+
+#[tauri::command]
+pub async fn get_project_icon(
+    root: String,
+    machine_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<AttachmentData>, ()> {
+    match peer_machine(machine_id) {
+        Some(machine) => Ok(read_on_peer(&state, "get_project_icon", &root, &machine).await),
+        None => Ok(get_project_icon_local(root).await),
+    }
 }
 
 #[cfg(test)]
@@ -204,11 +250,11 @@ mod tests {
         std::fs::write(frontend.join("package.json"), "{}").unwrap();
 
         assert_eq!(
-            get_project_tech(frontend.to_string_lossy().to_string()).await,
+            get_project_tech_local(frontend.to_string_lossy().to_string()).await,
             Some("node".to_string())
         );
         assert_eq!(
-            get_project_tech(root.path().to_string_lossy().to_string()).await,
+            get_project_tech_local(root.path().to_string_lossy().to_string()).await,
             Some("python".to_string())
         );
     }
@@ -224,7 +270,7 @@ mod tests {
         std::fs::create_dir_all(&docs).unwrap();
 
         assert_eq!(
-            get_project_tech(docs.to_string_lossy().to_string()).await,
+            get_project_tech_local(docs.to_string_lossy().to_string()).await,
             Some("rust".to_string())
         );
     }
@@ -240,7 +286,7 @@ mod tests {
         let frontend = root.path().join("frontend");
         std::fs::create_dir_all(&frontend).unwrap();
 
-        let icon = get_project_icon(frontend.to_string_lossy().to_string()).await;
+        let icon = get_project_icon_local(frontend.to_string_lossy().to_string()).await;
         assert!(icon.is_some(), "expected the repo root's icon.png to be inherited");
         assert_eq!(icon.unwrap().mime, "image/png");
     }
@@ -257,7 +303,7 @@ mod tests {
             std::fs::write(public.join("favicon.svg"), b"<svg/>").unwrap();
         }
 
-        let icon = get_project_icon(root.path().to_string_lossy().to_string()).await;
+        let icon = get_project_icon_local(root.path().to_string_lossy().to_string()).await;
         assert!(icon.is_some(), "expected apps/controller/public/favicon.svg (alphabetically first)");
         assert_eq!(icon.unwrap().mime, "image/svg+xml");
     }
@@ -274,6 +320,15 @@ mod tests {
         let sub = repo.join("sub");
         std::fs::create_dir_all(&sub).unwrap();
 
-        assert_eq!(get_project_tech(sub.to_string_lossy().to_string()).await, None);
+        assert_eq!(get_project_tech_local(sub.to_string_lossy().to_string()).await, None);
+    }
+
+    /// The desktop's Mac-reads-Windows-project bug: a `machine_id` that names a
+    /// peer must route away from this disk; null and "" stay local.
+    #[test]
+    fn a_named_machine_routes_to_the_peer_and_null_or_empty_stays_local() {
+        assert_eq!(peer_machine(Some("mach-win".into())), Some("mach-win".into()));
+        assert_eq!(peer_machine(None), None);
+        assert_eq!(peer_machine(Some(String::new())), None);
     }
 }

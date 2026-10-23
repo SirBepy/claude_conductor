@@ -130,7 +130,7 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
                     return Ok(result);
                 }
                 reject_unknown(&state, &p.root)?;
-                Ok(json!(crate::ipc::project_icons::get_project_tech(p.root).await))
+                Ok(json!(crate::ipc::project_icons::get_project_tech_local(p.root).await))
             }
         });
     }
@@ -154,7 +154,7 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
                     return Ok(result);
                 }
                 reject_unknown(&state, &p.root)?;
-                Ok(json!(crate::ipc::project_icons::get_project_icon(p.root).await))
+                Ok(json!(crate::ipc::project_icons::get_project_icon_local(p.root).await))
             }
         });
     }

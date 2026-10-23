@@ -4,43 +4,45 @@
 // the list_machine_projects fetch + its loading/error state.
 
 import type { ProjectGroup } from "../../../types/ipc.generated";
-import { api, type ProjectConfig } from "../../../shared/api";
+import { api, type MachineProjectStat } from "../../../shared/api";
 
-/** Maps a peer machine's bare `ProjectConfig` (no avatar/todo/worktree data -
- * that's all local-only enrichment) into the row shape the picker already
- * renders. `avatar` deliberately isn't {kind:"none"}: that renders a
- * hydratable `.proj-face` placeholder, and hydrateProjectTechIcons would then
- * probe THIS machine's filesystem for a path that only exists on the peer. */
-export function projectConfigToGroup(pc: ProjectConfig): ProjectGroup {
-  const path = String(pc.path);
-  const rawName = (pc as { name?: unknown }).name;
-  const name = typeof rawName === "string" && rawName
-    ? rawName
-    : path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
-  return {
-    id: pc.id, path, name,
-    parent_segment: null,
-    avatar: { kind: "emoji", value: "📁" },
-    automation_enabled: false,
-    tokens_7d: 0n,
-    live: 0,
-    any_automated: false,
-    last_active_at: null,
-    path_exists: true, // can't stat a peer's filesystem from here
-    worktrees: [],
-    last_worktree_path: null,
-    last_start_folder_rel: null,
-  };
+/** Turns one project group the peer built (icons, worktrees, last activity,
+ * all measured against ITS disk) into a row this machine's picker renders.
+ *
+ * Only an emoji avatar survives: it is plain text and means the same
+ * everywhere. An image avatar is a file path on the peer's disk and a
+ * character avatar names a roster this machine may not share, so both - and
+ * "no avatar" - become {kind:"none"}, which renders the `.proj-face`
+ * placeholder that hydrateProjectTechIcons fills by asking the peer
+ * (through `data-proj-face-machine`) for the project's own icon or tech logo. */
+export function remoteGroupToRow(g: ProjectGroup): ProjectGroup {
+  return { ...g, avatar: g.avatar?.kind === "emoji" ? g.avatar : { kind: "none" } };
 }
 
 export interface MachineProjectsState {
+  /** The machine `projects`/`stats` came from, or null before any fetch.
+   * Stats are keyed by the peer's own paths, which can coincide with a path
+   * on this machine, so a reader must check this before trusting a lookup. */
+  machineId: string | null;
   projects: ProjectGroup[] | undefined;
+  /** Todo count and last activity per project path, from the peer. */
+  stats: Record<string, MachineProjectStat>;
   loading: boolean;
   error: string | null;
 }
 
 export function createMachineProjectsState(): MachineProjectsState {
-  return { projects: undefined, loading: false, error: null };
+  return { machineId: null, projects: undefined, stats: {}, loading: false, error: null };
+}
+
+/** The peer-supplied stat for a row, or undefined when `machineId` is not the
+ * machine the state was last filled from (a switch whose fetch hasn't landed). */
+export function machineProjectStat(
+  state: MachineProjectsState,
+  machineId: string,
+  path: string,
+): MachineProjectStat | undefined {
+  return state.machineId === machineId ? state.stats[path] : undefined;
 }
 
 /** Fetches `list_machine_projects` for `machineId` into `state`, then calls
@@ -53,12 +55,15 @@ export function fetchMachineProjects(
   isStale: () => boolean,
   onChange: () => void,
 ): void {
+  state.machineId = machineId;
   state.projects = undefined;
+  state.stats = {};
   state.loading = true;
   state.error = null;
-  void api.listMachineProjects(machineId).then((list) => {
+  void api.listMachineProjects(machineId).then((res) => {
     if (isStale()) return;
-    state.projects = list.map(projectConfigToGroup);
+    state.projects = (res.groups ?? []).map(remoteGroupToRow);
+    state.stats = res.stats ?? {};
     state.loading = false;
     onChange();
   }).catch((err: unknown) => {
