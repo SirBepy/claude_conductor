@@ -1,26 +1,21 @@
 /* ── Stat cards ── */
 .stat-cards {
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
+  padding-bottom: var(--dv-pad-y, 26px);
 }
 
 .stat-card {
   flex: 1;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 14px 16px;
+  padding: 2px var(--dv-pad-x, 28px);
   text-align: center;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
+.stat-card + .stat-card { border-left: var(--dv-line, 1px solid var(--color-border)); }
 
 .stat-label {
-  font-size: var(--fs-micro);
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
   margin-bottom: 8px;
 }
 

@@ -97,7 +97,7 @@ export function buildWindowProjectsHTML(
     sortable: true,
     defaultSort: hasPct ? "sessionPct" : "tokens",
     id: listId || `window-${startMs}`,
-    style: "margin-top:2px;margin-bottom:8px",
+    className: "worked-on",
   });
 }
 
