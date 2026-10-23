@@ -106,7 +106,9 @@ pub enum LifecycleError {
     /// act on. See `crate::util::claude_bin`.
     #[error("{0}")]
     ClaudeNotFound(String),
-    #[error("cwd does not exist: {0}")]
+    // "On this machine" because the usual cause is a mirrored chat's folder, which
+    // lives on the peer hosting it, being resumed here by mistake.
+    #[error("cwd does not exist on this machine: {0} (a chat's folder lives on the machine hosting it)")]
     CwdMissing(PathBuf),
     #[error("no accounts registered - add an account before starting a chat")]
     NoAccounts,

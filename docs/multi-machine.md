@@ -57,6 +57,7 @@ proven only by in-process loopback tests. A gap audit on 2026-10-08 found these 
 | G8 | Phone had no machine picker (`list_machines`/`list_machine_projects` not phone-reachable, picker gated on desktop). | Add both to the table as `P`, lift the gate. |
 | G9 | Phone could not tell which machine a chat lives on (tooltip only). | Phone rows carry every machine's icon, own daemon included (the text label it first got was replaced 2026-10-18). |
 | G10 | Code mode, commits popover and open-in-editor silently ran against this machine's disk for a mirrored chat. | Hidden for mirrored chats; remote git browsing is a backlog todo. |
+| G11 | A send into an idle mirrored chat (host's `claude` child exited) came back as the host's raw -32004, so the desktop respawned the chat LOCALLY and failed `cwd does not exist` for the host's folder. | The host revives its own chat when a peer-transport `send_message` finds no child (`methods/lifecycle/core.rs`); a host NotFound is remapped to `ERR_SESSION_NOT_LIVE_ON_PEER` (-32015); `ipc/chat/run.rs` never respawns a mirrored chat; `start_session` refuses a resume or fork of a peer-hosted id; `MirrorState` persists `machine -> hosted session ids` (`mirror-owners[suffix].json`) so `mirrored_owner` still routes to the peer right after a restart. |
 
 ## G10 follow-up (2026-10-13, todo 1129): Code mode now proxies its reads
 

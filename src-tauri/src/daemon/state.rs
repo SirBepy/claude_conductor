@@ -192,7 +192,13 @@ impl DaemonState {
     /// Loads (or mints) this daemon's machine registry from `app_data`.
     /// Idempotent: a second call is ignored, same contract as `init_push`.
     pub fn init_machines(&self, app_data: std::path::PathBuf) {
-        let _ = self.machines.set(Arc::new(crate::daemon::machines::MachineRegistry::load(&app_data)));
+        let registry = Arc::new(crate::daemon::machines::MachineRegistry::load(&app_data));
+        // Only on the first call, like `machines.set` below: a repeat would
+        // reload the record over whatever the live links already wrote.
+        if self.machines.get().is_none() {
+            self.mirror.attach_ownership_store(&app_data, |id| registry.peer(id).is_some());
+        }
+        let _ = self.machines.set(registry);
     }
 
     /// Next value in the `question-requested` ordering sequence (see `prompt_seq`).

@@ -24,6 +24,14 @@ pub const ERR_NOT_FORWARDABLE: i32 = -32011;
 pub const ERR_MACHINE_OFFLINE: i32 = -32012;
 /// The peer rejected our bearer token - re-pairing is the fix, not a retry.
 pub const ERR_REPAIR_REQUIRED: i32 = -32013;
+/// The session's host answered NotFound: its `claude` child is not live over
+/// there. Deliberately NOT the host's own -32004: a desktop client reads
+/// -32004 as "my local child is gone, respawn it here", which for a mirrored
+/// chat resumes it on the wrong machine (`ipc/chat/run.rs`).
+pub const ERR_SESSION_NOT_LIVE_ON_PEER: i32 = -32015;
+
+/// The host daemon's `LifecycleError::NotFound` code (`methods::lifecycle::err_to_rpc`).
+const PEER_NOT_FOUND_CODE: i64 = -32004;
 
 /// Methods whose session-identifying param is literally named `id` rather
 /// than `session_id`. Still empty - NOT because `respond_permission`,
@@ -82,6 +90,30 @@ pub(crate) fn map_peer_err(e: PeerError) -> RpcError {
     }
 }
 
+/// `map_peer_err` for a call about one specific mirrored session: the host's
+/// NotFound becomes [`ERR_SESSION_NOT_LIVE_ON_PEER`] naming the host, so no
+/// caller can mistake it for a dead LOCAL child. Everything else is unchanged.
+pub(crate) fn map_peer_session_err(e: PeerError, host_label: &str) -> RpcError {
+    match e {
+        PeerError::Rejected { code, .. } if code == PEER_NOT_FOUND_CODE => RpcError {
+            code: ERR_SESSION_NOT_LIVE_ON_PEER,
+            message: format!("session not live on {host_label}"),
+            data: None,
+        },
+        other => map_peer_err(other),
+    }
+}
+
+/// The label to show for `machine_id` in an error, falling back to its id.
+fn peer_label(state: &DaemonState, machine_id: &str) -> String {
+    state
+        .machines
+        .get()
+        .and_then(|r| r.peer(machine_id))
+        .map(|p| p.label)
+        .unwrap_or_else(|| machine_id.to_string())
+}
+
 /// Installs the mirrored-session forwarder on `router`. Never forwards a
 /// request that itself arrived FROM a peer (`Transport::PeerMachine`) -
 /// that's always about OUR own local sessions, and forwarding it again would
@@ -138,7 +170,8 @@ async fn forward_one(
     } else {
         None
     };
-    let result = client.call(method, params_value).await.map_err(map_peer_err);
+    let label = peer_label(state, &machine_id);
+    let result = client.call(method, params_value).await.map_err(|e| map_peer_session_err(e, &label));
     if result.is_ok() {
         if let Some(rid) = request_id {
             state.mirror.drop_prompt(&machine_id, &rid);
@@ -185,10 +218,14 @@ pub(crate) async fn forward_send_message(
     text: &str,
 ) -> Result<(), RpcError> {
     let client = resolve_peer_client(state, machine_id).await?;
+    // The host revives its own idle chat for a peer-transport `send_message`
+    // (`methods/lifecycle/core.rs`), reading cwd/model/effort/account from its
+    // registry; nothing about the chat's folder is sent from here.
+    let label = peer_label(state, machine_id);
     client
         .call("send_message", serde_json::json!({"session_id": session_id, "text": text}))
         .await
-        .map_err(map_peer_err)?;
+        .map_err(|e| map_peer_session_err(e, &label))?;
     Ok(())
 }
 
@@ -372,6 +409,80 @@ mod tests {
         )
         .await;
         assert!(result.is_none(), "a peer's own request must never be re-forwarded");
+    }
+
+    /// A host's NotFound for a mirrored session must not reach a caller as its
+    /// own -32004: `ipc/chat/run.rs` reads that as "my local child died" and
+    /// resumes the chat on the wrong machine.
+    #[test]
+    fn a_hosts_not_found_is_remapped_and_other_errors_pass_through() {
+        let e = map_peer_session_err(PeerError::Rejected { code: -32004, message: "session id x not found".into() }, "WIN");
+        assert_eq!(e.code, ERR_SESSION_NOT_LIVE_ON_PEER);
+        assert_eq!(e.message, "session not live on WIN");
+        let other = map_peer_session_err(PeerError::Rejected { code: -32602, message: "bad cwd".into() }, "WIN");
+        assert_eq!((other.code, other.message.as_str()), (-32602, "bad cwd"));
+        assert_eq!(map_peer_session_err(PeerError::Unauthorized, "WIN").code, ERR_REPAIR_REQUIRED);
+    }
+
+    /// End to end over loopback: the peer's -32004 reaches the forwarding
+    /// daemon's caller as the distinct code, for the RPC seam and the phone's
+    /// REST-send entry point alike.
+    #[tokio::test]
+    async fn a_peers_not_found_reaches_the_caller_as_not_live_on_the_peer() {
+        use crate::daemon::rpc::RpcError as RE;
+
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let mut b_router = Router::new();
+        b_router.register("send_message", |_params, _ctx| async move {
+            Err::<Value, RE>(RE { code: -32004, message: "session id s1 not found".into(), data: None })
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "s1");
+
+        let via_rpc =
+            forward_one(&state, "send_message", Some(json!({"session_id": "s1", "text": "hi"})), &Transport::Local).await;
+        match via_rpc {
+            Some(Err(e)) => {
+                assert_eq!(e.code, ERR_SESSION_NOT_LIVE_ON_PEER);
+                assert!(e.message.contains('B'), "{}", e.message);
+            }
+            other => panic!("expected the remapped error, got {other:?}"),
+        }
+        let via_rest = forward_send_message(&state, "mach-b", "s1", "hi").await.expect_err("peer refused");
+        assert_eq!(via_rest.code, ERR_SESSION_NOT_LIVE_ON_PEER);
+        b_serve.kill();
+    }
+
+    /// After a restart the mirror is empty until the peer's link reconnects.
+    /// A send for the peer's chat must still go to the peer's route (and fail
+    /// "offline"), not fall through to the local handler that would resume the
+    /// chat on this machine.
+    #[tokio::test]
+    async fn a_send_after_restart_routes_to_the_peer_and_reports_it_offline() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let (before, peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        mirror_owned_session(&before, &sid);
+        drop(before);
+
+        let restarted = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        restarted.init_machines(dir.path().to_path_buf());
+        assert!(restarted.machines.get().unwrap().peer(&peer.machine_id).is_some());
+        assert!(restarted.mirror.owner_of(&sid).is_none(), "nothing mirrored yet");
+        let result =
+            forward_one(&restarted, "send_message", Some(json!({"session_id": sid, "text": "hi"})), &Transport::Local).await;
+        match result {
+            Some(Err(e)) => {
+                assert_eq!(e.code, ERR_MACHINE_OFFLINE);
+                assert!(e.message.contains("B is offline"), "{}", e.message);
+            }
+            other => panic!("expected an offline refusal from the peer route, got {other:?}"),
+        }
     }
 
     #[tokio::test]
