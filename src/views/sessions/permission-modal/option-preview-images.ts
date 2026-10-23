@@ -28,6 +28,9 @@ const cache = new Map<string, string | null>();
 // The read behind each null cache entry, shared so a second card naming the
 // same path awaits it instead of seeing "already handled" and never refreshing.
 const inflight = new Map<string, Promise<boolean>>();
+// Counts clearLocalImageCache() calls: a read from an older generation never
+// releases a slot, since that slot now belongs to a newer read.
+let cacheGeneration = 0;
 
 function cacheKey(path: string, sessionId?: string): string {
   return `${sessionId ?? ""}|${path}`;
@@ -36,6 +39,7 @@ function cacheKey(path: string, sessionId?: string): string {
 export function clearLocalImageCache(): void {
   cache.clear();
   inflight.clear();
+  cacheGeneration++;
 }
 
 /** The filesystem path a src points at, or null when it is not a local image. */
@@ -91,6 +95,7 @@ export async function prefetchLocalImages(fragments: string[], sessionId?: strin
 
 function startRead(p: string, key: string, sessionId?: string): Promise<boolean> {
   cache.set(key, null);
+  const generation = cacheGeneration;
   const read = (async () => {
     try {
       const data = await invoke<{ mime: string; base64: string }>("read_image_file", { path: p, sessionId });
@@ -105,8 +110,9 @@ function startRead(p: string, key: string, sessionId?: string): Promise<boolean>
       return false;
     } finally {
       // A read started before clearLocalImageCache() can finish after a newer
-      // read for the same key took its slot; only the owner may clear it.
-      if (inflight.get(key) === read) inflight.delete(key);
+      // read for the same key took its slot; only a read from the current
+      // generation can own the slot.
+      if (generation === cacheGeneration) inflight.delete(key);
     }
   })();
   inflight.set(key, read);
