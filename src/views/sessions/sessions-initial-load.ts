@@ -16,6 +16,7 @@ import { rateLimitBanner } from "../../shared/chat/rate-limit-banner";
 import { selectSession } from "./active-session";
 import { launchNewSession } from "./pending-flow";
 import { consumePendingHistoryResume, consumePendingNewChat } from "./session-controls";
+import { loadCachedInstances } from "./instances-cache";
 
 // If the daemon hasn't connected within this window, the sidebar's
 // "Setting up..." spinner swaps to a visible warning (state.daemonSetupStalled)
@@ -51,6 +52,13 @@ export function disarmSetupStallTimer(): void {
 export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLElement, myMount: number): Promise<void> {
   // Show setup indicator immediately (daemonConnected = null → centered
   // "Setting up..." in the pane; the sidebar stays blank until connected).
+  // The phone paints its last-known list first; the remote client IS the
+  // daemon connection (see below), so no setup indicator stands in for it.
+  const cached = isRemote() ? loadCachedInstances() : null;
+  if (cached) {
+    state.sessions = cached;
+    state.daemonConnected = true;
+  }
   renderSidebar(listEl);
   refreshPaneEmptyState(pane);
   armSetupStallTimer(listEl, pane, myMount);

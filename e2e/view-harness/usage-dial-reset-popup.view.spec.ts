@@ -1,5 +1,6 @@
+// asserts: src/views/sessions/usage-dials.ts
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { delayInvokes, mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Todo 418: .oc-reset-pop opens ABOVE its dial. The overlay window reserves
 // 78px of headroom for it (overlay.css:75); the phone header has none.
@@ -52,6 +53,18 @@ async function mountHeaderWithDials(page: Page): Promise<void> {
   });
   await page.locator(".oc-cell").first().waitFor();
 }
+
+test("a reopened phone paints the last dials before list_accounts / get_usage_map answer", async ({ page }) => {
+  await mountHeaderWithDials(page);
+  await delayInvokes(page, ["list_accounts", "get_usage_map"], 600_000);
+  await page.reload();
+  await page.locator(".view-sessions .view-header").waitFor();
+  await page.evaluate(async () => {
+    const { mountUsageDials } = await import("/views/sessions/usage-dials.ts");
+    mountUsageDials(document.querySelector<HTMLElement>("#usage-dial-host")!);
+  });
+  await expect(page.locator(".oc-cell[data-acc-id='acc-1']")).toBeVisible({ timeout: 2000 });
+});
 
 test.describe("view-harness / usage dial reset popup in the phone header", () => {
   test("compact dial cell suppresses the reset popup - no clip off the top", async ({ page }) => {

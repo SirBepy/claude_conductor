@@ -15,6 +15,8 @@ import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachRowTooltips } from "../../shared/row-tooltip";
 import { buildSidebarEntries } from "./sidebar-entries";
 import { ensureMachineIcons } from "./machine-icons";
+import { isRemote } from "../../shared/transport";
+import { saveCachedInstances } from "./instances-cache";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 
 let sidebarListEl: HTMLElement | null = null;
@@ -244,11 +246,14 @@ export async function refreshSessions(): Promise<boolean> {
 
     saveUnreadSet(unread);
     state.sessions = next;
+    if (isRemote()) saveCachedInstances(next);
     updateFaviconBadge(next, unread);
     return true;
   } catch (err) {
     console.error("[sessions] list_instances failed", err);
-    state.sessions = [];
+    // The phone keeps its last-known list through a tunnel blip instead of
+    // blanking it; the next successful refresh replaces it.
+    if (!isRemote()) state.sessions = [];
     return false;
   }
 }

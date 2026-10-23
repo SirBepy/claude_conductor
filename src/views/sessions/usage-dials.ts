@@ -28,6 +28,35 @@ const RESET_TICK_MS = 1_000;
 // overlay's full-size dial.
 const DIAL_SCALE = 0.6;
 
+/** The last dials the phone showed, so a reopened app paints them before the
+ *  tunnel answers. Account labels, colours and usage numbers only. */
+const DIALS_CACHE_KEY = "cc_usage_dials_v1";
+
+interface CachedDials {
+  accounts: Account[];
+  usageMap: Record<string, UsageRecord>;
+}
+
+function loadCachedDials(): CachedDials | null {
+  try {
+    const raw = localStorage.getItem(DIALS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedDials>;
+    if (!Array.isArray(parsed.accounts) || !parsed.accounts.length || !parsed.usageMap) return null;
+    return { accounts: parsed.accounts, usageMap: parsed.usageMap };
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedDials(accounts: Account[], usageMap: Record<string, UsageRecord>): void {
+  try {
+    localStorage.setItem(DIALS_CACHE_KEY, JSON.stringify({ accounts, usageMap }));
+  } catch {
+    // Quota or private mode: the next mount just waits for the network.
+  }
+}
+
 /** Tap-opened detail panel for one account - the real dashboard account card
  *  (account-selector.ts's buildAccountCardsHTML), not a one-off layout. Built
  *  with createMoreMenu so it gets the same floating-panel chrome, outside-
@@ -59,6 +88,15 @@ export function mountUsageDials(host: HTMLElement): () => void {
   let lastAccounts: Account[] = [];
   let lastUsageMap: Record<string, UsageRecord> = {};
 
+  const paint = (accounts: Account[], usageMap: Record<string, UsageRecord>): void => {
+    lastAccounts = accounts;
+    lastUsageMap = usageMap;
+    const settings = getSettings();
+    const rows: OverlayRow[] = buildOverlayRows(accounts, usageMap);
+    host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE, true)).join("");
+    host.hidden = false;
+  };
+
   const render = async (): Promise<void> => {
     let accounts: Account[];
     let usageMap: Record<string, UsageRecord>;
@@ -72,13 +110,11 @@ export function mountUsageDials(host: HTMLElement): () => void {
       host.hidden = true;
       return;
     }
-    lastAccounts = accounts;
-    lastUsageMap = usageMap;
-    const settings = getSettings();
-    const rows: OverlayRow[] = buildOverlayRows(accounts, usageMap);
-    host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE, true)).join("");
-    host.hidden = false;
+    paint(accounts, usageMap);
+    saveCachedDials(accounts, usageMap);
   };
+  const cached = loadCachedDials();
+  if (cached) paint(cached.accounts, cached.usageMap);
   void render();
 
   const onClick = (e: MouseEvent): void => {
