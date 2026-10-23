@@ -48,6 +48,7 @@ impl TemplateCtx {
         }
     }
 
+    #[cfg(test)]
     pub fn with_last_runs(mut self, last_runs: HashMap<String, i64>) -> Self {
         self.last_runs = last_runs;
         self
@@ -88,6 +89,7 @@ pub fn env_secret(name: &str) -> Option<String> {
     crate::env_file::read_value(&std::fs::read_to_string(path).ok()?, name)
 }
 
+#[cfg(test)]
 pub fn render(template: &str, ctx: &TemplateCtx, secrets: SecretLookup) -> Result<String, String> {
     render_collect(template, ctx, secrets, &mut Vec::new())
 }

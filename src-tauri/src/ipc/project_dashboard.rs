@@ -5,19 +5,13 @@
 //! methods to a phone or a paired machine.
 
 use crate::project_dashboard::{
-    CardResult, CardView, DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTargetRef, GroupDef, Scope,
+    CardResult, DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTargetRef, GroupDef, Scope,
 };
 use crate::state::AppState;
 use tauri::State;
 
 async fn client(state: &State<'_, AppState>) -> Result<crate::daemon_client::PersistentClient, String> {
     state.client().await.ok_or_else(|| "daemon client not connected".to_string())
-}
-
-#[tauri::command]
-pub async fn dashboard_groups_list(state: State<'_, AppState>) -> Result<Vec<GroupDef>, String> {
-    let v = client(&state).await?.dashboard_groups_list().await.map_err(|e| e.to_string())?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
 /// `id` absent creates a group; present edits it.
@@ -40,13 +34,6 @@ pub async fn dashboard_group_upsert(
 pub async fn dashboard_group_delete(id: String, state: State<'_, AppState>) -> Result<(), String> {
     client(&state).await?.dashboard_group_delete(&id).await.map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-pub async fn dashboard_cards_list(scope: Scope, state: State<'_, AppState>) -> Result<Vec<CardView>, String> {
-    let scope = serde_json::to_value(scope).map_err(|e| e.to_string())?;
-    let v = client(&state).await?.dashboard_cards_list(scope).await.map_err(|e| e.to_string())?;
-    serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
