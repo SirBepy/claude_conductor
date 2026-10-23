@@ -221,7 +221,7 @@ pub fn workflow_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_DASHBOARD_CARD,
-            "description": "Add your own stat or list card to this project's dashboard (Shortcut stories, Clockify hours, `gh run list`), each showing labels and values from an HTTP call or a local command. `test` a card first to see what it would show, then `upsert` it; `list` shows existing cards; `pin` sets the quick-action chips (slash commands) on the dashboard header.",
+            "description": "Add your own stat or list card to this project's dashboard (Shortcut stories, Clockify hours, `gh run list`), each showing labels and values from an HTTP call or a local command. `test` a card first to see what it would show, then `upsert` it (an enabled card runs once on save and returns its `result`); `list` shows existing cards; `pin` sets the quick-action chips (slash commands) on the dashboard header.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
