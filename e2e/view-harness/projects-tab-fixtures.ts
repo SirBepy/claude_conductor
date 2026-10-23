@@ -110,12 +110,16 @@ export function zirtueSnapshot(): DashSnapshot {
     ],
     your_todos: [],
     chats_running: [
-      { session_id: "z-q", title: "Release 2.14 notes", status: "your_turn", repo_cwd: app, at_ms: min(4) },
+      { session_id: "z-q", title: "Release 2.14 notes", status: "question", repo_cwd: app, at_ms: min(4) },
       { session_id: "z-w", title: "ACH retry backoff", status: "working", repo_cwd: biller, at_ms: min(3) },
     ],
     chats_recent: [
       { session_id: "zh1", title: "Loan export CSV columns", status: "ended", repo_cwd: admin, at_ms: min(120) },
       { session_id: "zh2", title: "Quote endpoint load test", status: "ended", repo_cwd: api, at_ms: min(60 * 26) },
+      { session_id: "zh3", title: "Biller invite email copy", status: "ended", repo_cwd: biller, at_ms: min(60 * 30) },
+      { session_id: "zh4", title: "Payout retry dashboards", status: "ended", repo_cwd: biller, at_ms: min(60 * 48) },
+      { session_id: "zh5", title: "Release 2.13 hotfix", status: "ended", repo_cwd: app, at_ms: min(60 * 72) },
+      { session_id: "zh6", title: "Admin role audit", status: "ended", repo_cwd: admin, at_ms: min(60 * 96) },
     ],
     plan: [
       { id: "68", text: "low priority: Shortcut hygiene, close sc-54841/54746, decide on a ticket template", section: "Phase 1 - start now", priority: false, repo_cwd: admin },

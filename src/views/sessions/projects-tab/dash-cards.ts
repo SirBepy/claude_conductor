@@ -62,12 +62,14 @@ function cardHeader(c: DashCtx, v: CardView, pager: TemplateResult | typeof noth
       @click=${() => c.act.refreshCard(id)}><i class="ph ph-arrows-clockwise"></i></button>`;
 }
 
-/** Disabled cards stay in the cards modal but never paint on the dashboard. */
-export function customCards(c: DashCtx): Array<TemplateResult | typeof nothing> {
+/** Disabled cards stay in the cards modal but never paint on the dashboard.
+ *  Each body comes paired with its section id, so the two cannot drift apart. */
+export function customCards(c: DashCtx): Array<{ id: string, body: TemplateResult }> {
   return c.snap.cards
     .filter((v) => v.config.enabled)
     .map((v) => {
+      const id = `card:${v.config.id}`;
       const { body, pager } = cardBody(c, v);
-      return card(v.config.title, body, { id: `card:${v.config.id}`, trailing: cardHeader(c, v, pager) });
+      return { id, body: card(v.config.title, body, { id, trailing: cardHeader(c, v, pager) }) };
     });
 }

@@ -1,12 +1,12 @@
-// Dashboard header (face, name, branch or repo chips, kebab), the New chat
-// FAB, and the one-line quick-action chip row.
+// Dashboard header (face, name, branch or repo count, kebab) and the one-line
+// quick-action chip row, which New chat leads.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { renderAvatar } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
 import { isRemote } from "../../../shared/transport";
 import { offerableCommands, sameCwd } from "./format";
-import { moveTrack } from "./quick-track";
+import { onTrackScroll, onTrackWheel } from "./quick-track";
 import { hidden, isGroup, type DashCtx } from "./dash-parts";
 
 function face(c: DashCtx): TemplateResult {
@@ -24,31 +24,18 @@ function sublineSingle(c: DashCtx): TemplateResult | typeof nothing {
   return html`<code class="pd-branch">${s.branch}${arrows}</code>`;
 }
 
-function repoChips(c: DashCtx): TemplateResult {
-  const chip = (label: string, cwd: string | null): TemplateResult => html`
-    <button type="button" class="pd-repo-chip ${c.repo === cwd ? "on" : ""}" @click=${() => c.act.setRepo(cwd)}>${label}</button>`;
-  return html`<span class="pd-repos">${chip("All", null)}${c.snap.target.repos.map((r) => chip(r.name, r.cwd))}</span>`;
-}
-
 export function header(c: DashCtx): TemplateResult {
   return html`<div class="pd-head">
     ${face(c)}
     <div class="pd-titles">
       <h3>${c.snap.target.name}</h3>
-      <div class="pd-subline">${isGroup(c) ? repoChips(c) : sublineSingle(c)}</div>
+      <div class="pd-subline">${isGroup(c) ? html`<span>${c.snap.target.repos.length} repos</span>` : sublineSingle(c)}</div>
     </div>
     <span class="grow"></span>
     ${/* The kebab opens apps on the PC and edits the dashboard's configuration, so the phone has none of it. */
       isRemote() ? nothing : html`<button type="button" class="pd-ib" title="More" data-pd-kebab
         @click=${(e: Event) => c.act.openKebab(e.currentTarget as HTMLElement)}><i class="ph ph-dots-three-vertical"></i></button>`}
   </div>`;
-}
-
-/** New chat as a floating button, bottom right of the pane (pd-dashboard.css
- *  docks it). */
-export function newChatFab(c: DashCtx): TemplateResult {
-  return html`<div class="pd-fab-dock"><button type="button" class="pd-fab" title="New chat" aria-label="New chat"
-    @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement)}><i class="ph ph-plus"></i></button></div>`;
 }
 
 /** The pinned slash commands when the project has a list; until it does, the commands used most.
@@ -58,19 +45,13 @@ export function chipCommands(c: DashCtx): string[] {
   return offerableCommands(pinned.length ? pinned : (c.history?.quick_actions ?? []).map((q) => q.command));
 }
 
-export function quickActions(c: DashCtx): TemplateResult | typeof nothing {
-  if (hidden(c, "quick_actions")) return nothing;
-  const cmds = chipCommands(c);
-  if (!cmds.length) return nothing;
-  const arrow = (dir: 1 | -1, ic: string): TemplateResult => html`
-    <button type="button" class="pd-ib sm pd-qa-btn" data-pd-qa-dir=${dir} title=${dir === 1 ? "Next actions" : "Previous actions"}
-      @click=${(e: Event) => { c.qaStart = moveTrack((e.currentTarget as HTMLElement).closest<HTMLElement>(".pd-qa")!, c.qaStart, dir); }}>
-      <i class="ph ph-${ic}"></i></button>`;
-  return html`<div class="pd-qa">
-    ${arrow(-1, "caret-left")}
-    <div class="pd-qa-track"><div class="pd-qa-strip">${cmds.map((cmd) => html`
-      <button type="button" class="pd-chip" @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement, cmd)}>${cmd}</button>`)}
-    </div></div>
-    ${arrow(1, "caret-right")}
-  </div>`;
+/** New chat leads the row and stays when the commands are hidden or there
+ *  are none yet: it is the dashboard's only way to start a plain chat. */
+export function quickActions(c: DashCtx): TemplateResult {
+  const cmds = hidden(c, "quick_actions") ? [] : chipCommands(c);
+  return html`<div class="pd-qa"><div class="pd-qa-track" @scroll=${onTrackScroll} @wheel=${onTrackWheel}>
+    <button type="button" class="pd-chip" data-pd-new-chat
+      @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement)}>+ New chat</button>${cmds.map((cmd) => html`
+    <button type="button" class="pd-chip" @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement, cmd)}>${cmd}</button>`)}
+  </div></div>`;
 }

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 //
-// The dashboard's tighter cards: the Chats tabs and status groups, Next up
-// summaries and paging, the compact Reports card with its See more modal, the
-// one-line quick-action track, and the custom-card extras (progress bar,
-// headline, run button).
+// The dashboard's tighter cards: the Chats list (live chats in status order,
+// then the most recently closed), Next up summaries and paging, the Past
+// results footer and its modal, the quick-action chip row, and the
+// custom-card extras (progress bar, headline, run button).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { card as cardView, groupSnapshot, history, mixedChats, planItems, projectSnapshot } from "./helpers/projects-tab-fixtures.mjs";
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
@@ -59,31 +59,38 @@ beforeEach(() => {
 
 describe("Chats card", () => {
   const rowsText = (root) => [...root.querySelectorAll('[data-pd-card="chats"] .pd-row .pd-t')].map((n) => n.textContent);
-  const gaps = (root) => [...root.querySelectorAll('[data-pd-card="chats"] .pd-row')].map((n) => n.classList.contains("is-gap"));
+  const label = (root) => root.querySelector('[data-pd-card="chats"] [data-pd-past-label]');
+  const recent = (n) => Array.from({ length: n }, (_, i) => ({ session_id: `old-${i}`, title: `old-${i}`, status: "ended", repo_cwd: "C:/Projects/conductor", at_ms: Date.now() - (i + 1) * 60_000 }));
 
-  it("Current keeps the sidebar's group order with a gap, not a label, where the next group starts, 4 rows a page", async () => {
+  it("lists live chats in the sidebar's group order with no gap between groups, 4 a page, then the closed ones", async () => {
     snapshot = projectSnapshot({ chats_running: mixedChats() });
     const root = await mount({ kind: "project", id: "p1" });
-    expect(root.querySelector('[data-pd-card="chats"] .pd-rtab.on').textContent).toBe("Current");
-    expect(rowsText(root)).toEqual(["ask-a", "work-a", "work-b", "wait-a"]);
-    expect(gaps(root)).toEqual([false, true, false, false]);
-    expect(root.querySelector('[data-pd-card="chats"] .pd-sub')).toBeNull();
+    expect(rowsText(root)).toEqual(["ask-a", "work-a", "work-b", "wait-a", "Phone question sheet peek"]);
+    expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row.is-gap')).toHaveLength(0);
+    expect(label(root).textContent).toBe("Recently closed");
     expect(root.querySelector('[data-pd-pager="chats"] .pd-pg-n').textContent).toBe("1/2");
 
+    // The pager pages the live chats only; the closed ones stay under them.
     root.querySelector('[data-pd-pager="chats"] button[title="Next"]').click();
-    await vi.waitFor(() => expect(rowsText(root)).toEqual(["done-a"]));
-    // A page never opens on a gap, even when its first row starts a new group.
-    expect(gaps(root)).toEqual([false]);
+    await vi.waitFor(() => expect(rowsText(root)).toEqual(["done-a", "Phone question sheet peek"]));
     expect(root.querySelector('[data-pd-pager="chats"] button[title="Next"]').disabled).toBe(true);
   });
 
-  it("a short list shows no pager, and the Recent tab lists ended chats", async () => {
-    snapshot = projectSnapshot({ chats_running: mixedChats().slice(0, 2) });
+  it("shows at most three closed chats, muted, each opening its history; no tabs, a History button instead", async () => {
+    snapshot = projectSnapshot({ chats_running: mixedChats().slice(0, 2), chats_recent: recent(5) });
     const root = await mount({ kind: "project", id: "p1" });
     expect(root.querySelector('[data-pd-pager="chats"]')).toBeNull();
-    [...root.querySelectorAll('[data-pd-card="chats"] .pd-rtab')].find((b) => b.textContent === "Recent").click();
-    await vi.waitFor(() => expect(rowsText(root)).toEqual(["Phone question sheet peek"]));
-    expect(gaps(root)).toEqual([false]);
+    expect(rowsText(root)).toEqual(["ask-a", "work-a", "old-0", "old-1", "old-2"]);
+    expect(root.querySelectorAll('[data-pd-card="chats"] .pd-t .pd-muted')).toHaveLength(3);
+    expect(root.querySelector('[data-pd-card="chats"] .pd-rtab')).toBeNull();
+    expect(root.querySelector('[data-pd-card="chats"] [data-pd-all-history]').title).toBe("History");
+  });
+
+  it("drops the Recently closed label when there are no live chats above it", async () => {
+    snapshot = projectSnapshot({ chats_running: [], chats_recent: recent(2) });
+    const root = await mount({ kind: "project", id: "p1" });
+    expect(rowsText(root)).toEqual(["old-0", "old-1"]);
+    expect(label(root)).toBeNull();
   });
 });
 
@@ -118,111 +125,70 @@ describe("Next up", () => {
   });
 });
 
-describe("Reports card", () => {
-  it("peeks at the three newest outcomes, and See more opens all of them in the modal", async () => {
+describe("Past results footer", () => {
+  const link = (root, tab) => root.querySelector(`.pd-foot [data-pd-see-more="${tab}"]`);
+  const modal = () => document.getElementById("test-modal-slot");
+  // History feeds both the quick actions and past results; its chips landing means it has loaded.
+  const historyLoaded = (root) => vi.waitFor(() => expect(root.querySelectorAll(".pd-qa .pd-chip").length).toBeGreaterThan(1));
+
+  it("keeps outcomes off the page; its Outcomes link opens all of them in the modal", async () => {
     historyResult = history({
       outcomes: [1, 2, 3, 4].map((n) => ({ session_id: `o${n}`, title: `Outcome ${n}`, text: `First sentence ${n}. And then a long tail.`, at_ms: Date.now() - n * 60_000, repo_cwd: "C:/Projects/conductor" })),
     });
     const root = await mount({ kind: "project", id: "p1" });
-    const reports = () => root.querySelector('[data-pd-card="reports"]');
-    await vi.waitFor(() => expect(reports().querySelectorAll(".pd-out")).toHaveLength(3));
-    expect(reports().querySelector(".pd-out b").textContent).toBe("Outcome 1");
-    expect(reports().querySelector(".pd-out p").textContent).toBe("First sentence 1. And then a long tail.");
+    await historyLoaded(root);
+    expect(root.querySelector(".pd-out")).toBeNull();
 
-    reports().querySelector("[data-pd-see-more]").click();
-    const modal = document.getElementById("test-modal-slot");
-    expect(modal.querySelector("h3").textContent).toContain("Outcomes");
-    expect(modal.querySelectorAll(".pd-out")).toHaveLength(4);
-    modal.querySelector(".btn-primary").click();
-    expect(modal.querySelector(".pd-modal")).toBeNull();
+    link(root, "outcomes").click();
+    expect(modal().querySelector("h3").textContent).toBe("Past results");
+    expect(modal().querySelector(".pd-rtab.on").textContent).toBe("Outcomes");
+    expect(modal().querySelectorAll(".pd-out")).toHaveLength(4);
+    expect(modal().querySelector(".pd-out p").textContent).toBe("First sentence 1. And then a long tail.");
+    modal().querySelector(".btn-primary").click();
+    expect(modal().querySelector(".pd-modal")).toBeNull();
   });
 
-  it("the Gallery tab peeks at four thumbnails, and the modal shows them all", async () => {
+  it("the Gallery link loads every image into the open modal, and its Files tab dims a missing file", async () => {
     historyResult = history({
       gallery: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: `img${n}`, session_id: "s", title: `Shot ${n}`, at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" })),
     });
     const root = await mount({ kind: "project", id: "p1" });
-    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-out')).not.toBeNull());
-    [...root.querySelectorAll('[data-pd-card="reports"] .pd-rtab')].find((b) => b.textContent === "Gallery").click();
-    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="reports"] .pd-shot img')).toHaveLength(4));
-    expect(root.querySelector('[data-pd-card="reports"] .pd-gal').classList.contains("compact")).toBe(true);
-
-    root.querySelector("[data-pd-see-more]").click();
-    const modal = document.getElementById("test-modal-slot");
+    await historyLoaded(root);
+    link(root, "gallery").click();
     // Images keep arriving while the modal is open; it redraws on each paint.
-    await vi.waitFor(() => expect(modal.querySelectorAll(".pd-shot img")).toHaveLength(7));
+    await vi.waitFor(() => expect(modal().querySelectorAll(".pd-shot img")).toHaveLength(7));
+
+    [...modal().querySelectorAll(".pd-rtab")].find((b) => b.textContent === "Files").click();
+    await vi.waitFor(() => expect(modal().querySelectorAll(".pd-row")).toHaveLength(2));
+    expect([...modal().querySelectorAll(".pd-row")].map((r) => r.classList.contains("is-dim"))).toEqual([false, true]);
   });
 });
 
-describe("quick-action track", () => {
-  const proto = HTMLElement.prototype;
-  const saved = {};
-  const CHIP = 80;
-  const GAP = 6;
+describe("quick-action chips", () => {
+  const chips = (root) => [...root.querySelectorAll(".pd-qa .pd-chip")].map((c) => c.textContent.trim());
 
-  // jsdom has no layout, so the measured widths the track pages by are stubbed:
-  // 80px chips 6px apart, a 300px track, and a 400px row (track plus two arrows).
-  function stubLayout() {
-    const stub = (name, get) => {
-      saved[name] = Object.getOwnPropertyDescriptor(proto, name);
-      Object.defineProperty(proto, name, { configurable: true, get });
-    };
-    stub("offsetWidth", function () { return this.classList.contains("pd-chip") ? CHIP : 0; });
-    stub("offsetLeft", function () { return this.classList.contains("pd-chip") ? [...this.parentElement.children].indexOf(this) * (CHIP + GAP) : 0; });
-    stub("clientWidth", function () { return this.classList.contains("pd-qa") ? 400 : this.classList.contains("pd-qa-track") ? 300 : 0; });
-  }
-  // clientWidth lives on Element.prototype, so its "saved" descriptor is undefined and restoring means deleting the shadow.
-  afterEach(() => {
-    for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(proto, k, d); else delete proto[k]; delete saved[k]; }
-  });
-
-  const PINNED = ["/a", "/b", "/c", "/d", "/e", "/f", "/g", "/h", "/i"];
-  const shift = (root) => root.querySelector(".pd-qa-strip").style.transform;
-  const btn = (root, dir) => root.querySelector(`[data-pd-qa-dir="${dir}"]`);
-
-  it("pages by the chips that fully fit: right slides forward, left slides back, arrows disable at the ends", async () => {
-    stubLayout();
-    snapshot = projectSnapshot({ pinned_actions: PINNED });
+  it("New chat leads the row and starts a chat with no message; the row scrolls, so it has no arrows", async () => {
+    snapshot = projectSnapshot({ pinned_actions: ["/a", "/b", "/c", "/d", "/e", "/f", "/g", "/h", "/i"] });
     const root = await mount({ kind: "project", id: "p1" });
-    expect(root.querySelector(".pd-qa").classList.contains("is-fit")).toBe(false);
-    expect(shift(root)).toBe("translateX(0px)");
-    expect(btn(root, -1).disabled).toBe(true);
-    expect(btn(root, 1).disabled).toBe(false);
+    expect(chips(root)[0]).toBe("+ New chat");
+    expect(root.querySelector("[data-pd-qa-dir]")).toBeNull();
 
-    btn(root, 1).click(); // 3 chips fit in 300px, so the next page starts at the 4th
-    expect(shift(root)).toBe(`translateX(-${3 * (CHIP + GAP)}px)`);
-    expect(btn(root, -1).disabled).toBe(false);
-
-    btn(root, 1).click();
-    btn(root, 1).click();
-    expect(btn(root, 1).disabled).toBe(true);
-    const end = shift(root);
-
-    btn(root, -1).click();
-    expect(shift(root)).not.toBe(end);
-    for (let i = 0; i < 4; i++) btn(root, -1).click();
-    expect(shift(root)).toBe("translateX(0px)");
-    expect(btn(root, -1).disabled).toBe(true);
-  });
-
-  it("hides the arrows when every chip fits", async () => {
-    stubLayout();
-    snapshot = projectSnapshot({ pinned_actions: ["/a", "/b"] });
-    const root = await mount({ kind: "project", id: "p1" });
-    expect(root.querySelector(".pd-qa").classList.contains("is-fit")).toBe(true);
-    expect(root.querySelectorAll(".pd-qa-strip .pd-chip")).toHaveLength(2);
+    state.launchNewChatCallback = vi.fn();
+    openModelEffortModal.mockResolvedValueOnce({ model: "m" });
+    root.querySelector("[data-pd-new-chat]").click();
+    await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledWith(
+      { path: "C:/Projects/conductor", name: "conductor" }, { model: "m" }));
   });
 
   it("shows the pinned list when there is one, never offers /close, and a chip starts a chat with its command", async () => {
     snapshot = projectSnapshot({ pinned_actions: ["/close", "/pickup", "/close now", "/audit"] });
     historyResult = history({ quick_actions: [{ command: "/other", count: 1 }] });
     const root = await mount({ kind: "project", id: "p1" });
-    await vi.waitFor(() => expect(root.querySelectorAll(".pd-qa .pd-chip")).toHaveLength(2));
-    expect([...root.querySelectorAll(".pd-qa .pd-chip")].map((c) => c.textContent.trim())).toEqual(["/pickup", "/audit"]);
+    await vi.waitFor(() => expect(chips(root)).toEqual(["+ New chat", "/pickup", "/audit"]));
 
     state.launchNewChatCallback = vi.fn();
     openModelEffortModal.mockResolvedValueOnce({ model: "m" });
-    root.querySelector(".pd-qa .pd-chip").click();
+    root.querySelectorAll(".pd-qa .pd-chip")[1].click();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledWith(
       { path: "C:/Projects/conductor", name: "conductor" }, { model: "m", initialMessage: "/pickup" }));
   });
@@ -230,15 +196,14 @@ describe("quick-action track", () => {
   it("without a pinned list falls back to the most-used commands, minus /close", async () => {
     historyResult = history({ quick_actions: [{ command: "/close", count: 99 }, { command: "/pushnbump", count: 9 }] });
     const root = await mount({ kind: "project", id: "p1" });
-    await vi.waitFor(() => expect(root.querySelectorAll(".pd-qa .pd-chip")).toHaveLength(1));
-    expect(root.querySelector(".pd-qa .pd-chip").textContent.trim()).toBe("/pushnbump");
+    await vi.waitFor(() => expect(chips(root)).toEqual(["+ New chat", "/pushnbump"]));
   });
 
   it("open-in actions lead the kebab menu, and neither the header nor the chip row carries them", async () => {
     snapshot = projectSnapshot({ pinned_actions: ["/pickup"] });
     const root = await mount({ kind: "project", id: "p1" });
     expect(root.querySelectorAll(".pd-head .pd-ib")).toHaveLength(1);
-    expect([...root.querySelectorAll(".pd-qa .pd-chip")].map((b) => b.textContent.trim())).toEqual(["/pickup"]);
+    expect(chips(root)).toEqual(["+ New chat", "/pickup"]);
     root.querySelector("[data-pd-kebab]").click();
     const items = [...document.querySelectorAll(".smore-item")].map((b) => b.textContent.trim());
     expect(items.slice(0, 3)).toEqual(["Open in VS Code", "Open a terminal here", "Show in Explorer"]);
@@ -271,17 +236,19 @@ describe("custom card extras", () => {
     expect(root.querySelector('[data-pd-card="card:c7"] .pd-prog').classList.contains("is-behind")).toBe(false);
   });
 
-  it("the action button starts a chat in the chosen repo with its command", async () => {
+  it("the action button asks which repo, then starts a chat there with its command", async () => {
     snapshot = groupSnapshot();
     const root = await mount({ kind: "group", id: "g1" });
     const button = root.querySelector('[data-pd-card="card:c5"] [data-pd-action]');
     expect(button.textContent).toBe("Run /shortcut-priorities");
     expect(root.querySelector('[data-pd-card="card:c5"] .pd-headline').textContent).toContain("12 updates since /shortcut-priorities ran 2d ago");
 
-    [...root.querySelectorAll(".pd-repo-chip")].find((c) => c.textContent.trim() === "zng-biller").click();
     state.launchNewChatCallback = vi.fn();
     openModelEffortModal.mockResolvedValueOnce({ model: "m" });
     root.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
+    const pick = () => [...document.querySelectorAll(".smore-item")].find((b) => b.textContent.trim() === "zng-biller");
+    await vi.waitFor(() => expect(pick()).toBeTruthy());
+    pick().click();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledWith(
       { path: "C:/Projects/zng-biller", name: "zng-biller" }, { model: "m", initialMessage: "/shortcut-priorities" }));
   });

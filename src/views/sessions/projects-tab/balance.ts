@@ -15,11 +15,11 @@ export function naturalHeight(sec: HTMLElement): number {
 }
 
 /** Greedy shortest-column placement, in reading order. Ties go left. */
-export function assignColumns(heights: number[], gap: number): Array<0 | 1> {
+export function assignColumns(heights: number[]): Array<0 | 1> {
   const total: [number, number] = [0, 0];
   return heights.map((h) => {
     const col: 0 | 1 = total[0] <= total[1] ? 0 : 1;
-    total[col] += h + gap;
+    total[col] += h;
     return col;
   });
 }

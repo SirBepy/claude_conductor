@@ -1,10 +1,8 @@
 // Pure helpers behind the compact dashboard: plan-item summaries, report
-// sentences, the sidebar's chat groups, the offerable quick actions, and the
-// chip track's page arithmetic (fake chip boxes, no layout needed).
+// sentences, the sidebar's chat groups and the offerable quick actions.
 
 import { describe, it, expect } from "vitest";
 import { chatGroupOf, offerableCommands, summarize } from "../src/views/sessions/projects-tab/format.ts";
-import { atEnd, fitsAll, nextStart, prevStart } from "../src/views/sessions/projects-tab/quick-track.ts";
 
 describe("summarize", () => {
   it("cuts at the first ' - ', '; ', '. ' or '(' that leaves a real headline", () => {
@@ -37,30 +35,5 @@ describe("chat groups and quick actions", () => {
 
   it("never offers /close, with or without arguments, but keeps similarly named commands", () => {
     expect(offerableCommands(["/close", "/pickup", "/close now", "/closeout", "/Close"])).toEqual(["/pickup", "/closeout"]);
-  });
-});
-
-describe("quick-action track paging", () => {
-  // Six 80px chips, 6px apart, in a 300px window: chips 0-2 fit, 3-5 are the next page.
-  const chips = Array.from({ length: 6 }, (_, i) => ({ left: i * 86, width: 80 }));
-
-  it("the next page starts at the first chip that does not fully fit", () => {
-    expect(nextStart(chips, 0, 300)).toBe(3);
-    expect(nextStart(chips, 3, 300)).toBe(3);
-  });
-
-  it("the previous page ends right before the current start", () => {
-    expect(prevStart(chips, 3, 300)).toBe(0);
-    expect(prevStart(chips, 0, 300)).toBe(0);
-    // two chips (166px) fit a 170px window, so the page before chip 4 starts at chip 2
-    expect(prevStart(chips, 4, 170)).toBe(2);
-  });
-
-  it("knows when everything fits and when the last chip is already showing", () => {
-    expect(fitsAll(chips, 300)).toBe(false);
-    expect(fitsAll(chips, 600)).toBe(true);
-    expect(fitsAll([], 10)).toBe(true);
-    expect(atEnd(chips, 0, 300)).toBe(false);
-    expect(atEnd(chips, 3, 300)).toBe(true);
   });
 });

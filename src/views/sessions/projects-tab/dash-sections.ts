@@ -1,60 +1,17 @@
-// The built-in dashboard cards: Needs you, Your todos, Next up, Ship state,
-// Running (Chats and Reports have their own files). Each returns nothing when its builtin id is hidden.
+// The built-in dashboard cards: Your todos, Next up, Ship state, Running
+// (Chats and Reports have their own files). Each returns nothing when its builtin id is hidden.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { shortAgo, summarize, whenLabel } from "./format";
 import { pageSlice } from "./paging";
 import {
-  card, dot, hidden, icon, inRepo, isGroup, kv, quiet, repoTag, row, type DashCtx,
+  card, dot, hidden, icon, isGroup, kv, quiet, repoTag, row, type DashCtx,
 } from "./dash-parts";
-import type { NeedsYouItem, RepoShip } from "./types";
-
-// A client repo can hold a dozen unsent drafts at once; one row each buries
-// the open questions under them, so past this many a repo's drafts share a row.
-const DRAFT_ROWS_PER_REPO = 2;
-
-function draftRollups(items: NeedsYouItem[]): { keep: NeedsYouItem[], rollups: NeedsYouItem[][] } {
-  const byRepo = new Map<string, NeedsYouItem[]>();
-  for (const i of items) if (i.kind === "draft") byRepo.set(i.repo_cwd, [...(byRepo.get(i.repo_cwd) ?? []), i]);
-  const rolled = new Set([...byRepo.values()].filter((d) => d.length > DRAFT_ROWS_PER_REPO).flat());
-  return {
-    keep: items.filter((i) => !rolled.has(i)),
-    rollups: [...byRepo.values()].filter((d) => d.length > DRAFT_ROWS_PER_REPO),
-  };
-}
-
-export function needsYou(c: DashCtx): TemplateResult | typeof nothing {
-  if (hidden(c, "needs_you")) return nothing;
-  const { keep: items, rollups } = draftRollups(c.snap.needs_you.filter((i) => inRepo(c, i.repo_cwd)));
-  const rolled = rollups.map((drafts) => {
-    const newest = drafts.reduce((a, b) => (b.at_ms > a.at_ms ? b : a));
-    return row(icon("note-pencil"), `${drafts.length} drafts not sent yet`, {
-      meta: shortAgo(newest.at_ms, c.nowMs), tag: repoTag(c, newest.repo_cwd),
-      title: drafts.map((d) => d.title).join("\n"),
-      onClick: newest.draft_id ? () => c.act.openDraft(newest.draft_id!, newest.session_id) : undefined,
-    });
-  });
-  const rows = items.map((i) => {
-    const tag = repoTag(c, i.repo_cwd);
-    const meta = shortAgo(i.at_ms, c.nowMs);
-    if (i.kind === "question") {
-      return row(dot("q"), html`<b>${i.title}</b> ${i.detail || "is waiting on your answer"}`, {
-        meta, tag, onClick: i.session_id ? () => c.act.openChat(i.session_id!) : undefined,
-      });
-    }
-    return row(icon("note-pencil"), `Draft not sent yet: ${i.title}`, {
-      meta, tag, title: i.detail || undefined,
-      onClick: i.draft_id ? () => c.act.openDraft(i.draft_id!, i.session_id) : undefined,
-    });
-  });
-  const { slice, pager } = pageSlice(c, "needs_you", [...rows, ...rolled]);
-  return card("Needs you", slice.length ? slice : quiet("Nothing waiting"), { id: "needs_you", full: true, trailing: pager });
-}
+import type { RepoShip } from "./types";
 
 export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "your_todos")) return nothing;
-  const todos = c.snap.your_todos.filter((t) => inRepo(c, t.repo_cwd));
-  if (todos.length === 0) return nothing;
-  const { slice, pager } = pageSlice(c, "your_todos", todos);
+  if (c.snap.your_todos.length === 0) return nothing;
+  const { slice, pager } = pageSlice(c, "your_todos", c.snap.your_todos);
   const rows = slice.map((t) => {
     const done = c.doneTodos.has(t.id);
     return html`<label class="pd-row pd-todo ${done ? "is-done" : ""}">
@@ -63,7 +20,7 @@ export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
       ${t.by_ai ? html`<span class="pd-m">from a chat</span>` : nothing}
     </label>`;
   });
-  return card("Your todos", rows, { id: "your_todos", full: true, trailing: pager });
+  return card("Your todos", rows, { id: "your_todos", trailing: pager });
 }
 
 // The plan is long and mostly prose, so the card shows only what is next: a few
@@ -73,9 +30,8 @@ const SCHEDULED_ROWS = 2;
 
 export function nextUp(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "next_up")) return nothing;
-  const plan = c.snap.plan.filter((p) => inRepo(c, p.repo_cwd));
-  const scheduled = c.snap.scheduled.filter((s) => inRepo(c, s.repo_cwd)).slice(0, SCHEDULED_ROWS);
-  const { slice, pager } = pageSlice(c, "next_up", plan, PLAN_ROWS);
+  const scheduled = c.snap.scheduled.slice(0, SCHEDULED_ROWS);
+  const { slice, pager } = pageSlice(c, "next_up", c.snap.plan, PLAN_ROWS);
   const body: TemplateResult[] = slice.map((p) => row(icon(p.priority ? "star" : "circle"),
     p.id ? `#${p.id} ${summarize(p.text)}` : summarize(p.text),
     { tag: repoTag(c, p.repo_cwd), title: p.text }));
@@ -122,7 +78,7 @@ function shipRows(ship: RepoShip[]): TemplateResult[] {
 
 export function shipState(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "ship")) return nothing;
-  const ship = c.snap.ship.filter((r) => inRepo(c, r.cwd));
+  const ship = c.snap.ship;
   let body: TemplateResult | TemplateResult[];
   if (ship.length === 0) body = quiet("No git state");
   else if (ship.length === 1) body = shipDetail(ship[0]!, c);
@@ -132,7 +88,7 @@ export function shipState(c: DashCtx): TemplateResult | typeof nothing {
 
 export function running(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "running")) return nothing;
-  const all = c.snap.servers.filter((s) => inRepo(c, s.repo_cwd));
+  const all = c.snap.servers;
   const { slice: servers, pager } = pageSlice(c, "running", all);
   const body: TemplateResult[] = servers.map((s) => row(dot("ok"),
     html`${s.name} <span class="pd-muted">:${s.port}</span>`, {

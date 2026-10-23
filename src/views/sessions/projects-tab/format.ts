@@ -7,7 +7,6 @@ export type ReportsTab = "outcomes" | "gallery" | "files";
 
 /** Builtin card ids accepted by `dashboard_builtin_set_hidden`, in display order. */
 export const BUILTIN_CARDS: ReadonlyArray<{ id: string, label: string }> = [
-  { id: "needs_you", label: "Needs you" },
   { id: "your_todos", label: "Your todos" },
   { id: "chats", label: "Chats" },
   { id: "next_up", label: "Next up" },
