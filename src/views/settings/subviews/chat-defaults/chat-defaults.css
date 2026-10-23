@@ -9,6 +9,18 @@
   margin: 0 0 12px;
 }
 
+.view-settings-chat-defaults .cd-profile-input {
+  width: 150px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: var(--fs-body);
+  font-family: inherit;
+}
+
 .view-settings-chat-defaults .cd-models-input {
   width: 100%;
   box-sizing: border-box;

@@ -270,6 +270,10 @@ impl Settings {
         self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
     }
 
+    pub fn str_extra(&self, key: &str) -> Option<&str> {
+        self.extra.get(key).and_then(|v| v.as_str())
+    }
+
     /// Bumps `settings_generation` and returns the new value. Call this at
     /// every site that mutates settings, under the same lock guarding that
     /// mutation, so a snapshot cloned right after always carries the freshest

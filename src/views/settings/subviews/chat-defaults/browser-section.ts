@@ -1,31 +1,120 @@
 // "Claude's browser" section of Chat defaults: the switch that gives chats the
-// browser_* tools, and the button that brings the daemon's off-screen Chrome
-// onto this screen so Joe can sign in or clear a CAPTCHA for Claude.
+// browser_* tools, the choice between Claude's own off-screen Chrome and one of
+// Joe's own browsers (driven through the Playwright extension he approves),
+// and the button that brings the daemon's Chrome onto this screen so Joe can
+// sign in or clear a CAPTCHA for Claude.
 import { html, type TemplateResult } from "lit-html";
 import { api } from "../../../../shared/api";
 import { toggleRow } from "../../ui";
 
 export const BROWSER_SETTING_KEY = "claudeBrowserEnabled";
+export const BROWSER_MODE_KEY = "claudeBrowserMode";
+export const BROWSER_APP_KEY = "claudeBrowserMineApp";
+export const BROWSER_PROFILE_KEY = "claudeBrowserMineProfile";
 
-export function readBrowserEnabled(settings: Record<string, unknown>): boolean {
-  return settings[BROWSER_SETTING_KEY] === true;
+export type BrowserMode = "own" | "mine";
+export type BrowserApp = "chrome" | "edge" | "brave";
+
+export interface BrowserChoice {
+  enabled: boolean;
+  mode: BrowserMode;
+  app: BrowserApp;
+  /** Profile folder name ("Default", "Profile 1"); blank lets the browser pick its last used. */
+  profile: string;
 }
 
-export function browserSectionTemplate(enabled: boolean): TemplateResult {
+/** The Playwright extension's store page, from the pinned @playwright/mcp's own install hint. */
+const EXTENSION_URL = "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm";
+
+export function readBrowserChoice(settings: Record<string, unknown>): BrowserChoice {
+  const app = settings[BROWSER_APP_KEY];
+  const profile = settings[BROWSER_PROFILE_KEY];
+  return {
+    enabled: settings[BROWSER_SETTING_KEY] === true,
+    mode: settings[BROWSER_MODE_KEY] === "mine" ? "mine" : "own",
+    app: app === "edge" || app === "brave" ? app : "chrome",
+    profile: typeof profile === "string" ? profile : "",
+  };
+}
+
+/** Reads the section's live controls, keeping `prev` for any control the
+ *  current mode does not render (the app and profile rows exist only in My browser). */
+export function readBrowserFields(root: HTMLElement, prev: BrowserChoice): BrowserChoice {
+  const app = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserApp")?.value;
+  return {
+    enabled: root.querySelector<HTMLInputElement>("#chatDefaultsBrowser")?.checked ?? prev.enabled,
+    mode: root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserMode")?.value === "mine" ? "mine" : "own",
+    app: app === "edge" || app === "brave" || app === "chrome" ? app : prev.app,
+    profile: root.querySelector<HTMLInputElement>("#chatDefaultsBrowserProfile")?.value.trim() ?? prev.profile,
+  };
+}
+
+export function browserSettingsPatch(choice: BrowserChoice): Record<string, unknown> {
+  return {
+    [BROWSER_SETTING_KEY]: choice.enabled,
+    [BROWSER_MODE_KEY]: choice.mode,
+    [BROWSER_APP_KEY]: choice.app,
+    [BROWSER_PROFILE_KEY]: choice.profile,
+  };
+}
+
+function minePart(choice: BrowserChoice): TemplateResult {
+  return html`
+    <div class="kit-row">
+      <span class="kit-row-label">Browser</span>
+      <select id="chatDefaultsBrowserApp" class="kit-select">
+        <option value="chrome" ?selected=${choice.app === "chrome"}>Chrome</option>
+        <option value="edge" ?selected=${choice.app === "edge"}>Edge</option>
+        <option value="brave" ?selected=${choice.app === "brave"}>Brave</option>
+      </select>
+    </div>
+    <div class="kit-row">
+      <span class="kit-row-label">Profile folder</span>
+      <input
+        type="text"
+        id="chatDefaultsBrowserProfile"
+        class="cd-profile-input"
+        .value=${choice.profile}
+        placeholder="Last used"
+        spellcheck="false"
+      >
+    </div>
+    <div class="kit-row">
+      <span class="kit-row-label">Playwright extension</span>
+      <button type="button" class="btn-secondary" id="chatDefaultsBrowserInstall">Install page</button>
+    </div>
+    <p class="cd-hint">Install the extension once in that browser. Each chat opens a connect page there for you to approve, so Claude acts with your real sign-ins only after you say yes. Leave the profile blank to use the one you used last, or name a folder such as Profile 1 to point Claude at a dedicated profile.</p>
+  `;
+}
+
+function ownPart(): TemplateResult {
+  return html`
+    <div class="kit-row">
+      <span class="kit-row-label">Browser window</span>
+      <button type="button" class="btn-secondary" id="chatDefaultsBrowserShow">Show</button>
+    </div>
+    <p class="cd-hint">Sign in to Claude's accounts here, and finish any check a chat says it is stuck on.</p>
+  `;
+}
+
+export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
   return html`
     <div class="kit-section">
       <div class="kit-section-title">Claude's browser</div>
       ${toggleRow({
-        label: "Let chats use Claude's own browser",
+        label: "Let chats use a browser",
         inputId: "chatDefaultsBrowser",
-        checked: enabled,
-        tooltip: "A separate Chrome profile for accounts made for Claude, never yours. It runs off-screen. New chats get the browser tools; an open chat gets them after a respawn.",
+        checked: choice.enabled,
+        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours, and runs off-screen. My browser drives one of yours through the Playwright extension.",
       })}
       <div class="kit-row">
-        <span class="kit-row-label">Browser window</span>
-        <button type="button" class="btn-secondary" id="chatDefaultsBrowserShow">Show</button>
+        <span class="kit-row-label">Which browser</span>
+        <select id="chatDefaultsBrowserMode" class="kit-select">
+          <option value="own" ?selected=${choice.mode === "own"}>Claude's own</option>
+          <option value="mine" ?selected=${choice.mode === "mine"}>My browser</option>
+        </select>
       </div>
-      <p class="cd-hint">Sign in to Claude's accounts here, and finish any check a chat says it is stuck on.</p>
+      ${choice.mode === "mine" ? minePart(choice) : ownPart()}
     </div>
   `;
 }
@@ -33,6 +122,9 @@ export function browserSectionTemplate(enabled: boolean): TemplateResult {
 /** Wires the Show/Hide button. The label follows the daemon's own view of
  *  the window, so a browser left shown from an earlier visit reads "Hide". */
 export function wireBrowserSection(root: HTMLElement): void {
+  root.querySelector<HTMLButtonElement>("#chatDefaultsBrowserInstall")?.addEventListener("click", () => {
+    void api.openExternal(EXTENSION_URL).catch((e: unknown) => { console.warn("open_external failed", e); });
+  });
   const btn = root.querySelector<HTMLButtonElement>("#chatDefaultsBrowserShow");
   if (!btn) return;
   let shown = false;
