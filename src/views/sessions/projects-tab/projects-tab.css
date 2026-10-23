@@ -46,6 +46,9 @@
 .sessions-sidebar.is-projects-tab .sessions-fab { display: none !important; }
 
 #projects-list li.row-portrait { cursor: pointer; }
+/* The chats list cuts a notch in the circle for the project badge; a project
+   row has no badge, so the circle stays whole. */
+#projects-list li.row-portrait .session-avatar-wrap > .session-avatar { -webkit-mask-image: none; mask-image: none; }
 #projects-list .pd-list-empty { text-transform: none; letter-spacing: 0; font-weight: 400; }
 
 /* Header row with the "+" that opens the closed-projects picker. */

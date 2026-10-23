@@ -131,7 +131,7 @@ describe("Projects tab", () => {
       expect(document.querySelector("#projects-list .pd-list-add")).not.toBeNull();
     });
 
-    it("tapping a project slides its dashboard in, and the header has no PC-only tools", async () => {
+    it("tapping a project slides its dashboard in, and the header has no PC-only kebab", async () => {
       clickTab("projects");
       await vi.waitFor(() => expect(rows()).toHaveLength(2));
       // Listing paints the first dashboard behind the list without leaving it.
@@ -139,9 +139,8 @@ describe("Projects tab", () => {
       rows()[1].click();
       expect(d.view.getAttribute("data-mobile-pane")).toBe("chat");
       await vi.waitFor(() => expect(d.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-head')).not.toBeNull());
-      expect(d.pane.querySelector(".pd-head [data-pd-open]")).toBeNull();
       expect(d.pane.querySelector('.pd-head [title="More"]')).toBeNull();
-      expect(d.pane.querySelector(".pd-head .pd-btn.primary")).not.toBeNull();
+      expect(d.pane.querySelector(".pd-fab")).not.toBeNull();
     });
 
     it("opening a closed project from + slides its dashboard in", async () => {

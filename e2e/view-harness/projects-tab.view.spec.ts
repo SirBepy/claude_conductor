@@ -99,12 +99,12 @@ test.describe("view-harness / Projects tab", () => {
       await expect(card(page, id)).toBeVisible();
     }
     await expect(page.locator(".pd-qa .pd-chip").first()).toContainText("/pickup");
-    await expect(card(page, "reports").locator(".pd-row")).toHaveCount(3);
+    await expect(card(page, "reports").locator(".pd-out")).toHaveCount(3);
     await page.waitForTimeout(250); // row background transition
     await capture(page, "r2-projects-conductor");
   });
 
-  test("a four-repo group shows repo chips, the ship table and both custom cards", async ({ page }) => {
+  test("a four-repo group shows repo chips, one ship row per repo and both custom cards", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     await projectRow(page, "Zirtue").click();
@@ -113,7 +113,7 @@ test.describe("view-harness / Projects tab", () => {
     await expect(projectRow(page, "Zirtue")).toHaveClass(/\bactive\b/);
     await expect(projectRow(page, "claude_usage_in_taskbar")).not.toHaveClass(/\bactive\b/);
     await expect(page.locator(".pd-repo-chip")).toHaveCount(5);
-    await expect(card(page, "ship").locator(".pd-tbl tr")).toHaveCount(5);
+    await expect(card(page, "ship").locator(".pd-row")).toHaveCount(4);
     await expect(card(page, "card:c-sc").locator(".pd-row")).toHaveCount(3);
     await expect(card(page, "card:c-sc").locator(".pd-fetched")).toHaveText("fetched 6m ago");
     await expect(card(page, "card:c-sc").locator(".pd-headline")).toContainText("12 updates since /shortcut-priorities ran 2d ago");
@@ -125,18 +125,16 @@ test.describe("view-harness / Projects tab", () => {
 
     await page.locator(".pd-repo-chip", { hasText: "zng-biller" }).click();
     await expect(card(page, "chats").locator(".pd-row")).toHaveCount(1);
-    await expect(card(page, "ship").locator(".pd-tbl")).toHaveCount(0);
+    await expect(card(page, "ship").locator(".pd-kv").first()).toBeVisible();
   });
 
   test("Reports gallery loads images one by one", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     await card(page, "reports").locator(".pd-rtab", { hasText: "Gallery" }).click();
-    // 1340px leaves the card tall enough for its 3 x 2 gallery, so all six thumbnails show.
-    await expect(card(page, "reports").locator(".pd-shot img")).toHaveCount(6);
-    await expect(card(page, "reports").locator(".pd-shot").nth(5)).toBeVisible();
+    await expect(card(page, "reports").locator(".pd-shot img")).toHaveCount(4);
     await page.waitForTimeout(250);
-    await capture(page, "r3-reports-gallery-fill");
+    await capture(page, "r4-reports-gallery");
     await expect(card(page, "reports").locator(".pd-rtab.on")).toHaveText("Gallery");
 
     await card(page, "reports").locator("[data-pd-see-more]").click();
@@ -153,26 +151,16 @@ test.describe("view-harness / Projects tab", () => {
     await expect(page.locator(".pd-lightbox")).toHaveCount(0);
   });
 
-  test("Reports fills the pane's leftover height, and a short window keeps it a compact peek", async ({ page }) => {
+  test("Reports keeps its natural height, so the page ends under it instead of stretching it into a blank box", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     const reports = card(page, "reports");
-    await expect(reports.locator(".pd-tiles .pd-out").first()).toBeVisible();
-    await expect(reports.locator(".pd-fit")).toBeHidden();
-    // The card's bottom edge lands on the pane's padding, not above a blank band.
-    const gap = await page.evaluate(() => {
-      const root = document.querySelector(".pd-root")!.getBoundingClientRect();
-      const r = document.querySelector('[data-pd-card="reports"]')!.getBoundingClientRect();
-      return root.bottom - r.bottom;
-    });
-    expect(gap).toBeLessThan(30);
-
-    await page.setViewportSize({ width: 1032, height: 820 });
-    await expect(reports.locator(".pd-tiles")).toBeHidden();
-    await expect(reports.locator(".pd-fit .pd-row").first()).toBeVisible();
-    await reports.locator(".pd-rtab", { hasText: "Gallery" }).click();
-    await expect(reports.locator(".pd-shot").nth(3)).toBeVisible();
-    await expect(reports.locator(".pd-shot").nth(4)).toBeHidden();
+    await expect(reports.locator(".pd-out")).toHaveCount(3);
+    const height = async (): Promise<number> => (await reports.boundingBox())!.height;
+    const atDefault = await height();
+    await page.setViewportSize({ width: 1032, height: 2000 });
+    await page.waitForTimeout(100);
+    expect(Math.abs((await height()) - atDefault)).toBeLessThan(1);
   });
 
   test("the kebab opens the Dashboard cards modal with switches for every section", async ({ page }) => {
@@ -232,15 +220,15 @@ test.describe("view-harness / Projects tab", () => {
     await capture(page, "projects-tab-chats-at-rest");
   });
 
-  test("Chats card: Current groups live chats under the sidebar's words, Recent lists ended ones", async ({ page }) => {
+  test("Chats card: Current keeps the sidebar's group order with no sub-labels, Recent lists ended ones", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     const chats = card(page, "chats");
     await expect(chats.locator(".pd-rtab.on")).toHaveText("Current");
-    await expect(chats.locator(".pd-sub")).toHaveText(["Input needed", "In progress"]);
+    await expect(chats.locator(".pd-row.is-gap")).toHaveCount(1);
     await expect(chats.locator("[data-pd-pager]")).toContainText("1/2");
     await chats.locator('[data-pd-pager] button[title="Next"]').click();
-    await expect(chats.locator(".pd-sub")).toHaveText(["Done"]);
+    await expect(chats.locator(".pd-row.is-gap")).toHaveCount(0);
 
     await chats.locator(".pd-rtab", { hasText: "Recent" }).click();
     await expect(chats.locator(".pd-row")).toHaveCount(3);
@@ -253,7 +241,6 @@ test.describe("view-harness / Projects tab", () => {
     await projectRow(page, "Zirtue").click();
     const next = card(page, "next_up");
     await expect(next.locator(".pd-row")).toHaveCount(3);
-    await expect(next.locator(".pd-sub")).toHaveCount(0);
     await expect(next.locator(".pd-row").first()).toHaveAttribute("title", /decide on a ticket template/);
     await expect(next.locator("[data-pd-pager]")).toContainText("1/2");
     await next.locator('[data-pd-pager] button[title="Next"]').click();

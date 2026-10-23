@@ -1,18 +1,19 @@
 // Reports card: finished-chat outcomes, a gallery of images from past chats,
 // and files chats produced. All three come from dashboard_history, which
 // arrives after the snapshot, so the card shows a quiet loading line first.
-// The card fills whatever height the pane has left: short, it is a compact peek
-// (the rows that fit, four thumbnails); tall, outcomes become tiles and the
-// gallery grows to 3 x 2 (pd-cards.css). "See more" opens the full tab in a modal.
+// The card is a peek at its natural height (three outcomes, four thumbnails,
+// four files) and the page ends under it; "See more" opens the full tab in a modal.
 import { html, nothing, render, type TemplateResult } from "lit-html";
 import { isRemote } from "../../../shared/transport";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
-import { agoLabel, fileIcon, fileName, firstSentence, plainPreview, shortAgo, type ReportsTab } from "./format";
+import { agoLabel, fileIcon, fileName, plainPreview, shortAgo, type ReportsTab } from "./format";
 import type { ActionHost } from "./dash-actions";
 import type { OutcomeRow } from "./types";
 import { card, hidden, icon, inRepo, quiet, repoTag, row, type DashCtx } from "./dash-parts";
 
-const CARD_THUMBS = 6;
+const CARD_THUMBS = 4;
+const CARD_OUTCOMES = 3;
+const CARD_FILES = 4;
 
 const TABS: Array<{ id: ReportsTab, label: string }> = [
   { id: "outcomes", label: "Outcomes" },
@@ -34,14 +35,10 @@ function outcomesFull(c: DashCtx): TemplateResult {
   return html`<div class="pd-outs">${items.map((o) => tile(c, o))}</div>`;
 }
 
-/** Both shapes are rendered; the card body's height picks which one shows. */
 function outcomesCard(c: DashCtx): TemplateResult {
-  const items = outcomesIn(c);
+  const items = outcomesIn(c).slice(0, CARD_OUTCOMES);
   if (!items.length) return quiet("No finished chats yet");
-  return html`<div class="pd-fit has-tiles">${items.map((o) => row(icon("check-circle"),
-    html`<b>${o.title}</b> <span class="pd-muted">${firstSentence(o.text)}</span>`,
-    { tag: repoTag(c, o.repo_cwd), title: plainPreview(o.text), onClick: () => c.act.openHistory(o.session_id) }))}</div>
-    <div class="pd-outs pd-tiles">${items.map((o) => tile(c, o))}</div>`;
+  return html`<div class="pd-outs pd-tiles">${items.map((o) => tile(c, o))}</div>`;
 }
 
 function galleryCompact(c: DashCtx): TemplateResult {
@@ -84,8 +81,8 @@ function filesFull(c: DashCtx): TemplateResult | TemplateResult[] {
 }
 
 function filesCard(c: DashCtx): TemplateResult {
-  const rows = fileRows(c);
-  return rows.length ? html`<div class="pd-fit">${rows}</div>` : quiet("No files from past chats");
+  const rows = fileRows(c).slice(0, CARD_FILES);
+  return rows.length ? html`${rows}` : quiet("No files from past chats");
 }
 
 const tabsFor = (c: DashCtx): TemplateResult => html`<div class="pd-rtabs">${TABS.map((t) => html`
@@ -99,7 +96,7 @@ export function reports(c: DashCtx): TemplateResult | typeof nothing {
   else if (c.tab === "gallery") body = galleryCompact(c);
   else body = filesCard(c);
   const more = c.history ? html`<a class="pd-link" data-pd-see-more @click=${() => c.act.openReportsModal()}>See more</a>` : nothing;
-  return card("Reports", html`<div class="pd-rbody">${body}</div>`,
+  return card("Reports", body,
     { id: "reports", full: true, cls: "pd-reports", trailing: html`${tabsFor(c)}${more}` });
 }
 

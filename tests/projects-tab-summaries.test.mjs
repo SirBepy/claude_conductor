@@ -3,7 +3,7 @@
 // chip track's page arithmetic (fake chip boxes, no layout needed).
 
 import { describe, it, expect } from "vitest";
-import { chatGroupOf, firstSentence, offerableCommands, summarize } from "../src/views/sessions/projects-tab/format.ts";
+import { chatGroupOf, offerableCommands, summarize } from "../src/views/sessions/projects-tab/format.ts";
 import { atEnd, fitsAll, nextStart, prevStart } from "../src/views/sessions/projects-tab/quick-track.ts";
 
 describe("summarize", () => {
@@ -27,21 +27,6 @@ describe("summarize", () => {
     const out = summarize("x".repeat(120));
     expect(out.endsWith("…")).toBe(true);
     expect(out.length).toBeLessThanOrEqual(70);
-  });
-});
-
-describe("firstSentence", () => {
-  it("stops after the first sentence once it is long enough to read", () => {
-    expect(firstSentence("**Shipped** the phone sheet fix in `dd1af90`, vitest green. Not pushed yet."))
-      .toBe("Shipped the phone sheet fix in dd1af90, vitest green.");
-    expect(firstSentence("No full stop here")).toBe("No full stop here");
-  });
-
-  it("keeps reading past an opener too short to say anything", () => {
-    expect(firstSentence("Hi. Claude has the full context from earlier: the 5 spawned chats. More."))
-      .toBe("Hi. Claude has the full context from earlier: the 5 spawned chats.");
-    expect(firstSentence("Retrospective. **Verdict:** mid. The right answer landed."))
-      .toBe("Retrospective. Verdict: mid. The right answer landed.");
   });
 });
 

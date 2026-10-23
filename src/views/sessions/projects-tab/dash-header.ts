@@ -1,5 +1,5 @@
-// Dashboard header (face, name, branch or repo chips, New chat, open-in icons,
-// kebab) and the one-line quick-action chip row.
+// Dashboard header (face, name, branch or repo chips, kebab), the New chat
+// FAB, and the one-line quick-action chip row.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { renderAvatar } from "../../../shared/projects";
@@ -30,12 +30,6 @@ function repoChips(c: DashCtx): TemplateResult {
   return html`<span class="pd-repos">${chip("All", null)}${c.snap.target.repos.map((r) => chip(r.name, r.cwd))}</span>`;
 }
 
-const OPEN_IN: Array<{ kind: "vscode" | "terminal" | "explorer", icon: string, label: string }> = [
-  { kind: "vscode", icon: "code", label: "Open in VS Code" },
-  { kind: "terminal", icon: "terminal-window", label: "Open a terminal here" },
-  { kind: "explorer", icon: "folder-open", label: "Show in Explorer" },
-];
-
 export function header(c: DashCtx): TemplateResult {
   return html`<div class="pd-head">
     ${face(c)}
@@ -44,19 +38,17 @@ export function header(c: DashCtx): TemplateResult {
       <div class="pd-subline">${isGroup(c) ? repoChips(c) : sublineSingle(c)}</div>
     </div>
     <span class="grow"></span>
-    <button type="button" class="pd-btn primary" @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement)}>
-      <i class="ph ph-plus"></i>New chat</button>
-    ${isRemote() ? nothing : desktopTools(c)}
+    ${/* The kebab opens apps on the PC and edits the dashboard's configuration, so the phone has none of it. */
+      isRemote() ? nothing : html`<button type="button" class="pd-ib" title="More" data-pd-kebab
+        @click=${(e: Event) => c.act.openKebab(e.currentTarget as HTMLElement)}><i class="ph ph-dots-three-vertical"></i></button>`}
   </div>`;
 }
 
-/** VS Code, Terminal, Explorer and the kebab: they open apps on the PC or edit
- *  the dashboard's configuration, so the phone has none of them. */
-function desktopTools(c: DashCtx): TemplateResult {
-  return html`${OPEN_IN.map((o) => html`<button type="button" class="pd-ib" title=${o.label} data-pd-open=${o.kind}
-      @click=${(e: Event) => c.act.openIn(e.currentTarget as HTMLElement, o.kind)}><i class="ph ph-${o.icon}"></i></button>`)}
-    <button type="button" class="pd-ib" title="More" @click=${(e: Event) => c.act.openKebab(e.currentTarget as HTMLElement)}>
-      <i class="ph ph-dots-three-vertical"></i></button>`;
+/** New chat as a floating button, bottom right of the pane (pd-dashboard.css
+ *  docks it). */
+export function newChatFab(c: DashCtx): TemplateResult {
+  return html`<div class="pd-fab-dock"><button type="button" class="pd-fab" title="New chat" aria-label="New chat"
+    @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement)}><i class="ph ph-plus"></i></button></div>`;
 }
 
 /** The pinned slash commands when the project has a list; until it does, the commands used most.

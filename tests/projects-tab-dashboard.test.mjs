@@ -70,15 +70,16 @@ describe("single project", () => {
     const { root } = await mount({ kind: "project", id: "p1" });
     expect(root.querySelector(".pd-head h3").textContent).toBe("claude_usage_in_taskbar");
     expect(root.querySelector(".pd-branch").textContent).toBe("master ↑2");
-    expect(root.querySelector(".pd-btn.primary").textContent).toContain("New chat");
-    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-row')).not.toBeNull());
+    expect(root.querySelector(".pd-fab").getAttribute("aria-label")).toBe("New chat");
+    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-out')).not.toBeNull());
     expect(cardIds(root)).toEqual(["needs_you", "your_todos", "chats", "next_up", "ship", "running", "reports"]);
     expect(root.querySelector('[data-pd-card="needs_you"]').textContent).toContain("Dashboard brainstorm");
     expect(root.querySelector('[data-pd-card="next_up"] .ph-star')).not.toBeNull();
     expect(root.querySelector('[data-pd-card="next_up"]').textContent).toContain("#1264 Hyperfocus the mobile todos");
     expect(root.querySelector('[data-pd-card="ship"]').textContent).toContain("2 commits");
-    expect(root.querySelector('[data-pd-card="running"]').textContent).toContain("3 chats active in this repo");
-    expect(root.querySelector('[data-pd-card="running"]').textContent).toContain("holding commit on chat-renderer.ts");
+    // Running is servers only: the repo's other live chats are already in the Chats card.
+    expect(root.querySelector('[data-pd-card="running"]').textContent).not.toContain("chats active in this repo");
+    expect(root.querySelector('[data-pd-card="running"]').textContent).not.toContain("holding commit on chat-renderer.ts");
   });
 
   it("hides Your todos entirely when there are none, and shows quiet empty states elsewhere", async () => {
@@ -98,6 +99,17 @@ describe("single project", () => {
       .find((r) => r.textContent.includes(title)).querySelector(".pd-dot");
     expect(dotFor("asking").classList.contains("q")).toBe(true);
     expect(dotFor("idle").classList.contains("q")).toBe(false);
+    // The asking chat's title reads red too; the idle one's stays plain.
+    expect(dotFor("asking").parentElement.querySelector(".pd-ask")).not.toBeNull();
+    expect(dotFor("idle").parentElement.querySelector(".pd-ask")).toBeNull();
+  });
+
+  it("Running shows how many servers run beside its title, and no number when none do", async () => {
+    const { root } = await mount({ kind: "project", id: "p1" });
+    expect(root.querySelector('[data-pd-card="running"] .pd-h .pd-count').textContent).toBe("1");
+    snapshot = projectSnapshot({ servers: [] });
+    const again = await mount({ kind: "project", id: "p1" });
+    expect(again.root.querySelector('[data-pd-card="running"] .pd-count')).toBeNull();
   });
 
   it("rolls a repo's drafts into one row past two, keeping questions and a small repo's drafts as rows", async () => {
@@ -143,13 +155,13 @@ describe("single project", () => {
     release();
     await vi.waitFor(() => expect(root.querySelectorAll(".pd-qa .pd-chip")).toHaveLength(2));
     expect(root.querySelector(".pd-qa .pd-chip").textContent).toContain("/pushnbump");
-    expect(root.querySelector('[data-pd-card="reports"] .pd-row b').textContent).toBe("Phone question sheet peek");
+    expect(root.querySelector('[data-pd-card="reports"] .pd-out b').textContent).toBe("Phone question sheet peek");
     expect(calls.map((c) => c.cmd).indexOf("dashboard_snapshot")).toBeLessThan(calls.map((c) => c.cmd).indexOf("dashboard_history"));
   });
 
   it("Reports tabs: gallery lazy-loads images one at a time, files dim a missing file", async () => {
     const { root } = await mount({ kind: "project", id: "p1" });
-    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-row')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-out')).not.toBeNull());
 
     [...root.querySelectorAll(".pd-rtab")].find((b) => b.textContent === "Gallery").click();
     await vi.waitFor(() => expect(root.querySelector(".pd-shot img")).not.toBeNull());
@@ -175,13 +187,14 @@ describe("single project", () => {
 describe("group", () => {
   const ref = { kind: "group", id: "g1" };
 
-  it("shows repo chips, repo tags on rows, and the per-repo ship table", async () => {
+  it("shows repo chips, repo tags on rows, and one ship row per repo", async () => {
     snapshot = groupSnapshot();
     const { root } = await mount(ref);
     expect(root.querySelector(".ph-briefcase")).not.toBeNull();
     expect([...root.querySelectorAll(".pd-repo-chip")].map((c) => c.textContent.trim())).toEqual(["All", ...ZIRTUE_REPOS.map((r) => r.name)]);
     expect(root.querySelector('[data-pd-card="needs_you"] .pd-repo').textContent).toBe("zng-app");
-    expect(root.querySelectorAll('[data-pd-card="ship"] .pd-tbl tr')).toHaveLength(5);
+    expect(root.querySelectorAll('[data-pd-card="ship"] .pd-row')).toHaveLength(ZIRTUE_REPOS.length);
+    expect(root.querySelector('[data-pd-card="ship"] .pd-tbl')).toBeNull();
   });
 
   it("a repo chip narrows every section, and All restores them", async () => {
@@ -193,8 +206,8 @@ describe("group", () => {
     await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(1));
     expect(root.querySelector('[data-pd-card="chats"] .pd-t').textContent).toBe("ACH retry backoff");
     expect(root.querySelector('[data-pd-card="needs_you"]').textContent).toContain("Nothing waiting");
-    // one repo left: the table collapses to the single-repo detail view
-    expect(root.querySelector('[data-pd-card="ship"] .pd-tbl')).toBeNull();
+    // one repo left: the per-repo rows give way to the single-repo detail view
+    expect(root.querySelector('[data-pd-card="ship"] .pd-kv')).not.toBeNull();
     expect(root.querySelector('[data-pd-card="ship"]').textContent).toContain("1 commit");
     expect(root.querySelector(".pd-repo-chip.on").textContent.trim()).toBe("zng-biller");
 
