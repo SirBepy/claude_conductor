@@ -23,11 +23,10 @@ export async function renderPendingPane(
   placeholderId: string,
   project: { path: string; name: string },
   config: SessionConfig,
-  onDiscard?: (pane: HTMLElement) => void,
 ): Promise<void> {
   const myMount = state.mountId;
 
-  _pendingHeader = mountPendingChrome(pane, placeholderId, project, config, onDiscard);
+  _pendingHeader = mountPendingChrome(pane, placeholderId, project, config);
   await mountPendingStatusbar(pane, project, config, placeholderId, _pendingHeader);
   await attachPendingRenderer(pane, placeholderId, project, config, _pendingHeader, myMount);
   // Must come after attachPendingRenderer: ChatRenderer.attach() clears

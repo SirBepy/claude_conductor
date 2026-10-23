@@ -161,7 +161,6 @@ export async function resumeDraft(pane: HTMLElement): Promise<void> {
     pending.placeholderId,
     { path: pending.projectPath, name: pending.projectName },
     pending.config,
-    discardDraft,
   );
 
   if (root) {
@@ -280,7 +279,7 @@ export async function launchNewSession(
   const root = document.querySelector<HTMLElement>(".view-sessions");
   root?.setAttribute("data-mobile-pane", "chat");
 
-  await renderPendingPane(pane, placeholderId, project, config, discardDraft);
+  await renderPendingPane(pane, placeholderId, project, config);
 
   // Re-render sidebar to show the pending row.
   if (root) {

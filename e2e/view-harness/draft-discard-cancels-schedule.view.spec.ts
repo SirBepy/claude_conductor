@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, invokeCalls, SESSIONS_BASE_INVOKE } from "./harness";
 
-// Drives the real discard button through __launchDraftForTest, since the full
-// pickProject + model-modal chain is not worth simulating for this behavior.
+// Drives the real "Delete draft" menu item on a draft made through
+// __launchDraftForTest, since the full pickProject + model-modal chain is not
+// worth simulating for this behavior.
 
 const BASE_INVOKE = {
   ...SESSIONS_BASE_INVOKE,
@@ -42,7 +43,7 @@ async function createDraft(page: Page): Promise<string> {
     (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: { model: string; effort: string }) => void })
       .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "high" });
   });
-  await page.locator(".discard-btn").waitFor();
+  await page.locator("#sessions-list li[data-placeholder-id]").waitFor();
   const id = await page.locator("#sessions-list li[data-placeholder-id]").getAttribute("data-placeholder-id");
   if (!id) throw new Error("draft row never rendered a placeholder id");
   return id;
@@ -52,6 +53,11 @@ async function createDraft(page: Page): Promise<string> {
  *  placeholderId isn't known until after mount) while every other command
  *  keeps going through the harness's real mock (so __ccInvokeCalls still
  *  records schedule_delete calls). */
+async function deleteDraftViaMenu(page: Page): Promise<void> {
+  await page.locator("#viewMoreBtn").click();
+  await page.locator(".smore-item.smore-danger", { hasText: "Delete draft" }).click();
+}
+
 async function seedScheduleList(page: Page, items: unknown[]): Promise<void> {
   await page.evaluate((seeded) => {
     const w = window as unknown as {
@@ -74,7 +80,7 @@ test.describe("view-harness / discarding a draft cancels its owned schedule", ()
     const placeholderId = await createDraft(page);
     await seedScheduleList(page, [scheduledNewChat({ id: "owned-1", kind: { ...(scheduledNewChat().kind as object), placeholder_id: placeholderId } })]);
 
-    await page.locator(".discard-btn").click();
+    await deleteDraftViaMenu(page);
 
     await expect(page.locator(".toast")).toContainText("scheduled from this draft");
     const calls = await invokeCalls(page);
@@ -87,7 +93,7 @@ test.describe("view-harness / discarding a draft cancels its owned schedule", ()
     void placeholderId; // ownership is by id match, not by this draft's identity
     await seedScheduleList(page, [scheduledNewChat({ id: "other-1", kind: { ...(scheduledNewChat().kind as object), placeholder_id: "some-other-placeholder" } })]);
 
-    await page.locator(".discard-btn").click();
+    await deleteDraftViaMenu(page);
     await page.waitForTimeout(200); // let the fire-and-forget cancel settle
 
     const calls = await invokeCalls(page);
@@ -103,7 +109,7 @@ test.describe("view-harness / discarding a draft cancels its owned schedule", ()
       recurrence: { time: "09:00", rule: { type: "daily" } },
     })]);
 
-    await page.locator(".discard-btn").click();
+    await deleteDraftViaMenu(page);
     await page.waitForTimeout(200);
 
     const calls = await invokeCalls(page);
