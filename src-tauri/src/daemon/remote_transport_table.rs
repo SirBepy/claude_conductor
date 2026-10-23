@@ -151,7 +151,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // account bindings, plus settings/accounts/projects, all of which are
     // already P individually. Every path it touches comes from the daemon's
     // own project list, never from params (it takes none).
-    ("new_session_bundle", P),
+    // PM: `list_machine_projects` forwards this to the machine whose projects
+    // the new-chat picker is showing. The handler answers a PeerMachine caller
+    // with only `{groups, stats}` (image-avatar disk paths blanked), decided
+    // from the connection's transport and not a param, so the settings,
+    // account registry and CLAUDE.md scopes stay phone-only data.
+    ("new_session_bundle", PM),
     // Read-only: `file` is canonicalized and prefix-checked against the
     // character's own dir via Character::asset_path_checked (todo 656).
     ("character_asset_url", P),
@@ -168,9 +173,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Only mutates `session_characters` for the given session_id via
     // whitelist pick_random; cannot touch any other settings field.
     ("ensure_session_character", P),
-    // Read-only project list. PM (not just P): a peer daemon needs this too -
-    // `list_machine_projects`'s RPC forwards this SAME method name to
-    // whichever machine the desktop's new-chat picker asked about, verbatim.
+    // Read-only project list. PM since `list_machine_projects` used to forward
+    // this exact method to a peer; it now forwards `new_session_bundle`
+    // instead, so nothing in the tree calls this from a peer any more. Left PM
+    // (not narrowed here) so a paired machine on the previous build keeps its
+    // picker working until both sides are updated; narrow to P afterwards.
     ("list_projects", PM),
     // Read-only self+peers view for the phone's new-chat machine picker
     // (parity with desktop's own picker). P, never M: a peer machine already
@@ -180,8 +187,8 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // response is built, so nothing secret crosses the wire either way.
     ("list_machines", P),
     // Read-only cross-machine project list for the same picker: `machine_id
-    // == self` returns this daemon's own settings snapshot, any other known
-    // machine forwards `list_projects` to it (see methods/machines.rs). P,
+    // == self` returns this daemon's own `{groups, stats}`, any other known
+    // machine forwards `new_session_bundle` to it (see methods/machines.rs). P,
     // never M, same reasoning as list_machines above.
     ("list_machine_projects", P),
     // Read-only, gated by reject_unknown(cwd) in registry.rs (todo 656).
@@ -670,6 +677,16 @@ mod tests {
         for m in ["get_project_icon", "get_project_tech"] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine for the machine_id forward");
         }
+    }
+
+    /// `list_machine_projects` forwards `new_session_bundle` to the picked
+    /// machine, which answers a peer caller with a slim `{groups, stats}`
+    /// (pinned in registry.rs's bundle tests), so it must be `PM`. The phone
+    /// keeps the full bundle, and the picker RPC itself stays phone-only.
+    #[test]
+    fn new_session_bundle_is_machine_callable_for_the_project_picker() {
+        assert!(allowed("new_session_bundle", &Transport::PeerMachine("x".into())));
+        assert!(allowed("new_session_bundle", &Transport::Phone));
     }
 
     /// The write/mutating counterparts stay phone-only: this follow-up proxies

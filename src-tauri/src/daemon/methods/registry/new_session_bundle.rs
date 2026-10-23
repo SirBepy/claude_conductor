@@ -7,7 +7,7 @@
 //! means the phone can warm it at boot and every step opens from cache.
 
 use super::listings::project_groups;
-use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -72,10 +72,53 @@ async fn bundle(state: &Arc<DaemonState>) -> Result<Value, RpcError> {
     }))
 }
 
+/// The project list a paired machine's new-chat picker needs, and nothing
+/// else: `groups` (icons, worktrees, last activity) plus per-project `stats`
+/// (todo badge, recency). The full `bundle` also carries this daemon's whole
+/// settings, account registry, per-project account bindings and CLAUDE.md
+/// scopes; none of that is the other machine's business, and the scopes scan
+/// is the slow part of the bundle.
+pub(crate) async fn project_list(state: &Arc<DaemonState>) -> Result<Value, RpcError> {
+    let mut groups = project_groups(state).await?;
+    for g in &mut groups {
+        // An image avatar is an absolute path on THIS disk; the picker's other
+        // machine could neither read it nor should learn it. It re-asks for
+        // the project's icon through `get_project_icon` instead.
+        if matches!(g.avatar, crate::types::Avatar::Image(_)) {
+            g.avatar = crate::types::Avatar::None;
+        }
+    }
+    let paths: Vec<String> = groups.iter().filter(|g| g.path_exists).map(|g| g.path.clone()).collect();
+    let scan_paths = paths.clone();
+    let mtimes = tokio::task::spawn_blocking(move || {
+        scan_paths
+            .iter()
+            .map(|p| crate::ipc::project_groups::latest_jsonl_mtime_in_projects_dir(Path::new(p)))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| RpcError::internal(format!("join: {e}")))?;
+    let mut stats = Map::new();
+    for (path, mtime) in paths.into_iter().zip(mtimes) {
+        let todo_count = crate::ipc::ai_todos::count_ai_todos(path.clone()).await;
+        stats.insert(path, json!({ "mtime": mtime, "todoCount": todo_count }));
+    }
+    Ok(json!({ "groups": groups, "stats": stats }))
+}
+
 pub fn register_new_session_bundle(router: &mut Router, state: Arc<DaemonState>) {
-    router.register("new_session_bundle", move |_params, _ctx| {
+    router.register("new_session_bundle", move |_params, ctx| {
         let state = state.clone();
-        async move { bundle(&state).await }
+        // Decided from the connection, never from a param, so a peer can't ask
+        // for the full bundle by claiming to be a phone.
+        let from_peer = matches!(ctx.transport, Transport::PeerMachine(_));
+        async move {
+            if from_peer {
+                project_list(&state).await
+            } else {
+                bundle(&state).await
+            }
+        }
     });
 }
 

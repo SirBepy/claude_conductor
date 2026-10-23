@@ -105,11 +105,15 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
         }
     });
 
-    // New-chat picker's cross-machine project list (D3): `machine_id == self`
-    // (or no registry yet) mirrors `list_projects`'s own body exactly; any
-    // other known machine forwards the SAME "list_projects" RPC to it over
-    // `/api/rpc` and returns its result verbatim - `list_projects` is PM in
-    // `remote_transport_table::TRANSPORT_TABLE` precisely so that peer accepts it.
+    // New-chat picker's cross-machine project list (D3): `{groups, stats}`,
+    // the same two pieces the local picker is built from (icons, worktrees,
+    // last activity, todo counts). `machine_id == self` builds them from this
+    // daemon's own state; any other known machine forwards `new_session_bundle`
+    // to it over `/api/rpc`, where that method answers a `PeerMachine` caller
+    // with just this slim shape (see `registry/new_session_bundle.rs`), so the
+    // peer's settings and accounts never cross the wire. `new_session_bundle`
+    // is PM in `remote_transport_table::TRANSPORT_TABLE` precisely so that peer
+    // accepts it.
     router.register("list_machine_projects", {
         let state = state.clone();
         move |params, _ctx| {
@@ -119,10 +123,14 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
                 if self_id.as_deref() == Some(req.machine_id.as_str()) {
-                    return Ok(json!(state.settings.snapshot().projects));
+                    return super::registry::new_session_bundle::project_list(&state).await;
                 }
                 let client = crate::daemon::machines::forward::resolve_peer_client(&state, &req.machine_id).await?;
-                client.call("list_projects", Value::Null).await.map_err(map_peer_err)
+                let bundle = client.call("new_session_bundle", Value::Null).await.map_err(map_peer_err)?;
+                // Re-picked rather than passed through: this response goes on to
+                // the phone, and a peer that answered with more than the slim
+                // shape must not leak the rest onward.
+                Ok(json!({ "groups": bundle["groups"], "stats": bundle["stats"] }))
             }
         }
     });
@@ -182,14 +190,19 @@ mod tests {
     // ── list_machine_projects ───────────────────────────────────────────────
 
     #[tokio::test]
-    async fn list_machine_projects_self_returns_the_local_snapshot() {
+    async fn list_machine_projects_self_returns_the_local_groups_and_stats() {
         let dir = tempdir().unwrap();
+        // Not under the OS temp dir: the group list drops temp-dir projects as ephemeral.
+        let proj_dir = tempfile::Builder::new().prefix("lmp-self-").tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        std::fs::create_dir_all(proj_dir.path().join(".claude/todos")).unwrap();
+        std::fs::write(proj_dir.path().join(".claude/todos/01-a.md"), "a").unwrap();
+        let proj_path = proj_dir.path().to_string_lossy().into_owned();
         let mut settings = Settings::default();
         settings.projects.push(crate::types::ProjectConfig {
             id: "proj1".into(),
-            path: std::path::PathBuf::from("C:/proj1"),
+            path: std::path::PathBuf::from(&proj_path),
             name: "proj1".into(),
-            avatar: Default::default(),
+            avatar: crate::types::Avatar::Image(std::path::PathBuf::from("C:/secret/avatar.png")),
             automation: None,
             created_at: "2026-09-05T00:00:00Z".into(),
             last_active_at: None,
@@ -219,19 +232,28 @@ mod tests {
             )
             .await;
         assert!(resp.error.is_none(), "got {:?}", resp.error);
-        let arr = resp.result.unwrap();
-        assert_eq!(arr.as_array().unwrap().len(), 1);
-        assert_eq!(arr[0]["id"], json!("proj1"));
+        let out = resp.result.unwrap();
+        let group = out["groups"].as_array().unwrap().iter().find(|g| g["id"] == json!("proj1")).expect("proj1 group");
+        assert_eq!(group["avatar"]["kind"], json!("none"), "an image avatar's disk path never leaves the daemon");
+        assert_eq!(out["stats"][&proj_path]["todoCount"], json!(1));
+        assert!(out.get("settings").is_none() && out.get("accounts").is_none());
     }
 
     #[tokio::test]
-    async fn list_machine_projects_forwards_to_the_named_peer_and_returns_it_verbatim() {
+    async fn list_machine_projects_forwards_new_session_bundle_and_keeps_only_groups_and_stats() {
         let dir = tempdir().unwrap();
         let peer_dir = tempdir().unwrap();
 
+        // A peer that answers with MORE than the slim shape (an older build, or
+        // a bug) must not have the extra fields relayed on to the phone.
         let mut b_router = Router::new();
-        b_router.register("list_projects", |_params, _ctx| async move {
-            Ok(json!([{"id": "peer-proj", "root": "C:/peer-proj"}]))
+        b_router.register("new_session_bundle", |_params, _ctx| async move {
+            Ok(json!({
+                "groups": [{"id": "peer-proj", "path": "C:/peer-proj", "worktrees": [{"path": "C:/peer-proj-wt"}]}],
+                "stats": {"C:/peer-proj": {"mtime": 5, "todoCount": 3}},
+                "settings": {"apiKey": "dummy-secret"},
+                "accounts": [{"id": "acct"}],
+            }))
         });
         let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let (_stt, b_port, b_serve) =
@@ -268,7 +290,13 @@ mod tests {
             )
             .await;
         assert!(resp.error.is_none(), "got {:?}", resp.error);
-        assert_eq!(resp.result.unwrap(), json!([{"id": "peer-proj", "root": "C:/peer-proj"}]));
+        assert_eq!(
+            resp.result.unwrap(),
+            json!({
+                "groups": [{"id": "peer-proj", "path": "C:/peer-proj", "worktrees": [{"path": "C:/peer-proj-wt"}]}],
+                "stats": {"C:/peer-proj": {"mtime": 5, "todoCount": 3}},
+            })
+        );
 
         b_serve.kill();
     }

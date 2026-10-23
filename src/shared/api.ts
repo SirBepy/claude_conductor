@@ -146,6 +146,14 @@ export interface ProjectGroup {
   any_automated: boolean;
   last_active_at: string | null;
 }
+/** One project's todo count and last activity, as measured on the machine that owns it. */
+export interface MachineProjectStat { mtime: number; todoCount: number; }
+/** `list_machine_projects`: the project groups a paired machine built plus a
+ * stat per project path (the same two pieces the local picker reads). */
+export interface MachineProjectList {
+  groups: import("../types/ipc.generated").ProjectGroup[];
+  stats: Record<string, MachineProjectStat>;
+}
 export interface InstanceInfo { [k: string]: unknown; }
 export interface AuthStatus { state?: string; [k: string]: unknown; }
 
@@ -543,7 +551,7 @@ export const api = {
   browserStatus: (): Promise<{ running: boolean; shown: boolean }> => invoke("browser_status"),
   browserSetShown: (shown: boolean): Promise<{ ok: boolean; shown: boolean }> =>
     invoke("browser_set_shown", { shown }),
-  listMachineProjects: (machineId: string): Promise<ProjectConfig[]> =>
+  listMachineProjects: (machineId: string): Promise<MachineProjectList> =>
     invoke("list_machine_projects", { machineId }),
 
   // --- Hook registration ---

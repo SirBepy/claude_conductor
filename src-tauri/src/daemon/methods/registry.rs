@@ -7,7 +7,7 @@ mod attachments;
 mod characters;
 pub(super) mod lifecycle;
 mod listings;
-mod new_session_bundle;
+pub(super) mod new_session_bundle;
 mod project_meta;
 mod waiting_tail;
 
@@ -136,6 +136,42 @@ mod reject_unknown_tests {
         assert_eq!(b["scopes"][&path].as_array().unwrap().len(), 2);
         assert!(b["projectAccounts"].as_object().unwrap().contains_key(&path));
         assert!(b["settings"].is_object() && b["accounts"].is_array() && b["projects"].is_array());
+    }
+
+    // A paired machine's picker needs the project rows and their todo/recency
+    // stats, not this daemon's settings, accounts or CLAUDE.md scopes.
+    #[tokio::test]
+    async fn new_session_bundle_for_a_peer_machine_is_groups_and_stats_only() {
+        let dir = tempfile::Builder::new().prefix("bundle-peer-").tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude/todos")).unwrap();
+        std::fs::write(dir.path().join(".claude/todos/01-a.md"), "a").unwrap();
+        std::fs::write(dir.path().join(".claude/todos/02-b.md"), "b").unwrap();
+        let path = dir.path().to_string_lossy().into_owned();
+        let mut settings = Settings::default();
+        settings.projects.push(
+            serde_json::from_value(json!({
+                "id": "p1", "path": path, "name": "bundle", "created_at": "2026-10-22T00:00:00Z",
+                "avatar": {"kind": "image", "value": "C:/private/face.png"},
+            }))
+            .unwrap(),
+        );
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+
+        let mut r = Router::new();
+        register_chat_registry(&mut r, state);
+        let mut ctx = dummy_ctx();
+        ctx.transport = crate::daemon::rpc::Transport::PeerMachine("mac".into());
+        let resp = r
+            .dispatch(Request { jsonrpc: "2.0".into(), id: json!(1), method: "new_session_bundle".into(), params: None }, ctx)
+            .await;
+        let b = resp.result.unwrap_or_else(|| panic!("bundle errored: {:?}", resp.error));
+
+        let g = b["groups"].as_array().unwrap().iter().find(|g| g["path"] == json!(path)).expect("project group");
+        assert_eq!(g["avatar"]["kind"], json!("none"), "image avatar path must not cross to a peer");
+        assert_eq!(b["stats"][&path]["todoCount"], json!(2));
+        for stripped in ["settings", "accounts", "projects", "scopes", "projectAccounts"] {
+            assert!(b.get(stripped).is_none(), "{stripped} must not be sent to a peer machine");
+        }
     }
 
     #[tokio::test]

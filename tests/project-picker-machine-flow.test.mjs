@@ -21,10 +21,18 @@ const PEER = {
   iroh_id: null, direct_url: null, reverse_device_id: null, added_at: 0,
   reach: "direct",
 };
-const PEER_PROJECT = { id: "peer-proj-1", path: "C:/PeerProjects/widget", name: "widget" };
+const PEER_PROJECT = {
+  id: "peer-proj-1", path: "C:/PeerProjects/widget", name: "widget", parent_segment: null,
+  avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_automated: false,
+  last_active_at: null, path_exists: true, last_worktree_path: null, last_start_folder_rel: null,
+  worktrees: [{ path: "C:/PeerProjects/widget-wt", name: "wt", tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }],
+};
 
 const listMachines = vi.fn().mockResolvedValue({ self: SELF, peers: [PEER] });
-const listMachineProjects = vi.fn().mockResolvedValue([PEER_PROJECT]);
+const listMachineProjects = vi.fn().mockResolvedValue({
+  groups: [PEER_PROJECT],
+  stats: { [PEER_PROJECT.path]: { mtime: 9, todoCount: 4 } },
+});
 vi.mock("../src/shared/api.ts", () => ({
   api: {
     listMachines: (...a) => listMachines(...a),
@@ -80,6 +88,10 @@ describe("openProjectPickerModal / peer machine project pick (G8)", () => {
     await vi.waitFor(() => {
       expect(document.querySelector(".project-picker-row")).not.toBeNull();
     });
+    // The peer's own todo count rides along on the row; its worktree badge
+    // does not, since picking a worktree on a peer is not wired up.
+    expect(document.querySelector(".project-picker-todo-badge")?.textContent).toBe("4");
+    expect(document.querySelector(".project-picker-wt-badge")).toBeNull();
     document.querySelector(".project-picker-row")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 

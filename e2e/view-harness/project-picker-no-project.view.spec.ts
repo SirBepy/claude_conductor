@@ -1,3 +1,4 @@
+// Reviewed 2026-10-23 (peer project stats): project-picker.ts now reads row stats through statFor() and hides the worktree badge on peer rows - this spec only drives the local list, where both are unchanged.
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
