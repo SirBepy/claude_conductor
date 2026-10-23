@@ -1,6 +1,7 @@
-//! The dashboard's read RPCs. All four are desktop-pipe only (absent from
-//! `TRANSPORT_TABLE`): they expose local file paths, git state and transcript
-//! contents, none of which a phone or paired machine may pull.
+//! The dashboard's read RPCs. All four are reachable from the phone (`P` in
+//! `TRANSPORT_TABLE`, for its Projects tab) and never from a paired machine:
+//! they expose local file paths, git state and transcript contents, which the
+//! phone already reads piecemeal through its list_* methods.
 
 use super::gather::gather;
 use super::{history, layout, parse, snapshot, to_json, IdOnly};

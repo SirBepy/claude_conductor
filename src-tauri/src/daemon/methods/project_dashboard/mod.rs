@@ -189,10 +189,9 @@ mod tests {
     use crate::daemon::remote_transport_table::allowed;
     use crate::daemon::rpc::Transport;
 
-    /// Every method this module registers. Kept next to the registration so a
-    /// new method added there is one grep from this list.
     /// Every method this module registers that only the desktop pipe may call:
-    /// all card, group and pin writes.
+    /// all card, group and pin writes. Kept next to the registration so a new
+    /// method added there is one grep from these lists.
     const DESKTOP_ONLY: &[&str] = &[
         "dashboard_group_upsert",
         "dashboard_group_delete",

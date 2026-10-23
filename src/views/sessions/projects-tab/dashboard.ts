@@ -13,7 +13,7 @@ import type { DashCtx } from "./dash-parts";
 import { reports } from "./dash-reports";
 import { chats } from "./dash-chats";
 import { needsYou, nextUp, running, shipState, yourTodos } from "./dash-sections";
-import { DEFAULT_CARD_REFRESH_SECS, staleCardIds } from "./format";
+import { cardRefreshSecs, staleCardIds } from "./format";
 import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 
 import "./pd-dashboard.css";
@@ -111,7 +111,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
         if (ctx.refreshing.has(id)) continue;
         const cfg = ctx.snap.cards.find((v) => v.config.id === id)?.config;
         const tried = lastAutoRun.get(id);
-        if (tried && Date.now() - tried < (cfg?.refresh_secs ?? DEFAULT_CARD_REFRESH_SECS) * 1000) continue;
+        if (tried && Date.now() - tried < cardRefreshSecs(cfg?.refresh_secs) * 1000) continue;
         lastAutoRun.set(id, Date.now());
         ctx.refreshing.add(id);
         paint();

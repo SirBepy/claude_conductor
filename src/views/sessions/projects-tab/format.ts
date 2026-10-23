@@ -161,13 +161,21 @@ export function offerableCommands(cmds: string[]): string[] {
 
 /** How long a custom card's result counts as fresh when its config names no refresh_secs. */
 export const DEFAULT_CARD_REFRESH_SECS = 900;
+/** A chat can write any refresh_secs, 0 included; each run is an HTTP call or a local
+ *  command, so an open dashboard never re-runs one card more often than this. */
+export const MIN_CARD_REFRESH_SECS = 60;
+
+/** The interval a card is actually refreshed on. */
+export function cardRefreshSecs(refreshSecs: number | null | undefined): number {
+  return Math.max(refreshSecs ?? DEFAULT_CARD_REFRESH_SECS, MIN_CARD_REFRESH_SECS);
+}
 
 /** Enabled cards with no result yet, or one older than their refresh interval. */
 export function staleCardIds(cards: CardView[], nowMs: number = Date.now()): string[] {
   return cards.filter((v) => {
     if (!v.config.enabled) return false;
     if (!v.result) return true;
-    const secs = v.config.refresh_secs ?? DEFAULT_CARD_REFRESH_SECS;
+    const secs = cardRefreshSecs(v.config.refresh_secs);
     return nowMs - v.result.fetched_at_ms >= secs * 1000;
   }).map((v) => v.config.id);
 }
