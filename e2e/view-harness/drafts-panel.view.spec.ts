@@ -294,6 +294,21 @@ test("Copy writes rich HTML and markdown in one clipboard call, and marks the ca
     .toBe("copied");
 });
 
+test("a webview that refuses the rich write gets Slack-ready plain text, never markdown syntax", async ({ page }) => {
+  const panel = await mountPanel(page);
+  await page.evaluate(() => {
+    (navigator.clipboard as any).write = () => Promise.reject(new Error("NotAllowedError"));
+  });
+  await panel.locator(".dr-card").first().click();
+  await panel.locator("[data-copy]").click();
+
+  await expect.poll(() => page.evaluate(() => (window as any).__clipboard.length)).toBe(1);
+  const payload = await page.evaluate(() => (window as any).__clipboard.at(-1));
+  expect(payload["text/html"]).toBeUndefined();
+  expect(payload["text/plain"]).toContain("*auth migration*");
+  expect(payload["text/plain"]).not.toContain("**");
+});
+
 test("the bold button marks the selection instead of typing asterisks", async ({ page }) => {
   const panel = await mountPanel(page);
   await panel.locator(".dr-card").first().click();
