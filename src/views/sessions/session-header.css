@@ -101,7 +101,7 @@
 .session-header .meta-cfg-sep[hidden] { display: none; }
 
 /* Desktop reads words; the phone swaps in the rank battery and a 3-4 letter
-   effort (colour from --effort-* in tokens.css, cool to hot as it climbs). */
+   effort, uncoloured: the word already says the level (Joe, 2026-10-23). */
 .session-header .meta-cfg-model-battery,
 .session-header .meta-cfg-effort-short { display: none; }
 
@@ -111,11 +111,6 @@
   .session-header .meta-cfg-sep { display: none; }
   .session-header .meta-cfg-model-battery { display: inline; font-size: 1rem; line-height: 1; }
   .session-header .meta-cfg-effort-short { display: inline; }
-  .session-header .meta-cfg-effort[data-effort="low"] { color: var(--effort-low); }
-  .session-header .meta-cfg-effort[data-effort="medium"] { color: var(--effort-medium); }
-  .session-header .meta-cfg-effort[data-effort="high"] { color: var(--effort-high); }
-  .session-header .meta-cfg-effort[data-effort="xhigh"] { color: var(--effort-xhigh); }
-  .session-header .meta-cfg-effort[data-effort="max"] { color: var(--effort-max); }
 }
 
 /* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which

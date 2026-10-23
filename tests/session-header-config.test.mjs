@@ -7,6 +7,7 @@
 // the slider popover anchored to it.
 
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { SessionHeader } from "../src/views/sessions/session-header.ts";
 
 let header;
@@ -96,5 +97,14 @@ describe("session header Code mode button", () => {
   it("is gone from the header", () => {
     expect(header.el.querySelector(".code-mode-btn")).toBeNull();
     expect(header.onCodeModeClick).toBeUndefined();
+  });
+});
+
+// The short effort word is uncoloured on the phone: the word already names the
+// level (Joe, 2026-10-23).
+describe("session header effort colour", () => {
+  it("does not colour the effort word by level", () => {
+    const css = readFileSync("src/views/sessions/session-header.css", "utf8");
+    expect(css).not.toMatch(/meta-cfg-effort\[data-effort/);
   });
 });

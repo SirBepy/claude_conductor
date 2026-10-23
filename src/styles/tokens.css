@@ -14,11 +14,4 @@
     --fs-title: 0.875rem;
     --fs-body: 0.8125rem;
     --fs-micro: 0.72rem;
-
-    /* Reasoning-effort scale, cool to hot; no palette token spans five steps. */
-    --effort-low: #6b9bd1;
-    --effort-medium: #5fbf8a;
-    --effort-high: #e0c060;
-    --effort-xhigh: #e8914f;
-    --effort-max: #e5605f;
 }
