@@ -358,17 +358,26 @@ pub async fn list_pending_prompts(state: State<'_, AppState>) -> Result<Value, S
 /// `session_id` is `None` for every call site that predates mirroring (the
 /// AUQ card's attachment hydrate, the composer's own re-read on restore) -
 /// those fall straight through to the local read, unchanged from before.
+///
+/// `machine_id` is a pending new-chat pane's target machine: its placeholder
+/// session id is in no chat list, so the pane's attachments (saved on that
+/// machine's disk) can only be re-read by naming the machine.
 #[tauri::command]
 pub async fn read_attachment(
     path: String,
     session_id: Option<String>,
+    machine_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<super::attachments::AttachmentData, String> {
-    if let Some(sid) = session_id.as_deref() {
-        if super::history::is_mirrored(&state.cached_instances.lock().unwrap(), sid) {
-            let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-            return client.read_attachment(&path, Some(sid)).await.map_err(|e| e.to_string());
-        }
+    let mirrored = session_id
+        .as_deref()
+        .is_some_and(|sid| super::history::is_mirrored(&state.cached_instances.lock().unwrap(), sid));
+    if mirrored || machine_id.as_deref().is_some_and(|m| !m.is_empty()) {
+        let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+        return client
+            .read_attachment(&path, session_id.as_deref(), machine_id.as_deref())
+            .await
+            .map_err(|e| e.to_string());
     }
     super::attachments::read_attachment(path).await
 }

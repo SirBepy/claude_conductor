@@ -181,3 +181,4 @@ test.describe("@shot", () => {
   });
 });
 // Reviewed 2026-10-23: http-transport's list_previews/get_preview/read_image_file cases gained an optional session id; the contract asserted here is unchanged.
+// Reviewed 2026-10-23 (attachments for a new chat on a paired machine): http-transport's paste_attachment/read_attachment cases gained an optional machine_id; this spec only reads RemoteUnavailableError, so its contract is unchanged.

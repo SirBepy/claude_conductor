@@ -32,6 +32,29 @@ pub async fn start_session(
     start_session_daemon(cwd, prompt, model, effort, placeholder_id, account_id, auto_accept.unwrap_or(false), machine_id, &state, &app).await
 }
 
+/// The refusal for a first message aimed at paired machine `target` that
+/// mentions a file saved in THIS machine's chat-attachments (the peer's
+/// `claude` cannot read it). `None` when there is nothing to refuse, or the
+/// machine list is unavailable: the daemon's `send_message` forward runs the
+/// same check, so a miss here only costs the empty-chat tidiness.
+async fn local_attachment_refusal_for(state: &State<'_, AppState>, target: &str, prompt: &str) -> Option<String> {
+    if !prompt.contains("<file:") {
+        return None;
+    }
+    let client = state.client().await?;
+    let machines = client.call("list_machines", serde_json::Value::Null).await.ok()?;
+    if machines["self"]["machine_id"].as_str() == Some(target) {
+        return None;
+    }
+    let label = machines["peers"]
+        .as_array()?
+        .iter()
+        .find(|p| p["machine_id"].as_str() == Some(target))
+        .and_then(|p| p["label"].as_str())
+        .unwrap_or(target);
+    crate::daemon::machines::forward::local_attachment_refusal(prompt, label)
+}
+
 /// Daemon-backed new session: spawn via RPC, bridge events, hand the real id
 /// to the frontend via a synthetic SessionStarted on the placeholder channel.
 async fn start_session_daemon(
@@ -46,6 +69,13 @@ async fn start_session_daemon(
     state: &State<'_, AppState>,
     app: &AppHandle,
 ) -> Result<String, String> {
+    // Before the spawn, not after: a refused first message would otherwise leave
+    // an empty chat behind on the target machine.
+    if let Some(target) = machine_id.as_deref().filter(|m| !m.is_empty()) {
+        if let Some(msg) = local_attachment_refusal_for(state, target, &prompt).await {
+            return Err(msg);
+        }
+    }
     // account_id: None (unbound project, default untouched) resolves to
     // Settings.default_account_id daemon-side - docs/multi-account/02-chat-routing.md step 5.
     let spawn = || async {

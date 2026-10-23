@@ -40,6 +40,10 @@ export interface ComposerOptions {
   onSend: (blocks: ContentBlock[]) => Promise<void> | void;
   projectDir?: string | null;
   getRenderer?: () => ChatRenderer | null;
+  /** The paired machine this composer's chat is aimed at while it is still a
+   * pending draft (or null). Routes attachment uploads and reads to that
+   * machine's disk, since the placeholder session id names no host. */
+  getMachineId?: () => string | null;
   /** True while the active session's turn is in flight. When busy, Enter stages
    * the message (via onStage) instead of sending it. */
   isBusy?: () => boolean;
@@ -178,6 +182,7 @@ export class Composer {
     });
     this.att = new ComposerAttachments({
       getSessionId: () => this.sessionId,
+      getMachineId: () => this.opts.getMachineId?.() ?? null,
       onChange: () => this.updateScheduleBtnState(),
     });
     this.strayInput = new ComposerStrayInput({

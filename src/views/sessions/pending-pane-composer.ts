@@ -71,6 +71,10 @@ export function wirePendingComposer(
   const composer = new Composer(composerEl, {
     projectDir: project.path,
     getRenderer: () => state.renderer,
+    // The placeholder id names no host, so without this an attached image is
+    // saved on THIS machine and the peer's `claude` is handed a path that
+    // does not exist on its disk.
+    getMachineId: () => config.machineId ?? null,
     // Staging routing (same as the established pane): while busy, Enter holds
     // the message; not-busy-with-held bundles it. The FIRST message never
     // stages (isBusy is false until firstMessageSent), so it still starts the
