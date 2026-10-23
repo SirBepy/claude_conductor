@@ -20,8 +20,7 @@ export type ScheduledRow = { id: string, label: string, fire_at_ms: number, repo
 export type CommitRow = { short_sha: string, message: string, timestamp_ms: number, pushed: boolean }
 export type RepoShip = { cwd: string, name: string, branch: string, ahead: number, behind: number, has_upstream: boolean, dirty_count: number, recent_commits: CommitRow[] }
 export type ServerRow = { name: string, port: number, repo_cwd: string }
-export type ChannelNote = { author: string, text: string, at_ms: number }
-export type DashboardSnapshot = { target: DashboardTarget, needs_you: NeedsYouItem[], your_todos: DashTodo[], chats_running: DashChatRow[], chats_recent: DashChatRow[], plan: PlanItem[], scheduled: ScheduledRow[], ship: RepoShip[], servers: ServerRow[], peers_active: number, last_channel_message: ChannelNote | null, cards: CardView[], hidden_builtins: string[], pinned_actions: string[] }
+export type DashboardSnapshot = { target: DashboardTarget, needs_you: NeedsYouItem[], your_todos: DashTodo[], chats_running: DashChatRow[], chats_recent: DashChatRow[], plan: PlanItem[], scheduled: ScheduledRow[], ship: RepoShip[], servers: ServerRow[], cards: CardView[], hidden_builtins: string[], pinned_actions: string[] }
 export type QuickAction = { command: string, count: number }
 export type OutcomeRow = { session_id: string, title: string, text: string, at_ms: number, repo_cwd: string }
 export type GalleryItem = { id: string, session_id: string, title: string, at_ms: number, repo_cwd: string }
@@ -61,7 +60,6 @@ export type _ContractChecks = [
   Assert<Fits<CommitRow, Gen.CommitRow>>,
   Assert<Fits<RepoShip, Gen.RepoShip>>,
   Assert<Fits<ServerRow, Gen.ServerRow>>,
-  Assert<Fits<ChannelNote, Gen.ChannelNote>>,
   Assert<Fits<DashboardSnapshot, Gen.DashboardSnapshot>>,
   Assert<Fits<QuickAction, Gen.QuickAction>>,
   Assert<Fits<OutcomeRow, Gen.OutcomeRow>>,

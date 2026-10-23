@@ -27,7 +27,7 @@ pub use types::{
     CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSource, CardView, GroupDef, LabelValue, RowValue, Scope, StatSpec, BUILTIN_CARDS,
 };
 pub use snapshot_types::{
-    ChannelNote, CommitRow, DashChatRow, DashTodo, DashboardHistory, DashboardListRow, DashboardSnapshot,
+    CommitRow, DashChatRow, DashTodo, DashboardHistory, DashboardListRow, DashboardSnapshot,
     DashboardTarget, DashboardTargetRef, FileRow, GalleryItem, NeedsYouItem, OutcomeRow, PlanItem, QuickAction,
     RepoRef, RepoShip, ScheduledRow, ServerRow,
 };

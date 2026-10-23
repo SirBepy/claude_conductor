@@ -10,7 +10,7 @@ use crate::daemon::state::DaemonState;
 use crate::project_dashboard::history_scan::project_dir_slug;
 use crate::project_dashboard::plan::{rank, read_plan};
 use crate::project_dashboard::snapshot_parts::{
-    draft_is_open, draft_item, newest_note, scheduled_row, soonest_scheduled,
+    draft_is_open, draft_item, scheduled_row, soonest_scheduled,
 };
 use crate::project_dashboard::targets::{chat_in_repo, resolve_target};
 use crate::project_dashboard::{
@@ -18,7 +18,7 @@ use crate::project_dashboard::{
     PlanItem, RepoRef, RepoShip, Scope, ScheduledRow, ServerRow,
 };
 use crate::sessions::user_todos::TodoState;
-use crate::sessions::{message_drafts, repo_channel, scheduled_items, user_todos};
+use crate::sessions::{message_drafts, scheduled_items, user_todos};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -77,7 +77,6 @@ struct StoredRows {
     drafts: Vec<NeedsYouItem>,
     plan: Vec<PlanItem>,
     scheduled: Vec<ScheduledRow>,
-    note: Option<crate::project_dashboard::ChannelNote>,
     recent: Vec<DashChatRow>,
 }
 
@@ -85,7 +84,6 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
     let mut todos = Vec::new();
     let mut drafts = Vec::new();
     let mut plan = Vec::new();
-    let mut channel = Vec::new();
     for repo in repos {
         plan.extend(read_plan(&repo.cwd));
         let Some(pid) = &repo.project_id else { continue };
@@ -105,7 +103,6 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
                 .filter(|d| draft_is_open(d, now_ms))
                 .map(|d| draft_item(d, &repo.cwd)),
         );
-        channel.extend(repo_channel::list_all(pid));
     }
     drafts.sort_by(|a, b| b.at_ms.cmp(&a.at_ms));
     rank(&mut plan);
@@ -117,7 +114,6 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
         drafts,
         plan,
         scheduled,
-        note: newest_note(channel),
         recent: recent_chats(repos, live_ids, live_in_target),
     }
 }
@@ -243,14 +239,12 @@ pub(super) async fn snapshot(state: &Arc<DaemonState>, target_ref: DashboardTarg
     Ok(DashboardSnapshot {
         needs_you,
         your_todos: stored.todos,
-        peers_active: chats_running.len() as u32,
         chats_running,
         chats_recent: stored.recent,
         plan: stored.plan,
         scheduled: stored.scheduled,
         ship,
         servers: servers.into_iter().flatten().collect(),
-        last_channel_message: stored.note,
         cards: cards_for_target(&target, &st),
         hidden_builtins: st.hidden_builtins.get(&scope_of(&target).scope_key()).cloned().unwrap_or_default(),
         // Exactly the target's own list: a project inside a group does not

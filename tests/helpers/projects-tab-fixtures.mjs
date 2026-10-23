@@ -49,8 +49,6 @@ export function projectSnapshot(over = {}) {
     scheduled: [{ id: "sc1", label: "/loop-todos cycle", fire_at_ms: NOW + 3_600_000, repo_cwd: CONDUCTOR.cwd }],
     ship: [ship(CONDUCTOR.cwd, "conductor", "master", 2, 0)],
     servers: [{ name: "vite dev server", port: 1420, repo_cwd: CONDUCTOR.cwd }],
-    peers_active: 3,
-    last_channel_message: { author: "peer", text: "holding commit on chat-renderer.ts", at_ms: min(4) },
     cards: [], hidden_builtins: [], pinned_actions: [], ...over,
   };
 }
@@ -104,7 +102,7 @@ export function groupSnapshot(over = {}) {
     chats_recent: [{ session_id: "z-old", title: "Loan export CSV columns", status: "ended", repo_cwd: admin.cwd, at_ms: min(120) }],
     plan: [], scheduled: [],
     ship: [ship(app.cwd, "zng-app", "release/2.14", 3, 0), ship(admin.cwd, "zng-admin", "sc-4810", 0, 0), ship(biller.cwd, "zng-biller", "sc-4821", 1, 2), ship(api.cwd, "zng-api", "main", 0, 0)],
-    servers: [], peers_active: 0, last_channel_message: null,
+    servers: [],
     cards: [
       card("c1", "Shortcut: my stories", { kind: "list", items_path: "a", label_path: "b", value_path: "c", link_path: null, limit: null },
         { fetched_at_ms: min(6), stats: [], rows: [{ label: "Retry failed ACH payouts", value: "In progress", link: null }], error: null }),
