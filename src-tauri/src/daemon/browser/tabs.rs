@@ -51,7 +51,9 @@ pub(super) async fn list_pages(base: &str) -> Option<Vec<String>> {
 }
 
 /// Target id of the tab opened by `open`, or `None` when it cannot be told
-/// apart (Chrome unreachable, or other tabs appeared at the same moment).
+/// apart (Chrome unreachable, or other tabs appeared at the same moment). A
+/// failed `open` can still have opened its tab, which nothing would ever
+/// close, so that tab is closed here before the error is returned.
 pub(super) async fn open_and_find<F, Fut, E>(base: &str, open: F) -> Result<Option<String>, E>
 where
     F: FnOnce() -> Fut,
@@ -59,16 +61,30 @@ where
 {
     let _guard = OPEN_LOCK.lock().await;
     let before = list_pages(base).await;
-    open().await?;
+    let opened = open().await;
     let after = list_pages(base).await;
-    Ok(match (before, after) {
+    let found = match (before, after) {
         (Some(b), Some(a)) => single_new(&b, &a),
         _ => None,
-    })
+    };
+    if let Err(e) = opened {
+        if let Some(id) = found {
+            close_page(base, &id).await;
+        }
+        return Err(e);
+    }
+    Ok(found)
 }
 
-/// Best-effort: the tab may already be gone with a relaunched Chrome.
+/// Best-effort: the tab may already be gone with a relaunched Chrome. The
+/// browser's last tab is left open: closing a window's last tab closes the
+/// window, and Chrome exits with its last window, which would take the
+/// DevTools port every other driver attaches through down with it.
 pub(super) async fn close_page(base: &str, target_id: &str) {
+    if list_pages(base).await.is_some_and(|pages| pages == [target_id]) {
+        log::debug!("claude browser: leaving tab {target_id} open, it is the browser's last");
+        return;
+    }
     let Ok(client) = reqwest::Client::builder().timeout(HTTP_TIMEOUT).build() else { return };
     if let Err(e) = client.get(format!("{base}/json/close/{target_id}")).send().await {
         log::debug!("claude browser: closing tab {target_id} failed: {e}");
@@ -164,6 +180,27 @@ mod tests {
             vec!["startup".to_string()],
             "only the startup tab is left, not a pile of abandoned ones"
         );
+    }
+
+    #[tokio::test]
+    async fn the_browsers_last_tab_is_never_closed() {
+        let chrome = fake_chrome(&["only"]).await;
+        close_page(&chrome.base, "only").await;
+        assert!(chrome.closed.lock().unwrap().is_empty(), "closing it would exit Chrome");
+        assert_eq!(list_pages(&chrome.base).await.unwrap(), vec!["only".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_tab_opened_by_a_failing_open_is_closed_not_leaked() {
+        let chrome = fake_chrome(&["startup"]).await;
+        let pages = chrome.pages.clone();
+        let res = open_and_find(&chrome.base, || async move {
+            pages.lock().unwrap().push("half-open".to_string());
+            Err::<(), String>("browser_tabs new failed".into())
+        })
+        .await;
+        assert_eq!(res, Err("browser_tabs new failed".to_string()));
+        assert_eq!(*chrome.closed.lock().unwrap(), vec!["half-open".to_string()]);
     }
 
     #[tokio::test]
