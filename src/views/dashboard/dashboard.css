@@ -1,6 +1,6 @@
 .view-dashboard {
-  /* Dividers look: no card boxes, 1px hairlines between sections and columns. */
-  --dv-line: 1px solid var(--color-border);
+  /* Dividers look: no card boxes, 1px hairlines (--dv-line, dividers.css)
+     between sections and columns. */
   --dv-meta: var(--sb-muted, var(--color-text-muted));
   --dv-pad-y: 26px;
   --dv-pad-x: 28px;

@@ -1,0 +1,45 @@
+/* The app-wide dividers look, shared by every screen that groups content into
+ * sections: no card boxes (fill, border, radius, shadow), a 1px hairline above
+ * each section instead, and a sentence-case section title carried by weight
+ * alone. The Projects dashboard (pd-dashboard.css) and the main Dashboard
+ * (dashboard.css) set the look; this file holds it for the shared section
+ * classes so each screen does not carry its own copy.
+ *
+ * `.kit-section` is tauri_kit's settings card, used by other apps too, so it is
+ * restyled here rather than in the kit. The `body` prefix outranks the kit's
+ * single-class rule whatever order the bundle emits the two files in. */
+
+/* The hairline itself, for screens that draw their own rows and columns. */
+:root { --dv-line: 1px solid var(--color-border); }
+
+body .kit-section,
+body .section,
+body .chart-container {
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 22px 0 24px;
+}
+/* The view header already draws a rule under itself, so the section that
+   opens a view's body skips its own. Only at the top of the body: a section
+   opening a nested list (Notifications' event cards) still needs its rule. A
+   section hidden by an inline display:none (phone-only push settings) hands
+   the exemption to the one after it. */
+:is(.view-body, .view-body-inner) > :is(.kit-section, .section, .chart-container):first-child,
+:is(.view-body, .view-body-inner) > [style*="display:none"]:first-child + :is(.kit-section, .section, .chart-container) {
+  border-top: 0;
+  padding-top: 6px;
+}
+body .kit-section-title,
+body .section-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text);
+}
+body .kit-section-title.kit-section-danger { color: var(--color-danger); }
