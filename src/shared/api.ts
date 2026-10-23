@@ -154,6 +154,23 @@ export interface MachineProjectList {
   groups: import("../types/ipc.generated").ProjectGroup[];
   stats: Record<string, MachineProjectStat>;
 }
+/** One account of a paired machine, as `list_machine_accounts` returns it: the
+ * display fields only. No config dir, profile dir or org id ever crosses. */
+export interface MachineAccount {
+  id: string;
+  label: string;
+  colour: string;
+  icon: string;
+  email: string;
+  subscription_tier: string;
+}
+/** `list_machine_accounts`: that machine's accounts, its default account id and
+ * its own binding for the project asked about (null when it has none). */
+export interface MachineAccountList {
+  accounts: MachineAccount[];
+  default_account_id: string | null;
+  project_account_id: string | null;
+}
 export interface InstanceInfo { [k: string]: unknown; }
 export interface AuthStatus { state?: string; [k: string]: unknown; }
 
@@ -553,6 +570,14 @@ export const api = {
     invoke("browser_set_shown", { shown }),
   listMachineProjects: (machineId: string): Promise<MachineProjectList> =>
     invoke("list_machine_projects", { machineId }),
+  // New-chat account step for a chat aimed at a paired machine: THAT machine's
+  // accounts (ids are per machine) plus its binding for `cwd`.
+  listMachineAccounts: (machineId: string, cwd: string): Promise<MachineAccountList> =>
+    invoke("list_machine_accounts", { machineId, cwd }),
+  // Saves a pick as the paired machine's own binding for `cwd`. Rejects when
+  // that machine's owner limited this one to viewing.
+  setMachineProjectAccount: (machineId: string, cwd: string, accountId: string): Promise<{ ok: boolean }> =>
+    invoke("set_machine_project_account", { machineId, cwd, accountId }),
 
   // --- Hook registration ---
   // Rejects on failure: any fallback value would read as a real "registered /

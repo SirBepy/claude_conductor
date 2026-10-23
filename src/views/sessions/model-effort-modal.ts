@@ -3,17 +3,18 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { updateSettings } from "../../shared/settings-update";
 import { api } from "../../shared/api";
-import type { Account } from "../../shared/api";
 import { modalCardSlot, presentHostCard, closeHostCard, setBackdropCancel, registerHostOptions } from "../../shared/modal";
 import { settingsData, projectsListData, accountsListData, projectAccountData } from "./new-session-cache";
-import { resolveModelEffortData } from "./model-effort-data";
+import { resolveModelEffortData, type AccountSource } from "./model-effort-data";
+import { loadMachineAccounts, type MachineAccountsLoad } from "./machine-accounts";
 import {
   accountPickIncomplete,
   renderAccountFieldHtml,
   attachAccountFieldHandlers,
+  type AccountFieldMachine,
   type AccountFieldState,
 } from "./account-field";
-import { attachChipKeyboardActivation } from "../../shared/account-chip";
+import { attachChipKeyboardActivation, type AccountLite } from "../../shared/account-chip";
 import { createCharacterPane, cancelCharacterPaneSound, type CharacterPane } from "./character-pane";
 import { createSliderController, type SliderController, type SliderKind } from "./slider-controller";
 import { createModelProbeController, type ModelProbeController } from "./model-effort-probe";
@@ -26,22 +27,39 @@ import {
 
 export type { SessionConfig };
 
+/** `machineId` names the paired machine the chat will run on (the picker's
+ *  machine chip); null/absent means this machine. For a paired machine the
+ *  account step lists THAT machine's accounts and preselects its binding for
+ *  the project, since account ids and project folders are per machine. */
 export async function openModelEffortModal(
   projectPath: string,
   projectName: string,
+  machineId: string | null = null,
 ): Promise<SessionConfig | null> {
   // Reads (each triggers/reuses a background revalidation - see
   // new-session-cache.ts) fire immediately so all four are in flight
   // concurrently regardless of how loadAndBuild() below awaits them.
   const settingsRead = settingsData();
-  const projectsRead = projectsListData();
-  const accountsRead = accountsListData();
-  const projectAccountRead = projectAccountData(projectPath);
-  // Cold: at least one of the four has no cached value yet, so the modal
+  // A paired machine's answer replaces the three local account reads outright,
+  // so none of them is started for it (they would only fetch this machine's
+  // own data and warm caches the peer flow never reads).
+  const machineRead: Promise<MachineAccountsLoad> | null = machineId
+    ? loadMachineAccounts(machineId, projectPath)
+    : null;
+  const localReads = machineId
+    ? null
+    : {
+        projectsRead: projectsListData(),
+        accountsRead: accountsListData(),
+        projectAccountRead: projectAccountData(projectPath),
+      };
+  // Cold: at least one of the reads has no cached value yet, so the modal
   // opens on a loading shell instead of the real form (issue: this popup
-  // used to show nothing at all while these awaits ran).
-  const cold = settingsRead.cached === undefined || projectsRead.cached === undefined
-    || accountsRead.cached === undefined || projectAccountRead.cached === undefined;
+  // used to show nothing at all while these awaits ran). A paired machine's
+  // list is never cached, so it is always cold.
+  const cold = localReads === null
+    || settingsRead.cached === undefined || localReads.projectsRead.cached === undefined
+    || localReads.accountsRead.cached === undefined || localReads.projectAccountRead.cached === undefined;
 
   return new Promise<SessionConfig | null>((resolve) => {
     // Assigned once loadAndBuild() (below) resolves the four reads above and
@@ -54,7 +72,10 @@ export async function openModelEffortModal(
     let models: string[] = [];
     let projectId: string | null = null;
     let preferredAccountId: string | null = null;
-    let accounts: Account[] = [];
+    let accounts: AccountLite[] = [];
+    // Set only for a chat aimed at a paired machine: names it in the account
+    // step's messages and carries why its accounts could not be loaded.
+    let machineCtx: AccountFieldMachine | null = null;
 
     let model = "";
     let effort = "";
@@ -116,7 +137,7 @@ export async function openModelEffortModal(
                 <h3 class="title">New session</h3>
                 <div class="me-project"><i class="ph ph-folder"></i> ${escapeHtml(projectName)}</div>
               </div>
-              ${renderAccountFieldHtml(accountField, { accounts })}
+              ${renderAccountFieldHtml(accountField, { accounts, machine: machineCtx })}
 
               ${slider.html("model", "Model", modelIdx(), models.map(modelDisplayLabel), true, probe.state.modelProbeLoading ? ` <i class="ph ph-circle-notch me-label-spinner" aria-hidden="true" title="Checking availability..."></i>` : "")}
 
@@ -126,7 +147,7 @@ export async function openModelEffortModal(
                 ? `<div class="me-model-warning" role="alert">Claude login session expired - reconnect (run <code>claude</code> in a terminal to log back in), then reopen this dialog</div>`
                 : modelDisabled()
                   ? `<div class="me-model-warning" role="alert">${escapeHtml(modelDisplayLabel(model))} is disabled, please choose another model</div>`
-                  : accountPickIncomplete(accountField, accounts)
+                  : accountPickIncomplete(accountField, accounts) && !(machineCtx && (machineCtx.error || accounts.length === 0))
                     ? `<div class="me-model-warning" role="alert">Pick an account to start this session</div>`
                     : ""}
 
@@ -213,10 +234,23 @@ export async function openModelEffortModal(
      *
      * ensureProject/updateProject are desktop-only RPCs: the phone transport
      * refuses both, so this skips there rather than letting
-     * the chat start log a RemoteUnavailableError every time. */
+     * the chat start log a RemoteUnavailableError every time.
+     *
+     * A paired machine's pick is saved on THAT machine, through a forwarded
+     * write the phone is allowed to make too: it lands on the host, not in the
+     * phone's own (refused) settings. The host refuses it for a peer limited
+     * to viewing, which is logged and never blocks the start. */
     async function persistAccountBinding(): Promise<void> {
-      if (isRemote()) return;
       if (accountField.accountId === null || accountField.accountId === preferredAccountId) return;
+      if (machineId) {
+        try {
+          await api.setMachineProjectAccount(machineId, projectPath, accountField.accountId);
+        } catch (e) {
+          console.error("[model-effort-modal] saving the binding on the paired machine failed", e);
+        }
+        return;
+      }
+      if (isRemote()) return;
       try {
         let id = projectId;
         if (!id) {
@@ -289,13 +323,18 @@ export async function openModelEffortModal(
     }
 
     async function loadAndBuild(): Promise<void> {
-      const data = await resolveModelEffortData(
-        projectPath,
-        settingsRead,
-        projectsRead,
-        accountsRead,
-        projectAccountRead,
-      );
+      const loaded = machineRead ? await machineRead : null;
+      if (closed) return;
+      // An unreachable machine resolves with no accounts, which gates Start
+      // (accountPickIncomplete) so the chat never starts on a silent default.
+      const source: AccountSource = loaded
+        ? {
+            kind: "machine",
+            list: loaded.list ?? { accounts: [], default_account_id: null, project_account_id: null },
+          }
+        : { kind: "local", ...localReads! };
+      if (loaded) machineCtx = { label: loaded.label, error: loaded.error };
+      const data = await resolveModelEffortData(projectPath, settingsRead, source);
       if (closed) return;
       models = data.models;
       model = data.model;
@@ -305,7 +344,11 @@ export async function openModelEffortModal(
       preferredAccountId = data.preferredAccountId;
       accounts = data.accounts;
       accountField.accountId = data.accountId;
-      probe.seedIdByFamily(data.idByFamily);
+      // Availability is probed with this machine's credentials under a
+      // local account id, which means nothing for a paired machine's account.
+      // Unseeded, the probe is a no-op and every model stays selectable; the
+      // host refuses an unusable one at spawn.
+      if (!machineId) probe.seedIdByFamily(data.idByFamily);
 
       void presentHostCard(() => {
         render(

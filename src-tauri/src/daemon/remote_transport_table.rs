@@ -191,6 +191,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // machine forwards `new_session_bundle` to it (see methods/machines.rs). P,
     // never M, same reasoning as list_machines above.
     ("list_machine_projects", P),
+    // The same picker's account step for a chat aimed at another machine:
+    // `list_machine_accounts` lists that machine's accounts (display fields
+    // only) plus its binding for the project, and `set_machine_project_account`
+    // saves a pick as that binding there. P, never M, like the two above. The
+    // write wrapper refuses this machine's own id, so the phone cannot rebind
+    // its own desktop's projects through it (its local flow skips persisting on
+    // purpose); the host decides whether a paired machine may write, see
+    // `peer_set_project_account` below.
+    ("list_machine_accounts", P),
+    ("set_machine_project_account", P),
     // Read-only, gated by reject_unknown(cwd) in registry.rs (todo 656).
     ("project_last_activity_at", P),
     // Read-only account-pin resolution, gated by reject_unknown(cwd) in the
@@ -465,6 +475,21 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // relays a repo-channel post between two OTHER machines either.
     // Registered by `methods::channel::register_channel_rpc`.
     ("peer_channel_post", M),
+    // Machine-only: the host half of `list_machine_accounts`. Answers with each
+    // account's id/label/colour/icon/email/tier, the default account id and
+    // the host's binding for a project, never `config_dir`,
+    // `chrome_profile_dir`, `org_uuid` or any path. Deliberately not
+    // `list_accounts` (P, full registry): the shape is fixed by this method's
+    // own handler, not by who is asking. Read-only, so a view-only peer may
+    // call it (peer_scope SEE_ONLY): it still starts chats here.
+    ("peer_accounts", M),
+    // Machine-only: the host half of `set_machine_project_account`. Writes one
+    // project's `preferred_account_id` (the same value the desktop's own
+    // new-chat modal saves), for a project the host already knows and an
+    // account in the host's own registry. Strictly weaker than `start_session`
+    // (which a peer may already call with any account id). Absent from
+    // peer_scope SEE_ONLY, so a view-only peer is refused.
+    ("peer_set_project_account", M),
 ];
 
 /// True when `t` may invoke `method`. `Transport::Local` (the desktop pipe)
@@ -546,7 +571,7 @@ mod tests {
             "list_message_drafts", "set_draft_body", "set_draft_version",
             "set_draft_state",
             "ensure_jarvis_session",
-            "list_machines", "list_machine_projects",
+            "list_machines", "list_machine_projects", "list_machine_accounts", "set_machine_project_account",
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }
@@ -562,7 +587,8 @@ mod tests {
     /// exception like `peer_unpaired`, never an unreviewed superset.
     #[test]
     fn peer_machine_mask_is_phone_subset_or_a_named_machine_only_exception() {
-        const MACHINE_ONLY_EXCEPTIONS: &[&str] = &["peer_unpaired", "spawn_chat", "peer_channel_post"];
+        const MACHINE_ONLY_EXCEPTIONS: &[&str] =
+            &["peer_unpaired", "spawn_chat", "peer_channel_post", "peer_accounts", "peer_set_project_account"];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
                 assert!(
@@ -735,9 +761,23 @@ mod tests {
     #[test]
     fn machine_picker_methods_are_phone_only() {
         let peer = Transport::PeerMachine("x".into());
-        for m in ["list_machines", "list_machine_projects"] {
+        for m in ["list_machines", "list_machine_projects", "list_machine_accounts", "set_machine_project_account"] {
             assert!(allowed(m, &Transport::Phone), "{m} must be callable by the phone");
             assert!(!allowed(m, &peer), "{m} must not be callable by a peer machine");
+        }
+    }
+
+    /// The host halves of the cross-machine account picker are machine-only:
+    /// a peer reaches them through the wrappers above, and a phone connected
+    /// straight to this daemon has no business calling them (nor the full
+    /// `list_accounts` shape being what a peer receives).
+    #[test]
+    fn peer_account_methods_are_machine_only() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in ["peer_accounts", "peer_set_project_account"] {
+            assert!(allowed(m, &peer), "{m} must be callable by a peer machine");
+            assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
+            assert!(allowed(m, &Transport::Local), "{m} stays callable over the desktop pipe");
         }
     }
 }

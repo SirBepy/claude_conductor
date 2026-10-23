@@ -239,6 +239,27 @@ pub fn upsert_project_with_id_for_cwd(
     settings.bump_generation();
 }
 
+/// Binds `account_id` as the project's `preferred_account_id`, registering
+/// the project first when `cwd` isn't tracked yet (the local new-chat modal's
+/// ensure_project + update_project pair, in one step). Returns false when the
+/// cwd is an ephemeral root that never gets a persisted project, so there is
+/// nothing to bind. Shared by the daemon's cache and the app process's
+/// persistence handler so both land on the same project.
+pub fn bind_project_account_for_cwd(
+    settings: &mut crate::types::Settings,
+    cwd: &std::path::Path,
+    account_id: &str,
+    now: &str,
+) -> bool {
+    let (id, _) = upsert_project_for_cwd(settings, cwd, now);
+    let Some(p) = settings.projects.iter_mut().find(|p| p.id == id) else {
+        return false;
+    };
+    p.preferred_account_id = Some(account_id.to_string());
+    settings.bump_generation();
+    true
+}
+
 /// Saves settings to disk, creating parent dirs if needed.
 pub fn save(path: &Path, settings: &Settings) -> Result<()> {
     if let Some(parent) = path.parent() {

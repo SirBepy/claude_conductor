@@ -628,6 +628,19 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_machine_projects", {
           machine_id: args.machineId ?? args.machine_id,
         });
+      // New-chat account step for a paired machine (see api.listMachineAccounts):
+      // the phone reaches the peer through this daemon's forward.
+      case "list_machine_accounts":
+        return this.rpc<T>("list_machine_accounts", {
+          machine_id: args.machineId ?? args.machine_id,
+          cwd: args.cwd ?? null,
+        });
+      case "set_machine_project_account":
+        return this.rpc<T>("set_machine_project_account", {
+          machine_id: args.machineId ?? args.machine_id,
+          cwd: args.cwd,
+          account_id: args.accountId ?? args.account_id,
+        });
       case "project_last_activity_at":
         return this.rpc<T>("project_last_activity_at", {
           cwd: args.cwd,

@@ -180,11 +180,11 @@ let inFlight = false;
  *  (startNewSession) or a favourite slot (startNewSessionWithFavorite). */
 async function resolveConfigAndLaunch(pane: HTMLElement, project: PickedProject): Promise<void> {
   const myMount = state.mountId;
-  const config = await openModelEffortModal(project.path, project.name);
+  const config = await openModelEffortModal(project.path, project.name, project.machineId ?? null);
   if (!config) return;
   if (state.mountId !== myMount) return;
-  // The picker's own machine chip (H4), not anything openModelEffortModal
-  // resolves - it never sees the machine dimension.
+  // The picker's own machine chip (H4). The modal got it too, to list that
+  // machine's accounts, but the launch reads it from the config.
   config.machineId = project.machineId ?? null;
   await launchNewSession(pane, project, config);
 }

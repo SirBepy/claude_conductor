@@ -11,12 +11,25 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// An account refusal from the host, prefixed with the host's name: the
+/// caller's picker listed that machine's accounts, so "account X not found"
+/// alone would read as a problem on this machine.
+fn name_host_on_account_refusal(e: crate::daemon::machines::PeerError, host_label: &str) -> RpcError {
+    match e {
+        crate::daemon::machines::PeerError::Rejected { code, message } if message.starts_with("account ") => {
+            RpcError { code: code as i32, message: format!("{host_label}: {message}"), data: None }
+        }
+        other => map_peer_err(other),
+    }
+}
+
 /// `start_session`'s `machine_id` branch (D3): forwards to that peer's own
 /// `start_session` with `machine_id` stripped (the peer has no use for it -
-/// it always spawns locally) and `account_id` stripped (account ids are
-/// per-machine registry entries, so this machine's picked account means
-/// nothing over there; the peer falls back to its own default account), and
-/// returns its result verbatim. The mirror
+/// it always spawns locally) and returns its result verbatim. `account_id`
+/// is passed through untouched: the new-chat picker listed the HOST's
+/// accounts for a peer target (`list_machine_accounts`), so the id is the
+/// host's own and the host's normal account resolution is the authority. The
+/// mirror
 /// delivers the new row via the peer's own `instances_changed` broadcast, so
 /// no local publish is needed here.
 async fn forward_start_session(
@@ -34,10 +47,12 @@ async fn forward_start_session(
     crate::daemon::machines::forward::require_online(state, &peer).await?;
     if let Some(obj) = params_value.as_object_mut() {
         obj.remove("machine_id");
-        obj.remove("account_id");
     }
     let client = crate::daemon::machines::client_for(state, &peer).await.map_err(map_peer_err)?;
-    let result = client.call("start_session", params_value).await.map_err(map_peer_err)?;
+    let result = client
+        .call("start_session", params_value)
+        .await
+        .map_err(|e| name_host_on_account_refusal(e, &peer.label))?;
     // The peer's own `instances_changed` broadcast can take up to one
     // mirror-link cycle to report the chat it just spawned for us, so a
     // caller's immediate follow-up `attach_session`/`send_message` would
@@ -438,7 +453,7 @@ mod machine_target_tests {
     }
 
     #[tokio::test]
-    async fn start_session_with_a_different_machine_id_forwards_and_strips_it() {
+    async fn start_session_with_a_different_machine_id_strips_the_machine_but_keeps_the_account() {
         use crate::daemon::rpc::RpcError as RE;
 
         let dir = tempdir().unwrap();
@@ -452,8 +467,12 @@ mod machine_target_tests {
             if has_machine_id {
                 return Err::<Value, RE>(RE::invalid_params("machine_id must not be forwarded"));
             }
-            if params.as_ref().and_then(|p| p.get("account_id")).is_some() {
-                return Err::<Value, RE>(RE::invalid_params("account f225 not found in the registry"));
+            // The id was picked from THIS peer's own account list, so it must
+            // arrive untouched; a missing or rewritten id would start the chat
+            // on the peer's default account instead of the one picked.
+            let account = params.as_ref().and_then(|p| p.get("account_id")).and_then(Value::as_str);
+            if account != Some("acct-on-b") {
+                return Err::<Value, RE>(RE::invalid_params(format!("account {account:?} was not the picked one")));
             }
             Ok(json!({"session_id": "peer-spawned-1"}))
         });
@@ -488,7 +507,7 @@ mod machine_target_tests {
                     jsonrpc: "2.0".into(),
                     id: json!(1),
                     method: "start_session".into(),
-                    params: Some(start_session_params(json!({"machine_id": "mach-b", "account_id": "acct-on-a-only"}))),
+                    params: Some(start_session_params(json!({"machine_id": "mach-b", "account_id": "acct-on-b"}))),
                 },
                 dummy_ctx(),
             )
@@ -538,6 +557,40 @@ mod machine_target_tests {
         assert!(resp.error.is_none(), "a reachable peer must not be refused as offline: {:?}", resp.error);
         assert_eq!(resp.result.unwrap()["session_id"], json!("peer-spawned-2"));
         assert!(state.mirror.is_online("mach-b"));
+        b_serve.kill();
+    }
+
+    /// A host that refuses the picked account says so with ITS name on it, so
+    /// the caller does not read "account X not found" as a local problem.
+    #[tokio::test]
+    async fn an_account_the_host_does_not_have_is_reported_with_the_hosts_name() {
+        use crate::daemon::rpc::RpcError as RE;
+
+        let (dir, peer_dir) = (tempdir().unwrap(), tempdir().unwrap());
+        let mut b_router = Router::new();
+        b_router.register("start_session", |_params, _ctx| async move {
+            Err::<Value, RE>(RE::invalid_params("account stale-id not found in the registry"))
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let (_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+        let state = state_paired_to_b(dir.path(), peer_dir.path(), b_port, vec![]);
+
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "start_session".into(),
+                    params: Some(start_session_params(json!({"machine_id": "mach-b", "account_id": "stale-id"}))),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        let err = resp.error.expect("the host refused the account");
+        assert_eq!(err.message, "B: account stale-id not found in the registry");
         b_serve.kill();
     }
 

@@ -412,6 +412,8 @@ pub fn run() {
             ipc::browser_set_shown,
             ipc::list_machines,
             ipc::list_machine_projects,
+            ipc::list_machine_accounts,
+            ipc::set_machine_project_account,
             ipc::push_preview,
             ipc::list_previews,
             ipc::get_preview,

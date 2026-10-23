@@ -430,6 +430,7 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
             app.exit(0);
         }
         "project_created" => handlers::handle_project_created(app, params),
+        "project_account_set" => handlers::handle_project_account_set(app, params),
         "session_character_assigned" => handlers::handle_session_character_assigned(app, params),
         // Desktop-side character (re)assignment (`set_settings` diffing
         // `session_characters`) and catalogue invalidation

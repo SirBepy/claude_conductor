@@ -4,7 +4,7 @@
 // model-effort-modal.ts is the only caller.
 
 import { api } from "../../shared/api";
-import type { Account } from "../../shared/api";
+import type { AccountLite } from "../../shared/account-chip";
 import type { AccountFieldState } from "./account-field";
 
 /** Mutable probe results the modal reads on every render. A plain mutated
@@ -45,7 +45,7 @@ export interface ModelProbeController {
  * `renderBody` is called once a probe settles or the account changes. */
 export function createModelProbeController(opts: {
   accountField: AccountFieldState;
-  getAccounts: () => Account[];
+  getAccounts: () => AccountLite[];
   renderBody: () => void;
 }): ModelProbeController {
   const { accountField, getAccounts, renderBody } = opts;

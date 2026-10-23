@@ -37,6 +37,11 @@ const SEE_ONLY: &[&str] = &[
     "new_session_bundle",
     "get_project_icon",
     "get_project_tech",
+    // The account step of the same picker: a view-only peer still starts chats
+    // here, so it must see which accounts it can start them on. Saving a pick
+    // as the project's binding (`peer_set_project_account`) is not listed, so it
+    // is refused for a view-only peer.
+    "peer_accounts",
     "get_recent_branches",
     "get_range_files",
     "get_file_diff",
@@ -191,10 +196,26 @@ mod tests {
         let state = state_with_peer(dir.path(), true);
         for method in [
             "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_wrap_up_on_done",
-            "new_session_bundle", "get_project_icon", "get_project_tech",
+            "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts",
         ] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");
         }
+    }
+
+    /// Reading the host's accounts is allowed to a view-only peer (it still
+    /// starts chats), but rebinding a project's account is a write on the host
+    /// and is refused; a peer with the switch on may do both.
+    #[tokio::test]
+    async fn saving_a_project_account_binding_needs_the_drive_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let params = json!({"cwd": "C:/proj", "account_id": "acct"});
+        let view_only = state_with_peer(dir.path(), true);
+        assert!(check(&view_only, "peer_set_project_account", &params, "mac").await.is_err());
+        assert_eq!(check(&view_only, "peer_accounts", &json!({"cwd": "C:/proj"}), "mac").await, Ok(()));
+
+        let dir2 = tempfile::tempdir().unwrap();
+        let driving = state_with_peer(dir2.path(), false);
+        assert_eq!(check(&driving, "peer_set_project_account", &params, "mac").await, Ok(()));
     }
 
     /// The prompt's own session decides, so a peer can't answer a desktop

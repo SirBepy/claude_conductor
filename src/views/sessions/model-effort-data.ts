@@ -1,9 +1,9 @@
-/** Resolves the four cached reads `openModelEffortModal` needs (settings,
- *  project list, accounts list, project's bound account) into the plain
- *  state the modal renders from - split out of model-effort-modal.ts's
- *  loadAndBuild() (todo 810). */
+/** Resolves the cached reads `openModelEffortModal` needs (settings, project
+ *  list, accounts list, project's bound account) into the plain state the
+ *  modal renders from - split out of model-effort-modal.ts's loadAndBuild(). */
 
-import type { Account, ProjectConfig } from "../../shared/api";
+import type { Account, MachineAccountList, ProjectConfig } from "../../shared/api";
+import type { AccountLite } from "../../shared/account-chip";
 import { resolveCached, type CacheRead } from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
@@ -20,17 +20,26 @@ export interface ModelEffortResolvedData {
   autoAccept: boolean;
   projectId: string | null;
   preferredAccountId: string | null;
-  accounts: Account[];
+  accounts: AccountLite[];
   accountId: string | null;
   idByFamily: Map<string, string>;
 }
 
+/** Where the account step's data comes from: this machine's caches, or a
+ *  paired machine's own answer (a chat aimed at that machine). */
+export type AccountSource =
+  | {
+      kind: "local";
+      projectsRead: CacheRead<ProjectConfig[]>;
+      accountsRead: CacheRead<Account[]>;
+      projectAccountRead: CacheRead<string | null>;
+    }
+  | { kind: "machine"; list: MachineAccountList };
+
 export async function resolveModelEffortData(
   projectPath: string,
   settingsRead: CacheRead<Record<string, unknown>>,
-  projectsRead: CacheRead<ProjectConfig[]>,
-  accountsRead: CacheRead<Account[]>,
-  projectAccountRead: CacheRead<string | null>,
+  source: AccountSource,
 ): Promise<ModelEffortResolvedData> {
   const settingsRaw = await resolveCached(settingsRead, {} as Record<string, unknown>);
   const models = readModels(settingsRaw);
@@ -38,29 +47,42 @@ export async function resolveModelEffortData(
   // No presets anymore - first-ever session in a project defaults to Opus/high.
   const initial = readLastChoice(settingsRaw, projectPath) ?? { model: "opus", effort: "high" };
 
-  // Resolve projectId for whitelist + live-taken dedup, and the project's
-  // bound account (if any) for the account picker below.
-  const projectsListVal: ProjectConfig[] = await resolveCached(projectsRead, [] as ProjectConfig[]);
-  const proj = projectsListVal.find((p) => String(p.path) === projectPath) as
-    | { id: string; preferred_account_id?: string | null }
-    | undefined;
-  const projectId = proj?.id ?? null;
-  let preferredAccountId = proj?.preferred_account_id ?? null;
-  // Backend-normalized override: resolves worktree/casing cases the raw
-  // find() above misses. On throw (e.g. remote transport, no mirror yet)
-  // keep the raw-match result from above as a best-effort fallback.
-  try {
-    preferredAccountId = projectAccountRead.cached !== undefined
-      ? projectAccountRead.cached
-      : await projectAccountRead.ready;
-  } catch {
-    // keep raw-match fallback
+  let projectId: string | null = null;
+  let preferredAccountId: string | null;
+  let accounts: AccountLite[];
+  let defaultAccountId: string | null;
+
+  if (source.kind === "machine") {
+    // The path names a folder on ANOTHER machine, so neither this machine's
+    // project list nor its binding apply; the host already resolved its own.
+    preferredAccountId = source.list.project_account_id;
+    accounts = source.list.accounts;
+    defaultAccountId = source.list.default_account_id;
+  } else {
+    // Resolve projectId for whitelist + live-taken dedup, and the project's
+    // bound account (if any) for the account picker below.
+    const projectsListVal: ProjectConfig[] = await resolveCached(source.projectsRead, [] as ProjectConfig[]);
+    const proj = projectsListVal.find((p) => String(p.path) === projectPath) as
+      | { id: string; preferred_account_id?: string | null }
+      | undefined;
+    projectId = proj?.id ?? null;
+    preferredAccountId = proj?.preferred_account_id ?? null;
+    // Backend-normalized override: resolves worktree/casing cases the raw
+    // find() above misses. On throw (e.g. remote transport, no mirror yet)
+    // keep the raw-match result from above as a best-effort fallback.
+    try {
+      preferredAccountId = source.projectAccountRead.cached !== undefined
+        ? source.projectAccountRead.cached
+        : await source.projectAccountRead.ready;
+    } catch {
+      // keep raw-match fallback
+    }
+    accounts = await resolveCached(source.accountsRead, [] as Account[]);
+    defaultAccountId = (settingsRaw["default_account_id"] as string | null | undefined) ?? null;
   }
 
   // Account picker (multi-account milestone 04): resolve project binding ->
   // default -> sole-account fallback -> null (ambiguous/empty registry).
-  const accounts = await resolveCached(accountsRead, [] as Account[]);
-  const defaultAccountId = (settingsRaw["default_account_id"] as string | null | undefined) ?? null;
   const accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
 
   const idByFamily = new Map<string, string>();
