@@ -14,6 +14,7 @@ pub mod runner;
 pub mod snapshot_parts;
 pub mod snapshot_types;
 pub mod store;
+pub mod store_file;
 pub mod targets;
 pub mod template;
 pub mod types;

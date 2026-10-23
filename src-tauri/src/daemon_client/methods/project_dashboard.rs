@@ -2,10 +2,6 @@ use super::super::{ClientError, PersistentClient};
 use serde_json::{json, Value};
 
 impl PersistentClient {
-    pub async fn dashboard_groups_list(&self) -> Result<Value, ClientError> {
-        self.call("dashboard_groups_list", json!({})).await
-    }
-
     pub async fn dashboard_group_upsert(
         &self,
         id: Option<&str>,
@@ -17,10 +13,6 @@ impl PersistentClient {
 
     pub async fn dashboard_group_delete(&self, id: &str) -> Result<Value, ClientError> {
         self.call("dashboard_group_delete", json!({"id": id})).await
-    }
-
-    pub async fn dashboard_cards_list(&self, scope: Value) -> Result<Value, ClientError> {
-        self.call("dashboard_cards_list", json!({"scope": scope})).await
     }
 
     pub async fn dashboard_card_refresh(&self, id: &str) -> Result<Value, ClientError> {

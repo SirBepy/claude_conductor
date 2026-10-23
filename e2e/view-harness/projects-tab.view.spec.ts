@@ -50,7 +50,6 @@ async function fakeDashboardBackend(page: Page, backend: Backend): Promise<void>
             case "dashboard_snapshot": return answer(b.snapshots[key]);
             case "dashboard_history": return answer(b.histories[key]);
             case "dashboard_gallery_image": return answer(b.shots[Number(String(args?.id).replace("img-", ""))] ?? b.shots[0]);
-            case "dashboard_cards_list": return answer((b.snapshots["g-zirtue"] as { cards: unknown[] }).cards);
             case "dashboard_card_refresh":
             case "dashboard_card_set_enabled":
             case "dashboard_card_delete":

@@ -1,7 +1,7 @@
 //! Keeps the dashboard's vault-seeded groups current without re-reading the
 //! Obsidian vault on every call: the vault only changes when the dev edits a
 //! client note, so a minute of lag is invisible and a vault scan per
-//! `dashboard_groups_list` would not be.
+//! dashboard read would not be.
 
 use crate::daemon::state::DaemonState;
 use crate::project_dashboard::{seed_groups, store};
