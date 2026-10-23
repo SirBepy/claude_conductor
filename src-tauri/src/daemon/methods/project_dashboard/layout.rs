@@ -1,6 +1,6 @@
 //! Which targets the Projects list shows (open/closed) and which quick-action
-//! chips a target pins. Desktop-pipe only, like the rest of the dashboard
-//! (none of these names is in `TRANSPORT_TABLE`).
+//! chips a target pins. Open and close are phone-reachable (`P` in
+//! `TRANSPORT_TABLE`); pinning stays desktop-pipe only, like every card write.
 
 use super::gather::Gathered;
 use super::{parse, publish_changed, storage_unavailable, to_json};

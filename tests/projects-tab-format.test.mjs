@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
-  agoLabel, fetchedLabel, fileIcon, fileName, listDotClass, listSubline, plainPreview, sameCwd, scopeOf, shortAgo, whenLabel,
+  agoLabel, fetchedLabel, fileIcon, fileName, listDotClass, listSubline, plainPreview, sameCwd, scopeOf, shortAgo, staleCardIds, whenLabel,
 } from "../src/views/sessions/projects-tab/format.ts";
 
 describe("plainPreview", () => {
@@ -76,5 +76,17 @@ describe("paths", () => {
     expect(fileIcon("a/b/deck.pptx")).toBe("presentation-chart");
     expect(fileIcon("a/b/noext")).toBe("file");
     expect(fileName("C:\\x\\y\\report.pdf")).toBe("report.pdf");
+  });
+});
+
+describe("staleCardIds", () => {
+  const view = (id, refresh_secs, agoSecs) => ({
+    config: { id, enabled: true, refresh_secs },
+    result: { fetched_at_ms: 1_000_000 - agoSecs * 1000 },
+  });
+
+  it("never treats a card as stale sooner than a minute, whatever interval it asks for", () => {
+    const cards = [view("zero", 0, 30), view("ten", 10, 30), view("zero-old", 0, 61)];
+    expect(staleCardIds(cards, 1_000_000)).toEqual(["zero-old"]);
   });
 });

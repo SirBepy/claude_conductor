@@ -3,9 +3,9 @@
 
 use super::snapshot_types::PlanItem;
 
-/// Rows per repo. A plan is a pull-next lane, so the dashboard only wants its
-/// head; the long tail would bury the other cards. The UI pages them three at
-/// a time.
+/// Rows kept per repo, and again for a group's merged list. A plan is a
+/// pull-next lane, so the dashboard only wants its head; the long tail would
+/// bury the other cards.
 pub const PLAN_CAP: usize = 12;
 
 /// Keeps one runaway hand-edited line from stretching the card.
