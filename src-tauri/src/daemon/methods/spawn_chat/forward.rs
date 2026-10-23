@@ -15,7 +15,7 @@ use crate::daemon::state::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::{claim_turn_slot, spawn_chat, FALLBACK_EFFORT, FALLBACK_MODEL};
+use super::{spawn_chat, FALLBACK_EFFORT, FALLBACK_MODEL};
 
 /// `spawn_chat`'s optional `machine`: label or id of a paired peer, or
 /// omitted/self for "spawn locally" (today's behaviour, byte-identical).
@@ -132,9 +132,6 @@ pub(crate) async fn spawn_chat_or_forward(
         // strand the successor link (`successor_of` resolves through the
         // LOCAL registry snapshot) - only a same-machine spawn can respawn.
         return json!({"ok": false, "error": "respawn cannot target another machine - use spawn_chat instead"});
-    }
-    if !claim_turn_slot(state, caller_session_id) {
-        return json!({"ok": false, "error": "this session already spawned a chat during the current turn - one spawn per turn"});
     }
     let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
     let model = model
@@ -269,24 +266,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spawn_chat_or_forward_rejects_an_unknown_machine_before_touching_the_turn_slot() {
+    async fn spawn_chat_or_forward_rejects_an_unknown_machine() {
         let state = test_state();
         state.init_machines(tempfile::tempdir().unwrap().path().to_path_buf());
         state.machines.get().unwrap().ensure_self();
-        // Its own session id: `claim_turn_slot`'s `SPAWNED_IN_GEN` is a
-        // process-global static keyed only by session id string, shared with
-        // every other test in this file - reusing "sess-1" here collided with
-        // `spawn_chat_or_forward_to_an_unreachable_peer_reports_the_forward_error_code`'s
-        // own successful claim on the same id whenever the two ran in the
-        // same `cargo test` process.
         state.registry.upsert_interactive("sess-unknown-machine", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
         let result =
             spawn_chat_or_forward(&state, "sess-unknown-machine", ".", "carry on", None, None, None, false, Some("Ghost Box")).await;
         assert_eq!(result["ok"], false);
         assert!(result["error"].as_str().unwrap().contains("Ghost Box"));
-        // The rejected machine name must not have consumed this turn's spawn
-        // slot - a real local spawn right after must still succeed.
-        assert!(claim_turn_slot(&state, "sess-unknown-machine"));
     }
 
     #[tokio::test]
@@ -329,16 +317,16 @@ mod tests {
             reverse_device_id: None,
             added_at: 0,
         });
-        // Its own session id (see the sibling test's comment on
-        // `SPAWNED_IN_GEN` being a process-global, session-id-keyed static):
-        // this call DOES reach `claim_turn_slot` (the peer resolves fine, so
-        // it falls through past the respawn/unknown-machine early returns).
         state.registry.upsert_interactive("sess-unreachable-peer", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
-        let result = spawn_chat_or_forward(
-            &state, "sess-unreachable-peer", ".", "carry on", None, None, None, false, Some("Mac Mini"),
-        )
-        .await;
-        assert_eq!(result["ok"], false);
-        assert_eq!(result["code"], json!(crate::daemon::machines::forward::ERR_MACHINE_OFFLINE));
+        // Twice in one turn: spawn_chat has no per-turn cap, so the second
+        // call must reach the peer too rather than be refused locally.
+        for _ in 0..2 {
+            let result = spawn_chat_or_forward(
+                &state, "sess-unreachable-peer", ".", "carry on", None, None, None, false, Some("Mac Mini"),
+            )
+            .await;
+            assert_eq!(result["ok"], false);
+            assert_eq!(result["code"], json!(crate::daemon::machines::forward::ERR_MACHINE_OFFLINE), "{result:?}");
+        }
     }
 }

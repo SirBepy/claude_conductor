@@ -3,7 +3,8 @@
 //! Not `jarvis_fleet::spawn_worker`, which is `CC_JARVIS`-gated and fleet-
 //! tagged. Guards instead: `cwd` must be either the caller's own working
 //! directory or a project already in `Settings.projects` (never an arbitrary
-//! path), one spawn per turn; and it inherits the caller's own model/effort/
+//! path), and `respawn` at most once per turn (two would hand the caller off
+//! to two successors); plain `spawn_chat` siblings are unlimited. It inherits the caller's own model/effort/
 //! account, plus the character on the `respawn` path only. Auto-accept is
 //! inherited per `session_registration::spawned_auto_accept`.
 //!
@@ -87,11 +88,8 @@ pub(crate) async fn spawn_chat(
     let requested = std::path::PathBuf::from(cwd);
     let target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
 
-    if !claim_turn_slot(state, caller_session_id) {
-        return Err(
-            "this session already spawned a chat during the current turn - one spawn per turn"
-                .to_string(),
-        );
+    if respawn && !claim_turn_slot(state, caller_session_id) {
+        return Err("this session already respawned during the current turn - one respawn per turn".to_string());
     }
 
     let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
