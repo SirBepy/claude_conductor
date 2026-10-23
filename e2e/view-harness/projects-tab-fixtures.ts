@@ -84,8 +84,6 @@ export function conductorSnapshot(): DashSnapshot {
       { short_sha: "714fa30", message: "claude.ai publish trusts verified result", timestamp_ms: min(300), pushed: true },
     ])],
     servers: [{ name: "vite dev server", port: 1420, repo_cwd: CONDUCTOR_CWD }],
-    peers_active: 3,
-    last_channel_message: { author: "peer-2", text: "holding commit on chat-renderer.ts", at_ms: min(4) },
     cards: [], hidden_builtins: [], pinned_actions: PINNED_CONDUCTOR,
   };
 }
@@ -136,7 +134,7 @@ export function zirtueSnapshot(): DashSnapshot {
       ship(biller, "zng-biller", "sc-4821", 1, 2),
       ship(api, "zng-api", "main", 0, 0),
     ],
-    servers: [], peers_active: 0, last_channel_message: null,
+    servers: [],
     cards: [
       {
         config: withAction(cfg("c-sc", "Shortcut · my stories", listDisplay), "Run /shortcut-priorities", "/shortcut-priorities"),

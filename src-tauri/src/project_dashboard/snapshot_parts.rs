@@ -2,10 +2,9 @@
 //! derived, which drafts count as open, how stored rows map onto the wire
 //! rows. The daemon method gathers state and calls these.
 
-use super::snapshot_types::{ChannelNote, NeedsYouItem, RepoRef, ScheduledRow};
+use super::snapshot_types::{NeedsYouItem, RepoRef, ScheduledRow};
 use super::targets::chat_in_repo;
 use crate::sessions::message_drafts::{DraftState, MessageDraft};
-use crate::sessions::repo_channel::ChannelMessage;
 use crate::sessions::scheduled_items::{ScheduledItem, ScheduledKind, ScheduledStatus};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -114,17 +113,6 @@ pub fn soonest_scheduled(mut rows: Vec<ScheduledRow>) -> Vec<ScheduledRow> {
     rows.sort_by_key(|r| r.fire_at_ms);
     rows.truncate(SCHEDULED_CAP);
     rows
-}
-
-/// The most recent of several repos' channel messages.
-pub fn newest_note(messages: impl IntoIterator<Item = ChannelMessage>) -> Option<ChannelNote> {
-    messages
-        .into_iter()
-        .filter_map(|m| {
-            let at_ms = parse_ms(&m.posted_at)?;
-            Some(ChannelNote { author: m.author, text: clip(&m.text, 400), at_ms })
-        })
-        .max_by_key(|n| n.at_ms)
 }
 
 #[cfg(test)]
@@ -256,21 +244,6 @@ mod tests {
         let out = soonest_scheduled(rows);
         let times: Vec<i64> = out.iter().map(|r| r.fire_at_ms).collect();
         assert_eq!(times, [10, 20, 30, 40]);
-    }
-
-    #[test]
-    fn the_newest_channel_message_wins_across_repos() {
-        let m = |text: &str, at: &str| ChannelMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: "s".into(),
-            author: "peer".into(),
-            text: text.into(),
-            posted_at: at.into(),
-            to_session_id: None,
-        };
-        let note = newest_note(vec![m("old", "2026-10-20T00:00:00Z"), m("new", "2026-10-22T00:00:00Z"), m("mid", "2026-10-21T00:00:00Z")]).unwrap();
-        assert_eq!(note.text, "new");
-        assert!(newest_note(Vec::new()).is_none());
     }
 
     #[test]

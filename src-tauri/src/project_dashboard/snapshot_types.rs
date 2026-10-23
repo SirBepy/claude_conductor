@@ -147,15 +147,6 @@ pub struct ServerRow {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
-pub struct ChannelNote {
-    pub author: String,
-    pub text: String,
-    #[ts(type = "number")]
-    pub at_ms: i64,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct DashboardSnapshot {
     pub target: DashboardTarget,
     pub needs_you: Vec<NeedsYouItem>,
@@ -166,8 +157,6 @@ pub struct DashboardSnapshot {
     pub scheduled: Vec<ScheduledRow>,
     pub ship: Vec<RepoShip>,
     pub servers: Vec<ServerRow>,
-    pub peers_active: u32,
-    pub last_channel_message: Option<ChannelNote>,
     pub cards: Vec<CardView>,
     pub hidden_builtins: Vec<String>,
     /// Quick-action chips the dev (or a chat) pinned for this target, in order.

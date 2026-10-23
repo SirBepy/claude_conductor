@@ -86,7 +86,7 @@ describe("single project", () => {
   });
 
   it("hides Your todos entirely when there are none, and shows quiet empty states elsewhere", async () => {
-    snapshot = projectSnapshot({ your_todos: [], chats_running: [], chats_recent: [], plan: [], scheduled: [], servers: [], peers_active: 0, last_channel_message: null });
+    snapshot = projectSnapshot({ your_todos: [], chats_running: [], chats_recent: [], plan: [], scheduled: [], servers: [] });
     const { root } = await mount({ kind: "project", id: "p1" });
     expect(root.querySelector('[data-pd-card="your_todos"]')).toBeNull();
     expect(root.querySelector('[data-pd-card="chats"]').textContent).toContain("No chats yet");
