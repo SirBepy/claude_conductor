@@ -42,3 +42,24 @@
 
 #projects-list li.row-portrait { cursor: pointer; }
 #projects-list .pd-list-empty { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* Header row with the "+" that opens the closed-projects picker. */
+#projects-list .pd-list-head { display: flex; align-items: center; justify-content: space-between; }
+/* The base group-header rule disables pointer events; the button is the one clickable part. */
+.pd-list-add {
+  pointer-events: auto;
+  width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px;
+  background: transparent; color: var(--color-text-muted); font-size: 14px; cursor: pointer;
+}
+.pd-list-add:hover { background: var(--color-surface-alt); color: var(--color-text); }
+
+/* Close affordance: invisible until the row is hovered, like closing a chat. */
+#projects-list li.row-portrait { position: relative; }
+.pd-row-x {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; font-size: 13px; cursor: pointer;
+  opacity: 0; pointer-events: none;
+}
+#projects-list li.row-portrait:hover .pd-row-x { opacity: 1; pointer-events: auto; }
+.pd-row-x:hover { background: color-mix(in srgb, currentColor 20%, transparent); }

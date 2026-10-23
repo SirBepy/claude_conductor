@@ -11,7 +11,7 @@ import { selectSession } from "../active-session";
 import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
-import { showImageOverlay } from "./dash-reports";
+import { openReportsModal, showImageOverlay } from "./dash-reports";
 import { openDashKebab } from "./dash-kebab";
 import type { CardResult, DashTodo, RepoRef } from "./types";
 
@@ -146,6 +146,9 @@ export function makeActions(host: ActionHost): DashActions {
     openKebab: (anchor) => openDashKebab(anchor, host),
     setRepo: (cwd) => host.patch((c) => { c.repo = cwd; }),
     setTab: (tab) => { host.patch((c) => { c.tab = tab; }); if (tab === "gallery") host.loadGallery(); },
+    setPage: (key, page) => host.patch((c) => { c.pages.set(key, Math.max(0, page)); }),
+    setChatsTab: (tab) => host.patch((c) => { c.chatsTab = tab; }),
+    openReportsModal: () => openReportsModal(host),
     openImage: (id) => {
       const c = host.ctx();
       const src = c.images.get(id);

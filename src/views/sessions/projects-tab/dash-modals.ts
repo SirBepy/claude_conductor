@@ -9,6 +9,7 @@ import { showToast } from "../../../shared/toast";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
 import { fetchedLabel, scopeOf, sameCwd, BUILTIN_CARDS } from "./format";
 import type { ActionHost } from "./dash-actions";
+import { pinsEditor } from "./dash-pins";
 import type { CardView, GroupDef } from "./types";
 
 const toggle = (on: boolean, onChange: (next: boolean) => void): TemplateResult => html`
@@ -26,6 +27,7 @@ export function openCardsModal(host: ActionHost): void {
   let cards: CardView[] = c.snap.cards;
   const slot = modalCardSlot();
   const close = (): void => { setBackdropCancel(null); closeHostCard(); host.reload(); };
+  const pins = pinsEditor(c.snap.pinned_actions ?? [], scope, () => draw());
 
   const reloadCards = async (): Promise<void> => {
     try { cards = await invoke<CardView[]>("dashboard_cards_list", { scope }); }
@@ -64,6 +66,7 @@ export function openCardsModal(host: ActionHost): void {
       <div class="modal-card pd-modal" role="dialog" aria-modal="true" aria-label="Dashboard cards">
         <header class="modal-header"><h3>Dashboard cards</h3></header>
         <div class="modal-body pd-mbody">
+          ${pins.view()}
           <div class="pd-msec">Sections</div>
           ${BUILTIN_CARDS.map((b) => html`<div class="pd-mrow"><span class="pd-mt">${b.label}</span>
             ${toggle(!hiddenSet.has(b.id), (on) => setHidden(b.id, !on))}</div>`)}

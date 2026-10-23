@@ -3,7 +3,7 @@
 // Clockify-style stats card, typed against the dashboard contract so a field
 // change there fails typecheck here instead of rotting the spec.
 import type {
-  CardConfig, DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTarget, RepoShip,
+  CardConfig, CardConfigX, CardResultX, DashboardHistory, DashboardTarget, DashSnapshot, ListRow, RepoShip,
 } from "../../src/views/sessions/projects-tab/types";
 
 export const CONDUCTOR_CWD = "C:/Projects/claude_usage_in_taskbar";
@@ -21,22 +21,32 @@ export const ZIRTUE: DashboardTarget = {
   repos: ZIRTUE_CWDS.map((cwd, i) => ({ cwd, name: cwd.split("/").pop()!, project_id: `p-z${i}` })),
 };
 
-export const LIST_ROWS: DashboardListRow[] = [
-  { target: CONDUCTOR, last_active_ms: Date.now() - 20_000, live_count: 2, question_count: 1, working_count: 1 },
-  { target: ZIRTUE, last_active_ms: min(4), live_count: 2, question_count: 1, working_count: 1 },
+export const LIST_ROWS: ListRow[] = [
+  { target: CONDUCTOR, last_active_ms: Date.now() - 20_000, live_count: 2, question_count: 1, working_count: 1, open: true },
+  { target: ZIRTUE, last_active_ms: min(4), live_count: 2, question_count: 1, working_count: 1, open: true },
   {
     target: { kind: "project", id: "p-soccer", name: "head_soccer_v_fable_oneshot", repos: [{ cwd: "C:/Projects/head_soccer", name: "head_soccer_v_fable_oneshot", project_id: "p-soccer" }] },
-    last_active_ms: min(12), live_count: 1, question_count: 0, working_count: 1,
+    last_active_ms: min(12), live_count: 1, question_count: 0, working_count: 1, open: true,
   },
-  { target: { kind: "project", id: "p-dash", name: "dashboard-a", repos: [{ cwd: "C:/Projects/dashboard-a", name: "dashboard-a", project_id: "p-dash" }] }, last_active_ms: min(65), live_count: 0, question_count: 0, working_count: 0 },
-  { target: { kind: "project", id: "p-count", name: "countoff", repos: [{ cwd: "C:/Projects/countoff", name: "countoff", project_id: "p-count" }] }, last_active_ms: min(60 * 26), live_count: 0, question_count: 0, working_count: 0 },
+  { target: { kind: "project", id: "p-dash", name: "dashboard-a", repos: [{ cwd: "C:/Projects/dashboard-a", name: "dashboard-a", project_id: "p-dash" }] }, last_active_ms: min(65), live_count: 0, question_count: 0, working_count: 0, open: true },
+  // Closed projects: hidden from the sidebar, listed by the "+" picker.
+  ...[["p-count", "countoff"], ["p-sahur", "sahur_starting_point"], ["p-stop", "annoying_stopwatch"]].map(([id, name], i): ListRow => ({
+    target: { kind: "project", id: id!, name: name!, repos: [{ cwd: `C:/Projects/${name}`, name: name!, project_id: id! }] },
+    last_active_ms: min(60 * 26 * (i + 1)), live_count: 0, question_count: 0, working_count: 0, open: false,
+  })),
 ];
 
 const ship = (cwd: string, name: string, branch: string, ahead: number, dirty: number, commits: RepoShip["recent_commits"] = []): RepoShip => ({
   cwd, name, branch, ahead, behind: 0, has_upstream: true, dirty_count: dirty, recent_commits: commits,
 });
 
-export function conductorSnapshot(): DashboardSnapshot {
+const PINNED_CONDUCTOR = ["/pickup", "/autopilot", "/plan-todos", "/batch-todos", "/code-check", "/audit", "/recall", "/status", "/e2e", "/deploy"];
+const PINNED_ZIRTUE = [
+  "/shortcut-priorities", "/clockify-reconciliator", "/ticket", "/pickup", "/flutter-e2e", "/shortcut-done-audit",
+  "/zirtue-release-backfill", "/work-recap", "/obsidian-pickup-ticket",
+];
+
+export function conductorSnapshot(): DashSnapshot {
   return {
     target: CONDUCTOR,
     needs_you: [
@@ -48,7 +58,10 @@ export function conductorSnapshot(): DashboardSnapshot {
     ],
     chats_running: [
       { session_id: "s-w", title: "Loop todos: cycle 3", status: "working", repo_cwd: CONDUCTOR_CWD, at_ms: min(12) },
-      { session_id: "s-q", title: "Projects dashboard brainstorm", status: "your_turn", repo_cwd: CONDUCTOR_CWD, at_ms: min(2) },
+      { session_id: "s-q", title: "Projects dashboard brainstorm", status: "question", repo_cwd: CONDUCTOR_CWD, at_ms: min(2) },
+      { session_id: "s-w2", title: "Phone question sheet follow-up", status: "working", repo_cwd: CONDUCTOR_CWD, at_ms: min(5) },
+      { session_id: "s-wait", title: "Release CI watch", status: "waiting", repo_cwd: CONDUCTOR_CWD, at_ms: min(25) },
+      { session_id: "s-done", title: "Hidden chats offline owner", status: "your_turn", repo_cwd: CONDUCTOR_CWD, at_ms: min(9) },
     ],
     chats_recent: [
       { session_id: "h1", title: "Phone question sheet peek", status: "ended", repo_cwd: CONDUCTOR_CWD, at_ms: min(40) },
@@ -73,24 +86,27 @@ export function conductorSnapshot(): DashboardSnapshot {
     servers: [{ name: "vite dev server", port: 1420, repo_cwd: CONDUCTOR_CWD }],
     peers_active: 3,
     last_channel_message: { author: "peer-2", text: "holding commit on chat-renderer.ts", at_ms: min(4) },
-    cards: [], hidden_builtins: [],
+    cards: [], hidden_builtins: [], pinned_actions: PINNED_CONDUCTOR,
   };
 }
 
-export function zirtueSnapshot(): DashboardSnapshot {
+export function zirtueSnapshot(): DashSnapshot {
   const [app, admin, biller, api] = ZIRTUE_CWDS as [string, string, string, string];
   const listDisplay: CardConfig["display"] = { kind: "list", items_path: "stories", label_path: "name", value_path: "state", link_path: null, limit: 5 };
   const statsDisplay: CardConfig["display"] = { kind: "stats", items: [] };
-  const cfg = (id: string, title: string, display: CardConfig["display"]): CardConfig => ({
-    id, title, display, enabled: true, refresh_secs: null,
+  const cfg = (id: string, title: string, display: CardConfig["display"]): CardConfigX => ({
+    id, title, display, enabled: true, refresh_secs: null, action: null,
     scope: { kind: "group", id: ZIRTUE.id } as const,
     source: { kind: "http", method: "GET", url: "https://api.app.shortcut.com/api/v3/search", headers: {}, body: null } as const,
   });
+  const withAction = (c: CardConfigX, label: string, command: string): CardConfigX => ({ ...c, action: { label, command } });
   return {
     target: ZIRTUE,
     needs_you: [
       { kind: "question", title: "Release 2.14 notes", detail: "is waiting on your answer", session_id: "z-q", draft_id: null, repo_cwd: app, at_ms: min(4) },
-      { kind: "draft", title: "standup note", detail: "", session_id: "z-q", draft_id: "d-z", repo_cwd: app, at_ms: min(35) },
+      // 9 + 4 unsent drafts, as in the live data: each repo's drafts roll into one row.
+      ...Array.from({ length: 9 }, (_, i) => ({ kind: "draft" as const, title: `draft ${i + 1}`, detail: "", session_id: "z-q", draft_id: `d-a${i}`, repo_cwd: app, at_ms: min(240 + i) })),
+      ...Array.from({ length: 4 }, (_, i) => ({ kind: "draft" as const, title: `biller draft ${i + 1}`, detail: "", session_id: "z-w", draft_id: `d-b${i}`, repo_cwd: biller, at_ms: min(300 + i) })),
     ],
     your_todos: [],
     chats_running: [
@@ -101,7 +117,15 @@ export function zirtueSnapshot(): DashboardSnapshot {
       { session_id: "zh1", title: "Loan export CSV columns", status: "ended", repo_cwd: admin, at_ms: min(120) },
       { session_id: "zh2", title: "Quote endpoint load test", status: "ended", repo_cwd: api, at_ms: min(60 * 26) },
     ],
-    plan: [], scheduled: [],
+    plan: [
+      { id: "68", text: "low priority: Shortcut hygiene, close sc-54841/54746, decide on a ticket template", section: "Phase 1 - start now", priority: false, repo_cwd: admin },
+      { id: "88", text: "wire the Amplitude SDK into zng-biller", section: "Phase 1 - start now", priority: false, repo_cwd: biller },
+      { id: "89", text: "[P] - BP Amplitude login / email-verify / logout events", section: "Phase 1 - start now", priority: false, repo_cwd: biller },
+      { id: "90", text: "[P] - BP Amplitude team invite / remove events", section: "Phase 1 - start now", priority: false, repo_cwd: biller },
+      { id: "91", text: "[P] - BP Amplitude overview / insights / nav / Intercom / page-view events", section: "Phase 1 - start now", priority: false, repo_cwd: biller },
+      { id: "87", text: "[P] - SC-54866 header biller logo (needs stevan's self-scoped token)", section: "Phase 2 - blocked on others", priority: false, repo_cwd: biller },
+    ],
+    scheduled: [],
     ship: [
       ship(app, "zng-app", "release/2.14", 3, 0),
       ship(admin, "zng-admin", "sc-4810", 0, 0),
@@ -111,29 +135,27 @@ export function zirtueSnapshot(): DashboardSnapshot {
     servers: [], peers_active: 0, last_channel_message: null,
     cards: [
       {
-        config: cfg("c-sc", "Shortcut \u00B7 my stories", listDisplay),
+        config: withAction(cfg("c-sc", "Shortcut · my stories", listDisplay), "Run /shortcut-priorities", "/shortcut-priorities"),
         result: {
-          fetched_at_ms: min(6), error: null, stats: [],
+          fetched_at_ms: min(6), error: null, stats: [], headline_tone: null, progress: null,
+          headline: "12 updates since /shortcut-priorities ran 2d ago",
           rows: [
             { label: "sc-4821 Retry failed ACH payouts", value: "In progress", link: null },
             { label: "sc-4810 Loan export as CSV", value: "Review", link: null },
             { label: "sc-4807 Rate-limit the public quote endpoint", value: "Ready", link: null },
-            { label: "sc-4799 Onboarding copy pass", value: "Done", link: null },
           ],
-        },
+        } as CardResultX,
       },
       {
-        config: cfg("c-ck", "Logged hours", statsDisplay),
+        config: withAction(cfg("c-ck", "Clockify", statsDisplay), "Run /clockify-reconciliator", "/clockify-reconciliator"),
         result: {
-          fetched_at_ms: min(60), error: null, rows: [],
-          stats: [
-            { label: "Today", value: "2h 10m" }, { label: "Yesterday", value: "not logged" },
-            { label: "This week", value: "14h 30m" }, { label: "zng-biller", value: "6h 20m" },
-          ],
-        },
+          fetched_at_ms: min(60), error: null, rows: [], stats: [],
+          progress: { value: 14.5, max: 20, label: "14h 30m of 20h this week", behind: true },
+          headline: "3 workdays not logged: Mon, Tue, Wed", headline_tone: "warn",
+        } as CardResultX,
       },
     ],
-    hidden_builtins: [],
+    hidden_builtins: [], pinned_actions: PINNED_ZIRTUE,
   };
 }
 

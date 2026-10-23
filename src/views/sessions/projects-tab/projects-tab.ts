@@ -18,8 +18,10 @@ import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import { mountDashboard, type DashboardHandle } from "./dashboard";
 import { sameRef } from "./format";
-import { renderProjectsList } from "./projects-list";
-import type { DashboardListRow, DashboardTargetRef } from "./types";
+import { openClosedProjectsPicker } from "./open-picker";
+import { isOpen, renderProjectsList } from "./projects-list";
+import { showToast } from "../../../shared/toast";
+import type { DashboardTargetRef, ListRow } from "./types";
 
 import "./projects-tab.css";
 
@@ -45,7 +47,7 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
 
   let tab: SidebarTab = "chats";
   let target: DashboardTargetRef | null = null;
-  let rows: DashboardListRow[] = [];
+  let rows: ListRow[] = [];
   let handle: DashboardHandle | null = null;
   let resumeId: string | null = null;
   let listSeq = 0;
@@ -67,13 +69,22 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
     render(html`${btn("chats", "chats-circle", "Chats")}${btn("projects", "folders", "Projects")}`, tabsEl);
   };
 
-  const drawList = (): void => renderProjectsList(listUl, rows, target, (ref) => selectTarget(ref));
+  const openRows = (): ListRow[] => rows.filter(isOpen);
+  const refOf = (r: ListRow): DashboardTargetRef => ({ kind: r.target.kind, id: r.target.id });
+
+  const drawList = (): void => renderProjectsList(listUl, rows, target, {
+    pick: (ref) => selectTarget(ref),
+    close: (ref) => { void closeTarget(ref); },
+    add: () => openClosedProjectsPicker(rows.filter((r) => !isOpen(r)), (ref) => { void openTarget(ref); }),
+  });
 
   const showPlaceholder = (): void => {
     pane.replaceChildren();
     const el = document.createElement("div");
     el.className = "pd-root";
-    render(html`<div class="pd-quiet pd-loading">${rows.length ? "Pick a project" : "No projects yet"}</div>`, el);
+    const message = openRows().length ? "Pick a project"
+      : rows.length ? "No open projects. Use + to open one." : "No projects yet";
+    render(html`<div class="pd-quiet pd-loading">${message}</div>`, el);
     pane.appendChild(el);
   };
 
@@ -91,22 +102,63 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
     drawList();
   }
 
+  /** Keeps the shown dashboard if its row is still open, else moves to the first open row. */
+  function reconcileSelection(): void {
+    const stillThere = target && openRows().some((r) => sameRef(target, refOf(r)));
+    if (!stillThere) {
+      target = null;
+      const first = openRows()[0];
+      if (first) { showTarget(refOf(first)); return; }
+      handle?.destroy();
+      handle = null;
+      showPlaceholder();
+    }
+    drawList();
+  }
+
+  async function closeTarget(ref: DashboardTargetRef): Promise<void> {
+    try {
+      await invoke<void>("dashboard_close_target", { target: ref });
+    } catch (err) {
+      showToast(`Could not close the project: ${String(err)}`);
+      return;
+    }
+    const was = openRows().findIndex((r) => sameRef(ref, refOf(r)));
+    const row = rows.find((r) => sameRef(ref, refOf(r)));
+    if (row) row.open = false;
+    // Closing the shown project hands the pane to its neighbour, the way closing a chat does.
+    if (sameRef(target, ref)) {
+      target = null;
+      handle?.destroy();
+      handle = null;
+      const open = openRows();
+      const next = open[Math.min(Math.max(was, 0), open.length - 1)];
+      if (next) showTarget(refOf(next)); else showPlaceholder();
+    }
+    drawList();
+    void loadList();
+  }
+
+  async function openTarget(ref: DashboardTargetRef): Promise<void> {
+    try {
+      await invoke<void>("dashboard_open_target", { target: ref });
+    } catch (err) {
+      showToast(`Could not open the project: ${String(err)}`);
+      return;
+    }
+    const row = rows.find((r) => sameRef(ref, refOf(r)));
+    if (row) row.open = true;
+    showTarget(ref);
+    void loadList();
+  }
+
   async function loadList(): Promise<void> {
     const mine = ++listSeq;
     try {
-      const next = await invoke<DashboardListRow[]>("dashboard_list_targets");
+      const next = await invoke<ListRow[]>("dashboard_list_targets");
       if (destroyed || mine !== listSeq || tab !== "projects") return;
       rows = next;
-      const stillThere = target && rows.some((r) => sameRef(target, { kind: r.target.kind, id: r.target.id }));
-      if (!stillThere) {
-        target = null;
-        const first = rows[0];
-        if (first) { showTarget({ kind: first.target.kind, id: first.target.id }); return; }
-        handle?.destroy();
-        handle = null;
-        showPlaceholder();
-      }
-      drawList();
+      reconcileSelection();
     } catch (err) {
       console.warn("[projects-tab] dashboard_list_targets failed", err);
     }
@@ -125,6 +177,7 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
     dismissQuestionCard();
     state.dashboardOpen = true;
     state.onChatActivated = () => leaveProjects(false);
+    state.onCloseProject = () => { if (target) void closeTarget(target); };
     dismountActivePane({ rerenderSidebar: false });
     aside.classList.add("is-projects-tab");
     drawTabs();
@@ -138,6 +191,7 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
     if (tab !== "projects") return;
     tab = "chats";
     state.dashboardOpen = false;
+    state.onCloseProject = null;
     handle?.destroy();
     handle = null;
     aside.classList.remove("is-projects-tab");
@@ -186,6 +240,7 @@ export function mountProjectsTab(view: HTMLElement, pane: HTMLElement, listEl: H
       handle?.destroy();
       handle = null;
       if (state.onChatActivated) state.onChatActivated = null;
+      state.onCloseProject = null;
       state.dashboardOpen = false;
       tabsEl.remove();
       listUl.remove();

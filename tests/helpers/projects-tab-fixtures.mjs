@@ -53,13 +53,41 @@ export function projectSnapshot(over = {}) {
   };
 }
 
-const card = (id, title, display, result, enabled = true) => ({
+/** A custom card. `extra` carries the optional config fields the backend adds (action). */
+export const card = (id, title, display, result, enabled = true, extra = {}) => ({
   config: {
     id, scope: { kind: "group", id: "g1" }, title, enabled, refresh_secs: null, display,
-    source: { kind: "command", program: "x", args: [], cwd: null },
+    source: { kind: "command", program: "x", args: [], cwd: null }, ...extra,
   },
   result,
 });
+
+/** A project row the user closed from the Projects list. */
+export function closedRow(id = "p9", name = "old_project") {
+  return {
+    target: { kind: "project", id, name, repos: [{ cwd: `C:/Projects/${name}`, name, project_id: id }] },
+    last_active_ms: NOW - 3 * 86_400_000, live_count: 0, question_count: 0, working_count: 0, open: false,
+  };
+}
+
+/** Five live chats in mixed statuses, in the order the daemon sends them. */
+export function mixedChats(cwd = CONDUCTOR.cwd) {
+  const c = (session_id, status, m) => ({ session_id, title: session_id, status, repo_cwd: cwd, at_ms: min(m) });
+  return [c("work-a", "working", 12), c("ask-a", "question", 2), c("work-b", "working", 5), c("wait-a", "waiting", 25), c("done-a", "your_turn", 9)];
+}
+
+/** Six plan items; the first has a long tail after a " - " cut point. */
+export function planItems(cwd = CONDUCTOR.cwd) {
+  const p = (id, text) => ({ id, text, section: "Phase 1", priority: false, repo_cwd: cwd });
+  return [
+    p("68", "low priority: Shortcut hygiene - close sc-54841/54746 and decide on a ticket template"),
+    p("88", "wire the Amplitude SDK; then add the login events"),
+    p("89", "Short one"),
+    p("90", "[P] - BP Amplitude team invite / remove events"),
+    p("91", "Amplitude overview (insights, nav, Intercom, page-view)"),
+    p("87", "SC-54866 header biller logo. Needs the self-scoped token."),
+  ];
+}
 
 export function groupSnapshot(over = {}) {
   const [app, admin, biller, api] = ZIRTUE_REPOS;
@@ -81,6 +109,14 @@ export function groupSnapshot(over = {}) {
       card("c2", "Logged hours", { kind: "stats", items: [] },
         { fetched_at_ms: min(60), stats: [{ label: "Today", value: "2h 10m" }], rows: [], error: null }),
       card("c3", "Disabled card", { kind: "stats", items: [] }, null, false),
+      card("c5", "Shortcut: updates", { kind: "list", items_path: "a", label_path: "b", value_path: "c", link_path: null, limit: null },
+        { fetched_at_ms: min(6), stats: [], rows: [{ label: "sc-4821 Retry ACH", value: "Review", link: null }], error: null,
+          headline: "12 updates since /shortcut-priorities ran 2d ago" },
+        true, { action: { label: "Run /shortcut-priorities", command: "/shortcut-priorities" } }),
+      card("c6", "Clockify", { kind: "stats", items: [] },
+        { fetched_at_ms: min(9), stats: [], rows: [], error: null,
+          progress: { value: 14.5, max: 20, label: "14h 30m of 20h this week", behind: true },
+          headline: "3 workdays not logged: Mon, Tue, Wed", headline_tone: "warn" }),
       card("c4", "Broken card", { kind: "stats", items: [] },
         { fetched_at_ms: min(1), stats: [], rows: [], error: "HTTP 401 from the tracker" }),
     ],

@@ -8,10 +8,12 @@ import { hydrateProjectTechIcons } from "../../../shared/projects";
 import { makeActions, type ActionHost } from "./dash-actions";
 import { customCards } from "./dash-cards";
 import { header, quickActions } from "./dash-header";
+import { syncTrack } from "./quick-track";
 import type { DashCtx } from "./dash-parts";
 import { reports } from "./dash-reports";
-import { chats, needsYou, nextUp, running, shipState, yourTodos } from "./dash-sections";
-import type { DashboardHistory, DashboardSnapshot, DashboardTargetRef } from "./types";
+import { chats } from "./dash-chats";
+import { needsYou, nextUp, running, shipState, yourTodos } from "./dash-sections";
+import type { DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 
 import "./pd-dashboard.css";
 import "./pd-cards.css";
@@ -65,7 +67,18 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     ctx.nowMs = Date.now();
     render(dashboardTemplate(ctx), root);
     void hydrateProjectTechIcons(root);
+    syncQuickActions();
+    for (const hook of [...ctx.paintHooks]) hook();
   };
+
+  // The chip track's page boundaries depend on measured widths, so they are
+  // re-derived after every paint and whenever the window resizes.
+  const syncQuickActions = (): void => {
+    const qa = root.querySelector<HTMLElement>(".pd-qa");
+    if (qa && ctx) ctx.qaStart = syncTrack(qa, ctx.qaStart);
+  };
+  const onResize = (): void => syncQuickActions();
+  window.addEventListener("resize", onResize);
 
   const loadGallery = async (): Promise<void> => {
     if (galleryRunning || !ctx?.history) return;
@@ -105,13 +118,14 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
   async function loadSnapshot(): Promise<void> {
     const mine = ++snapSeq;
     try {
-      const snap = await invoke<DashboardSnapshot>("dashboard_snapshot", { target: ref });
+      const snap = await invoke<DashSnapshot>("dashboard_snapshot", { target: ref });
       if (destroyed || mine !== snapSeq) return;
       const first = !ctx;
       if (!ctx) {
         ctx = {
           snap, history: null, repo: null, tab: "outcomes", images: new Map(), refreshing: new Set(),
-          doneTodos: new Set(), nowMs: Date.now(), act: makeActions(host),
+          doneTodos: new Set(), pages: new Map(), chatsTab: "current", qaStart: 0, paintHooks: new Set(),
+          nowMs: Date.now(), act: makeActions(host),
         };
       } else {
         ctx.snap = snap;
@@ -138,6 +152,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     if (destroyed) return;
     destroyed = true;
     refetch.cancel();
+    window.removeEventListener("resize", onResize);
     for (const u of unlisteners.splice(0)) { try { u(); } catch { /* already gone */ } }
     root.remove();
   }

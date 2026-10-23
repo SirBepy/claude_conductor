@@ -154,6 +154,8 @@ function closeFocusedDraft(): void {
 }
 
 export function closeFocusedChat(): void {
+  // The Projects tab keeps selectedId null, so without this Ctrl+W would do nothing there.
+  if (state.dashboardOpen && state.onCloseProject) { state.onCloseProject(); return; }
   const id = state.selectedId;
   if (!id) return;
   if (state.pendingNewSession?.placeholderId === id) {

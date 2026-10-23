@@ -115,6 +115,9 @@ export interface SessionsState {
    *  Ctrl+1..9, notification, new chat) flips the tab back without each caller
    *  knowing the tab exists. */
   onChatActivated: (() => void) | null;
+  /** Registered by the Projects tab while it is showing: Ctrl+W hides the selected
+   *  project instead of closing a chat (a project close is just a list filter, so no confirm). */
+  onCloseProject: (() => void) | null;
 }
 
 export function createInitialState(mountId: number): SessionsState {
@@ -145,6 +148,7 @@ export function createInitialState(mountId: number): SessionsState {
     takeoverInFlightIds: new Set(),
     dashboardOpen: false,
     onChatActivated: null,
+    onCloseProject: null,
   };
 }
 

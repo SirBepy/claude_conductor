@@ -1,10 +1,11 @@
-// Dashboard header (face, name, branch or repo chips, New chat, kebab) and the
-// quick-action chip row.
+// Dashboard header (face, name, branch or repo chips, New chat, open-in icons,
+// kebab) and the one-line quick-action chip row.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { renderAvatar } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
-import { sameCwd } from "./format";
+import { offerableCommands, sameCwd } from "./format";
+import { moveTrack } from "./quick-track";
 import { hidden, isGroup, type DashCtx } from "./dash-parts";
 
 function face(c: DashCtx): TemplateResult {
@@ -28,6 +29,12 @@ function repoChips(c: DashCtx): TemplateResult {
   return html`<span class="pd-repos">${chip("All", null)}${c.snap.target.repos.map((r) => chip(r.name, r.cwd))}</span>`;
 }
 
+const OPEN_IN: Array<{ kind: "vscode" | "terminal" | "explorer", icon: string, label: string }> = [
+  { kind: "vscode", icon: "code", label: "Open in VS Code" },
+  { kind: "terminal", icon: "terminal-window", label: "Open a terminal here" },
+  { kind: "explorer", icon: "folder-open", label: "Show in Explorer" },
+];
+
 export function header(c: DashCtx): TemplateResult {
   return html`<div class="pd-head">
     ${face(c)}
@@ -38,22 +45,31 @@ export function header(c: DashCtx): TemplateResult {
     <span class="grow"></span>
     <button type="button" class="pd-btn primary" @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement)}>
       <i class="ph ph-plus"></i>New chat</button>
+    ${OPEN_IN.map((o) => html`<button type="button" class="pd-ib" title=${o.label} data-pd-open=${o.kind}
+      @click=${(e: Event) => c.act.openIn(e.currentTarget as HTMLElement, o.kind)}><i class="ph ph-${o.icon}"></i></button>`)}
     <button type="button" class="pd-ib" title="More" @click=${(e: Event) => c.act.openKebab(e.currentTarget as HTMLElement)}>
       <i class="ph ph-dots-three-vertical"></i></button>
   </div>`;
 }
 
+/** The pinned slash commands when the project has a list; until it does, the commands used most. */
+export function chipCommands(c: DashCtx): string[] {
+  return offerableCommands(c.snap.pinned_actions ?? (c.history?.quick_actions ?? []).map((q) => q.command));
+}
+
 export function quickActions(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "quick_actions")) return nothing;
-  const slash = (c.history?.quick_actions ?? []).map((q, i) => html`
-    <button type="button" class="pd-chip" title="${q.count} uses in the last 30 days"
-      @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement, q.command)}>
-      ${i === 0 ? html`<i class="ph ph-lightning"></i>` : nothing}${q.command}</button>`);
-  const open = (kind: "vscode" | "terminal" | "explorer", ic: string, label: string): TemplateResult => html`
-    <button type="button" class="pd-chip plain" @click=${(e: Event) => c.act.openIn(e.currentTarget as HTMLElement, kind)}>
-      <i class="ph ph-${ic}"></i>${label}</button>`;
+  const cmds = chipCommands(c);
+  if (!cmds.length) return nothing;
+  const arrow = (dir: 1 | -1, ic: string): TemplateResult => html`
+    <button type="button" class="pd-ib sm pd-qa-btn" data-pd-qa-dir=${dir} title=${dir === 1 ? "Next actions" : "Previous actions"}
+      @click=${(e: Event) => { c.qaStart = moveTrack((e.currentTarget as HTMLElement).closest<HTMLElement>(".pd-qa")!, c.qaStart, dir); }}>
+      <i class="ph ph-${ic}"></i></button>`;
   return html`<div class="pd-qa">
-    ${slash}${slash.length ? html`<span class="pd-vsep"></span>` : nothing}
-    ${open("vscode", "code", "VS Code")}${open("terminal", "terminal-window", "Terminal")}${open("explorer", "folder-open", "Explorer")}
+    ${arrow(-1, "caret-left")}
+    <div class="pd-qa-track"><div class="pd-qa-strip">${cmds.map((cmd) => html`
+      <button type="button" class="pd-chip" @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement, cmd)}>${cmd}</button>`)}
+    </div></div>
+    ${arrow(1, "caret-right")}
   </div>`;
 }
