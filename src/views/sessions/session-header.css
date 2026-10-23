@@ -111,6 +111,8 @@
   .session-header .meta-cfg-sep { display: none; }
   .session-header .meta-cfg-model-battery { display: inline; font-size: 1rem; line-height: 1; }
   .session-header .meta-cfg-effort-short { display: inline; }
+  .session-header .meta-cfg-model.no-rank .meta-cfg-model-text { display: inline; }
+  .session-header .meta-cfg-model.no-rank .meta-cfg-model-battery { display: none; }
 }
 
 /* Corner badge on the avatar (Joe, 2026-10-20: moved off the icon row, which

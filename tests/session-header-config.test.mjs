@@ -77,9 +77,25 @@ describe("session header config", () => {
     expect(effortEl().classList.contains("meta-cfg-btn")).toBe(false);
     expect(effortEl().hasAttribute("tabindex")).toBe(false);
     expect(fired).toBe(0);
-    expect(effortEl().title).toBe("");
+    // Locked, it still names the level on hover.
+    expect(effortEl().title).toBe("Effort high");
     // The model half stays clickable - only effort is locked on an external session.
     expect(modelEl().classList.contains("meta-cfg-btn")).toBe(true);
+  });
+
+  it("names the model in its tooltip", () => {
+    header.setConfig("claude-opus-5", "high");
+    expect(modelEl().title).toBe("Opus 5: change model");
+  });
+
+  it("an unranked model family shows its name on the phone instead of an empty battery", () => {
+    header.setConfig("claude-mystery-9", "high");
+    expect(modelEl().hidden).toBe(false);
+    expect(modelEl().classList.contains("no-rank")).toBe(true);
+    header.setConfig("claude-opus-5", "high");
+    expect(modelEl().classList.contains("no-rank")).toBe(false);
+    const css = readFileSync("src/views/sessions/session-header.css", "utf8");
+    expect(css).toMatch(/\.meta-cfg-model\.no-rank \.meta-cfg-model-text \{ display: inline; \}/);
   });
 
   it("hides a half that has no value", () => {
