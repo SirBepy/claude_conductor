@@ -123,7 +123,7 @@ describe("Reports card", () => {
     const root = await mount({ kind: "project", id: "p1" });
     const reports = () => root.querySelector('[data-pd-card="reports"]');
     await vi.waitFor(() => expect(reports().querySelectorAll(".pd-row")).toHaveLength(3));
-    expect(reports().querySelector(".pd-row .pd-muted").textContent).toBe("First sentence 1.");
+    expect(reports().querySelector(".pd-row .pd-muted").textContent).toBe("First sentence 1. And then a long tail.");
     expect(reports().querySelector(".pd-outs")).toBeNull();
 
     reports().querySelector("[data-pd-see-more]").click();
