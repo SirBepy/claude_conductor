@@ -158,20 +158,24 @@ export class SessionHeader {
   setConfig(model: string | null, effort: string, effortEditable = true): void {
     const modelText = model ? shortModelName(model) : "";
     this._cfgModelTextEl.textContent = modelText;
-    this._cfgModelBatteryEl.className = `ph-bold meta-cfg-model-battery ${modelRankIcon(model ?? "")}`;
+    const rankIcon = modelRankIcon(model ?? "");
+    this._cfgModelBatteryEl.className = `ph-bold meta-cfg-model-battery ${rankIcon}`;
+    // An unranked family has no battery glyph, so the phone shows the name
+    // instead of an empty, still-clickable span.
+    this._cfgModelEl.classList.toggle("no-rank", !rankIcon);
     this._cfgModelEl.hidden = !modelText;
-    this.setConfigPart(this._cfgModelEl, !!modelText, "Change model");
+    this.setConfigPart(this._cfgModelEl, !!modelText, `${modelText}: change model`, modelText);
     this._cfgEffortFullEl.textContent = effort;
     this._cfgEffortShortEl.textContent = EFFORT_SHORT[effort] ?? effort;
     this._cfgEffortEl.hidden = !effort;
     this._cfgEffortEl.dataset.effort = effort;
-    this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, "Change effort");
+    this.setConfigPart(this._cfgEffortEl, !!effort && effortEditable, `Effort ${effort}: change effort`, effort ? `Effort ${effort}` : "");
     this._cfgSepEl.hidden = !(modelText && effort);
   }
 
-  private setConfigPart(el: HTMLElement, clickable: boolean, title: string): void {
+  private setConfigPart(el: HTMLElement, clickable: boolean, title: string, lockedTitle: string): void {
     el.classList.toggle("meta-cfg-btn", clickable);
-    el.title = clickable ? title : "";
+    el.title = clickable ? title : lockedTitle;
     if (clickable) {
       el.setAttribute("role", "button");
       el.setAttribute("tabindex", "0");
