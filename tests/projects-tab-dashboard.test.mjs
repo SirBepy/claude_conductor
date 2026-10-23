@@ -202,8 +202,12 @@ describe("group", () => {
     await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(2));
   });
 
+  // The fixture cards were fetched up to an hour ago; a day-long interval keeps
+  // the dashboard's own stale-card refresh from replacing what these assert.
+  const settled = (snap) => { for (const v of snap.cards) v.config.refresh_secs = 86_400; return snap; };
+
   it("renders enabled custom cards (list and stats), hides a disabled one, shows an error line", async () => {
-    snapshot = groupSnapshot();
+    snapshot = settled(groupSnapshot());
     const { root } = await mount(ref);
     expect(cardIds(root)).toContain("card:c1");
     expect(cardIds(root)).toContain("card:c2");
@@ -215,7 +219,7 @@ describe("group", () => {
   });
 
   it("the refresh icon calls dashboard_card_refresh and repaints the new values", async () => {
-    snapshot = groupSnapshot();
+    snapshot = settled(groupSnapshot());
     const { root } = await mount(ref);
     root.querySelector('[data-pd-card="card:c2"] button[title="Refresh"]').click();
     expect(calls.find((c) => c.cmd === "dashboard_card_refresh").args).toEqual({ id: "c2" });

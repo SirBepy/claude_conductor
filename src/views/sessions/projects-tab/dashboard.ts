@@ -13,7 +13,8 @@ import type { DashCtx } from "./dash-parts";
 import { reports } from "./dash-reports";
 import { chats } from "./dash-chats";
 import { needsYou, nextUp, running, shipState, yourTodos } from "./dash-sections";
-import type { DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
+import { DEFAULT_CARD_REFRESH_SECS, staleCardIds } from "./format";
+import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 
 import "./pd-dashboard.css";
 import "./pd-cards.css";
@@ -41,6 +42,8 @@ const LIVE_EVENTS = ["instances-changed", "user-todos-changed", "message-drafts-
 const REFETCH_DEBOUNCE_MS = 400;
 // History mining is the expensive call, so a burst of events never repeats it inside this window.
 const HISTORY_MIN_INTERVAL_MS = 15_000;
+// How often an open dashboard re-checks its custom cards for a result past its refresh interval.
+const CARD_STALE_CHECK_MS = 60_000;
 
 export function dashboardTemplate(c: DashCtx): TemplateResult {
   return html`${header(c)}${quickActions(c)}
@@ -94,6 +97,39 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     } finally { galleryRunning = false; }
   };
 
+  // Custom cards fetch themselves: one at a time, never a card the user is
+  // already refreshing, and a card that failed to run is not retried until
+  // its own interval has passed again (the failure itself is the result).
+  let cardsRunning = false;
+  const lastAutoRun = new Map<string, number>();
+  const refreshStaleCards = async (): Promise<void> => {
+    if (cardsRunning || !ctx) return;
+    cardsRunning = true;
+    try {
+      for (const id of staleCardIds(ctx.snap.cards)) {
+        if (destroyed || !ctx || !root.isConnected) return;
+        if (ctx.refreshing.has(id)) continue;
+        const cfg = ctx.snap.cards.find((v) => v.config.id === id)?.config;
+        const tried = lastAutoRun.get(id);
+        if (tried && Date.now() - tried < (cfg?.refresh_secs ?? DEFAULT_CARD_REFRESH_SECS) * 1000) continue;
+        lastAutoRun.set(id, Date.now());
+        ctx.refreshing.add(id);
+        paint();
+        try {
+          const result = await invoke<CardResult>("dashboard_card_refresh", { id });
+          const v = ctx?.snap.cards.find((x) => x.config.id === id);
+          if (v && result) v.result = result;
+        } catch (err) {
+          console.warn("[projects-tab] card auto-refresh failed", id, err);
+        } finally {
+          ctx?.refreshing.delete(id);
+          paint();
+        }
+      }
+    } finally { cardsRunning = false; }
+  };
+  const staleTimer = window.setInterval(() => { void refreshStaleCards(); }, CARD_STALE_CHECK_MS);
+
   const loadHistory = async (): Promise<void> => {
     historyAt = Date.now();
     try {
@@ -135,6 +171,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
         if (ctx.repo && !snap.target.repos.some((r) => r.cwd === ctx!.repo)) ctx.repo = null;
       }
       paint();
+      void refreshStaleCards();
       if (first || Date.now() - historyAt > HISTORY_MIN_INTERVAL_MS) void loadHistory();
     } catch (err) {
       console.error("[projects-tab] dashboard_snapshot failed", err);
@@ -152,6 +189,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     if (destroyed) return;
     destroyed = true;
     refetch.cancel();
+    window.clearInterval(staleTimer);
     window.removeEventListener("resize", onResize);
     for (const u of unlisteners.splice(0)) { try { u(); } catch { /* already gone */ } }
     root.remove();
