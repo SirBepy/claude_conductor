@@ -24,10 +24,7 @@ const { state } = await import("../src/views/sessions/state.ts");
 const { closePvMoreMenu } = await import("../src/views/sessions/preview-panel-more-menu.ts");
 
 let tab = null;
-afterEach(async () => {
-  // The menu arms its outside-click listener on a 0ms timer; closing before
-  // it fires would leave that listener behind to shut the next test's menu.
-  await new Promise((r) => setTimeout(r, 0));
+afterEach(() => {
   closePvMoreMenu();
   tab?.destroy();
   document.body.innerHTML = "";

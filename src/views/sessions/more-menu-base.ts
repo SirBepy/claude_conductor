@@ -63,9 +63,13 @@ export function createMoreMenu<Args extends unknown[] = []>(
         btn.focus();
       }
     };
-    setTimeout(() => document.addEventListener("click", onOutside), 0);
+    // Deferred so the opening click doesn't reach it. A close() before the
+    // timer fires must cancel it, or the listener lands after cleanup and
+    // shuts the next menu opened from another button.
+    const armTimer = setTimeout(() => document.addEventListener("click", onOutside), 0);
     document.addEventListener("keydown", onKeyDown);
     cleanup = () => {
+      clearTimeout(armTimer);
       document.removeEventListener("click", onOutside);
       document.removeEventListener("keydown", onKeyDown);
     };
