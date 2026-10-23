@@ -98,6 +98,13 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
                             strip_hidden_instances_json(arr, keep_jarvis);
                         }
                     }
+                    // `keep_jarvis` is false exactly for a paired machine. A
+                    // peer reads previews per chat (`list_previews`/
+                    // `get_preview` scope it), so the stream must not hand it
+                    // every snapshot's title and slug either.
+                    if !keep_jarvis && !peer_may_see_preview(&frame, |sid| crate::daemon::machines::is_local_session(&state, sid)) {
+                        continue;
+                    }
                     // A suspended host doesn't cleanly close this socket, so `turn_sound`
                     // frames pile up in the broadcast buffer and blast out all at once on
                     // wake. Dropping ones older than the cutoff is intentional (user wants
@@ -144,6 +151,17 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
     if hosting {
         state.notifier.publish("widget_host_changed", serde_json::json!({"hosted": false}));
     }
+}
+
+/// Whether a paired machine may receive this global frame. Only `preview`
+/// frames are filtered: one for a chat hosted here passes (the peer mirrors
+/// that chat and can already read its previews), a session-less one or one
+/// for any other chat never does. Every other method passes.
+fn peer_may_see_preview(frame: &serde_json::Value, is_local: impl Fn(&str) -> bool) -> bool {
+    if frame.get("method").and_then(serde_json::Value::as_str) != Some("preview") {
+        return true;
+    }
+    frame.pointer("/params/snapshot/session_id").and_then(serde_json::Value::as_str).is_some_and(is_local)
 }
 
 /// How long `pump_events` keeps polling the SessionMap for a respawn after its
@@ -368,6 +386,19 @@ mod tests {
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
+
+    #[test]
+    fn a_peer_gets_preview_frames_only_for_chats_hosted_here() {
+        let frame = |sid: serde_json::Value| {
+            serde_json::json!({"jsonrpc": "2.0", "method": "preview", "params": {"snapshot": {"id": "p", "title": "t", "session_id": sid}}})
+        };
+        let is_local = |sid: &str| sid == "local";
+        assert!(peer_may_see_preview(&frame(serde_json::json!("local")), is_local));
+        assert!(!peer_may_see_preview(&frame(serde_json::Value::Null), is_local), "session-less snapshot");
+        assert!(!peer_may_see_preview(&frame(serde_json::json!("elsewhere")), is_local));
+        let other = serde_json::json!({"jsonrpc": "2.0", "method": "instances_changed", "params": {}});
+        assert!(peer_may_see_preview(&other, is_local), "other methods pass");
+    }
 
     #[test]
     fn instances_changed_frame_matches_notifier_shape() {
