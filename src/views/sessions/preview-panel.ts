@@ -17,6 +17,8 @@ import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDep
 import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
 import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./preview-panel-composer";
 import { mountPreviewWindowShell, type RailController, type RailTabDeps, type RailTabHandle } from "./rail-panel";
+import { isMirrored } from "./sessions-helpers";
+import { state } from "./state";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
@@ -270,7 +272,9 @@ class PreviewTab implements RailTabHandle {
       onOpenBrowser: () => this.openInBrowser(),
       onSetDeviceWidth: (w) => this.setDeviceWidth(w),
       getDeviceWidth: () => this.deviceWidth,
-      publish: this.selected && canPublish()
+      // Publish reads the LOCAL preview store, which never holds a mirrored
+      // chat's snapshots (they live on the machine hosting the chat).
+      publish: this.selected && canPublish() && !this.chatIsMirrored()
         ? {
             label: publishLabel(this.selected.published, this.selected.version),
             icon: publishIcon(this.selected.published, this.selected.version),
@@ -287,6 +291,10 @@ class PreviewTab implements RailTabHandle {
       getSelectedId: () => this.selected?.id,
       onSelect: (id) => void this.selectSnapshot(id),
     };
+  }
+
+  private chatIsMirrored(): boolean {
+    return isMirrored(state.sessions.find((s) => s.session_id === this.currentSessionId));
   }
 
   private publish(): void {
