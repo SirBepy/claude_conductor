@@ -33,10 +33,24 @@ pub async fn open_in_explorer(path: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// cmd.exe treats these as syntax even inside an argument std leaves unquoted
+/// (it only quotes args with spaces), so `C:\a&calc.md` would run `calc`. The
+/// path can come from a chat transcript (the dashboard's Files list), so a
+/// path holding one is refused rather than handed to `cmd /C`.
+const CMD_METACHARS: &[char] = &['&', '|', '<', '>', '^', '%', '"', '!'];
+
+fn cmd_safe_path(path: &str) -> Result<(), String> {
+    if path.is_empty() { return Err("empty path".into()) }
+    if path.contains(CMD_METACHARS) {
+        return Err(format!("cannot open {path} in VS Code: its name has a character the Windows shell would run as a command"));
+    }
+    Ok(())
+}
+
 /// Open a folder in VS Code.
 #[tauri::command]
 pub async fn open_in_vscode(path: String) -> Result<(), String> {
-    if path.is_empty() { return Err("empty path".into()) }
+    cmd_safe_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(target_os = "windows")]
         {
@@ -62,4 +76,18 @@ pub async fn open_in_vscode(path: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmd_safe_path;
+
+    #[test]
+    fn a_path_with_shell_syntax_is_refused_and_a_plain_one_passes() {
+        assert!(cmd_safe_path(r"C:\repo\a&calc.md").is_err());
+        assert!(cmd_safe_path(r"C:\repo\x|y.md").is_err());
+        assert!(cmd_safe_path(r"C:\repo\%PATH%.md").is_err());
+        assert!(cmd_safe_path("").is_err());
+        assert!(cmd_safe_path(r"C:\Users\me\My Projects\notes (v2).md").is_ok());
+    }
 }
