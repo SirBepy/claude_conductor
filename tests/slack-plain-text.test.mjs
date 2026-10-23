@@ -16,6 +16,17 @@ describe("slackPlainText", () => {
     expect(slackPlainText("the **auth migration** slips")).toBe("the *auth migration* slips");
   });
 
+  it("keeps a URL's own balanced parentheses inside the link", () => {
+    expect(slackPlainText("[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) ok"))
+      .toBe("Foo (https://en.wikipedia.org/wiki/Foo_(bar)) ok");
+  });
+
+  it("leaves code spans and fences untouched", () => {
+    expect(slackPlainText("run `a **b** c` then **go**")).toBe("run `a **b** c` then *go*");
+    const fence = "```\n**x** [l](https://a.io)\n```";
+    expect(slackPlainText(fence)).toBe(fence);
+  });
+
   it("leaves paragraphs, bullets and plain text alone", () => {
     const text = "Hi Marko,\n\n- one\n- two\n\nThanks";
     expect(slackPlainText(text)).toBe(text);

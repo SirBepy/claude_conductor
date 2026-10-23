@@ -18,12 +18,16 @@ export function handleOf(variant: DraftVariant): string {
 /** Markdown rewritten into what Slack's composer shows cleanly when it only
  *  gets plain text: Slack never parses `[text](url)` or `**bold**`, so the
  *  link becomes `text (url)` (the bare URL auto-links) and bold uses Slack's
- *  own single-asterisk form. */
+ *  own single-asterisk form. Code spans and fences pass through verbatim,
+ *  and a URL may hold one level of balanced parentheses (`.../Foo_(bar)`). */
 export function slackPlainText(markdown: string): string {
   return markdown
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text: string, url: string) =>
-      text === url ? url : `${text} (${url})`)
-    .replace(/\*\*([^*\n]+)\*\*/g, "*$1*");
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, i) => i % 2 === 1 ? part : part
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]+|\([^\s()]*\))+)\)/g, (_, text: string, url: string) =>
+        text === url ? url : `${text} (${url})`)
+      .replace(/\*\*([^*\n]+)\*\*/g, "*$1*"))
+    .join("");
 }
 
 /** Both payloads in one write: Slack and Google Chat read the tags, a plain
