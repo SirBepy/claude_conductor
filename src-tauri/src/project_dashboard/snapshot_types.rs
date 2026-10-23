@@ -50,6 +50,9 @@ pub struct DashboardListRow {
     pub live_count: u32,
     pub question_count: u32,
     pub working_count: u32,
+    /// Whether the Projects list shows it. The list returns every target so
+    /// the UI can offer the closed ones in its picker.
+    pub open: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
@@ -167,6 +170,9 @@ pub struct DashboardSnapshot {
     pub last_channel_message: Option<ChannelNote>,
     pub cards: Vec<CardView>,
     pub hidden_builtins: Vec<String>,
+    /// Quick-action chips the dev (or a chat) pinned for this target, in order.
+    /// Empty means "show the most-used commands instead".
+    pub pinned_actions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]

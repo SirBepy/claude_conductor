@@ -32,6 +32,15 @@ pub struct DashboardStore {
     /// Vault client slugs whose group the dev deleted; seeding never recreates them.
     #[serde(default)]
     pub deleted_vault_slugs: Vec<String>,
+    /// Scope key -> quick-action commands pinned for that target, in order.
+    #[serde(default)]
+    pub pinned_actions: BTreeMap<String, Vec<String>>,
+    /// Target key -> when the dev closed it (epoch ms). Absent = open; see `open_state`.
+    #[serde(default)]
+    pub closed_targets: BTreeMap<String, i64>,
+    /// Set once the first-run "close what has been idle a week" pass has run.
+    #[serde(default)]
+    pub open_seeded: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -474,6 +483,13 @@ mod tests {
         let id = s.upsert_group(None, "m", vec![]);
         assert!(s.delete_group(&id));
         assert!(s.deleted_vault_slugs.is_empty());
+    }
+
+    #[test]
+    fn a_pre_existing_store_file_loads_with_the_new_fields_defaulted() {
+        let s: DashboardStore = serde_json::from_str(r#"{"cards":[{"id":"x"}],"closed_targets":{"project:a":5}}"#).unwrap();
+        assert!(!s.open_seeded && s.pinned_actions.is_empty());
+        assert_eq!(s.closed_targets["project:a"], 5);
     }
 
     #[test]

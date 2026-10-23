@@ -221,13 +221,15 @@ pub fn workflow_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_DASHBOARD_CARD,
-            "description": "Add your own stat or list card to this project's dashboard (Shortcut stories, Clockify hours, `gh run list`), each showing labels and values from an HTTP call or a local command. `test` a card first to see what it would show, then `upsert` it; `list` shows existing cards.",
+            "description": "Add your own stat or list card to this project's dashboard (Shortcut stories, Clockify hours, `gh run list`), each showing labels and values from an HTTP call or a local command. `test` a card first to see what it would show, then `upsert` it; `list` shows existing cards; `pin` sets the quick-action chips (slash commands) on the dashboard header.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "upsert", "delete", "test"]},
-                    "card": {"type": "object", "description": "upsert/test. {id?, title, scope?: {kind:project,cwd}|{kind:group,id} (default: this project), source: {kind:http,method,url,headers?,body?} | {kind:command,program,args,cwd?}, display: {kind:stats,items:[{label,path,format}]} | {kind:list,items_path,label_path,value_path,link_path?,limit?}, refresh_secs?}. url/headers/body/args may use {{secret:NAME}} (read from ~/.claude/.env; never write a secret value), {{cwd}}, {{repo}}, {{today}}, {{week_start}}, {{now_iso}}. Paths: dotted, with [n] and [] (map), sum(...). format: number|text|count|duration_s|duration_ms|duration_iso|relative_time. Omit id to create."},
-                    "id": {"type": "string", "description": "delete: which card."}
+                    "action": {"type": "string", "enum": ["list", "upsert", "delete", "test", "pin"]},
+                    "card": {"type": "object", "description": "upsert/test. {id?, title, scope?: {kind:project,cwd}|{kind:group,id} (default: this project), source: {kind:http,method,url,headers?,body?} | {kind:command,program,args,cwd?,env?: {NAME: value}}, action?: {label,command: \"/slash\"} (a button that starts a chat), display: {kind:stats,items:[{label,path,format}]} | {kind:list,items_path,label_path,value_path,link_path?,limit?}, refresh_secs?}. url/headers/body/args/env values may use {{secret:NAME}} (read from ~/.claude/.env; never write a secret value; pass it via env, not args), {{cwd}}, {{repo}}, {{today}}, {{week_start}}, {{now_iso}}, {{last_run:/cmd}} (epoch ms of the latest /cmd chat run, 0 if never). JSON output may carry a top-level _card {headline?, headline_tone?: warn|good, progress?: {value,max,label?,behind?}}; display may then be {kind:stats,items:[]}. Paths: dotted, with [n] and [] (map), sum(...). format: number|text|count|duration_s|duration_ms|duration_iso|relative_time. Omit id to create."},
+                    "id": {"type": "string", "description": "delete: which card."},
+                    "actions": {"type": "array", "items": {"type": "string"}, "description": "pin: slash commands, max 20, no /close. [] clears."},
+                    "scope": {"type": "object", "description": "pin: {kind:project,cwd}|{kind:group,id}. Default: this project."}
                 },
                 "required": ["action"]
             }

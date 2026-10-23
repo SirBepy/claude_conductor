@@ -3,10 +3,9 @@
 //! contents, none of which a phone or paired machine may pull.
 
 use super::gather::gather;
-use super::{history, parse, snapshot, to_json, IdOnly};
+use super::{history, layout, parse, snapshot, to_json, IdOnly};
 use crate::daemon::rpc::Router;
 use crate::daemon::state::DaemonState;
-use crate::project_dashboard::targets::{build_targets, LiveChat};
 use crate::project_dashboard::DashboardTargetRef;
 use std::sync::Arc;
 
@@ -22,17 +21,7 @@ pub(super) fn register_read(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 let g = gather(&state).await;
-                let live: Vec<LiveChat> = g
-                    .live
-                    .iter()
-                    .map(|c| LiveChat {
-                        project_id: c.inst.project_id.clone(),
-                        cwd: c.inst.cwd.to_string_lossy().into_owned(),
-                        question: c.status == "question",
-                        working: c.status == "working",
-                    })
-                    .collect();
-                to_json(&build_targets(&g.groups, &g.projects, &live, g.now_ms))
+                to_json(&layout::list_rows(&g))
             }
         });
     }

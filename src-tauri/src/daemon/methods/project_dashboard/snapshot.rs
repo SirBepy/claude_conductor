@@ -256,6 +256,9 @@ pub(super) async fn snapshot(state: &Arc<DaemonState>, target_ref: DashboardTarg
         last_channel_message: stored.note,
         cards: cards_for_target(&target, &st),
         hidden_builtins: st.hidden_builtins.get(&scope_of(&target).scope_key()).cloned().unwrap_or_default(),
+        // Exactly the target's own list: a project inside a group does not
+        // inherit the group's pins, it just has none until it sets its own.
+        pinned_actions: st.pinned_for(&scope_of(&target).scope_key()),
         target,
     })
 }
@@ -385,6 +388,14 @@ mod tests {
         };
         assert_eq!(ids(cards_for_target(&target("project", "c:/w/app"), &st)), ["mine", "shared"]);
         assert_eq!(ids(cards_for_target(&target("group", "g1"), &st)), ["shared"]);
+    }
+
+    #[test]
+    fn pinned_actions_come_from_the_targets_own_scope_key() {
+        let mut st = store::DashboardStore::default();
+        st.set_pinned_actions(&Scope::Project { cwd: "C:\\w\\App".into() }.scope_key(), vec!["/a".into()]).unwrap();
+        assert_eq!(st.pinned_for(&scope_of(&target("project", "c:/w/app")).scope_key()), ["/a"]);
+        assert!(st.pinned_for(&scope_of(&target("group", "g1")).scope_key()).is_empty());
     }
 
     #[test]

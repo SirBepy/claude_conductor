@@ -8,6 +8,7 @@
 pub(crate) mod cards;
 mod gather;
 mod history;
+mod layout;
 mod read;
 mod seed;
 mod snapshot;
@@ -47,6 +48,7 @@ struct IdOnly {
 
 pub fn register_project_dashboard(router: &mut Router, state: Arc<DaemonState>) {
     read::register_read(router, state.clone());
+    layout::register_layout(router, state.clone());
     {
         let state = state.clone();
         router.register("dashboard_groups_list", move |_params, _ctx| {
@@ -223,6 +225,9 @@ mod tests {
         "dashboard_snapshot",
         "dashboard_history",
         "dashboard_gallery_image",
+        "dashboard_close_target",
+        "dashboard_open_target",
+        "dashboard_set_pinned_actions",
     ];
 
     #[test]
@@ -239,7 +244,7 @@ mod tests {
 
     #[test]
     fn the_method_list_matches_what_the_router_registers() {
-        let src = format!("{}{}", include_str!("mod.rs"), include_str!("read.rs"));
+        let src = format!("{}{}{}", include_str!("mod.rs"), include_str!("read.rs"), include_str!("layout.rs"));
         let registered = src.matches("router.register(\"dashboard_").count();
         assert_eq!(registered, METHODS.len(), "METHODS and register_project_dashboard drifted");
         for m in METHODS {
