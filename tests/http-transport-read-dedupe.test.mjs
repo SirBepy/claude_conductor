@@ -52,6 +52,20 @@ describe("HttpTransport - concurrent identical reads", () => {
     expect(methods()).toEqual(["list_pending_prompts", "set_auto_accept", "list_pending_prompts"]);
   });
 
+  it("a send over the REST route also keeps a later read off the earlier one", async () => {
+    let release;
+    const ok = { ok: true, json: async () => ({ prompts: [] }) };
+    fetchMock.mockImplementationOnce(() => new Promise((r) => { release = () => r(ok); }));
+    const t = new HttpTransport();
+    const first = t.call("list_pending_prompts");
+    await t.call("send_message", { sessionId: "s1", blocks: [{ type: "text", text: "hi" }] }).catch(() => {});
+    const second = t.call("list_pending_prompts");
+    release();
+    await Promise.all([first, second]);
+    const urls = fetchMock.mock.calls.map((c) => c[0]);
+    expect(urls).toEqual(["/api/rpc", "/api/sessions/s1/send", "/api/rpc"]);
+  });
+
   it("sequential reads still each go to the network", async () => {
     const t = new HttpTransport();
     await t.call("list_pending_prompts");

@@ -838,6 +838,9 @@ export class HttpTransport implements Transport {
       .map((b) => b.text ?? "")
       .join("\n")
       .trim();
+    // A send is a write on the REST route, not rpc(), so it bumps the read
+    // dedupe's write counter here.
+    this.writes++;
     const stall = new StallTimer(SEND_TIMEOUT_MS);
     let res: Response;
     try {
