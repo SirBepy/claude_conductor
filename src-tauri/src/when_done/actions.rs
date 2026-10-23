@@ -3,11 +3,14 @@
 
 use super::idle::log_comment;
 use crate::state::AppState;
+use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 
-/// Auto-resolve every pending prompt: allow permissions as-is, answer questions
-/// with the first/default option. Logs each auto-answer to COMMENTS_FOR_BEPY.md.
-pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
+/// Auto-resolve every pending prompt in an armed session: allow permissions
+/// as-is, answer questions with the first/default option. Logs each
+/// auto-answer to COMMENTS_FOR_BEPY.md. `armed` is the set of sessions busy
+/// when when-done was armed; a prompt from any other chat stays pending.
+pub(super) async fn auto_resolve_prompts(app: &AppHandle, armed: &HashSet<String>) {
     let state = app.state::<AppState>();
     let prompts = match state.client().await {
         Some(c) => c.list_pending_prompts().await.ok(),
@@ -30,7 +33,7 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
         // `list_pending_prompts` also returns prompts mirrored from a paired
         // peer. This machine going to sleep never blocks on those, and
         // auto-approving another machine's permission prompt is not ours to do.
-        if is_mirrored_prompt(&instances, payload) {
+        if is_mirrored_prompt(&instances, payload) || !prompt_in_armed_scope(armed, payload) {
             continue;
         }
         let request_id = match payload.get("id").and_then(|v| v.as_str()) {
@@ -74,6 +77,17 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle) {
             _ => {}
         }
     }
+}
+
+/// Whether a pending prompt belongs to a session that was busy at arm time.
+/// Arming means "approve what these running chats need to finish"; a chat
+/// that was idle then (or a prompt with no session id) never gets a blind
+/// approval, since nobody chose to let it run unattended.
+pub(super) fn prompt_in_armed_scope(armed: &HashSet<String>, payload: &serde_json::Value) -> bool {
+    payload
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .is_some_and(|sid| armed.contains(sid))
 }
 
 /// Whether a pending prompt's payload belongs to a session mirrored from a

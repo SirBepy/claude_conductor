@@ -5,10 +5,12 @@
 
 use super::actions::auto_resolve_prompts;
 use super::engine::{is_cancelled, update_and_emit};
-use super::idle::{all_sessions_idle, live_busy_map};
+use super::idle::{all_sessions_idle, live_busy_map, waiting_on_ids};
 use super::protocol::{ProtocolState, TerminalAction};
 use crate::state::AppState;
+use std::collections::HashSet;
 use std::future::Future;
+use std::sync::Arc;
 use std::pin::Pin;
 use std::time::Instant;
 use tauri::{AppHandle, Manager};
@@ -30,7 +32,8 @@ pub(super) struct EngineDeps {
     /// Whether every live session is idle. Mirrors the inline
     /// `all_sessions_idle(&cached_instances)` check.
     pub(super) all_idle: Box<dyn Fn() -> bool + Send + Sync>,
-    /// Auto-resolve every pending daemon prompt (permission/question). Async.
+    /// Auto-resolve the pending daemon prompts (permission/question) of the
+    /// sessions busy at arm time. Async.
     pub(super) auto_resolve: Box<dyn Fn() -> BoxFut<'static, ()> + Send + Sync>,
     /// Mutate the stored ProtocolState and emit `when-done-state`. Mirrors
     /// `update_and_emit`; returns the new state.
@@ -60,6 +63,8 @@ impl EngineDeps {
         let app_resolve = app.clone();
         let app_emit = app.clone();
         let app_cancel = app.clone();
+        // Snapshotted once: production() runs at arm time (run_engine).
+        let armed: Arc<HashSet<String>> = Arc::new(waiting_on_ids(&live_busy_map(&app)).into_iter().collect());
         Self {
             busy_map: Box::new(move || live_busy_map(&app_busy)),
             all_idle: Box::new(move || {
@@ -69,7 +74,8 @@ impl EngineDeps {
             }),
             auto_resolve: Box::new(move || {
                 let app = app_resolve.clone();
-                Box::pin(async move { auto_resolve_prompts(&app).await })
+                let armed = armed.clone();
+                Box::pin(async move { auto_resolve_prompts(&app, &armed).await })
             }),
             mutate_and_emit: Box::new(move |f| update_and_emit(&app_emit, f)),
             is_cancelled: Box::new(move || is_cancelled(&app_cancel)),
