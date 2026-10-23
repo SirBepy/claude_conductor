@@ -4,13 +4,14 @@
 use super::snapshot_types::PlanItem;
 
 /// Rows per repo. A plan is a pull-next lane, so the dashboard only wants its
-/// head; the long tail would bury the other cards.
-pub const PLAN_CAP: usize = 6;
+/// head; the long tail would bury the other cards. The UI pages them three at
+/// a time.
+pub const PLAN_CAP: usize = 12;
 
 /// Keeps one runaway hand-edited line from stretching the card.
 const MAX_TEXT_CHARS: usize = 240;
 
-/// Open items in file order, each tagged with its `##` section. A section whose
+/// Open items, priority first then file order (see `rank`), each tagged with its `##` section. A section whose
 /// heading contains "priorities" marks its items `priority`. Checked items and
 /// sections with no open item contribute nothing.
 pub fn parse_plan(text: &str, repo_cwd: &str) -> Vec<PlanItem> {
@@ -38,11 +39,18 @@ pub fn parse_plan(text: &str, repo_cwd: &str) -> Vec<PlanItem> {
             priority,
             repo_cwd: repo_cwd.to_string(),
         });
-        if out.len() == PLAN_CAP {
-            break;
-        }
     }
+    rank(&mut out);
     out
+}
+
+/// Priority items first, then cut to `PLAN_CAP`. The cut comes after the sort
+/// so a priorities section far down the file is not pushed out by earlier
+/// items. `sort_by_key` is stable, so file order survives within each band.
+/// Also used to merge several repos' lists.
+pub fn rank(items: &mut Vec<PlanItem>) {
+    items.sort_by_key(|p| !p.priority);
+    items.truncate(PLAN_CAP);
 }
 
 /// The text after `- [ ] ` for an unchecked top-level item. Indented lines are
@@ -131,11 +139,32 @@ mod tests {
     }
 
     #[test]
-    fn the_list_is_capped_at_six() {
-        let md: String = (1..=10).map(|n| format!("- [ ] {n} - item {n}\n")).collect();
+    fn the_list_is_capped_at_twelve() {
+        let md: String = (1..=20).map(|n| format!("- [ ] {n} - item {n}\n")).collect();
         let items = parse_plan(&format!("## A\n{md}"), REPO);
         assert_eq!(items.len(), PLAN_CAP);
-        assert_eq!(items[5].id.as_deref(), Some("6"));
+        assert_eq!(PLAN_CAP, 12);
+        assert_eq!(items[11].id.as_deref(), Some("12"));
+    }
+
+    #[test]
+    fn a_priorities_section_below_many_open_items_still_comes_first() {
+        let phase: String = (1..=7).map(|n| format!("- [ ] {n} - phase {n}\n")).collect();
+        let md = format!("## Phase 1\n{phase}## Joe's own priorities\n- [ ] 99 - urgent\n");
+        let items = parse_plan(&md, REPO);
+        assert_eq!(items[0].id.as_deref(), Some("99"));
+        assert!(items[0].priority);
+        assert_eq!(items[1].id.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn priority_items_survive_the_cap_and_file_order_holds_within_a_class() {
+        let phase: String = (1..=14).map(|n| format!("- [ ] {n} - phase {n}\n")).collect();
+        let md = format!("## Phase 1\n{phase}## Priorities\n- [ ] 90 - a\n- [ ] 91 - b\n");
+        let items = parse_plan(&md, REPO);
+        assert_eq!(items.len(), PLAN_CAP);
+        let ids: Vec<_> = items.iter().take(3).map(|i| i.id.as_deref().unwrap()).collect();
+        assert_eq!(ids, ["90", "91", "1"]);
     }
 
     #[test]

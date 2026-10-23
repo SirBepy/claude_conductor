@@ -8,7 +8,7 @@ use super::gather::{gather, Gathered, LiveChat};
 use crate::daemon::rpc::RpcError;
 use crate::daemon::state::DaemonState;
 use crate::project_dashboard::history_scan::project_dir_slug;
-use crate::project_dashboard::plan::{read_plan, PLAN_CAP};
+use crate::project_dashboard::plan::{rank, read_plan};
 use crate::project_dashboard::snapshot_parts::{
     draft_is_open, draft_item, newest_note, scheduled_row, soonest_scheduled,
 };
@@ -108,10 +108,7 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
         channel.extend(repo_channel::list_all(pid));
     }
     drafts.sort_by(|a, b| b.at_ms.cmp(&a.at_ms));
-    // Priority items first across repos; `sort_by_key` is stable so each
-    // repo's own file order survives within a band.
-    plan.sort_by_key(|p| !p.priority);
-    plan.truncate(PLAN_CAP);
+    rank(&mut plan);
     let scheduled = soonest_scheduled(
         scheduled_items::list().iter().filter_map(|i| scheduled_row(i, repos)).collect(),
     );
