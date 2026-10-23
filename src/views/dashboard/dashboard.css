@@ -191,28 +191,27 @@
 .view-dashboard .dash-acard-warning:hover { text-decoration: underline; }
 
 /* ── Widget shell: stacked sections split by hairlines ─────────────────── */
-.view-dashboard .dash-widgets {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
 .view-dashboard .dash-widget {
-  grid-column: 1 / -1;
   border-top: var(--dv-line);
   padding: var(--dv-pad-y) 0;
 }
-/* Each chart pairs with its by-project companion, side by side. Fixed here
-   because the widget registry has no "column" concept. */
-.view-dashboard .dash-widget[data-widget-id="session-chart"],
-.view-dashboard .dash-widget[data-widget-id="weekly-chart"] {
-  grid-column: 1;
-  padding-right: var(--dv-pad-x);
+/* A run of half-width widgets (widget-layout.ts) sits in two columns split by
+   a hairline, filled shortest-first. The pair draws one top hairline across
+   both columns; a column's widgets share out whatever height the other column
+   has over it, so no one widget holds the whole gap. */
+.view-dashboard .dash-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-top: var(--dv-line);
 }
-.view-dashboard .dash-widget[data-widget-id="session-bars"],
-.view-dashboard .dash-widget[data-widget-id="weekly-bars"] {
-  grid-column: 2;
-  padding-left: var(--dv-pad-x);
-  border-left: var(--dv-line);
-}
+.view-dashboard .dash-col { min-width: 0; display: flex; flex-direction: column; }
+.view-dashboard .dash-col:first-child { padding-right: var(--dv-pad-x); border-right: var(--dv-line); }
+.view-dashboard .dash-col:last-child { padding-left: var(--dv-pad-x); }
+.view-dashboard .dash-col > .dash-widget { flex: 1 1 auto; }
+.view-dashboard .dash-col > .dash-widget:first-child { border-top: 0; }
+/* Too narrow for two columns: one, in reading order (the second is empty). */
+.view-dashboard .dash-pair.is-single { display: block; }
+.view-dashboard .dash-pair.is-single .dash-col { padding: 0; border: 0; }
 .view-dashboard .dash-widget-header {
   display: flex;
   align-items: center;

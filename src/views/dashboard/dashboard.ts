@@ -32,6 +32,7 @@ import { wireDashMoreMenu, closeDashMenu } from "./dashboard-more-menu";
 import type { DashMoreMenuDeps } from "./dashboard-more-menu";
 import { legacyStatCardsHtml } from "./legacy-stat-cards";
 import { visibleInterval } from "../../shared/visible-interval";
+import { observeWidgetLayout, rebalanceWidgets, widgetsGridHtml } from "./widget-layout";
 
 let refreshBusy = false;
 let lastAutoPollMs = 0;
@@ -48,6 +49,7 @@ let authStateMapCache: Record<string, AuthState> = {};
 let dashboardWidgets: DashboardWidgetEntry[] = [];
 let editMode = false;
 const widgetTeardowns = new Map<string, () => void>();
+let disposeWidgetLayout: (() => void) | null = null;
 
 // Multi-account milestone 08: one-time "set up your accounts" migration
 // prompt. Fetched once per mount (not on every refresh) - see renderDashboard.
@@ -198,6 +200,8 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
     disposeDashMoreMenu?.();
     disposeDashMoreMenu = null;
     teardownAllWidgets();
+    disposeWidgetLayout?.();
+    disposeWidgetLayout = null;
     mountedContainer = null;
   };
 }
@@ -340,7 +344,7 @@ function widgetShellHtml(entry: DashboardWidgetEntry, index: number, total: numb
     `<button class="icon-btn dash-widget-up" data-widget-id="${escapeHtml(entry.id)}" title="Move up" ${index === 0 ? "disabled" : ""}><i class="ph ph-caret-up"></i></button>
      <button class="icon-btn dash-widget-down" data-widget-id="${escapeHtml(entry.id)}" title="Move down" ${index === total - 1 ? "disabled" : ""}><i class="ph ph-caret-down"></i></button>
      <button class="icon-btn dash-widget-remove" data-widget-id="${escapeHtml(entry.id)}" title="Remove"><i class="ph ph-x"></i></button>`;
-  return `<div class="dash-widget v-card" data-widget-id="${escapeHtml(entry.id)}">
+  return `<div class="dash-widget v-card" data-widget-id="${escapeHtml(entry.id)}" data-order="${index}">
     <div class="dash-widget-header">
       <i class="ph ${escapeHtml(widget.icon)} dash-widget-icon"></i>
       <span class="dash-widget-title">${escapeHtml(widget.title)}</span>
@@ -363,7 +367,7 @@ function renderShell(container: HTMLElement): void {
     : legacyStatCardsHtml(history);
 
   const enabled = dashboardWidgets.filter((e) => e.enabled && getWidget(e.id));
-  const widgetsHtml = enabled.map((e, i) => widgetShellHtml(e, i, enabled.length)).join("");
+  const widgetsHtml = widgetsGridHtml(enabled, (e, i) => widgetShellHtml(e, i, enabled.length));
 
   container.innerHTML = `
     ${refreshErrorBannerHtml()}
@@ -381,6 +385,10 @@ function renderShell(container: HTMLElement): void {
   wireSetupBanner(container);
   wireEditControls(container);
   mountWidgets(container);
+  const grid = container.querySelector<HTMLElement>(".dash-widgets");
+  disposeWidgetLayout?.();
+  disposeWidgetLayout = grid ? observeWidgetLayout(grid) : null;
+  if (grid) rebalanceWidgets(grid);
 }
 
 // ── Fetch-failure banner (P0-2) ─────────────────────────────────────────────

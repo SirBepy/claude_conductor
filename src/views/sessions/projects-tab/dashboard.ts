@@ -13,7 +13,7 @@ import type { DashCtx } from "./dash-parts";
 import { reportsLink } from "./dash-reports";
 import { chats } from "./dash-chats";
 import { nextUp, running, shipState, yourTodos } from "./dash-sections";
-import { assignColumns, naturalHeight } from "./balance";
+import { assignColumns, naturalHeight } from "../../../shared/balance";
 import { cardRefreshSecs, staleCardIds } from "./format";
 import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 

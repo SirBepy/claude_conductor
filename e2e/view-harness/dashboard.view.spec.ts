@@ -135,6 +135,53 @@ test.describe("view-harness / dashboard", () => {
     await expect(labels.nth(1)).toHaveText("7d");
   });
 
+  // #1316: chart and bars widgets pair up by position, not by id, so a
+  // reordered or disabled widget never leaves a hole in a fixed grid.
+  const mountWithWidgets = async (page: import("@playwright/test").Page, order: string[]): Promise<void> => {
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_settings: { theme: "void", dashboardWidgets: order.map((id) => ({ id, enabled: true })) },
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [],
+        get_usage_map: {},
+        get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        poll_now: null,
+      },
+    });
+  };
+
+  test("adjacent half-width widgets share one two-column block, filled from both columns", async ({ page }) => {
+    await mountWithWidgets(page, ["session-bars", "session-chart", "weekly-chart", "weekly-bars"]);
+    const pair = page.locator(".dash-pair");
+    await expect(pair).toHaveCount(1);
+    await expect(pair.locator(".dash-widget")).toHaveCount(4);
+    for (const col of [0, 1]) {
+      await expect(pair.locator(".dash-col").nth(col).locator(".dash-widget")).not.toHaveCount(0);
+    }
+  });
+
+  test("a half-width widget with no half-width neighbour spans the full width", async ({ page }) => {
+    await mountWithWidgets(page, ["session-chart", "token-source", "session-bars"]);
+    await expect(page.locator(".dash-widget[data-widget-id='session-bars']")).toBeAttached();
+    await expect(page.locator(".dash-pair")).toHaveCount(0);
+    const grid = await page.locator(".dash-widgets").boundingBox();
+    const chart = await page.locator(".dash-widget[data-widget-id='session-chart']").boundingBox();
+    expect(Math.round(chart!.width)).toBe(Math.round(grid!.width));
+  });
+
+  test("a narrow window stacks a pair in one column, in reading order", async ({ page }) => {
+    await page.setViewportSize({ width: 560, height: 900 });
+    await mountWithWidgets(page, ["session-chart", "session-bars", "weekly-chart"]);
+    const pair = page.locator(".dash-pair");
+    await expect(pair).toHaveClass(/is-single/);
+    const ids = await pair.locator(".dash-col").first().locator(".dash-widget")
+      .evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset["widgetId"]));
+    expect(ids).toEqual(["session-chart", "session-bars", "weekly-chart"]);
+  });
+
   // P0-2: listAccounts/getUsageMap/getAuthStateMap self-catch in shared/api.ts
   // and never reach fullRefresh's own catch - the genuinely reachable
   // failure is the crossover auto-poll's pollNow() call, which does not.
