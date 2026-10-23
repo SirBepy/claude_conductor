@@ -3,20 +3,22 @@
 .pd-fetched { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-muted); }
 .pd-err { color: var(--color-danger); opacity: 0.85; font-size: 12px; padding: 4px 0; overflow-wrap: anywhere; }
 
-/* Reports */
-.pd-rtabs { display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--color-background); }
-.pd-h .pd-rtabs { margin-right: 2px; }
+/* In-card tabs (Chats, Reports): words in the header line, the chosen one
+   underlined, the same language as the sidebar's Chats | Projects strip. */
+.pd-rtabs { display: flex; gap: 12px; }
+.pd-h .pd-rtabs { margin-right: 4px; }
 .pd-rtab {
-  border: 0; border-radius: 5px; padding: 2px 9px; background: transparent; cursor: pointer;
-  color: var(--color-text-muted); font: 600 11.5px inherit; font-family: inherit; text-transform: none; letter-spacing: 0;
+  border: 0; border-bottom: 1px solid transparent; padding: 2px 0 1px; background: transparent; cursor: pointer;
+  color: var(--color-text-muted); font: 500 12px inherit; font-family: inherit; text-transform: none; letter-spacing: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 .pd-rtab:hover { color: var(--color-text); }
-.pd-rtab.on { background: var(--color-surface-alt); color: var(--color-text); }
+.pd-rtab.on { color: var(--color-text); border-bottom-color: color-mix(in srgb, var(--color-text) 55%, transparent); }
 
 .pd-outs, .pd-gal { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 @media (max-width: 900px) { .pd-outs, .pd-gal { grid-template-columns: 1fr 1fr; } }
 .pd-out { border: 1px solid var(--color-border); border-radius: 8px; padding: 9px 10px; background: var(--color-background); cursor: pointer; min-width: 0; }
-.pd-out:hover { border-color: var(--color-primary); }
+.pd-out:hover, .pd-shot:hover { border-color: color-mix(in srgb, var(--color-text) 35%, var(--color-border)); }
 .pd-out b { display: block; font-size: 12.5px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pd-out p {
   margin: 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.45; overflow: hidden;
@@ -25,13 +27,53 @@
 .pd-out .when { margin-top: 6px; font-size: 11px; color: var(--color-text-muted); display: flex; gap: 6px; align-items: center; }
 
 .pd-shot { border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-background); cursor: pointer; min-width: 0; }
-.pd-shot:hover { border-color: var(--color-primary); }
 .pd-shot img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top left; }
 .pd-shot-ph { height: 120px; display: grid; place-items: center; color: var(--color-text-muted); font-size: 12px; }
 .pd-shot-ph .ph-spinner { animation: icon-btn-spin 0.8s linear infinite; font-size: 16px; }
 .pd-gal.compact { grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .pd-gal.compact .pd-shot img, .pd-gal.compact .pd-shot-ph { height: 64px; }
+/* The card carries six; the compact peek shows four in a row, the tall one 3 x 2. */
+.pd-gal.compact .pd-shot:nth-child(n+5) { display: none; }
 .pd-shot-t { padding: 5px 8px; font-size: 11.5px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Reports sits under the grid and takes the rest of the pane's height. Its
+   body is a size container: short, it is the compact peek (rows that fit,
+   four thumbnails); given room, outcomes become tiles and the gallery grows. */
+.pd-card.pd-reports { flex: 1 0 auto; display: flex; flex-direction: column; margin-top: 16px; }
+.pd-rbody { flex: 1 1 0; min-height: 84px; container-type: size; }
+.pd-rbody > .pd-quiet { padding-top: 0; }
+
+/* A column that wraps: a row that does not fully fit moves to a second
+   column outside the clip, so the list never shows half a row. */
+.pd-fit {
+  height: 100%; display: flex; flex-direction: column; flex-wrap: wrap; align-content: flex-start;
+  overflow: hidden; margin: 0 -6px; padding: 0 6px;
+}
+.pd-fit > .pd-row { width: 100%; box-sizing: border-box; margin: 0; }
+
+.pd-tiles { display: none; }
+@container (min-height: 200px) {
+  .pd-rbody > .pd-fit.has-tiles { display: none; }
+  .pd-rbody > .pd-tiles { height: 100%; display: grid; grid-auto-rows: minmax(0, 1fr); }
+  /* Columns of text, not boxes inside the card: a short message just ends, and
+     the space under it reads as margin rather than an empty tile. Taller
+     columns show more of the message; the fade replaces the line clamp. */
+  .pd-tiles { column-gap: 14px; row-gap: 8px; margin: 0 -10px; }
+  .pd-tiles .pd-out {
+    display: flex; flex-direction: column; min-height: 0; padding: 8px 10px;
+    border: 0; border-radius: 8px; background: transparent; transition: background-color 0.15s ease;
+  }
+  .pd-tiles .pd-out:hover { background: var(--color-surface-alt); }
+  .pd-tiles .pd-out b { order: -2; }
+  .pd-tiles .pd-out .when { order: -1; margin: 0 0 6px; }
+  .pd-tiles .pd-out p {
+    flex: 1; min-height: 0; display: block; -webkit-line-clamp: unset;
+    mask-image: linear-gradient(to bottom, #000 80%, transparent);
+  }
+  .pd-gal.compact { height: 100%; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(0, 1fr); gap: 10px; }
+  .pd-gal.compact .pd-shot:nth-child(n+5) { display: block; }
+  .pd-gal.compact .pd-shot img, .pd-gal.compact .pd-shot-ph { height: 100%; }
+}
 
 /* Modals (shared #modal-host card slot) */
 #modal-host .modal-card.pd-modal {

@@ -2,11 +2,15 @@
    mockup; theme vars only. --color-success is not defined in every theme, so
    it always carries a fallback. */
 
+/* A column so the Reports card, last, can take whatever height is left
+   (pd-cards.css) instead of the pane ending in a blank band. */
 .pd-root {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 18px 32px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px 22px;
   color: var(--color-text);
   font-size: 13px;
 }
@@ -27,14 +31,15 @@
 .pd-subline { margin-top: 2px; min-height: 18px; color: var(--color-text-muted); font-size: 12px; display: flex; gap: 10px; align-items: center; }
 .pd-branch { font: 11.5px var(--font-mono, monospace); }
 
-.pd-repos { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Repo filter: plain words, the chosen one underlined like the tab strips. */
+.pd-repos { display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .pd-repo-chip {
-  padding: 2px 8px; border-radius: 6px; cursor: pointer;
-  border: 1px solid var(--color-border); background: var(--color-background);
-  color: var(--color-text-muted); font: 11px var(--font-mono, monospace);
+  padding: 1px 0; border: 0; border-bottom: 1px solid transparent; background: transparent; cursor: pointer;
+  color: var(--sb-muted, var(--color-text-muted)); font: 11.5px var(--font-mono, monospace);
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 .pd-repo-chip:hover { color: var(--color-text); }
-.pd-repo-chip.on { color: var(--color-text); border-color: var(--color-primary); }
+.pd-repo-chip.on { color: var(--color-text); border-bottom-color: color-mix(in srgb, var(--color-text) 55%, transparent); }
 
 .pd-btn {
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px;
@@ -58,30 +63,31 @@
 
 /* Quick actions: one line. The track clips the strip and the strip slides by
    whole pages (quick-track.ts); the arrows drop out when every chip fits. */
-.pd-qa { display: flex; align-items: center; gap: 4px; margin: 10px 0 12px; }
+.pd-qa { display: flex; align-items: center; gap: 4px; margin: 14px 0 18px; }
 .pd-qa.is-fit .pd-qa-btn { display: none; }
 .pd-qa-btn:disabled { opacity: 0.3; cursor: default; }
 .pd-qa-track { flex: 1; min-width: 0; overflow: hidden; }
 .pd-qa-strip { position: relative; display: flex; gap: 6px; width: max-content; transition: transform 0.25s ease; }
+/* Unfilled, so the row reads as a line of commands rather than a row of buttons; hover brings the fill. */
 .pd-chip {
   flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);
-  font: 12px var(--font-mono, monospace);
+  border: 1px solid var(--color-border); background: transparent; color: var(--sb-muted, var(--color-text-muted));
+  font: 12px var(--font-mono, monospace); transition: color 0.15s ease, background-color 0.15s ease;
 }
-.pd-chip:hover { border-color: var(--color-primary); }
+.pd-chip:hover { background: var(--color-surface); color: var(--color-text); }
 
 /* Card grid */
-.pd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pd-grid { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .pd-card {
   background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px;
-  padding: 8px 12px 8px; min-width: 0;
+  padding: 12px 16px 14px; min-width: 0;
 }
 .pd-card.full { grid-column: 1 / -1; }
 @media (max-width: 900px) { .pd-grid { grid-template-columns: 1fr; } }
 
 .pd-h {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 4px; min-height: 24px;
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted);
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px; min-height: 24px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted);
 }
 .pd-link { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--color-text-muted); cursor: pointer; }
 .pd-link:hover { color: var(--color-text); }
@@ -93,7 +99,7 @@
 
 /* Rows */
 .pd-row {
-  display: flex; align-items: center; gap: 8px; padding: 3px 6px; margin: 0 -6px; border-radius: 7px; min-width: 0;
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin: 0 -6px; border-radius: 7px; min-width: 0;
 }
 .pd-row.is-link { cursor: pointer; }
 .pd-row.is-link:hover { background: var(--color-surface-alt); }
@@ -101,10 +107,8 @@
 .pd-ic { font-size: 15px; color: var(--color-text-muted); flex: none; width: 18px; text-align: center; }
 .pd-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pd-m { flex: none; color: var(--color-text-muted); font-size: 12px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pd-repo {
-  flex: none; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--color-border);
-  background: var(--color-background); color: var(--color-text-muted); font: 11px var(--font-mono, monospace);
-}
+/* Which repo a row belongs to: plain muted text, not a boxed tag. */
+.pd-repo { flex: none; color: var(--color-text-muted); font: 11px var(--font-mono, monospace); }
 .pd-sha { font: 11.5px var(--font-mono, monospace); color: var(--color-primary); flex: none; width: auto; }
 .pd-sha.unpushed { color: var(--color-warning); }
 

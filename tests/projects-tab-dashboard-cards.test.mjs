@@ -116,15 +116,17 @@ describe("Next up", () => {
 });
 
 describe("Reports card", () => {
-  it("is a three-row peek, and See more opens the full tab in the modal", async () => {
+  // Which shape shows (rows that fit, or tiles) depends on the card's height, which
+  // jsdom never lays out; projects-tab.view.spec.ts checks that half in a browser.
+  it("carries every outcome as a row and as a tile, and See more opens the full tab in the modal", async () => {
     historyResult = history({
       outcomes: [1, 2, 3, 4].map((n) => ({ session_id: `o${n}`, title: `Outcome ${n}`, text: `First sentence ${n}. And then a long tail.`, at_ms: Date.now() - n * 60_000, repo_cwd: "C:/Projects/conductor" })),
     });
     const root = await mount({ kind: "project", id: "p1" });
     const reports = () => root.querySelector('[data-pd-card="reports"]');
-    await vi.waitFor(() => expect(reports().querySelectorAll(".pd-row")).toHaveLength(3));
+    await vi.waitFor(() => expect(reports().querySelectorAll(".pd-fit .pd-row")).toHaveLength(4));
     expect(reports().querySelector(".pd-row .pd-muted").textContent).toBe("First sentence 1. And then a long tail.");
-    expect(reports().querySelector(".pd-outs")).toBeNull();
+    expect(reports().querySelectorAll(".pd-tiles .pd-out")).toHaveLength(4);
 
     reports().querySelector("[data-pd-see-more]").click();
     const modal = document.getElementById("test-modal-slot");
@@ -134,20 +136,20 @@ describe("Reports card", () => {
     expect(modal.querySelector(".pd-modal")).toBeNull();
   });
 
-  it("the Gallery tab is one row of four thumbnails, and the modal shows them all", async () => {
+  it("the Gallery tab carries six thumbnails, and the modal shows them all", async () => {
     historyResult = history({
-      gallery: [1, 2, 3, 4, 5].map((n) => ({ id: `img${n}`, session_id: "s", title: `Shot ${n}`, at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" })),
+      gallery: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: `img${n}`, session_id: "s", title: `Shot ${n}`, at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" })),
     });
     const root = await mount({ kind: "project", id: "p1" });
     await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-row')).not.toBeNull());
     [...root.querySelectorAll('[data-pd-card="reports"] .pd-rtab')].find((b) => b.textContent === "Gallery").click();
-    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="reports"] .pd-shot img')).toHaveLength(4));
+    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="reports"] .pd-shot img')).toHaveLength(6));
     expect(root.querySelector('[data-pd-card="reports"] .pd-gal').classList.contains("compact")).toBe(true);
 
     root.querySelector("[data-pd-see-more]").click();
     const modal = document.getElementById("test-modal-slot");
     // Images keep arriving while the modal is open; it redraws on each paint.
-    await vi.waitFor(() => expect(modal.querySelectorAll(".pd-shot img")).toHaveLength(5));
+    await vi.waitFor(() => expect(modal.querySelectorAll(".pd-shot img")).toHaveLength(7));
   });
 });
 
