@@ -20,10 +20,12 @@ use super::{peer_client, publish_instances_changed};
 /// blipping should recover fast, not leave a stale mirrored row lingering.
 const RECONNECT_MIN: Duration = Duration::from_secs(2);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
-/// `reach_url` errs for a peer with neither a `direct_url` nor an `iroh_id`,
-/// or when the iroh dial endpoint itself fails to bind - retry on this
-/// cadence rather than hot-looping a guaranteed-`Err` call.
-const UNREACHABLE_RETRY: Duration = Duration::from_secs(30);
+/// Longest the WS upgrade may take once `reach_url` has the path up. The cold
+/// iroh dial is not in here (it completes inside `reach_url`), so what is left
+/// is a loopback TCP connect plus one round trip through the tunnel. Without a
+/// bound, a path that died between those two steps parks the link until the
+/// proxy's QUIC idle timeout, with the peer still shown online.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// A revoked token means re-pairing fixes it, not a fast retry - back off
 /// harder than a plain network blip (step 2).
 const REVOKED_BACKOFF: Duration = Duration::from_secs(60);
@@ -44,37 +46,50 @@ pub fn spawn_link(state: Arc<DaemonState>, peer: PeerMachine) -> tokio::task::Jo
 
 async fn run_link(state: Arc<DaemonState>, peer: PeerMachine) {
     let machine_id = peer.machine_id.clone();
+    let wake = state.hub.wake_handle(&machine_id);
     let mut backoff = RECONNECT_MIN;
     loop {
+        // `reach_url` now also completes the iroh dial, so it can fail after
+        // ~30s as well as at once (no iroh id): either way the failure climbs
+        // the same ladder, which also keeps a guaranteed-`Err` from hot-looping.
         let base_url = match peer_client::reach_url(&state, &peer).await {
             Ok(u) => u,
-            Err(_) => {
+            Err(e) => {
+                log::debug!("peer_link: {machine_id} unreachable: {e}");
                 mark_offline(&state, &machine_id);
-                tokio::time::sleep(UNREACHABLE_RETRY).await;
+                backoff = pause(&wake, backoff).await;
                 continue;
             }
         };
         let ws_url = to_stream_url(&base_url, &peer.token);
-        match tokio_tungstenite::connect_async(&ws_url).await {
-            Ok((stream, _resp)) => {
+        let connected = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&ws_url)).await;
+        match connected {
+            Ok(Ok((stream, _resp))) => {
                 backoff = RECONNECT_MIN; // a clean connect resets the ladder
                 read_until_dead(&state, &peer, stream).await;
                 mark_offline(&state, &machine_id);
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(RECONNECT_MAX);
+                backoff = pause(&wake, backoff).await;
             }
-            Err(e) => {
-                if handshake_was_revoked(&e) {
-                    state.mirror.remove(&machine_id);
-                    publish_instances_changed(&state);
-                    tokio::time::sleep(REVOKED_BACKOFF).await;
-                } else {
-                    mark_offline(&state, &machine_id);
-                    tokio::time::sleep(backoff).await;
-                    backoff = (backoff * 2).min(RECONNECT_MAX);
-                }
+            Ok(Err(e)) if handshake_was_revoked(&e) => {
+                state.mirror.remove(&machine_id);
+                publish_instances_changed(&state);
+                tokio::time::sleep(REVOKED_BACKOFF).await;
+            }
+            Ok(Err(_)) | Err(_) => {
+                mark_offline(&state, &machine_id);
+                backoff = pause(&wake, backoff).await;
             }
         }
+    }
+}
+
+/// Sleeps `backoff`, or until `MachineHub::wake` says the peer was just seen
+/// alive. Returns the next backoff: doubled on a plain timeout, reset to the
+/// floor on a wake (the ladder was climbed against a peer that is now back).
+async fn pause(wake: &tokio::sync::Notify, backoff: Duration) -> Duration {
+    tokio::select! {
+        () = tokio::time::sleep(backoff) => (backoff * 2).min(RECONNECT_MAX),
+        () = wake.notified() => RECONNECT_MIN,
     }
 }
 
@@ -604,5 +619,25 @@ mod tests {
         handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(None));
         handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(Some("unknown")));
         assert!(rx.try_recv().is_err(), "none of these may reach the local notifier");
+    }
+
+    /// `MachineHub::wake` (a probe found the peer alive) must end the link's
+    /// backoff at once and put the next one back at the floor.
+    #[tokio::test]
+    async fn a_wake_ends_the_backoff_and_resets_the_ladder() {
+        let wake = tokio::sync::Notify::new();
+        wake.notify_one();
+        let next = tokio::time::timeout(Duration::from_secs(1), pause(&wake, RECONNECT_MAX))
+            .await
+            .expect("a woken pause must not sit out its backoff");
+        assert_eq!(next, RECONNECT_MIN);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unwoken_pause_waits_out_the_backoff_and_doubles_it() {
+        let wake = tokio::sync::Notify::new();
+        let next = pause(&wake, RECONNECT_MIN).await;
+        assert_eq!(next, RECONNECT_MIN * 2);
+        assert_eq!(pause(&wake, RECONNECT_MAX).await, RECONNECT_MAX, "the ladder stops at its ceiling");
     }
 }

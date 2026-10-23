@@ -37,7 +37,12 @@ pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParam
         ReachDecision::Direct(url) => url,
         ReachDecision::Iroh(iroh_id) => {
             let dialer = state.iroh_dialer().await.map_err(RpcError::internal)?;
-            let port = dialer.proxy_port(&iroh_id).await.map_err(RpcError::internal)?;
+            // Dialed up front so a cold iroh dial (up to DIAL_TIMEOUT) is not
+            // charged to the health call's 10s request timeout below.
+            let port = dialer
+                .connected_proxy_port(&iroh_id)
+                .await
+                .map_err(|e| RpcError::internal(format!("could not reach that machine: {e}")))?;
             format!("http://127.0.0.1:{port}")
         }
         ReachDecision::Neither => {
