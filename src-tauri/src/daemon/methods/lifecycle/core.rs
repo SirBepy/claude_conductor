@@ -55,6 +55,29 @@ async fn forward_start_session(
     Ok(result)
 }
 
+/// Refuses a `start_session` that would spawn a peer-hosted chat on THIS
+/// machine: its transcript and folder live on the host, so a local resume (or
+/// a fork of it) can only fail, or worse start a second diverging copy. Hosted
+/// there means `machines::mirrored_owner` (local registry first, then the
+/// live mirror, then the persisted ownership record).
+fn refuse_peer_hosted(state: &DaemonState, p: &StartSessionParams) -> Option<RpcError> {
+    for id in [p.resume_id.as_deref(), p.new_session_id.as_deref()].into_iter().flatten() {
+        let Some(machine_id) = crate::daemon::machines::mirrored_owner(state, id) else { continue };
+        let label = state
+            .machines
+            .get()
+            .and_then(|r| r.peer(&machine_id))
+            .map(|peer| peer.label)
+            .unwrap_or(machine_id);
+        return Some(RpcError {
+            code: crate::daemon::machines::forward::ERR_NOT_FORWARDABLE,
+            message: format!("chat {id} is hosted on {label}; it cannot be started on this machine"),
+            data: None,
+        });
+    }
+    None
+}
+
 #[derive(Debug, Deserialize)]
 struct SendMessageParams {
     session_id: String,
@@ -97,6 +120,11 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     .map(str::to_string);
                 let p: StartSessionParams = serde_json::from_value(params_value)
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // After the `machine_id` forward above, so a start aimed at the
+                // host still reaches it; this only stops a LOCAL spawn.
+                if let Some(refusal) = refuse_peer_hosted(&state, &p) {
+                    return Err(refusal);
+                }
                 // A phone or peer may only start agents inside a registered
                 // project (or one of its worktrees), not in `C:\` or the home
                 // folder; `create_project_folder` is their way to add one. The
@@ -155,20 +183,33 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
     {
         let map = map.clone();
         let state = state.clone();
-        router.register("send_message", move |params, _ctx| {
+        router.register("send_message", move |params, ctx| {
             let map = map.clone();
             let state = state.clone();
             async move {
                 let p: SendMessageParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let session = map.get(&p.session_id)
-                    .ok_or_else(|| err_to_rpc(LifecycleError::NotFound(p.session_id.clone())))?
-                    .clone();
+                let live = map.get(&p.session_id).map(|s| s.clone());
+                // A paired machine cannot do the desktop's -32004 dance: that
+                // respawns on the CALLER's daemon, resuming the chat on the
+                // wrong machine. So for a peer, this host revives its own idle
+                // chat (cwd/model/effort/account from its registry, never the
+                // caller's) and delivers the message, as its REST send route does.
+                // Only for a chat this registry knows: an unknown id must stay a
+                // plain NotFound, not seed busy/chat-state entries for it.
+                let respawn_for_peer = live.is_none()
+                    && matches!(ctx.transport, Transport::PeerMachine(_))
+                    && state.registry.get(&p.session_id).is_some();
+                if live.is_none() && !respawn_for_peer {
+                    return Err(err_to_rpc(LifecycleError::NotFound(p.session_id.clone())));
+                }
                 // Refusing beats writing into a live child (todo 873): the bump
                 // below would strand the running turn's own result line on the
                 // old gen, latching `busy` until the 20-minute watchdog. After
                 // the map lookup, so a dead child still gets its -32004 respawn.
-                lifecycle::refuse_if_busy(&state, &p.session_id).map_err(err_to_rpc)?;
+                if live.is_some() {
+                    lifecycle::refuse_if_busy(&state, &p.session_id).map_err(err_to_rpc)?;
+                }
                 // Bump turn_gen (set_busy) BEFORE the write - a warm child can
                 // emit its first stream_event before this fn resumes past the
                 // write's own .await (todo 525 root cause 1).
@@ -181,7 +222,11 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     state.registry.current_turn_gen(&p.session_id)
                 );
                 crate::sessions::chat_state::set_busy(&p.session_id, true);
-                if let Err(e) = lifecycle::send_message(&session, &p.text, false).await {
+                let sent = match &live {
+                    Some(session) => lifecycle::send_message(session, &p.text, false).await,
+                    None => lifecycle::send_message_with_respawn(&state, &p.session_id, &p.text, false).await,
+                };
+                if let Err(e) = sent {
                     state.registry.set_busy(&p.session_id, false);
                     crate::sessions::chat_state::set_busy(&p.session_id, false);
                     return Err(err_to_rpc(e));
@@ -463,5 +508,201 @@ mod machine_target_tests {
         assert_eq!(state.mirror.owner_of("peer-spawned-1").as_deref(), Some("mach-b"));
 
         b_serve.kill();
+    }
+
+    /// A state paired to `mach-b` at `b_port`, online, with `mirrored` rows.
+    fn state_paired_to_b(
+        app_dir: &std::path::Path,
+        b_data_dir: &std::path::Path,
+        b_port: u16,
+        mirrored: Vec<crate::types::Instance>,
+    ) -> Arc<DaemonState> {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        state.init_machines(app_dir.to_path_buf());
+        state.machines.get().unwrap().ensure_self();
+        let (token, _device_id) = DeviceRegistry::add_machine_device("A", "mach-a", b_data_dir).unwrap();
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mach-b".into(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token,
+            reverse_device_id: None,
+            added_at: 0,
+        });
+        state.mirror.set_instances("mach-b", "B", mirrored);
+        state.mirror.set_online("mach-b", true);
+        state
+    }
+
+    fn fresh_state() -> Arc<DaemonState> {
+        DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()))
+    }
+
+    /// The reported bug: a chat hosted on the peer whose `claude` child exited
+    /// used to come back as the peer's raw -32004, which the desktop read as
+    /// "respawn locally". Now the HOST revives its own idle chat from its own
+    /// registry. A real `claude` cannot be spawned in a unit test, so the host's
+    /// registered folder is deliberately missing: reaching `CwdMissing` is only
+    /// possible by getting past the NotFound branch into `spawn_session` with
+    /// the HOST's recorded cwd (the caller never sends one).
+    #[tokio::test]
+    async fn forwarded_send_makes_the_host_respawn_its_own_idle_chat() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+
+        let b_state = fresh_state();
+        b_state.registry.upsert_interactive(
+            &sid,
+            std::path::Path::new("Z:\\host-only-folder"),
+            "proj",
+            "2026-10-23T00:00:00Z",
+        );
+        let row = b_state.registry.get(&sid).unwrap();
+        let mut b_router = Router::new();
+        register_core(&mut b_router, b_state.clone());
+        let (_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+
+        let state = state_paired_to_b(dir.path(), peer_dir.path(), b_port, vec![row]);
+        let mut router = Router::new();
+        crate::daemon::machines::forward::install(state.clone(), &mut router);
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "send_message".into(),
+                    params: Some(json!({"session_id": sid, "text": "hi"})),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        let err = resp.error.expect("the host cannot really spawn here");
+        assert_eq!(err.code, -32602, "{err:?}");
+        assert!(err.message.contains("cwd does not exist"), "{}", err.message);
+        assert!(err.message.contains("host-only-folder"), "must be the HOST's recorded folder: {}", err.message);
+        b_serve.kill();
+    }
+
+    async fn send_as(state: &Arc<DaemonState>, transport: Transport, sid: &str) -> crate::daemon::rpc::Response {
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        crate::daemon::rpc::TRANSPORT
+            .scope(transport, async {
+                router
+                    .dispatch(
+                        Request {
+                            jsonrpc: "2.0".into(),
+                            id: json!(1),
+                            method: "send_message".into(),
+                            params: Some(json!({"session_id": sid, "text": "hi"})),
+                        },
+                        dummy_ctx(),
+                    )
+                    .await
+            })
+            .await
+    }
+
+    /// Control for the test above: only a PEER gets the host-side respawn. A
+    /// local caller keeps today's -32004 so the desktop's own respawn-and-reattach
+    /// dance (`ipc/chat/run.rs`) still runs for chats hosted here.
+    #[tokio::test]
+    async fn local_send_to_a_dead_child_still_answers_not_found() {
+        let state = fresh_state();
+        let sid = uuid::Uuid::new_v4().to_string();
+        state.registry.upsert_interactive(&sid, std::path::Path::new("Z:\\gone"), "proj", "2026-10-23T00:00:00Z");
+        let resp = send_as(&state, Transport::Local, &sid).await;
+        assert_eq!(resp.error.expect("no live child").code, -32004);
+    }
+
+    /// A peer asking this host to message an id it never registered is a plain
+    /// NotFound, not a respawn attempt (and seeds no busy/chat-state entry).
+    #[tokio::test]
+    async fn peer_send_for_an_unknown_id_is_not_found() {
+        let state = fresh_state();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let resp = send_as(&state, Transport::PeerMachine("mach-a".into()), &sid).await;
+        assert_eq!(resp.error.expect("unknown id").code, -32004);
+    }
+
+    async fn start_resume(state: &Arc<DaemonState>, params: serde_json::Value) -> crate::daemon::rpc::Response {
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        router
+            .dispatch(
+                Request { jsonrpc: "2.0".into(), id: json!(1), method: "start_session".into(), params: Some(params) },
+                dummy_ctx(),
+            )
+            .await
+    }
+
+    fn row_for(sid: &str, cwd: &std::path::Path) -> crate::types::Instance {
+        let s = fresh_state();
+        s.registry.upsert_interactive(sid, cwd, "proj", "2026-10-23T00:00:00Z");
+        s.registry.get(sid).unwrap()
+    }
+
+    /// A resume (or a fork) of a chat the peer hosts must never spawn here.
+    /// The cwd EXISTS in this fixture, so without the guard the call gets past
+    /// the folder check and fails somewhere else (accounts), not on ownership.
+    #[tokio::test]
+    async fn start_session_never_spawns_a_peer_hosted_chat_locally() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let cwd = tempdir().unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let state = state_paired_to_b(dir.path(), peer_dir.path(), 0, vec![row_for(&sid, cwd.path())]);
+
+        let resume = start_resume(
+            &state,
+            start_session_params(json!({"cwd": cwd.path().to_string_lossy(), "resume_id": sid})),
+        )
+        .await;
+        let err = resume.error.expect("a peer-hosted chat must be refused");
+        assert_eq!(err.code, crate::daemon::machines::forward::ERR_NOT_FORWARDABLE);
+        assert!(err.message.contains("hosted on B"), "{}", err.message);
+
+        let fork = start_resume(
+            &state,
+            start_session_params(json!({
+                "cwd": cwd.path().to_string_lossy(), "resume_id": sid, "fork": true,
+                "new_session_id": uuid::Uuid::new_v4().to_string(),
+            })),
+        )
+        .await;
+        assert_eq!(
+            fork.error.expect("fork of a peer chat refused").code,
+            crate::daemon::machines::forward::ERR_NOT_FORWARDABLE
+        );
+        assert_eq!(state.sessions.len(), 0, "nothing may have been spawned locally");
+    }
+
+    /// The same refusal holds right after a restart, when the live mirror is
+    /// empty and only the persisted ownership record knows the chat is the peer's.
+    #[tokio::test]
+    async fn start_session_refuses_a_chat_only_the_ownership_record_places_on_a_peer() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let cwd = tempdir().unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        // First run: the peer is paired and reports the chat, which persists it.
+        let first = state_paired_to_b(dir.path(), peer_dir.path(), 0, vec![row_for(&sid, cwd.path())]);
+        drop(first);
+
+        // A fresh daemon on the same data dir: peer still paired, mirror empty.
+        let restarted = fresh_state();
+        restarted.init_machines(dir.path().to_path_buf());
+        assert!(restarted.mirror.owner_of(&sid).is_none(), "the live mirror is empty after a restart");
+        let resp = start_resume(
+            &restarted,
+            start_session_params(json!({"cwd": cwd.path().to_string_lossy(), "resume_id": sid})),
+        )
+        .await;
+        assert_eq!(resp.error.expect("refused").code, crate::daemon::machines::forward::ERR_NOT_FORWARDABLE);
+        assert_eq!(restarted.sessions.len(), 0);
     }
 }

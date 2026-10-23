@@ -106,7 +106,7 @@ pub async fn send_message(
     app: AppHandle,
 ) -> Result<String, String> {
     let prompt = blocks_to_prompt_text(&blocks);
-    let (model, effort, account_id) = {
+    let (model, effort, account_id, mirrored) = {
         let inst = state
             .cached_instances
             .lock()
@@ -130,13 +130,22 @@ pub async fn send_message(
                 } else {
                     ("opus".to_string(), "high".to_string())
                 };
-                (model, effort, i.account_id.clone())
+                (model, effort, i.account_id.clone(), i.machine.is_some())
             }
-            None => ("opus".to_string(), "high".to_string(), None),
+            None => ("opus".to_string(), "high".to_string(), None, false),
         }
     };
 
-    send_message_daemon(&session_id, &cwd, &prompt, &model, &effort, account_id.as_deref(), &state, &app).await
+    send_message_daemon(&session_id, &cwd, &prompt, &model, &effort, account_id.as_deref(), mirrored, &state, &app).await
+}
+
+/// Whether a failed first send may be answered by respawning the chat through
+/// THIS machine's daemon. Only a local chat can: a mirrored one lives on its
+/// host, where its transcript and folder are, so resuming it here can only
+/// fail on a missing cwd (or fork a diverging copy); the host revives it
+/// itself when it receives the forwarded send.
+fn respawn_locally(err: &crate::daemon_client::ClientError, mirrored: bool) -> bool {
+    !mirrored && matches!(err, crate::daemon_client::ClientError::Rpc { code: -32004, .. })
 }
 
 /// Daemon-backed turn on an existing session. If the daemon no longer holds the
@@ -148,6 +157,7 @@ async fn send_message_daemon(
     model: &str,
     effort: &str,
     account_id: Option<&str>,
+    mirrored: bool,
     state: &State<'_, AppState>,
     app: &AppHandle,
 ) -> Result<String, String> {
@@ -161,7 +171,7 @@ async fn send_message_daemon(
 
     match first {
         Ok(()) => Ok(session_id.to_string()),
-        Err(crate::daemon_client::ClientError::Rpc { code: -32004, .. }) => {
+        Err(e) if respawn_locally(&e, mirrored) => {
             // Session not live in the daemon: respawn with resume_id, re-attach, retry.
             // Pass the session's ORIGINAL account_id (not the current default) so a
             // resume never silently rebinds to a different account.
@@ -313,6 +323,16 @@ pub async fn register_historical_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_local_chat_is_respawned_on_a_not_found_send() {
+        use crate::daemon_client::ClientError;
+        let not_found = ClientError::Rpc { code: -32004, message: "session id x not found".into() };
+        assert!(respawn_locally(&not_found, false));
+        assert!(!respawn_locally(&not_found, true), "a mirrored chat must never be resumed on this machine");
+        let other = ClientError::Rpc { code: -32602, message: "bad".into() };
+        assert!(!respawn_locally(&other, false));
+    }
 
     #[test]
     fn blocks_to_prompt_text_text_only() {

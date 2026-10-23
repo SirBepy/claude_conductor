@@ -57,11 +57,16 @@ pub fn is_local_session(state: &DaemonState, session_id: &str) -> bool {
 /// what keeps Joe's messages and approvals for a local chat from being routed
 /// to that peer. Every "is this mirrored?" routing decision goes through this,
 /// not `MirrorState::owner_of` directly.
+///
+/// Falls back to the persisted ownership record (`MirrorState::recorded_owner`)
+/// after the live rows: right after a restart the mirror is empty until each
+/// peer's link reconnects, and without the record a send for a peer's chat
+/// would reach the local handler and try to resume it on the wrong machine.
 pub fn mirrored_owner(state: &DaemonState, session_id: &str) -> Option<String> {
     if is_local_session(state, session_id) {
         return None;
     }
-    state.mirror.owner_of(session_id)
+    state.mirror.owner_of(session_id).or_else(|| state.mirror.recorded_owner(session_id))
 }
 
 /// Every cached mirrored prompt, minus any whose session id names a local
@@ -146,6 +151,36 @@ mod merged_tests {
         assert_eq!(mirrored_owner(&state, "remote-1").as_deref(), Some("mach-b"));
         let ids: Vec<_> = mirrored_prompts(&state).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
         assert_eq!(ids, vec!["real".to_string()]);
+    }
+
+    /// After a restart the live mirror is empty; the persisted record still
+    /// routes the peer's chat to the peer, and still never claims a local id.
+    #[test]
+    fn mirrored_owner_falls_back_to_the_record_but_local_ids_always_win() {
+        let dir = tempfile::tempdir().unwrap();
+        let (remote, local) = (uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string());
+        let before = state_for_ownership(dir.path(), &local);
+        let mut peer_row = before.registry.get(&local).unwrap();
+        peer_row.session_id = remote.clone();
+        let mut claimed_local = peer_row.clone();
+        claimed_local.session_id = local.clone();
+        before.mirror.set_instances("mach-b", "Mac Mini", vec![peer_row, claimed_local]);
+        assert_eq!(before.mirror.recorded_owner(&local).as_deref(), Some("mach-b"), "the record itself does hold it");
+
+        let after = state_for_ownership(dir.path(), &local);
+        assert!(after.mirror.owner_of(&remote).is_none(), "live mirror is empty after the restart");
+        assert_eq!(mirrored_owner(&after, &remote).as_deref(), Some("mach-b"));
+        assert_eq!(mirrored_owner(&after, &local), None, "a local chat is never claimed by the record");
+        assert_eq!(mirrored_owner(&after, "never-seen"), None);
+    }
+
+    /// A daemon on `dir` whose own registry hosts `local`, as it would after
+    /// a restart that reloaded its snapshot.
+    fn state_for_ownership(dir: &std::path::Path, local: &str) -> std::sync::Arc<DaemonState> {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.mirror.attach_ownership_store(dir, |_| true);
+        state.registry.upsert_interactive(local, std::path::Path::new("C:/x"), "proj", "2026-10-23T00:00:00Z");
+        state
     }
 
     #[tokio::test]
