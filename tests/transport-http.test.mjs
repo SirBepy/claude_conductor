@@ -290,6 +290,19 @@ describe("HttpTransport.call mapping", () => {
     });
   });
 
+  it("forwards list_machine_accounts and set_machine_project_account with snake_case params", async () => {
+    await new HttpTransport().call("list_machine_accounts", { machineId: "mach-b", cwd: "C:/p" });
+    expect(body()).toEqual({
+      method: "list_machine_accounts",
+      params: { machine_id: "mach-b", cwd: "C:/p" },
+    });
+    await new HttpTransport().call("set_machine_project_account", { machineId: "mach-b", cwd: "C:/p", accountId: "a1" });
+    expect(body(1)).toEqual({
+      method: "set_machine_project_account",
+      params: { machine_id: "mach-b", cwd: "C:/p", account_id: "a1" },
+    });
+  });
+
   it("throws RemoteUnavailableError for commands with no remote path", async () => {
     // poll_now is a CDP scrape that only the desktop app process can run.
     await expect(new HttpTransport().call("poll_now", {})).rejects.toBeInstanceOf(

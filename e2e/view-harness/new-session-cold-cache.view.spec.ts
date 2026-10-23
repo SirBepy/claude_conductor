@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/model-effort-modal.ts
+// Reviewed 2026-10-23 (peer account picker): model-effort-modal.ts takes an optional machine id and, only when one is given, lists that machine's accounts instead of the four local reads. With no machine (every flow this spec drives) it starts the same reads in the same order and the cold-shell condition is unchanged.
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's row render now passes a machineId to renderAvatar - this spec never selects a peer machine, so it stays null and the markup is unchanged.
 // Reviewed 2026-10-23 (peer project stats): project-picker.ts now reads row stats through statFor() and hides the worktree badge on peer rows - this spec only drives the local list, where both are unchanged.
 import { existsSync } from "node:fs";

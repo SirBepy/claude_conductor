@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/model-effort-modal.ts, src/shared/modal-input-lock.ts
+// Reviewed 2026-10-23 (peer account picker): model-effort-modal.ts takes an optional machine id for a chat aimed at a paired machine; the local flow this spec drives (resolve_project_account still read cold, closed flag still guards the late presentHostCard) is unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, delayInvokes } from "./harness";
 

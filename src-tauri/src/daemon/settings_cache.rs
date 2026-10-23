@@ -39,6 +39,15 @@ impl SettingsCache {
         settings::upsert_project_for_cwd(&mut g, cwd, now)
     }
 
+    /// Binds `account_id` to the project for `cwd` in the cache, for an instant
+    /// read. The caller publishes `project_account_set` so the app process
+    /// persists the same binding to settings.json. False when `cwd` has no
+    /// persistable project.
+    pub fn bind_project_account(&self, cwd: &Path, account_id: &str, now: &str) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        settings::bind_project_account_for_cwd(&mut g, cwd, account_id, now)
+    }
+
     /// Mirror of `ipc::characters::ensure_session_character` but operating on
     /// the cache directly, so the daemon can assign an avatar to a
     /// remote-started session without a Tauri app process in the loop.
@@ -151,6 +160,21 @@ mod tests {
         assert!(c1);
         assert!(!c2);
         assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn bind_project_account_registers_the_project_and_rebinds_it() {
+        let cache = SettingsCache::new(Settings::default());
+        let cwd = PathBuf::from("/tmp/bind-p1");
+        assert!(cache.bind_project_account(&cwd, "acct-a", "2026-10-23T00:00:00Z"));
+        let snap = cache.snapshot();
+        assert_eq!(snap.projects.len(), 1);
+        assert_eq!(snap.projects[0].preferred_account_id.as_deref(), Some("acct-a"));
+
+        assert!(cache.bind_project_account(&cwd, "acct-b", "2026-10-23T00:00:01Z"));
+        let snap = cache.snapshot();
+        assert_eq!(snap.projects.len(), 1, "a rebind never adds a second project");
+        assert_eq!(snap.projects[0].preferred_account_id.as_deref(), Some("acct-b"));
     }
 
     #[test]

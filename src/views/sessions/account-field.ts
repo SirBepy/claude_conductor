@@ -6,8 +6,7 @@
 // state object below in its closure and passes it in/out here.
 
 import { escapeHtml } from "../../shared/escape-html";
-import type { Account } from "../../shared/api";
-import { accountChipHtml } from "../../shared/account-chip";
+import { accountChipHtml, type AccountLite } from "../../shared/account-chip";
 import "../../shared/account-chip.css";
 
 /** Mutable account-picker state, owned by the modal's closure. `accountId`
@@ -18,21 +17,51 @@ export interface AccountFieldState {
   accountId: string | null;
 }
 
+/** Set when the accounts listed belong to ANOTHER machine (a chat aimed at a
+ * paired peer): its name for the messages, and why the list could not be
+ * loaded, if it could not. */
+export interface AccountFieldMachine {
+  label: string;
+  error: string | null;
+}
+
 /** Read-only context the modal already resolved before opening. */
 export interface AccountFieldContext {
-  accounts: Account[];
+  accounts: AccountLite[];
+  machine?: AccountFieldMachine | null;
 }
 
 /** True while there is no usable account to spawn under: an empty registry
  * (the "add an account first" state), or an ambiguous one (multiple
  * accounts, no binding/default) the user hasn't resolved yet by picking a
  * chip. Gates "Start session" in both cases. */
-export function accountPickIncomplete(state: AccountFieldState, accounts: Account[]): boolean {
+export function accountPickIncomplete(state: AccountFieldState, accounts: readonly AccountLite[]): boolean {
   return accounts.length === 0 || state.accountId === null;
 }
 
+/** A peer's accounts carry their email so two similarly-labelled ones can be
+ * told apart; the local picker shows label only, so this stays peer-only. */
+function chipTitle(a: AccountLite & { email?: string }, machine: AccountFieldMachine | null | undefined): string {
+  return machine && a.email ? ` title="${escapeHtml(a.email)}"` : "";
+}
+
 export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFieldContext): string {
-  const { accounts } = ctx;
+  const { accounts, machine } = ctx;
+  // Another machine's registry can't be edited from here, so these two states
+  // name that machine instead of pointing at this one's Settings. Start stays
+  // gated either way (accountPickIncomplete), so a peer that can't be reached
+  // never silently starts the chat on its default account.
+  if (machine && (machine.error !== null || accounts.length === 0)) {
+    const msg = machine.error !== null
+      ? `Couldn't load ${escapeHtml(machine.label)}'s accounts: ${escapeHtml(machine.error)}`
+      : `${escapeHtml(machine.label)} has no Claude accounts yet.`;
+    return `
+      <div class="me-acc-field me-acc-empty">
+        <label class="me-label">Account</label>
+        <div class="me-acc-empty-msg"><i class="ph ph-warning-circle"></i> ${msg}</div>
+      </div>
+    `;
+  }
   if (accounts.length === 0) {
     return `
       <div class="me-acc-field me-acc-empty">
@@ -58,7 +87,7 @@ export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFie
     <div class="me-acc-field">
       <label class="me-label">Account</label>
       <div class="me-acc-edit">
-        ${accounts.map((a) => accountChipHtml(a, a.id === state.accountId, `data-acc-id="${escapeHtml(a.id)}"`)).join("")}
+        ${accounts.map((a) => accountChipHtml(a, a.id === state.accountId, `data-acc-id="${escapeHtml(a.id)}"${chipTitle(a, machine)}`)).join("")}
       </div>
     </div>
   `;

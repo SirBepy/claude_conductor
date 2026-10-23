@@ -9,8 +9,10 @@
 //! Split by concern into `machines/` submodules (todo 914): this file wires
 //! `register_machines` and owns `list_machine_projects` (an RPC-registration
 //! concern, not pairing); `machines/pairing.rs` holds the pairing lifecycle,
-//! `machines/pairing_url.rs` the pure URL parsing it depends on.
+//! `machines/pairing_url.rs` the pure URL parsing it depends on, and
+//! `machines/accounts.rs` the cross-machine new-chat account picker.
 
+mod accounts;
 mod pairing;
 mod pairing_url;
 
@@ -25,6 +27,10 @@ use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 
 pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
+    // New-chat account picker for a chat started on another machine, and the
+    // save of its pick as that machine's project binding.
+    accounts::register(router, state.clone());
+
     router.register("list_machines", {
         let state = state.clone();
         move |_params, _ctx| {

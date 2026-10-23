@@ -63,3 +63,38 @@ pub async fn list_machine_projects(machine_id: String, state: State<'_, AppState
         .await
         .map_err(|e| e.to_string())
 }
+
+/// New-chat picker's account step for a chat aimed at `machine_id`: that
+/// machine's accounts (display fields only), its default account id and its
+/// binding for `cwd`. See the daemon's `list_machine_accounts` RPC.
+#[tauri::command]
+pub async fn list_machine_accounts(
+    machine_id: String,
+    cwd: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call("list_machine_accounts", serde_json::json!({ "machine_id": machine_id, "cwd": cwd }))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Saves a picked account as `machine_id`'s own binding for the project at
+/// `cwd` (a peer only; this machine's bindings use `update_project`).
+#[tauri::command]
+pub async fn set_machine_project_account(
+    machine_id: String,
+    cwd: String,
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call(
+            "set_machine_project_account",
+            serde_json::json!({ "machine_id": machine_id, "cwd": cwd, "account_id": account_id }),
+        )
+        .await
+        .map_err(|e| e.to_string())
+}

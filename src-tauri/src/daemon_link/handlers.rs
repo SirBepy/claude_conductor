@@ -163,6 +163,33 @@ pub(super) fn handle_project_created(app: &tauri::AppHandle, params: serde_json:
     }
 }
 
+/// A paired machine picked an account for one of this machine's projects
+/// (`peer_set_project_account`). The daemon already bound it in its own cache;
+/// the app process merges the same binding and persists it to settings.json.
+/// Mirrors `handle_project_created` above.
+pub(super) fn handle_project_account_set(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::Manager;
+    if let (Some(cwd), Some(account_id), Some(now)) = (
+        params.get("cwd").and_then(|v| v.as_str()),
+        params.get("account_id").and_then(|v| v.as_str()),
+        params.get("now").and_then(|v| v.as_str()),
+    ) {
+        let state = app.state::<crate::state::AppState>();
+        let mut settings_guard = state.settings.lock().unwrap();
+        if !crate::settings::bind_project_account_for_cwd(
+            &mut settings_guard,
+            std::path::Path::new(cwd),
+            account_id,
+            now,
+        ) {
+            return;
+        }
+        let snapshot = settings_guard.clone();
+        drop(settings_guard);
+        crate::settings::persist(app, &snapshot);
+    }
+}
+
 /// The daemon assigned a character to a session created on the remote
 /// (phone/browser) transport, where there is no app-process Tauri command to
 /// do this in-process (ipc/characters.rs's `ensure_session_character`).
