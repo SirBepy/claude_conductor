@@ -155,12 +155,14 @@ export class PaginationPolicy {
     this.applyTailPage(entry, page);
   }
 
-  /** Background half of a cache-painted loadInitial. A page overlapping the
-   * cached one only appends what is new, through the same diff as
-   * reconcileLatest, so nothing on screen moves. A page sharing no event with
-   * it means more happened than one page holds: the cache is replaced and the
-   * tail watchers see messages the renderer never painted, which sends it
-   * through chat-resync's full rebuild. */
+  /** Background half of a cache-painted loadInitial. A page whose oldest event
+   * is already cached continues the cached window, so it only appends what is
+   * new, through the same diff as reconcileLatest, and nothing on screen moves.
+   * Any other page means more happened than one page holds (sharing a later
+   * event like a repeated "ok" would still leave a gap): the cache is replaced
+   * and the tail watchers see messages the renderer never painted, which sends
+   * it through chat-resync's full rebuild. The cached oldestSeq is kept on the
+   * append path: the cached events older than the page start there. */
   private async revalidateCached(sessionId: string, entry: CacheEntry, cwd?: string): Promise<void> {
     const liveBefore = new Set(entry.events);
     let page: HistoryPage;
@@ -182,7 +184,7 @@ export class PaginationPolicy {
       if (s !== null) cachedSigs.add(s);
     }
     const pageSigs = page.events.map((ev) => this.delivery.sigOf(ev)).filter((s): s is string => s !== null);
-    if (pageSigs.length === 0 || pageSigs.some((s) => cachedSigs.has(s))) {
+    if (pageSigs.length === 0 || cachedSigs.has(pageSigs[0]!)) {
       this.applyTailPage(entry, page);
       return;
     }

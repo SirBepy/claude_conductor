@@ -74,6 +74,25 @@ describe("phone history page cache", () => {
     expect(store.events("s1").map((e) => e.content[0].text)).toEqual(["much later"]);
   });
 
+  it("replaces the cache when only a later repeated message matches, since a gap sits before it", async () => {
+    invoke.mockResolvedValueOnce(page([userEvent("start"), userEvent("ok")]));
+    await (await reload()).loadInitial("s1");
+
+    const store = await reload();
+    invoke.mockResolvedValueOnce(page([assistantEvent("far later"), userEvent("ok"), assistantEvent("done")], { oldest_seq: 9000 }));
+    const tails = [];
+    store.subscribeTranscriptTail("s1", (sigs) => tails.push(sigs));
+    await store.loadInitial("s1");
+    await vi.waitFor(() => expect(tails).toHaveLength(1));
+    expect(store.events("s1").map((e) => e.content[0].text)).toEqual(["far later", "ok", "done"]);
+  });
+
+  it("does not store an empty page", async () => {
+    invoke.mockResolvedValueOnce(page([], { oldest_seq: 0, has_more: false }));
+    await (await reload()).loadInitial("s1");
+    expect(localStorage.getItem("cc_history_page_v1:s1")).toBeNull();
+  });
+
   it("strips image blocks before storing", async () => {
     const withImage = {
       type: "user_message",
