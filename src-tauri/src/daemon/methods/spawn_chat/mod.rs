@@ -159,6 +159,8 @@ pub(crate) async fn spawn_chat(
         // resolve after that.
         crate::sessions::chat_config::set_predecessor(&sid, caller_session_id);
         state.registry.set_close_requested(caller_session_id);
+    } else {
+        crate::sessions::chat_config::set_spawned_by(&sid, caller_session_id);
     }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 

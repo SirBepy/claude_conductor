@@ -69,6 +69,12 @@ pub struct ChatConfig {
     /// this outlives a daemon restart. Written only via `set_started_by_machine`.
     #[serde(default)]
     pub started_by_machine: String,
+    /// The chat whose `spawn_chat` call started this one (not a respawn: that
+    /// is `predecessor`). Empty for a chat started any other way. When-done
+    /// reads it to let a child of an armed chat join the armed set. Written
+    /// only via `set_spawned_by`.
+    #[serde(default)]
+    pub spawned_by: String,
 }
 
 /// Serialize read-modify-write within a process. Cross-process integrity comes
@@ -205,6 +211,33 @@ pub fn set_started_by_machine(session_id: &str, machine_id: &str) {
 /// The chat `session_id` took over from, or None if it started fresh.
 pub fn predecessor_of(session_id: &str) -> Option<String> {
     get(session_id).map(|c| c.predecessor).filter(|p| !p.is_empty())
+}
+
+/// Record which chat's `spawn_chat` started `session_id`. Preserves
+/// everything else on the entry. Best-effort, never panics.
+pub fn set_spawned_by(session_id: &str, parent: &str) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_spawned_by_at(&path, session_id, parent);
+}
+
+/// The chat that started `session_id`, by `spawn_chat` or by respawn, or
+/// None for a chat started by hand or by a schedule.
+pub fn parent_of(session_id: &str) -> Option<String> {
+    get(session_id).and_then(parent_in)
+}
+
+fn parent_in(c: ChatConfig) -> Option<String> {
+    [c.predecessor, c.spawned_by].into_iter().find(|p| !p.is_empty())
+}
+
+fn set_spawned_by_at(path: &Path, session_id: &str, parent: &str) {
+    if session_id.is_empty() || parent.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    map.entry(session_id.to_string()).or_default().spawned_by = parent.to_string();
+    write_atomic(path, &map);
 }
 
 fn set_predecessor_at(path: &Path, session_id: &str, predecessor: &str) {
@@ -409,6 +442,20 @@ mod tests {
         assert_eq!(got.predecessor, "predecessor");
         assert_eq!(got.model, "opus", "model preserved across predecessor write");
         assert!(get_at(&path, "predecessor").is_none(), "link is one-way, on the successor only");
+    }
+
+    #[test]
+    fn parent_is_the_respawn_predecessor_or_the_spawn_chat_caller() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        set_spawned_by_at(&path, "child", "armed");
+        set_predecessor_at(&path, "successor", "armed");
+        record_at(&path, "by-hand", "opus", "high");
+        let parent = |sid: &str| get_at(&path, sid).and_then(parent_in);
+        assert_eq!(parent("child").as_deref(), Some("armed"));
+        assert_eq!(parent("successor").as_deref(), Some("armed"));
+        assert_eq!(parent("by-hand"), None);
+        assert_eq!(parent("unknown"), None);
     }
 
     /// A chat that started fresh must not report a chain, and an empty write
