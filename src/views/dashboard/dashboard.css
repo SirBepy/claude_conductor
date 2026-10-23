@@ -293,4 +293,7 @@
 /* The graph-detail page renders the same list outside .view-dashboard and keeps
    the tight margins the old inline style gave it. */
 .today-section.worked-on { margin-top: 2px; margin-bottom: 8px; }
-.project-list-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+/* The list is shared with the Today widget and the usage-chart view, which keep
+   the title size it always had; only the Dashboard uses the quieter one. */
+.project-list-title { font-size: var(--fs-title); font-weight: 700; margin-bottom: 10px; }
+.view-dashboard .project-list-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
