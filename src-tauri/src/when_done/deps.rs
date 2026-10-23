@@ -7,10 +7,10 @@ use super::actions::auto_resolve_prompts;
 use super::engine::{is_cancelled, update_and_emit};
 use super::idle::{all_sessions_idle, live_busy_map, waiting_on_ids};
 use super::protocol::{ProtocolState, TerminalAction};
+use super::scope::ArmScope;
 use crate::state::AppState;
-use std::collections::HashSet;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::pin::Pin;
 use std::time::Instant;
 use tauri::{AppHandle, Manager};
@@ -63,18 +63,26 @@ impl EngineDeps {
         let app_resolve = app.clone();
         let app_emit = app.clone();
         let app_cancel = app.clone();
-        // Snapshotted once: production() runs at arm time (run_engine).
-        let armed: Arc<HashSet<String>> = Arc::new(waiting_on_ids(&live_busy_map(&app)).into_iter().collect());
+        // Built at arm time (production() runs from run_engine), then widened
+        // each tick by `admitted_busy_map` as armed chats start children.
+        let at_arm = live_busy_map(&app);
+        let live: Vec<String> = at_arm.iter().map(|(id, _)| id.clone()).collect();
+        let scope = Arc::new(Mutex::new(ArmScope::new(&live, &waiting_on_ids(&at_arm))));
+        let scope_busy = scope.clone();
+        let scope_idle = scope.clone();
         Self {
-            busy_map: Box::new(move || live_busy_map(&app_busy)),
+            busy_map: Box::new(move || admitted_busy_map(&scope_busy, live_busy_map(&app_busy))),
             all_idle: Box::new(move || {
+                let busy = admitted_busy_map(&scope_idle, live_busy_map(&app_idle));
                 let state = app_idle.state::<AppState>();
                 let guard = state.cached_instances.lock().unwrap();
-                all_sessions_idle(&guard)
+                let counted: Vec<_> =
+                    guard.iter().filter(|i| busy.iter().any(|(id, _)| id == &i.session_id)).cloned().collect();
+                all_sessions_idle(&counted)
             }),
             auto_resolve: Box::new(move || {
                 let app = app_resolve.clone();
-                let armed = armed.clone();
+                let armed = scope.lock().unwrap_or_else(|e| e.into_inner()).armed().clone();
                 Box::pin(async move { auto_resolve_prompts(&app, &armed).await })
             }),
             mutate_and_emit: Box::new(move |f| update_and_emit(&app_emit, f)),
@@ -87,6 +95,23 @@ impl EngineDeps {
             now: Box::new(Instant::now),
         }
     }
+}
+
+/// The live busy map minus every chat the arm scope ignores, after admitting
+/// any chat an armed chat started since the last tick.
+pub(super) fn admitted_busy_map(scope: &Mutex<ArmScope>, live: Vec<(String, bool)>) -> Vec<(String, bool)> {
+    admitted_with(scope, live, crate::sessions::chat_config::parent_of)
+}
+
+pub(super) fn admitted_with(
+    scope: &Mutex<ArmScope>,
+    live: Vec<(String, bool)>,
+    parent_of: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, bool)> {
+    let mut scope = scope.lock().unwrap_or_else(|e| e.into_inner());
+    let ids: Vec<String> = live.iter().map(|(id, _)| id.clone()).collect();
+    scope.admit(&ids, parent_of);
+    live.into_iter().filter(|(id, _)| !scope.is_ignored(id)).collect()
 }
 
 /// Whether `CC_WHEN_DONE_DRY_RUN` is enabled, given its raw value (`None` when

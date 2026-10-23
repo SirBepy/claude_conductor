@@ -32,3 +32,19 @@ fn dry_run_terminal_action_is_a_no_op_ok() {
     assert_eq!(run_terminal_action(TerminalAction::Sleep, true), Ok(()));
     assert_eq!(run_terminal_action(TerminalAction::Shutdown, true), Ok(()));
 }
+
+// The arm-scope filter the busy-map and all-idle seams run through: a busy
+// child of an armed chat is waited on and its prompt is auto-resolved; a busy
+// chat started by hand after arming is dropped, so it cannot stall the run.
+#[test]
+fn a_late_child_is_waited_on_and_a_late_stranger_never_blocks() {
+    let scope = Mutex::new(ArmScope::new(&["a".to_string()], &["a".to_string()]));
+    let parent_of = |id: &str| (id == "child").then(|| "a".to_string());
+    let live = vec![("a".to_string(), false), ("child".to_string(), true), ("stranger".to_string(), true)];
+    let counted = admitted_with(&scope, live, parent_of);
+    assert_eq!(waiting_on_ids(&counted), vec!["child".to_string()]);
+    let armed = scope.lock().unwrap().armed().clone();
+    let prompt = |sid: &str| serde_json::json!({ "id": "r", "session_id": sid });
+    assert!(super::super::actions::prompt_in_armed_scope(&armed, &prompt("child")));
+    assert!(!super::super::actions::prompt_in_armed_scope(&armed, &prompt("stranger")));
+}

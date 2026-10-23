@@ -20,6 +20,7 @@ mod deps;
 mod engine;
 mod idle;
 mod nightly;
+mod scope;
 
 pub use protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner, OverdueAction};
 pub use nightly::spawn as spawn_nightly_scheduler;
