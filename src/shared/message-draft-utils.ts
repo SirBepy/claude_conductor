@@ -24,7 +24,7 @@ export function slackPlainText(markdown: string): string {
   return markdown
     .split(/(```[\s\S]*?```|`[^`\n]*`)/)
     .map((part, i) => i % 2 === 1 ? part : part
-      .replace(/\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]+|\([^\s()]*\))+)\)/g, (_, text: string, url: string) =>
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)\)/g, (_, text: string, url: string) =>
         text === url ? url : `${text} (${url})`)
       .replace(/\*\*([^*\n]+)\*\*/g, "*$1*"))
     .join("");
