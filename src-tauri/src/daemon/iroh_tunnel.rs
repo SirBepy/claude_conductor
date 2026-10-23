@@ -73,19 +73,14 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
         // A wrapped key that will not unwrap (another Windows user, a copied
         // profile) may still be recoverable, so it is set aside, never
         // overwritten: restoring the .unreadable file restores the old id.
-        // rename replaces an existing target on Windows, so a second failure
-        // takes a numbered name instead of destroying the first blob.
-        let mut aside = path.with_extension("unreadable");
-        let mut n = 1u32;
-        while aside.exists() {
-            aside = path.with_extension(format!("unreadable.{n}"));
-            n += 1;
-        }
-        let kept = std::fs::rename(&path, &aside).is_ok();
+        let aside = secret_store::set_aside_unreadable(&path);
         log::warn!(
             "iroh tunnel: unreadable key at {}; minting a new one (old file {})",
             path.display(),
-            if kept { format!("kept as {}", aside.display()) } else { "could not be set aside".to_string() },
+            match aside {
+                Some(a) => format!("kept as {}", a.display()),
+                None => "could not be set aside".to_string(),
+            },
         );
     }
     let key = SecretKey::generate();

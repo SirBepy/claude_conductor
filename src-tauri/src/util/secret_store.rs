@@ -57,6 +57,21 @@ pub fn unprotect(stored: &str) -> Result<String> {
     }
 }
 
+/// Moves a file whose wrapped value will not unwrap out of the way, keeping it
+/// for recovery: the first goes to `<stem>.unreadable`, later ones to
+/// `.unreadable.1`, `.2`, ... because a rename replaces an existing target on
+/// Windows and would destroy the earlier blob. Returns where it went, or
+/// `None` if the rename failed.
+pub fn set_aside_unreadable(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut aside = path.with_extension("unreadable");
+    let mut n = 1u32;
+    while aside.exists() {
+        aside = path.with_extension(format!("unreadable.{n}"));
+        n += 1;
+    }
+    std::fs::rename(path, &aside).ok().map(|()| aside)
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;

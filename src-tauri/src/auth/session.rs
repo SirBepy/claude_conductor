@@ -20,9 +20,11 @@ pub fn load(path: &Path) -> Option<String> {
         Err(e) => {
             // Set aside, never left for the next login to overwrite: a blob
             // wrapped by another Windows user may still be recoverable.
-            let aside = path.with_extension("unreadable");
-            let kept = std::fs::rename(path, &aside).is_ok();
-            log::warn!("session: {path:?} unreadable: {e} (old file {})", if kept { "kept as .unreadable" } else { "could not be set aside" });
+            let kept = match secret_store::set_aside_unreadable(path) {
+                Some(a) => format!("kept as {a:?}"),
+                None => "could not be set aside".to_string(),
+            };
+            log::warn!("session: {path:?} unreadable: {e} (old file {kept})");
             return None;
         }
     };
@@ -77,6 +79,22 @@ mod tests {
             std::fs::read_to_string(path.with_extension("unreadable")).unwrap(),
             "ccsec1:garbage-not-a-real-blob"
         );
+    }
+
+    #[test]
+    fn a_second_undecryptable_blob_does_not_overwrite_the_first_aside() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session.txt");
+        let first = format!("{}first-blob", secret_store::PREFIX);
+        let second = format!("{}second-blob", secret_store::PREFIX);
+        std::fs::write(&path, &first).unwrap();
+        if load(&path).is_some() {
+            return; // platform treats this text as plaintext; nothing to set aside
+        }
+        std::fs::write(&path, &second).unwrap();
+        assert_eq!(load(&path), None);
+        assert_eq!(std::fs::read_to_string(path.with_extension("unreadable")).unwrap(), first);
+        assert_eq!(std::fs::read_to_string(path.with_extension("unreadable.1")).unwrap(), second);
     }
 
     #[test]
