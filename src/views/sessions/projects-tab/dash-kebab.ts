@@ -37,9 +37,18 @@ async function deleteGroup(host: ActionHost): Promise<void> {
   }
 }
 
+const OPEN_IN: Array<{ kind: "vscode" | "terminal" | "explorer", icon: string, label: string }> = [
+  { kind: "vscode", icon: "code", label: "Open in VS Code" },
+  { kind: "terminal", icon: "terminal-window", label: "Open a terminal here" },
+  { kind: "explorer", icon: "folder-open", label: "Show in Explorer" },
+];
+
 export function openDashKebab(anchor: HTMLElement, host: ActionHost): void {
   const t = host.ctx().snap.target;
-  const items: Item[] = [{ icon: "squares-four", label: "Dashboard cards...", run: () => openCardsModal(host) }];
+  const items: Item[] = [
+    ...OPEN_IN.map((o): Item => ({ icon: o.icon, label: o.label, run: () => host.ctx().act.openIn(anchor, o.kind) })),
+    { icon: "squares-four", label: "Dashboard cards...", run: () => openCardsModal(host) },
+  ];
   if (t.kind === "group") {
     items.push(
       { icon: "pencil-simple", label: "Edit repos...", run: () => openEditReposModal(host) },

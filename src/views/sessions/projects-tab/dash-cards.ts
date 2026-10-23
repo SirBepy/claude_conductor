@@ -18,8 +18,8 @@ function progressBar(p: CardProgress): TemplateResult {
 
 function headlineLine(c: DashCtx, r: CardResultX, action: CardConfigX["action"]): TemplateResult | typeof nothing {
   if (!r.headline && !action) return nothing;
-  const button = action ? html`<button type="button" class="pd-btn sm" data-pd-action
-    @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement, action.command)}>${action.label}</button>` : nothing;
+  const button = action ? html`<button type="button" class="pd-act" data-pd-action
+    @click=${(e: Event) => c.act.newChat(e.currentTarget as HTMLElement, action.command)}>${action.label}<i class="ph ph-arrow-right"></i></button>` : nothing;
   return html`<div class="pd-headline">
     <span class="pd-hl-t ${r.headline_tone ?? ""}">${r.headline ?? ""}</span>${button}</div>`;
 }

@@ -42,6 +42,8 @@ export interface DashCtx {
   /** Current page per paged card, keyed by the pager's name. */
   pages: Map<string, number>;
   chatsTab: ChatsTab;
+  /** Which of the two columns each half-width section sits in, by section id (balance.ts). */
+  columns: Map<string, 0 | 1>;
   /** Index of the first quick-action chip showing in the one-line track. */
   qaStart: number;
   /** Called after every paint; the Reports modal redraws from it while open. */
@@ -79,17 +81,18 @@ export interface RowOpts {
   meta?: string;
   tag?: TemplateResult | typeof nothing;
   trailing?: TemplateResult | typeof nothing;
+  /** First row of a new run inside a card (the next status, the scheduled
+   *  items): extra space above it does the job a sub-heading would. */
+  gap?: boolean;
 }
 
 export function row(lead: TemplateResult, text: TemplateResult | string, o: RowOpts = {}): TemplateResult {
-  return html`<div class="pd-row ${o.onClick ? "is-link" : ""} ${o.dim ? "is-dim" : ""}" title=${ifDefined(o.title)} @click=${o.onClick}>
+  return html`<div class="pd-row ${o.onClick ? "is-link" : ""} ${o.dim ? "is-dim" : ""} ${o.gap ? "is-gap" : ""}" title=${ifDefined(o.title)} @click=${o.onClick}>
     ${lead}<span class="pd-t">${text}</span>${o.tag ?? nothing}${o.trailing ?? nothing}${o.meta ? html`<span class="pd-m">${o.meta}</span>` : nothing}
   </div>`;
 }
 
 export const quiet = (text: string): TemplateResult => html`<div class="pd-quiet">${text}</div>`;
-
-export const sub = (text: string): TemplateResult => html`<div class="pd-sub">${text}</div>`;
 
 export interface CardOpts {
   full?: boolean;
@@ -97,11 +100,13 @@ export interface CardOpts {
   /** Extra class on the section. */
   cls?: string;
   trailing?: TemplateResult | typeof nothing;
+  /** A small number beside the title (how many are running), so the state reads at a glance. */
+  count?: number;
 }
 
 export function card(title: string, body: TemplateResult | TemplateResult[], o: CardOpts): TemplateResult {
   return html`<section class="pd-card ${o.full ? "full" : ""} ${o.cls ?? ""}" data-pd-card=${o.id}>
-    <div class="pd-h"><span>${title}</span><span class="grow"></span>${o.trailing ?? nothing}</div>
+    <div class="pd-h"><span>${title}${o.count ? html`<span class="pd-count">${o.count}</span>` : nothing}</span><span class="grow"></span>${o.trailing ?? nothing}</div>
     ${body}
   </section>`;
 }

@@ -121,23 +121,6 @@ export function summarize(text: string): string {
   return head.length > SUMMARY_MAX ? `${head.slice(0, SUMMARY_MAX - 1).trimEnd()}…` : head;
 }
 
-// Real outcomes often open with a greeting or a label ("Hi.", "Retrospective.",
-// "...things up: 1."), so a lone first sentence that short says nothing.
-const SENTENCE_MIN = 40;
-
-/** The opening of an outcome's text for a one-line report row: whole
- * sentences until there is enough to read, the row's CSS ellipsizes the rest. */
-export function firstSentence(text: string): string {
-  const plain = plainPreview(text);
-  const re = /.+?(?:[.!?](?=\s|$)|$)/g;
-  let out = "";
-  for (let m = re.exec(plain); m && m[0]; m = re.exec(plain)) {
-    out = `${out} ${m[0].trim()}`.trim();
-    if (out.length >= SENTENCE_MIN) break;
-  }
-  return out || plain;
-}
-
 export type ChatGroupId = "input" | "progress" | "done";
 
 /** The Chats sidebar's three live segments, in the same words and order. */

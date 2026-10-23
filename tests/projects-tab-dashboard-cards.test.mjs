@@ -59,19 +59,21 @@ beforeEach(() => {
 
 describe("Chats card", () => {
   const rowsText = (root) => [...root.querySelectorAll('[data-pd-card="chats"] .pd-row .pd-t')].map((n) => n.textContent);
-  const heads = (root) => [...root.querySelectorAll('[data-pd-card="chats"] .pd-sub')].map((n) => n.textContent);
+  const gaps = (root) => [...root.querySelectorAll('[data-pd-card="chats"] .pd-row')].map((n) => n.classList.contains("is-gap"));
 
-  it("Current groups live chats under the sidebar's three words, empty groups omitted, 4 rows a page", async () => {
+  it("Current keeps the sidebar's group order with a gap, not a label, where the next group starts, 4 rows a page", async () => {
     snapshot = projectSnapshot({ chats_running: mixedChats() });
     const root = await mount({ kind: "project", id: "p1" });
     expect(root.querySelector('[data-pd-card="chats"] .pd-rtab.on').textContent).toBe("Current");
-    expect(heads(root)).toEqual(["Input needed", "In progress"]);
     expect(rowsText(root)).toEqual(["ask-a", "work-a", "work-b", "wait-a"]);
+    expect(gaps(root)).toEqual([false, true, false, false]);
+    expect(root.querySelector('[data-pd-card="chats"] .pd-sub')).toBeNull();
     expect(root.querySelector('[data-pd-pager="chats"] .pd-pg-n').textContent).toBe("1/2");
 
     root.querySelector('[data-pd-pager="chats"] button[title="Next"]').click();
     await vi.waitFor(() => expect(rowsText(root)).toEqual(["done-a"]));
-    expect(heads(root)).toEqual(["Done"]);
+    // A page never opens on a gap, even when its first row starts a new group.
+    expect(gaps(root)).toEqual([false]);
     expect(root.querySelector('[data-pd-pager="chats"] button[title="Next"]').disabled).toBe(true);
   });
 
@@ -81,7 +83,7 @@ describe("Chats card", () => {
     expect(root.querySelector('[data-pd-pager="chats"]')).toBeNull();
     [...root.querySelectorAll('[data-pd-card="chats"] .pd-rtab')].find((b) => b.textContent === "Recent").click();
     await vi.waitFor(() => expect(rowsText(root)).toEqual(["Phone question sheet peek"]));
-    expect(heads(root)).toEqual([]);
+    expect(gaps(root)).toEqual([false]);
   });
 });
 
@@ -117,17 +119,15 @@ describe("Next up", () => {
 });
 
 describe("Reports card", () => {
-  // Which shape shows (rows that fit, or tiles) depends on the card's height, which
-  // jsdom never lays out; projects-tab.view.spec.ts checks that half in a browser.
-  it("carries every outcome as a row and as a tile, and See more opens the full tab in the modal", async () => {
+  it("peeks at the three newest outcomes, and See more opens all of them in the modal", async () => {
     historyResult = history({
       outcomes: [1, 2, 3, 4].map((n) => ({ session_id: `o${n}`, title: `Outcome ${n}`, text: `First sentence ${n}. And then a long tail.`, at_ms: Date.now() - n * 60_000, repo_cwd: "C:/Projects/conductor" })),
     });
     const root = await mount({ kind: "project", id: "p1" });
     const reports = () => root.querySelector('[data-pd-card="reports"]');
-    await vi.waitFor(() => expect(reports().querySelectorAll(".pd-fit .pd-row")).toHaveLength(4));
-    expect(reports().querySelector(".pd-row .pd-muted").textContent).toBe("First sentence 1. And then a long tail.");
-    expect(reports().querySelectorAll(".pd-tiles .pd-out")).toHaveLength(4);
+    await vi.waitFor(() => expect(reports().querySelectorAll(".pd-out")).toHaveLength(3));
+    expect(reports().querySelector(".pd-out b").textContent).toBe("Outcome 1");
+    expect(reports().querySelector(".pd-out p").textContent).toBe("First sentence 1. And then a long tail.");
 
     reports().querySelector("[data-pd-see-more]").click();
     const modal = document.getElementById("test-modal-slot");
@@ -137,14 +137,14 @@ describe("Reports card", () => {
     expect(modal.querySelector(".pd-modal")).toBeNull();
   });
 
-  it("the Gallery tab carries six thumbnails, and the modal shows them all", async () => {
+  it("the Gallery tab peeks at four thumbnails, and the modal shows them all", async () => {
     historyResult = history({
       gallery: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: `img${n}`, session_id: "s", title: `Shot ${n}`, at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" })),
     });
     const root = await mount({ kind: "project", id: "p1" });
-    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-row')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-out')).not.toBeNull());
     [...root.querySelectorAll('[data-pd-card="reports"] .pd-rtab')].find((b) => b.textContent === "Gallery").click();
-    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="reports"] .pd-shot img')).toHaveLength(6));
+    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="reports"] .pd-shot img')).toHaveLength(4));
     expect(root.querySelector('[data-pd-card="reports"] .pd-gal').classList.contains("compact")).toBe(true);
 
     root.querySelector("[data-pd-see-more]").click();
@@ -234,13 +234,14 @@ describe("quick-action track", () => {
     expect(root.querySelector(".pd-qa .pd-chip").textContent.trim()).toBe("/pushnbump");
   });
 
-  it("open-in actions are three icon-only buttons in the header, not chips", async () => {
+  it("open-in actions lead the kebab menu, and neither the header nor the chip row carries them", async () => {
     snapshot = projectSnapshot({ pinned_actions: ["/pickup"] });
     const root = await mount({ kind: "project", id: "p1" });
-    const open = [...root.querySelectorAll(".pd-head [data-pd-open]")];
-    expect(open.map((b) => b.dataset.pdOpen)).toEqual(["vscode", "terminal", "explorer"]);
-    expect(open.every((b) => b.textContent.trim() === "" && b.title)).toBe(true);
-    expect(root.querySelector(".pd-qa [data-pd-open]")).toBeNull();
+    expect(root.querySelectorAll(".pd-head .pd-ib")).toHaveLength(1);
+    expect([...root.querySelectorAll(".pd-qa .pd-chip")].map((b) => b.textContent.trim())).toEqual(["/pickup"]);
+    root.querySelector("[data-pd-kebab]").click();
+    const items = [...document.querySelectorAll(".smore-item")].map((b) => b.textContent.trim());
+    expect(items.slice(0, 3)).toEqual(["Open in VS Code", "Open a terminal here", "Show in Explorer"]);
   });
 });
 
