@@ -89,6 +89,9 @@ export function loadCachedPage(sessionId: string): CachedPage | null {
 export function saveCachedPage(sessionId: string, page: HistoryPage): void {
   const ls = storage();
   if (!ls) return;
+  // An empty page (a transcript with nothing rendered yet) carries no window
+  // to resume from; painting it would only hide that the first fetch is owed.
+  if (page.events.length === 0) return;
   const entry: CachedPage = {
     events: page.events.map(stripImages),
     oldestSeq: Number(page.oldest_seq),
