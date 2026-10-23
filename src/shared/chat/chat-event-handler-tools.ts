@@ -9,11 +9,13 @@ import { parseFileEdit } from "./file-edits";
 import {
   BUILTIN_TODO_WRITE_TOOL,
   canonicalTool,
+  isPrPreviewTool,
   isShowPreviewTool,
   isWriteDraftTool,
   MCP_WRITE_PLAN_TOOL,
 } from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
+import { prToolMessage } from "./chat-pr-tool";
 import { draftFieldsOf, draftResultFieldsOf } from "./chat-draft-card";
 import {
   tryHandleQuestionToolUse,
@@ -69,6 +71,12 @@ export function handleToolUseEvent(
   // narration. The rail still gets the same snapshot via the daemon push.
   if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
     r.messages.push({ ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null });
+    return { touched: true, coalesce: false };
+  }
+  // The /create-pr card: a finalized assistant row carrying the PR markers,
+  // so it renders exactly like the marker text it replaces.
+  if (isPrPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
+    r.messages.push(prToolMessage(ev.input, ev.id, ts));
     return { touched: true, coalesce: false };
   }
   // An outbound message draft: its own card row rather than a narration chip,

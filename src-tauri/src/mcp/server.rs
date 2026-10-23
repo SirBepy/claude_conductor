@@ -200,7 +200,7 @@ mod tests {
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
-        TOOL_DASHBOARD_CARD, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
+        TOOL_DASHBOARD_CARD, TOOL_PR_PREVIEW, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
     };
 
     thread_local! {
@@ -312,14 +312,15 @@ mod tests {
         // todo 692) plus schedule (write access to the Schedule panel) plus
         // create_project (registers a project folder with the app) plus
         // person (who the user means by a name, from the vault) plus
-        // dashboard_card (custom cards on the project dashboard).
+        // dashboard_card (custom cards on the project dashboard) plus
+        // pr_preview (the /create-pr review card).
         let resp = dispatch(
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
             27182,
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 21);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -338,6 +339,7 @@ mod tests {
         assert!(names.contains(&"write_user_todo"));
         assert!(names.contains(&"write_draft"));
         assert!(names.contains(&"show_preview"));
+        assert!(names.contains(&"pr_preview"));
         assert!(names.contains(&"write_plan"));
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"create_project"));
@@ -379,7 +381,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 24, "20 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 25, "21 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -581,5 +583,19 @@ mod tests {
             "",
         );
         assert_eq!(resp["error"]["code"], -32601);
+    }
+
+    /// The card renders off the tool_use event itself, so the call is answered
+    /// here without touching the hooks server.
+    #[test]
+    fn pr_preview_answers_locally_and_needs_a_title() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let id = json!(1);
+        POSTED_URLS.with(|u| u.borrow_mut().clear());
+        let ok = dispatch_tool_with(&rt, &id, TOOL_PR_PREVIEW, &json!({"title": "T", "body": "", "commits": []}), "s", 1234, fake_http_post);
+        assert_eq!(ok["result"]["isError"], false);
+        let bad = dispatch_tool_with(&rt, &id, TOOL_PR_PREVIEW, &json!({"title": "  "}), "s", 1234, fake_http_post);
+        assert_eq!(bad["result"]["isError"], true);
+        assert!(POSTED_URLS.with(|u| u.borrow().is_empty()), "nothing relayed");
     }
 }

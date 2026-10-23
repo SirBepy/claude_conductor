@@ -24,6 +24,11 @@ pub const TOOL_WRITE_DRAFT: &str = "write_draft";
 // is the failure mode the status/title markers already hit; a tool call cannot
 // be half-emitted. Unconditional, same as send_message.
 pub const TOOL_SHOW_PREVIEW: &str = "show_preview";
+// The /create-pr review card. A tool because the model stopped emitting the
+// long base64 `<cc-pr-*>` marker lines as text (they came back as a thinking
+// block). Answered in the MCP server itself: the card renders off this call's
+// own `tool_use` event, so there is nothing for the daemon to do.
+pub const TOOL_PR_PREVIEW: &str = "pr_preview";
 // Turn-footer step checklist. A tool we serve ourselves is always in the list,
 // unlike `TodoWrite`, which the harness withholds often enough that the
 // checklist rendered in 4 of 188 transcripts (2026-09-04). Unconditional, and
@@ -141,6 +146,30 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "title": {"type": "string", "description": "Short human label for the card header. Derived from the slug if omitted."}
                 },
                 "required": ["slug", "html"]
+            }
+        }),
+        json!({
+            "name": TOOL_PR_PREVIEW,
+            "description": "Show a pull request draft as a review card in the chat, before creating it. The user opens it to read the description and commits.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "The PR title."},
+                    "body": {"type": "string", "description": "The PR description, markdown."},
+                    "commits": {
+                        "type": "array",
+                        "description": "The branch's commits, newest first.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sha": {"type": "string", "description": "Short sha."},
+                                "msg": {"type": "string", "description": "Subject line."}
+                            },
+                            "required": ["sha", "msg"]
+                        }
+                    }
+                },
+                "required": ["title", "body", "commits"]
             }
         }),
         json!({

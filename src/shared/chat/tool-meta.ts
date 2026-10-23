@@ -23,6 +23,15 @@ export function isShowPreviewTool(tool: string): boolean {
   return tool === MCP_SHOW_PREVIEW_TOOL;
 }
 
+// The /create-pr preview card. Delivered as a tool call because the model
+// stopped emitting the long base64 `<cc-pr-*>` marker lines as text (they came
+// back as a thinking block). Same live/scrollback drift guard as above.
+export const MCP_PR_PREVIEW_TOOL = "mcp__cc_conductor__pr_preview";
+
+export function isPrPreviewTool(tool: string): boolean {
+  return tool === MCP_PR_PREVIEW_TOOL;
+}
+
 // Outbound message draft. Same live/scrollback drift guard as the two above:
 // one predicate, both paths. The Drafts panel is still the editing surface -
 // the inline card is a read/copy view of the same store row.

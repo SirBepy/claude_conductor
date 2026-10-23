@@ -9,8 +9,9 @@ import {
   noiseAssistantLabel,
   CHAIN_DIVIDER_KIND,
 } from "./chat-classifiers";
-import { isAskQuestionTool, isShowPreviewTool, isWriteDraftTool } from "./tool-meta";
+import { isAskQuestionTool, isPrPreviewTool, isShowPreviewTool, isWriteDraftTool } from "./tool-meta";
 import { previewFieldsOf } from "./chat-preview-card";
+import { prToolMessage } from "./chat-pr-tool";
 import { draftFieldsOf } from "./chat-draft-card";
 export type { RenderedMessage } from "./chat-classifiers";
 
@@ -182,6 +183,10 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       // pushed mockup renders as the same card on the scrollback path.
       if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
         return { ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null };
+      }
+      // Mirrors chat-event-handler-tools.ts's pr_preview special-case.
+      if (isPrPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
+        return prToolMessage(ev.input, ev.id, ts);
       }
       // Mirrors chat-event-handler-tools.ts's write_draft special-case. Its
       // tool_result (which carries the draft id) is folded in by
