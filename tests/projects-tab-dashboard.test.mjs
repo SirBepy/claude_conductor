@@ -2,7 +2,8 @@
 //
 // A mounted dashboard rendered from fixture snapshots: every section, the
 // empty/hidden rules, the group repo filter, custom cards, and the
-// snapshot-first / history-after load order.
+// snapshot-first / history-after load order. The tighter cards (tabs, paging,
+// quick-action track, card extras) are in projects-tab-dashboard-cards.test.mjs.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { groupSnapshot, history, projectSnapshot, ZIRTUE_REPOS } from "./helpers/projects-tab-fixtures.mjs";
@@ -70,7 +71,7 @@ describe("single project", () => {
     expect(root.querySelector(".pd-head h3").textContent).toBe("claude_usage_in_taskbar");
     expect(root.querySelector(".pd-branch").textContent).toBe("master ↑2");
     expect(root.querySelector(".pd-btn.primary").textContent).toContain("New chat");
-    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-out')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-row')).not.toBeNull());
     expect(cardIds(root)).toEqual(["needs_you", "your_todos", "chats", "next_up", "ship", "running", "reports"]);
     expect(root.querySelector('[data-pd-card="needs_you"]').textContent).toContain("Dashboard brainstorm");
     expect(root.querySelector('[data-pd-card="next_up"] .ph-star')).not.toBeNull();
@@ -97,7 +98,6 @@ describe("single project", () => {
       .find((r) => r.textContent.includes(title)).querySelector(".pd-dot");
     expect(dotFor("asking").classList.contains("q")).toBe(true);
     expect(dotFor("idle").classList.contains("q")).toBe(false);
-    expect(root.querySelector('[data-pd-card="chats"]').textContent).toContain("waiting on you");
   });
 
   it("rolls a repo's drafts into one row past two, keeping questions and a small repo's drafts as rows", async () => {
@@ -115,16 +115,6 @@ describe("single project", () => {
     expect(text.some((t) => t.includes("Asking"))).toBe(true);
     expect(text.some((t) => t.includes("4 drafts not sent yet"))).toBe(true);
     expect(text.some((t) => t.includes("Draft not sent yet: d5"))).toBe(true);
-  });
-
-  it("Next up shows each plan section once as a subheading, not on every row", async () => {
-    const item = (id, section, priority = false) => ({ id, text: `t${id}`, section, priority, repo_cwd: "C:/p1" });
-    snapshot = projectSnapshot({ plan: [item("1", "Mine", true), item("2", "Phase 1"), item("3", "Phase 1"), item("4", "Phase 2")], scheduled: [] });
-    const { root } = await mount({ kind: "project", id: "p1" });
-    const cardEl = root.querySelector('[data-pd-card="next_up"]');
-    expect(cardEl.textContent.match(/Phase 1/g)).toHaveLength(1);
-    expect(cardEl.textContent.match(/Phase 2/g)).toHaveLength(1);
-    expect(cardEl.textContent).not.toContain("Mine");
   });
 
   it("drops a card whose builtin id is hidden", async () => {
@@ -147,20 +137,19 @@ describe("single project", () => {
     const { root } = await mount({ kind: "project", id: "p1" });
 
     expect(root.querySelector('[data-pd-card="needs_you"]')).not.toBeNull();
-    expect(root.querySelector(".pd-qa .pd-chip.plain")).not.toBeNull();
-    expect(root.querySelectorAll(".pd-qa .pd-chip:not(.plain)")).toHaveLength(0);
+    expect(root.querySelector(".pd-qa")).toBeNull();
     expect(root.querySelector('[data-pd-card="reports"]').textContent).toContain("Loading...");
 
     release();
-    await vi.waitFor(() => expect(root.querySelectorAll(".pd-qa .pd-chip:not(.plain)")).toHaveLength(2));
+    await vi.waitFor(() => expect(root.querySelectorAll(".pd-qa .pd-chip")).toHaveLength(2));
     expect(root.querySelector(".pd-qa .pd-chip").textContent).toContain("/pushnbump");
-    expect(root.querySelector('[data-pd-card="reports"] .pd-out b').textContent).toBe("Phone question sheet peek");
+    expect(root.querySelector('[data-pd-card="reports"] .pd-row b').textContent).toBe("Phone question sheet peek");
     expect(calls.map((c) => c.cmd).indexOf("dashboard_snapshot")).toBeLessThan(calls.map((c) => c.cmd).indexOf("dashboard_history"));
   });
 
   it("Reports tabs: gallery lazy-loads images one at a time, files dim a missing file", async () => {
     const { root } = await mount({ kind: "project", id: "p1" });
-    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-out')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('[data-pd-card="reports"] .pd-row')).not.toBeNull());
 
     [...root.querySelectorAll(".pd-rtab")].find((b) => b.textContent === "Gallery").click();
     await vi.waitFor(() => expect(root.querySelector(".pd-shot img")).not.toBeNull());
@@ -198,7 +187,7 @@ describe("group", () => {
   it("a repo chip narrows every section, and All restores them", async () => {
     snapshot = groupSnapshot();
     const { root } = await mount(ref);
-    expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(3);
+    expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(2);
 
     [...root.querySelectorAll(".pd-repo-chip")].find((c) => c.textContent.trim() === "zng-biller").click();
     await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(1));
@@ -210,7 +199,7 @@ describe("group", () => {
     expect(root.querySelector(".pd-repo-chip.on").textContent.trim()).toBe("zng-biller");
 
     [...root.querySelectorAll(".pd-repo-chip")][0].click();
-    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(3));
+    await vi.waitFor(() => expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row')).toHaveLength(2));
   });
 
   it("renders enabled custom cards (list and stats), hides a disabled one, shows an error line", async () => {

@@ -5,8 +5,9 @@
 
 /* Reports */
 .pd-rtabs { display: flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--color-background); }
+.pd-h .pd-rtabs { margin-right: 2px; }
 .pd-rtab {
-  border: 0; border-radius: 5px; padding: 3px 10px; background: transparent; cursor: pointer;
+  border: 0; border-radius: 5px; padding: 2px 9px; background: transparent; cursor: pointer;
   color: var(--color-text-muted); font: 600 11.5px inherit; font-family: inherit; text-transform: none; letter-spacing: 0;
 }
 .pd-rtab:hover { color: var(--color-text); }
@@ -28,6 +29,8 @@
 .pd-shot img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top left; }
 .pd-shot-ph { height: 120px; display: grid; place-items: center; color: var(--color-text-muted); font-size: 12px; }
 .pd-shot-ph .ph-spinner { animation: icon-btn-spin 0.8s linear infinite; font-size: 16px; }
+.pd-gal.compact { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pd-gal.compact .pd-shot img, .pd-gal.compact .pd-shot-ph { height: 64px; }
 .pd-shot-t { padding: 5px 8px; font-size: 11.5px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Modals (shared #modal-host card slot) */
@@ -48,6 +51,9 @@
 .pd-mrow.pd-check input { accent-color: var(--color-primary); }
 .pd-mrow.pd-check .pd-fetched { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pd-hint { margin: 12px 0 0; font-size: 12px; color: var(--color-text-muted); }
+/* The fill, border and focus ring come from inputs.css's input[type="text"]; the two-class selector only trims its padding to the modal's compact rows. */
+.pd-mrow.pd-pin-add { padding-top: 8px; align-items: stretch; }
+.pd-mrow .pd-pin-input { flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; font-size: 13px; }
 .pd-field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--color-text-muted); }
 .pd-field input {
   padding: 6px 8px; border-radius: 6px; border: 1px solid var(--color-border);
@@ -60,3 +66,28 @@
 
 /* Full-size image: the app's lightbox chrome, one image only. */
 .pd-lightbox { z-index: 3000; }
+
+/* Custom-card extras: progress bar, headline stat line, run button */
+.pd-prog { padding: 2px 0 6px; }
+.pd-prog-label { font-size: 12.5px; margin-bottom: 4px; }
+.pd-prog-bar { height: 4px; border-radius: 2px; background: var(--color-background); overflow: hidden; }
+.pd-prog-bar span { display: block; height: 100%; border-radius: 2px; background: var(--color-primary); }
+.pd-prog.is-behind .pd-prog-bar span { background: var(--color-warning); }
+/* The stat text keeps its full words; the button drops to its own line when they do not share one. */
+.pd-headline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 2px 0 4px; font-size: 12.5px; }
+.pd-hl-t { flex: 1 1 auto; min-width: 0; }
+.pd-hl-t.warn { color: var(--color-warning); }
+.pd-hl-t.good { color: var(--color-success, var(--st-done)); opacity: 0.75; }
+
+/* Reports "See more" modal is wider than the settings-style modals. */
+#modal-host .modal-card.pd-modal.wide { width: min(900px, 94vw); }
+
+/* Closed-projects picker */
+.pd-pick-search {
+  width: 100%; box-sizing: border-box; margin: 6px 0; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--color-border); background: var(--color-background); color: var(--color-text); font: inherit; font-size: 13px;
+}
+.pd-pick-search:focus { outline: none; border-color: var(--color-primary); }
+.pd-pick { cursor: pointer; padding: 5px 6px; margin: 0 -6px; border-radius: 7px; }
+.pd-pick:hover { background: var(--color-surface-alt); }
+.pd-pick .ph { color: var(--color-text-muted); font-size: 16px; }

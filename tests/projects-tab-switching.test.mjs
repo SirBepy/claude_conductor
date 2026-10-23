@@ -6,15 +6,22 @@
 // pending-flow and the sidebar are stubbed so only this module's own wiring runs.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { groupRow, groupSnapshot, history, projectRow, projectSnapshot } from "./helpers/projects-tab-fixtures.mjs";
+import { closedRow, groupRow, groupSnapshot, history, projectRow, projectSnapshot } from "./helpers/projects-tab-fixtures.mjs";
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 
 const calls = [];
+// The daemon owns which rows are open; the fake keeps that state so a close/open round-trips through the next list load.
+let listRows = [];
 vi.mock("../src/shared/ipc.ts", () => ({
   invoke: vi.fn(async (cmd, args) => {
     calls.push({ cmd, args });
-    if (cmd === "dashboard_list_targets") return [projectRow(), groupRow()];
+    if (cmd === "dashboard_list_targets") return structuredClone(listRows);
+    if (cmd === "dashboard_close_target" || cmd === "dashboard_open_target") {
+      const row = listRows.find((r) => r.target.id === args.target.id);
+      if (row) row.open = cmd === "dashboard_open_target";
+      return null;
+    }
     if (cmd === "dashboard_snapshot") return args.target.kind === "group" ? groupSnapshot() : projectSnapshot();
     if (cmd === "dashboard_history") return history();
     return null;
@@ -38,6 +45,18 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
   };
 });
 
+// The real host morphs between cards on timers; the picker only needs its card in a slot.
+vi.mock("../src/shared/modal.ts", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    modalCardSlot: () => document.getElementById("test-modal-slot"),
+    presentHostCard: vi.fn(async (fn) => fn()),
+    closeHostCard: vi.fn(() => { document.getElementById("test-modal-slot").replaceChildren(); }),
+    setBackdropCancel: vi.fn(),
+  };
+});
+
 const { state, setActiveSession } = await import("../src/views/sessions/state.ts");
 vi.mock("../src/views/sessions/active-session.ts", () => ({
   dismountActivePane: vi.fn(() => setActiveSession(null)),
@@ -54,7 +73,8 @@ function mountDom() {
   document.body.innerHTML = `<div class="view-sessions"><aside class="sessions-sidebar">
     <div id="project-rail" hidden></div><ul id="sessions-list" class="sessions-list"></ul>
     <button class="sessions-fab"></button></aside>
-    <main id="session-pane" class="session-pane"><div class="chat-stub">open chat</div></main></div>`;
+    <main id="session-pane" class="session-pane"><div class="chat-stub">open chat</div></main></div>
+    <div id="test-modal-slot"></div>`;
   return {
     view: document.querySelector(".view-sessions"),
     aside: document.querySelector(".sessions-sidebar"),
@@ -74,6 +94,7 @@ describe("Projects tab", () => {
     document.body.innerHTML = "";
     vi.clearAllMocks();
     calls.length = 0;
+    listRows = [projectRow(), groupRow(), closedRow()];
     listeners.clear();
     remote = false;
     state.dashboardOpen = false;
@@ -177,6 +198,93 @@ describe("Projects tab", () => {
     for (const cb of listeners.get("instances-changed") ?? []) cb({});
     await new Promise((r) => setTimeout(r, 500));
     expect(calls.filter((c) => c.cmd === "dashboard_list_targets")).toHaveLength(0);
+  });
+});
+
+describe("open and closed projects", () => {
+  let dom;
+  const closeBtn = (i) => rows()[i].querySelector(".pd-row-x");
+  const names = () => rows().map((r) => r.querySelector(".session-row-title-text").textContent);
+  const closeCalls = () => calls.filter((c) => c.cmd === "dashboard_close_target").map((c) => c.args);
+
+  beforeEach(async () => {
+    document.body.innerHTML = "";
+    vi.clearAllMocks();
+    calls.length = 0;
+    listRows = [projectRow(), groupRow(), closedRow("p9", "old_project"), closedRow("p8", "ancient_app")];
+    listeners.clear();
+    remote = false;
+    state.dashboardOpen = false;
+    state.onChatActivated = null;
+    state.onCloseProject = null;
+    state.selectedId = null;
+    state.pendingNewSession = null;
+    dom = mountDom();
+    mountProjectsTab(dom.view, dom.pane, dom.listEl);
+    clickTab("projects");
+    await vi.waitFor(() => expect(rows()).toHaveLength(2));
+  });
+
+  it("lists only open targets under an Open projects header with a + button", () => {
+    expect(dom.view.querySelector("#projects-list .pd-list-head").textContent).toContain("Open projects");
+    expect(dom.view.querySelector("#projects-list .pd-list-add")).not.toBeNull();
+    expect(names()).toEqual(["claude_usage_in_taskbar", "Zirtue"]);
+  });
+
+  it("a row's x closes that project through dashboard_close_target and drops the row", async () => {
+    closeBtn(1).click();
+    await vi.waitFor(() => expect(names()).toEqual(["claude_usage_in_taskbar"]));
+    expect(closeCalls()).toEqual([{ target: { kind: "group", id: "g1" } }]);
+    expect(rows()[0].classList.contains("active")).toBe(true);
+    expect(dom.pane.querySelector('.pd-root[data-pd-target="project:p1"]')).not.toBeNull();
+  });
+
+  it("closing the shown project moves to the next open one, and closing the last shows the empty pane", async () => {
+    await vi.waitFor(() => expect(dom.pane.querySelector(".pd-root")).not.toBeNull());
+    closeBtn(0).click();
+    await vi.waitFor(() => expect(dom.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-repos')).not.toBeNull());
+    expect(names()).toEqual(["Zirtue"]);
+
+    closeBtn(0).click();
+    await vi.waitFor(() => expect(rows()).toHaveLength(0));
+    expect(dom.pane.textContent).toContain("No open projects");
+    expect(dom.view.querySelector("#projects-list .pd-list-empty").textContent).toBe("No open projects");
+  });
+
+  it("the Ctrl+W hook closes the selected project without a confirm, and is released on leaving the tab", async () => {
+    expect(typeof state.onCloseProject).toBe("function");
+    state.onCloseProject();
+    await vi.waitFor(() => expect(names()).toEqual(["Zirtue"]));
+    expect(closeCalls()).toEqual([{ target: { kind: "project", id: "p1" } }]);
+
+    clickTab("chats");
+    expect(state.onCloseProject).toBeNull();
+  });
+
+  it("+ lists the closed targets, filters them, and picking one opens it and shows its dashboard", async () => {
+    dom.view.querySelector(".pd-list-add").click();
+    const slot = document.getElementById("test-modal-slot");
+    expect([...slot.querySelectorAll(".pd-pick .pd-mt")].map((n) => n.textContent)).toEqual(["old_project", "ancient_app"]);
+
+    const search = slot.querySelector(".pd-pick-search");
+    search.value = "anc";
+    search.dispatchEvent(new Event("input"));
+    expect([...slot.querySelectorAll(".pd-pick .pd-mt")].map((n) => n.textContent)).toEqual(["ancient_app"]);
+
+    slot.querySelector(".pd-pick").click();
+    await vi.waitFor(() => expect(names()).toContain("ancient_app"));
+    expect(calls.find((c) => c.cmd === "dashboard_open_target").args).toEqual({ target: { kind: "project", id: "p8" } });
+    expect(slot.querySelector(".pd-modal")).toBeNull();
+    await vi.waitFor(() => expect(dom.pane.querySelector('.pd-root[data-pd-target="project:p8"]')).not.toBeNull());
+    expect(rows().find((r) => r.textContent.includes("ancient_app")).classList.contains("active")).toBe(true);
+  });
+
+  it("the picker says so when every project is already open", async () => {
+    listRows = [projectRow(), groupRow()];
+    for (const cb of listeners.get("instances-changed") ?? []) cb({});
+    await vi.waitFor(() => expect(calls.filter((c) => c.cmd === "dashboard_list_targets").length).toBeGreaterThan(1));
+    dom.view.querySelector(".pd-list-add").click();
+    expect(document.getElementById("test-modal-slot").textContent).toContain("Every project is already open");
   });
 });
 

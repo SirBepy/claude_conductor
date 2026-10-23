@@ -1,12 +1,12 @@
-// The built-in dashboard cards: Needs you, Your todos, Chats, Next up, Ship
-// state, Running. Each returns nothing when its builtin id is hidden.
+// The built-in dashboard cards: Needs you, Your todos, Next up, Ship state,
+// Running (Chats and Reports have their own files). Each returns nothing when its builtin id is hidden.
 import { html, nothing, type TemplateResult } from "lit-html";
-import { shortAgo, whenLabel } from "./format";
+import { shortAgo, summarize, whenLabel } from "./format";
+import { pageSlice } from "./paging";
 import {
-  card, dot, hidden, icon, inRepo, isGroup, kv, quiet, repoTag, row, sub,
-  type DashCtx, type DotKind,
+  card, dot, hidden, icon, inRepo, isGroup, kv, quiet, repoTag, row, sub, type DashCtx,
 } from "./dash-parts";
-import type { DashChatRow, NeedsYouItem, RepoShip } from "./types";
+import type { NeedsYouItem, RepoShip } from "./types";
 
 // A client repo can hold a dozen unsent drafts at once; one row each buries
 // the open questions under them, so past this many a repo's drafts share a row.
@@ -46,15 +46,16 @@ export function needsYou(c: DashCtx): TemplateResult | typeof nothing {
       onClick: i.draft_id ? () => c.act.openDraft(i.draft_id!, i.session_id) : undefined,
     });
   });
-  const all = [...rows, ...rolled];
-  return card("Needs you", all.length ? all : quiet("Nothing waiting"), { id: "needs_you", full: true });
+  const { slice, pager } = pageSlice(c, "needs_you", [...rows, ...rolled]);
+  return card("Needs you", slice.length ? slice : quiet("Nothing waiting"), { id: "needs_you", full: true, trailing: pager });
 }
 
 export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "your_todos")) return nothing;
   const todos = c.snap.your_todos.filter((t) => inRepo(c, t.repo_cwd));
   if (todos.length === 0) return nothing;
-  const rows = todos.map((t) => {
+  const { slice, pager } = pageSlice(c, "your_todos", todos);
+  const rows = slice.map((t) => {
     const done = c.doneTodos.has(t.id);
     return html`<label class="pd-row pd-todo ${done ? "is-done" : ""}">
       <input type="checkbox" .checked=${done} @change=${() => c.act.toggleTodo(t)}>
@@ -62,62 +63,35 @@ export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
       ${t.by_ai ? html`<span class="pd-m">from a chat</span>` : nothing}
     </label>`;
   });
-  return card("Your todos", rows, { id: "your_todos", full: true });
+  return card("Your todos", rows, { id: "your_todos", full: true, trailing: pager });
 }
 
-const CHAT_DOT: Record<DashChatRow["status"], DotKind> = {
-  question: "q", your_turn: "idle", working: "w", waiting: "idle", ended: "idle",
-};
-
-const CHAT_META: Record<DashChatRow["status"], string> = {
-  question: "waiting on you", your_turn: "your turn", working: "working", waiting: "waiting", ended: "",
-};
-
-export function chats(c: DashCtx): TemplateResult | typeof nothing {
-  if (hidden(c, "chats")) return nothing;
-  const running = c.snap.chats_running.filter((r) => inRepo(c, r.repo_cwd));
-  const recent = c.snap.chats_recent.filter((r) => inRepo(c, r.repo_cwd));
-  const live = running.map((r) => row(dot(CHAT_DOT[r.status]), r.title, {
-    tag: repoTag(c, r.repo_cwd),
-    meta: r.status === "working" ? `working ${shortAgo(r.at_ms, c.nowMs)}` : CHAT_META[r.status],
-    onClick: () => c.act.openChat(r.session_id),
-  }));
-  const past = recent.map((r) => row(icon("chat-circle"), r.title, {
-    tag: repoTag(c, r.repo_cwd), meta: shortAgo(r.at_ms, c.nowMs),
-    onClick: () => c.act.openHistory(r.session_id),
-  }));
-  const body: TemplateResult[] = [...live];
-  if (past.length) body.push(sub("Recent"), ...past);
-  if (!body.length) body.push(quiet("No chats yet"));
-  const trailing = html`<a class="pd-link" @click=${() => c.act.openAllHistory()}>History</a>`;
-  return card("Chats", body, { id: "chats", trailing });
-}
+// The plan is long and mostly prose, so the card shows only what is next: a few
+// items cut to their headline, paged. The full text stays in each row's tooltip.
+const PLAN_ROWS = 3;
+const SCHEDULED_ROWS = 2;
 
 export function nextUp(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "next_up")) return nothing;
   const plan = c.snap.plan.filter((p) => inRepo(c, p.repo_cwd));
-  const scheduled = c.snap.scheduled.filter((s) => inRepo(c, s.repo_cwd));
-  // Sections become subheadings rather than a per-row meta column: the meta
-  // repeated the same phrase on every row and squeezed the item text.
-  const body: TemplateResult[] = [];
-  let section: string | null = null;
-  for (const p of plan) {
-    if (!p.priority && p.section !== section) body.push(sub(p.section));
-    section = p.priority ? null : p.section;
-    body.push(row(icon(p.priority ? "star" : "circle"), p.id ? `#${p.id} ${p.text}` : p.text,
-      { tag: repoTag(c, p.repo_cwd) }));
-  }
+  const scheduled = c.snap.scheduled.filter((s) => inRepo(c, s.repo_cwd)).slice(0, SCHEDULED_ROWS);
+  const { slice, pager } = pageSlice(c, "next_up", plan, PLAN_ROWS);
+  const body: TemplateResult[] = slice.map((p) => row(icon(p.priority ? "star" : "circle"),
+    p.id ? `#${p.id} ${summarize(p.text)}` : summarize(p.text),
+    { tag: repoTag(c, p.repo_cwd), title: p.text }));
   if (scheduled.length) {
     body.push(sub("Scheduled"), ...scheduled.map((s) => row(icon("alarm"), s.label,
       { tag: repoTag(c, s.repo_cwd), meta: whenLabel(s.fire_at_ms, c.nowMs) })));
   }
   if (!body.length) body.push(quiet("Nothing queued"));
   const single = !isGroup(c) ? c.snap.target.repos[0]?.cwd : null;
-  const trailing = single
+  const link = single
     ? html`<a class="pd-link" @click=${() => c.act.openFile(`${single}/.claude/todos/PLAN.md`)}>PLAN.md</a>`
     : nothing;
-  return card("Next up", body, { id: "next_up", trailing });
+  return card("Next up", body, { id: "next_up", trailing: html`${pager}${link}` });
 }
+
+const COMMIT_ROWS = 3;
 
 function shipDetail(r: RepoShip, c: DashCtx): TemplateResult[] {
   const unpushed = !r.has_upstream ? kv("Unpushed", "no upstream", "warn")
@@ -129,7 +103,7 @@ function shipDetail(r: RepoShip, c: DashCtx): TemplateResult[] {
   ];
   if (r.behind > 0) out.push(kv("Behind", `${r.behind} commit${r.behind === 1 ? "" : "s"}`, "warn"));
   if (r.recent_commits.length) {
-    out.push(sub("Recent commits"), ...r.recent_commits.map((m) => row(
+    out.push(sub("Recent commits"), ...r.recent_commits.slice(0, COMMIT_ROWS).map((m) => row(
       html`<code class="pd-sha ${m.pushed ? "" : "unpushed"}">${m.short_sha}</code>`, m.message,
       { meta: shortAgo(m.timestamp_ms, c.nowMs), title: m.pushed ? undefined : "Not pushed yet" },
     )));
@@ -158,7 +132,7 @@ export function shipState(c: DashCtx): TemplateResult | typeof nothing {
 
 export function running(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "running")) return nothing;
-  const servers = c.snap.servers.filter((s) => inRepo(c, s.repo_cwd));
+  const { slice: servers, pager } = pageSlice(c, "running", c.snap.servers.filter((s) => inRepo(c, s.repo_cwd)));
   const body: TemplateResult[] = servers.map((s) => row(dot("ok"),
     html`${s.name} <span class="pd-muted">:${s.port}</span>`, {
       tag: repoTag(c, s.repo_cwd),
@@ -177,5 +151,5 @@ export function running(c: DashCtx): TemplateResult | typeof nothing {
     }));
   }
   if (!body.length) body.push(quiet("Nothing running"));
-  return card("Running", body, { id: "running" });
+  return card("Running", body, { id: "running", trailing: pager });
 }

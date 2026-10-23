@@ -2,7 +2,9 @@
 import { html, nothing, type TemplateResult } from "lit-html";
 import { ifDefined } from "lit-html/directives/if-defined.js";
 import { sameCwd, type ReportsTab } from "./format";
-import type { DashboardHistory, DashboardSnapshot, DashTodo, RepoRef } from "./types";
+import type { DashboardHistory, DashSnapshot, DashTodo, RepoRef } from "./types";
+
+export type ChatsTab = "current" | "recent";
 
 /** What a dashboard row can do. Implemented in dash-actions.ts, so the section
  *  templates stay pure functions of (ctx) and never import the sessions view. */
@@ -21,10 +23,14 @@ export interface DashActions {
   setRepo(cwd: string | null): void;
   setTab(tab: ReportsTab): void;
   openImage(id: string): void;
+  setPage(key: string, page: number): void;
+  setChatsTab(tab: ChatsTab): void;
+  /** Full-size view of the Reports card's current tab. */
+  openReportsModal(): void;
 }
 
 export interface DashCtx {
-  snap: DashboardSnapshot;
+  snap: DashSnapshot;
   history: DashboardHistory | null;
   /** Selected repo of a group dashboard; null means "All". */
   repo: string | null;
@@ -33,6 +39,13 @@ export interface DashCtx {
   images: Map<string, string>;
   refreshing: Set<string>;
   doneTodos: Set<string>;
+  /** Current page per paged card, keyed by the pager's name. */
+  pages: Map<string, number>;
+  chatsTab: ChatsTab;
+  /** Index of the first quick-action chip showing in the one-line track. */
+  qaStart: number;
+  /** Called after every paint; the Reports modal redraws from it while open. */
+  paintHooks: Set<() => void>;
   nowMs: number;
   act: DashActions;
 }

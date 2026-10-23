@@ -13,7 +13,7 @@ export const BUILTIN_CARDS: ReadonlyArray<{ id: string, label: string }> = [
   { id: "next_up", label: "Next up" },
   { id: "ship", label: "Ship state" },
   { id: "running", label: "Running" },
-  { id: "quick_actions", label: "Quick actions" },
+  { id: "quick_actions", label: "Quick action row" },
   { id: "reports", label: "Reports" },
 ];
 
@@ -104,4 +104,47 @@ export function plainPreview(text: string): string {
 export function fetchedLabel(fetchedAtMs: number, nowMs: number = Date.now()): string {
   const ago = agoLabel(fetchedAtMs, nowMs);
   return ago === "now" ? "fetched just now" : `fetched ${ago}`;
+}
+
+const SUMMARY_CUTS = [" - ", "; ", ". ", "("];
+// A cut earlier than this would leave a bare label ("Fix"), not a summary.
+const SUMMARY_MIN = 12;
+const SUMMARY_MAX = 70;
+
+/** A plan item cut down to its headline: the text before the first " - ", "; ",
+ * ". " or "(" that leaves at least SUMMARY_MIN characters, ellipsized when
+ * still long. */
+export function summarize(text: string): string {
+  const t = text.trim();
+  const cuts = SUMMARY_CUTS.map((s) => t.indexOf(s, SUMMARY_MIN)).filter((i) => i >= 0);
+  const head = (cuts.length ? t.slice(0, Math.min(...cuts)) : t).trim();
+  return head.length > SUMMARY_MAX ? `${head.slice(0, SUMMARY_MAX - 1).trimEnd()}…` : head;
+}
+
+/** The first sentence of an outcome's text, for a one-line report row. */
+export function firstSentence(text: string): string {
+  const plain = plainPreview(text);
+  const m = /^(.+?[.!?])(\s|$)/.exec(plain);
+  return m ? m[1]! : plain;
+}
+
+export type ChatGroupId = "input" | "progress" | "done";
+
+/** The Chats sidebar's three live segments, in the same words and order. */
+export const CHAT_GROUPS: ReadonlyArray<{ id: ChatGroupId, label: string }> = [
+  { id: "input", label: "Input needed" },
+  { id: "progress", label: "In progress" },
+  { id: "done", label: "Done" },
+];
+
+export function chatGroupOf(status: "question" | "working" | "your_turn" | "waiting" | "ended"): ChatGroupId | null {
+  if (status === "question") return "input";
+  if (status === "working" || status === "waiting") return "progress";
+  if (status === "your_turn") return "done";
+  return null;
+}
+
+/** Slash chips, minus the ones a dashboard must never offer: closing a chat is not a quick action. */
+export function offerableCommands(cmds: string[]): string[] {
+  return cmds.filter((c) => !/^\/close(\s|$)/.test(c));
 }
