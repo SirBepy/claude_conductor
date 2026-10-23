@@ -1,5 +1,7 @@
 // Shared fixtures for the Projects tab tests: one single-project snapshot and
 // one four-repo group snapshot, shaped like the daemon's DashboardSnapshot.
+// Fields the daemon always sends (pinned_actions, a row's open flag) are always
+// present here too, so a test can never pass on a shape the real wire never has.
 
 const NOW = Date.now();
 const min = (n) => NOW - n * 60_000;
@@ -10,7 +12,7 @@ export function projectRow(over = {}) {
   return {
     target: { kind: "project", id: "p1", name: "claude_usage_in_taskbar", repos: [CONDUCTOR] },
     last_active_ms: NOW - 10_000,
-    live_count: 2, question_count: 1, working_count: 1, ...over,
+    live_count: 2, question_count: 1, working_count: 1, open: true, ...over,
   };
 }
 
@@ -21,7 +23,7 @@ export const ZIRTUE_REPOS = ["zng-app", "zng-admin", "zng-biller", "zng-api"].ma
 export function groupRow(over = {}) {
   return {
     target: { kind: "group", id: "g1", name: "Zirtue", repos: ZIRTUE_REPOS },
-    last_active_ms: min(4), live_count: 0, question_count: 0, working_count: 1, ...over,
+    last_active_ms: min(4), live_count: 0, question_count: 0, working_count: 1, open: true, ...over,
   };
 }
 
@@ -49,7 +51,7 @@ export function projectSnapshot(over = {}) {
     servers: [{ name: "vite dev server", port: 1420, repo_cwd: CONDUCTOR.cwd }],
     peers_active: 3,
     last_channel_message: { author: "peer", text: "holding commit on chat-renderer.ts", at_ms: min(4) },
-    cards: [], hidden_builtins: [], ...over,
+    cards: [], hidden_builtins: [], pinned_actions: [], ...over,
   };
 }
 
@@ -57,7 +59,7 @@ export function projectSnapshot(over = {}) {
 export const card = (id, title, display, result, enabled = true, extra = {}) => ({
   config: {
     id, scope: { kind: "group", id: "g1" }, title, enabled, refresh_secs: null, display,
-    source: { kind: "command", program: "x", args: [], cwd: null }, ...extra,
+    source: { kind: "command", program: "x", args: [], cwd: null, env: {} }, ...extra,
   },
   result,
 });
@@ -120,7 +122,7 @@ export function groupSnapshot(over = {}) {
       card("c4", "Broken card", { kind: "stats", items: [] },
         { fetched_at_ms: min(1), stats: [], rows: [], error: "HTTP 401 from the tracker" }),
     ],
-    hidden_builtins: [], ...over,
+    hidden_builtins: [], pinned_actions: [], ...over,
   };
 }
 

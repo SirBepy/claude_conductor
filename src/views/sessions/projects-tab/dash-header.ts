@@ -52,9 +52,11 @@ export function header(c: DashCtx): TemplateResult {
   </div>`;
 }
 
-/** The pinned slash commands when the project has a list; until it does, the commands used most. */
+/** The pinned slash commands when the project has a list; until it does, the commands used most.
+ *  The daemon always sends `pinned_actions`, empty when nothing is pinned, so emptiness is the test. */
 export function chipCommands(c: DashCtx): string[] {
-  return offerableCommands(c.snap.pinned_actions ?? (c.history?.quick_actions ?? []).map((q) => q.command));
+  const pinned = c.snap.pinned_actions ?? [];
+  return offerableCommands(pinned.length ? pinned : (c.history?.quick_actions ?? []).map((q) => q.command));
 }
 
 export function quickActions(c: DashCtx): TemplateResult | typeof nothing {
