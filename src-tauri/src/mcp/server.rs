@@ -125,7 +125,7 @@ pub fn run_stdio() {
     // is fixed for its whole lifetime (one child per turn - see
     // `write_mcp_config`), so there's no need to re-read it per request.
     let is_jarvis = std::env::var("CC_JARVIS").is_ok();
-    let browser = std::env::var("CC_BROWSER").ok().map(|v| crate::daemon::browser::Mode::from_env(&v));
+    let browser = std::env::var("CC_BROWSER").is_ok();
 
     announce_attached(port, session_id.clone());
 
@@ -245,7 +245,7 @@ mod tests {
                     "serverInfo": {"name": "cc_conductor", "version": "0.1.0"}
                 }
             }),
-            "tools/list" => tool_list_response(&id, is_jarvis, None),
+            "tools/list" => tool_list_response(&id, is_jarvis, false),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -401,9 +401,8 @@ mod tests {
     /// the base set gains exactly Playwright's tools, minus the withheld one.
     #[test]
     fn tools_list_browser_adds_the_playwright_tools() {
-        use crate::daemon::browser::Mode;
-        let base = tool_list_response(&json!(1), false, None)["result"]["tools"].as_array().unwrap().len();
-        let resp = tool_list_response(&json!(1), false, Some(Mode::Own));
+        let base = tool_list_response(&json!(1), false, false)["result"]["tools"].as_array().unwrap().len();
+        let resp = tool_list_response(&json!(1), false, true);
         let tools = resp["result"]["tools"].as_array().unwrap();
         let browser: Vec<&str> = tools
             .iter()
@@ -411,8 +410,9 @@ mod tests {
             .filter(|n| n.starts_with("browser_"))
             .collect();
         assert_eq!(tools.len(), base + browser.len());
-        assert_eq!(browser.len(), 24, "25 Playwright MCP 0.0.83 tools minus browser_run_code_unsafe");
+        assert_eq!(browser.len(), 25, "25 Playwright MCP 0.0.83 tools minus browser_run_code_unsafe, plus browser_target");
         assert!(browser.contains(&"browser_navigate"));
+        assert!(browser.contains(&"browser_target"));
         assert!(browser.contains(&"browser_take_screenshot"));
     }
 

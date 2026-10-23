@@ -1,6 +1,6 @@
 //! `browser_*` hook route: every Playwright MCP tool a chat calls lands here
-//! and runs against Claude's own browser, or the one of Joe's that Settings
-//! names (`daemon::browser`). Re-checks the
+//! and runs against the browser that chat chose, or the one Settings starts it
+//! on (`daemon::browser`). Re-checks the
 //! Settings switch on every call, because a chat spawned while it was on keeps
 //! the tools listed after Joe turns it off.
 
@@ -32,9 +32,8 @@ pub(super) async fn on_browser_call(
     if !settings.claude_browser_enabled() {
         return (StatusCode::OK, Json(json!({"ok": false, "error": DISABLED})));
     }
-    let target = crate::daemon::browser::Target::from_settings(&settings);
     let args = if body.arguments.is_null() { json!({}) } else { body.arguments };
-    match crate::daemon::browser::get().call(&body.session_id, &body.name, args, &target).await {
+    match crate::daemon::browser::get().call(&body.session_id, &body.name, args, &settings).await {
         Ok(result) => (StatusCode::OK, Json(json!({"ok": true, "result": result}))),
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
     }

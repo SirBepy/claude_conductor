@@ -14,14 +14,13 @@ use std::path::PathBuf;
 /// `fleet_status`/`respond_worker_prompt`) in `tools/list`. A normal
 /// session's config is byte-identical to before this var existed.
 ///
-/// `browser` adds `CC_BROWSER` the same way, advertising the `browser_*` tools
-/// while Settings' "Claude's browser" switch is on; its value says whether
-/// they drive Claude's own Chrome or one of Joe's.
+/// `browser` adds `CC_BROWSER=1` the same way, advertising the `browser_*`
+/// tools while Settings' "Claude's browser" switch is on.
 pub(crate) fn write_mcp_config(
     turn_id: &str,
     tracking_id: &str,
     is_jarvis: bool,
-    browser: Option<crate::daemon::browser::Mode>,
+    browser: bool,
     connectors: serde_json::Map<String, serde_json::Value>,
 ) -> Option<PathBuf> {
     match write_mcp_config_inner(turn_id, tracking_id, is_jarvis, browser, connectors) {
@@ -46,7 +45,7 @@ fn write_mcp_config_inner(
     turn_id: &str,
     tracking_id: &str,
     is_jarvis: bool,
-    browser: Option<crate::daemon::browser::Mode>,
+    browser: bool,
     connectors: serde_json::Map<String, serde_json::Value>,
 ) -> Result<PathBuf, String> {
     let mcp_dir = crate::settings::paths::mcp_temp_dir()
@@ -56,8 +55,8 @@ fn write_mcp_config_inner(
     if is_jarvis {
         env["CC_JARVIS"] = serde_json::json!("1");
     }
-    if let Some(mode) = browser {
-        env["CC_BROWSER"] = serde_json::json!(mode.env_value());
+    if browser {
+        env["CC_BROWSER"] = serde_json::json!("1");
     }
     // Floors Claude Code's own client-side MCP idle timeout (default 1800s for
     // stdio servers) at this relay's window so the CLI doesn't abort a pending
@@ -87,7 +86,6 @@ fn write_mcp_config_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::browser::Mode;
 
     /// Todo 907: this is the write whose silent failure meant `claude` was
     /// spawned with `--permission-prompt-tool` naming a tool no MCP server
@@ -102,7 +100,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
-        let path = write_mcp_config("turn-1", "sess-1", false, None, Default::default()).expect("write must succeed");
+        let path = write_mcp_config("turn-1", "sess-1", false, false, Default::default()).expect("write must succeed");
         std::env::remove_var("CC_DATA_DIR");
 
         let raw = std::fs::read_to_string(&path).expect("config file must exist on disk");
@@ -123,7 +121,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
-        let path = write_mcp_config("turn-2", "sess-2", true, None, Default::default()).expect("write must succeed");
+        let path = write_mcp_config("turn-2", "sess-2", true, false, Default::default()).expect("write must succeed");
         std::env::remove_var("CC_DATA_DIR");
 
         let raw = std::fs::read_to_string(&path).unwrap();
@@ -137,26 +135,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
-        let path = write_mcp_config("turn-4", "sess-4", false, Some(Mode::Own), Default::default()).expect("write must succeed");
+        let path = write_mcp_config("turn-4", "sess-4", false, true, Default::default()).expect("write must succeed");
         std::env::remove_var("CC_DATA_DIR");
 
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["mcpServers"]["cc_conductor"]["env"]["CC_BROWSER"], serde_json::json!("1"));
-    }
-
-    #[test]
-    fn write_mcp_config_marks_cc_browser_mine_when_the_chat_drives_joes_browser() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("CC_DATA_DIR", dir.path());
-
-        let path = write_mcp_config("turn-5", "sess-5", false, Some(Mode::Mine), Default::default()).expect("write must succeed");
-        std::env::remove_var("CC_DATA_DIR");
-
-        let parsed: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(parsed["mcpServers"]["cc_conductor"]["env"]["CC_BROWSER"], serde_json::json!("mine"));
     }
 
     #[test]
@@ -170,7 +154,7 @@ mod tests {
             "claude_ai_Google_Drive".into(),
             serde_json::json!({"type": "claudeai-proxy", "url": "https://d.example", "id": "mcpsrv_a"}),
         );
-        let path = write_mcp_config("turn-3", "sess-3", false, None, connectors).expect("write must succeed");
+        let path = write_mcp_config("turn-3", "sess-3", false, false, connectors).expect("write must succeed");
         std::env::remove_var("CC_DATA_DIR");
 
         let parsed: serde_json::Value =

@@ -109,6 +109,13 @@ describe("Claude's browser section", () => {
 });
 
 describe("My browser mode", () => {
+  it("labels the select as the browser chats start on, since a chat can switch itself", async () => {
+    const { root, dispose } = await mount();
+    const row = root.querySelector("#chatDefaultsBrowserMode").closest(".kit-row");
+    expect(row.textContent).toContain("Chats start on");
+    dispose();
+  });
+
   it("defaults to Claude's own browser, with the Show button and no app or profile rows", async () => {
     const { root, dispose } = await mount();
     expect(root.querySelector("#chatDefaultsBrowserMode").value).toBe("own");

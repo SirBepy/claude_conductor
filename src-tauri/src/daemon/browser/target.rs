@@ -4,39 +4,41 @@
 
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 use crate::types::Settings;
 
-/// Settings keys (all in `Settings.extra`, so no struct change).
+/// Settings keys (all in `Settings.extra`, so no struct change). They give
+/// the browser a chat starts on and the app/profile "mine" falls back to; a
+/// chat can override them with `browser_target`.
 const MODE_KEY: &str = "claudeBrowserMode";
 const APP_KEY: &str = "claudeBrowserMineApp";
 const PROFILE_KEY: &str = "claudeBrowserMineProfile";
-
-/// Rides on the MCP child's `CC_BROWSER` env so the tool descriptions can say
-/// whose browser the tools drive.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Own,
-    Mine,
-}
-
-impl Mode {
-    pub fn env_value(self) -> &'static str {
-        match self {
-            Mode::Own => "1",
-            Mode::Mine => "mine",
-        }
-    }
-
-    pub fn from_env(value: &str) -> Self {
-        if value == "mine" { Mode::Mine } else { Mode::Own }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum App {
     Chrome,
     Edge,
     Brave,
+}
+
+impl App {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "chrome" => Some(App::Chrome),
+            "edge" => Some(App::Edge),
+            "brave" => Some(App::Brave),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            App::Chrome => "Chrome",
+            App::Edge => "Edge",
+            App::Brave => "Brave",
+        }
+    }
 }
 
 /// One of Joe's own browsers. `profile` is the profile directory name
@@ -53,29 +55,76 @@ pub enum Target {
     Mine(Mine),
 }
 
+/// What a `browser_target` call asks for.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Request {
+    /// No `target` given: report the chat's current browser, change nothing.
+    Report,
+    /// Drop the chat's own choice, back to what Settings says.
+    Default,
+    Set(Target),
+}
+
 impl Target {
+    /// The browser a chat starts on.
     pub fn from_settings(settings: &Settings) -> Self {
-        if settings.str_extra(MODE_KEY) != Some("mine") {
-            return Target::Own;
+        if settings.str_extra(MODE_KEY) == Some("mine") {
+            Target::Mine(Mine::from_settings(settings))
+        } else {
+            Target::Own
         }
-        let app = match settings.str_extra(APP_KEY) {
-            Some("edge") => App::Edge,
-            Some("brave") => App::Brave,
-            _ => App::Chrome,
-        };
-        let profile = settings.str_extra(PROFILE_KEY).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string);
-        Target::Mine(Mine { app, profile })
     }
 
-    pub fn mode(&self) -> Mode {
+    /// Plain words for a tool result.
+    pub fn describe(&self) -> String {
         match self {
-            Target::Own => Mode::Own,
-            Target::Mine(_) => Mode::Mine,
+            Target::Own => "Claude's own Chrome profile, signed in only to accounts set up for Claude".to_string(),
+            Target::Mine(mine) => {
+                let profile = match &mine.profile {
+                    Some(p) => format!("profile folder \"{p}\""),
+                    None => "the profile he used last".to_string(),
+                };
+                format!("Joe's own {}, {profile}", mine.app.label())
+            }
+        }
+    }
+
+    /// Parses a `browser_target` call. `fallback` supplies the app and
+    /// profile a "mine" request leaves out (Settings' values).
+    pub fn parse_request(args: &Value, fallback: &Mine) -> Result<Request, String> {
+        let Some(target) = args["target"].as_str() else {
+            return Ok(Request::Report);
+        };
+        match target {
+            "default" => Ok(Request::Default),
+            "own" => Ok(Request::Set(Target::Own)),
+            "mine" => {
+                let app = match args["app"].as_str() {
+                    Some(name) => App::parse(name).ok_or_else(|| format!("app must be chrome, edge or brave, not \"{name}\""))?,
+                    None => fallback.app,
+                };
+                let profile = match args["profile"].as_str() {
+                    Some(p) => Some(p.trim().to_string()).filter(|p| !p.is_empty()),
+                    None => fallback.profile.clone(),
+                };
+                let mine = Mine { app, profile };
+                // Refuse a bad profile name or a missing Brave now, not on the first page load.
+                mine.playwright_args()?;
+                Ok(Request::Set(Target::Mine(mine)))
+            }
+            other => Err(format!("target must be own, mine or default, not \"{other}\"")),
         }
     }
 }
 
 impl Mine {
+    /// The app and profile Settings holds, whether or not it is the starting mode.
+    pub fn from_settings(settings: &Settings) -> Self {
+        let app = settings.str_extra(APP_KEY).and_then(App::parse).unwrap_or(App::Chrome);
+        let profile = settings.str_extra(PROFILE_KEY).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string);
+        Mine { app, profile }
+    }
+
     /// Playwright MCP flags that attach to this browser through its extension.
     pub fn playwright_args(&self) -> Result<Vec<String>, String> {
         self.playwright_args_with(|| brave_candidates().into_iter().find(|p| p.is_file()))
@@ -184,11 +233,55 @@ mod tests {
         }
     }
 
+    fn request(args: serde_json::Value, fallback: &Mine) -> Result<Request, String> {
+        Target::parse_request(&args, fallback)
+    }
+
     #[test]
-    fn the_mode_round_trips_through_the_mcp_env() {
-        assert_eq!(Mode::from_env(Mode::Own.env_value()), Mode::Own);
-        assert_eq!(Mode::from_env(Mode::Mine.env_value()), Mode::Mine);
-        assert_eq!(Target::Own.mode(), Mode::Own);
-        assert_eq!(Target::Mine(mine(App::Chrome, None)).mode(), Mode::Mine);
+    fn a_call_without_a_target_only_reports() {
+        let fallback = mine(App::Chrome, None);
+        assert_eq!(request(json!({}), &fallback), Ok(Request::Report));
+        assert_eq!(request(json!({"target": "default"}), &fallback), Ok(Request::Default));
+        assert_eq!(request(json!({"target": "own"}), &fallback), Ok(Request::Set(Target::Own)));
+    }
+
+    #[test]
+    fn mine_takes_what_the_call_names_and_settings_fills_the_rest() {
+        let fallback = mine(App::Edge, Some("Profile 3"));
+        assert_eq!(request(json!({"target": "mine"}), &fallback), Ok(Request::Set(Target::Mine(fallback.clone()))));
+        assert_eq!(
+            request(json!({"target": "mine", "app": "chrome", "profile": " Profile 1 "}), &fallback),
+            Ok(Request::Set(Target::Mine(mine(App::Chrome, Some("Profile 1")))))
+        );
+        // An empty profile means "the browser's last used", overriding Settings' folder.
+        assert_eq!(
+            request(json!({"target": "mine", "profile": ""}), &fallback),
+            Ok(Request::Set(Target::Mine(mine(App::Edge, None))))
+        );
+    }
+
+    #[test]
+    fn a_bad_request_is_refused_with_a_reason() {
+        let fallback = mine(App::Chrome, None);
+        assert!(request(json!({"target": "elsewhere"}), &fallback).unwrap_err().contains("own, mine or default"));
+        assert!(request(json!({"target": "mine", "app": "firefox"}), &fallback).unwrap_err().contains("chrome, edge or brave"));
+        assert!(request(json!({"target": "mine", "profile": "../x"}), &fallback).unwrap_err().contains("not a browser profile"));
+    }
+
+    #[test]
+    fn mine_from_settings_reads_app_and_profile_even_when_own_is_the_start() {
+        let s = settings(&[("claudeBrowserMode", "own"), ("claudeBrowserMineApp", "edge"), ("claudeBrowserMineProfile", "Profile 4")]);
+        assert_eq!(Mine::from_settings(&s), mine(App::Edge, Some("Profile 4")));
+        assert_eq!(Target::from_settings(&s), Target::Own);
+    }
+
+    #[test]
+    fn describe_names_whose_browser_it_is() {
+        assert!(Target::Own.describe().contains("accounts set up for Claude"));
+        assert_eq!(
+            Target::Mine(mine(App::Brave, Some("Profile 1"))).describe(),
+            "Joe's own Brave, profile folder \"Profile 1\""
+        );
+        assert_eq!(Target::Mine(mine(App::Chrome, None)).describe(), "Joe's own Chrome, the profile he used last");
     }
 }

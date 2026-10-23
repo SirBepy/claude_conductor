@@ -1,8 +1,9 @@
 // "Claude's browser" section of Chat defaults: the switch that gives chats the
-// browser_* tools, the choice between Claude's own off-screen Chrome and one of
-// Joe's own browsers (driven through the Playwright extension he approves),
-// and the button that brings the daemon's Chrome onto this screen so Joe can
-// sign in or clear a CAPTCHA for Claude.
+// browser_* tools, the browser a chat starts on (Claude's own off-screen Chrome
+// or one of Joe's own, driven through the Playwright extension he approves; a
+// chat can switch itself with browser_target), and the button that brings the
+// daemon's Chrome onto this screen so Joe can sign in or clear a CAPTCHA for
+// Claude.
 import { html, type TemplateResult } from "lit-html";
 import { api } from "../../../../shared/api";
 import { toggleRow } from "../../ui";
@@ -83,7 +84,7 @@ function minePart(choice: BrowserChoice): TemplateResult {
       <span class="kit-row-label">Playwright extension</span>
       <button type="button" class="btn-secondary" id="chatDefaultsBrowserInstall">Install page</button>
     </div>
-    <p class="cd-hint">Install the extension once in that browser. Each chat opens a connect page there for you to approve, so Claude acts with your real sign-ins only after you say yes. Leave the profile blank to use the one you used last, or name a folder such as Profile 1 to point Claude at a dedicated profile.</p>
+    <p class="cd-hint">Used when a chat starts on, or is told to switch to, your browser. Install the extension once in that browser. Each chat opens a connect page there for you to approve, so Claude acts with your real sign-ins only after you say yes. Leave the profile blank to use the one you used last, or name a folder such as Profile 1 to point Claude at a dedicated profile.</p>
   `;
 }
 
@@ -105,10 +106,10 @@ export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
         label: "Let chats use a browser",
         inputId: "chatDefaultsBrowser",
         checked: choice.enabled,
-        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours, and runs off-screen. My browser drives one of yours through the Playwright extension.",
+        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours, and runs off-screen. My browser drives one of yours through the Playwright extension. Tell any chat \"use my browser\" or \"use your own\" to switch just that chat.",
       })}
       <div class="kit-row">
-        <span class="kit-row-label">Which browser</span>
+        <span class="kit-row-label">Chats start on</span>
         <select id="chatDefaultsBrowserMode" class="kit-select">
           <option value="own" ?selected=${choice.mode === "own"}>Claude's own</option>
           <option value="mine" ?selected=${choice.mode === "mine"}>My browser</option>
