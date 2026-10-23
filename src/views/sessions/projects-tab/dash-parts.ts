@@ -4,8 +4,6 @@ import { ifDefined } from "lit-html/directives/if-defined.js";
 import { sameCwd, type ReportsTab } from "./format";
 import type { DashboardHistory, DashSnapshot, DashTodo, RepoRef } from "./types";
 
-export type ChatsTab = "current" | "recent";
-
 /** What a dashboard row can do. Implemented in dash-actions.ts, so the section
  *  templates stay pure functions of (ctx) and never import the sessions view. */
 export interface DashActions {
@@ -13,18 +11,15 @@ export interface DashActions {
   openIn(anchor: HTMLElement, kind: "vscode" | "terminal" | "explorer"): void;
   openChat(sessionId: string): void;
   openHistory(sessionId: string): void;
-  openDraft(draftId: string, sessionId: string | null): void;
   openFile(path: string): void;
   openUrl(url: string): void;
   openAllHistory(): void;
   toggleTodo(todo: DashTodo): void;
   refreshCard(id: string): void;
   openKebab(anchor: HTMLElement): void;
-  setRepo(cwd: string | null): void;
   setTab(tab: ReportsTab): void;
   openImage(id: string): void;
   setPage(key: string, page: number): void;
-  setChatsTab(tab: ChatsTab): void;
   /** Full-size view of the Reports card's current tab. */
   openReportsModal(): void;
 }
@@ -32,8 +27,6 @@ export interface DashActions {
 export interface DashCtx {
   snap: DashSnapshot;
   history: DashboardHistory | null;
-  /** Selected repo of a group dashboard; null means "All". */
-  repo: string | null;
   tab: ReportsTab;
   /** Gallery data URLs by image id; "failed" once a load errored. */
   images: Map<string, string>;
@@ -41,11 +34,10 @@ export interface DashCtx {
   doneTodos: Set<string>;
   /** Current page per paged card, keyed by the pager's name. */
   pages: Map<string, number>;
-  chatsTab: ChatsTab;
   /** Which of the two columns each half-width section sits in, by section id (balance.ts). */
   columns: Map<string, 0 | 1>;
-  /** Index of the first quick-action chip showing in the one-line track. */
-  qaStart: number;
+  /** The half-width section ids in reading order, as the last template built them. */
+  halfOrder: string[];
   /** Called after every paint; the Reports modal redraws from it while open. */
   paintHooks: Set<() => void>;
   nowMs: number;
@@ -53,8 +45,6 @@ export interface DashCtx {
 }
 
 export const isGroup = (c: DashCtx): boolean => c.snap.target.kind === "group";
-
-export const inRepo = (c: DashCtx, cwd: string): boolean => !c.repo || sameCwd(c.repo, cwd);
 
 export const hidden = (c: DashCtx, id: string): boolean => c.snap.hidden_builtins.includes(id);
 
@@ -65,7 +55,7 @@ export function repoName(c: DashCtx, cwd: string): string {
 
 /** A repo tag on a row, only where it carries information: a group showing every repo. */
 export function repoTag(c: DashCtx, cwd: string): TemplateResult | typeof nothing {
-  if (!isGroup(c) || c.repo) return nothing;
+  if (!isGroup(c)) return nothing;
   return html`<span class="pd-repo">${repoName(c, cwd)}</span>`;
 }
 
@@ -81,8 +71,8 @@ export interface RowOpts {
   meta?: string;
   tag?: TemplateResult | typeof nothing;
   trailing?: TemplateResult | typeof nothing;
-  /** First row of a new run inside a card (the next status, the scheduled
-   *  items): extra space above it does the job a sub-heading would. */
+  /** First row of a new run inside a card (the scheduled items, the commits):
+   *  extra space above it does the job a sub-heading would. */
   gap?: boolean;
 }
 
@@ -95,17 +85,14 @@ export function row(lead: TemplateResult, text: TemplateResult | string, o: RowO
 export const quiet = (text: string): TemplateResult => html`<div class="pd-quiet">${text}</div>`;
 
 export interface CardOpts {
-  full?: boolean;
   id: string;
-  /** Extra class on the section. */
-  cls?: string;
   trailing?: TemplateResult | typeof nothing;
   /** A small number beside the title (how many are running), so the state reads at a glance. */
   count?: number;
 }
 
 export function card(title: string, body: TemplateResult | TemplateResult[], o: CardOpts): TemplateResult {
-  return html`<section class="pd-card ${o.full ? "full" : ""} ${o.cls ?? ""}" data-pd-card=${o.id}>
+  return html`<section class="pd-card" data-pd-card=${o.id}>
     <div class="pd-h"><span>${title}${o.count ? html`<span class="pd-count">${o.count}</span>` : nothing}</span><span class="grow"></span>${o.trailing ?? nothing}</div>
     ${body}
   </section>`;

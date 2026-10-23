@@ -6,8 +6,9 @@ import {
 } from "./projects-tab-fixtures";
 
 // The Projects tab against a fake dashboard backend: tab swap, both dashboard
-// shapes (one repo, a four-repo group with two custom cards), the cards modal,
-// and the click that hands a running chat back to the Chats tab.
+// shapes (one repo, a four-repo group with two custom cards), the column
+// balancing, the Past results footer and modal, the cards modal, and the
+// click that hands a running chat back to the Chats tab.
 
 const SESSIONS = [
   sessionInstance({ session_id: "s-w", pid: 201, name: "Loop todos: cycle 3", cwd: CONDUCTOR_CWD, busy: true, awaiting: "working" }),
@@ -95,16 +96,20 @@ test.describe("view-harness / Projects tab", () => {
     const root = page.locator('.pd-root[data-pd-target="project:p-conductor"]');
     await expect(root.locator(".pd-head h3")).toHaveText("claude_usage_in_taskbar");
     await expect(root.locator(".pd-branch")).toHaveText("master ↑2");
-    for (const id of ["needs_you", "your_todos", "chats", "next_up", "ship", "running", "reports"]) {
+    for (const id of ["your_todos", "chats", "next_up", "ship", "running", "reports"]) {
       await expect(card(page, id)).toBeVisible();
     }
-    await expect(page.locator(".pd-qa .pd-chip").first()).toContainText("/pickup");
-    await expect(card(page, "reports").locator(".pd-out")).toHaveCount(3);
+    await expect(card(page, "needs_you")).toHaveCount(0);
+    await expect(page.locator(".pd-qa .pd-chip").first()).toHaveText("+ New chat");
+    await expect(page.locator(".pd-qa .pd-chip").nth(1)).toContainText("/pickup");
+    // Past results are only the footer's links; nothing of them sits on the page.
+    await expect(card(page, "reports")).toHaveClass(/\bpd-foot\b/);
+    await expect(page.locator(".pd-root .pd-out")).toHaveCount(0);
     await page.waitForTimeout(250); // row background transition
     await capture(page, "r2-projects-conductor");
   });
 
-  test("a four-repo group shows repo chips, one ship row per repo and both custom cards", async ({ page }) => {
+  test("a four-repo group shows its repo count, one ship row per repo and both custom cards", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     await projectRow(page, "Zirtue").click();
@@ -112,7 +117,8 @@ test.describe("view-harness / Projects tab", () => {
     await expect(page.locator('.pd-root[data-pd-target="group:g-zirtue"] .pd-head h3')).toHaveText("Zirtue");
     await expect(projectRow(page, "Zirtue")).toHaveClass(/\bactive\b/);
     await expect(projectRow(page, "claude_usage_in_taskbar")).not.toHaveClass(/\bactive\b/);
-    await expect(page.locator(".pd-repo-chip")).toHaveCount(5);
+    await expect(page.locator(".pd-root .pd-subline")).toHaveText("4 repos");
+    await expect(page.locator(".pd-repo-chip")).toHaveCount(0);
     await expect(card(page, "ship").locator(".pd-row")).toHaveCount(4);
     await expect(card(page, "card:c-sc").locator(".pd-row")).toHaveCount(3);
     await expect(card(page, "card:c-sc").locator(".pd-fetched")).toHaveText("fetched 6m ago");
@@ -122,45 +128,72 @@ test.describe("view-harness / Projects tab", () => {
     await expect(card(page, "your_todos")).toHaveCount(0);
     await page.waitForTimeout(250);
     await capture(page, "r2-projects-zirtue");
-
-    await page.locator(".pd-repo-chip", { hasText: "zng-biller" }).click();
-    await expect(card(page, "chats").locator(".pd-row")).toHaveCount(1);
-    await expect(card(page, "ship").locator(".pd-kv").first()).toBeVisible();
   });
 
-  test("Reports gallery loads images one by one", async ({ page }) => {
+  test("the Past results footer opens the modal on the chosen tab, which loads the gallery and opens an image", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
-    await card(page, "reports").locator(".pd-rtab", { hasText: "Gallery" }).click();
-    await expect(card(page, "reports").locator(".pd-shot img")).toHaveCount(4);
-    await page.waitForTimeout(250);
-    await capture(page, "r4-reports-gallery");
-    await expect(card(page, "reports").locator(".pd-rtab.on")).toHaveText("Gallery");
-
-    await card(page, "reports").locator("[data-pd-see-more]").click();
+    await page.locator('.pd-foot [data-pd-see-more="gallery"]').click();
     const modal = page.locator(".pd-modal.wide");
+    await expect(modal.locator(".pd-rtab.on")).toHaveText("Gallery");
     await expect(modal.locator(".pd-shot img")).toHaveCount(6);
     await page.waitForTimeout(350); // open morph
-    await capture(page, "r2-reports-see-more");
-    await modal.locator(".btn-primary").click();
-    await expect(modal).toHaveCount(0);
+    await capture(page, "r5-past-results-gallery");
 
-    await card(page, "reports").locator(".pd-shot img").first().click();
+    await modal.locator(".pd-rtab", { hasText: "Outcomes" }).click();
+    await expect(modal.locator(".pd-out")).toHaveCount(3);
+    await modal.locator(".pd-rtab", { hasText: "Gallery" }).click();
+    await modal.locator(".pd-shot img").first().click();
     await expect(page.locator(".pd-lightbox img")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.locator(".pd-lightbox")).toHaveCount(0);
+    await modal.locator(".btn-primary").click();
+    await expect(modal).toHaveCount(0);
   });
 
-  test("Reports keeps its natural height, so the page ends under it instead of stretching it into a blank box", async ({ page }) => {
+  test("the half-width sections balance across two columns, then stack in reading order when narrow", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
-    const reports = card(page, "reports");
-    await expect(reports.locator(".pd-out")).toHaveCount(3);
-    const height = async (): Promise<number> => (await reports.boundingBox())!.height;
-    const atDefault = await height();
-    await page.setViewportSize({ width: 1032, height: 2000 });
-    await page.waitForTimeout(100);
-    expect(Math.abs((await height()) - atDefault)).toBeLessThan(1);
+    await projectRow(page, "Zirtue").click();
+    const root = page.locator('.pd-root[data-pd-target="group:g-zirtue"]');
+    await expect(card(page, "card:c-ck")).toBeVisible();
+
+    // Greedy shortest-first placement: the columns' natural heights differ by
+    // less than the tallest single section, and neither column is empty.
+    const cols = await root.evaluate((el) => [...el.querySelectorAll(".pd-col")].map((col) =>
+      [...col.querySelectorAll<HTMLElement>(":scope > [data-pd-card]")].map((sec) => {
+        const last = sec.lastElementChild!.getBoundingClientRect();
+        return last.bottom - sec.getBoundingClientRect().top;
+      })));
+    expect(cols[0]!.length).toBeGreaterThan(0);
+    expect(cols[1]!.length).toBeGreaterThan(0);
+    const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
+    expect(Math.abs(sum(cols[0]!) - sum(cols[1]!))).toBeLessThan(Math.max(...cols.flat()));
+
+    await page.setViewportSize({ width: 860, height: 1340 });
+    await expect(root.locator(".pd-col").nth(1).locator("[data-pd-card]")).toHaveCount(0);
+    await expect(root.locator(".pd-col").first().locator(":scope > [data-pd-card]"))
+      .toHaveCount(4);
+    const order = await root.locator(".pd-col").first().locator(":scope > [data-pd-card]")
+      .evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.pdCard));
+    expect(order).toEqual(["next_up", "ship", "card:c-sc", "card:c-ck"]);
+  });
+
+  test("the Past results footer stays on the pane's bottom edge, whether the page is short or scrolled", async ({ page }) => {
+    await mountWithDashboard(page);
+    await page.locator('[data-pd-tab="projects"]').click();
+    const root = page.locator('.pd-root[data-pd-target="project:p-conductor"]');
+    await expect(root.locator(".pd-foot")).toBeVisible();
+    const gap = async (): Promise<number> => root.evaluate((el) =>
+      el.getBoundingClientRect().bottom - el.querySelector(".pd-foot")!.getBoundingClientRect().bottom);
+
+    // A pane taller than the page: the footer drops to the bottom instead of following the last section.
+    await page.setViewportSize({ width: 1032, height: 2400 });
+    await expect.poll(gap).toBeLessThan(1);
+    // A pane shorter than the page: the footer sticks to the bottom at the top of the scroll too.
+    await page.setViewportSize({ width: 1032, height: 600 });
+    await root.evaluate((el) => { el.scrollTop = 0; });
+    await expect.poll(gap).toBeLessThan(1);
   });
 
   test("the kebab opens the Dashboard cards modal with switches for every section", async ({ page }) => {
@@ -174,7 +207,7 @@ test.describe("view-harness / Projects tab", () => {
     await expect(modal).toBeVisible();
     await expect(modal.locator(".pd-msec")).toHaveText(["Quick actions", "Sections", "Custom cards"]);
     await expect(modal.locator("[data-pd-pin]")).toHaveCount(9);
-    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 8 + 2);
+    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 7 + 2);
     await expect(modal).toContainText("Ask Claude in a chat here to add a card");
     await expect(modal).not.toHaveClass(/modal-card-morph-hidden/);
     await page.waitForTimeout(350); // open morph
@@ -220,19 +253,20 @@ test.describe("view-harness / Projects tab", () => {
     await capture(page, "projects-tab-chats-at-rest");
   });
 
-  test("Chats card: Current keeps the sidebar's group order with no sub-labels, Recent lists ended ones", async ({ page }) => {
+  test("Chats: one list, live chats in group order with no gaps, then three closed ones under a label", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     const chats = card(page, "chats");
-    await expect(chats.locator(".pd-rtab.on")).toHaveText("Current");
-    await expect(chats.locator(".pd-row.is-gap")).toHaveCount(1);
+    await expect(chats.locator(".pd-rtab")).toHaveCount(0);
+    await expect(chats.locator(".pd-row.is-gap")).toHaveCount(0);
+    await expect(chats.locator(".pd-row")).toHaveCount(4 + 3);
+    await expect(chats.locator(".pd-row").first()).toContainText("Projects dashboard brainstorm");
+    await expect(chats.locator("[data-pd-past-label]")).toHaveText("Recently closed");
     await expect(chats.locator("[data-pd-pager]")).toContainText("1/2");
     await chats.locator('[data-pd-pager] button[title="Next"]').click();
-    await expect(chats.locator(".pd-row.is-gap")).toHaveCount(0);
-
-    await chats.locator(".pd-rtab", { hasText: "Recent" }).click();
-    await expect(chats.locator(".pd-row")).toHaveCount(3);
+    await expect(chats.locator(".pd-row")).toHaveCount(1 + 3);
     await expect(chats).toContainText("Phone question sheet peek");
+    await expect(chats.locator('[data-pd-all-history][title="History"]')).toBeVisible();
   });
 
   test("Next up shows three summarized items with the full text in the tooltip, and a pager", async ({ page }) => {
@@ -247,26 +281,28 @@ test.describe("view-harness / Projects tab", () => {
     await expect(next.locator(".pd-row").first()).toContainText("#90");
   });
 
-  test("quick actions stay on one line and a right press pages the track forward", async ({ page }) => {
+  test("quick actions stay on one line led by New chat, and a wheel turn scrolls them sideways with a passing scrollbar", async ({ page }) => {
     await mountWithDashboard(page);
     await page.locator('[data-pd-tab="projects"]').click();
     await projectRow(page, "Zirtue").click();
-    const qa = page.locator(".pd-qa");
-    await expect(qa.locator(".pd-chip").first()).toHaveText("/shortcut-priorities");
-    const tops = await qa.locator(".pd-chip").evaluateAll((els) => els.map((e) => (e as HTMLElement).offsetTop));
+    const track = page.locator(".pd-qa-track");
+    await expect(track.locator(".pd-chip").first()).toHaveText("+ New chat");
+    await expect(track.locator(".pd-chip").nth(1)).toHaveText("/shortcut-priorities");
+    const tops = await track.locator(".pd-chip").evaluateAll((els) => els.map((e) => (e as HTMLElement).offsetTop));
     expect(new Set(tops).size).toBe(1);
-    await expect(qa).not.toHaveClass(/is-fit/);
-    await expect(qa.locator('[data-pd-qa-dir="-1"]')).toBeDisabled();
+    await expect(page.locator("[data-pd-qa-dir]")).toHaveCount(0);
+    await expect(track).toHaveClass(/\bfade-r\b/);
+    await expect(track).not.toHaveClass(/\bfade-l\b/);
 
-    const strip = qa.locator(".pd-qa-strip");
-    await qa.locator('[data-pd-qa-dir="1"]').click();
-    await expect(qa.locator('[data-pd-qa-dir="-1"]')).toBeEnabled();
-    await expect(strip).not.toHaveCSS("transform", /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
-    await page.waitForTimeout(350); // slide transition
-    await capture(page, "r2-quick-actions-paged");
-
-    await qa.locator('[data-pd-qa-dir="-1"]').click();
-    await expect(qa.locator('[data-pd-qa-dir="-1"]')).toBeDisabled();
+    const box = (await track.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 200);
+    await expect.poll(() => track.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+    await expect(track).toHaveClass(/\bis-scrolling\b/);
+    await expect(track).toHaveClass(/\bfade-l\b/);
+    await capture(page, "r5-quick-actions-scrolling");
+    // The scrollbar hides again once the row stops moving.
+    await expect(track).not.toHaveClass(/\bis-scrolling\b/, { timeout: 3000 });
   });
 
   test("closing a project hides its row, Ctrl+W closes the shown one, and + reopens from the picker", async ({ page }) => {

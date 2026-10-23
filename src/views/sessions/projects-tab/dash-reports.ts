@@ -1,27 +1,20 @@
-// Reports card: finished-chat outcomes, a gallery of images from past chats,
-// and files chats produced. All three come from dashboard_history, which
-// arrives after the snapshot, so the card shows a quiet loading line first.
-// The card is a peek at its natural height (three outcomes, four thumbnails,
-// four files) and the page ends under it; "See more" opens the full tab in a modal.
+// Past results: finished-chat outcomes, a gallery of images from past chats,
+// and files chats produced. All three come from dashboard_history. The page
+// only carries the footer's links to them; the full-size modal, with a tab per
+// kind, is where they show.
 import { html, nothing, render, type TemplateResult } from "lit-html";
 import { isRemote } from "../../../shared/transport";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
 import { agoLabel, fileIcon, fileName, plainPreview, shortAgo, type ReportsTab } from "./format";
 import type { ActionHost } from "./dash-actions";
 import type { OutcomeRow } from "./types";
-import { card, hidden, icon, inRepo, quiet, repoTag, row, type DashCtx } from "./dash-parts";
-
-const CARD_THUMBS = 4;
-const CARD_OUTCOMES = 3;
-const CARD_FILES = 4;
+import { hidden, icon, quiet, repoTag, row, type DashCtx } from "./dash-parts";
 
 const TABS: Array<{ id: ReportsTab, label: string }> = [
   { id: "outcomes", label: "Outcomes" },
   { id: "gallery", label: "Gallery" },
   { id: "files", label: "Files" },
 ];
-
-const outcomesIn = (c: DashCtx): OutcomeRow[] => (c.history?.outcomes ?? []).filter((o) => inRepo(c, o.repo_cwd));
 
 const tile = (c: DashCtx, o: OutcomeRow): TemplateResult => html`
   <div class="pd-out" @click=${() => c.act.openHistory(o.session_id)}>
@@ -30,42 +23,30 @@ const tile = (c: DashCtx, o: OutcomeRow): TemplateResult => html`
   </div>`;
 
 function outcomesFull(c: DashCtx): TemplateResult {
-  const items = outcomesIn(c);
+  const items = c.history?.outcomes ?? [];
   if (!items.length) return quiet("No finished chats yet");
   return html`<div class="pd-outs">${items.map((o) => tile(c, o))}</div>`;
 }
 
-function outcomesCard(c: DashCtx): TemplateResult {
-  const items = outcomesIn(c).slice(0, CARD_OUTCOMES);
-  if (!items.length) return quiet("No finished chats yet");
-  return html`<div class="pd-outs pd-tiles">${items.map((o) => tile(c, o))}</div>`;
-}
-
-function galleryCompact(c: DashCtx): TemplateResult {
-  const items = (c.history?.gallery ?? []).filter((g) => inRepo(c, g.repo_cwd)).slice(0, CARD_THUMBS);
-  if (!items.length) return quiet("No images from past chats");
-  return html`<div class="pd-gal compact">${items.map((g) => shot(c, g.id, g.title, false))}</div>`;
-}
-
-/** One thumbnail. The caption only shows in the full view; the compact row keeps it as a tooltip. */
-function shot(c: DashCtx, id: string, title: string, caption: boolean): TemplateResult {
+/** One thumbnail with its caption. */
+function shot(c: DashCtx, id: string, title: string): TemplateResult {
   const src = c.images.get(id);
   const ok = !!src && src !== "failed";
   return html`<div class="pd-shot" title=${title} @click=${() => ok && c.act.openImage(id)}>
     ${ok ? html`<img src=${src} alt=${title}>`
       : html`<div class="pd-shot-ph">${src === "failed" ? "Image unavailable" : html`<i class="ph ph-spinner"></i>`}</div>`}
-    ${caption ? html`<div class="pd-shot-t">${title}</div>` : nothing}
+    <div class="pd-shot-t">${title}</div>
   </div>`;
 }
 
 function galleryFull(c: DashCtx): TemplateResult {
-  const items = (c.history?.gallery ?? []).filter((g) => inRepo(c, g.repo_cwd));
+  const items = c.history?.gallery ?? [];
   if (!items.length) return quiet("No images from past chats");
-  return html`<div class="pd-gal">${items.map((g) => shot(c, g.id, g.title, true))}</div>`;
+  return html`<div class="pd-gal">${items.map((g) => shot(c, g.id, g.title))}</div>`;
 }
 
 function fileRows(c: DashCtx): TemplateResult[] {
-  const items = (c.history?.files ?? []).filter((f) => inRepo(c, f.repo_cwd));
+  const items = c.history?.files ?? [];
   return items.map((f) => row(icon(fileIcon(f.path)), fileName(f.path), {
     dim: !f.exists, tag: repoTag(c, f.repo_cwd),
     meta: `${f.chat_title} · ${shortAgo(f.at_ms, c.nowMs)}`,
@@ -80,24 +61,16 @@ function filesFull(c: DashCtx): TemplateResult | TemplateResult[] {
   return rows.length ? rows : quiet("No files from past chats");
 }
 
-function filesCard(c: DashCtx): TemplateResult {
-  const rows = fileRows(c).slice(0, CARD_FILES);
-  return rows.length ? html`${rows}` : quiet("No files from past chats");
-}
-
 const tabsFor = (c: DashCtx): TemplateResult => html`<div class="pd-rtabs">${TABS.map((t) => html`
   <button type="button" class="pd-rtab ${c.tab === t.id ? "on" : ""}" @click=${() => c.act.setTab(t.id)}>${t.label}</button>`)}</div>`;
 
-export function reports(c: DashCtx): TemplateResult | typeof nothing {
+/** Past results stay off the page: the footer row pinned to the pane's
+ *  bottom edge opens any of the three in the full-size view. */
+export function reportsLink(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "reports")) return nothing;
-  let body: TemplateResult;
-  if (!c.history) body = quiet("Loading...");
-  else if (c.tab === "outcomes") body = outcomesCard(c);
-  else if (c.tab === "gallery") body = galleryCompact(c);
-  else body = filesCard(c);
-  const more = c.history ? html`<a class="pd-link" data-pd-see-more @click=${() => c.act.openReportsModal()}>See more</a>` : nothing;
-  return card("Reports", body,
-    { id: "reports", full: true, cls: "pd-reports", trailing: html`${tabsFor(c)}${more}` });
+  const open = (tab: ReportsTab): void => { c.act.setTab(tab); c.act.openReportsModal(); };
+  return html`<div class="pd-foot" data-pd-card="reports"><span>Past results</span>${TABS.map((t) => html`
+    <button type="button" class="pd-act" data-pd-see-more=${t.id} @click=${() => open(t.id)}>${t.label}</button>`)}</div>`;
 }
 
 /** The current tab at full size, in the shared modal host. Redraws on every dashboard paint so gallery images appear as they load. */
@@ -108,11 +81,10 @@ export function openReportsModal(host: ActionHost): void {
   const close = (): void => { c.paintHooks.delete(hook); setBackdropCancel(null); closeHostCard(); };
 
   function draw(): void {
-    const label = TABS.find((t) => t.id === c.tab)?.label ?? "";
     const body = c.tab === "outcomes" ? outcomesFull(c) : c.tab === "gallery" ? galleryFull(c) : filesFull(c);
     render(html`
-      <div class="modal-card pd-modal wide" role="dialog" aria-modal="true" aria-label="Reports">
-        <header class="modal-header"><h3>Reports · ${label}</h3></header>
+      <div class="modal-card pd-modal wide" role="dialog" aria-modal="true" aria-label="Past results">
+        <header class="modal-header pd-mhead"><h3>Past results</h3>${tabsFor(c)}</header>
         <div class="modal-body pd-mbody">${body}</div>
         <footer class="modal-footer"><button type="button" class="btn btn-primary" @click=${close}>Done</button></footer>
       </div>`, slot);

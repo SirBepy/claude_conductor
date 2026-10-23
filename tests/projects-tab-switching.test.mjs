@@ -140,7 +140,8 @@ describe("Projects tab", () => {
       expect(d.view.getAttribute("data-mobile-pane")).toBe("chat");
       await vi.waitFor(() => expect(d.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-head')).not.toBeNull());
       expect(d.pane.querySelector('.pd-head [title="More"]')).toBeNull();
-      expect(d.pane.querySelector(".pd-fab")).not.toBeNull();
+      // New chat stays reachable on the phone: it leads the chip row.
+      expect(d.pane.querySelector("[data-pd-new-chat]")).not.toBeNull();
     });
 
     it("opening a closed project from + slides its dashboard in", async () => {
@@ -191,7 +192,7 @@ describe("Projects tab", () => {
     clickTab("projects");
     await vi.waitFor(() => expect(rows()).toHaveLength(2));
     rows()[1].click();
-    await vi.waitFor(() => expect(dom.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-repos')).not.toBeNull());
+    await vi.waitFor(() => expect(dom.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-head')).not.toBeNull());
     expect(rows()[1].classList.contains("active")).toBe(true);
     expect(rows()[0].classList.contains("active")).toBe(false);
   });
@@ -284,7 +285,7 @@ describe("open and closed projects", () => {
   it("closing the shown project moves to the next open one, and closing the last shows the empty pane", async () => {
     await vi.waitFor(() => expect(dom.pane.querySelector(".pd-root")).not.toBeNull());
     closeBtn(0).click();
-    await vi.waitFor(() => expect(dom.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-repos')).not.toBeNull());
+    await vi.waitFor(() => expect(dom.pane.querySelector('.pd-root[data-pd-target="group:g1"] .pd-head')).not.toBeNull());
     expect(names()).toEqual(["Zirtue"]);
 
     closeBtn(0).click();

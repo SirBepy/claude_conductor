@@ -4,7 +4,7 @@
    weight), 12px meta in --sb-muted, which keeps small text readable where raw
    --color-text-muted would not. */
 
-/* A column so the FAB dock (margin-top: auto) sits on the pane's bottom edge
+/* A column so the footer (margin-top: auto) sits on the pane's bottom edge
    when the page is shorter than the pane. */
 .pd-root {
   flex: 1;
@@ -12,7 +12,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  /* No bottom padding: the FAB dock is the page's last 104px. */
+  /* No bottom padding: the footer is flush with the pane's bottom edge. */
   padding: 24px 32px 0;
   color: var(--color-text);
   font-size: 13px;
@@ -33,24 +33,6 @@
 .pd-subline { margin-top: 3px; min-height: 18px; color: var(--sb-muted, var(--color-text-muted)); font-size: 12px; display: flex; gap: 10px; align-items: center; }
 .pd-branch { font: 12px var(--font-mono, monospace); color: var(--sb-muted, var(--color-text-muted)); }
 
-/* Repo filter: plain words, the chosen one underlined like the tab strips. */
-.pd-repos { display: flex; flex-wrap: wrap; gap: 2px 14px; }
-.pd-repo-chip {
-  padding: 1px 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; cursor: pointer;
-  color: var(--sb-muted, var(--color-text-muted)); font: 12px var(--font-mono, monospace);
-  transition: color 0.15s ease, border-color 0.15s ease;
-}
-.pd-repo-chip:hover { color: var(--color-text); }
-.pd-repo-chip.on { color: var(--color-text); border-bottom-color: color-mix(in srgb, var(--color-text) 55%, transparent); }
-
-.pd-btn {
-  display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px;
-  border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text);
-  font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-}
-.pd-btn.primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-background); }
-.pd-btn.primary:hover { filter: brightness(1.08); }
-
 .pd-ib {
   width: 32px; height: 32px; display: grid; place-items: center; flex: none;
   border: 0; border-radius: 8px; background: transparent; color: var(--sb-muted, var(--color-text-muted));
@@ -61,52 +43,52 @@
 .pd-ib:disabled { cursor: default; opacity: 0.6; }
 .pd-ib.is-spinning i { animation: icon-btn-spin 0.8s linear infinite; }
 
-/* New chat FAB: the sidebar's .sessions-fab look, docked to the pane. The dock
-   is the last thing on the page and sticks to the pane's bottom edge, so the
-   button stays put while the page scrolls, and its height is the room the
-   last section keeps clear of the button when scrolled to the end. */
-.pd-fab-dock { position: sticky; bottom: 0; margin-top: auto; flex: none; height: 104px; pointer-events: none; z-index: 20; }
-.pd-fab {
-  position: absolute; right: -8px; bottom: 28px; pointer-events: auto;
-  width: 52px; height: 52px; border-radius: 50%; border: 0; display: grid; place-items: center;
-  background: var(--color-primary); color: var(--color-background); font-size: 22px; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); transition: transform 0.12s ease, box-shadow 0.12s ease;
+/* Quick actions: one line that scrolls sideways (quick-track.ts). The
+   scrollbar keeps its room at all times, so showing it never shifts the row,
+   but is transparent until the row is scrolling. The -8px margin lines the
+   first chip's text up with the title above. Commands read as a line of text;
+   hover gives the one under the pointer a fill. */
+/* 2px + the thin scrollbar's ~10px + 12px keeps the old 24px under the chips. */
+.pd-qa { margin: 18px -8px 12px; }
+.pd-qa-track {
+  display: flex; align-items: center; gap: 4px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px;
+  scrollbar-width: thin; scrollbar-color: transparent transparent;
 }
-.pd-fab:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); }
-
-/* Quick actions: one line. The track clips the strip and the strip slides by
-   whole pages (quick-track.ts); the arrows drop out when every chip fits.
-   Commands read as a line of text; hover gives the one under the pointer a fill. */
-.pd-qa { display: flex; align-items: center; gap: 4px; margin: 18px 0 24px; }
-/* With no quick-action row (none pinned or used yet, or hidden) the header still keeps the same air above the sections. */
-.pd-head + .pd-top { margin-top: 24px; }
-.pd-qa.is-fit .pd-qa-btn { display: none; }
-.pd-qa-btn:disabled { opacity: 0.3; cursor: default; }
-.pd-qa-track { flex: 1; min-width: 0; overflow: hidden; }
-.pd-qa-strip { position: relative; display: flex; gap: 4px; width: max-content; transition: transform 0.25s ease; }
-.pd-qa.is-fit .pd-qa-track { margin-left: -8px; }
-/* A page boundary can fall mid-chip; the fade makes the cut read as "more this way". */
-.pd-qa:not(.is-fit) .pd-qa-track { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.pd-qa-track.is-scrolling { scrollbar-color: color-mix(in srgb, var(--color-text) 28%, transparent) transparent; }
+/* Fades say "more this way" on whichever side still has chips past the edge. */
+.pd-qa-track.fade-r { mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
+.pd-qa-track.fade-l { mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
+.pd-qa-track.fade-l.fade-r { mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
 .pd-chip {
   flex: none; white-space: nowrap; display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 6px; cursor: pointer;
   border: 0; background: transparent; color: var(--sb-muted, var(--color-text-muted));
-  font: 12.5px var(--font-mono, monospace); transition: color 0.15s ease, background-color 0.15s ease;
+  font: 12.5px/18px var(--font-mono, monospace); transition: color 0.15s ease, background-color 0.15s ease;
 }
 .pd-chip:hover { background: var(--color-surface); color: var(--color-text); }
-
 /* Sections are separated by hairlines, not boxes: each draws one above
    itself, and the two columns have one between them. Full-width sections sit
    in .pd-top; the rest in two columns that balance.ts fills shortest-first. A
    column's sections share out whatever height the other column has over it,
    so no one section is left holding the whole difference. */
 .pd-top { flex: none; display: flex; flex-direction: column; }
-.pd-cols { flex: none; display: grid; grid-template-columns: 1fr 1fr; }
+/* The columns' shared top hairline is drawn once across both, not per first
+   card, which the column padding would break into two segments. */
+.pd-cols { flex: none; display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--color-border); }
+.pd-col > .pd-card:first-child { border-top: 0; }
 .pd-col { min-width: 0; display: flex; flex-direction: column; }
 .pd-col:first-child { padding-right: 32px; border-right: 1px solid var(--color-border); }
 .pd-col:last-child { padding-left: 32px; }
 .pd-col > .pd-card { flex: 1 1 auto; }
 .pd-card { min-width: 0; border-top: 1px solid var(--color-border); padding: 18px 0 22px; }
-.pd-reports { border-bottom: 1px solid var(--color-border); }
+.pd-bottom { flex: none; }/* Footer: the way into past results, pinned to the pane's bottom edge while
+   the page scrolls under it, so it needs the pane's own fill. Its negative
+   side margins carry the hairline across .pd-root's padding. */
+.pd-foot {
+  position: sticky; bottom: 0; z-index: 20; margin: auto -32px 0;
+  flex: none; display: flex; align-items: center; gap: 16px; padding: 12px 32px;
+  border-top: 1px solid var(--color-border); background: var(--color-background);
+  font-size: 12.5px; color: var(--sb-muted, var(--color-text-muted));
+}
 @media (max-width: 900px) {
   .pd-cols { display: block; }
   .pd-col:first-child, .pd-col:last-child { padding: 0; border: 0; }
@@ -121,6 +103,8 @@
 .pd-count { margin-left: 7px; font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--sb-muted, var(--color-text-muted)); }
 .pd-link { font-weight: 400; font-size: 12px; color: var(--sb-muted, var(--color-text-muted)); cursor: pointer; }
 .pd-link:hover { color: var(--color-text); }
+/* A label inside a list, starting a run of rows (no rule: the label alone splits them). */
+.pd-sub { margin: 8px 0 3px; font-size: 12px; color: var(--sb-muted, var(--color-text-muted)); }
 .pd-quiet { color: var(--sb-muted, var(--color-text-muted)); font-size: 13px; padding: 4px 0; }
 .pd-quiet.pd-loading { padding: 24px 20px; }
 .pd-muted { color: var(--sb-muted, var(--color-text-muted)); }
@@ -175,6 +159,7 @@
    small controls (the pagers, card refresh, chip arrows). */
 @media (max-width: 768px) {
   .pd-root { padding: 16px 16px 0; }
+  .pd-foot { margin: auto -16px 0; padding: 12px 16px; }
   .pd-head { gap: 10px; }
   .pd-face { width: 24px; height: 24px; font-size: 18px; }
   .pd-titles h3 { font-size: 16px; }

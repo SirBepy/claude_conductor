@@ -7,12 +7,12 @@ import { debounce } from "../../../shared/debounce";
 import { hydrateProjectTechIcons } from "../../../shared/projects";
 import { makeActions, type ActionHost } from "./dash-actions";
 import { customCards } from "./dash-cards";
-import { header, newChatFab, quickActions } from "./dash-header";
-import { syncTrack } from "./quick-track";
+import { header, quickActions } from "./dash-header";
+import { syncEdges } from "./quick-track";
 import type { DashCtx } from "./dash-parts";
-import { reports } from "./dash-reports";
+import { reportsLink } from "./dash-reports";
 import { chats } from "./dash-chats";
-import { needsYou, nextUp, running, shipState, yourTodos } from "./dash-sections";
+import { nextUp, running, shipState, yourTodos } from "./dash-sections";
 import { assignColumns, naturalHeight } from "./balance";
 import { cardRefreshSecs, staleCardIds } from "./format";
 import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
@@ -41,6 +41,7 @@ export interface DashboardHandle {
 // chat status, the other three are the dashboard's own stores.
 const LIVE_EVENTS = ["instances-changed", "user-todos-changed", "message-drafts-changed", "dashboard-changed"];
 const REFETCH_DEBOUNCE_MS = 400;
+const RESIZE_DEBOUNCE_MS = 100;
 // History mining is the expensive call, so a burst of events never repeats it inside this window.
 const HISTORY_MIN_INTERVAL_MS = 15_000;
 // How often an open dashboard re-checks its custom cards for a result past its refresh interval.
@@ -50,14 +51,10 @@ interface Section { id: string, body: TemplateResult | typeof nothing }
 
 /** The half-width sections, in reading order; hidden ones drop out. */
 function halfSections(c: DashCtx): Section[] {
-  const cards = c.snap.cards.filter((v) => v.config.enabled);
-  const custom = customCards(c);
   const all: Section[] = [
-    { id: "chats", body: chats(c) },
     { id: "next_up", body: nextUp(c) },
     { id: "ship", body: shipState(c) },
-    { id: "running", body: running(c) },
-    ...cards.map((v, i): Section => ({ id: `card:${v.config.id}`, body: custom[i]! })),
+    ...customCards(c),
   ];
   return all.filter((s) => s.body !== nothing);
 }
@@ -65,28 +62,41 @@ function halfSections(c: DashCtx): Section[] {
 export function dashboardTemplate(c: DashCtx): TemplateResult {
   // Until a paint has measured them, sections alternate columns.
   const halves = halfSections(c);
+  // rebalance() needs the reading order, which the two-column DOM no longer shows.
+  c.halfOrder = halves.map((s) => s.id);
   const col = (n: 0 | 1): Array<TemplateResult | typeof nothing> =>
     halves.filter((s, i) => (c.columns.get(s.id) ?? i % 2) === n).map((s) => s.body);
+  // Chats lead (input-needed first, in red); Running sits last since it is
+  // often empty; past results stay behind the footer's links.
   return html`${header(c)}${quickActions(c)}
-    <div class="pd-top">${needsYou(c)}${yourTodos(c)}</div>
+    <div class="pd-top">${chats(c)}${yourTodos(c)}</div>
     <div class="pd-cols"><div class="pd-col">${col(0)}</div><div class="pd-col">${col(1)}</div></div>
-    ${reports(c)}${newChatFab(c)}`;
+    <div class="pd-bottom">${running(c)}</div>
+    ${reportsLink(c)}`;
 }
 
 const ONE_COLUMN = "(max-width: 900px)";
 
 /** Re-places the half-width sections by measured height. True when the
  *  placement changed and the dashboard needs another paint. */
-function rebalance(root: HTMLElement, c: DashCtx): boolean {
+export function rebalance(root: HTMLElement, c: DashCtx): boolean {
   const cols = root.querySelector<HTMLElement>(".pd-cols");
   if (!cols) return false;
   const secs = [...cols.querySelectorAll<HTMLElement>(".pd-col > [data-pd-card]")];
-  const ids = halfSections(c).map((s) => s.id);
   const byId = new Map(secs.map((s) => [s.dataset.pdCard!, s]));
+  const ids = c.halfOrder;
   // One column (narrow window): reading order, all in the first column.
   const narrow = window.matchMedia?.(ONE_COLUMN).matches ?? false;
-  const gap = parseFloat(getComputedStyle(cols.firstElementChild as HTMLElement).rowGap) || 0;
-  const next = narrow ? ids.map((): 0 | 1 => 0) : assignColumns(ids.map((id) => (byId.get(id) ? naturalHeight(byId.get(id)!) : 0)), gap);
+  let next: Array<0 | 1>;
+  if (narrow) next = ids.map((): 0 | 1 => 0);
+  else {
+    const heights = ids.map((id) => (byId.get(id) ? naturalHeight(byId.get(id)!) : 0));
+    // Not laid out (a hidden pane, a detached root): every height reads 0,
+    // which would pile everything into the left column. Keep the placement;
+    // the root's ResizeObserver re-runs this once it is shown again.
+    if (heights.every((h) => h === 0)) return false;
+    next = assignColumns(heights);
+  }
   let changed = false;
   ids.forEach((id, i) => {
     if (c.columns.get(id) !== next[i]) { c.columns.set(id, next[i]!); changed = true; }
@@ -118,14 +128,17 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     for (const hook of [...ctx.paintHooks]) hook();
   };
 
-  // The chip track's page boundaries depend on measured widths, so they are
-  // re-derived after every paint and whenever the window resizes.
+  // Whether the chip row overflows depends on measured widths, so its edge
+  // fades are re-derived after every paint and whenever the root's size changes.
   const syncQuickActions = (): void => {
-    const qa = root.querySelector<HTMLElement>(".pd-qa");
-    if (qa && ctx) ctx.qaStart = syncTrack(qa, ctx.qaStart);
+    const track = root.querySelector<HTMLElement>(".pd-qa-track");
+    if (track) syncEdges(track);
   };
-  const onResize = (): void => { syncQuickActions(); if (ctx && rebalance(root, ctx)) paint(); };
-  window.addEventListener("resize", onResize);
+  // Observing the root, not the window, also catches the pane being shown
+  // again after a paint it was hidden for (rebalance skips unmeasured paints).
+  const onResize = debounce((): void => { syncQuickActions(); if (ctx && rebalance(root, ctx)) paint(); }, RESIZE_DEBOUNCE_MS);
+  const resizeObs = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => onResize());
+  resizeObs?.observe(root);
 
   const loadGallery = async (): Promise<void> => {
     if (galleryRunning || !ctx?.history) return;
@@ -203,8 +216,8 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       const first = !ctx;
       if (!ctx) {
         ctx = {
-          snap, history: null, repo: null, tab: "outcomes", images: new Map(), refreshing: new Set(),
-          doneTodos: new Set(), pages: new Map(), chatsTab: "current", columns: new Map(), qaStart: 0, paintHooks: new Set(),
+          snap, history: null, tab: "outcomes", images: new Map(), refreshing: new Set(),
+          doneTodos: new Set(), pages: new Map(), columns: new Map(), halfOrder: [], paintHooks: new Set(),
           nowMs: Date.now(), act: makeActions(host),
         };
       } else {
@@ -212,7 +225,6 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
         // Keep a checked-off mark only while the todo is still in the snapshot (write in flight).
         const open = new Set(snap.your_todos.map((t) => t.id));
         ctx.doneTodos = new Set([...ctx.doneTodos].filter((id) => open.has(id)));
-        if (ctx.repo && !snap.target.repos.some((r) => r.cwd === ctx!.repo)) ctx.repo = null;
       }
       paint();
       void refreshStaleCards();
@@ -234,7 +246,8 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     destroyed = true;
     refetch.cancel();
     window.clearInterval(staleTimer);
-    window.removeEventListener("resize", onResize);
+    onResize.cancel();
+    resizeObs?.disconnect();
     for (const u of unlisteners.splice(0)) { try { u(); } catch { /* already gone */ } }
     root.remove();
   }

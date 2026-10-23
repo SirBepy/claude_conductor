@@ -53,10 +53,9 @@ const repoMenu = createMoreMenu<[RepoRef[]]>({
   },
 });
 
-/** The repo an action applies to: the selected chip, the only repo, or the user's pick. */
+/** The repo an action applies to: the only repo, or the user's pick. */
 async function pickRepo(c: DashCtx, anchor: HTMLElement): Promise<RepoRef | null> {
   const repos = c.snap.target.repos;
-  if (c.repo) return repos.find((r) => r.cwd === c.repo) ?? null;
   if (repos.length === 1) return repos[0] ?? null;
   if (repos.length === 0) return null;
   return new Promise<RepoRef | null>((resolve) => {
@@ -110,15 +109,6 @@ export function makeActions(host: ActionHost): DashActions {
       })();
     },
     openHistory: (sessionId) => { void openHistory(sessionId); },
-    openDraft: (draftId, sessionId) => {
-      void (async () => {
-        if (sessionId && await selectLive(sessionId)) {
-          state.fabDial?.openDraft(draftId);
-          return;
-        }
-        showToast("This draft's chat is not running, so it cannot be opened here.");
-      })();
-    },
     openFile: (path) => {
       void invoke<void>("open_in_vscode", { path }).catch((err) => showToast(`Could not open the file: ${String(err)}`));
     },
@@ -144,10 +134,8 @@ export function makeActions(host: ActionHost): DashActions {
         .finally(() => host.patch((c) => { c.refreshing.delete(id); }));
     },
     openKebab: (anchor) => openDashKebab(anchor, host),
-    setRepo: (cwd) => host.patch((c) => { c.repo = cwd; }),
     setTab: (tab) => { host.patch((c) => { c.tab = tab; }); if (tab === "gallery") host.loadGallery(); },
     setPage: (key, page) => host.patch((c) => { c.pages.set(key, Math.max(0, page)); }),
-    setChatsTab: (tab) => host.patch((c) => { c.chatsTab = tab; }),
     openReportsModal: () => openReportsModal(host),
     openImage: (id) => {
       const c = host.ctx();
