@@ -31,9 +31,17 @@ describe("summarize", () => {
 });
 
 describe("firstSentence", () => {
-  it("returns the first sentence of the plain text, or all of it when there is no full stop", () => {
-    expect(firstSentence("**Shipped** in `dd1af90`. Tests green.")).toBe("Shipped in dd1af90.");
+  it("stops after the first sentence once it is long enough to read", () => {
+    expect(firstSentence("**Shipped** the phone sheet fix in `dd1af90`, vitest green. Not pushed yet."))
+      .toBe("Shipped the phone sheet fix in dd1af90, vitest green.");
     expect(firstSentence("No full stop here")).toBe("No full stop here");
+  });
+
+  it("keeps reading past an opener too short to say anything", () => {
+    expect(firstSentence("Hi. Claude has the full context from earlier: the 5 spawned chats. More."))
+      .toBe("Hi. Claude has the full context from earlier: the 5 spawned chats.");
+    expect(firstSentence("Retrospective. **Verdict:** mid. The right answer landed."))
+      .toBe("Retrospective. Verdict: mid. The right answer landed.");
   });
 });
 
