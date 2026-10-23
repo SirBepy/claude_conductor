@@ -1,6 +1,8 @@
 (() => {
   const STORAGE_KEY = "conductor_server_url";
   const IROH_STORAGE_KEY = "conductor_iroh_id";
+  const LEGACY_IROH_KEY = "conductor_iroh_legacy_id";
+  const PORT_SCHEME_KEY = "conductor_iroh_port_scheme";
   const HEALTH_TIMEOUT_MS = 5000;
   const UNREACHABLE_MESSAGE =
     "Can’t reach your PC. Make sure Claude Conductor is running there and the tunnel is up.";
@@ -125,19 +127,47 @@
     return window.__TAURI_INTERNALS__.invoke(cmd, args);
   }
 
-  // The port is fixed (src-tauri LOOPBACK_PORT) so the SPA's rc_token, which
-  // lives in this origin's localStorage, survives across launches.
-  async function connectViaIroh(endpointId, pairCode) {
-    if (irohConnectInFlight) return;
-    irohConnectInFlight = true;
-    setConnecting(true);
+  // Before per-endpoint ports every PC shared 127.0.0.1:27184. The PC paired
+  // then keeps that origin (`legacy`), so its rc_token survives the upgrade;
+  // any other PC gets the port src-tauri derives from its endpoint id.
+  function migratePortScheme() {
+    try {
+      if (localStorage.getItem(PORT_SCHEME_KEY)) return;
+      const prior = localStorage.getItem(IROH_STORAGE_KEY);
+      if (prior) localStorage.setItem(LEGACY_IROH_KEY, prior);
+      localStorage.setItem(PORT_SCHEME_KEY, "per-endpoint");
+    } catch {
+      // Ignore: without storage there is no stored PC to carry over anyway.
+    }
+  }
+
+  function tunnelArgs(endpointId) {
+    let legacy = false;
+    try {
+      legacy = localStorage.getItem(LEGACY_IROH_KEY) === endpointId;
+    } catch {
+      // Ignore: falls back to the derived port.
+    }
+    return { endpointId, legacy };
+  }
+
+  // Stored only once a tunnel for it is up: a QR that never connects must
+  // not replace the PC the next launch reconnects to.
+  function rememberIroh(endpointId) {
     try {
       localStorage.setItem(IROH_STORAGE_KEY, endpointId);
     } catch {
       // Ignore: worst case re-scanning the QR mints a fresh tunnel next time.
     }
+  }
+
+  async function connectViaIroh(endpointId, pairCode) {
+    if (irohConnectInFlight) return;
+    irohConnectInFlight = true;
+    setConnecting(true);
     try {
-      const port = await tunnelInvoke("start_iroh_tunnel", { endpointId });
+      const port = await tunnelInvoke("start_iroh_tunnel", tunnelArgs(endpointId));
+      rememberIroh(endpointId);
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);
       navigating = true;
@@ -291,7 +321,7 @@
 
   async function attemptIrohConnect(endpointId, pairCode, token) {
     try {
-      const port = await tunnelInvoke("start_iroh_tunnel", { endpointId });
+      const port = await tunnelInvoke("start_iroh_tunnel", tunnelArgs(endpointId));
       if (token.cancelled) return false;
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);
@@ -422,6 +452,7 @@
   }
 
   function init() {
+    migratePortScheme();
     const stored = getStoredUrl();
     if (stored) {
       serverUrlInput.value = stored;

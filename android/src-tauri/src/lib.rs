@@ -1,6 +1,6 @@
 mod iroh_tunnel;
 
-use iroh_tunnel::{start_iroh_tunnel, IrohTunnelState, LOOPBACK_PORT};
+use iroh_tunnel::{is_tunnel_port, start_iroh_tunnel, IrohTunnelState};
 
 /// Bundled-shell entry point; the setup/health-check/handoff logic is in android/src/app.js.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,7 +36,7 @@ fn allow_navigation(url: &tauri::Url) -> bool {
     if url.host_str() == Some("tauri.localhost") {
         return true;
     }
-    if url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(LOOPBACK_PORT) {
+    if url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port().is_some_and(is_tunnel_port) {
         return true;
     }
     url.scheme() == "https"
@@ -68,24 +68,17 @@ mod tests {
         ));
     }
 
+    /// A derived per-endpoint port is allowed once its tunnel is live, and
+    /// never before: any other loopback port would be a general
+    /// http-on-localhost hole.
     #[test]
-    fn allows_the_iroh_loopback_origin() {
-        assert!(allow_navigation(
-            &Url::parse("http://127.0.0.1:27184/index.html").unwrap()
-        ));
-    }
-
-    /// The port must be the fixed one, not any loopback port - else the
-    /// guard's third branch would be a general http-on-localhost hole.
-    #[test]
-    fn rejects_loopback_on_the_wrong_port() {
+    fn allows_a_live_tunnel_port_and_no_other_loopback_port() {
+        let id = iroh::SecretKey::from_bytes(&[9; 32]).public();
+        let port = iroh_tunnel::derived_port(&id);
+        assert!(!allow_navigation(&Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap()));
+        iroh_tunnel::mark_live_for_test(port);
+        assert!(allow_navigation(&Url::parse(&format!("http://127.0.0.1:{port}/index.html")).unwrap()));
         assert!(!allow_navigation(&Url::parse("http://127.0.0.1:9999/").unwrap()));
-    }
-
-    #[test]
-    fn rejects_the_right_port_on_a_non_loopback_host() {
-        assert!(!allow_navigation(
-            &Url::parse("http://example.com:27184/").unwrap()
-        ));
+        assert!(!allow_navigation(&Url::parse(&format!("http://example.com:{port}/")).unwrap()));
     }
 }
